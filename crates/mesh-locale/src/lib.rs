@@ -30,6 +30,24 @@ impl LocaleEngine {
         }
     }
 
+    pub fn with_fallback_locale(
+        default_locale: impl Into<String>,
+        fallback_locale: impl Into<String>,
+    ) -> Self {
+        let locale = default_locale.into();
+        let fallback = fallback_locale.into();
+        let mut fallback_chain = vec![locale.clone()];
+        if fallback != locale {
+            fallback_chain.push(fallback);
+        }
+
+        Self {
+            active_locale: locale,
+            fallback_chain,
+            translations: HashMap::new(),
+        }
+    }
+
     pub fn current(&self) -> &str {
         &self.active_locale
     }

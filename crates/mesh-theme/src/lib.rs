@@ -5,6 +5,7 @@
 /// inherit tokens from the active theme.
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// A resolved theme token value.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,49 +94,48 @@ impl ThemeEngine {
 pub enum ThemeError {
     #[error("theme not found: {0}")]
     NotFound(String),
+
+    #[error("failed to read theme file {path}: {source}")]
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+
+    #[error("failed to parse theme file {path}: {source}")]
+    Parse {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
 }
 
-/// Build a minimal default theme with core tokens.
 pub fn default_theme() -> Theme {
-    let mut tokens = HashMap::new();
-
-    // Colors
-    tokens.insert("color.primary".into(), TokenValue::String("#6750A4".into()));
-    tokens.insert("color.on-primary".into(), TokenValue::String("#FFFFFF".into()));
-    tokens.insert("color.surface".into(), TokenValue::String("#1C1B1F".into()));
-    tokens.insert("color.surface-variant".into(), TokenValue::String("#2B2930".into()));
-    tokens.insert("color.on-surface".into(), TokenValue::String("#E6E1E5".into()));
-    tokens.insert("color.background".into(), TokenValue::String("#1C1B1F".into()));
-    tokens.insert("color.error".into(), TokenValue::String("#F2B8B5".into()));
-
-    // Typography
-    tokens.insert("typography.family".into(), TokenValue::String("Inter".into()));
-    tokens.insert("typography.size.sm".into(), TokenValue::Number(12.0));
-    tokens.insert("typography.size.md".into(), TokenValue::Number(14.0));
-    tokens.insert("typography.size.lg".into(), TokenValue::Number(16.0));
-
-    // Spacing
-    tokens.insert("spacing.xs".into(), TokenValue::Number(4.0));
-    tokens.insert("spacing.sm".into(), TokenValue::Number(8.0));
-    tokens.insert("spacing.md".into(), TokenValue::Number(16.0));
-    tokens.insert("spacing.lg".into(), TokenValue::Number(24.0));
-    tokens.insert("spacing.xl".into(), TokenValue::Number(32.0));
-
-    // Radius
-    tokens.insert("radius.sm".into(), TokenValue::Number(4.0));
-    tokens.insert("radius.md".into(), TokenValue::Number(8.0));
-    tokens.insert("radius.lg".into(), TokenValue::Number(16.0));
-    tokens.insert("radius.full".into(), TokenValue::Number(9999.0));
-
-    // Elevation
-    tokens.insert("elevation.none".into(), TokenValue::Number(0.0));
-    tokens.insert("elevation.sm".into(), TokenValue::Number(1.0));
-    tokens.insert("elevation.md".into(), TokenValue::Number(3.0));
-    tokens.insert("elevation.lg".into(), TokenValue::Number(6.0));
-
-    Theme {
-        id: "mesh-default-dark".into(),
-        name: "MESH Default Dark".into(),
-        tokens,
+    match load_theme_from_path(&default_theme_path()) {
+        Ok(theme) => theme,
+        Err(err) => {
+            tracing::warn!("failed to load default theme json, using embedded fallback: {err}");
+            embedded_default_theme()
+        }
     }
+}
+
+pub fn default_theme_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("config/themes/mesh-default-dark.json")
+}
+
+pub fn load_theme_from_path(path: &Path) -> Result<Theme, ThemeError> {
+    let content = std::fs::read_to_string(path).map_err(|source| ThemeError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    serde_json::from_str(&content).map_err(|source| ThemeError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn embedded_default_theme() -> Theme {
+    serde_json::from_str(include_str!("../../../config/themes/mesh-default-dark.json"))
+        .expect("embedded default theme json must be valid")
 }

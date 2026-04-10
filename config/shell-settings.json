@@ -1,0 +1,9 @@
+{
+  "theme": {
+    "active": "mesh-default-dark"
+  },
+  "i18n": {
+    "locale": "en",
+    "fallback_locale": "en"
+  }
+}

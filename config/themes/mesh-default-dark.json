@@ -1,0 +1,30 @@
+{
+  "id": "mesh-default-dark",
+  "name": "MESH Default Dark",
+  "tokens": {
+    "color.primary": "#6750A4",
+    "color.on-primary": "#FFFFFF",
+    "color.surface": "#1C1B1F",
+    "color.surface-variant": "#2B2930",
+    "color.on-surface": "#E6E1E5",
+    "color.background": "#1C1B1F",
+    "color.error": "#F2B8B5",
+    "typography.family": "Inter",
+    "typography.size.sm": 12.0,
+    "typography.size.md": 14.0,
+    "typography.size.lg": 16.0,
+    "spacing.xs": 4.0,
+    "spacing.sm": 8.0,
+    "spacing.md": 16.0,
+    "spacing.lg": 24.0,
+    "spacing.xl": 32.0,
+    "radius.sm": 4.0,
+    "radius.md": 8.0,
+    "radius.lg": 16.0,
+    "radius.full": 9999.0,
+    "elevation.none": 0.0,
+    "elevation.sm": 1.0,
+    "elevation.md": 3.0,
+    "elevation.lg": 6.0
+  }
+}

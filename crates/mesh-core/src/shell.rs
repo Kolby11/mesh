@@ -1,6 +1,6 @@
 /// The top-level Shell struct that owns shell coordination and plugin loading.
 use mesh_component_backend::{CompiledFrontendPlugin, compile_frontend_plugin, is_frontend_plugin};
-use mesh_config::{ShellConfig, load_config};
+use mesh_config::{ShellConfig, ShellSettings, load_config, load_shell_settings};
 use mesh_diagnostics::DiagnosticsCollector;
 use mesh_events::EventBus;
 use mesh_locale::LocaleEngine;
@@ -123,6 +123,7 @@ impl Default for SurfaceState {
 
 pub struct Shell {
     pub config: ShellConfig,
+    pub settings: ShellSettings,
     pub theme: ThemeEngine,
     pub locale: LocaleEngine,
     pub events: EventBus,
@@ -161,11 +162,28 @@ impl Shell {
                 plugins: HashMap::new(),
             }
         });
+        let settings = load_shell_settings().unwrap_or_else(|e| {
+            tracing::warn!("failed to load shell settings, using defaults: {e}");
+            ShellSettings::default()
+        });
+        let theme = ThemeEngine::new(default_theme());
+        if theme.active().id != settings.theme.active {
+            tracing::warn!(
+                "requested theme '{}' is not registered yet; using '{}'",
+                settings.theme.active,
+                theme.active().id
+            );
+        }
+        let locale = LocaleEngine::with_fallback_locale(
+            settings.i18n.locale.clone(),
+            settings.i18n.fallback_locale.clone(),
+        );
 
         Self {
             config,
-            theme: ThemeEngine::new(default_theme()),
-            locale: LocaleEngine::new("en"),
+            settings,
+            theme,
+            locale,
             events: EventBus::new(),
             diagnostics: DiagnosticsCollector::new(),
             services: ServiceRegistry::new(),
