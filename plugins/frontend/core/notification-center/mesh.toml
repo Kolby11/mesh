@@ -19,4 +19,4 @@ required = [
 ]
 
 [entrypoints]
-main = "src/main.luau"
+main = "src/main.mesh"

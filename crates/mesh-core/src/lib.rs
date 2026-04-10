@@ -4,4 +4,7 @@
 /// enforcement, event routing, theming, localization, and diagnostics.
 pub mod shell;
 
-pub use shell::Shell;
+pub use shell::{
+    ComponentContext, ComponentError, CoreEvent, CoreRequest, ServiceEvent, Shell, ShellComponent,
+    ShellRunError, SurfaceId,
+};

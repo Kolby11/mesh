@@ -25,14 +25,10 @@ fn main() {
 fn cmd_start() {
     tracing::info!("starting MESH shell");
     let mut shell = Shell::new();
-    shell.discover_plugins();
-    shell.resolve_plugins();
-
-    for (id, state) in shell.plugins() {
-        tracing::info!("  {id}: {state}");
+    if let Err(err) = shell.run() {
+        tracing::error!("MESH shell exited with error: {err}");
+        std::process::exit(1);
     }
-
-    tracing::info!("MESH shell is running (stub — no event loop yet)");
 }
 
 fn cmd_list() {

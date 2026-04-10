@@ -17,6 +17,7 @@ members = [
     "crates/mesh-renderer",
     "crates/mesh-scripting",
     "crates/mesh-cli",
+    "crates/mesh-component-backend",
 ]
 
 [workspace.package]
@@ -41,6 +42,7 @@ mesh-component = { path = "crates/mesh-component" }
 mesh-ui = { path = "crates/mesh-ui" }
 mesh-renderer = { path = "crates/mesh-renderer" }
 mesh-scripting = { path = "crates/mesh-scripting" }
+mesh-component-backend = { path = "crates/mesh-component-backend" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

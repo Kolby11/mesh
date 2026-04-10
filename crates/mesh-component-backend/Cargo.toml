@@ -1,0 +1,13 @@
+[package]
+name = "mesh-component-backend"
+description = "Frontend component compilation and loading for MESH shell plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-component = { workspace = true }
+mesh-plugin = { workspace = true }
+
+thiserror = { workspace = true }
+tracing = { workspace = true }

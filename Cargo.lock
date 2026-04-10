@@ -123,6 +123,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mesh-component-backend"
+version = "0.1.0"
+dependencies = [
+ "mesh-component",
+ "mesh-plugin",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "mesh-config"
 version = "0.1.0"
 dependencies = [
@@ -138,6 +148,7 @@ name = "mesh-core"
 version = "0.1.0"
 dependencies = [
  "mesh-capability",
+ "mesh-component-backend",
  "mesh-config",
  "mesh-diagnostics",
  "mesh-events",
