@@ -1,0 +1,144 @@
+<template>
+  <row class="panel">
+    <row class="left">
+      <text class="workspace" :content="activeWorkspace"/>
+    </row>
+    <row class="center">
+      <text class="clock" :content="time"/>
+    </row>
+    <row class="right">
+      <icon name="network" :status="networkStatus"/>
+      <icon name="volume" :level="volumeLevel" @click="onVolumeClick"/>
+      <text class="battery" :content="batteryText"/>
+    </row>
+  </row>
+</template>
+
+<script lang="luau">
+local audio = mesh.services.get("audio")
+local power = mesh.services.get("power")
+local network = mesh.services.get("network")
+
+local time = ""
+local batteryText = ""
+local volumeLevel = "0"
+local networkStatus = "disconnected"
+local activeWorkspace = "1"
+
+function init()
+    updateClock()
+    updateBattery()
+    updateVolume()
+    updateNetwork()
+end
+
+function updateClock()
+    time = os.date("%H:%M")
+    mesh.ui.request_redraw()
+end
+
+function updateBattery()
+    if power then
+        local info = power.battery()
+        batteryText = string.format("%d%%", info.level * 100)
+    else
+        batteryText = "N/A"
+    end
+end
+
+function updateVolume()
+    if audio then
+        local dev = audio.default_output()
+        if dev then
+            volumeLevel = tostring(math.floor(dev.volume * 100))
+        end
+    end
+end
+
+function updateNetwork()
+    if network then
+        local conn = network.active_connection()
+        if conn then
+            networkStatus = "connected"
+        end
+    end
+end
+
+function onVolumeClick()
+    mesh.events.publish("shell.toggle-quick-settings", {})
+end
+</script>
+
+<style>
+.panel {
+    background: token(color.surface);
+    color: token(color.on-surface);
+    padding: token(spacing.sm);
+    gap: token(spacing.md);
+    justify-content: space-between;
+    align-items: center;
+}
+
+.left {
+    flex-grow: 1;
+    justify-content: start;
+}
+
+.center {
+    flex-grow: 0;
+}
+
+.right {
+    flex-grow: 1;
+    justify-content: end;
+    gap: token(spacing.sm);
+}
+
+.clock {
+    font-size: token(typography.size.md);
+    font-weight: 600;
+}
+
+.battery {
+    font-size: token(typography.size.sm);
+}
+</style>
+
+<schema>
+[clock_format]
+type = "enum"
+values = ["12h", "24h"]
+default = "24h"
+description = "Clock display format"
+
+[show_seconds]
+type = "boolean"
+default = false
+description = "Show seconds in clock"
+
+[show_battery_percent]
+type = "boolean"
+default = true
+description = "Show battery percentage"
+</schema>
+
+<i18n>
+[en]
+clock = "Clock"
+battery = "Battery"
+volume = "Volume"
+network = "Network"
+
+[es]
+clock = "Reloj"
+battery = "Batería"
+volume = "Volumen"
+network = "Red"
+</i18n>
+
+<meta>
+name = "MESH Panel"
+description = "Default top panel with clock, system tray, and status indicators"
+role = "toolbar"
+label = "System panel"
+</meta>

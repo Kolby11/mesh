@@ -1,0 +1,12 @@
+[package]
+name = "mesh-diagnostics"
+description = "Logging, health reporting, and performance monitoring for MESH"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }

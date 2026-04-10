@@ -1,0 +1,22 @@
+[package]
+id = "@mesh/pipewire-audio"
+version = "0.1.0"
+type = "backend"
+api_version = "0.1"
+description = "Audio backend using PipeWire"
+authors = ["MESH Project"]
+
+[service]
+provides = "audio"
+backend_name = "PipeWire"
+priority = 100
+
+[capabilities]
+required = [
+    "service.audio.read",
+    "service.audio.control",
+    "dbus.session",
+]
+
+[entrypoints]
+main = "src/main.luau"

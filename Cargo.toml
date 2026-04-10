@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mesh-core",
+    "crates/mesh-plugin",
+    "crates/mesh-capability",
+    "crates/mesh-events",
+    "crates/mesh-config",
+    "crates/mesh-theme",
+    "crates/mesh-locale",
+    "crates/mesh-diagnostics",
+    "crates/mesh-wayland",
+    "crates/mesh-runtime",
+    "crates/mesh-service",
+    "crates/mesh-component",
+    "crates/mesh-ui",
+    "crates/mesh-renderer",
+    "crates/mesh-scripting",
+    "crates/mesh-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+mesh-core = { path = "crates/mesh-core" }
+mesh-plugin = { path = "crates/mesh-plugin" }
+mesh-capability = { path = "crates/mesh-capability" }
+mesh-events = { path = "crates/mesh-events" }
+mesh-config = { path = "crates/mesh-config" }
+mesh-theme = { path = "crates/mesh-theme" }
+mesh-locale = { path = "crates/mesh-locale" }
+mesh-diagnostics = { path = "crates/mesh-diagnostics" }
+mesh-wayland = { path = "crates/mesh-wayland" }
+mesh-runtime = { path = "crates/mesh-runtime" }
+mesh-service = { path = "crates/mesh-service" }
+mesh-component = { path = "crates/mesh-component" }
+mesh-ui = { path = "crates/mesh-ui" }
+mesh-renderer = { path = "crates/mesh-renderer" }
+mesh-scripting = { path = "crates/mesh-scripting" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tokio = { version = "1", features = ["full"] }

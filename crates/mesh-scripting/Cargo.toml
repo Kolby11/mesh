@@ -1,0 +1,21 @@
+[package]
+name = "mesh-scripting"
+description = "Luau scripting bridge between UI components and service backends"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-component = { workspace = true }
+mesh-ui = { workspace = true }
+mesh-theme = { workspace = true }
+mesh-locale = { workspace = true }
+mesh-config = { workspace = true }
+mesh-events = { workspace = true }
+mesh-capability = { workspace = true }
+mesh-service = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

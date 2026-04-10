@@ -1,0 +1,21 @@
+[package]
+id = "@mesh/pulseaudio-audio"
+version = "0.1.0"
+type = "backend"
+api_version = "0.1"
+description = "Audio backend using PulseAudio"
+authors = ["MESH Project"]
+
+[service]
+provides = "audio"
+backend_name = "PulseAudio"
+priority = 50
+
+[capabilities]
+required = [
+    "service.audio.read",
+    "service.audio.control",
+]
+
+[entrypoints]
+main = "src/main.luau"

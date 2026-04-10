@@ -1,0 +1,23 @@
+[package]
+id = "@mesh/launcher"
+version = "0.1.0"
+type = "surface"
+api_version = "0.1"
+description = "Application launcher"
+authors = ["MESH Project"]
+
+[compatibility]
+mesh = ">=0.1.0"
+compositors = ["wlr-layer-shell-v1"]
+
+[capabilities]
+required = [
+    "shell.surface",
+    "shell.input.keyboard",
+    "exec.launch-app",
+    "theme.read",
+    "locale.read",
+]
+
+[entrypoints]
+main = "src/main.luau"

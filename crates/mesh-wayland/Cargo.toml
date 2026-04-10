@@ -1,0 +1,10 @@
+[package]
+name = "mesh-wayland"
+description = "Wayland surface management and compositor abstraction for MESH"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }
