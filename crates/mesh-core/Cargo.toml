@@ -17,6 +17,7 @@ mesh-wayland = { workspace = true }
 mesh-runtime = { workspace = true }
 mesh-service = { workspace = true }
 mesh-component-backend = { workspace = true }
+mesh-renderer = { workspace = true }
 
 tokio = { workspace = true }
 tracing = { workspace = true }

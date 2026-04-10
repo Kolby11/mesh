@@ -1,7 +1,7 @@
 /// Parser for `.mesh` single-file components.
 ///
 /// Splits the source into top-level blocks (`<template>`, `<script>`, `<style>`,
-/// `<schema>`, `<i18n>`, `<meta>`) then parses each block with its own sub-parser.
+/// `<schema>`, `<i18n>`, `<meta>`) then parses each block with parser libraries.
 use crate::{
     ComponentFile, ScriptBlock, ScriptLang,
     i18n::I18nBlock,
@@ -10,6 +10,9 @@ use crate::{
     style::{Declaration, Selector, StyleBlock, StyleRule, StyleValue},
     template::*,
 };
+use cssparser::{Parser, ParserInput, Token, ToCss};
+use quick_xml::Reader;
+use quick_xml::events::Event;
 use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error)]
@@ -19,6 +22,9 @@ pub enum ParseError {
 
     #[error("unexpected closing tag </{tag}> at line {line}")]
     UnexpectedClose { tag: String, line: usize },
+
+    #[error("invalid template syntax: {message}")]
+    InvalidTemplate { message: String },
 
     #[error("invalid style syntax at line {line}: {message}")]
     InvalidStyle { message: String, line: usize },
@@ -36,7 +42,6 @@ pub enum ParseError {
     UnknownBlock { name: String, line: usize },
 }
 
-/// Parse a `.mesh` file source into a `ComponentFile`.
 pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
     let blocks = extract_blocks(source)?;
 
@@ -77,7 +82,6 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
     })
 }
 
-/// Extract top-level blocks from the source text.
 fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
     let mut blocks = HashMap::new();
     let known_tags = ["template", "script", "style", "schema", "i18n", "meta"];
@@ -86,12 +90,10 @@ fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
     let mut line_offset = 1;
 
     while !remaining.is_empty() {
-        // Find next opening tag.
         let Some(open_start) = remaining.find('<') else {
             break;
         };
 
-        // Skip whitespace before the tag.
         let before = &remaining[..open_start];
         line_offset += before.chars().filter(|&c| c == '\n').count();
 
@@ -101,7 +103,6 @@ fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
         };
 
         let tag_content = &after_open[..open_end];
-        // Extract tag name (might have attributes like `script lang="luau"`).
         let tag_name = tag_content.split_whitespace().next().unwrap_or("");
 
         if tag_name.starts_with('/') || tag_name.is_empty() {
@@ -110,7 +111,6 @@ fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
         }
 
         if !known_tags.contains(&tag_name) {
-            // Skip unknown top-level content (could be text between blocks).
             remaining = &after_open[open_end + 1..];
             continue;
         }
@@ -126,8 +126,7 @@ fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
             });
         };
 
-        let body = &body_source[..close_pos];
-        blocks.insert(tag_name.to_string(), body.to_string());
+        blocks.insert(tag_name.to_string(), body_source[..close_pos].to_string());
 
         let skip = body_start + close_pos + close_tag.len();
         line_offset += remaining[..skip].chars().filter(|&c| c == '\n').count();
@@ -137,198 +136,213 @@ fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
     Ok(blocks)
 }
 
-// -- Template parser --
-
 fn parse_template(source: &str) -> Result<TemplateBlock, ParseError> {
-    let nodes = parse_nodes(source.trim())?;
-    Ok(TemplateBlock { root: nodes })
-}
+    let wrapped = format!("<mesh-root>{}</mesh-root>", source.trim());
+    let mut reader = Reader::from_str(&wrapped);
+    reader.config_mut().trim_text(false);
 
-fn parse_nodes(source: &str) -> Result<Vec<TemplateNode>, ParseError> {
-    let mut nodes = Vec::new();
-    let mut remaining = source;
+    let mut stack: Vec<OpenNode> = Vec::new();
+    let mut root = Vec::new();
 
-    while !remaining.is_empty() {
-        remaining = remaining.trim_start();
-        if remaining.is_empty() {
-            break;
-        }
-
-        if remaining.starts_with("{{") {
-            // Expression interpolation.
-            let end = remaining.find("}}").unwrap_or(remaining.len());
-            let expr = remaining[2..end].trim().to_string();
-            nodes.push(TemplateNode::Expr(ExprNode { expression: expr }));
-            remaining = if end + 2 <= remaining.len() {
-                &remaining[end + 2..]
-            } else {
-                ""
-            };
-        } else if remaining.starts_with("<") {
-            // Element or self-closing tag.
-            let (node, rest) = parse_element(remaining)?;
-            nodes.push(node);
-            remaining = rest;
-        } else {
-            // Text content — consume until we hit `<` or `{{`.
-            let end = remaining
-                .find(|c: char| c == '<')
-                .unwrap_or(remaining.len());
-            let end = remaining
-                .find("{{")
-                .map(|e| e.min(end))
-                .unwrap_or(end);
-            let text = remaining[..end].trim();
-            if !text.is_empty() {
-                nodes.push(TemplateNode::Text(TextNode {
-                    content: text.to_string(),
-                }));
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(event)) => {
+                let tag = decode_name(event.name().as_ref());
+                if tag == "mesh-root" {
+                    continue;
+                }
+                let attrs = parse_xml_attributes(&reader, &event)?;
+                stack.push(OpenNode {
+                    tag,
+                    attributes: attrs,
+                    children: Vec::new(),
+                });
             }
-            remaining = &remaining[end..];
+            Ok(Event::Empty(event)) => {
+                let tag = decode_name(event.name().as_ref());
+                if tag == "mesh-root" {
+                    continue;
+                }
+                let attrs = parse_xml_attributes(&reader, &event)?;
+                let node = build_template_node(tag, attrs, Vec::new());
+                push_template_node(&mut stack, &mut root, node);
+            }
+            Ok(Event::Text(event)) => {
+                let text = event
+                    .xml_content()
+                    .map_err(|err| ParseError::InvalidTemplate {
+                        message: err.to_string(),
+                    })?
+                    .into_owned();
+                for node in parse_inline_nodes(&text) {
+                    push_template_node(&mut stack, &mut root, node);
+                }
+            }
+            Ok(Event::CData(event)) => {
+                let text = event
+                    .xml_content()
+                    .map_err(|err| ParseError::InvalidTemplate {
+                        message: err.to_string(),
+                    })?
+                    .into_owned();
+                for node in parse_inline_nodes(&text) {
+                    push_template_node(&mut stack, &mut root, node);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let tag = decode_name(event.name().as_ref());
+                if tag == "mesh-root" {
+                    break;
+                }
+
+                let open = stack.pop().ok_or_else(|| ParseError::UnexpectedClose {
+                    tag: tag.clone(),
+                    line: 0,
+                })?;
+
+                if open.tag != tag {
+                    return Err(ParseError::UnexpectedClose { tag, line: 0 });
+                }
+
+                let node = build_template_node(open.tag, open.attributes, open.children);
+                push_template_node(&mut stack, &mut root, node);
+            }
+            Ok(Event::Eof) => break,
+            Ok(Event::Comment(_)) | Ok(Event::Decl(_)) | Ok(Event::PI(_)) | Ok(Event::DocType(_)) | Ok(Event::GeneralRef(_)) => {}
+            Err(err) => {
+                return Err(ParseError::InvalidTemplate {
+                    message: err.to_string(),
+                });
+            }
         }
     }
 
-    Ok(nodes)
-}
-
-fn parse_element(source: &str) -> Result<(TemplateNode, &str), ParseError> {
-    // Find the end of the opening tag.
-    let tag_end = source.find('>').unwrap_or(source.len());
-    let tag_content = &source[1..tag_end];
-    let self_closing = tag_content.ends_with('/');
-    let tag_content = tag_content.trim_end_matches('/');
-
-    // Split into tag name and attributes.
-    let mut parts = tag_content.split_whitespace();
-    let tag_name = parts.next().unwrap_or("").to_string();
-
-    // Parse attributes.
-    let attr_str: String = parts.collect::<Vec<&str>>().join(" ");
-    let attributes = parse_attributes(&attr_str);
-
-    let after_open = &source[tag_end + 1..];
-
-    if self_closing {
-        let node = TemplateNode::Element(ElementNode {
-            tag: tag_name,
-            attributes,
-            children: Vec::new(),
+    if let Some(open) = stack.pop() {
+        return Err(ParseError::UnclosedBlock {
+            tag: open.tag,
+            line: 0,
         });
-        return Ok((node, after_open));
     }
 
-    // Find the matching closing tag.
-    let close_tag = format!("</{tag_name}>");
-    let (children_src, rest) = find_matching_close(after_open, &tag_name, &close_tag)?;
-
-    let children = parse_nodes(children_src)?;
-
-    let node = TemplateNode::Element(ElementNode {
-        tag: tag_name,
-        attributes,
-        children,
-    });
-
-    Ok((node, rest))
+    Ok(TemplateBlock { root })
 }
 
-fn find_matching_close<'a>(
-    source: &'a str,
-    tag_name: &str,
-    close_tag: &str,
-) -> Result<(&'a str, &'a str), ParseError> {
-    let mut depth = 1u32;
-    let open_pattern = format!("<{tag_name}");
-    let mut pos = 0;
-
-    while pos < source.len() {
-        if source[pos..].starts_with(close_tag) {
-            depth -= 1;
-            if depth == 0 {
-                let children = &source[..pos];
-                let rest = &source[pos + close_tag.len()..];
-                return Ok((children, rest));
-            }
-            pos += close_tag.len();
-        } else if source[pos..].starts_with(&open_pattern) {
-            depth += 1;
-            pos += open_pattern.len();
-        } else {
-            pos += 1;
-        }
-    }
-
-    Err(ParseError::UnclosedBlock {
-        tag: tag_name.to_string(),
-        line: 0,
-    })
-}
-
-fn parse_attributes(attr_str: &str) -> Vec<Attribute> {
+fn parse_xml_attributes(
+    reader: &Reader<&[u8]>,
+    event: &quick_xml::events::BytesStart<'_>,
+) -> Result<Vec<Attribute>, ParseError> {
     let mut attrs = Vec::new();
-    let mut remaining = attr_str.trim();
 
-    while !remaining.is_empty() {
-        // Skip whitespace.
-        remaining = remaining.trim_start();
-        if remaining.is_empty() {
-            break;
-        }
+    for attr in event.attributes().with_checks(false) {
+        let attr = attr.map_err(|err| ParseError::InvalidTemplate {
+            message: err.to_string(),
+        })?;
+        let name = decode_name(attr.key.as_ref());
+        let value = attr
+            .decode_and_unescape_value(reader.decoder())
+            .map_err(|err| ParseError::InvalidTemplate {
+                message: err.to_string(),
+            })?
+            .into_owned();
 
-        // Find the `=` separator.
-        let Some(eq_pos) = remaining.find('=') else {
-            break;
-        };
-
-        let name = remaining[..eq_pos].trim();
-        let after_eq = remaining[eq_pos + 1..].trim();
-
-        // Extract quoted value.
-        let (value_str, rest) = if after_eq.starts_with('"') {
-            let end = after_eq[1..].find('"').unwrap_or(after_eq.len() - 1);
-            (&after_eq[1..=end], &after_eq[end + 2..])
-        } else {
-            let end = after_eq
-                .find(char::is_whitespace)
-                .unwrap_or(after_eq.len());
-            (&after_eq[..end], &after_eq[end..])
-        };
-
-        // Determine binding type from name prefix.
         let (attr_name, attr_value) = if let Some(stripped) = name.strip_prefix(':') {
-            (stripped, AttributeValue::Binding(value_str.to_string()))
+            (stripped.to_string(), AttributeValue::Binding(value))
         } else if let Some(stripped) = name.strip_prefix('@') {
-            (
-                stripped,
-                AttributeValue::EventHandler(value_str.to_string()),
-            )
+            (stripped.to_string(), AttributeValue::EventHandler(value))
         } else {
-            (name, AttributeValue::Static(value_str.to_string()))
+            (name, AttributeValue::Static(value))
         };
 
         attrs.push(Attribute {
-            name: attr_name.to_string(),
+            name: attr_name,
             value: attr_value,
         });
-
-        remaining = rest;
     }
 
-    attrs
+    Ok(attrs)
 }
 
-// -- Script parser --
+fn parse_inline_nodes(text: &str) -> Vec<TemplateNode> {
+    let mut nodes = Vec::new();
+    let mut remaining = text;
+
+    while let Some(start) = remaining.find("{{") {
+        let prefix = &remaining[..start];
+        if !prefix.trim().is_empty() {
+            nodes.push(TemplateNode::Text(TextNode {
+                content: prefix.trim().to_string(),
+            }));
+        }
+
+        let expr_body = &remaining[start + 2..];
+        if let Some(end) = expr_body.find("}}") {
+            let expr = expr_body[..end].trim();
+            if !expr.is_empty() {
+                nodes.push(TemplateNode::Expr(ExprNode {
+                    expression: expr.to_string(),
+                }));
+            }
+            remaining = &expr_body[end + 2..];
+        } else {
+            remaining = &remaining[start..];
+            break;
+        }
+    }
+
+    if !remaining.trim().is_empty() {
+        nodes.push(TemplateNode::Text(TextNode {
+            content: remaining.trim().to_string(),
+        }));
+    }
+
+    nodes
+}
+
+fn build_template_node(tag: String, attributes: Vec<Attribute>, children: Vec<TemplateNode>) -> TemplateNode {
+    if tag.chars().next().is_some_and(char::is_uppercase) {
+        return TemplateNode::Component(ComponentRef {
+            name: tag,
+            props: attributes,
+            children,
+        });
+    }
+
+    TemplateNode::Element(ElementNode {
+        tag,
+        attributes,
+        children,
+    })
+}
+
+fn push_template_node(
+    stack: &mut [OpenNode],
+    root: &mut Vec<TemplateNode>,
+    node: TemplateNode,
+) {
+    if let Some(parent) = stack.last_mut() {
+        parent.children.push(node);
+    } else {
+        root.push(node);
+    }
+}
+
+fn decode_name(name: &[u8]) -> String {
+    String::from_utf8_lossy(name).into_owned()
+}
+
+struct OpenNode {
+    tag: String,
+    attributes: Vec<Attribute>,
+    children: Vec<TemplateNode>,
+}
 
 fn parse_script(source: &str, blocks: &HashMap<String, String>) -> ScriptBlock {
-    // Check for lang attribute in the original block tag.
-    let _ = blocks; // Lang detection would come from the tag attributes.
+    let _ = blocks;
     ScriptBlock {
         lang: ScriptLang::Luau,
         source: source.to_string(),
     }
 }
-
-// -- Style parser --
 
 fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
     let mut rules = Vec::new();
@@ -340,14 +354,12 @@ fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
             break;
         }
 
-        // Find selector (everything before `{`).
         let Some(brace_start) = remaining.find('{') else {
             break;
         };
         let selector_str = remaining[..brace_start].trim();
-        let selector = parse_selector(selector_str);
+        let selector = parse_selector(selector_str)?;
 
-        // Find matching `}`.
         let after_brace = &remaining[brace_start + 1..];
         let Some(brace_end) = after_brace.find('}') else {
             return Err(ParseError::InvalidStyle {
@@ -357,7 +369,7 @@ fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
         };
 
         let declarations_str = &after_brace[..brace_end];
-        let declarations = parse_declarations(declarations_str);
+        let declarations = parse_declarations(declarations_str)?;
 
         rules.push(StyleRule {
             selector,
@@ -370,66 +382,167 @@ fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
     Ok(StyleBlock { rules })
 }
 
-fn parse_selector(s: &str) -> Selector {
-    let s = s.trim();
-    if s == "*" {
-        Selector::Universal
-    } else if let Some(class) = s.strip_prefix('.') {
-        Selector::Class(class.to_string())
-    } else if let Some(id) = s.strip_prefix('#') {
-        Selector::Id(id.to_string())
-    } else if let Some((tag, state)) = s.split_once(':') {
-        Selector::State(tag.to_string(), state.to_string())
+fn parse_selector(source: &str) -> Result<Selector, ParseError> {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut parts = Vec::new();
+
+    while let Ok(token) = parser.next() {
+        match token {
+            Token::Delim('*') => parts.push(Selector::Universal),
+            Token::Delim('.') => {
+                let class = parser.expect_ident_cloned().map_err(|err| ParseError::InvalidStyle {
+                    message: format!("{err:?}"),
+                    line: 0,
+                })?;
+                parts.push(Selector::Class(class.to_string()));
+            }
+            Token::IDHash(id) => parts.push(Selector::Id(id.to_string())),
+            Token::Colon => {
+                let state = parser.expect_ident_cloned().map_err(|err| ParseError::InvalidStyle {
+                    message: format!("{err:?}"),
+                    line: 0,
+                })?;
+                match parts.pop() {
+                    Some(Selector::Tag(tag)) => {
+                        parts.push(Selector::State(tag, state.to_string()));
+                    }
+                    Some(previous) => {
+                        parts.push(previous);
+                        parts.push(Selector::State("*".into(), state.to_string()));
+                    }
+                    None => parts.push(Selector::State("*".into(), state.to_string())),
+                }
+            }
+            Token::Ident(tag) => parts.push(Selector::Tag(tag.to_string())),
+            Token::WhiteSpace(_) => {}
+            other => {
+                return Err(ParseError::InvalidStyle {
+                    message: format!("unsupported selector token {}", other.to_css_string()),
+                    line: 0,
+                });
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        return Err(ParseError::InvalidStyle {
+            message: "empty selector".into(),
+            line: 0,
+        });
+    }
+
+    if parts.len() == 1 {
+        Ok(parts.remove(0))
     } else {
-        Selector::Tag(s.to_string())
+        Ok(Selector::Compound(parts))
     }
 }
 
-fn parse_declarations(s: &str) -> Vec<Declaration> {
-    s.split(';')
-        .filter_map(|decl| {
-            let decl = decl.trim();
-            if decl.is_empty() {
-                return None;
-            }
-            let (prop, value) = decl.split_once(':')?;
-            let prop = prop.trim().to_string();
-            let value_str = value.trim();
+fn parse_declarations(source: &str) -> Result<Vec<Declaration>, ParseError> {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut declarations = Vec::new();
 
-            let style_value = if value_str.starts_with("token(") && value_str.ends_with(')') {
-                let token_name = &value_str[6..value_str.len() - 1];
-                StyleValue::Token(token_name.trim().to_string())
-            } else if value_str.starts_with("var(") && value_str.ends_with(')') {
-                let var_name = &value_str[4..value_str.len() - 1];
-                StyleValue::Var(var_name.trim().to_string())
-            } else {
-                StyleValue::Literal(value_str.to_string())
-            };
+    while !parser.is_exhausted() {
+        parser.skip_whitespace();
+        if parser.is_exhausted() {
+            break;
+        }
 
-            Some(Declaration {
-                property: prop,
-                value: style_value,
+        let property = parser.expect_ident_cloned().map_err(|err| ParseError::InvalidStyle {
+            message: format!("{err:?}"),
+            line: 0,
+        })?;
+        parser.expect_colon().map_err(|err| ParseError::InvalidStyle {
+            message: format!("{err:?}"),
+            line: 0,
+        })?;
+
+        let raw_value = parser
+            .parse_until_before(cssparser::Delimiter::Bang | cssparser::Delimiter::Semicolon, |input| {
+                serialize_css_value(input)
             })
-        })
-        .collect()
+            .map_err(|err| ParseError::InvalidStyle {
+                message: format!("{err:?}"),
+                line: 0,
+            })?;
+
+        let _ = parser.try_parse(|input| {
+            input.expect_delim('!')?;
+            input.expect_ident_matching("important")
+        });
+        let _ = parser.try_parse(|input| input.expect_semicolon());
+
+        declarations.push(Declaration {
+            property: property.to_string(),
+            value: classify_style_value(&raw_value),
+        });
+    }
+
+    Ok(declarations)
 }
 
-// -- Schema parser --
+fn classify_style_value(value: &str) -> StyleValue {
+    let value = value.trim();
+    if value.starts_with("token(") && value.ends_with(')') {
+        StyleValue::Token(value[6..value.len() - 1].trim().to_string())
+    } else if value.starts_with("var(") && value.ends_with(')') {
+        StyleValue::Var(value[4..value.len() - 1].trim().to_string())
+    } else {
+        StyleValue::Literal(value.to_string())
+    }
+}
+
+fn serialize_css_value<'i, 't>(
+    input: &mut Parser<'i, 't>,
+) -> Result<String, cssparser::ParseError<'i, ()>> {
+    let mut rendered = String::new();
+
+    while let Ok(token) = input.next_including_whitespace_and_comments() {
+        match token {
+            Token::Function(name) => {
+                rendered.push_str(name);
+                rendered.push('(');
+                let inner = input.parse_nested_block(serialize_css_value)?;
+                rendered.push_str(&inner);
+                rendered.push(')');
+            }
+            Token::ParenthesisBlock => {
+                rendered.push('(');
+                let inner = input.parse_nested_block(serialize_css_value)?;
+                rendered.push_str(&inner);
+                rendered.push(')');
+            }
+            Token::SquareBracketBlock => {
+                rendered.push('[');
+                let inner = input.parse_nested_block(serialize_css_value)?;
+                rendered.push_str(&inner);
+                rendered.push(']');
+            }
+            Token::CurlyBracketBlock => {
+                rendered.push('{');
+                let inner = input.parse_nested_block(serialize_css_value)?;
+                rendered.push_str(&inner);
+                rendered.push('}');
+            }
+            other => rendered.push_str(&other.to_css_string()),
+        }
+    }
+
+    Ok(rendered.trim().to_string())
+}
 
 fn parse_schema(source: &str) -> Result<SchemaBlock, ParseError> {
     let block: SchemaBlock = toml::from_str(source)?;
     Ok(block)
 }
 
-// -- I18n parser --
-
 fn parse_i18n(source: &str) -> Result<I18nBlock, ParseError> {
     let raw: HashMap<String, HashMap<String, String>> =
         toml::from_str(source).map_err(|e| ParseError::InvalidI18n(e.to_string()))?;
     Ok(I18nBlock { entries: raw })
 }
-
-// -- Meta parser --
 
 fn parse_meta(source: &str) -> Result<MetaBlock, ParseError> {
     let block: MetaBlock =
@@ -506,16 +619,13 @@ role = "region"
 "#;
         let file = parse_component(source).unwrap();
 
-        // Template.
         let tmpl = file.template.unwrap();
         assert_eq!(tmpl.root.len(), 1);
 
-        // Script.
         let script = file.script.unwrap();
         assert_eq!(script.lang, ScriptLang::Luau);
         assert!(script.source.contains("function onTap"));
 
-        // Style.
         let style = file.style.unwrap();
         assert_eq!(style.rules.len(), 2);
         match &style.rules[0].declarations[0].value {
@@ -523,16 +633,13 @@ role = "region"
             other => panic!("expected token, got {other:?}"),
         }
 
-        // Schema.
         let schema = file.schema.unwrap();
         assert!(schema.fields.contains_key("greeting"));
 
-        // I18n.
         let i18n = file.i18n.unwrap();
         assert_eq!(i18n.entries["en"]["greeting"], "Hello");
         assert_eq!(i18n.entries["fr"]["greeting"], "Bonjour");
 
-        // Meta.
         let meta = file.meta.unwrap();
         assert_eq!(meta.name.unwrap(), "Greeter");
     }
@@ -546,11 +653,10 @@ role = "region"
 "#;
         let file = parse_component(source).unwrap();
         let tmpl = file.template.unwrap();
-        // The text element should contain text + expr children.
         match &tmpl.root[0] {
             TemplateNode::Element(el) => {
                 assert_eq!(el.tag, "text");
-                assert!(el.children.len() >= 1);
+                assert!(!el.children.is_empty());
             }
             _ => panic!("expected element"),
         }

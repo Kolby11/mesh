@@ -10,3 +10,5 @@ serde = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+quick-xml = "0.39"
+cssparser = "0.35"

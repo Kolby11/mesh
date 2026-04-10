@@ -1,5 +1,7 @@
-use mesh_core::Shell;
+use mesh_core::{Shell, default_ipc_socket_path};
 use mesh_plugin::PluginType;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixStream;
 
 fn main() {
     tracing_subscriber::fmt().init();
@@ -11,6 +13,8 @@ fn main() {
         Some("start") | None => cmd_start(),
         Some("list") => cmd_list(),
         Some("services") => cmd_services(),
+        Some("ipc") => cmd_ipc(&args[2..]),
+        Some("ipc-socket-path") => cmd_ipc_socket_path(),
         Some("status") => cmd_status(),
         Some("version") => cmd_version(),
         Some("help") | Some("--help") | Some("-h") => cmd_help(),
@@ -96,6 +100,55 @@ fn cmd_status() {
     println!("locale: {}", shell.locale.current());
 }
 
+fn cmd_ipc(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("usage: mesh ipc <command>");
+        eprintln!("example: mesh ipc shell:open_launcher");
+        std::process::exit(1);
+    }
+
+    let command = args.join(" ");
+    let socket_path = default_ipc_socket_path();
+    let mut stream = match UnixStream::connect(&socket_path) {
+        Ok(stream) => stream,
+        Err(err) => {
+            eprintln!(
+                "failed to connect to shell ipc socket {}: {err}",
+                socket_path.display()
+            );
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(err) = writeln!(stream, "{command}") {
+        eprintln!("failed to send ipc command: {err}");
+        std::process::exit(1);
+    }
+
+    let mut reader = BufReader::new(stream);
+    let mut response = String::new();
+    match reader.read_line(&mut response) {
+        Ok(0) => {
+            eprintln!("shell ipc socket closed without a response");
+            std::process::exit(1);
+        }
+        Ok(_) => {
+            print!("{response}");
+            if response.starts_with("error ") {
+                std::process::exit(1);
+            }
+        }
+        Err(err) => {
+            eprintln!("failed to read ipc response: {err}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_ipc_socket_path() {
+    println!("{}", default_ipc_socket_path().display());
+}
+
 fn cmd_version() {
     println!("mesh {}", env!("CARGO_PKG_VERSION"));
 }
@@ -110,6 +163,8 @@ fn cmd_help() {
     println!("  start     Start the shell (default)");
     println!("  list      List discovered plugins");
     println!("  services  List available service backends");
+    println!("  ipc       Send an IPC command to the running shell");
+    println!("  ipc-socket-path  Print the shell IPC socket path");
     println!("  status    Show shell status");
     println!("  version   Print version");
     println!("  help      Show this help");

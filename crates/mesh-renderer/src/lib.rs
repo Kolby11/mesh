@@ -8,11 +8,13 @@
 /// `mesh-scripting`.
 
 pub mod buffer;
+pub mod dev_window;
 pub mod painter;
 pub mod surface;
 pub mod text;
 
 pub use buffer::PixelBuffer;
+pub use dev_window::DevWindowBackend;
 pub use painter::Painter;
 pub use surface::{RenderSurface, SurfaceConfig, SurfaceId};
 

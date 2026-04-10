@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 mesh-component = { workspace = true }
 mesh-plugin = { workspace = true }
+mesh-ui = { workspace = true }
+mesh-theme = { workspace = true }
 
 thiserror = { workspace = true }
 tracing = { workspace = true }

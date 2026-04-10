@@ -103,6 +103,7 @@ pub fn default_theme() -> Theme {
     tokens.insert("color.primary".into(), TokenValue::String("#6750A4".into()));
     tokens.insert("color.on-primary".into(), TokenValue::String("#FFFFFF".into()));
     tokens.insert("color.surface".into(), TokenValue::String("#1C1B1F".into()));
+    tokens.insert("color.surface-variant".into(), TokenValue::String("#2B2930".into()));
     tokens.insert("color.on-surface".into(), TokenValue::String("#E6E1E5".into()));
     tokens.insert("color.background".into(), TokenValue::String("#1C1B1F".into()));
     tokens.insert("color.error".into(), TokenValue::String("#F2B8B5".into()));

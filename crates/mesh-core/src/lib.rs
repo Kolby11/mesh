@@ -6,5 +6,5 @@ pub mod shell;
 
 pub use shell::{
     ComponentContext, ComponentError, CoreEvent, CoreRequest, ServiceEvent, Shell, ShellComponent,
-    ShellRunError, SurfaceId,
+    ShellRunError, SurfaceId, default_ipc_socket_path,
 };

@@ -6,14 +6,17 @@ use mesh_events::EventBus;
 use mesh_locale::LocaleEngine;
 use mesh_plugin::lifecycle::{PluginInstance, PluginState};
 use mesh_plugin::{PluginType, manifest};
+use mesh_renderer::{DevWindowBackend, Painter, PixelBuffer};
 use mesh_service::ServiceRegistry;
-use mesh_theme::{ThemeEngine, default_theme};
+use mesh_theme::{Theme, ThemeEngine, default_theme};
 use mesh_wayland::{Edge, Layer, ShellSurface, StubSurface};
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::UnixListener;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
@@ -71,6 +74,13 @@ pub trait ShellComponent: Send {
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError>;
     fn wants_render(&self) -> bool;
     fn render(&mut self, surface: &mut dyn ShellSurface) -> Result<(), ComponentError>;
+    fn paint(
+        &self,
+        theme: &Theme,
+        width: u32,
+        height: u32,
+        buffer: &mut PixelBuffer,
+    ) -> Result<(), ComponentError>;
 }
 
 struct ComponentRuntime {
@@ -91,6 +101,7 @@ impl ComponentRuntime {
 #[derive(Debug)]
 enum ShellMessage {
     Service(ServiceEvent),
+    Ipc(CoreRequest),
 }
 
 #[derive(Debug, Default)]
@@ -122,6 +133,22 @@ pub struct Shell {
     core: ShellCoreState,
     components: Vec<ComponentRuntime>,
     surfaces: HashMap<SurfaceId, StubSurface>,
+    windows: DevWindowBackend,
+}
+
+pub fn default_ipc_socket_path() -> PathBuf {
+    if let Ok(path) = std::env::var("MESH_IPC_SOCKET") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+
+    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+        return PathBuf::from(runtime_dir).join("mesh.sock");
+    }
+
+    let uid = std::env::var("UID").unwrap_or_else(|_| "unknown".to_string());
+    PathBuf::from("/tmp").join(format!("mesh-{uid}.sock"))
 }
 
 impl Shell {
@@ -147,6 +174,7 @@ impl Shell {
             core: ShellCoreState::default(),
             components: Vec::new(),
             surfaces: HashMap::new(),
+            windows: DevWindowBackend::new(),
         }
     }
 
@@ -226,7 +254,14 @@ impl Shell {
 
         let runtime = Runtime::new().map_err(ShellRunError::RuntimeInit)?;
         let (tx, mut rx) = mpsc::unbounded_channel::<ShellMessage>();
-        self.spawn_backend_plugins(&runtime, tx);
+        self.spawn_backend_plugins(&runtime, tx.clone());
+        let ipc_socket_path = default_ipc_socket_path();
+        spawn_ipc_server(&runtime, ipc_socket_path.clone(), tx).map_err(|source| {
+            ShellRunError::IpcInit {
+                path: ipc_socket_path.clone(),
+                source,
+            }
+        })?;
 
         let mut pending = VecDeque::new();
         pending.extend(self.mount_components()?);
@@ -245,6 +280,9 @@ impl Shell {
                     ShellMessage::Service(event) => {
                         pending.extend(self.broadcast_service_event(event)?);
                     }
+                    ShellMessage::Ipc(request) => {
+                        pending.push_back(request);
+                    }
                 }
             }
 
@@ -252,12 +290,14 @@ impl Shell {
             self.drain_requests(&mut pending)?;
             self.render_components()?;
             self.flush_wayland()?;
+            self.windows.pump();
 
             std::thread::sleep(Duration::from_millis(16));
         }
 
         let mut shutdown_requests = self.broadcast_core_event(CoreEvent::ShuttingDown)?;
         self.drain_requests(&mut shutdown_requests)?;
+        let _ = std::fs::remove_file(&ipc_socket_path);
         tracing::info!("shell event loop stopped");
         Ok(())
     }
@@ -435,6 +475,27 @@ impl Shell {
                 .component
                 .render(surface)
                 .map_err(ShellRunError::Component)?;
+
+            let mut buffer = PixelBuffer::new(surface.width.max(1), surface.height.max(1));
+            runtime
+                .component
+                .paint(self.theme.active(), surface.width.max(1), surface.height.max(1), &mut buffer)
+                .map_err(ShellRunError::Component)?;
+
+            let visible = self
+                .core
+                .surfaces
+                .get(&runtime.surface_id)
+                .map(|state| state.visible)
+                .unwrap_or(surface.visible);
+            self.windows
+                .present(
+                    &runtime.surface_id,
+                    runtime.component.id(),
+                    visible,
+                    &buffer,
+                )
+                .map_err(ShellRunError::Render)?;
         }
         Ok(())
     }
@@ -519,6 +580,15 @@ pub enum ShellRunError {
 
     #[error("missing shell surface: {0}")]
     MissingSurface(String),
+
+    #[error(transparent)]
+    Render(#[from] mesh_renderer::RenderError),
+
+    #[error("failed to initialize ipc socket at {path}: {source}")]
+    IpcInit {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 }
 
 fn default_plugin_dirs() -> Vec<PathBuf> {
@@ -538,10 +608,7 @@ fn default_plugin_dirs() -> Vec<PathBuf> {
 }
 
 fn default_surface_visibility(surface_id: &str) -> bool {
-    !matches!(
-        surface_id,
-        "@mesh/launcher" | "@mesh/notification-center" | "@mesh/quick-settings"
-    )
+    !matches!(surface_id, "@mesh/notification-center" | "@mesh/quick-settings")
 }
 
 struct FrontendSurfaceComponent {
@@ -689,6 +756,19 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.dirty = false;
         Ok(())
     }
+
+    fn paint(
+        &self,
+        theme: &Theme,
+        width: u32,
+        height: u32,
+        buffer: &mut PixelBuffer,
+    ) -> Result<(), ComponentError> {
+        let tree = self.compiled.build_preview_tree(theme, width, height);
+        buffer.clear(tree.computed_style.background_color);
+        Painter::new().paint(&tree, buffer, 1.0);
+        Ok(())
+    }
 }
 
 async fn spawn_mock_backend_service(
@@ -726,6 +806,134 @@ async fn spawn_mock_backend_service(
             .is_err()
         {
             break;
+        }
+    }
+}
+
+fn spawn_ipc_server(
+    runtime: &Runtime,
+    socket_path: PathBuf,
+    tx: mpsc::UnboundedSender<ShellMessage>,
+) -> Result<(), std::io::Error> {
+    if let Some(parent) = socket_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    if socket_path.exists() {
+        let _ = std::fs::remove_file(&socket_path);
+    }
+
+    let _guard = runtime.enter();
+    let listener = UnixListener::bind(&socket_path)?;
+    tracing::info!("listening for ipc commands on {}", socket_path.display());
+
+    runtime.spawn(async move {
+        loop {
+            let (stream, _) = match listener.accept().await {
+                Ok(stream) => stream,
+                Err(err) => {
+                    tracing::warn!("ipc accept failed: {err}");
+                    continue;
+                }
+            };
+
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                if let Err(err) = handle_ipc_client(stream, tx).await {
+                    tracing::warn!("ipc client failed: {err}");
+                }
+            });
+        }
+    });
+
+    Ok(())
+}
+
+async fn handle_ipc_client(
+    stream: tokio::net::UnixStream,
+    tx: mpsc::UnboundedSender<ShellMessage>,
+) -> Result<(), std::io::Error> {
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        let read = reader.read_line(&mut line).await?;
+        if read == 0 {
+            break;
+        }
+
+        let command = line.trim();
+        if command.is_empty() {
+            continue;
+        }
+
+        match parse_ipc_command(command) {
+            Some(request) => {
+                tx.send(ShellMessage::Ipc(request)).map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::BrokenPipe, "shell is not running")
+                })?;
+                writer.write_all(b"ok\n").await?;
+            }
+            None => {
+                writer
+                    .write_all(format!("error unknown-command {command}\n").as_bytes())
+                    .await?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
+    match command {
+        "shell:open_launcher" => Some(CoreRequest::ShowSurface {
+            surface_id: "@mesh/launcher".into(),
+        }),
+        "shell:close_launcher" => Some(CoreRequest::HideSurface {
+            surface_id: "@mesh/launcher".into(),
+        }),
+        "shell:toggle_launcher" => Some(CoreRequest::ToggleSurface {
+            surface_id: "@mesh/launcher".into(),
+        }),
+        "shell:open_quick_settings" => Some(CoreRequest::ShowSurface {
+            surface_id: "@mesh/quick-settings".into(),
+        }),
+        "shell:close_quick_settings" => Some(CoreRequest::HideSurface {
+            surface_id: "@mesh/quick-settings".into(),
+        }),
+        "shell:toggle_quick_settings" => Some(CoreRequest::ToggleSurface {
+            surface_id: "@mesh/quick-settings".into(),
+        }),
+        "shell:open_notification_center" => Some(CoreRequest::ShowSurface {
+            surface_id: "@mesh/notification-center".into(),
+        }),
+        "shell:close_notification_center" => Some(CoreRequest::HideSurface {
+            surface_id: "@mesh/notification-center".into(),
+        }),
+        "shell:toggle_notification_center" => Some(CoreRequest::ToggleSurface {
+            surface_id: "@mesh/notification-center".into(),
+        }),
+        "shell:shutdown" => Some(CoreRequest::Shutdown),
+        _ => {
+            if let Some(surface_id) = command.strip_prefix("shell:show_surface:") {
+                return Some(CoreRequest::ShowSurface {
+                    surface_id: surface_id.to_string(),
+                });
+            }
+            if let Some(surface_id) = command.strip_prefix("shell:hide_surface:") {
+                return Some(CoreRequest::HideSurface {
+                    surface_id: surface_id.to_string(),
+                });
+            }
+            if let Some(surface_id) = command.strip_prefix("shell:toggle_surface:") {
+                return Some(CoreRequest::ToggleSurface {
+                    surface_id: surface_id.to_string(),
+                });
+            }
+            None
         }
     }
 }

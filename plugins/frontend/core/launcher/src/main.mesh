@@ -4,8 +4,8 @@
     <input class="search" placeholder="Search apps" />
     <column class="results">
       <button class="result">Terminal</button>
-      <button class="result">Files</button>
-      <button class="result">Browser</button>
+      //<button class="result">Files</button>
+      //<button class="result">Browser</button>
     </column>
   </column>
 </template>
