@@ -4,7 +4,6 @@
 /// `<schema>`, `<i18n>`, `<meta>`) then parses each block with parser libraries.
 use crate::{
     ComponentFile, ScriptBlock, ScriptLang,
-    i18n::I18nBlock,
     meta::MetaBlock,
     schema::SchemaBlock,
     style::{Declaration, Selector, StyleBlock, StyleRule, StyleValue},
@@ -62,11 +61,6 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
         .map(|s| parse_schema(s))
         .transpose()?;
 
-    let i18n = blocks
-        .get("i18n")
-        .map(|s| parse_i18n(s))
-        .transpose()?;
-
     let meta = blocks
         .get("meta")
         .map(|s| parse_meta(s))
@@ -77,7 +71,6 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
         script,
         style,
         schema,
-        i18n,
         meta,
     })
 }
@@ -266,7 +259,12 @@ fn parse_inline_nodes(text: &str) -> Vec<TemplateNode> {
     let mut nodes = Vec::new();
     let mut remaining = text;
 
-    while let Some(start) = remaining.find("{{") {
+    while !remaining.is_empty() {
+        // Find the next `{` — could be `{{expr}}` or `{expr}`.
+        let Some(start) = remaining.find('{') else {
+            break;
+        };
+
         let prefix = &remaining[..start];
         if !prefix.trim().is_empty() {
             nodes.push(TemplateNode::Text(TextNode {
@@ -274,18 +272,45 @@ fn parse_inline_nodes(text: &str) -> Vec<TemplateNode> {
             }));
         }
 
-        let expr_body = &remaining[start + 2..];
-        if let Some(end) = expr_body.find("}}") {
-            let expr = expr_body[..end].trim();
-            if !expr.is_empty() {
-                nodes.push(TemplateNode::Expr(ExprNode {
-                    expression: expr.to_string(),
+        let after_brace = &remaining[start + 1..];
+
+        if after_brace.starts_with('{') {
+            // `{{expr}}` — double-brace form
+            let expr_body = &after_brace[1..];
+            if let Some(end) = expr_body.find("}}") {
+                let expr = expr_body[..end].trim();
+                if !expr.is_empty() {
+                    nodes.push(TemplateNode::Expr(ExprNode {
+                        expression: expr.to_string(),
+                    }));
+                }
+                remaining = &expr_body[end + 2..];
+            } else {
+                // Unclosed `{{` — emit as literal and stop processing
+                nodes.push(TemplateNode::Text(TextNode {
+                    content: remaining[start..].to_string(),
                 }));
+                remaining = "";
             }
-            remaining = &expr_body[end + 2..];
         } else {
-            remaining = &remaining[start..];
-            break;
+            // `{expr}` — single-brace form; find the matching `}`
+            // respecting nested parens so `{t(a.b)}` works correctly.
+            let expr_body = after_brace;
+            if let Some(end) = find_closing_brace(expr_body) {
+                let expr = expr_body[..end].trim();
+                if !expr.is_empty() {
+                    nodes.push(TemplateNode::Expr(ExprNode {
+                        expression: expr.to_string(),
+                    }));
+                }
+                remaining = &expr_body[end + 1..];
+            } else {
+                // Unclosed `{` — emit as literal and stop
+                nodes.push(TemplateNode::Text(TextNode {
+                    content: remaining[start..].to_string(),
+                }));
+                remaining = "";
+            }
         }
     }
 
@@ -296,6 +321,41 @@ fn parse_inline_nodes(text: &str) -> Vec<TemplateNode> {
     }
 
     nodes
+}
+
+/// Find the index of the `}` that closes the expression, respecting nested
+/// parentheses and string literals so `t(a.b)` and `t("key")` are handled.
+fn find_closing_brace(s: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut string_char = '\0';
+    let mut chars = s.char_indices();
+
+    while let Some((i, ch)) = chars.next() {
+        if in_string {
+            if ch == string_char {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' | '\'' => {
+                in_string = true;
+                string_char = ch;
+            }
+            '(' | '[' => depth += 1,
+            ')' | ']' => {
+                if depth == 0 {
+                    return None; // unbalanced
+                }
+                depth -= 1;
+            }
+            '}' if depth == 0 => return Some(i),
+            _ => {}
+        }
+    }
+
+    None
 }
 
 fn build_template_node(tag: String, attributes: Vec<Attribute>, children: Vec<TemplateNode>) -> TemplateNode {
@@ -538,12 +598,6 @@ fn parse_schema(source: &str) -> Result<SchemaBlock, ParseError> {
     Ok(block)
 }
 
-fn parse_i18n(source: &str) -> Result<I18nBlock, ParseError> {
-    let raw: HashMap<String, HashMap<String, String>> =
-        toml::from_str(source).map_err(|e| ParseError::InvalidI18n(e.to_string()))?;
-    Ok(I18nBlock { entries: raw })
-}
-
 fn parse_meta(source: &str) -> Result<MetaBlock, ParseError> {
     let block: MetaBlock =
         toml::from_str(source).map_err(|e| ParseError::InvalidMeta(e.to_string()))?;
@@ -635,10 +689,6 @@ role = "region"
 
         let schema = file.schema.unwrap();
         assert!(schema.fields.contains_key("greeting"));
-
-        let i18n = file.i18n.unwrap();
-        assert_eq!(i18n.entries["en"]["greeting"], "Hello");
-        assert_eq!(i18n.entries["fr"]["greeting"], "Bonjour");
 
         let meta = file.meta.unwrap();
         assert_eq!(meta.name.unwrap(), "Greeter");

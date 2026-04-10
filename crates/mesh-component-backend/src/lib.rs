@@ -167,11 +167,9 @@ fn build_widget_node(
         TemplateNode::Expr(expr) => {
             let mut node = WidgetNode::new("text");
             let content = state
-                .and_then(|store| store.get(&expr.expression))
-                .map(json_value_to_string)
+                .map(|store| eval_expr(&expr.expression, store))
                 .unwrap_or_else(|| format!("{{{{ {} }}}}", expr.expression));
-            node.attributes
-                .insert("content".into(), content);
+            node.attributes.insert("content".into(), content);
             node.computed_style = text_style();
             if let Some(parent_style) = parent_style {
                 inherit_text_style(&mut node.computed_style, parent_style, InheritedStyleMask::default());
@@ -393,8 +391,7 @@ fn parse_attributes(
             }
             AttributeValue::Binding(binding) => {
                 let value = state
-                    .and_then(|store| store.get(binding))
-                    .map(json_value_to_string)
+                    .map(|store| eval_expr(binding, store))
                     .unwrap_or_default();
                 resolved.insert(attr.name.clone(), value);
             }
@@ -413,6 +410,77 @@ fn json_value_to_string(value: serde_json::Value) -> String {
         serde_json::Value::String(value) => value,
         other => other.to_string(),
     }
+}
+
+/// Evaluate a template expression against the current variable store.
+///
+/// Supported forms:
+/// - `t("literal key")` — translate a string literal
+/// - `t(variable)` — translate the string value of a variable
+/// - `t(a.b)` — translate the value at a dotted path
+/// - `variable` — look up a variable by name
+/// - `a.b.c` — look up a dotted path (falls back to flat key if not found)
+fn eval_expr(expr: &str, store: &dyn mesh_ui::VariableStore) -> String {
+    let expr = expr.trim();
+
+    // t(...) — translation call
+    if let Some(arg) = expr
+        .strip_prefix("t(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        let arg = arg.trim();
+        // String literal argument: t("key") or t('key')
+        if let Some(key) = strip_string_literal(arg) {
+            return store.translate(&key).unwrap_or(key);
+        }
+        // Variable/path argument: t(variable) or t(a.b)
+        let resolved = eval_path(arg, store);
+        return store.translate(&resolved).unwrap_or(resolved);
+    }
+
+    // Plain variable or dotted path
+    eval_path(expr, store)
+}
+
+/// Resolve a variable name or dotted path from the store.
+fn eval_path(expr: &str, store: &dyn mesh_ui::VariableStore) -> String {
+    // Try exact key first (covers both flat and pre-serialized dotted keys)
+    if let Some(value) = store.get(expr) {
+        return json_value_to_string(value);
+    }
+
+    // Try dotted path traversal on a JSON object stored under the root key
+    let parts: Vec<&str> = expr.splitn(2, '.').collect();
+    if parts.len() == 2 {
+        if let Some(root) = store.get(parts[0]) {
+            if let Some(nested) = json_path(root, parts[1]) {
+                return json_value_to_string(nested);
+            }
+        }
+    }
+
+    // No match — return the expression itself so it's visible during development
+    expr.to_string()
+}
+
+/// Walk a dotted path into a JSON value.
+fn json_path(mut value: serde_json::Value, path: &str) -> Option<serde_json::Value> {
+    for key in path.split('.') {
+        value = value.get(key)?.clone();
+    }
+    Some(value)
+}
+
+/// Strip surrounding `"..."` or `'...'` quotes, returning the inner string.
+fn strip_string_literal(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.len() >= 2 {
+        let q = s.chars().next()?;
+        if (q == '"' || q == '\'') && s.ends_with(q) {
+            return Some(s[1..s.len() - 1].to_string());
+        }
+    }
+    None
 }
 
 fn normalize_tag(tag: &str) -> String {

@@ -27,4 +27,9 @@ pub use accessibility::{AccessibilityInfo, AccessibilityState, AccessibilityTree
 pub trait VariableStore {
     fn get(&self, name: &str) -> Option<serde_json::Value>;
     fn keys(&self) -> Vec<String>;
+    /// Look up a translation key. Returns `None` if no locale engine is available.
+    fn translate(&self, key: &str) -> Option<String> {
+        let _ = key;
+        None
+    }
 }

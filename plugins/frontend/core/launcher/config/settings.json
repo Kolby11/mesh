@@ -1,0 +1,9 @@
+{
+    "i18n": {
+        "available_locales": [
+            "en",
+            "sk"
+        ],
+        "default_locale": "en"
+    }
+}

@@ -13,7 +13,7 @@ pub struct TranslationSet {
 }
 
 /// The locale engine manages the active locale and translation lookup.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LocaleEngine {
     active_locale: String,
     fallback_chain: Vec<String>,

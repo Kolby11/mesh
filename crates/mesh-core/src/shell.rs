@@ -1,14 +1,14 @@
 /// The top-level Shell struct that owns shell coordination and plugin loading.
 use mesh_component_backend::{CompiledFrontendPlugin, compile_frontend_plugin, is_frontend_plugin};
 use mesh_capability::{Capability, CapabilitySet};
-use mesh_config::{ShellConfig, ShellSettings, load_config, load_shell_settings};
+use mesh_config::{ShellConfig, ShellSettings, load_config, load_shell_settings, default_settings_path};
 use mesh_diagnostics::DiagnosticsCollector;
 use mesh_events::EventBus;
 use mesh_locale::LocaleEngine;
 use mesh_plugin::lifecycle::{PluginInstance, PluginState};
 use mesh_plugin::{PluginType, manifest};
 use mesh_renderer::{DevWindowBackend, DevWindowEvent, DevWindowKeyEvent, Painter, PixelBuffer};
-use mesh_scripting::{ScriptContext, ScriptError};
+use mesh_scripting::{LocaleBoundState, ScriptContext, ScriptError};
 use mesh_service::ServiceRegistry;
 use mesh_theme::{Theme, ThemeEngine, default_theme, load_theme_from_path, theme_path_for_id};
 use mesh_ui::WidgetNode;
@@ -103,6 +103,9 @@ pub trait ShellComponent: Send {
         buffer: &mut PixelBuffer,
     ) -> Result<(), ComponentError>;
     fn theme_changed(&mut self) -> Result<(), ComponentError>;
+    fn locale_changed(&mut self, _locale: &LocaleEngine) -> Result<(), ComponentError> {
+        Ok(())
+    }
     fn handle_input(
         &mut self,
         _theme: &Theme,
@@ -118,6 +121,12 @@ pub trait ShellComponent: Send {
     fn reload_source(&mut self) -> Result<bool, ComponentError> {
         Ok(false)
     }
+    fn plugin_settings_path(&self) -> Option<&Path> {
+        None
+    }
+    fn reload_plugin_settings(&mut self) -> Result<bool, ComponentError> {
+        Ok(false)
+    }
 }
 
 struct ComponentRuntime {
@@ -125,6 +134,8 @@ struct ComponentRuntime {
     component: Box<dyn ShellComponent>,
     source_path: Option<PathBuf>,
     source_modified_at: Option<SystemTime>,
+    plugin_settings_path: Option<PathBuf>,
+    plugin_settings_modified_at: Option<SystemTime>,
 }
 
 impl ComponentRuntime {
@@ -135,17 +146,26 @@ impl ComponentRuntime {
             .as_ref()
             .and_then(|path| std::fs::metadata(path).ok())
             .and_then(|metadata| metadata.modified().ok());
+        let plugin_settings_path = component.plugin_settings_path().map(PathBuf::from);
         Self {
             surface_id,
             component,
             source_path,
             source_modified_at,
+            plugin_settings_path,
+            plugin_settings_modified_at: None,
         }
     }
 }
 
 #[derive(Debug, Clone)]
 struct ThemeWatchState {
+    path: PathBuf,
+    modified_at: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone)]
+struct SettingsWatchState {
     path: PathBuf,
     modified_at: Option<SystemTime>,
 }
@@ -188,6 +208,7 @@ pub struct Shell {
     surfaces: HashMap<SurfaceId, StubSurface>,
     windows: DevWindowBackend,
     theme_watch: ThemeWatchState,
+    settings_watch: SettingsWatchState,
 }
 
 pub fn default_ipc_socket_path() -> PathBuf {
@@ -224,6 +245,13 @@ impl Shell {
             settings.i18n.locale.clone(),
             settings.i18n.fallback_locale.clone(),
         );
+        let settings_watch = {
+            let path = default_settings_path();
+            let modified_at = std::fs::metadata(&path)
+                .ok()
+                .and_then(|m| m.modified().ok());
+            SettingsWatchState { path, modified_at }
+        };
 
         Self {
             config,
@@ -240,6 +268,7 @@ impl Shell {
             surfaces: HashMap::new(),
             windows: DevWindowBackend::new(),
             theme_watch,
+            settings_watch,
         }
     }
 
@@ -330,6 +359,7 @@ impl Shell {
 
         let mut pending = VecDeque::new();
         pending.extend(self.mount_components()?);
+        self.mark_components_locale_changed()?;
         pending.extend(self.broadcast_core_event(CoreEvent::Started)?);
 
         tracing::info!(
@@ -339,6 +369,8 @@ impl Shell {
 
         while !self.core.shutting_down {
             self.reload_theme_if_changed()?;
+            self.reload_locale_if_settings_changed()?;
+            self.reload_plugin_settings_if_changed()?;
             self.reload_frontend_components_if_changed()?;
             self.dispatch_wayland()?;
 
@@ -433,6 +465,94 @@ impl Shell {
             runtime
                 .component
                 .theme_changed()
+                .map_err(ShellRunError::Component)?;
+        }
+        Ok(())
+    }
+
+    fn reload_locale_if_settings_changed(&mut self) -> Result<(), ShellRunError> {
+        let Ok(metadata) = std::fs::metadata(&self.settings_watch.path) else {
+            return Ok(());
+        };
+        let Ok(modified_at) = metadata.modified() else {
+            return Ok(());
+        };
+
+        if self.settings_watch.modified_at == Some(modified_at) {
+            return Ok(());
+        }
+
+        self.settings_watch.modified_at = Some(modified_at);
+
+        let new_settings = match load_shell_settings() {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("failed to reload shell settings: {e}");
+                return Ok(());
+            }
+        };
+
+        let old_i18n = &self.settings.i18n;
+        let new_i18n = &new_settings.i18n;
+        if old_i18n.locale != new_i18n.locale || old_i18n.fallback_locale != new_i18n.fallback_locale {
+            tracing::info!(
+                "locale changed: {} (fallback: {}) -> {} (fallback: {})",
+                old_i18n.locale,
+                old_i18n.fallback_locale,
+                new_i18n.locale,
+                new_i18n.fallback_locale,
+            );
+            self.locale = LocaleEngine::with_fallback_locale(
+                new_i18n.locale.clone(),
+                new_i18n.fallback_locale.clone(),
+            );
+            self.settings.i18n = new_i18n.clone();
+            self.mark_components_locale_changed()?;
+        }
+
+        Ok(())
+    }
+
+    fn reload_plugin_settings_if_changed(&mut self) -> Result<(), ShellRunError> {
+        for runtime in &mut self.components {
+            let Some(settings_path) = runtime.plugin_settings_path.as_ref() else {
+                continue;
+            };
+
+            let Ok(metadata) = std::fs::metadata(settings_path) else {
+                continue;
+            };
+            let Ok(modified_at) = metadata.modified() else {
+                continue;
+            };
+
+            if runtime.plugin_settings_modified_at == Some(modified_at) {
+                continue;
+            }
+
+            runtime.plugin_settings_modified_at = Some(modified_at);
+
+            let changed = runtime
+                .component
+                .reload_plugin_settings()
+                .map_err(ShellRunError::Component)?;
+
+            if changed {
+                tracing::info!(
+                    "plugin settings changed for component '{}'",
+                    runtime.component.id()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn mark_components_locale_changed(&mut self) -> Result<(), ShellRunError> {
+        let locale = self.locale.clone();
+        for runtime in &mut self.components {
+            runtime
+                .component
+                .locale_changed(&locale)
                 .map_err(ShellRunError::Component)?;
         }
         Ok(())
@@ -829,6 +949,7 @@ fn load_active_theme(settings: &ShellSettings) -> (ThemeEngine, ThemeWatchState)
 struct FrontendSurfaceComponent {
     compiled: CompiledFrontendPlugin,
     plugin_dir: PathBuf,
+    plugin_settings_file: PathBuf,
     visible: bool,
     dirty: bool,
     last_service_update: Option<String>,
@@ -840,6 +961,7 @@ struct FrontendSurfaceComponent {
     scroll_offsets: HashMap<String, f32>,
     script_ctx: ScriptContext,
     measured_size: Option<(u32, u32)>,
+    locale: LocaleEngine,
 }
 
 impl FrontendSurfaceComponent {
@@ -847,9 +969,11 @@ impl FrontendSurfaceComponent {
         let surface_id = compiled.surface_id().to_string();
         let component_id = compiled.manifest.package.id.clone();
         let granted_capabilities = grant_capabilities_from_manifest(&compiled.manifest);
+        let plugin_settings_file = plugin_dir.join("config/settings.json");
         Self {
             compiled,
             plugin_dir,
+            plugin_settings_file,
             visible: default_surface_visibility(&surface_id),
             dirty: true,
             last_service_update: None,
@@ -865,6 +989,7 @@ impl FrontendSurfaceComponent {
             )
             .unwrap_or_else(|err| panic!("failed to create script context for {component_id}: {err}")),
             measured_size: None,
+            locale: LocaleEngine::new("en"),
         }
     }
 
@@ -908,11 +1033,12 @@ impl FrontendSurfaceComponent {
     }
 
     fn build_tree(&self, theme: &Theme, width: u32, height: u32) -> WidgetNode {
+        let bound = LocaleBoundState::new(self.script_ctx.state(), &self.locale);
         let mut tree = self.compiled.build_preview_tree_with_state(
             theme,
             width,
             height,
-            Some(self.script_ctx.state()),
+            Some(&bound),
         );
         annotate_runtime_tree(
             &mut tree,
@@ -949,6 +1075,49 @@ impl FrontendSurfaceComponent {
         let pct = (local_x / node.layout.width.max(1.0)).clamp(0.0, 1.0);
         let value = min + (max - min) * pct;
         self.slider_values.insert(slider_key.to_string(), value);
+    }
+
+    /// Load translation files from `config/i18n/{locale}.json` inside the plugin directory.
+    fn load_plugin_i18n(&mut self) {
+        let i18n_dir = self.plugin_dir.join("config/i18n");
+        let entries = match std::fs::read_dir(&i18n_dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let messages: HashMap<String, String> = match serde_json::from_str(&content) {
+                Ok(m) => m,
+                Err(_) => {
+                    tracing::warn!(
+                        "plugin '{}': failed to parse i18n file {}",
+                        self.id(),
+                        path.display()
+                    );
+                    continue;
+                }
+            };
+            tracing::debug!(
+                "plugin '{}': loaded {} translations for locale '{}'",
+                self.id(),
+                messages.len(),
+                stem
+            );
+            self.locale.load_translations(mesh_locale::TranslationSet {
+                locale: stem.to_string(),
+                messages,
+            });
+        }
     }
 
     fn init_script(&mut self) -> Result<(), ComponentError> {
@@ -990,6 +1159,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn mount(&mut self, _ctx: ComponentContext) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.load_plugin_i18n();
         self.init_script()?;
         self.dirty = true;
         Ok(vec![CoreRequest::PublishDiagnostics {
@@ -1096,8 +1266,53 @@ impl ShellComponent for FrontendSurfaceComponent {
         Ok(())
     }
 
+    fn locale_changed(&mut self, locale: &LocaleEngine) -> Result<(), ComponentError> {
+        self.locale.set_locale(locale.current());
+        self.dirty = true;
+        Ok(())
+    }
+
     fn source_path(&self) -> Option<&Path> {
         Some(self.compiled.source_path.as_path())
+    }
+
+    fn plugin_settings_path(&self) -> Option<&Path> {
+        if self.plugin_settings_file.exists() {
+            Some(self.plugin_settings_file.as_path())
+        } else {
+            None
+        }
+    }
+
+    fn reload_plugin_settings(&mut self) -> Result<bool, ComponentError> {
+        let content = match std::fs::read_to_string(&self.plugin_settings_file) {
+            Ok(c) => c,
+            Err(_) => return Ok(false),
+        };
+        let value: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => return Ok(false),
+        };
+        let Some(locale) = value
+            .get("i18n")
+            .and_then(|i18n| i18n.get("default_locale"))
+            .and_then(|l| l.as_str())
+        else {
+            return Ok(false);
+        };
+
+        if self.locale.current() == locale {
+            return Ok(false);
+        }
+
+        tracing::info!(
+            "plugin '{}': applying locale '{}' from plugin settings",
+            self.id(),
+            locale
+        );
+        self.locale.set_locale(locale);
+        self.dirty = true;
+        Ok(true)
     }
 
     fn reload_source(&mut self) -> Result<bool, ComponentError> {

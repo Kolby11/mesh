@@ -122,20 +122,6 @@ default = true
 description = "Show battery percentage"
 </schema>
 
-<i18n>
-[en]
-clock = "Clock"
-battery = "Battery"
-volume = "Volume"
-network = "Network"
-
-[es]
-clock = "Reloj"
-battery = "Batería"
-volume = "Volumen"
-network = "Red"
-</i18n>
-
 <meta>
 name = "MESH Panel"
 description = "Default top panel with clock, system tray, and status indicators"

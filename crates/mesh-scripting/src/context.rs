@@ -1,5 +1,6 @@
 /// Script execution context — one per plugin/component instance.
 use mesh_capability::CapabilitySet;
+use mesh_locale::LocaleEngine;
 use mesh_ui::VariableStore;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -324,5 +325,34 @@ fn parse_literal_value(value: &str) -> Option<Value> {
             }
             None
         }
+    }
+}
+
+/// A `VariableStore` that combines script state with locale engine access.
+///
+/// Pass this to `build_preview_tree_with_state` so that template expressions
+/// like `{t("greeting")}` resolve through the active locale engine.
+pub struct LocaleBoundState<'a> {
+    state: &'a ScriptState,
+    locale: &'a LocaleEngine,
+}
+
+impl<'a> LocaleBoundState<'a> {
+    pub fn new(state: &'a ScriptState, locale: &'a LocaleEngine) -> Self {
+        Self { state, locale }
+    }
+}
+
+impl<'a> VariableStore for LocaleBoundState<'a> {
+    fn get(&self, name: &str) -> Option<Value> {
+        self.state.get(name)
+    }
+
+    fn keys(&self) -> Vec<String> {
+        self.state.keys()
+    }
+
+    fn translate(&self, key: &str) -> Option<String> {
+        self.locale.translate(key).map(str::to_string)
     }
 }

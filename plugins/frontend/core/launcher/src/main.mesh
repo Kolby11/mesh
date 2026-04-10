@@ -1,3 +1,8 @@
+<script lang="luau">
+    local t = require("@mesh/i18n").t
+</script>
+
+
 <template>
   <column class="launcher">
     <text class="title" :content="headline"/>
@@ -5,8 +10,8 @@
     <text class="status" :content="statusMessage"/>
     <scroll class="results">
       <button class="result" @click="onLaunchTerminal">Terminal</button>
-      <button class="result" @click="onLaunchFiles">Files</button>
-      <button class="result" @click="onLaunchBrowser">Browser</button>
+      <button class="result" @click="onLaunchFiles">{t(results.files)}</button>
+      <button class="result" @click="onLaunchBrowser">{t(results.browser)}</button>
       <button class="result" @click="onLaunchEditor">Editor</button>
       <button class="result" @click="onLaunchMonitor">System Monitor</button>
       <button class="result" @click="onLaunchSettings">Settings</button>
@@ -15,62 +20,6 @@
     </scroll>
   </column>
 </template>
-
-<script lang="luau">
-function init()
-    mesh.state.set("headline", "Applications")
-    mesh.state.set("statusMessage", "Choose an app to preview launcher actions.")
-    mesh.ui.request_redraw()
-end
-
-function onLaunchTerminal()
-    mesh.state.set("statusMessage", "Terminal clicked")
-    mesh.log.info("Launcher clicked: Terminal")
-    mesh.ui.request_redraw()
-end
-
-function onLaunchFiles()
-    mesh.state.set("statusMessage", "Files clicked")
-    mesh.log.info("Launcher clicked: Files")
-    mesh.ui.request_redraw()
-end
-
-function onLaunchBrowser()
-    mesh.state.set("statusMessage", "Browser clicked")
-    mesh.log.info("Launcher clicked: Browser")
-    mesh.ui.request_redraw()
-end
-
-function onLaunchEditor()
-    mesh.state.set("statusMessage", "Editor clicked")
-    mesh.log.info("Launcher clicked: Editor")
-    mesh.ui.request_redraw()
-end
-
-function onLaunchMonitor()
-    mesh.state.set("statusMessage", "System Monitor clicked")
-    mesh.log.info("Launcher clicked: System Monitor")
-    mesh.ui.request_redraw()
-end
-
-function onLaunchSettings()
-    mesh.state.set("statusMessage", "Settings clicked")
-    mesh.log.info("Launcher clicked: Settings")
-    mesh.ui.request_redraw()
-end
-
-function onLaunchMusic()
-    mesh.state.set("statusMessage", "Music clicked")
-    mesh.log.info("Launcher clicked: Music")
-    mesh.ui.request_redraw()
-end
-
-function onLaunchMessages()
-    mesh.state.set("statusMessage", "Messages clicked")
-    mesh.log.info("Launcher clicked: Messages")
-    mesh.ui.request_redraw()
-end
-</script>
 
 <style>
 .title {

@@ -468,6 +468,7 @@ dependencies = [
  "mesh-theme",
  "mesh-ui",
  "mesh-wayland",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",

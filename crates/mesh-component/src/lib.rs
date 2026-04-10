@@ -18,7 +18,6 @@
 pub mod template;
 pub mod style;
 pub mod schema;
-pub mod i18n;
 pub mod meta;
 pub mod parser;
 
@@ -26,7 +25,6 @@ pub use parser::{parse_component, ParseError};
 pub use template::*;
 pub use style::*;
 pub use schema::{SchemaBlock, SchemaFieldDef};
-pub use i18n::I18nBlock;
 pub use meta::{MetaBlock, AccessibilityRole};
 
 /// A parsed `.mesh` single-file component.
@@ -36,7 +34,6 @@ pub struct ComponentFile {
     pub script: Option<ScriptBlock>,
     pub style: Option<StyleBlock>,
     pub schema: Option<SchemaBlock>,
-    pub i18n: Option<I18nBlock>,
     pub meta: Option<MetaBlock>,
 }
 

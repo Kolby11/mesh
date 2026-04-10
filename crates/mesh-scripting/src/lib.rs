@@ -16,5 +16,5 @@ pub mod context;
 pub mod host_api;
 pub mod component;
 
-pub use context::{ScriptContext, ScriptState, ScriptError};
+pub use context::{ScriptContext, ScriptState, ScriptError, LocaleBoundState};
 pub use component::ComponentInstance;
