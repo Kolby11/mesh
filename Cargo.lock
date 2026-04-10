@@ -434,6 +434,7 @@ dependencies = [
  "mesh-plugin",
  "mesh-theme",
  "mesh-ui",
+ "serde_json",
  "thiserror",
  "tracing",
 ]
@@ -462,8 +463,10 @@ dependencies = [
  "mesh-plugin",
  "mesh-renderer",
  "mesh-runtime",
+ "mesh-scripting",
  "mesh-service",
  "mesh-theme",
+ "mesh-ui",
  "mesh-wayland",
  "thiserror",
  "tokio",

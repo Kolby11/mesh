@@ -45,17 +45,40 @@ impl TextRenderer {
         x: u32,
         y: u32,
     ) {
+        self.render_clipped(
+            text,
+            font_size,
+            color,
+            buffer,
+            x,
+            y,
+            (0, 0, buffer.width, buffer.height),
+        );
+    }
+
+    pub fn render_clipped(
+        &self,
+        text: &str,
+        font_size: f32,
+        color: Color,
+        buffer: &mut PixelBuffer,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+    ) {
         let scale = glyph_scale(font_size);
         let glyph_advance = 8 * scale + scale;
         let mut cursor_x = x;
+        let mut cursor_y = y;
 
         for ch in text.chars() {
             if ch == '\n' {
                 cursor_x = x;
+                cursor_y = cursor_y.saturating_add(8 * scale + scale);
                 continue;
             }
 
-            self.render_glyph(ch, color, buffer, cursor_x, y, scale);
+            self.render_glyph(ch, color, buffer, cursor_x, cursor_y, scale, clip);
             cursor_x = cursor_x.saturating_add(glyph_advance);
         }
     }
@@ -68,11 +91,16 @@ impl TextRenderer {
         x: u32,
         y: u32,
         scale: u32,
+        clip: (u32, u32, u32, u32),
     ) {
         let glyph = BASIC_FONTS.get(ch).or_else(|| BASIC_FONTS.get('?'));
         let Some(glyph) = glyph else {
             return;
         };
+
+        let (clip_x, clip_y, clip_w, clip_h) = clip;
+        let clip_right = clip_x.saturating_add(clip_w);
+        let clip_bottom = clip_y.saturating_add(clip_h);
 
         for (row, bits) in glyph.iter().enumerate() {
             for col in 0..8u32 {
@@ -84,7 +112,16 @@ impl TextRenderer {
                 let py = y.saturating_add(row as u32 * scale);
                 for sy in 0..scale {
                     for sx in 0..scale {
-                        buffer.set_pixel(px.saturating_add(sx), py.saturating_add(sy), color);
+                        let draw_x = px.saturating_add(sx);
+                        let draw_y = py.saturating_add(sy);
+                        if draw_x < clip_x
+                            || draw_y < clip_y
+                            || draw_x >= clip_right
+                            || draw_y >= clip_bottom
+                        {
+                            continue;
+                        }
+                        buffer.set_pixel(draw_x, draw_y, color);
                     }
                 }
             }

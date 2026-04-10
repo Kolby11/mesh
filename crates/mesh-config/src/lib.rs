@@ -59,7 +59,7 @@ pub struct ShellSection {
 }
 
 fn default_surface() -> String {
-    "@mesh/panel".to_string()
+    "@mesh/launcher".to_string()
 }
 
 fn default_theme_id() -> String {

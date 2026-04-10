@@ -88,6 +88,10 @@ impl ThemeEngine {
     pub fn available_themes(&self) -> &[Theme] {
         &self.available
     }
+
+    pub fn replace_active(&mut self, theme: Theme) {
+        self.active = theme;
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -119,9 +123,23 @@ pub fn default_theme() -> Theme {
 }
 
 pub fn default_theme_path() -> PathBuf {
+    theme_path_for_id("mesh-default-dark")
+}
+
+pub fn theme_dir_path() -> PathBuf {
+    if let Ok(path) = std::env::var("MESH_THEME_DIR") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("config/themes/mesh-default-dark.json")
+        .join("config/themes")
+}
+
+pub fn theme_path_for_id(theme_id: &str) -> PathBuf {
+    theme_dir_path().join(format!("{theme_id}.json"))
 }
 
 pub fn load_theme_from_path(path: &Path) -> Result<Theme, ThemeError> {

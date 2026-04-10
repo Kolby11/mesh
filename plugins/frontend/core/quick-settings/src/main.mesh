@@ -6,6 +6,10 @@
       <button class="chip">Bluetooth</button>
       <button class="chip">Do Not Disturb</button>
     </row>
+    <column class="audio">
+      <text class="label">Volume</text>
+      <slider class="volume" min="0" max="100" value="42" />
+    </column>
   </column>
 </template>
 
@@ -23,6 +27,10 @@
 }
 
 .toggles {
+    gap: token(spacing.sm);
+}
+
+.audio {
     gap: token(spacing.sm);
 }
 </style>

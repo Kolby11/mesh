@@ -14,7 +14,7 @@ pub mod surface;
 pub mod text;
 
 pub use buffer::PixelBuffer;
-pub use dev_window::DevWindowBackend;
+pub use dev_window::{DevWindowBackend, DevWindowEvent, DevWindowKeyEvent};
 pub use painter::Painter;
 pub use surface::{RenderSurface, SurfaceConfig, SurfaceId};
 

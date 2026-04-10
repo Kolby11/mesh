@@ -83,7 +83,12 @@ pub struct ScriptContext {
     pub plugin_id: String,
     pub capabilities: CapabilitySet,
     pub state: ScriptState,
-    handlers: HashMap<String, String>,
+    handlers: HashMap<String, ScriptFunction>,
+}
+
+#[derive(Debug, Clone)]
+struct ScriptFunction {
+    body: Vec<String>,
 }
 
 impl ScriptContext {
@@ -102,19 +107,7 @@ impl ScriptContext {
     /// Stub: extracts function names from the source text.
     /// Real implementation will execute in the Luau VM.
     pub fn load_script(&mut self, source: &str) -> Result<(), ScriptError> {
-        // Stub: scan for `function name()` declarations.
-        for line in source.lines() {
-            let trimmed = line.trim();
-            if let Some(rest) = trimmed.strip_prefix("function ") {
-                if let Some(name) = rest.split('(').next() {
-                    let name = name.trim();
-                    if !name.is_empty() {
-                        self.handlers.insert(name.to_string(), name.to_string());
-                        tracing::debug!("registered handler: {name}");
-                    }
-                }
-            }
-        }
+        self.handlers = parse_functions(source);
         tracing::info!("loaded script for plugin {}", self.plugin_id);
         Ok(())
     }
@@ -123,7 +116,7 @@ impl ScriptContext {
     pub fn call_init(&mut self) -> Result<(), ScriptError> {
         if self.handlers.contains_key("init") {
             tracing::debug!("calling init() for {}", self.plugin_id);
-            // Stub: would execute init() in the Luau VM.
+            self.execute_function("init")?;
         }
         Ok(())
     }
@@ -134,8 +127,7 @@ impl ScriptContext {
             return Err(ScriptError::HandlerNotFound(name.to_string()));
         }
         tracing::debug!("calling handler {name}() for {}", self.plugin_id);
-        // Stub: would execute the handler in the Luau VM.
-        Ok(())
+        self.execute_function(name)
     }
 
     /// Check if a handler exists.
@@ -151,5 +143,186 @@ impl ScriptContext {
     /// Get a mutable reference to state.
     pub fn state_mut(&mut self) -> &mut ScriptState {
         &mut self.state
+    }
+
+    fn execute_function(&mut self, name: &str) -> Result<(), ScriptError> {
+        let Some(function) = self.handlers.get(name).cloned() else {
+            return Err(ScriptError::HandlerNotFound(name.to_string()));
+        };
+
+        for line in function.body {
+            self.execute_statement(&line)?;
+        }
+
+        Ok(())
+    }
+
+    fn execute_statement(&mut self, line: &str) -> Result<(), ScriptError> {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("--") {
+            return Ok(());
+        }
+
+        if let Some(args) = extract_call_args(trimmed, "mesh.state.set") {
+            if args.len() != 2 {
+                return Err(ScriptError::LuaError(format!(
+                    "mesh.state.set expects 2 arguments in {}",
+                    self.plugin_id
+                )));
+            }
+
+            let key = parse_string_literal(&args[0]).ok_or_else(|| {
+                ScriptError::LuaError(format!("invalid mesh.state.set key: {}", args[0]))
+            })?;
+            let value = parse_literal_value(&args[1]).ok_or_else(|| {
+                ScriptError::LuaError(format!("invalid mesh.state.set value: {}", args[1]))
+            })?;
+            self.state.set(key, value);
+            return Ok(());
+        }
+
+        if let Some(args) = extract_call_args(trimmed, "mesh.log.info") {
+            if let Some(message) = args.first().and_then(|value| parse_string_literal(value)) {
+                tracing::info!("{}: {}", self.plugin_id, message);
+            }
+            return Ok(());
+        }
+
+        if let Some(args) = extract_call_args(trimmed, "mesh.log.warn") {
+            if let Some(message) = args.first().and_then(|value| parse_string_literal(value)) {
+                tracing::warn!("{}: {}", self.plugin_id, message);
+            }
+            return Ok(());
+        }
+
+        if trimmed == "mesh.ui.request_redraw()" {
+            self.state.dirty = true;
+            return Ok(());
+        }
+
+        if let Some(args) = extract_call_args(trimmed, "mesh.events.publish") {
+            if let Some(channel) = args.first().and_then(|value| parse_string_literal(value)) {
+                tracing::info!("{} published event {}", self.plugin_id, channel);
+            }
+            return Ok(());
+        }
+
+        Ok(())
+    }
+}
+
+fn parse_functions(source: &str) -> HashMap<String, ScriptFunction> {
+    let mut functions = HashMap::new();
+    let mut current_name: Option<String> = None;
+    let mut current_body = Vec::new();
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("function ") {
+            if let Some(name) = rest.split('(').next() {
+                let name = name.trim();
+                if !name.is_empty() {
+                    current_name = Some(name.to_string());
+                    current_body.clear();
+                }
+            }
+            continue;
+        }
+
+        if trimmed == "end" {
+            if let Some(name) = current_name.take() {
+                tracing::debug!("registered handler: {name}");
+                functions.insert(
+                    name.clone(),
+                    ScriptFunction {
+                        body: std::mem::take(&mut current_body),
+                    },
+                );
+            }
+            continue;
+        }
+
+        if current_name.is_some() {
+            current_body.push(trimmed.to_string());
+        }
+    }
+
+    functions
+}
+
+fn extract_call_args(line: &str, prefix: &str) -> Option<Vec<String>> {
+    let call = line.strip_prefix(prefix)?;
+    let call = call.trim();
+    let inner = call.strip_prefix('(')?.strip_suffix(')')?;
+    Some(split_call_args(inner))
+}
+
+fn split_call_args(inner: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_string = false;
+    let mut quote = '\0';
+
+    for ch in inner.chars() {
+        match ch {
+            '"' | '\'' => {
+                current.push(ch);
+                if in_string && ch == quote {
+                    in_string = false;
+                    quote = '\0';
+                } else if !in_string {
+                    in_string = true;
+                    quote = ch;
+                }
+            }
+            ',' if !in_string => {
+                if !current.trim().is_empty() {
+                    args.push(current.trim().to_string());
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        args.push(current.trim().to_string());
+    }
+
+    args
+}
+
+fn parse_string_literal(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.len() < 2 {
+        return None;
+    }
+
+    let quote = value.chars().next()?;
+    if (quote == '"' || quote == '\'') && value.ends_with(quote) {
+        return Some(value[1..value.len() - 1].to_string());
+    }
+
+    None
+}
+
+fn parse_literal_value(value: &str) -> Option<Value> {
+    if let Some(string) = parse_string_literal(value) {
+        return Some(Value::String(string));
+    }
+
+    match value.trim() {
+        "true" => Some(Value::Bool(true)),
+        "false" => Some(Value::Bool(false)),
+        "null" | "nil" => Some(Value::Null),
+        other => {
+            if let Ok(number) = other.parse::<i64>() {
+                return Some(Value::Number(number.into()));
+            }
+            if let Ok(number) = other.parse::<f64>() {
+                return serde_json::Number::from_f64(number).map(Value::Number);
+            }
+            None
+        }
     }
 }

@@ -4,7 +4,7 @@ use mesh_plugin::{Manifest, PluginType};
 use mesh_theme::Theme;
 use mesh_ui::accessibility::AccessibilityInfo;
 use mesh_ui::style::{Display, FlexDirection};
-use mesh_ui::{ComputedStyle, LayoutEngine, StyleResolver, WidgetNode};
+use mesh_ui::{ComputedStyle, LayoutEngine, StyleResolver, VariableStore, WidgetNode};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,6 +22,16 @@ impl CompiledFrontendPlugin {
     }
 
     pub fn build_preview_tree(&self, theme: &Theme, width: u32, height: u32) -> WidgetNode {
+        self.build_preview_tree_with_state(theme, width, height, None)
+    }
+
+    pub fn build_preview_tree_with_state(
+        &self,
+        theme: &Theme,
+        width: u32,
+        height: u32,
+        state: Option<&dyn VariableStore>,
+    ) -> WidgetNode {
         let mut root = WidgetNode::new("surface");
         root.attributes.insert("id".into(), self.manifest.package.id.clone());
         root.computed_style = surface_style(&self.manifest.package.id, width, height);
@@ -45,7 +55,9 @@ impl CompiledFrontendPlugin {
             root.children = template
                 .root
                 .iter()
-                .map(|node| build_widget_node(node, rules, &resolver))
+                .map(|node| {
+                    build_widget_node(node, rules, &resolver, Some(&root.computed_style), state)
+                })
                 .collect();
         }
 
@@ -133,21 +145,37 @@ fn build_widget_node(
     node: &TemplateNode,
     rules: &[mesh_component::style::StyleRule],
     resolver: &StyleResolver<'_>,
+    parent_style: Option<&ComputedStyle>,
+    state: Option<&dyn VariableStore>,
 ) -> WidgetNode {
     match node {
-        TemplateNode::Element(element) => build_element_node(element, rules, resolver),
-        TemplateNode::Component(component) => build_component_ref(component, rules, resolver),
+        TemplateNode::Element(element) => {
+            build_element_node(element, rules, resolver, parent_style, state)
+        }
+        TemplateNode::Component(component) => {
+            build_component_ref(component, rules, resolver, parent_style, state)
+        }
         TemplateNode::Text(text) => {
             let mut node = WidgetNode::new("text");
             node.attributes.insert("content".into(), text.content.clone());
             node.computed_style = text_style();
+            if let Some(parent_style) = parent_style {
+                inherit_text_style(&mut node.computed_style, parent_style, InheritedStyleMask::default());
+            }
             node
         }
         TemplateNode::Expr(expr) => {
             let mut node = WidgetNode::new("text");
+            let content = state
+                .and_then(|store| store.get(&expr.expression))
+                .map(json_value_to_string)
+                .unwrap_or_else(|| format!("{{{{ {} }}}}", expr.expression));
             node.attributes
-                .insert("content".into(), format!("{{{{ {} }}}}", expr.expression));
+                .insert("content".into(), content);
             node.computed_style = text_style();
+            if let Some(parent_style) = parent_style {
+                inherit_text_style(&mut node.computed_style, parent_style, InheritedStyleMask::default());
+            }
             node
         }
         TemplateNode::If(if_node) => {
@@ -158,8 +186,13 @@ fn build_widget_node(
             node.children = if_node
                 .then_children
                 .iter()
-                .map(|child| build_widget_node(child, rules, resolver))
+                .map(|child| {
+                    build_widget_node(child, rules, resolver, Some(&node.computed_style), state)
+                })
                 .collect();
+            if let Some(parent_style) = parent_style {
+                inherit_text_style(&mut node.computed_style, parent_style, InheritedStyleMask::default());
+            }
             node
         }
         TemplateNode::For(for_node) => {
@@ -172,8 +205,13 @@ fn build_widget_node(
             node.children = for_node
                 .children
                 .iter()
-                .map(|child| build_widget_node(child, rules, resolver))
+                .map(|child| {
+                    build_widget_node(child, rules, resolver, Some(&node.computed_style), state)
+                })
                 .collect();
+            if let Some(parent_style) = parent_style {
+                inherit_text_style(&mut node.computed_style, parent_style, InheritedStyleMask::default());
+            }
             node
         }
         TemplateNode::Slot(slot) => {
@@ -186,6 +224,9 @@ fn build_widget_node(
                     .unwrap_or_else(|| "slot".into()),
             );
             node.computed_style = default_leaf_style("box");
+            if let Some(parent_style) = parent_style {
+                inherit_text_style(&mut node.computed_style, parent_style, InheritedStyleMask::default());
+            }
             node
         }
     }
@@ -195,15 +236,21 @@ fn build_element_node(
     element: &ElementNode,
     rules: &[mesh_component::style::StyleRule],
     resolver: &StyleResolver<'_>,
+    parent_style: Option<&ComputedStyle>,
+    state: Option<&dyn VariableStore>,
 ) -> WidgetNode {
     let tag = normalize_tag(&element.tag);
-    let (classes, id, attributes, event_handlers) = parse_attributes(&element.attributes);
+    let (classes, id, attributes, event_handlers) = parse_attributes(&element.attributes, state);
+    let inherited_mask = inherited_style_mask(rules, &tag, &classes, id.as_deref());
 
     let mut node = WidgetNode::new(tag.clone());
     node.attributes = attributes;
     node.event_handlers = event_handlers;
     node.computed_style = resolver.resolve_node_style(rules, &tag, &classes, id.as_deref());
     merge_missing_defaults(&tag, &mut node.computed_style);
+    if let Some(parent_style) = parent_style {
+        inherit_text_style(&mut node.computed_style, parent_style, inherited_mask);
+    }
     node.accessibility = accessibility_for_tag(&tag);
 
     if let Some(id) = id {
@@ -216,7 +263,7 @@ fn build_element_node(
     node.children = element
         .children
         .iter()
-        .map(|child| build_widget_node(child, rules, resolver))
+        .map(|child| build_widget_node(child, rules, resolver, Some(&node.computed_style), state))
         .collect();
 
     node
@@ -226,20 +273,102 @@ fn build_component_ref(
     component: &ComponentRef,
     rules: &[mesh_component::style::StyleRule],
     resolver: &StyleResolver<'_>,
+    parent_style: Option<&ComputedStyle>,
+    state: Option<&dyn VariableStore>,
 ) -> WidgetNode {
     let fake_element = ElementNode {
         tag: "box".into(),
         attributes: component.props.clone(),
         children: component.children.clone(),
     };
-    let mut node = build_element_node(&fake_element, rules, resolver);
+    let mut node = build_element_node(&fake_element, rules, resolver, parent_style, state);
     node.attributes
         .insert("component".into(), component.name.clone());
     node
 }
 
+#[derive(Clone, Copy, Default)]
+struct InheritedStyleMask {
+    color: bool,
+    font_family: bool,
+    font_size: bool,
+    font_weight: bool,
+    line_height: bool,
+}
+
+fn inherit_text_style(
+    style: &mut ComputedStyle,
+    parent_style: &ComputedStyle,
+    explicit: InheritedStyleMask,
+) {
+    if !explicit.color {
+        style.color = parent_style.color;
+    }
+    if !explicit.font_family {
+        style.font_family = parent_style.font_family.clone();
+    }
+    if !explicit.font_size {
+        style.font_size = parent_style.font_size;
+    }
+    if !explicit.font_weight {
+        style.font_weight = parent_style.font_weight;
+    }
+    if !explicit.line_height {
+        style.line_height = parent_style.line_height;
+    }
+}
+
+fn inherited_style_mask(
+    rules: &[mesh_component::style::StyleRule],
+    tag: &str,
+    classes: &[String],
+    id: Option<&str>,
+) -> InheritedStyleMask {
+    let mut mask = InheritedStyleMask::default();
+
+    for rule in rules {
+        if !selector_matches(&rule.selector, tag, classes, id) {
+            continue;
+        }
+
+        for decl in &rule.declarations {
+            match decl.property.as_str() {
+                "color" => mask.color = true,
+                "font-family" => mask.font_family = true,
+                "font-size" => mask.font_size = true,
+                "font-weight" => mask.font_weight = true,
+                "line-height" => mask.line_height = true,
+                _ => {}
+            }
+        }
+    }
+
+    mask
+}
+
+fn selector_matches(
+    selector: &mesh_component::style::Selector,
+    tag: &str,
+    classes: &[String],
+    id: Option<&str>,
+) -> bool {
+    use mesh_component::style::Selector;
+
+    match selector {
+        Selector::Universal => true,
+        Selector::Tag(t) => t == tag,
+        Selector::Class(c) => classes.iter().any(|cls| cls == c),
+        Selector::Id(i) => id == Some(i.as_str()),
+        Selector::State(t, _state) => t == "*" || t == tag,
+        Selector::Compound(parts) => parts
+            .iter()
+            .all(|part| selector_matches(part, tag, classes, id)),
+    }
+}
+
 fn parse_attributes(
     attrs: &[Attribute],
+    state: Option<&dyn VariableStore>,
 ) -> (
     Vec<String>,
     Option<String>,
@@ -263,7 +392,11 @@ fn parse_attributes(
                 }
             }
             AttributeValue::Binding(binding) => {
-                resolved.insert(attr.name.clone(), format!("{{{binding}}}"));
+                let value = state
+                    .and_then(|store| store.get(binding))
+                    .map(json_value_to_string)
+                    .unwrap_or_default();
+                resolved.insert(attr.name.clone(), value);
             }
             AttributeValue::EventHandler(handler) => {
                 event_handlers.insert(attr.name.clone(), handler.clone());
@@ -274,9 +407,19 @@ fn parse_attributes(
     (classes, id, resolved, event_handlers)
 }
 
+fn json_value_to_string(value: serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::String(value) => value,
+        other => other.to_string(),
+    }
+}
+
 fn normalize_tag(tag: &str) -> String {
     match tag {
-        "row" | "column" | "text" | "button" | "input" | "icon" | "box" => tag.to_string(),
+        "row" | "column" | "text" | "button" | "input" | "slider" | "scroll" | "icon" | "box" => {
+            tag.to_string()
+        }
         other => {
             if other.chars().next().is_some_and(char::is_uppercase) {
                 "box".into()
@@ -376,6 +519,23 @@ fn default_leaf_style(tag: &str) -> ComputedStyle {
                 mesh_ui::Color::from_hex("#221f28").unwrap_or(mesh_ui::Color::BLACK);
             style.border_radius = mesh_ui::Corners::all(10.0);
             style.padding = mesh_ui::Edges::all(10.0);
+            style.height = mesh_ui::Dimension::Px(44.0);
+            style.border_width = mesh_ui::Edges::all(1.0);
+            style.border_color =
+                mesh_ui::Color::from_hex("#3b3644").unwrap_or(mesh_ui::Color::WHITE);
+            style
+        }
+        "slider" => {
+            let mut style = container_style("row");
+            style.height = mesh_ui::Dimension::Px(36.0);
+            style.padding = mesh_ui::Edges::all(8.0);
+            style
+        }
+        "scroll" => {
+            let mut style = container_style("column");
+            style.background_color = mesh_ui::Color::TRANSPARENT;
+            style.height = mesh_ui::Dimension::Px(220.0);
+            style.padding = mesh_ui::Edges::all(0.0);
             style
         }
         "icon" => {
@@ -410,9 +570,10 @@ fn accessibility_for_tag(tag: &str) -> AccessibilityInfo {
     info.role = match tag {
         "button" => mesh_component::meta::AccessibilityRole::Button,
         "input" => mesh_component::meta::AccessibilityRole::TextInput,
+        "slider" => mesh_component::meta::AccessibilityRole::Slider,
         "text" => mesh_component::meta::AccessibilityRole::Label,
         _ => mesh_component::meta::AccessibilityRole::Region,
     };
-    info.focusable = matches!(tag, "button" | "input");
+    info.focusable = matches!(tag, "button" | "input" | "slider");
     info
 }

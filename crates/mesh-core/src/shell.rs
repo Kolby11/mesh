@@ -1,18 +1,22 @@
 /// The top-level Shell struct that owns shell coordination and plugin loading.
 use mesh_component_backend::{CompiledFrontendPlugin, compile_frontend_plugin, is_frontend_plugin};
+use mesh_capability::{Capability, CapabilitySet};
 use mesh_config::{ShellConfig, ShellSettings, load_config, load_shell_settings};
 use mesh_diagnostics::DiagnosticsCollector;
 use mesh_events::EventBus;
 use mesh_locale::LocaleEngine;
 use mesh_plugin::lifecycle::{PluginInstance, PluginState};
 use mesh_plugin::{PluginType, manifest};
-use mesh_renderer::{DevWindowBackend, Painter, PixelBuffer};
+use mesh_renderer::{DevWindowBackend, DevWindowEvent, DevWindowKeyEvent, Painter, PixelBuffer};
+use mesh_scripting::{ScriptContext, ScriptError};
 use mesh_service::ServiceRegistry;
-use mesh_theme::{Theme, ThemeEngine, default_theme};
-use mesh_wayland::{Edge, Layer, ShellSurface, StubSurface};
+use mesh_theme::{Theme, ThemeEngine, default_theme, load_theme_from_path, theme_path_for_id};
+use mesh_ui::WidgetNode;
+use mesh_wayland::{Edge, KeyboardMode, Layer, ShellSurface, StubSurface};
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -53,12 +57,29 @@ pub struct ComponentContext {
     pub surface_id: SurfaceId,
 }
 
+#[derive(Debug, Clone)]
+pub enum ComponentInput {
+    PointerMove { x: f32, y: f32 },
+    PointerButton { x: f32, y: f32, pressed: bool },
+    Scroll { x: f32, y: f32, dx: f32, dy: f32 },
+    KeyPressed { key: String },
+    KeyReleased { key: String },
+    Char { ch: char },
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ComponentError {
     #[error("component '{component_id}' failed: {message}")]
     Failed {
         component_id: String,
         message: String,
+    },
+
+    #[error("component '{component_id}' script error: {source}")]
+    Script {
+        component_id: String,
+        #[source]
+        source: ScriptError,
     },
 }
 
@@ -75,27 +96,58 @@ pub trait ShellComponent: Send {
     fn wants_render(&self) -> bool;
     fn render(&mut self, surface: &mut dyn ShellSurface) -> Result<(), ComponentError>;
     fn paint(
-        &self,
+        &mut self,
         theme: &Theme,
         width: u32,
         height: u32,
         buffer: &mut PixelBuffer,
     ) -> Result<(), ComponentError>;
+    fn theme_changed(&mut self) -> Result<(), ComponentError>;
+    fn handle_input(
+        &mut self,
+        _theme: &Theme,
+        _width: u32,
+        _height: u32,
+        _input: ComponentInput,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        Ok(Vec::new())
+    }
+    fn source_path(&self) -> Option<&Path> {
+        None
+    }
+    fn reload_source(&mut self) -> Result<bool, ComponentError> {
+        Ok(false)
+    }
 }
 
 struct ComponentRuntime {
     surface_id: SurfaceId,
     component: Box<dyn ShellComponent>,
+    source_path: Option<PathBuf>,
+    source_modified_at: Option<SystemTime>,
 }
 
 impl ComponentRuntime {
     fn new(component: Box<dyn ShellComponent>) -> Self {
         let surface_id = component.surface_id().to_string();
+        let source_path = component.source_path().map(PathBuf::from);
+        let source_modified_at = source_path
+            .as_ref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .and_then(|metadata| metadata.modified().ok());
         Self {
             surface_id,
             component,
+            source_path,
+            source_modified_at,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+struct ThemeWatchState {
+    path: PathBuf,
+    modified_at: Option<SystemTime>,
 }
 
 #[derive(Debug)]
@@ -135,6 +187,7 @@ pub struct Shell {
     components: Vec<ComponentRuntime>,
     surfaces: HashMap<SurfaceId, StubSurface>,
     windows: DevWindowBackend,
+    theme_watch: ThemeWatchState,
 }
 
 pub fn default_ipc_socket_path() -> PathBuf {
@@ -166,14 +219,7 @@ impl Shell {
             tracing::warn!("failed to load shell settings, using defaults: {e}");
             ShellSettings::default()
         });
-        let theme = ThemeEngine::new(default_theme());
-        if theme.active().id != settings.theme.active {
-            tracing::warn!(
-                "requested theme '{}' is not registered yet; using '{}'",
-                settings.theme.active,
-                theme.active().id
-            );
-        }
+        let (theme, theme_watch) = load_active_theme(&settings);
         let locale = LocaleEngine::with_fallback_locale(
             settings.i18n.locale.clone(),
             settings.i18n.fallback_locale.clone(),
@@ -193,6 +239,7 @@ impl Shell {
             components: Vec::new(),
             surfaces: HashMap::new(),
             windows: DevWindowBackend::new(),
+            theme_watch,
         }
     }
 
@@ -291,6 +338,8 @@ impl Shell {
         );
 
         while !self.core.shutting_down {
+            self.reload_theme_if_changed()?;
+            self.reload_frontend_components_if_changed()?;
             self.dispatch_wayland()?;
 
             while let Ok(message) = rx.try_recv() {
@@ -320,6 +369,75 @@ impl Shell {
         Ok(())
     }
 
+    fn reload_theme_if_changed(&mut self) -> Result<(), ShellRunError> {
+        let Ok(metadata) = std::fs::metadata(&self.theme_watch.path) else {
+            return Ok(());
+        };
+        let Ok(modified_at) = metadata.modified() else {
+            return Ok(());
+        };
+
+        if self.theme_watch.modified_at == Some(modified_at) {
+            return Ok(());
+        }
+
+        let theme = load_theme_from_path(&self.theme_watch.path).map_err(ShellRunError::Theme)?;
+        tracing::info!(
+            "reloaded active theme '{}' from {}",
+            theme.id,
+            self.theme_watch.path.display()
+        );
+        self.theme.replace_active(theme);
+        self.theme_watch.modified_at = Some(modified_at);
+        self.mark_components_theme_changed()?;
+        Ok(())
+    }
+
+    fn reload_frontend_components_if_changed(&mut self) -> Result<(), ShellRunError> {
+        for runtime in &mut self.components {
+            let Some(source_path) = runtime.source_path.as_ref() else {
+                continue;
+            };
+
+            let Ok(metadata) = std::fs::metadata(source_path) else {
+                continue;
+            };
+            let Ok(modified_at) = metadata.modified() else {
+                continue;
+            };
+
+            if runtime.source_modified_at == Some(modified_at) {
+                continue;
+            }
+
+            let reloaded = runtime
+                .component
+                .reload_source()
+                .map_err(ShellRunError::Component)?;
+            runtime.source_modified_at = Some(modified_at);
+
+            if reloaded {
+                tracing::info!(
+                    "recompiled frontend component '{}' from {}",
+                    runtime.component.id(),
+                    source_path.display()
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn mark_components_theme_changed(&mut self) -> Result<(), ShellRunError> {
+        for runtime in &mut self.components {
+            runtime
+                .component
+                .theme_changed()
+                .map_err(ShellRunError::Component)?;
+        }
+        Ok(())
+    }
+
     fn load_frontend_components(&mut self) -> Result<(), ShellRunError> {
         if !self.components.is_empty() {
             return Ok(());
@@ -345,7 +463,10 @@ impl Shell {
                     }
                 })?;
 
-            self.register_component(Box::new(FrontendSurfaceComponent::new(compiled)));
+            self.register_component(Box::new(FrontendSurfaceComponent::new(
+                compiled,
+                plugin.path.clone(),
+            )));
         }
 
         Ok(())
@@ -519,17 +640,64 @@ impl Shell {
     }
 
     fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
-        for runtime in &self.components {
-            let surface = self
-                .surfaces
-                .get(&runtime.surface_id)
-                .ok_or_else(|| ShellRunError::MissingSurface(runtime.surface_id.clone()))?;
-            tracing::trace!(
-                "dispatching surface '{}' visible={}",
-                runtime.surface_id,
-                surface.visible
-            );
+        for event in self.windows.poll_events() {
+            let surface_id = match &event {
+                DevWindowEvent::PointerMove { surface_id, .. }
+                | DevWindowEvent::PointerButton { surface_id, .. }
+                | DevWindowEvent::Scroll { surface_id, .. }
+                | DevWindowEvent::Key { surface_id, .. }
+                | DevWindowEvent::Char { surface_id, .. } => surface_id,
+            };
+
+            let Some(index) = self
+                .components
+                .iter()
+                .position(|runtime| runtime.surface_id == *surface_id)
+            else {
+                continue;
+            };
+
+            let runtime_surface_id = self.components[index].surface_id.clone();
+            let Some(surface) = self.surfaces.get(&runtime_surface_id) else {
+                continue;
+            };
+
+            let input = match event {
+                DevWindowEvent::PointerMove { x, y, .. } => ComponentInput::PointerMove { x, y },
+                DevWindowEvent::PointerButton { x, y, pressed, .. } => {
+                    ComponentInput::PointerButton { x, y, pressed }
+                }
+                DevWindowEvent::Scroll { x, y, dx, dy, .. } => {
+                    ComponentInput::Scroll { x, y, dx, dy }
+                }
+                DevWindowEvent::Key {
+                    event: DevWindowKeyEvent::Pressed(key),
+                    ..
+                } => ComponentInput::KeyPressed { key },
+                DevWindowEvent::Key {
+                    event: DevWindowKeyEvent::Released(key),
+                    ..
+                } => ComponentInput::KeyReleased { key },
+                DevWindowEvent::Char { ch, .. } => ComponentInput::Char { ch },
+            };
+
+            let emitted = {
+                let runtime = &mut self.components[index];
+                runtime.component.handle_input(
+                    self.theme.active(),
+                    surface.width.max(1),
+                    surface.height.max(1),
+                    input,
+                )
+            }
+            .map_err(ShellRunError::Component)?;
+
+            for request in emitted {
+                let mut pending = VecDeque::from([request]);
+                self.drain_requests(&mut pending)?;
+            }
         }
+
         Ok(())
     }
 
@@ -607,6 +775,9 @@ pub enum ShellRunError {
         path: PathBuf,
         source: std::io::Error,
     },
+
+    #[error(transparent)]
+    Theme(#[from] mesh_theme::ThemeError),
 }
 
 fn default_plugin_dirs() -> Vec<PathBuf> {
@@ -626,24 +797,74 @@ fn default_plugin_dirs() -> Vec<PathBuf> {
 }
 
 fn default_surface_visibility(surface_id: &str) -> bool {
-    !matches!(surface_id, "@mesh/notification-center" | "@mesh/quick-settings")
+    surface_id == "@mesh/launcher"
+}
+
+fn load_active_theme(settings: &ShellSettings) -> (ThemeEngine, ThemeWatchState) {
+    let theme_path = theme_path_for_id(&settings.theme.active);
+    let theme = match load_theme_from_path(&theme_path) {
+        Ok(theme) => theme,
+        Err(err) => {
+            tracing::warn!(
+                "failed to load requested theme '{}' from {}: {err}; using default theme",
+                settings.theme.active,
+                theme_path.display()
+            );
+            default_theme()
+        }
+    };
+    let modified_at = std::fs::metadata(&theme_path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok());
+
+    (
+        ThemeEngine::new(theme),
+        ThemeWatchState {
+            path: theme_path,
+            modified_at,
+        },
+    )
 }
 
 struct FrontendSurfaceComponent {
     compiled: CompiledFrontendPlugin,
+    plugin_dir: PathBuf,
     visible: bool,
     dirty: bool,
     last_service_update: Option<String>,
+    focused_key: Option<String>,
+    pointer_down_key: Option<String>,
+    active_slider_key: Option<String>,
+    input_values: HashMap<String, String>,
+    slider_values: HashMap<String, f32>,
+    scroll_offsets: HashMap<String, f32>,
+    script_ctx: ScriptContext,
+    measured_size: Option<(u32, u32)>,
 }
 
 impl FrontendSurfaceComponent {
-    fn new(compiled: CompiledFrontendPlugin) -> Self {
+    fn new(compiled: CompiledFrontendPlugin, plugin_dir: PathBuf) -> Self {
         let surface_id = compiled.surface_id().to_string();
+        let component_id = compiled.manifest.package.id.clone();
+        let granted_capabilities = grant_capabilities_from_manifest(&compiled.manifest);
         Self {
             compiled,
+            plugin_dir,
             visible: default_surface_visibility(&surface_id),
             dirty: true,
             last_service_update: None,
+            focused_key: None,
+            pointer_down_key: None,
+            active_slider_key: None,
+            input_values: HashMap::new(),
+            slider_values: HashMap::new(),
+            scroll_offsets: HashMap::new(),
+            script_ctx: ScriptContext::new(
+                component_id.clone(),
+                granted_capabilities,
+            )
+            .unwrap_or_else(|err| panic!("failed to create script context for {component_id}: {err}")),
+            measured_size: None,
         }
     }
 
@@ -658,20 +879,24 @@ impl FrontendSurfaceComponent {
             "@mesh/launcher" => {
                 surface.anchor(Edge::Top);
                 surface.set_layer(Layer::Overlay);
-                surface.set_size(640, 480);
+                let (width, height) = self.measured_size.unwrap_or((640, 360));
+                surface.set_size(width, height);
                 surface.set_exclusive_zone(0);
+                surface.set_keyboard_interactivity(KeyboardMode::OnDemand);
             }
             "@mesh/notification-center" => {
                 surface.anchor(Edge::Right);
                 surface.set_layer(Layer::Overlay);
                 surface.set_size(420, 720);
                 surface.set_exclusive_zone(0);
+                surface.set_keyboard_interactivity(KeyboardMode::OnDemand);
             }
             "@mesh/quick-settings" => {
                 surface.anchor(Edge::Top);
                 surface.set_layer(Layer::Overlay);
                 surface.set_size(480, 420);
                 surface.set_exclusive_zone(0);
+                surface.set_keyboard_interactivity(KeyboardMode::OnDemand);
             }
             _ => {
                 surface.anchor(Edge::Top);
@@ -680,6 +905,78 @@ impl FrontendSurfaceComponent {
                 surface.set_exclusive_zone(0);
             }
         }
+    }
+
+    fn build_tree(&self, theme: &Theme, width: u32, height: u32) -> WidgetNode {
+        let mut tree = self.compiled.build_preview_tree_with_state(
+            theme,
+            width,
+            height,
+            Some(self.script_ctx.state()),
+        );
+        annotate_runtime_tree(
+            &mut tree,
+            "root".to_string(),
+            &self.focused_key,
+            &self.input_values,
+            &self.slider_values,
+            &self.scroll_offsets,
+        );
+        tree
+    }
+
+    fn update_slider_from_position(&mut self, tree: &WidgetNode, slider_key: &str, x: f32) {
+        let Some(node) = find_node_by_key(tree, slider_key) else {
+            return;
+        };
+
+        let min = node
+            .attributes
+            .get("min")
+            .and_then(|value: &String| value.parse::<f32>().ok())
+            .unwrap_or(0.0);
+        let max = node
+            .attributes
+            .get("max")
+            .and_then(|value: &String| value.parse::<f32>().ok())
+            .unwrap_or(100.0);
+
+        if max <= min {
+            return;
+        }
+
+        let local_x = (x - node.layout.x).clamp(0.0, node.layout.width.max(1.0));
+        let pct = (local_x / node.layout.width.max(1.0)).clamp(0.0, 1.0);
+        let value = min + (max - min) * pct;
+        self.slider_values.insert(slider_key.to_string(), value);
+    }
+
+    fn init_script(&mut self) -> Result<(), ComponentError> {
+        self.script_ctx = ScriptContext::new(
+            self.compiled.manifest.package.id.clone(),
+            grant_capabilities_from_manifest(&self.compiled.manifest),
+        )
+        .map_err(|source| ComponentError::Script {
+            component_id: self.id().to_string(),
+            source,
+        })?;
+
+        if let Some(script) = &self.compiled.component.script {
+            self.script_ctx
+                .load_script(&script.source)
+                .map_err(|source| ComponentError::Script {
+                    component_id: self.id().to_string(),
+                    source,
+                })?;
+            self.script_ctx
+                .call_init()
+                .map_err(|source| ComponentError::Script {
+                    component_id: self.id().to_string(),
+                    source,
+                })?;
+        }
+
+        Ok(())
     }
 }
 
@@ -693,6 +990,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn mount(&mut self, _ctx: ComponentContext) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.init_script()?;
         self.dirty = true;
         Ok(vec![CoreRequest::PublishDiagnostics {
             message: format!(
@@ -776,17 +1074,387 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn paint(
-        &self,
+        &mut self,
         theme: &Theme,
         width: u32,
         height: u32,
         buffer: &mut PixelBuffer,
     ) -> Result<(), ComponentError> {
-        let tree = self.compiled.build_preview_tree(theme, width, height);
+        let tree = self.build_tree(theme, width, height);
+        let measured_size = measure_content_size(&tree, width, height, self.surface_id());
+        if self.measured_size != Some(measured_size) {
+            self.measured_size = Some(measured_size);
+            self.dirty = true;
+        }
         buffer.clear(tree.computed_style.background_color);
         Painter::new().paint(&tree, buffer, 1.0);
         Ok(())
     }
+
+    fn theme_changed(&mut self) -> Result<(), ComponentError> {
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn source_path(&self) -> Option<&Path> {
+        Some(self.compiled.source_path.as_path())
+    }
+
+    fn reload_source(&mut self) -> Result<bool, ComponentError> {
+        let manifest = self.compiled.manifest.clone();
+        let recompiled = compile_frontend_plugin(&manifest, &self.plugin_dir).map_err(|err| {
+            ComponentError::Failed {
+                component_id: self.id().to_string(),
+                message: format!("frontend recompile failed: {err}"),
+            }
+        })?;
+
+        self.compiled = recompiled;
+        self.init_script()?;
+        self.dirty = true;
+        Ok(true)
+    }
+
+    fn handle_input(
+        &mut self,
+        theme: &Theme,
+        width: u32,
+        height: u32,
+        input: ComponentInput,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        if !self.visible {
+            return Ok(Vec::new());
+        }
+
+        let tree = self.build_tree(theme, width, height);
+
+        match input {
+            ComponentInput::PointerButton { x, y, pressed } => {
+                if pressed {
+                    if let Some(node_key) = find_focusable_at(&tree, x, y) {
+                        self.focused_key = Some(node_key.clone());
+                        self.pointer_down_key = Some(node_key.clone());
+
+                        if is_slider_key(&tree, &node_key) {
+                            self.active_slider_key = Some(node_key.clone());
+                            self.update_slider_from_position(&tree, &node_key, x);
+                        } else {
+                            self.active_slider_key = None;
+                        }
+
+                        self.dirty = true;
+                    } else {
+                        self.focused_key = None;
+                        self.pointer_down_key = None;
+                        self.active_slider_key = None;
+                        self.dirty = true;
+                    }
+                } else {
+                    if let Some(node_key) = find_focusable_at(&tree, x, y) {
+                        if self.pointer_down_key.as_deref() == Some(node_key.as_str()) {
+                            if let Some(handler) = find_click_handler(&tree, &node_key) {
+                                self.script_ctx
+                                    .call_handler(&handler, &[])
+                                    .map_err(|source| ComponentError::Script {
+                                        component_id: self.id().to_string(),
+                                        source,
+                                    })?;
+                                self.dirty = true;
+                            }
+                        }
+                    }
+                    self.pointer_down_key = None;
+                    self.active_slider_key = None;
+                }
+            }
+            ComponentInput::PointerMove { x, .. } => {
+                if let Some(slider_key) = self.active_slider_key.clone() {
+                    self.update_slider_from_position(&tree, &slider_key, x);
+                    self.dirty = true;
+                }
+            }
+            ComponentInput::Scroll { x, y, dy, .. } => {
+                if let Some(scroll_key) = find_scrollable_at(&tree, x, y) {
+                    let current = self.scroll_offsets.get(&scroll_key).copied().unwrap_or(0.0);
+                    let next = (current - dy * 28.0).max(0.0);
+                    self.scroll_offsets.insert(scroll_key, next);
+                    self.dirty = true;
+                }
+            }
+            ComponentInput::Char { ch } => {
+                if let Some(focused_key) = self.focused_key.clone() {
+                    if is_input_key(&tree, &focused_key) && !ch.is_control() {
+                        self.input_values.entry(focused_key).or_default().push(ch);
+                        self.dirty = true;
+                    }
+                }
+            }
+            ComponentInput::KeyPressed { key } => {
+                if let Some(focused_key) = self.focused_key.clone() {
+                    if is_input_key(&tree, &focused_key) {
+                        let value = self.input_values.entry(focused_key).or_default();
+                        match key.as_str() {
+                            "Backspace" => {
+                                value.pop();
+                                self.dirty = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            ComponentInput::KeyReleased { .. } => {}
+        }
+
+        Ok(Vec::new())
+    }
+}
+
+fn annotate_runtime_tree(
+    node: &mut WidgetNode,
+    key: String,
+    focused_key: &Option<String>,
+    input_values: &HashMap<String, String>,
+    slider_values: &HashMap<String, f32>,
+    scroll_offsets: &HashMap<String, f32>,
+) {
+    node.attributes.insert("_mesh_key".into(), key.clone());
+
+    if focused_key.as_deref() == Some(key.as_str()) {
+        node.attributes.insert("_mesh_focused".into(), "true".into());
+    }
+
+    match node.tag.as_str() {
+        "input" => {
+            let value = input_values
+                .get(&key)
+                .cloned()
+                .or_else(|| node.attributes.get("value").cloned())
+                .unwrap_or_default();
+            node.attributes.insert("value".into(), value);
+        }
+        "slider" => {
+            let value = slider_values
+                .get(&key)
+                .copied()
+                .or_else(|| {
+                    node.attributes
+                        .get("value")
+                        .and_then(|value: &String| value.parse::<f32>().ok())
+                })
+                .unwrap_or(50.0);
+            node.attributes.insert("value".into(), format!("{value:.2}"));
+        }
+        "scroll" => {
+            let offset = scroll_offsets.get(&key).copied().unwrap_or(0.0);
+            node.attributes
+                .insert("_mesh_scroll_y".into(), format!("{offset:.2}"));
+        }
+        _ => {}
+    }
+
+    for (index, child) in node.children.iter_mut().enumerate() {
+        annotate_runtime_tree(
+            child,
+            format!("{key}/{index}"),
+            focused_key,
+            input_values,
+            slider_values,
+            scroll_offsets,
+        );
+    }
+}
+
+fn grant_capabilities_from_manifest(manifest: &mesh_plugin::Manifest) -> CapabilitySet {
+    let mut granted = CapabilitySet::new();
+
+    for capability in &manifest.capabilities.required {
+        granted.grant(Capability::new(capability.clone()));
+    }
+
+    for capability in &manifest.capabilities.optional {
+        granted.grant(Capability::new(capability.clone()));
+    }
+
+    granted
+}
+
+fn find_node_by_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetNode> {
+    if node.attributes.get("_mesh_key").is_some_and(|value| value == key) {
+        return Some(node);
+    }
+
+    for child in &node.children {
+        if let Some(found) = find_node_by_key(child, key) {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
+fn find_focusable_at(node: &WidgetNode, x: f32, y: f32) -> Option<String> {
+    find_focusable_at_with_offset(node, x, y, 0.0, 0.0)
+}
+
+fn find_scrollable_at(node: &WidgetNode, x: f32, y: f32) -> Option<String> {
+    find_scrollable_at_with_offset(node, x, y, 0.0, 0.0)
+}
+
+fn is_input_key(tree: &WidgetNode, key: &str) -> bool {
+    find_node_by_key(tree, key).is_some_and(|node| node.tag == "input")
+}
+
+fn is_slider_key(tree: &WidgetNode, key: &str) -> bool {
+    find_node_by_key(tree, key).is_some_and(|node| node.tag == "slider")
+}
+
+fn find_click_handler(tree: &WidgetNode, key: &str) -> Option<String> {
+    find_node_by_key(tree, key)
+        .and_then(|node| node.event_handlers.get("click"))
+        .cloned()
+}
+
+fn measure_content_size(
+    tree: &WidgetNode,
+    fallback_width: u32,
+    fallback_height: u32,
+    surface_id: &str,
+) -> (u32, u32) {
+    let bounds = content_bounds(tree, 0.0, 0.0);
+    let width = bounds
+        .map(|(_, _, right, _)| right.ceil().max(1.0) as u32)
+        .unwrap_or(fallback_width);
+    let height = bounds
+        .map(|(_, _, _, bottom)| bottom.ceil().max(1.0) as u32)
+        .unwrap_or(fallback_height);
+
+    match surface_id {
+        "@mesh/launcher" => (width.clamp(320, 640), height.clamp(180, 420)),
+        "@mesh/quick-settings" => (width.clamp(320, 520), height.clamp(180, 520)),
+        _ => (fallback_width, fallback_height),
+    }
+}
+
+fn content_bounds(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Option<(f32, f32, f32, f32)> {
+    if node.computed_style.display == mesh_ui::style::Display::None {
+        return None;
+    }
+
+    let left = node.layout.x + offset_x;
+    let top = node.layout.y + offset_y;
+    let right = left + node.layout.width.max(0.0);
+    let bottom = top + node.layout.height.max(0.0);
+
+    let child_offset_x = offset_x;
+    let mut child_offset_y = offset_y;
+    if node.tag == "scroll" {
+        let scroll_y = node
+            .attributes
+            .get("_mesh_scroll_y")
+            .and_then(|value| value.parse::<f32>().ok())
+            .unwrap_or(0.0);
+        child_offset_y -= scroll_y;
+    }
+
+    let mut bounds = Some((left, top, right, bottom));
+    for child in &node.children {
+        if let Some(child_bounds) = content_bounds(child, child_offset_x, child_offset_y) {
+            bounds = Some(match bounds {
+                Some((min_x, min_y, max_x, max_y)) => (
+                    min_x.min(child_bounds.0),
+                    min_y.min(child_bounds.1),
+                    max_x.max(child_bounds.2),
+                    max_y.max(child_bounds.3),
+                ),
+                None => child_bounds,
+            });
+        }
+    }
+
+    bounds
+}
+
+fn find_focusable_at_with_offset(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<String> {
+    if !layout_contains_with_offset(node, x, y, offset_x, offset_y) {
+        return None;
+    }
+
+    let child_offset_x = offset_x;
+    let mut child_offset_y = offset_y;
+    if node.tag == "scroll" {
+        let scroll_y = node
+            .attributes
+            .get("_mesh_scroll_y")
+            .and_then(|value| value.parse::<f32>().ok())
+            .unwrap_or(0.0);
+        child_offset_y -= scroll_y;
+    }
+
+    for child in node.children.iter().rev() {
+        if let Some(found) = find_focusable_at_with_offset(child, x, y, child_offset_x, child_offset_y) {
+            return Some(found);
+        }
+    }
+
+    if matches!(node.tag.as_str(), "input" | "button" | "slider") {
+        return node.attributes.get("_mesh_key").cloned();
+    }
+
+    None
+}
+
+fn find_scrollable_at_with_offset(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<String> {
+    if !layout_contains_with_offset(node, x, y, offset_x, offset_y) {
+        return None;
+    }
+
+    let child_offset_x = offset_x;
+    let mut child_offset_y = offset_y;
+    if node.tag == "scroll" {
+        let scroll_y = node
+            .attributes
+            .get("_mesh_scroll_y")
+            .and_then(|value| value.parse::<f32>().ok())
+            .unwrap_or(0.0);
+        child_offset_y -= scroll_y;
+    }
+
+    for child in node.children.iter().rev() {
+        if let Some(found) = find_scrollable_at_with_offset(child, x, y, child_offset_x, child_offset_y) {
+            return Some(found);
+        }
+    }
+
+    if node.tag == "scroll" {
+        return node.attributes.get("_mesh_key").cloned();
+    }
+
+    None
+}
+
+fn layout_contains_with_offset(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> bool {
+    let left = node.layout.x + offset_x;
+    let top = node.layout.y + offset_y;
+    x >= left && x < left + node.layout.width && y >= top && y < top + node.layout.height
 }
 
 async fn spawn_mock_backend_service(
@@ -826,6 +1494,7 @@ async fn spawn_mock_backend_service(
             break;
         }
     }
+
 }
 
 fn spawn_ipc_server(
