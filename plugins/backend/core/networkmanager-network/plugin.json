@@ -1,0 +1,32 @@
+{
+  "id": "@mesh/networkmanager",
+  "name": "MESH NetworkManager",
+  "version": "0.1.0",
+  "type": "backend",
+  "api_version": "0.1",
+  "description": "Network backend using NetworkManager",
+  "authors": ["MESH Project"],
+  "capabilities": {
+    "required": [
+      "service.network.read",
+      "service.network.control",
+      "dbus.system"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/network-interface": ">=1.0.0, <2.0.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.luau"
+  },
+  "provides": [
+    {
+      "interface": "mesh.network",
+      "version": "1.0",
+      "backend_name": "NetworkManager",
+      "priority": 100
+    }
+  ]
+}

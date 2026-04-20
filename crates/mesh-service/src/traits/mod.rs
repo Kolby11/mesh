@@ -1,8 +1,8 @@
-/// Service trait definitions.
+/// Transitional typed bindings for common service interfaces.
 ///
-/// Each module defines a trait that backends must implement and frontends consume.
-/// Traits use async methods and return Results so backends can handle real system I/O.
-
+/// The long-term source of truth is the interface contract plugin on disk.
+/// These Rust traits remain as typed adapters while the runtime finishes
+/// moving fully to plugin-declared interfaces and providers.
 pub mod audio;
 pub mod brightness;
 pub mod media;

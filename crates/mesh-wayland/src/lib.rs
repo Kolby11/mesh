@@ -71,13 +71,29 @@ impl CompositorCapabilities for StubCompositor {
 }
 
 /// Placeholder shell surface for development and testing.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct StubSurface {
     pub visible: bool,
     pub width: u32,
     pub height: u32,
     pub edge: Option<Edge>,
     pub layer: Option<Layer>,
+    pub exclusive_zone: i32,
+    pub keyboard_mode: KeyboardMode,
+}
+
+impl Default for StubSurface {
+    fn default() -> Self {
+        Self {
+            visible: true,
+            width: 0,
+            height: 0,
+            edge: None,
+            layer: None,
+            exclusive_zone: 0,
+            keyboard_mode: KeyboardMode::None,
+        }
+    }
 }
 
 impl ShellSurface for StubSurface {
@@ -90,13 +106,17 @@ impl ShellSurface for StubSurface {
         self.height = height;
     }
 
-    fn set_exclusive_zone(&mut self, _zone: i32) {}
+    fn set_exclusive_zone(&mut self, zone: i32) {
+        self.exclusive_zone = zone;
+    }
 
     fn set_layer(&mut self, layer: Layer) {
         self.layer = Some(layer);
     }
 
-    fn set_keyboard_interactivity(&mut self, _mode: KeyboardMode) {}
+    fn set_keyboard_interactivity(&mut self, mode: KeyboardMode) {
+        self.keyboard_mode = mode;
+    }
 
     fn show(&mut self) {
         self.visible = true;

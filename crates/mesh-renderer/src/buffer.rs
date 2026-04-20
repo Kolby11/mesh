@@ -46,6 +46,34 @@ impl PixelBuffer {
         }
     }
 
+    /// Blend a single pixel using source alpha and an extra coverage value.
+    pub fn blend_pixel(&mut self, x: u32, y: u32, color: Color, coverage: u8) {
+        if x >= self.width || y >= self.height || coverage == 0 {
+            return;
+        }
+
+        let offset = (y * self.stride + x * 4) as usize;
+        if offset + 3 >= self.data.len() {
+            return;
+        }
+
+        let src_alpha = (u16::from(color.a) * u16::from(coverage)) / 255;
+        if src_alpha == 0 {
+            return;
+        }
+
+        let inv_alpha = 255u16.saturating_sub(src_alpha);
+        let dst_b = u16::from(self.data[offset]);
+        let dst_g = u16::from(self.data[offset + 1]);
+        let dst_r = u16::from(self.data[offset + 2]);
+        let dst_a = u16::from(self.data[offset + 3]);
+
+        self.data[offset] = ((u16::from(color.b) * src_alpha + dst_b * inv_alpha) / 255) as u8;
+        self.data[offset + 1] = ((u16::from(color.g) * src_alpha + dst_g * inv_alpha) / 255) as u8;
+        self.data[offset + 2] = ((u16::from(color.r) * src_alpha + dst_r * inv_alpha) / 255) as u8;
+        self.data[offset + 3] = (src_alpha + ((dst_a * inv_alpha) / 255)).min(255) as u8;
+    }
+
     /// Fill a rectangle with a solid color.
     pub fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: Color) {
         for py in y..y.saturating_add(h).min(self.height) {
@@ -56,15 +84,7 @@ impl PixelBuffer {
     }
 
     /// Fill a rounded rectangle. Uses a simple distance check for corners.
-    pub fn fill_rounded_rect(
-        &mut self,
-        x: u32,
-        y: u32,
-        w: u32,
-        h: u32,
-        radius: f32,
-        color: Color,
-    ) {
+    pub fn fill_rounded_rect(&mut self, x: u32, y: u32, w: u32, h: u32, radius: f32, color: Color) {
         let r = radius.min(w as f32 / 2.0).min(h as f32 / 2.0);
         let ri = r as u32;
 
@@ -116,5 +136,12 @@ mod tests {
         let mut buf = PixelBuffer::new(10, 10);
         // Should not panic even with out-of-bounds rect.
         buf.fill_rect(8, 8, 20, 20, Color::WHITE);
+    }
+
+    #[test]
+    fn blend_pixel_applies_coverage() {
+        let mut buf = PixelBuffer::new(1, 1);
+        buf.blend_pixel(0, 0, Color::WHITE, 128);
+        assert_eq!(&buf.data[0..4], &[128, 128, 128, 128]);
     }
 }

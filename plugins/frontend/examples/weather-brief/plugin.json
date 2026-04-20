@@ -1,0 +1,44 @@
+{
+  "id": "@mesh/weather-brief",
+  "name": "Weather Brief",
+  "version": "0.1.0",
+  "type": "widget",
+  "api_version": "0.1",
+  "description": "Slot-contributed weather card for the workspace hub example.",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "capabilities": {
+    "required": [
+      "theme.read",
+      "locale.read"
+    ]
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "exports": {
+    "component": {
+      "tag": "WeatherBrief"
+    }
+  },
+  "slot_contributions": {
+    "@mesh/workspace-hub:main-extra": [
+      {
+        "id": "weather-brief",
+        "order": 120,
+        "props": {
+          "location": "Brooklyn",
+          "temperature": "17C",
+          "condition": "Clear with coastal wind"
+        }
+      }
+    ]
+  },
+  "accessibility": {
+    "role": "status",
+    "label": "Weather brief",
+    "description": "Weather summary widget"
+  }
+}

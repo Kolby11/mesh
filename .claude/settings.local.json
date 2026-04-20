@@ -3,7 +3,12 @@
     "allow": [
       "Bash(cargo check:*)",
       "Bash(cargo test:*)",
-      "Bash(cargo build:*)"
+      "Bash(cargo build:*)",
+      "Bash(cargo tree *)",
+      "Read(//home/kolby/.rustup/**)",
+      "Bash(cargo --version)",
+      "Bash(rustup default *)",
+      "Bash(nix develop *)"
     ]
   }
 }

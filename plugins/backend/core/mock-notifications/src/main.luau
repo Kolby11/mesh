@@ -1,0 +1,2 @@
+-- Placeholder notifications backend entrypoint.
+-- Backend execution is still routed through the shell runtime bridge.

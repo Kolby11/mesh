@@ -1,6 +1,7 @@
 # `@mesh/notification-center`
 
-Notification center and history surface.
+Notification center host surface. It now acts as a container for embeddable
+widget plugins rather than owning every piece of UI directly.
 
 - **Type:** `surface`
 - **Entrypoint:** `src/main.mesh`
@@ -17,11 +18,19 @@ Required:
 
 ## UI layout
 
-A column with a *Notifications* title and a vertical list of notification
-items. Each item is a box showing a summary line and body text. The initial
-build ships a single placeholder "System ready — MESH notification center
-initialized." item; full notification binding is delegated to the notification
-service once wired up.
+A two-column row:
+
+- **Content slot** — main notification feed widgets
+- **Sidebar slot** — smaller utility widgets like quick actions or filters
+
+The default core build fills those slots via:
+
+- direct dependency-backed component imports:
+  `<NotificationFeed/>` from `@mesh/notification-feed`
+  and `<NotificationSidebar/>` from `@mesh/notification-sidebar`
+
+This makes the notification center a real composition host: third-party widget
+plugins can still contribute to either slot without forking the surface.
 
 ## Theme tokens
 

@@ -1,0 +1,36 @@
+[[methods]]
+name = "list"
+returns = "[Notification]"
+
+[[methods]]
+name = "close"
+args = [{ name = "id", type = "integer" }]
+returns = "Result"
+
+[[methods]]
+name = "close_all"
+returns = "Result"
+
+[[methods]]
+name = "invoke_action"
+args = [
+  { name = "notification_id", type = "integer" },
+  { name = "action_id", type = "string" }
+]
+returns = "Result"
+
+[[events]]
+name = "Posted"
+payload = "{ notification: Notification }"
+
+[types.Notification]
+fields = [
+  { name = "id", type = "integer" },
+  { name = "summary", type = "string" },
+  { name = "body", type = "string" },
+  { name = "urgency", type = "string" }
+]
+
+[capabilities]
+required = ["service.notifications.read"]
+optional = ["service.notifications.manage"]

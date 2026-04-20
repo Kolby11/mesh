@@ -1,0 +1,44 @@
+{
+  "id": "@mesh/quick-settings",
+  "name": "MESH Quick Settings",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "description": "Quick settings panel (network, bluetooth, audio, power)",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "capabilities": {
+    "required": [
+      "shell.surface",
+      "service.network.read",
+      "service.audio.read",
+      "service.audio.control",
+      "service.power.read",
+      "theme.read",
+      "locale.read"
+    ],
+    "optional": [
+      "service.bluetooth.read",
+      "service.bluetooth.control",
+      "service.network.control",
+      "service.power.control"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/audio-interface": ">=1.0.0, <2.0.0",
+      "@mesh/network-interface": ">=1.0.0, <2.0.0",
+      "@mesh/power-interface": ">=1.0.0, <2.0.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "accessibility": {
+    "role": "dialog",
+    "label": "Quick settings",
+    "description": "Default quick settings surface"
+  }
+}

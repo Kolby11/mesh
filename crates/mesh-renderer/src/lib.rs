@@ -6,15 +6,16 @@
 /// **Separation boundary**: this crate depends on `mesh-ui` (widget tree) and
 /// `mesh-wayland` (surface traits) but does NOT depend on `mesh-service` or
 /// `mesh-scripting`.
-
 pub mod buffer;
 pub mod dev_window;
+pub mod layer_shell;
 pub mod painter;
 pub mod surface;
 pub mod text;
 
 pub use buffer::PixelBuffer;
 pub use dev_window::{DevWindowBackend, DevWindowEvent, DevWindowKeyEvent};
+pub use layer_shell::{LayerShellBackend, LayerSurfaceConfig};
 pub use painter::Painter;
 pub use surface::{RenderSurface, SurfaceConfig, SurfaceId};
 

@@ -1,0 +1,16 @@
+[[methods]]
+name = "value"
+returns = "float"
+
+[[methods]]
+name = "set_value"
+args = [{ name = "value", type = "float" }]
+returns = "Result"
+
+[[events]]
+name = "BrightnessChanged"
+payload = "{ value: float }"
+
+[capabilities]
+required = ["service.brightness.read"]
+optional = ["service.brightness.control"]

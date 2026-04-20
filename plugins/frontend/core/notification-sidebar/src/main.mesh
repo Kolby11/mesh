@@ -1,0 +1,19 @@
+<template>
+  <column class="sidebar">
+    <text class="heading">Quick actions</text>
+    <button>Mark all read</button>
+    <button>Pause notifications</button>
+    <button>Open settings</button>
+  </column>
+</template>
+
+<style>
+.sidebar {
+    gap: token(spacing.sm);
+}
+
+.heading {
+    font-size: token(typography.size.md);
+    font-weight: 700;
+}
+</style>

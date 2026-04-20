@@ -6,10 +6,10 @@ use crate::{
     ComponentFile, ScriptBlock, ScriptLang,
     meta::MetaBlock,
     schema::SchemaBlock,
-    style::{Declaration, Selector, StyleBlock, StyleRule, StyleValue},
+    style::{ContainerQuery, Declaration, Selector, StyleBlock, StyleRule, StyleValue},
     template::*,
 };
-use cssparser::{Parser, ParserInput, Token, ToCss};
+use cssparser::{Parser, ParserInput, ToCss, Token};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use std::collections::HashMap;
@@ -51,20 +51,11 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
 
     let script = blocks.get("script").map(|s| parse_script(s, &blocks));
 
-    let style = blocks
-        .get("style")
-        .map(|s| parse_style(s))
-        .transpose()?;
+    let style = blocks.get("style").map(|s| parse_style(s)).transpose()?;
 
-    let schema = blocks
-        .get("schema")
-        .map(|s| parse_schema(s))
-        .transpose()?;
+    let schema = blocks.get("schema").map(|s| parse_schema(s)).transpose()?;
 
-    let meta = blocks
-        .get("meta")
-        .map(|s| parse_meta(s))
-        .transpose()?;
+    let meta = blocks.get("meta").map(|s| parse_meta(s)).transpose()?;
 
     Ok(ComponentFile {
         template,
@@ -201,7 +192,11 @@ fn parse_template(source: &str) -> Result<TemplateBlock, ParseError> {
                 push_template_node(&mut stack, &mut root, node);
             }
             Ok(Event::Eof) => break,
-            Ok(Event::Comment(_)) | Ok(Event::Decl(_)) | Ok(Event::PI(_)) | Ok(Event::DocType(_)) | Ok(Event::GeneralRef(_)) => {}
+            Ok(Event::Comment(_))
+            | Ok(Event::Decl(_))
+            | Ok(Event::PI(_))
+            | Ok(Event::DocType(_))
+            | Ok(Event::GeneralRef(_)) => {}
             Err(err) => {
                 return Err(ParseError::InvalidTemplate {
                     message: err.to_string(),
@@ -358,7 +353,26 @@ fn find_closing_brace(s: &str) -> Option<usize> {
     None
 }
 
-fn build_template_node(tag: String, attributes: Vec<Attribute>, children: Vec<TemplateNode>) -> TemplateNode {
+fn build_template_node(
+    tag: String,
+    attributes: Vec<Attribute>,
+    children: Vec<TemplateNode>,
+) -> TemplateNode {
+    if tag == "slot" {
+        let name = attributes.iter().find_map(|attribute| {
+            if attribute.name != "name" {
+                return None;
+            }
+
+            match &attribute.value {
+                AttributeValue::Static(value) => Some(value.clone()),
+                _ => None,
+            }
+        });
+
+        return TemplateNode::Slot(SlotNode { name });
+    }
+
     if tag.chars().next().is_some_and(char::is_uppercase) {
         return TemplateNode::Component(ComponentRef {
             name: tag,
@@ -374,11 +388,7 @@ fn build_template_node(tag: String, attributes: Vec<Attribute>, children: Vec<Te
     })
 }
 
-fn push_template_node(
-    stack: &mut [OpenNode],
-    root: &mut Vec<TemplateNode>,
-    node: TemplateNode,
-) {
+fn push_template_node(stack: &mut [OpenNode], root: &mut Vec<TemplateNode>, node: TemplateNode) {
     if let Some(parent) = stack.last_mut() {
         parent.children.push(node);
     } else {
@@ -406,6 +416,16 @@ fn parse_script(source: &str, blocks: &HashMap<String, String>) -> ScriptBlock {
 
 fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
     let mut rules = Vec::new();
+    parse_style_rules(source, None, &mut rules)?;
+
+    Ok(StyleBlock { rules })
+}
+
+fn parse_style_rules(
+    source: &str,
+    inherited_query: Option<ContainerQuery>,
+    rules: &mut Vec<StyleRule>,
+) -> Result<(), ParseError> {
     let mut remaining = source.trim();
 
     while !remaining.is_empty() {
@@ -414,32 +434,166 @@ fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
             break;
         }
 
-        let Some(brace_start) = remaining.find('{') else {
-            break;
-        };
-        let selector_str = remaining[..brace_start].trim();
-        let selector = parse_selector(selector_str)?;
-
-        let after_brace = &remaining[brace_start + 1..];
-        let Some(brace_end) = after_brace.find('}') else {
+        let (header, body, rest) = take_style_block(remaining)?;
+        if header.starts_with("@container") {
+            let query = parse_container_query(header)?;
+            let combined_query = inherited_query
+                .map(|existing| existing.intersect(query))
+                .or(Some(query));
+            parse_style_rules(body, combined_query, rules)?;
+        } else if header.starts_with('@') {
             return Err(ParseError::InvalidStyle {
-                message: "unclosed rule block".to_string(),
+                message: format!("unsupported at-rule '{header}'"),
+                line: 0,
+            });
+        } else {
+            let selector = parse_selector(header)?;
+            let declarations = parse_declarations(body)?;
+            rules.push(StyleRule {
+                selector,
+                declarations,
+                container_query: inherited_query,
+            });
+        }
+
+        remaining = rest;
+    }
+
+    Ok(())
+}
+
+fn take_style_block(source: &str) -> Result<(&str, &str, &str), ParseError> {
+    let Some(brace_start) = source.find('{') else {
+        return Err(ParseError::InvalidStyle {
+            message: "expected '{' in style block".to_string(),
+            line: 0,
+        });
+    };
+    let Some(brace_end) = find_matching_delimiter(source, brace_start, '{', '}') else {
+        return Err(ParseError::InvalidStyle {
+            message: "unclosed rule block".to_string(),
+            line: 0,
+        });
+    };
+
+    Ok((
+        source[..brace_start].trim(),
+        &source[brace_start + 1..brace_end],
+        &source[brace_end + 1..],
+    ))
+}
+
+fn find_matching_delimiter(source: &str, start: usize, open: char, close: char) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut string_char = '\0';
+    let mut escaped = false;
+
+    for (index, ch) in source
+        .char_indices()
+        .skip_while(|(index, _)| *index < start)
+    {
+        if in_string {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match ch {
+                '\\' => escaped = true,
+                _ if ch == string_char => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+
+        match ch {
+            '"' | '\'' => {
+                in_string = true;
+                string_char = ch;
+            }
+            _ if ch == open => depth += 1,
+            _ if ch == close => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn parse_container_query(source: &str) -> Result<ContainerQuery, ParseError> {
+    let mut query = ContainerQuery::default();
+    let mut found_clause = false;
+    let mut remaining = source
+        .trim()
+        .strip_prefix("@container")
+        .ok_or_else(|| ParseError::InvalidStyle {
+            message: format!("invalid container query '{source}'"),
+            line: 0,
+        })?
+        .trim();
+
+    while let Some(start) = remaining.find('(') {
+        let Some(end) = find_matching_delimiter(remaining, start, '(', ')') else {
+            return Err(ParseError::InvalidStyle {
+                message: format!("unclosed container query '{source}'"),
                 line: 0,
             });
         };
-
-        let declarations_str = &after_brace[..brace_end];
-        let declarations = parse_declarations(declarations_str)?;
-
-        rules.push(StyleRule {
-            selector,
-            declarations,
-        });
-
-        remaining = &after_brace[brace_end + 1..];
+        let clause = remaining[start + 1..end].trim();
+        apply_container_clause(&mut query, clause)?;
+        found_clause = true;
+        remaining = remaining[end + 1..].trim();
     }
 
-    Ok(StyleBlock { rules })
+    if !found_clause {
+        return Err(ParseError::InvalidStyle {
+            message: format!("container query '{source}' is missing a condition"),
+            line: 0,
+        });
+    }
+
+    Ok(query)
+}
+
+fn apply_container_clause(query: &mut ContainerQuery, clause: &str) -> Result<(), ParseError> {
+    let (property, value) = clause
+        .split_once(':')
+        .ok_or_else(|| ParseError::InvalidStyle {
+            message: format!("invalid container clause '{clause}'"),
+            line: 0,
+        })?;
+    let parsed_value = parse_style_length(value)?;
+
+    match property.trim().to_ascii_lowercase().as_str() {
+        "min-width" => query.min_width = Some(parsed_value),
+        "max-width" => query.max_width = Some(parsed_value),
+        "min-height" => query.min_height = Some(parsed_value),
+        "max-height" => query.max_height = Some(parsed_value),
+        other => {
+            return Err(ParseError::InvalidStyle {
+                message: format!("unsupported container query property '{other}'"),
+                line: 0,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_style_length(value: &str) -> Result<f32, ParseError> {
+    value
+        .trim()
+        .trim_end_matches("px")
+        .parse::<f32>()
+        .map_err(|_| ParseError::InvalidStyle {
+            message: format!("invalid style length '{value}'"),
+            line: 0,
+        })
 }
 
 fn parse_selector(source: &str) -> Result<Selector, ParseError> {
@@ -451,18 +605,24 @@ fn parse_selector(source: &str) -> Result<Selector, ParseError> {
         match token {
             Token::Delim('*') => parts.push(Selector::Universal),
             Token::Delim('.') => {
-                let class = parser.expect_ident_cloned().map_err(|err| ParseError::InvalidStyle {
-                    message: format!("{err:?}"),
-                    line: 0,
-                })?;
+                let class =
+                    parser
+                        .expect_ident_cloned()
+                        .map_err(|err| ParseError::InvalidStyle {
+                            message: format!("{err:?}"),
+                            line: 0,
+                        })?;
                 parts.push(Selector::Class(class.to_string()));
             }
             Token::IDHash(id) => parts.push(Selector::Id(id.to_string())),
             Token::Colon => {
-                let state = parser.expect_ident_cloned().map_err(|err| ParseError::InvalidStyle {
-                    message: format!("{err:?}"),
-                    line: 0,
-                })?;
+                let state =
+                    parser
+                        .expect_ident_cloned()
+                        .map_err(|err| ParseError::InvalidStyle {
+                            message: format!("{err:?}"),
+                            line: 0,
+                        })?;
                 match parts.pop() {
                     Some(Selector::Tag(tag)) => {
                         parts.push(Selector::State(tag, state.to_string()));
@@ -510,19 +670,24 @@ fn parse_declarations(source: &str) -> Result<Vec<Declaration>, ParseError> {
             break;
         }
 
-        let property = parser.expect_ident_cloned().map_err(|err| ParseError::InvalidStyle {
-            message: format!("{err:?}"),
-            line: 0,
-        })?;
-        parser.expect_colon().map_err(|err| ParseError::InvalidStyle {
-            message: format!("{err:?}"),
-            line: 0,
-        })?;
+        let property = parser
+            .expect_ident_cloned()
+            .map_err(|err| ParseError::InvalidStyle {
+                message: format!("{err:?}"),
+                line: 0,
+            })?;
+        parser
+            .expect_colon()
+            .map_err(|err| ParseError::InvalidStyle {
+                message: format!("{err:?}"),
+                line: 0,
+            })?;
 
         let raw_value = parser
-            .parse_until_before(cssparser::Delimiter::Bang | cssparser::Delimiter::Semicolon, |input| {
-                serialize_css_value(input)
-            })
+            .parse_until_before(
+                cssparser::Delimiter::Bang | cssparser::Delimiter::Semicolon,
+                |input| serialize_css_value(input),
+            )
             .map_err(|err| ParseError::InvalidStyle {
                 message: format!("{err:?}"),
                 line: 0,
@@ -729,6 +894,33 @@ row {
         assert!(matches!(&decls[0].value, StyleValue::Literal(v) if v == "8px"));
         assert!(matches!(&decls[1].value, StyleValue::Token(v) if v == "spacing.md"));
         assert!(matches!(&decls[2].value, StyleValue::Var(v) if v == "--bg"));
+        assert!(style.rules[0].container_query.is_none());
+    }
+
+    #[test]
+    fn parse_container_query_rules() {
+        let source = r#"
+<style>
+@container (max-width: 640px) {
+    .sidebar {
+        width: 100%;
+        overflow-y: auto;
+    }
+}
+</style>
+"#;
+        let file = parse_component(source).unwrap();
+        let style = file.style.unwrap();
+        assert_eq!(style.rules.len(), 1);
+        let rule = &style.rules[0];
+        assert_eq!(
+            rule.container_query,
+            Some(ContainerQuery {
+                max_width: Some(640.0),
+                ..Default::default()
+            })
+        );
+        assert!(matches!(&rule.selector, Selector::Class(name) if name == "sidebar"));
     }
 
     #[test]
@@ -761,10 +953,34 @@ row {
         let tmpl = file.template.unwrap();
         match &tmpl.root[0] {
             TemplateNode::Element(el) => {
-                assert!(matches!(&el.attributes[0].value, AttributeValue::Binding(v) if v == "volume"));
-                assert!(matches!(&el.attributes[1].value, AttributeValue::EventHandler(v) if v == "onVolumeChange"));
+                assert!(
+                    matches!(&el.attributes[0].value, AttributeValue::Binding(v) if v == "volume")
+                );
+                assert!(
+                    matches!(&el.attributes[1].value, AttributeValue::EventHandler(v) if v == "onVolumeChange")
+                );
             }
             _ => panic!("expected element"),
+        }
+    }
+
+    #[test]
+    fn parse_named_slot() {
+        let source = r#"
+<template>
+  <column>
+    <slot name="sidebar"/>
+  </column>
+</template>
+"#;
+        let file = parse_component(source).unwrap();
+        let tmpl = file.template.unwrap();
+        match &tmpl.root[0] {
+            TemplateNode::Element(el) => match &el.children[0] {
+                TemplateNode::Slot(slot) => assert_eq!(slot.name.as_deref(), Some("sidebar")),
+                other => panic!("expected slot node, got {other:?}"),
+            },
+            other => panic!("expected element node, got {other:?}"),
         }
     }
 }

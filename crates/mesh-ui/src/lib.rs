@@ -1,3 +1,7 @@
+pub mod accessibility;
+pub mod events;
+pub mod layout;
+pub mod style;
 /// UI runtime for MESH.
 ///
 /// This crate owns the widget tree, layout computation, style resolution,
@@ -7,18 +11,17 @@
 /// **Separation boundary**: this crate does NOT depend on `mesh-service`,
 /// `mesh-wayland`, `mesh-renderer`, or `mesh-scripting`. Frontends connect
 /// to backends only through bindings injected by the scripting layer.
-
 pub mod tree;
-pub mod style;
-pub mod layout;
-pub mod events;
-pub mod accessibility;
 
-pub use tree::{WidgetNode, NodeId};
-pub use style::{ComputedStyle, Color, Dimension, Edges, Corners, StyleResolver};
-pub use layout::{LayoutRect, LayoutEngine};
-pub use events::{UiEvent, RawInputEvent, Modifiers, EventDispatcher};
-pub use accessibility::{AccessibilityInfo, AccessibilityState, AccessibilityTree, AccessibilityTreeNode};
+pub use accessibility::{
+    AccessibilityInfo, AccessibilityState, AccessibilityTree, AccessibilityTreeNode,
+};
+pub use events::{EventDispatcher, Modifiers, RawInputEvent, UiEvent};
+pub use layout::{LayoutEngine, LayoutRect};
+pub use style::{
+    Color, ComputedStyle, Corners, Dimension, Edges, Overflow, StyleContext, StyleResolver,
+};
+pub use tree::{NodeId, WidgetNode};
 
 /// Abstraction over the source of variable values for template evaluation.
 ///

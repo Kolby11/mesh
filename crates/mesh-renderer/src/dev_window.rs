@@ -5,7 +5,11 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
 pub enum DevWindowEvent {
-    PointerMove { surface_id: String, x: f32, y: f32 },
+    PointerMove {
+        surface_id: String,
+        x: f32,
+        y: f32,
+    },
     PointerButton {
         surface_id: String,
         x: f32,
@@ -76,15 +80,14 @@ impl DevWindowBackend {
             .unwrap_or(true);
 
         if needs_new_window {
-            let surface =
-                create_window_surface(title, width, height).map_err(crate::RenderError::SurfaceCreate)?;
+            let surface = create_window_surface(title, width, height)
+                .map_err(crate::RenderError::SurfaceCreate)?;
             self.windows.insert(surface_id.to_string(), surface);
         }
 
-        let surface = self
-            .windows
-            .get_mut(surface_id)
-            .ok_or_else(|| crate::RenderError::SurfaceCreate("window missing after creation".into()))?;
+        let surface = self.windows.get_mut(surface_id).ok_or_else(|| {
+            crate::RenderError::SurfaceCreate("window missing after creation".into())
+        })?;
 
         surface.window.set_title(title);
         surface.frame.resize((width * height) as usize, 0);
@@ -92,9 +95,7 @@ impl DevWindowBackend {
         surface
             .window
             .update_with_buffer(&surface.frame, width as usize, height as usize)
-            .map_err(|err: minifb::Error| {
-                crate::RenderError::SurfaceCreate(format!("{err:?}"))
-            })?;
+            .map_err(|err: minifb::Error| crate::RenderError::SurfaceCreate(format!("{err:?}")))?;
 
         Ok(())
     }
@@ -175,11 +176,7 @@ impl DevWindowBackend {
     }
 }
 
-fn create_window_surface(
-    title: &str,
-    width: u32,
-    height: u32,
-) -> Result<WindowSurface, String> {
+fn create_window_surface(title: &str, width: u32, height: u32) -> Result<WindowSurface, String> {
     let mut window = Window::new(
         title,
         width as usize,

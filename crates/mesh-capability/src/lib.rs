@@ -26,16 +26,19 @@ impl Capability {
     pub fn privilege_level(&self) -> PrivilegeLevel {
         match self.0.as_str() {
             // High privilege
-            "exec.command" | "shell.screenshot" | "dbus.system" | "net.socket"
-            | "theme.write" | "locale.write" => PrivilegeLevel::High,
+            "exec.command" | "shell.screenshot" | "dbus.system" | "net.socket" | "theme.write"
+            | "locale.write" => PrivilegeLevel::High,
 
             // Elevated privilege
             s if s.ends_with(".control") => PrivilegeLevel::Elevated,
-            "exec.launch-app" | "net.http" | "shell.clipboard.write"
-            | "shell.notification" | "fs.write" | "dbus.session"
-            | "service.notifications.post" | "service.notifications.manage" => {
-                PrivilegeLevel::Elevated
-            }
+            "exec.launch-app"
+            | "net.http"
+            | "shell.clipboard.write"
+            | "shell.notification"
+            | "fs.write"
+            | "dbus.session"
+            | "service.notifications.post"
+            | "service.notifications.manage" => PrivilegeLevel::Elevated,
 
             // Standard (default)
             _ => PrivilegeLevel::Standard,

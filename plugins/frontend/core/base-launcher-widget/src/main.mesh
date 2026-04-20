@@ -1,0 +1,58 @@
+<template>
+  <column class="launcher">
+    <text class="title">Launcher Pane</text>
+    <text class="copy">Use this widget as the primary imported component inside a host surface.</text>
+    <input class="search" placeholder="Search apps, actions, files" />
+
+    <row class="chips">
+      <button class="chip">Terminal</button>
+      <button class="chip">Browser</button>
+      <button class="chip">Editor</button>
+    </row>
+
+    <column class="stack">
+      <button class="item">Open workspace dashboard</button>
+      <button class="item">Jump to recent project</button>
+      <button class="item">Create scratch note</button>
+      <button class="item">Launch system monitor</button>
+    </column>
+  </column>
+</template>
+
+<style>
+.launcher {
+    background: token(color.surface-container);
+    border-radius: token(radius.lg);
+    padding: token(spacing.lg);
+    gap: token(spacing.md);
+}
+
+.title {
+    font-size: token(typography.size.lg);
+    font-weight: 700;
+}
+
+.copy {
+    color: token(color.on-surface-variant);
+}
+
+.search {
+    width: 100%;
+}
+
+.chips {
+    gap: token(spacing.sm);
+}
+
+.chip {
+    justify-content: start;
+}
+
+.stack {
+    gap: token(spacing.sm);
+}
+
+.item {
+    justify-content: start;
+}
+</style>

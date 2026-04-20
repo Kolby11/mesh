@@ -2,9 +2,9 @@
 use crate::context::{ScriptContext, ScriptError};
 use mesh_capability::CapabilitySet;
 use mesh_component::ComponentFile;
+use mesh_ui::events::UiEvent;
 use mesh_ui::style::StyleResolver;
 use mesh_ui::tree::WidgetNode;
-use mesh_ui::events::UiEvent;
 
 /// A running component instance that ties together parsing, scripting, and UI.
 #[derive(Debug)]
@@ -158,6 +158,7 @@ fn build_node(
                 &el.tag,
                 &classes,
                 id.as_deref(),
+                mesh_ui::StyleContext::default(),
             );
 
             // Recurse into children.
@@ -172,7 +173,9 @@ fn build_node(
 
         mesh_component::TemplateNode::Text(text) => {
             let mut widget = WidgetNode::new("text");
-            widget.attributes.insert("content".to_string(), text.content.clone());
+            widget
+                .attributes
+                .insert("content".to_string(), text.content.clone());
             widget
         }
 
@@ -193,9 +196,7 @@ fn build_node(
         mesh_component::TemplateNode::If(_)
         | mesh_component::TemplateNode::For(_)
         | mesh_component::TemplateNode::Slot(_)
-        | mesh_component::TemplateNode::Component(_) => {
-            WidgetNode::new("placeholder")
-        }
+        | mesh_component::TemplateNode::Component(_) => WidgetNode::new("placeholder"),
     }
 }
 

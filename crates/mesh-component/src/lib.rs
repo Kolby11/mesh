@@ -1,3 +1,7 @@
+pub mod meta;
+pub mod parser;
+pub mod schema;
+pub mod style;
 /// Single-file component parser for `.mesh` files.
 ///
 /// A `.mesh` file contains up to six blocks:
@@ -14,18 +18,13 @@
 /// This crate parses these blocks into a typed AST. It has no runtime
 /// dependencies — it does not depend on mesh-theme, mesh-service, or
 /// any other mesh crate.
-
 pub mod template;
-pub mod style;
-pub mod schema;
-pub mod meta;
-pub mod parser;
 
-pub use parser::{parse_component, ParseError};
-pub use template::*;
-pub use style::*;
+pub use meta::{AccessibilityRole, MetaBlock};
+pub use parser::{ParseError, parse_component};
 pub use schema::{SchemaBlock, SchemaFieldDef};
-pub use meta::{MetaBlock, AccessibilityRole};
+pub use style::*;
+pub use template::*;
 
 /// A parsed `.mesh` single-file component.
 #[derive(Debug, Clone)]

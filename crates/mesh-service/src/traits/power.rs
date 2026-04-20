@@ -36,9 +36,14 @@ pub trait PowerService: Send + Sync {
 
     fn battery(&self) -> impl Future<Output = Result<BatteryInfo, PowerError>> + Send;
     fn profile(&self) -> impl Future<Output = Result<PowerProfile, PowerError>> + Send;
-    fn set_profile(&self, profile: PowerProfile) -> impl Future<Output = Result<(), PowerError>> + Send;
+    fn set_profile(
+        &self,
+        profile: PowerProfile,
+    ) -> impl Future<Output = Result<(), PowerError>> + Send;
 
-    fn subscribe(&self) -> impl Future<Output = Result<tokio::sync::broadcast::Receiver<PowerEvent>, PowerError>> + Send;
+    fn subscribe(
+        &self,
+    ) -> impl Future<Output = Result<tokio::sync::broadcast::Receiver<PowerEvent>, PowerError>> + Send;
 }
 
 #[derive(Debug, thiserror::Error)]

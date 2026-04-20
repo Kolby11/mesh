@@ -1,0 +1,55 @@
+[[methods]]
+name = "connections"
+returns = "[Connection]"
+
+[[methods]]
+name = "devices"
+returns = "[Device]"
+
+[[methods]]
+name = "active_connection"
+returns = "Connection?"
+
+[[methods]]
+name = "connect"
+args = [{ name = "connection_id", type = "string" }]
+returns = "Result"
+
+[[methods]]
+name = "disconnect"
+args = [{ name = "connection_id", type = "string" }]
+returns = "Result"
+
+[[methods]]
+name = "wifi_scan"
+returns = "[Connection]"
+
+[[methods]]
+name = "set_wifi_enabled"
+args = [{ name = "enabled", type = "boolean" }]
+returns = "Result"
+
+[[events]]
+name = "ConnectionChanged"
+payload = "{ connection: Connection }"
+
+[types.Connection]
+fields = [
+  { name = "id", type = "string" },
+  { name = "name", type = "string" },
+  { name = "kind", type = "string" },
+  { name = "strength", type = "integer" },
+  { name = "active", type = "boolean" }
+]
+
+[types.Device]
+fields = [
+  { name = "id", type = "string" },
+  { name = "name", type = "string" },
+  { name = "kind", type = "string" },
+  { name = "state", type = "string" }
+]
+
+[capabilities]
+required = ["service.network.read"]
+optional = ["service.network.control"]

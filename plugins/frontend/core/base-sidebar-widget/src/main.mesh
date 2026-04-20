@@ -1,0 +1,51 @@
+<template>
+  <column class="sidebar">
+    <text class="title">Sidebar Pane</text>
+    <text class="copy">A second imported widget that gives the host surface a stable right rail.</text>
+
+    <column class="card">
+      <text class="label">Pinned tools</text>
+      <text>Notifications</text>
+      <text>Quick settings</text>
+      <text>Scratchpad</text>
+    </column>
+
+    <column class="card">
+      <text class="label">Composition notes</text>
+      <text>Direct imports use exported component tags.</text>
+      <text>Slots can layer extra widgets on top later.</text>
+      <text>Surface placement comes from config/settings.json.</text>
+    </column>
+  </column>
+</template>
+
+<style>
+.sidebar {
+    background: token(color.surface-container-high);
+    border-radius: token(radius.lg);
+    padding: token(spacing.lg);
+    gap: token(spacing.md);
+}
+
+.title {
+    font-size: token(typography.size.lg);
+    font-weight: 700;
+}
+
+.copy {
+    color: token(color.on-surface-variant);
+}
+
+.card {
+    background: token(color.surface-container);
+    border-radius: token(radius.md);
+    padding: token(spacing.md);
+    gap: token(spacing.xs);
+}
+
+.label {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+}
+</style>

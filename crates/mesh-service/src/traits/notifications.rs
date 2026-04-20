@@ -32,7 +32,10 @@ pub struct NotificationAction {
 pub enum NotificationEvent {
     Posted(Notification),
     Closed(u32),
-    ActionInvoked { notification_id: u32, action_id: String },
+    ActionInvoked {
+        notification_id: u32,
+        action_id: String,
+    },
 }
 
 /// The notification service trait.
@@ -44,9 +47,17 @@ pub trait NotificationService: Send + Sync {
     fn list(&self) -> impl Future<Output = Result<Vec<Notification>, NotificationError>> + Send;
     fn close(&self, id: u32) -> impl Future<Output = Result<(), NotificationError>> + Send;
     fn close_all(&self) -> impl Future<Output = Result<(), NotificationError>> + Send;
-    fn invoke_action(&self, notification_id: u32, action_id: &str) -> impl Future<Output = Result<(), NotificationError>> + Send;
+    fn invoke_action(
+        &self,
+        notification_id: u32,
+        action_id: &str,
+    ) -> impl Future<Output = Result<(), NotificationError>> + Send;
 
-    fn subscribe(&self) -> impl Future<Output = Result<tokio::sync::broadcast::Receiver<NotificationEvent>, NotificationError>> + Send;
+    fn subscribe(
+        &self,
+    ) -> impl Future<
+        Output = Result<tokio::sync::broadcast::Receiver<NotificationEvent>, NotificationError>,
+    > + Send;
 }
 
 #[derive(Debug, thiserror::Error)]

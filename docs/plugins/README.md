@@ -15,6 +15,10 @@ Plugins are split into two kinds, enforced by the architecture described in
   register with the interface registry and are looked up by interface name, not
   by plugin ID.
 
+Core contract packages now live alongside the default backends under
+`plugins/backend/core/` as ordinary `type = "interface"` plugins. The shell
+core no longer hardcodes those service APIs.
+
 The interface registry is the only bridge between the two.
 
 > **Full extensibility is a first-class goal.** The defaults below are
@@ -28,18 +32,26 @@ The interface registry is the only bridge between the two.
 ```
 plugins/
 ├── frontend/
-│   └── core/
-│       ├── panel/               — top panel surface
-│       ├── launcher/            — application launcher
-│       ├── notification-center/ — notification drawer
-│       └── quick-settings/      — toggles + sliders surface
+│   ├── core/
+│   │   ├── panel/               — top panel surface
+│   │   ├── launcher/            — application launcher
+│   │   ├── notification-center/ — notification drawer
+│   │   └── quick-settings/      — toggles + sliders surface
+│   └── examples/                — larger composition examples for plugin authors
 └── backend/
     └── core/
+        ├── audio-interface/         — contract for mesh.audio
+        ├── network-interface/       — contract for mesh.network
+        ├── power-interface/         — contract for mesh.power
+        ├── media-interface/         — contract for mesh.media
+        ├── notifications-interface/ — contract for mesh.notifications
+        ├── brightness-interface/    — contract for mesh.brightness
         ├── pipewire-audio/          — mesh.audio via PipeWire
         ├── pulseaudio-audio/        — mesh.audio via PulseAudio
         ├── networkmanager-network/  — mesh.network via NetworkManager
         ├── upower-power/            — mesh.power via UPower
-        └── mpris-media/             — mesh.media via MPRIS D-Bus
+        ├── mpris-media/             — mesh.media via MPRIS D-Bus
+        └── mock-notifications/      — mesh.notifications default provider
 ```
 
 ## Plugin anatomy
@@ -50,6 +62,11 @@ capabilities, dependencies, entrypoints, and its settings schema — see
 `src/main.mesh` single-file component (`<template>`, `<script lang="luau">`,
 `<style>`, `<schema>`, `<meta>`). Backends have a `src/main.luau` entrypoint
 that registers an interface implementation with the interface registry.
+Interface packages ship an `interface.toml` declaration instead of an
+executable entrypoint.
 
 See [`spec/pluggable-backend.md`](../../spec/pluggable-backend.md) for the
 authoritative plugin model, lifecycle, capabilities, and distribution rules.
+
+The example frontend plugin set is documented in
+[`frontend/examples/README.md`](./frontend/examples/README.md).

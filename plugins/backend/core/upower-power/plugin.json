@@ -1,0 +1,34 @@
+{
+  "id": "@mesh/upower",
+  "name": "MESH UPower",
+  "version": "0.1.0",
+  "type": "backend",
+  "api_version": "0.1",
+  "description": "Power and battery backend using UPower",
+  "authors": ["MESH Project"],
+  "capabilities": {
+    "required": [
+      "service.power.read",
+      "dbus.system"
+    ],
+    "optional": [
+      "service.power.control"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/power-interface": ">=1.0.0, <2.0.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.luau"
+  },
+  "provides": [
+    {
+      "interface": "mesh.power",
+      "version": "1.0",
+      "backend_name": "UPower",
+      "priority": 100
+    }
+  ]
+}

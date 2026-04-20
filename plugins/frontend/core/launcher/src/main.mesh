@@ -27,6 +27,7 @@
 }
 
 .launcher {
+    width: 360px;
     border-radius: token(radius.lg);
     background: token(color.surface);
     color: token(color.on-surface);
@@ -53,10 +54,3 @@
     justify-content: start;
 }
 </style>
-
-<meta>
-name = "MESH Launcher"
-description = "Default application launcher"
-role = "dialog"
-label = "Application launcher"
-</meta>

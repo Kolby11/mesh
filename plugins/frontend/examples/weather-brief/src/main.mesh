@@ -1,0 +1,39 @@
+<template>
+  <row class="weather">
+    <column class="copy">
+      <text class="location" :content="location"/>
+      <text class="condition" :content="condition"/>
+    </column>
+    <text class="temperature" :content="temperature"/>
+  </row>
+</template>
+
+<style>
+.weather {
+    justify-content: space-between;
+    align-items: center;
+    padding: token(spacing.md);
+    border-radius: token(radius.lg);
+    background: token(color.info-container);
+}
+
+.copy {
+    gap: token(spacing.xs);
+}
+
+.location {
+    color: token(color.on-info-container);
+    font-weight: 700;
+}
+
+.condition {
+    color: token(color.on-info-container);
+    font-size: token(typography.size.sm);
+}
+
+.temperature {
+    color: token(color.on-info-container);
+    font-size: token(typography.size.xl);
+    font-weight: 700;
+}
+</style>

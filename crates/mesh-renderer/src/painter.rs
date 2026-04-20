@@ -1,7 +1,7 @@
 /// Paints a `WidgetNode` tree into a `PixelBuffer`.
 use crate::buffer::PixelBuffer;
 use crate::text::TextRenderer;
-use mesh_ui::style::{Color, Display};
+use mesh_ui::style::{Color, Display, Overflow};
 use mesh_ui::tree::WidgetNode;
 
 /// Walks a widget tree and paints each node into a pixel buffer.
@@ -69,7 +69,13 @@ impl Painter {
         if style.background_color.a > 0 {
             let radius = style.border_radius.top_left * scale;
             if radius > 0.5 {
-                fill_rounded_rect_clipped(buffer, bounds, radius, style.background_color, node_clip);
+                fill_rounded_rect_clipped(
+                    buffer,
+                    bounds,
+                    radius,
+                    style.background_color,
+                    node_clip,
+                );
             } else {
                 fill_rect_clipped(buffer, bounds, style.background_color, node_clip);
             }
@@ -79,7 +85,12 @@ impl Painter {
             let bw = (style.border_width.top * scale).max(1.0) as i32;
             fill_rect_clipped(
                 buffer,
-                ClipRect { x, y, width: w, height: bw },
+                ClipRect {
+                    x,
+                    y,
+                    width: w,
+                    height: bw,
+                },
                 style.border_color,
                 node_clip,
             );
@@ -96,7 +107,12 @@ impl Painter {
             );
             fill_rect_clipped(
                 buffer,
-                ClipRect { x, y, width: bw, height: h },
+                ClipRect {
+                    x,
+                    y,
+                    width: bw,
+                    height: h,
+                },
                 style.border_color,
                 node_clip,
             );
@@ -120,23 +136,28 @@ impl Painter {
             _ => {}
         }
 
-        let child_offset_x = offset_x;
-        let mut child_offset_y = offset_y;
-        let mut child_clip = node_clip;
-
-        if node.tag == "scroll" {
-            let scroll_y = node
-                .attributes
-                .get("_mesh_scroll_y")
-                .and_then(|value| value.parse::<f32>().ok())
-                .unwrap_or(0.0);
-            child_offset_y -= scroll_y;
-            child_clip = intersect_clip(clip, bounds);
-        }
+        let scroll_x = node_attr_f32(node, "_mesh_scroll_x");
+        let scroll_y = node_attr_f32(node, "_mesh_scroll_y");
+        let child_offset_x = offset_x - scroll_x;
+        let child_offset_y = offset_y - scroll_y;
+        let child_clip = if node_clips_children(node) {
+            intersect_clip(clip, bounds)
+        } else {
+            clip
+        };
 
         for child in &node.children {
-            self.paint_node(child, buffer, scale, child_offset_x, child_offset_y, child_clip);
+            self.paint_node(
+                child,
+                buffer,
+                scale,
+                child_offset_x,
+                child_offset_y,
+                child_clip,
+            );
         }
+
+        self.paint_scrollbars(node, buffer, scale, bounds, clip);
     }
 
     fn paint_text_node(
@@ -162,14 +183,20 @@ impl Painter {
 
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
         let ty = (y + (style.padding.top * scale) as i32).max(0) as u32;
+        let inner_width = ((node.layout.width - style.padding.horizontal()) * scale).max(0.0);
         self.text_renderer.render_clipped(
             text,
+            &style.font_family,
             style.font_size * scale,
+            style.font_weight,
+            style.line_height,
+            style.text_align,
             style.color,
             buffer,
             tx,
             ty,
             clip_to_tuple(clip),
+            Some(inner_width),
         );
     }
 
@@ -193,7 +220,11 @@ impl Painter {
             .attributes
             .get("_mesh_focused")
             .is_some_and(|value| value == "true");
-        let text = if value.is_empty() { &placeholder } else { &value };
+        let text = if value.is_empty() {
+            &placeholder
+        } else {
+            &value
+        };
         let text_color = if value.is_empty() {
             dim_color(style.color, 0.6)
         } else {
@@ -201,27 +232,46 @@ impl Painter {
         };
 
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
-        let inner_height = ((node.layout.height - style.padding.vertical()) * scale).max(0.0) as i32;
-        let glyph_height = (style.font_size * scale).max(8.0) as i32;
-        let ty = (y
-            + (style.padding.top * scale) as i32
-            + ((inner_height - glyph_height) / 2).max(0))
-            .max(0) as u32;
+        let inner_height =
+            ((node.layout.height - style.padding.vertical()) * scale).max(0.0) as i32;
+        let (_text_width, text_height) = self.text_renderer.measure_styled(
+            text,
+            &style.font_family,
+            style.font_size * scale,
+            style.font_weight,
+            style.line_height,
+            None,
+        );
+        let glyph_height = text_height.max((style.font_size * scale).max(8.0)) as i32;
+        let ty =
+            (y + (style.padding.top * scale) as i32 + ((inner_height - glyph_height) / 2).max(0))
+                .max(0) as u32;
 
         self.text_renderer.render_clipped(
             text,
+            &style.font_family,
             style.font_size * scale,
+            style.font_weight,
+            style.line_height,
+            style.text_align,
             text_color,
             buffer,
             tx,
             ty,
             clip_to_tuple(clip),
+            None,
         );
 
         if focused {
-            let caret_x = tx
-                + ((text.chars().count() as f32 * ((style.font_size * scale / 8.0).round().max(1.0) * 9.0))
-                    as u32);
+            let (text_width, _text_height) = self.text_renderer.measure_styled(
+                text,
+                &style.font_family,
+                style.font_size * scale,
+                style.font_weight,
+                style.line_height,
+                None,
+            );
+            let caret_x = tx + text_width.round() as u32;
             fill_rect_clipped(
                 buffer,
                 ClipRect {
@@ -315,6 +365,144 @@ impl Painter {
             clip,
         );
     }
+
+    fn paint_scrollbars(
+        &self,
+        node: &WidgetNode,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        bounds: ClipRect,
+        clip: ClipRect,
+    ) {
+        let max_x = node_attr_f32(node, "_mesh_scroll_max_x");
+        let max_y = node_attr_f32(node, "_mesh_scroll_max_y");
+        let scroll_x = node_attr_f32(node, "_mesh_scroll_x");
+        let scroll_y = node_attr_f32(node, "_mesh_scroll_y");
+        let content_width = node_attr_f32(node, "_mesh_content_width");
+        let content_height = node_attr_f32(node, "_mesh_content_height");
+
+        let show_vertical = node.computed_style.overflow_y.always_shows_scrollbar()
+            || (node
+                .computed_style
+                .overflow_y
+                .shows_scrollbar_when_overflowing()
+                && max_y > f32::EPSILON);
+        let show_horizontal = node.computed_style.overflow_x.always_shows_scrollbar()
+            || (node
+                .computed_style
+                .overflow_x
+                .shows_scrollbar_when_overflowing()
+                && max_x > f32::EPSILON);
+
+        if !show_vertical && !show_horizontal {
+            return;
+        }
+
+        let inset = (4.0 * scale).round().max(2.0) as i32;
+        let thickness = (6.0 * scale).round().max(4.0) as i32;
+        let radius = (thickness as f32 / 2.0).max(2.0);
+        let track_color = Color::from_hex("#24202b").unwrap_or(Color::BLACK);
+        let thumb_color = Color::from_hex("#8f879c").unwrap_or(Color::WHITE);
+
+        if show_vertical {
+            let viewport_height = bounds.height.max(1) as f32;
+            let track_height = (bounds.height
+                - inset * 2
+                - if show_horizontal {
+                    thickness + inset
+                } else {
+                    0
+                })
+            .max(thickness);
+            let track = ClipRect {
+                x: bounds.x + bounds.width - inset - thickness,
+                y: bounds.y + inset,
+                width: thickness,
+                height: track_height,
+            };
+            fill_rounded_rect_clipped(
+                buffer,
+                track,
+                radius,
+                track_color,
+                intersect_clip(clip, bounds),
+            );
+
+            let thumb_height = if content_height <= 0.0 {
+                track_height
+            } else {
+                ((viewport_height / content_height.max(viewport_height)) * track_height as f32)
+                    .round()
+                    .clamp((18.0 * scale).max(10.0), track_height as f32) as i32
+            };
+            let thumb_range = (track_height - thumb_height).max(0) as f32;
+            let thumb_y = track.y
+                + if max_y <= f32::EPSILON {
+                    0
+                } else {
+                    ((scroll_y / max_y.max(1.0)) * thumb_range).round() as i32
+                };
+            fill_rounded_rect_clipped(
+                buffer,
+                ClipRect {
+                    x: track.x,
+                    y: thumb_y,
+                    width: thickness,
+                    height: thumb_height.max(thickness),
+                },
+                radius,
+                thumb_color,
+                intersect_clip(clip, bounds),
+            );
+        }
+
+        if show_horizontal {
+            let viewport_width = bounds.width.max(1) as f32;
+            let track_width =
+                (bounds.width - inset * 2 - if show_vertical { thickness + inset } else { 0 })
+                    .max(thickness);
+            let track = ClipRect {
+                x: bounds.x + inset,
+                y: bounds.y + bounds.height - inset - thickness,
+                width: track_width,
+                height: thickness,
+            };
+            fill_rounded_rect_clipped(
+                buffer,
+                track,
+                radius,
+                track_color,
+                intersect_clip(clip, bounds),
+            );
+
+            let thumb_width = if content_width <= 0.0 {
+                track_width
+            } else {
+                ((viewport_width / content_width.max(viewport_width)) * track_width as f32)
+                    .round()
+                    .clamp((18.0 * scale).max(10.0), track_width as f32) as i32
+            };
+            let thumb_range = (track_width - thumb_width).max(0) as f32;
+            let thumb_x = track.x
+                + if max_x <= f32::EPSILON {
+                    0
+                } else {
+                    ((scroll_x / max_x.max(1.0)) * thumb_range).round() as i32
+                };
+            fill_rounded_rect_clipped(
+                buffer,
+                ClipRect {
+                    x: thumb_x,
+                    y: track.y,
+                    width: thumb_width.max(thickness),
+                    height: thickness,
+                },
+                radius,
+                thumb_color,
+                intersect_clip(clip, bounds),
+            );
+        }
+    }
 }
 
 impl Default for Painter {
@@ -371,7 +559,9 @@ fn fill_rounded_rect_clipped(
         return;
     }
 
-    let r = radius.min(rect.width as f32 / 2.0).min(rect.height as f32 / 2.0);
+    let r = radius
+        .min(rect.width as f32 / 2.0)
+        .min(rect.height as f32 / 2.0);
     let ri = r.max(0.0) as i32;
 
     for py in clipped.y..clipped.y + clipped.height {
@@ -414,4 +604,16 @@ fn dim_color(color: Color, factor: f32) -> Color {
         b: ((color.b as f32) * factor).round().clamp(0.0, 255.0) as u8,
         a: color.a,
     }
+}
+
+fn node_attr_f32(node: &WidgetNode, key: &str) -> f32 {
+    node.attributes
+        .get(key)
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0)
+}
+
+fn node_clips_children(node: &WidgetNode) -> bool {
+    node.computed_style.overflow_x != Overflow::Visible
+        || node.computed_style.overflow_y != Overflow::Visible
 }

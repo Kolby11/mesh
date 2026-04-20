@@ -1,5 +1,5 @@
 /// Style resolution — converts style AST + theme tokens into computed styles.
-use mesh_component::style::{StyleRule, StyleValue, Selector};
+use mesh_component::style::{Selector, StyleRule, StyleValue};
 use mesh_theme::{Theme, TokenValue};
 
 /// Fully resolved style for a widget node.
@@ -21,6 +21,8 @@ pub struct ComputedStyle {
     pub border_color: Color,
     pub border_radius: Corners,
     pub opacity: f32,
+    pub overflow_x: Overflow,
+    pub overflow_y: Overflow,
 
     // Text
     pub font_family: String,
@@ -56,6 +58,8 @@ impl Default for ComputedStyle {
             border_color: Color::TRANSPARENT,
             border_radius: Corners::zero(),
             opacity: 1.0,
+            overflow_x: Overflow::Visible,
+            overflow_y: Overflow::Visible,
             font_family: "Inter".to_string(),
             font_size: 14.0,
             font_weight: 400,
@@ -90,11 +94,21 @@ pub struct Edges {
 
 impl Edges {
     pub fn zero() -> Self {
-        Self { top: 0.0, right: 0.0, bottom: 0.0, left: 0.0 }
+        Self {
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            left: 0.0,
+        }
     }
 
     pub fn all(value: f32) -> Self {
-        Self { top: value, right: value, bottom: value, left: value }
+        Self {
+            top: value,
+            right: value,
+            bottom: value,
+            left: value,
+        }
     }
 
     pub fn horizontal(&self) -> f32 {
@@ -114,13 +128,51 @@ pub struct Corners {
     pub bottom_left: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Overflow {
+    Visible,
+    Hidden,
+    Auto,
+    Scroll,
+}
+
+impl Overflow {
+    pub fn clips_contents(self) -> bool {
+        !matches!(self, Self::Visible)
+    }
+
+    pub fn shows_scrollbar_when_overflowing(self) -> bool {
+        matches!(self, Self::Auto | Self::Scroll)
+    }
+
+    pub fn always_shows_scrollbar(self) -> bool {
+        matches!(self, Self::Scroll)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StyleContext {
+    pub container_width: f32,
+    pub container_height: f32,
+}
+
 impl Corners {
     pub fn zero() -> Self {
-        Self { top_left: 0.0, top_right: 0.0, bottom_right: 0.0, bottom_left: 0.0 }
+        Self {
+            top_left: 0.0,
+            top_right: 0.0,
+            bottom_right: 0.0,
+            bottom_left: 0.0,
+        }
     }
 
     pub fn all(value: f32) -> Self {
-        Self { top_left: value, top_right: value, bottom_right: value, bottom_left: value }
+        Self {
+            top_left: value,
+            top_right: value,
+            bottom_right: value,
+            bottom_left: value,
+        }
     }
 }
 
@@ -133,9 +185,24 @@ pub struct Color {
 }
 
 impl Color {
-    pub const TRANSPARENT: Self = Self { r: 0, g: 0, b: 0, a: 0 };
-    pub const WHITE: Self = Self { r: 255, g: 255, b: 255, a: 255 };
-    pub const BLACK: Self = Self { r: 0, g: 0, b: 0, a: 255 };
+    pub const TRANSPARENT: Self = Self {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    };
+    pub const WHITE: Self = Self {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+    pub const BLACK: Self = Self {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
 
     /// Parse a hex color string: `#RGB`, `#RRGGBB`, or `#RRGGBBAA`.
     pub fn from_hex(hex: &str) -> Option<Self> {
@@ -166,19 +233,40 @@ impl Color {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Display { Flex, None }
+pub enum Display {
+    Flex,
+    None,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FlexDirection { Row, Column }
+pub enum FlexDirection {
+    Row,
+    Column,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JustifyContent { Start, End, Center, SpaceBetween, SpaceAround }
+pub enum JustifyContent {
+    Start,
+    End,
+    Center,
+    SpaceBetween,
+    SpaceAround,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AlignItems { Start, End, Center, Stretch }
+pub enum AlignItems {
+    Start,
+    End,
+    Center,
+    Stretch,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TextAlign { Left, Center, Right }
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
 
 /// Resolves style values against a theme's design tokens.
 pub struct StyleResolver<'a> {
@@ -194,17 +282,15 @@ impl<'a> StyleResolver<'a> {
     pub fn resolve_value(&self, value: &StyleValue) -> String {
         match value {
             StyleValue::Literal(s) => s.clone(),
-            StyleValue::Token(name) => {
-                match self.theme.token(name) {
-                    Some(TokenValue::String(s)) => s.clone(),
-                    Some(TokenValue::Number(n)) => format!("{n}"),
-                    Some(TokenValue::Bool(b)) => format!("{b}"),
-                    None => {
-                        tracing::warn!("unresolved theme token: {name}");
-                        String::new()
-                    }
+            StyleValue::Token(name) => match self.theme.token(name) {
+                Some(TokenValue::String(s)) => s.clone(),
+                Some(TokenValue::Number(n)) => format!("{n}"),
+                Some(TokenValue::Bool(b)) => format!("{b}"),
+                None => {
+                    tracing::warn!("unresolved theme token: {name}");
+                    String::new()
                 }
-            }
+            },
             StyleValue::Var(name) => {
                 tracing::debug!("var({name}) not yet resolved");
                 String::new()
@@ -231,6 +317,7 @@ impl<'a> StyleResolver<'a> {
         tag: &str,
         classes: &[String],
         id: Option<&str>,
+        context: StyleContext,
     ) -> ComputedStyle {
         let mut style = ComputedStyle::default();
 
@@ -241,7 +328,7 @@ impl<'a> StyleResolver<'a> {
 
         // Apply matching rules in order.
         for rule in rules {
-            if selector_matches(&rule.selector, tag, classes, id) {
+            if rule_matches(rule, tag, classes, id, context) {
                 for decl in &rule.declarations {
                     apply_declaration(&mut style, &decl.property, &decl.value, self);
                 }
@@ -263,7 +350,25 @@ fn selector_matches(selector: &Selector, tag: &str, classes: &[String], id: Opti
     }
 }
 
-fn apply_declaration(style: &mut ComputedStyle, property: &str, value: &StyleValue, resolver: &StyleResolver) {
+fn rule_matches(
+    rule: &StyleRule,
+    tag: &str,
+    classes: &[String],
+    id: Option<&str>,
+    context: StyleContext,
+) -> bool {
+    selector_matches(&rule.selector, tag, classes, id)
+        && rule
+            .container_query
+            .is_none_or(|query| query.matches(context.container_width, context.container_height))
+}
+
+fn apply_declaration(
+    style: &mut ComputedStyle,
+    property: &str,
+    value: &StyleValue,
+    resolver: &StyleResolver,
+) {
     match property {
         "background" | "background-color" => style.background_color = resolver.resolve_color(value),
         "color" => style.color = resolver.resolve_color(value),
@@ -278,6 +383,13 @@ fn apply_declaration(style: &mut ComputedStyle, property: &str, value: &StyleVal
         "border-radius" => style.border_radius = Corners::all(resolver.resolve_number(value)),
         "border-width" => style.border_width = Edges::all(resolver.resolve_number(value)),
         "opacity" => style.opacity = resolver.resolve_number(value),
+        "overflow" => {
+            let overflow = parse_overflow(&resolver.resolve_value(value));
+            style.overflow_x = overflow;
+            style.overflow_y = overflow;
+        }
+        "overflow-x" => style.overflow_x = parse_overflow(&resolver.resolve_value(value)),
+        "overflow-y" => style.overflow_y = parse_overflow(&resolver.resolve_value(value)),
         "width" => style.width = parse_dimension(&resolver.resolve_value(value)),
         "height" => style.height = parse_dimension(&resolver.resolve_value(value)),
         "flex-grow" => style.flex_grow = resolver.resolve_number(value),
@@ -324,6 +436,15 @@ fn apply_declaration(style: &mut ComputedStyle, property: &str, value: &StyleVal
     }
 }
 
+fn parse_overflow(value: &str) -> Overflow {
+    match value.trim() {
+        "hidden" => Overflow::Hidden,
+        "auto" => Overflow::Auto,
+        "scroll" => Overflow::Scroll,
+        _ => Overflow::Visible,
+    }
+}
+
 fn parse_px(s: &str) -> f32 {
     let s = s.trim().trim_end_matches("px");
     s.parse().unwrap_or(0.0)
@@ -346,9 +467,33 @@ mod tests {
 
     #[test]
     fn parse_hex_colors() {
-        assert_eq!(Color::from_hex("#fff"), Some(Color { r: 255, g: 255, b: 255, a: 255 }));
-        assert_eq!(Color::from_hex("#6750A4"), Some(Color { r: 103, g: 80, b: 164, a: 255 }));
-        assert_eq!(Color::from_hex("#00000080"), Some(Color { r: 0, g: 0, b: 0, a: 128 }));
+        assert_eq!(
+            Color::from_hex("#fff"),
+            Some(Color {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255
+            })
+        );
+        assert_eq!(
+            Color::from_hex("#6750A4"),
+            Some(Color {
+                r: 103,
+                g: 80,
+                b: 164,
+                a: 255
+            })
+        );
+        assert_eq!(
+            Color::from_hex("#00000080"),
+            Some(Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 128
+            })
+        );
         assert_eq!(Color::from_hex("invalid"), None);
     }
 
@@ -378,10 +523,60 @@ mod tests {
                     value: StyleValue::Token("color.primary".to_string()),
                 },
             ],
+            container_query: None,
         }];
 
-        let style = resolver.resolve_node_style(&rules, "text", &[], None);
+        let style = resolver.resolve_node_style(&rules, "text", &[], None, StyleContext::default());
         assert_eq!(style.font_size, 20.0);
-        assert_eq!(style.color, Color { r: 103, g: 80, b: 164, a: 255 });
+        assert_eq!(
+            style.color,
+            Color {
+                r: 103,
+                g: 80,
+                b: 164,
+                a: 255
+            }
+        );
+    }
+
+    #[test]
+    fn container_query_rules_apply_against_context() {
+        let theme = mesh_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_component::style::Declaration {
+                property: "overflow-y".to_string(),
+                value: StyleValue::Literal("auto".to_string()),
+            }],
+            container_query: Some(mesh_component::style::ContainerQuery {
+                min_width: Some(480.0),
+                ..Default::default()
+            }),
+        }];
+
+        let narrow = resolver.resolve_node_style(
+            &rules,
+            "column",
+            &["panel".into()],
+            None,
+            StyleContext {
+                container_width: 320.0,
+                container_height: 240.0,
+            },
+        );
+        assert_eq!(narrow.overflow_y, Overflow::Visible);
+
+        let wide = resolver.resolve_node_style(
+            &rules,
+            "column",
+            &["panel".into()],
+            None,
+            StyleContext {
+                container_width: 640.0,
+                container_height: 240.0,
+            },
+        );
+        assert_eq!(wide.overflow_y, Overflow::Auto);
     }
 }

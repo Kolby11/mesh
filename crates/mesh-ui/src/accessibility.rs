@@ -66,11 +66,7 @@ impl AccessibilityTree {
     }
 }
 
-fn collect_a11y(
-    node: &WidgetNode,
-    parent: Option<NodeId>,
-    out: &mut Vec<AccessibilityTreeNode>,
-) {
+fn collect_a11y(node: &WidgetNode, parent: Option<NodeId>, out: &mut Vec<AccessibilityTreeNode>) {
     let child_ids: Vec<NodeId> = node.children.iter().map(|c| c.id).collect();
 
     out.push(AccessibilityTreeNode {

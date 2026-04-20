@@ -1,0 +1,17 @@
+{
+  "id": "@mesh/network-interface",
+  "name": "MESH Network Interface",
+  "version": "1.0.0",
+  "type": "interface",
+  "api_version": "0.1",
+  "description": "Contract package for the mesh.network interface.",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "interface": {
+    "name": "mesh.network",
+    "version": "1.0",
+    "file": "interface.toml"
+  }
+}

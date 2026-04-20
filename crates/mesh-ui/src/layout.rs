@@ -101,14 +101,32 @@ fn layout_node(node: &mut WidgetNode, x: f32, y: f32, available_w: f32, availabl
         let child_style = &node.children[idx].computed_style;
         let child_main = if is_column {
             match child_style.height {
-                Dimension::Px(px) => { child_sizes[idx] = px; fixed_main += px; continue; }
-                Dimension::Percent(pct) => { let s = main_available * pct / 100.0; child_sizes[idx] = s; fixed_main += s; continue; }
+                Dimension::Px(px) => {
+                    child_sizes[idx] = px;
+                    fixed_main += px;
+                    continue;
+                }
+                Dimension::Percent(pct) => {
+                    let s = main_available * pct / 100.0;
+                    child_sizes[idx] = s;
+                    fixed_main += s;
+                    continue;
+                }
                 Dimension::Auto => 0.0,
             }
         } else {
             match child_style.width {
-                Dimension::Px(px) => { child_sizes[idx] = px; fixed_main += px; continue; }
-                Dimension::Percent(pct) => { let s = main_available * pct / 100.0; child_sizes[idx] = s; fixed_main += s; continue; }
+                Dimension::Px(px) => {
+                    child_sizes[idx] = px;
+                    fixed_main += px;
+                    continue;
+                }
+                Dimension::Percent(pct) => {
+                    let s = main_available * pct / 100.0;
+                    child_sizes[idx] = s;
+                    fixed_main += s;
+                    continue;
+                }
                 Dimension::Auto => 0.0,
             }
         };
@@ -165,7 +183,7 @@ fn layout_node(node: &mut WidgetNode, x: f32, y: f32, available_w: f32, availabl
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::style::{ComputedStyle, Edges, FlexDirection};
+    use crate::style::{Edges, FlexDirection};
 
     fn make_node(tag: &str, width: Dimension, height: Dimension) -> WidgetNode {
         let mut node = WidgetNode::new(tag);

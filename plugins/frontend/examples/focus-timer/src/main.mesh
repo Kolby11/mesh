@@ -1,0 +1,56 @@
+<template>
+  <column class="timer">
+    <text class="eyebrow">Focus session</text>
+    <text class="label" :content="label"/>
+    <text class="remaining" :content="remaining"/>
+    <row class="meta">
+      <text class="phase" :content="phase"/>
+      <text class="streak">Streak 4</text>
+    </row>
+    <button class="button">Pause timer</button>
+  </column>
+</template>
+
+<style>
+.timer {
+    gap: token(spacing.sm);
+    padding: token(spacing.md);
+    border-radius: token(radius.lg);
+    background: token(color.primary-container);
+}
+
+.eyebrow {
+    color: token(color.on-primary-container);
+    font-size: token(typography.size.sm);
+}
+
+.label {
+    font-size: token(typography.size.lg);
+    font-weight: 700;
+    color: token(color.on-primary-container);
+}
+
+.remaining {
+    font-size: token(typography.size.2xl);
+    font-weight: 700;
+    color: token(color.on-primary-container);
+}
+
+.meta {
+    justify-content: space-between;
+}
+
+.phase {
+    color: token(color.on-primary-container);
+}
+
+.streak {
+    color: token(color.on-primary-container);
+    font-size: token(typography.size.sm);
+}
+
+.button {
+    background: token(color.surface);
+    color: token(color.on-surface);
+}
+</style>

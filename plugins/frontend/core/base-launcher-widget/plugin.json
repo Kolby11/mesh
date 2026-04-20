@@ -1,0 +1,31 @@
+{
+  "id": "@mesh/base-launcher-widget",
+  "name": "MESH Base Launcher Widget",
+  "version": "0.1.0",
+  "type": "widget",
+  "api_version": "0.1",
+  "description": "Embeddable launcher-style widget for the base surface.",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "capabilities": {
+    "required": [
+      "theme.read",
+      "locale.read"
+    ]
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "exports": {
+    "component": {
+      "tag": "BaseLauncher"
+    }
+  },
+  "accessibility": {
+    "role": "region",
+    "label": "Launcher widget",
+    "description": "Embeddable launcher-style widget for composition tests."
+  }
+}

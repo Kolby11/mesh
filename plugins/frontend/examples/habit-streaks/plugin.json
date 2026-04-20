@@ -1,0 +1,40 @@
+{
+  "id": "@mesh/habit-streaks",
+  "name": "Habit Streaks",
+  "version": "0.1.0",
+  "type": "widget",
+  "api_version": "0.1",
+  "description": "Slot-contributed streak chips for the workspace hub example.",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "capabilities": {
+    "required": [
+      "theme.read",
+      "locale.read"
+    ]
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "slot_contributions": {
+    "@mesh/workspace-hub:footer": [
+      {
+        "id": "habit-streaks",
+        "order": 160,
+        "props": {
+          "headline": "Habits",
+          "first": "Write 6 days",
+          "second": "Walk 11 days",
+          "third": "Review PRs 4 days"
+        }
+      }
+    ]
+  },
+  "accessibility": {
+    "role": "region",
+    "label": "Habit streaks",
+    "description": "Footer streak summary widget"
+  }
+}

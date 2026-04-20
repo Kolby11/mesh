@@ -1,0 +1,48 @@
+{
+  "id": "@mesh/notification-center",
+  "name": "MESH Notification Center",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "description": "Notification center and history",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "capabilities": {
+    "required": [
+      "shell.surface",
+      "service.notifications.read",
+      "service.notifications.manage",
+      "theme.read",
+      "locale.read"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/notifications-interface": ">=1.0.0, <2.0.0",
+      "@mesh/notification-feed": ">=0.1.0",
+      "@mesh/notification-sidebar": ">=0.1.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "provides_slots": {
+    "content": {
+      "accepts": "widget",
+      "layout": "column",
+      "max": 8
+    },
+    "sidebar": {
+      "accepts": "widget",
+      "layout": "column",
+      "max": 4
+    }
+  },
+  "accessibility": {
+    "role": "region",
+    "label": "Notification center",
+    "description": "Default notification center surface"
+  }
+}

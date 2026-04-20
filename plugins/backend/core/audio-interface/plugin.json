@@ -1,0 +1,17 @@
+{
+  "id": "@mesh/audio-interface",
+  "name": "MESH Audio Interface",
+  "version": "1.0.0",
+  "type": "interface",
+  "api_version": "0.1",
+  "description": "Contract package for the mesh.audio interface.",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "interface": {
+    "name": "mesh.audio",
+    "version": "1.0",
+    "file": "interface.toml"
+  }
+}

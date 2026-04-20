@@ -55,19 +55,34 @@ pub trait AudioService: Send + Sync {
     fn streams(&self) -> impl Future<Output = Result<Vec<AudioStream>, AudioError>> + Send;
 
     /// Get the default output device.
-    fn default_output(&self) -> impl Future<Output = Result<Option<AudioDevice>, AudioError>> + Send;
+    fn default_output(
+        &self,
+    ) -> impl Future<Output = Result<Option<AudioDevice>, AudioError>> + Send;
 
     /// Set volume on a device (0.0 to 1.0).
-    fn set_volume(&self, device_id: &str, volume: f64) -> impl Future<Output = Result<(), AudioError>> + Send;
+    fn set_volume(
+        &self,
+        device_id: &str,
+        volume: f64,
+    ) -> impl Future<Output = Result<(), AudioError>> + Send;
 
     /// Mute or unmute a device.
-    fn set_muted(&self, device_id: &str, muted: bool) -> impl Future<Output = Result<(), AudioError>> + Send;
+    fn set_muted(
+        &self,
+        device_id: &str,
+        muted: bool,
+    ) -> impl Future<Output = Result<(), AudioError>> + Send;
 
     /// Set the default output device.
-    fn set_default_output(&self, device_id: &str) -> impl Future<Output = Result<(), AudioError>> + Send;
+    fn set_default_output(
+        &self,
+        device_id: &str,
+    ) -> impl Future<Output = Result<(), AudioError>> + Send;
 
     /// Subscribe to audio events. Returns a receiver.
-    fn subscribe(&self) -> impl Future<Output = Result<tokio::sync::broadcast::Receiver<AudioEvent>, AudioError>> + Send;
+    fn subscribe(
+        &self,
+    ) -> impl Future<Output = Result<tokio::sync::broadcast::Receiver<AudioEvent>, AudioError>> + Send;
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -1,0 +1,99 @@
+<template>
+  <column class="card">
+    <row class="header">
+      <column class="copy">
+        <text class="heading" :content="heading"/>
+        <text class="note" :content="note"/>
+      </column>
+      <box class="accent">
+        <text class="accent-text" :content="accent"/>
+      </box>
+    </row>
+    <row class="days">
+      <column class="day">
+        <text class="label">Mon</text>
+        <text class="value">3</text>
+      </column>
+      <column class="day">
+        <text class="label">Tue</text>
+        <text class="value">5</text>
+      </column>
+      <column class="day active">
+        <text class="label">Wed</text>
+        <text class="value">2</text>
+      </column>
+      <column class="day">
+        <text class="label">Thu</text>
+        <text class="value">4</text>
+      </column>
+      <column class="day">
+        <text class="label">Fri</text>
+        <text class="value">1</text>
+      </column>
+    </row>
+  </column>
+</template>
+
+<style>
+.card {
+    gap: token(spacing.md);
+    padding: token(spacing.md);
+    border-radius: token(radius.lg);
+    background: token(color.surface-container-high);
+}
+
+.header {
+    justify-content: space-between;
+    gap: token(spacing.md);
+}
+
+.copy {
+    gap: token(spacing.xs);
+}
+
+.heading {
+    font-size: token(typography.size.lg);
+    font-weight: 700;
+}
+
+.note {
+    color: token(color.on-surface-variant);
+}
+
+.accent {
+    padding: token(spacing.sm);
+    border-radius: token(radius.full);
+    background: token(color.secondary-container);
+}
+
+.accent-text {
+    color: token(color.on-secondary-container);
+    font-size: token(typography.size.sm);
+}
+
+.days {
+    gap: token(spacing.sm);
+}
+
+.day {
+    width: 84px;
+    padding: token(spacing.sm);
+    border-radius: token(radius.md);
+    background: token(color.surface-container);
+    gap: token(spacing.xs);
+}
+
+.active {
+    background: token(color.primary-container);
+}
+
+.label {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.sm);
+}
+
+.value {
+    font-size: token(typography.size.xl);
+    font-weight: 700;
+}
+</style>

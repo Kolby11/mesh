@@ -47,6 +47,7 @@ mesh-component-backend = { path = "crates/mesh-component-backend" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+semver = "1"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = "0.3"

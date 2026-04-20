@@ -1,0 +1,31 @@
+{
+  "id": "@mesh/pulseaudio-audio",
+  "name": "MESH PulseAudio",
+  "version": "0.1.0",
+  "type": "backend",
+  "api_version": "0.1",
+  "description": "Audio backend using PulseAudio",
+  "authors": ["MESH Project"],
+  "capabilities": {
+    "required": [
+      "service.audio.read",
+      "service.audio.control"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/audio-interface": ">=1.0.0, <2.0.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.luau"
+  },
+  "provides": [
+    {
+      "interface": "mesh.audio",
+      "version": "1.0",
+      "backend_name": "PulseAudio",
+      "priority": 50
+    }
+  ]
+}

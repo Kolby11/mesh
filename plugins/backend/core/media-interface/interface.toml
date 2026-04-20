@@ -1,0 +1,44 @@
+[[methods]]
+name = "players"
+returns = "[MediaInfo]"
+
+[[methods]]
+name = "active_player"
+returns = "MediaInfo?"
+
+[[methods]]
+name = "play"
+args = [{ name = "player_id", type = "string" }]
+returns = "Result"
+
+[[methods]]
+name = "pause"
+args = [{ name = "player_id", type = "string" }]
+returns = "Result"
+
+[[methods]]
+name = "next"
+args = [{ name = "player_id", type = "string" }]
+returns = "Result"
+
+[[methods]]
+name = "previous"
+args = [{ name = "player_id", type = "string" }]
+returns = "Result"
+
+[[events]]
+name = "PlaybackChanged"
+payload = "{ player: MediaInfo }"
+
+[types.MediaInfo]
+fields = [
+  { name = "id", type = "string" },
+  { name = "title", type = "string" },
+  { name = "artist", type = "string" },
+  { name = "album", type = "string" },
+  { name = "state", type = "string" }
+]
+
+[capabilities]
+required = ["service.media.read"]
+optional = ["service.media.control"]

@@ -1,0 +1,53 @@
+{
+  "id": "@mesh/workspace-hub",
+  "name": "Workspace Hub",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "description": "Example host surface showing dependency-backed component imports and slot extension points.",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "capabilities": {
+    "required": [
+      "shell.surface",
+      "theme.read",
+      "locale.read"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/date-strip": ">=0.1.0",
+      "@mesh/calendar-card": ">=0.1.0",
+      "@mesh/agenda-list": ">=0.1.0",
+      "@mesh/focus-timer": ">=0.1.0",
+      "@mesh/status-rail": ">=0.1.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "provides_slots": {
+    "main-extra": {
+      "accepts": "widget",
+      "layout": "column",
+      "max": 3
+    },
+    "sidebar-extra": {
+      "accepts": "widget",
+      "layout": "column",
+      "max": 3
+    },
+    "footer": {
+      "accepts": "widget",
+      "layout": "row",
+      "max": 4
+    }
+  },
+  "accessibility": {
+    "role": "region",
+    "label": "Workspace hub",
+    "description": "Example composition surface for frontend plugin authors"
+  }
+}

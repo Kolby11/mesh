@@ -1,0 +1,36 @@
+{
+  "id": "@mesh/mock-notifications",
+  "name": "MESH Mock Notifications",
+  "version": "0.1.0",
+  "type": "backend",
+  "api_version": "0.1",
+  "description": "Default notifications backend used by the shell's notification surfaces.",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "capabilities": {
+    "required": [
+      "service.notifications.read"
+    ],
+    "optional": [
+      "service.notifications.manage"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/notifications-interface": ">=1.0.0, <2.0.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.luau"
+  },
+  "provides": [
+    {
+      "interface": "mesh.notifications",
+      "version": "1.0",
+      "backend_name": "Mock Notifications",
+      "priority": 100
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "id": "@mesh/base-surface",
+  "name": "MESH Base Surface",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "description": "Composable base surface with a launcher pane and a sidebar pane.",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "capabilities": {
+    "required": [
+      "shell.surface",
+      "theme.read",
+      "locale.read"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/base-launcher-widget": ">=0.1.0",
+      "@mesh/base-sidebar-widget": ">=0.1.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "provides_slots": {
+    "main": {
+      "accepts": "widget",
+      "layout": "column",
+      "max": 4
+    },
+    "sidebar": {
+      "accepts": "widget",
+      "layout": "column",
+      "max": 4
+    }
+  },
+  "settings": {
+    "namespace": "@mesh/base-surface",
+    "schema": {
+      "surface": {
+        "type": "object",
+        "description": "Placement for the top-level surface window.",
+        "properties": {
+          "anchor": {
+            "type": "enum",
+            "values": ["top", "bottom", "left", "right"],
+            "default": "right",
+            "description": "Screen edge this surface anchors to."
+          },
+          "layer": {
+            "type": "enum",
+            "values": ["background", "bottom", "top", "overlay"],
+            "default": "overlay",
+            "description": "Layer-shell stacking layer."
+          },
+          "width": {
+            "type": "integer",
+            "default": 1120,
+            "min": 320,
+            "max": 1920,
+            "description": "Surface width in pixels."
+          },
+          "height": {
+            "type": "integer",
+            "default": 720,
+            "min": 240,
+            "max": 1440,
+            "description": "Surface height in pixels."
+          },
+          "exclusive_zone": {
+            "type": "integer",
+            "default": 0,
+            "min": 0,
+            "max": 512,
+            "description": "Reserved compositor space in pixels."
+          },
+          "keyboard_mode": {
+            "type": "enum",
+            "values": ["none", "exclusive", "on_demand"],
+            "default": "on_demand",
+            "description": "Keyboard interactivity policy for the surface."
+          },
+          "visible_on_start": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether this surface starts visible when Mesh boots."
+          }
+        }
+      },
+      "layout": {
+        "type": "object",
+        "description": "Display copy for the host surface chrome.",
+        "properties": {
+          "title": {
+            "type": "string",
+            "default": "Base Surface Lab",
+            "description": "Primary heading shown in the surface."
+          },
+          "subtitle": {
+            "type": "string",
+            "default": "Direct widget imports on the left, a companion sidebar on the right.",
+            "description": "Secondary text shown under the heading."
+          }
+        }
+      }
+    }
+  },
+  "accessibility": {
+    "role": "region",
+    "label": "Base surface",
+    "description": "Composable base surface for testing imported widgets and shell placement settings."
+  }
+}

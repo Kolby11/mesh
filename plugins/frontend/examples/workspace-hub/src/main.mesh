@@ -1,0 +1,50 @@
+<template>
+  <column class="hub">
+    <DateStrip title="Tuesday, April 22" context="Sprint review day" summary="Three meetings, one release train, two focus blocks"/>
+    <row class="body">
+      <column class="main">
+        <CalendarCard heading="This week" accent="Launch prep" note="Review milestones before 16:00"/>
+        <AgendaList heading="Today's agenda" first="09:30 Design crit" second="11:00 API review" third="14:00 Stakeholder sync"/>
+        <slot name="main-extra"/>
+      </column>
+      <column class="sidebar">
+        <FocusTimer label="Deep work" remaining="42:00" phase="Writing" />
+        <StatusRail heading="Live systems" primary="Docs build healthy" secondary="2 plugin updates waiting" tertiary="Theme preview synced"/>
+        <slot name="sidebar-extra"/>
+      </column>
+    </row>
+    <row class="footer">
+      <slot name="footer"/>
+    </row>
+  </column>
+</template>
+
+<style>
+.hub {
+    width: 1080px;
+    background: token(color.surface);
+    color: token(color.on-surface);
+    padding: token(spacing.lg);
+    gap: token(spacing.md);
+}
+
+.body {
+    gap: token(spacing.md);
+    align-items: start;
+}
+
+.main {
+    flex-grow: 1;
+    gap: token(spacing.md);
+}
+
+.sidebar {
+    width: 280px;
+    gap: token(spacing.md);
+}
+
+.footer {
+    gap: token(spacing.sm);
+    justify-content: space-between;
+}
+</style>

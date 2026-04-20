@@ -34,10 +34,3 @@
     gap: token(spacing.sm);
 }
 </style>
-
-<meta>
-name = "MESH Quick Settings"
-description = "Default quick settings surface"
-role = "dialog"
-label = "Quick settings"
-</meta>

@@ -46,7 +46,9 @@ pub trait MediaService: Send + Sync {
     fn next(&self, player_id: &str) -> impl Future<Output = Result<(), MediaError>> + Send;
     fn previous(&self, player_id: &str) -> impl Future<Output = Result<(), MediaError>> + Send;
 
-    fn subscribe(&self) -> impl Future<Output = Result<tokio::sync::broadcast::Receiver<MediaEvent>, MediaError>> + Send;
+    fn subscribe(
+        &self,
+    ) -> impl Future<Output = Result<tokio::sync::broadcast::Receiver<MediaEvent>, MediaError>> + Send;
 }
 
 #[derive(Debug, thiserror::Error)]

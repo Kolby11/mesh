@@ -1,0 +1,58 @@
+[[methods]]
+name = "output_devices"
+returns = "[Device]"
+
+[[methods]]
+name = "input_devices"
+returns = "[Device]"
+
+[[methods]]
+name = "streams"
+returns = "[Stream]"
+
+[[methods]]
+name = "default_output"
+returns = "Device?"
+
+[[methods]]
+name = "set_volume"
+args = [
+  { name = "device_id", type = "string" },
+  { name = "volume", type = "float" }
+]
+returns = "Result"
+
+[[methods]]
+name = "set_muted"
+args = [
+  { name = "device_id", type = "string" },
+  { name = "muted", type = "boolean" }
+]
+returns = "Result"
+
+[[events]]
+name = "VolumeChanged"
+payload = "{ device_id: string, level: float }"
+
+[types.Device]
+fields = [
+  { name = "id", type = "string" },
+  { name = "name", type = "string" },
+  { name = "description", type = "string" },
+  { name = "is_default", type = "boolean" },
+  { name = "volume", type = "float" },
+  { name = "muted", type = "boolean" }
+]
+
+[types.Stream]
+fields = [
+  { name = "id", type = "string" },
+  { name = "name", type = "string" },
+  { name = "application", type = "string" },
+  { name = "volume", type = "float" },
+  { name = "muted", type = "boolean" }
+]
+
+[capabilities]
+required = ["service.audio.read"]
+optional = ["service.audio.control"]

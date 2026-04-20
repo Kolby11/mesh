@@ -54,17 +54,32 @@ pub enum NetworkEvent {
 pub trait NetworkService: Send + Sync {
     fn backend_id(&self) -> &str;
 
-    fn connections(&self) -> impl Future<Output = Result<Vec<NetworkConnection>, NetworkError>> + Send;
+    fn connections(
+        &self,
+    ) -> impl Future<Output = Result<Vec<NetworkConnection>, NetworkError>> + Send;
     fn devices(&self) -> impl Future<Output = Result<Vec<NetworkDevice>, NetworkError>> + Send;
-    fn active_connection(&self) -> impl Future<Output = Result<Option<NetworkConnection>, NetworkError>> + Send;
+    fn active_connection(
+        &self,
+    ) -> impl Future<Output = Result<Option<NetworkConnection>, NetworkError>> + Send;
 
-    fn connect(&self, connection_id: &str) -> impl Future<Output = Result<(), NetworkError>> + Send;
-    fn disconnect(&self, connection_id: &str) -> impl Future<Output = Result<(), NetworkError>> + Send;
+    fn connect(&self, connection_id: &str)
+    -> impl Future<Output = Result<(), NetworkError>> + Send;
+    fn disconnect(
+        &self,
+        connection_id: &str,
+    ) -> impl Future<Output = Result<(), NetworkError>> + Send;
 
-    fn wifi_scan(&self) -> impl Future<Output = Result<Vec<NetworkConnection>, NetworkError>> + Send;
-    fn set_wifi_enabled(&self, enabled: bool) -> impl Future<Output = Result<(), NetworkError>> + Send;
+    fn wifi_scan(
+        &self,
+    ) -> impl Future<Output = Result<Vec<NetworkConnection>, NetworkError>> + Send;
+    fn set_wifi_enabled(
+        &self,
+        enabled: bool,
+    ) -> impl Future<Output = Result<(), NetworkError>> + Send;
 
-    fn subscribe(&self) -> impl Future<Output = Result<tokio::sync::broadcast::Receiver<NetworkEvent>, NetworkError>> + Send;
+    fn subscribe(
+        &self,
+    ) -> impl Future<Output = Result<tokio::sync::broadcast::Receiver<NetworkEvent>, NetworkError>> + Send;
 }
 
 #[derive(Debug, thiserror::Error)]

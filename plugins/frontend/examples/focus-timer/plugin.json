@@ -1,0 +1,31 @@
+{
+  "id": "@mesh/focus-timer",
+  "name": "Focus Timer",
+  "version": "0.1.0",
+  "type": "widget",
+  "api_version": "0.1",
+  "description": "Focus timer widget for the workspace hub example.",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "capabilities": {
+    "required": [
+      "theme.read",
+      "locale.read"
+    ]
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "exports": {
+    "component": {
+      "tag": "FocusTimer"
+    }
+  },
+  "accessibility": {
+    "role": "status",
+    "label": "Focus timer",
+    "description": "Sidebar focus session widget"
+  }
+}

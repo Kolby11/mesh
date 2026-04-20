@@ -4,16 +4,48 @@ use crate::tree::{NodeId, WidgetNode};
 /// A UI event targeted at a specific node.
 #[derive(Debug, Clone)]
 pub enum UiEvent {
-    PointerDown { node_id: NodeId, x: f32, y: f32 },
-    PointerUp { node_id: NodeId, x: f32, y: f32 },
-    PointerMove { node_id: NodeId, x: f32, y: f32 },
-    PointerEnter { node_id: NodeId },
-    PointerLeave { node_id: NodeId },
-    KeyDown { node_id: NodeId, key: String, modifiers: Modifiers },
-    KeyUp { node_id: NodeId, key: String, modifiers: Modifiers },
-    Focus { node_id: NodeId },
-    Blur { node_id: NodeId },
-    Scroll { node_id: NodeId, dx: f32, dy: f32 },
+    PointerDown {
+        node_id: NodeId,
+        x: f32,
+        y: f32,
+    },
+    PointerUp {
+        node_id: NodeId,
+        x: f32,
+        y: f32,
+    },
+    PointerMove {
+        node_id: NodeId,
+        x: f32,
+        y: f32,
+    },
+    PointerEnter {
+        node_id: NodeId,
+    },
+    PointerLeave {
+        node_id: NodeId,
+    },
+    KeyDown {
+        node_id: NodeId,
+        key: String,
+        modifiers: Modifiers,
+    },
+    KeyUp {
+        node_id: NodeId,
+        key: String,
+        modifiers: Modifiers,
+    },
+    Focus {
+        node_id: NodeId,
+    },
+    Blur {
+        node_id: NodeId,
+    },
+    Scroll {
+        node_id: NodeId,
+        dx: f32,
+        dy: f32,
+    },
 }
 
 impl UiEvent {
@@ -62,10 +94,27 @@ pub struct Modifiers {
 /// A raw input event from the Wayland backend.
 #[derive(Debug, Clone)]
 pub enum RawInputEvent {
-    PointerMotion { x: f32, y: f32 },
-    PointerButton { x: f32, y: f32, button: u32, pressed: bool },
-    Key { keycode: u32, pressed: bool, modifiers: Modifiers },
-    Scroll { x: f32, y: f32, dx: f32, dy: f32 },
+    PointerMotion {
+        x: f32,
+        y: f32,
+    },
+    PointerButton {
+        x: f32,
+        y: f32,
+        button: u32,
+        pressed: bool,
+    },
+    Key {
+        keycode: u32,
+        pressed: bool,
+        modifiers: Modifiers,
+    },
+    Scroll {
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    },
 }
 
 /// Performs hit-testing and event routing on a widget tree.
@@ -83,9 +132,17 @@ impl EventDispatcher {
             RawInputEvent::PointerButton { x, y, pressed, .. } => {
                 if let Some(node_id) = Self::hit_test(root, *x, *y) {
                     if *pressed {
-                        vec![UiEvent::PointerDown { node_id, x: *x, y: *y }]
+                        vec![UiEvent::PointerDown {
+                            node_id,
+                            x: *x,
+                            y: *y,
+                        }]
                     } else {
-                        vec![UiEvent::PointerUp { node_id, x: *x, y: *y }]
+                        vec![UiEvent::PointerUp {
+                            node_id,
+                            x: *x,
+                            y: *y,
+                        }]
                     }
                 } else {
                     vec![]
@@ -93,24 +150,44 @@ impl EventDispatcher {
             }
             RawInputEvent::PointerMotion { x, y } => {
                 if let Some(node_id) = Self::hit_test(root, *x, *y) {
-                    vec![UiEvent::PointerMove { node_id, x: *x, y: *y }]
+                    vec![UiEvent::PointerMove {
+                        node_id,
+                        x: *x,
+                        y: *y,
+                    }]
                 } else {
                     vec![]
                 }
             }
-            RawInputEvent::Key { keycode, pressed, modifiers } => {
+            RawInputEvent::Key {
+                keycode,
+                pressed,
+                modifiers,
+            } => {
                 // Keys go to the focused node. For now, target root.
                 let node_id = root.id;
                 let key = format!("{keycode}");
                 if *pressed {
-                    vec![UiEvent::KeyDown { node_id, key, modifiers: *modifiers }]
+                    vec![UiEvent::KeyDown {
+                        node_id,
+                        key,
+                        modifiers: *modifiers,
+                    }]
                 } else {
-                    vec![UiEvent::KeyUp { node_id, key, modifiers: *modifiers }]
+                    vec![UiEvent::KeyUp {
+                        node_id,
+                        key,
+                        modifiers: *modifiers,
+                    }]
                 }
             }
             RawInputEvent::Scroll { x, y, dx, dy } => {
                 if let Some(node_id) = Self::hit_test(root, *x, *y) {
-                    vec![UiEvent::Scroll { node_id, dx: *dx, dy: *dy }]
+                    vec![UiEvent::Scroll {
+                        node_id,
+                        dx: *dx,
+                        dy: *dy,
+                    }]
                 } else {
                     vec![]
                 }
@@ -120,23 +197,67 @@ impl EventDispatcher {
 }
 
 fn hit_test_node(node: &WidgetNode, x: f32, y: f32) -> Option<NodeId> {
-    if !node.layout.contains(x, y) {
+    hit_test_node_with_offset(node, x, y, 0.0, 0.0)
+}
+
+fn hit_test_node_with_offset(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<NodeId> {
+    let inside_self = layout_contains_with_offset(node, x, y, offset_x, offset_y);
+    if !inside_self && node_clips_children(node) {
         return None;
     }
-    // Check children in reverse order (last painted = topmost).
+
+    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
     for child in node.children.iter().rev() {
-        if let Some(id) = hit_test_node(child, x, y) {
+        if let Some(id) = hit_test_node_with_offset(child, x, y, child_offset_x, child_offset_y) {
             return Some(id);
         }
     }
-    Some(node.id)
+
+    if inside_self { Some(node.id) } else { None }
+}
+
+fn layout_contains_with_offset(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> bool {
+    let left = node.layout.x + offset_x;
+    let top = node.layout.y + offset_y;
+    x >= left && x < left + node.layout.width && y >= top && y < top + node.layout.height
+}
+
+fn child_offsets_with_scroll(node: &WidgetNode, offset_x: f32, offset_y: f32) -> (f32, f32) {
+    (
+        offset_x - node_attr_f32(node, "_mesh_scroll_x"),
+        offset_y - node_attr_f32(node, "_mesh_scroll_y"),
+    )
+}
+
+fn node_attr_f32(node: &WidgetNode, key: &str) -> f32 {
+    node.attributes
+        .get(key)
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0)
+}
+
+fn node_clips_children(node: &WidgetNode) -> bool {
+    node.computed_style.overflow_x.clips_contents()
+        || node.computed_style.overflow_y.clips_contents()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::style::Dimension;
     use crate::layout::LayoutEngine;
+    use crate::style::Dimension;
 
     #[test]
     fn hit_test_finds_deepest_node() {

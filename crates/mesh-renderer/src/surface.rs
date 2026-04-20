@@ -1,10 +1,10 @@
+use crate::RenderError;
 /// Render surface management.
 ///
 /// Each render surface wraps a Wayland surface with a pixel buffer.
 /// This module provides the configuration and management types.
 /// The actual Wayland protocol integration will use `smithay-client-toolkit`.
 use crate::buffer::PixelBuffer;
-use crate::RenderError;
 use mesh_wayland::{Edge, KeyboardMode, Layer};
 
 /// Unique identifier for a render surface.

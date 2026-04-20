@@ -1,0 +1,37 @@
+{
+  "id": "@mesh/notification-feed",
+  "name": "MESH Notification Feed",
+  "version": "0.1.0",
+  "type": "widget",
+  "api_version": "0.1",
+  "description": "Embeddable notification list widget",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "capabilities": {
+    "required": [
+      "service.notifications.read",
+      "theme.read",
+      "locale.read"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/notifications-interface": ">=1.0.0, <2.0.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "exports": {
+    "component": {
+      "tag": "NotificationFeed"
+    }
+  },
+  "accessibility": {
+    "role": "region",
+    "label": "Notification feed",
+    "description": "Notification history list widget"
+  }
+}

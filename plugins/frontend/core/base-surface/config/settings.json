@@ -1,0 +1,15 @@
+{
+  "surface": {
+    "anchor": "right",
+    "layer": "overlay",
+    "width": 1120,
+    "height": 720,
+    "exclusive_zone": 0,
+    "keyboard_mode": "on_demand",
+    "visible_on_start": true
+  },
+  "layout": {
+    "title": "Base Surface Lab",
+    "subtitle": "Direct widget imports on the left, a companion sidebar on the right."
+  }
+}

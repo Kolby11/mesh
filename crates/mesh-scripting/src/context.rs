@@ -1,6 +1,8 @@
+use crate::host_api::InterfaceProxy;
 /// Script execution context — one per plugin/component instance.
 use mesh_capability::CapabilitySet;
 use mesh_locale::LocaleEngine;
+use mesh_service::{InterfaceCatalog, InterfaceResolution};
 use mesh_ui::VariableStore;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -22,6 +24,12 @@ pub enum ScriptError {
 
     #[error("script execution timed out")]
     Timeout,
+
+    #[error("interface unavailable: {0}")]
+    InterfaceUnavailable(String),
+
+    #[error("unsupported interface operation: {interface}.{method}")]
+    UnsupportedOperation { interface: String, method: String },
 }
 
 /// Reactive state exposed to and mutated by Luau scripts.
@@ -44,7 +52,11 @@ impl ScriptState {
 
     /// Set a variable and mark state as dirty.
     pub fn set(&mut self, name: impl Into<String>, value: Value) {
-        self.variables.insert(name.into(), value);
+        let name = name.into();
+        if self.variables.get(&name) == Some(&value) {
+            return;
+        }
+        self.variables.insert(name, value);
         self.dirty = true;
     }
 
@@ -85,6 +97,8 @@ pub struct ScriptContext {
     pub capabilities: CapabilitySet,
     pub state: ScriptState,
     handlers: HashMap<String, ScriptFunction>,
+    interface_catalog: InterfaceCatalog,
+    interface_bindings: HashMap<String, InterfaceResolution>,
 }
 
 #[derive(Debug, Clone)]
@@ -94,13 +108,22 @@ struct ScriptFunction {
 
 impl ScriptContext {
     /// Create a new script context for a plugin.
-    pub fn new(plugin_id: impl Into<String>, capabilities: CapabilitySet) -> Result<Self, ScriptError> {
+    pub fn new(
+        plugin_id: impl Into<String>,
+        capabilities: CapabilitySet,
+    ) -> Result<Self, ScriptError> {
         Ok(Self {
             plugin_id: plugin_id.into(),
             capabilities,
             state: ScriptState::new(),
             handlers: HashMap::new(),
+            interface_catalog: InterfaceCatalog::default(),
+            interface_bindings: HashMap::new(),
         })
+    }
+
+    pub fn set_interface_catalog(&mut self, catalog: InterfaceCatalog) {
+        self.interface_catalog = catalog;
     }
 
     /// Load a script source. Parses and registers functions.
@@ -109,6 +132,7 @@ impl ScriptContext {
     /// Real implementation will execute in the Luau VM.
     pub fn load_script(&mut self, source: &str) -> Result<(), ScriptError> {
         self.handlers = parse_functions(source);
+        self.interface_bindings.clear();
         tracing::info!("loaded script for plugin {}", self.plugin_id);
         Ok(())
     }
@@ -164,6 +188,42 @@ impl ScriptContext {
             return Ok(());
         }
 
+        if let Some((binding, interface, version)) = parse_interface_binding(trimmed) {
+            let canonical = InterfaceProxy::canonical_name(&interface);
+            if canonical.starts_with("mesh.")
+                && !InterfaceProxy::can_read(&self.capabilities, &canonical)
+            {
+                return Err(ScriptError::CapabilityDenied(canonical));
+            }
+
+            let resolution = self
+                .interface_catalog
+                .resolve(&canonical, version.as_deref());
+            if resolution.contract.is_none() || resolution.provider.is_none() {
+                return Err(ScriptError::InterfaceUnavailable(format!(
+                    "{}{}",
+                    canonical,
+                    version
+                        .as_deref()
+                        .map(|value| format!(" ({value})"))
+                        .unwrap_or_default()
+                )));
+            }
+
+            tracing::debug!(
+                "{} bound interface alias '{}' -> {}{}",
+                self.plugin_id,
+                binding,
+                canonical,
+                version
+                    .as_deref()
+                    .map(|value| format!(" {value}"))
+                    .unwrap_or_default()
+            );
+            self.interface_bindings.insert(binding, resolution);
+            return Ok(());
+        }
+
         if let Some(args) = extract_call_args(trimmed, "mesh.state.set") {
             if args.len() != 2 {
                 return Err(ScriptError::LuaError(format!(
@@ -205,6 +265,35 @@ impl ScriptContext {
             if let Some(channel) = args.first().and_then(|value| parse_string_literal(value)) {
                 tracing::info!("{} published event {}", self.plugin_id, channel);
             }
+            return Ok(());
+        }
+
+        if let Some((binding, method)) = parse_bound_method_call(trimmed, &self.interface_bindings)
+        {
+            let resolution = self
+                .interface_bindings
+                .get(binding)
+                .expect("bound interface must exist");
+            let contract = resolution
+                .contract
+                .as_ref()
+                .ok_or_else(|| ScriptError::InterfaceUnavailable(resolution.requested.clone()))?;
+            if !contract
+                .methods
+                .iter()
+                .any(|candidate| candidate.name == method)
+            {
+                return Err(ScriptError::UnsupportedOperation {
+                    interface: contract.interface.clone(),
+                    method: method.to_string(),
+                });
+            }
+            tracing::debug!(
+                "{} invoked {} on interface alias '{}'",
+                self.plugin_id,
+                method,
+                binding
+            );
             return Ok(());
         }
 
@@ -256,6 +345,48 @@ fn extract_call_args(line: &str, prefix: &str) -> Option<Vec<String>> {
     let call = call.trim();
     let inner = call.strip_prefix('(')?.strip_suffix(')')?;
     Some(split_call_args(inner))
+}
+
+fn parse_interface_binding(line: &str) -> Option<(String, String, Option<String>)> {
+    let trimmed = line.trim();
+    let assignment = trimmed.strip_prefix("local ")?;
+    let (binding, expr) = assignment.split_once('=')?;
+    let binding = binding.trim().to_string();
+    let expr = expr.trim();
+
+    let (args, _kind) = if let Some(args) = extract_call_args(expr, "mesh.interfaces.get") {
+        (args, "interface")
+    } else if let Some(args) = extract_call_args(expr, "mesh.services.get") {
+        (args, "service")
+    } else {
+        return None;
+    };
+
+    let interface = parse_string_literal(args.first()?)?;
+    let version = args.get(1).and_then(|value| parse_string_literal(value));
+    Some((binding, interface, version))
+}
+
+fn parse_bound_method_call<'a>(
+    line: &'a str,
+    bindings: &HashMap<String, InterfaceResolution>,
+) -> Option<(&'a str, &'a str)> {
+    let trimmed = line.trim();
+    let call_target = trimmed.split('(').next()?.trim();
+
+    if let Some((binding, method)) = call_target.split_once(':') {
+        if bindings.contains_key(binding.trim()) {
+            return Some((binding.trim(), method.trim()));
+        }
+    }
+
+    if let Some((binding, method)) = call_target.split_once('.') {
+        if bindings.contains_key(binding.trim()) {
+            return Some((binding.trim(), method.trim()));
+        }
+    }
+
+    None
 }
 
 fn split_call_args(inner: &str) -> Vec<String> {
@@ -354,5 +485,139 @@ impl<'a> VariableStore for LocaleBoundState<'a> {
 
     fn translate(&self, key: &str) -> Option<String> {
         self.locale.translate(key).map(str::to_string)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mesh_capability::{Capability, CapabilitySet};
+    use mesh_service::{
+        ContractCapabilities, InterfaceCatalog, InterfaceContract, InterfaceMethod,
+        InterfaceProvider, parse_contract_version,
+    };
+    use std::path::PathBuf;
+
+    fn audio_catalog() -> InterfaceCatalog {
+        let mut catalog = InterfaceCatalog::default();
+        catalog.register_contract(InterfaceContract {
+            interface: "mesh.audio".into(),
+            version: parse_contract_version("1.0").unwrap(),
+            file_path: PathBuf::from("<test>"),
+            methods: vec![
+                InterfaceMethod {
+                    name: "default_output".into(),
+                    args: Vec::new(),
+                    returns: Some("Device?".into()),
+                },
+                InterfaceMethod {
+                    name: "set_volume".into(),
+                    args: Vec::new(),
+                    returns: Some("Result".into()),
+                },
+            ],
+            events: Vec::new(),
+            types: HashMap::new(),
+            capabilities: ContractCapabilities::default(),
+        });
+        catalog.register_provider(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            provider_plugin: "@mesh/pipewire-audio".into(),
+            backend_name: "PipeWire".into(),
+            priority: 100,
+        });
+        catalog
+    }
+
+    #[test]
+    fn binds_interface_aliases_from_new_api() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script(
+            r#"
+function init()
+    local audio = mesh.interfaces.get("mesh.audio", ">=1.0")
+end
+"#,
+        )
+        .unwrap();
+        ctx.call_init().unwrap();
+
+        assert_eq!(
+            ctx.interface_bindings
+                .get("audio")
+                .map(|resolution| resolution.requested.as_str()),
+            Some("mesh.audio")
+        );
+    }
+
+    #[test]
+    fn binds_interface_aliases_from_legacy_service_api() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+
+        let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script(
+            r#"
+function init()
+    local audio = mesh.services.get("audio")
+end
+"#,
+        )
+        .unwrap();
+        ctx.call_init().unwrap();
+
+        assert_eq!(
+            ctx.interface_bindings
+                .get("audio")
+                .map(|resolution| resolution.requested.as_str()),
+            Some("mesh.audio")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_interface_contract() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+        ctx.load_script(
+            r#"
+function init()
+    local audio = mesh.interfaces.get("mesh.audio", ">=1.0")
+end
+"#,
+        )
+        .unwrap();
+
+        let err = ctx.call_init().unwrap_err();
+        assert!(matches!(err, ScriptError::InterfaceUnavailable(_)));
+    }
+
+    #[test]
+    fn rejects_unsupported_interface_method() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script(
+            r#"
+function init()
+    local audio = mesh.interfaces.get("mesh.audio", ">=1.0")
+    audio:mute_all()
+end
+"#,
+        )
+        .unwrap();
+
+        let err = ctx.call_init().unwrap_err();
+        assert!(matches!(
+            err,
+            ScriptError::UnsupportedOperation { interface, method }
+            if interface == "mesh.audio" && method == "mute_all"
+        ));
     }
 }

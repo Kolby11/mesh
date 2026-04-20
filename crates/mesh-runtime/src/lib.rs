@@ -2,7 +2,6 @@
 ///
 /// This crate will host the Luau sandbox and provide the bridge between
 /// plugin scripts and the core's capability-gated host APIs.
-
 use mesh_capability::CapabilitySet;
 
 /// Configuration for the plugin sandbox.
@@ -18,7 +17,7 @@ impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
             memory_limit: 64 * 1024 * 1024, // 64 MB
-            frame_budget_us: 4_000,          // 4ms
+            frame_budget_us: 4_000,         // 4ms
         }
     }
 }

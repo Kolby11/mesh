@@ -1,0 +1,47 @@
+<template>
+  <column class="rail">
+    <text class="heading" :content="heading"/>
+    <box class="item">
+      <text class="label">Primary</text>
+      <text class="value" :content="primary"/>
+    </box>
+    <box class="item">
+      <text class="label">Secondary</text>
+      <text class="value" :content="secondary"/>
+    </box>
+    <box class="item">
+      <text class="label">Tertiary</text>
+      <text class="value" :content="tertiary"/>
+    </box>
+  </column>
+</template>
+
+<style>
+.rail {
+    gap: token(spacing.sm);
+    padding: token(spacing.md);
+    border-radius: token(radius.lg);
+    background: token(color.surface-container-high);
+}
+
+.heading {
+    font-size: token(typography.size.lg);
+    font-weight: 700;
+}
+
+.item {
+    gap: token(spacing.xs);
+    padding: token(spacing.sm);
+    border-radius: token(radius.md);
+    background: token(color.surface-container);
+}
+
+.label {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.sm);
+}
+
+.value {
+    font-weight: 600;
+}
+</style>

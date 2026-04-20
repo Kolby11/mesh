@@ -1,0 +1,121 @@
+<template>
+  <row class="surface">
+    <column class="main">
+      <text class="eyebrow">Composed Surface</text>
+      <text class="title" :content="settings.layout.title"/>
+      <text class="subtitle" :content="settings.layout.subtitle"/>
+
+      <row class="settings-grid">
+        <column class="setting">
+          <text class="label">Anchor</text>
+          <text class="value" :content="settings.surface.anchor"/>
+        </column>
+        <column class="setting">
+          <text class="label">Layer</text>
+          <text class="value" :content="settings.surface.layer"/>
+        </column>
+        <column class="setting">
+          <text class="label">Size</text>
+          <text class="value" :content="settings.surface.width"/>
+          <text class="value" :content="settings.surface.height"/>
+        </column>
+        <column class="setting">
+          <text class="label">Keyboard</text>
+          <text class="value" :content="settings.surface.keyboard_mode"/>
+        </column>
+      </row>
+
+      <BaseLauncher/>
+      <slot name="main"/>
+    </column>
+
+    <column class="sidebar">
+      <BaseSidebar/>
+      <slot name="sidebar"/>
+    </column>
+  </row>
+</template>
+
+<style>
+.surface {
+    width: 100%;
+    height: 100%;
+    background: token(color.surface);
+    color: token(color.on-surface);
+    gap: token(spacing.lg);
+    padding: token(spacing.lg);
+    overflow: hidden;
+}
+
+.main {
+    flex-grow: 1;
+    gap: token(spacing.md);
+    overflow-y: auto;
+}
+
+.sidebar {
+    width: 300px;
+    gap: token(spacing.md);
+    overflow-y: auto;
+}
+
+.eyebrow {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+}
+
+.title {
+    font-size: token(typography.size.xl);
+    font-weight: 800;
+}
+
+.subtitle {
+    color: token(color.on-surface-variant);
+}
+
+.settings-grid {
+    gap: token(spacing.md);
+}
+
+.setting {
+    background: token(color.surface-container);
+    border-radius: token(radius.md);
+    padding: token(spacing.md);
+    gap: token(spacing.xs);
+}
+
+.label {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.sm);
+}
+
+.value {
+    font-weight: 700;
+}
+
+@container (max-width: 900px) {
+    .surface {
+        direction: column;
+    }
+
+    .sidebar {
+        width: 100%;
+    }
+
+    .settings-grid {
+        direction: column;
+    }
+}
+
+@container (max-width: 640px) {
+    .surface {
+        padding: token(spacing.md);
+        gap: token(spacing.md);
+    }
+
+    .title {
+        font-size: token(typography.size.lg);
+    }
+}
+</style>

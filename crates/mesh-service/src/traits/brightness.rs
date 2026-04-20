@@ -19,7 +19,11 @@ pub trait BrightnessService: Send + Sync {
     /// Set brightness (0.0 to 1.0).
     fn set(&self, value: f64) -> impl Future<Output = Result<(), BrightnessError>> + Send;
 
-    fn subscribe(&self) -> impl Future<Output = Result<tokio::sync::broadcast::Receiver<BrightnessEvent>, BrightnessError>> + Send;
+    fn subscribe(
+        &self,
+    ) -> impl Future<
+        Output = Result<tokio::sync::broadcast::Receiver<BrightnessEvent>, BrightnessError>,
+    > + Send;
 }
 
 #[derive(Debug, thiserror::Error)]

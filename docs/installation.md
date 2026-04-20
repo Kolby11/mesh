@@ -14,6 +14,11 @@ Every plugin has a single `plugin.json` at its package root. It is the
 authoritative manifest: identity, dependencies, capabilities, entrypoints,
 settings schema, and defaults all live here.
 
+For the default service stack, even the built-in interface contracts are
+ordinary plugins on disk. The shell core does not seed service APIs at
+startup; it discovers interface and backend plugins the same way it discovers
+frontends.
+
 > **Migration note.** `plugin.json` replaces the earlier `mesh.toml`.
 > Existing plugin source in `plugins/` still uses the TOML form during
 > transition; the installer accepts both but `plugin.json` is the target
@@ -64,6 +69,10 @@ settings schema, and defaults all live here.
     "settings_ui":  null
   },
 
+  "exports": {
+    "component": { "tag": "PanelWidget" }
+  },
+
   "provides_slots": {
     "left":   { "accepts": "widget", "layout": "row", "max": 4 },
     "center": { "accepts": "widget", "layout": "row", "max": 1 },
@@ -94,6 +103,19 @@ settings schema, and defaults all live here.
   }
 }
 ```
+
+### Frontend composition
+
+Frontend plugins can embed other frontend plugins in two complementary ways:
+
+- `dependencies.plugins` declares the frontend plugins you want to consume
+- the consumed plugin exports a tag through `exports.component.tag`, so markup
+  like `<ClockWidget/>` resolves through that declared dependency
+- `provides_slots` exposes named insertion points and `slot_contributions`
+  lets other widget plugins attach themselves to those slots
+
+This lets a surface act as a host shell while keeping individual widgets
+packaged, versioned, and replaceable on their own.
 
 ### Variant: backend plugin
 

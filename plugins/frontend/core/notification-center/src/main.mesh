@@ -1,13 +1,14 @@
 <template>
-  <column class="notifications">
-    <text class="title">Notifications</text>
-    <column class="list">
-      <box class="item">
-        <text class="summary">System ready</text>
-        <text class="body">MESH notification center initialized.</text>
-      </box>
+  <row class="notifications">
+    <column class="main">
+      <NotificationFeed/>
+      <slot name="content"/>
     </column>
-  </column>
+    <column class="rail">
+      <NotificationSidebar/>
+      <slot name="sidebar"/>
+    </column>
+  </row>
 </template>
 
 <style>
@@ -16,27 +17,15 @@
     color: token(color.on-surface);
     padding: token(spacing.lg);
     gap: token(spacing.md);
+    align-items: start;
 }
 
-.title {
-    font-size: token(typography.size.lg);
-    font-weight: 700;
+.main {
+    flex-grow: 1;
 }
 
-.list {
+.rail {
+    width: 140px;
     gap: token(spacing.sm);
 }
-
-.item {
-    padding: token(spacing.md);
-    border-radius: token(radius.md);
-    background: token(color.surface-variant);
-}
 </style>
-
-<meta>
-name = "MESH Notification Center"
-description = "Default notification center surface"
-role = "region"
-label = "Notification center"
-</meta>

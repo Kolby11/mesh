@@ -1,0 +1,35 @@
+{
+  "id": "@mesh/panel",
+  "name": "MESH Panel",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "description": "Top panel shell surface",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0",
+    "compositors": ["wlr-layer-shell-v1"]
+  },
+  "capabilities": {
+    "required": [
+      "shell.surface",
+      "theme.read",
+      "locale.read"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/audio-interface": ">=1.0.0, <2.0.0",
+      "@mesh/network-interface": ">=1.0.0, <2.0.0",
+      "@mesh/power-interface": ">=1.0.0, <2.0.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "accessibility": {
+    "role": "toolbar",
+    "label": "System panel",
+    "description": "Default top panel with clock, system tray, and status indicators"
+  }
+}

@@ -1,0 +1,64 @@
+<template>
+  <row class="strip">
+    <column class="copy">
+      <text class="context" :content="context"/>
+      <text class="title" :content="title"/>
+      <text class="summary" :content="summary"/>
+    </column>
+    <row class="badges">
+      <box class="badge">
+        <text class="badge-text">Planning</text>
+      </box>
+      <box class="badge">
+        <text class="badge-text">Review</text>
+      </box>
+      <box class="badge">
+        <text class="badge-text">Ship</text>
+      </box>
+    </row>
+  </row>
+</template>
+
+<style>
+.strip {
+    justify-content: space-between;
+    align-items: start;
+    padding: token(spacing.md);
+    border-radius: token(radius.lg);
+    background: token(color.surface-container);
+    gap: token(spacing.md);
+}
+
+.copy {
+    gap: token(spacing.xs);
+}
+
+.context {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.sm);
+}
+
+.title {
+    font-size: token(typography.size.xl);
+    font-weight: 700;
+}
+
+.summary {
+    color: token(color.on-surface-variant);
+}
+
+.badges {
+    gap: token(spacing.xs);
+}
+
+.badge {
+    padding: token(spacing.sm);
+    border-radius: token(radius.full);
+    background: token(color.primary-container);
+}
+
+.badge-text {
+    color: token(color.on-primary-container);
+    font-size: token(typography.size.sm);
+}
+</style>

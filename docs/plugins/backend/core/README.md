@@ -7,19 +7,35 @@ look services up by interface name (`mesh.audio`, `mesh.network`, …), never by
 backend plugin ID.
 
 Interface contracts are ordinary distributable packages, not a fixed list
-baked into the core. See [`../../../extensibility.md`](../../../extensibility.md)
-for the full model; this page documents the core defaults.
+baked into the core. The shell runtime starts with an empty registry and fills
+it by discovering these packages from disk. See
+[`../../../extensibility.md`](../../../extensibility.md) for the full model;
+this page documents the core defaults.
 
-Every backend manifest has `type = "backend"` and a `[service]` section:
+Two plugin kinds live side by side in `plugins/backend/core/`:
 
-```toml
-[service]
-provides = "mesh.audio"     # interface name this backend implements
-backend_name = "PipeWire"   # human-readable name
-priority = 100              # higher wins auto-selection
+- `type = "interface"` packages that ship `interface.toml`
+- `type = "backend"` providers that implement one of those interfaces
 
-[dependencies]
-"@mesh/audio-contract" = ">=1.0.0, <2.0.0"
+Every backend manifest has `type = "backend"` and a `provides` block:
+
+```json
+{
+  "type": "backend",
+  "dependencies": {
+    "plugins": {
+      "@mesh/audio-interface": ">=1.0.0, <2.0.0"
+    }
+  },
+  "provides": [
+    {
+      "interface": "mesh.audio",
+      "version": "1.0",
+      "backend_name": "PipeWire",
+      "priority": 100
+    }
+  ]
+}
 ```
 
 ## Selection rules
@@ -34,6 +50,17 @@ Backends can be hot-swapped at runtime. The registry replaces the active
 implementation and emits a `BackendChanged` event on the interface's channel
 so frontends can re-query.
 
+## Core interface packages
+
+| Plugin | Manifest ID | Declares |
+|--------|-------------|----------|
+| `audio-interface` | `@mesh/audio-interface` | `mesh.audio` |
+| `network-interface` | `@mesh/network-interface` | `mesh.network` |
+| `power-interface` | `@mesh/power-interface` | `mesh.power` |
+| `media-interface` | `@mesh/media-interface` | `mesh.media` |
+| `notifications-interface` | `@mesh/notifications-interface` | `mesh.notifications` |
+| `brightness-interface` | `@mesh/brightness-interface` | `mesh.brightness` |
+
 ## Core backends
 
 | Plugin | Manifest ID | Implements | Backend | Priority |
@@ -43,6 +70,7 @@ so frontends can re-query.
 | [networkmanager-network](./networkmanager-network/README.md) | `@mesh/networkmanager` | `mesh.network` | NetworkManager | 100 |
 | [upower-power](./upower-power/README.md) | `@mesh/upower` | `mesh.power` | UPower | 100 |
 | [mpris-media](./mpris-media/README.md) | `@mesh/mpris-media` | `mesh.media` | MPRIS (D-Bus) | 100 |
+| `mock-notifications` | `@mesh/mock-notifications` | `mesh.notifications` | Mock Notifications | 100 |
 
 PipeWire and PulseAudio both implement `mesh.audio`; PipeWire wins by
 priority on systems where it is available, PulseAudio is the fallback.

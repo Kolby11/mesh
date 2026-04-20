@@ -1,0 +1,70 @@
+<template>
+  <column class="agenda">
+    <row class="header">
+      <text class="heading" :content="heading"/>
+      <text class="count">3 items</text>
+    </row>
+    <column class="items">
+      <box class="item emphasis">
+        <text class="title" :content="first"/>
+        <text class="meta">North room · 45 min</text>
+      </box>
+      <box class="item">
+        <text class="title" :content="second"/>
+        <text class="meta">Remote · notes required</text>
+      </box>
+      <box class="item">
+        <text class="title" :content="third"/>
+        <text class="meta">Board deck draft</text>
+      </box>
+    </column>
+  </column>
+</template>
+
+<style>
+.agenda {
+    gap: token(spacing.md);
+    padding: token(spacing.md);
+    border-radius: token(radius.lg);
+    background: token(color.surface-container);
+}
+
+.header {
+    justify-content: space-between;
+    align-items: center;
+}
+
+.heading {
+    font-size: token(typography.size.lg);
+    font-weight: 700;
+}
+
+.count {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.sm);
+}
+
+.items {
+    gap: token(spacing.sm);
+}
+
+.item {
+    gap: token(spacing.xs);
+    padding: token(spacing.sm);
+    border-radius: token(radius.md);
+    background: token(color.surface-container-high);
+}
+
+.emphasis {
+    background: token(color.tertiary-container);
+}
+
+.title {
+    font-weight: 600;
+}
+
+.meta {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.sm);
+}
+</style>

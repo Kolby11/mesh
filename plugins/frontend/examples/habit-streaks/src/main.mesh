@@ -1,0 +1,37 @@
+<template>
+  <row class="streaks">
+    <text class="headline" :content="headline"/>
+    <box class="chip">
+      <text class="chip-text" :content="first"/>
+    </box>
+    <box class="chip">
+      <text class="chip-text" :content="second"/>
+    </box>
+    <box class="chip">
+      <text class="chip-text" :content="third"/>
+    </box>
+  </row>
+</template>
+
+<style>
+.streaks {
+    gap: token(spacing.sm);
+    align-items: center;
+}
+
+.headline {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.sm);
+}
+
+.chip {
+    padding: token(spacing.sm);
+    border-radius: token(radius.full);
+    background: token(color.secondary-container);
+}
+
+.chip-text {
+    color: token(color.on-secondary-container);
+    font-size: token(typography.size.sm);
+}
+</style>

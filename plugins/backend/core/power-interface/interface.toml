@@ -1,0 +1,33 @@
+[[methods]]
+name = "battery"
+returns = "BatteryInfo"
+
+[[methods]]
+name = "profile"
+returns = "PowerProfile"
+
+[[methods]]
+name = "set_profile"
+args = [{ name = "profile", type = "PowerProfile" }]
+returns = "Result"
+
+[[events]]
+name = "BatteryChanged"
+payload = "{ battery: BatteryInfo }"
+
+[types.BatteryInfo]
+fields = [
+  { name = "level", type = "float" },
+  { name = "charging", type = "boolean" },
+  { name = "time_remaining_minutes", type = "integer" }
+]
+
+[types.PowerProfile]
+fields = [
+  { name = "id", type = "string" },
+  { name = "label", type = "string" }
+]
+
+[capabilities]
+required = ["service.power.read"]
+optional = ["service.power.control"]

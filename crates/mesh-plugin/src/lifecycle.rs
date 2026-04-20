@@ -1,5 +1,5 @@
 /// Plugin lifecycle state machine.
-use crate::manifest::Manifest;
+use crate::manifest::{Manifest, ManifestSource};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -36,6 +36,8 @@ impl std::fmt::Display for PluginState {
 pub struct PluginInstance {
     pub manifest: Manifest,
     pub path: PathBuf,
+    pub manifest_path: PathBuf,
+    pub manifest_source: ManifestSource,
     pub state: PluginState,
     pub error_count: u32,
     pub last_error: Option<String>,
@@ -43,10 +45,17 @@ pub struct PluginInstance {
 }
 
 impl PluginInstance {
-    pub fn new(manifest: Manifest, path: PathBuf) -> Self {
+    pub fn new(
+        manifest: Manifest,
+        path: PathBuf,
+        manifest_path: PathBuf,
+        manifest_source: ManifestSource,
+    ) -> Self {
         Self {
             manifest,
             path,
+            manifest_path,
+            manifest_source,
             state: PluginState::Discovered,
             error_count: 0,
             last_error: None,

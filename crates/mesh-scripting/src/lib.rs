@@ -1,3 +1,4 @@
+pub mod component;
 /// Luau scripting bridge for MESH.
 ///
 /// This is the ONLY crate that crosses the UI/service boundary. It embeds
@@ -11,10 +12,8 @@
 ///
 /// The actual Luau VM will use the `mlua` crate with Luau mode.
 /// For now, this module defines the interface and a stub runtime.
-
 pub mod context;
 pub mod host_api;
-pub mod component;
 
-pub use context::{ScriptContext, ScriptState, ScriptError, LocaleBoundState};
 pub use component::ComponentInstance;
+pub use context::{LocaleBoundState, ScriptContext, ScriptError, ScriptState};

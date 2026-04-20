@@ -154,6 +154,8 @@ pub fn load_theme_from_path(path: &Path) -> Result<Theme, ThemeError> {
 }
 
 fn embedded_default_theme() -> Theme {
-    serde_json::from_str(include_str!("../../../config/themes/mesh-default-dark.json"))
-        .expect("embedded default theme json must be valid")
+    serde_json::from_str(include_str!(
+        "../../../config/themes/mesh-default-dark.json"
+    ))
+    .expect("embedded default theme json must be valid")
 }

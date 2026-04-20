@@ -1,6 +1,9 @@
-/// Service trait system for MESH.
+pub mod contract;
+pub mod interface;
+/// Service and interface plumbing for MESH.
 ///
-/// This crate defines the contract between backends and frontends.
+/// This crate hosts the registry, contract loader, and transitional typed
+/// bindings used by backends and frontends.
 ///
 /// # Architecture
 ///
@@ -28,20 +31,28 @@
 ///              └─────────────────────────┘
 /// ```
 ///
-/// - A **service trait** defines what a service can do (read volume, list networks, etc.)
-/// - A **backend** is a plugin that implements a service trait for a specific system
-/// - A **frontend** is a UI component that consumes the trait through bindings
-/// - The **registry** holds one active backend per service trait and exposes it to frontends
+/// - An **interface contract** defines what a service can do (read volume, list networks, etc.)
+/// - A **backend** is a plugin that implements an interface for a specific system
+/// - A **frontend** is a UI component that consumes the interface through bindings
+/// - The **registry** holds discovered contracts/providers and exposes them to frontends
 ///
-/// Frontends never import backend crates. They only see the trait.
-
+/// Frontends never import backend crates. They only see the interface bridge.
 pub mod registry;
 pub mod traits;
 
-pub use registry::{ServiceRegistry, ServiceEntry, ServiceError};
-pub use traits::audio::{AudioService, AudioDevice, AudioStream, AudioEvent};
-pub use traits::network::{NetworkService, NetworkConnection, NetworkDevice, NetworkEvent};
-pub use traits::notifications::{NotificationService, Notification, Urgency, NotificationEvent};
-pub use traits::power::{PowerService, PowerProfile, BatteryInfo, PowerEvent};
-pub use traits::media::{MediaService, PlaybackState, MediaInfo, MediaEvent};
-pub use traits::brightness::{BrightnessService, BrightnessEvent};
+pub use contract::{
+    ContractCapabilities, ContractError, InterfaceArgument, InterfaceContract, InterfaceEvent,
+    InterfaceMethod, InterfaceTypeDef, load_interface_contract, parse_contract_version,
+    parse_version_req,
+};
+pub use interface::{
+    InterfaceCatalog, InterfaceProvider, InterfaceRegistry, InterfaceResolution,
+    canonical_interface_name,
+};
+pub use registry::{ServiceEntry, ServiceError, ServiceRegistry};
+pub use traits::audio::{AudioDevice, AudioEvent, AudioService, AudioStream};
+pub use traits::brightness::{BrightnessEvent, BrightnessService};
+pub use traits::media::{MediaEvent, MediaInfo, MediaService, PlaybackState};
+pub use traits::network::{NetworkConnection, NetworkDevice, NetworkEvent, NetworkService};
+pub use traits::notifications::{Notification, NotificationEvent, NotificationService, Urgency};
+pub use traits::power::{BatteryInfo, PowerEvent, PowerProfile, PowerService};
