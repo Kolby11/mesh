@@ -7,6 +7,12 @@ use mesh_ui::VariableStore;
 use serde_json::Value;
 use std::collections::HashMap;
 
+#[derive(Debug, Clone)]
+pub struct PublishedEvent {
+    pub channel: String,
+    pub payload: Value,
+}
+
 /// Errors from the scripting runtime.
 #[derive(Debug, thiserror::Error)]
 pub enum ScriptError {
@@ -99,6 +105,7 @@ pub struct ScriptContext {
     handlers: HashMap<String, ScriptFunction>,
     interface_catalog: InterfaceCatalog,
     interface_bindings: HashMap<String, InterfaceResolution>,
+    published_events: Vec<PublishedEvent>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +126,7 @@ impl ScriptContext {
             handlers: HashMap::new(),
             interface_catalog: InterfaceCatalog::default(),
             interface_bindings: HashMap::new(),
+            published_events: Vec::new(),
         })
     }
 
@@ -168,6 +176,10 @@ impl ScriptContext {
     /// Get a mutable reference to state.
     pub fn state_mut(&mut self) -> &mut ScriptState {
         &mut self.state
+    }
+
+    pub fn drain_published_events(&mut self) -> Vec<PublishedEvent> {
+        std::mem::take(&mut self.published_events)
     }
 
     fn execute_function(&mut self, name: &str) -> Result<(), ScriptError> {
@@ -263,7 +275,12 @@ impl ScriptContext {
 
         if let Some(args) = extract_call_args(trimmed, "mesh.events.publish") {
             if let Some(channel) = args.first().and_then(|value| parse_string_literal(value)) {
+                let payload = args
+                    .get(1)
+                    .and_then(|value| parse_event_payload(value))
+                    .unwrap_or(Value::Null);
                 tracing::info!("{} published event {}", self.plugin_id, channel);
+                self.published_events.push(PublishedEvent { channel, payload });
             }
             return Ok(());
         }
@@ -456,6 +473,15 @@ fn parse_literal_value(value: &str) -> Option<Value> {
             }
             None
         }
+    }
+}
+
+fn parse_event_payload(value: &str) -> Option<Value> {
+    let trimmed = value.trim();
+    match trimmed {
+        "{}" => Some(Value::Object(serde_json::Map::new())),
+        "[]" => Some(Value::Array(Vec::new())),
+        _ => parse_literal_value(trimmed),
     }
 }
 

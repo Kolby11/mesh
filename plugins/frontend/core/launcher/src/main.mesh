@@ -4,21 +4,21 @@
 
 
 <template>
-  <column class="launcher">
-    <text class="title" :content="headline"/>
-    <input class="search" placeholder="Search apps" />
-    <text class="status" :content="statusMessage"/>
-    <scroll class="results">
-      <button class="result" @click="onLaunchTerminal">Terminal</button>
-      <button class="result" @click="onLaunchFiles">{t(results.files)}</button>
-      <button class="result" @click="onLaunchBrowser">{t(results.browser)}</button>
-      <button class="result" @click="onLaunchEditor">Editor</button>
-      <button class="result" @click="onLaunchMonitor">System Monitor</button>
-      <button class="result" @click="onLaunchSettings">Settings</button>
-      <button class="result" @click="onLaunchMusic">Music</button>
-      <button class="result" @click="onLaunchMessages">Messages</button>
-    </scroll>
-  </column>
+  <section class="launcher">
+    <span class="title">{headline}</span>
+    <input class="search" type="text" placeholder="Search apps" />
+    <span class="status">{statusMessage}</span>
+    <div class="results">
+      <button class="result" onclick={onLaunchTerminal}>Terminal</button>
+      <button class="result" onclick={onLaunchFiles}>{t(results.files)}</button>
+      <button class="result" onclick={onLaunchBrowser}>{t(results.browser)}</button>
+      <button class="result" onclick={onLaunchEditor}>Editor</button>
+      <button class="result" onclick={onLaunchMonitor}>System Monitor</button>
+      <button class="result" onclick={onLaunchSettings}>Settings</button>
+      <button class="result" onclick={onLaunchMusic}>Music</button>
+      <button class="result" onclick={onLaunchMessages}>Messages</button>
+    </div>
+  </section>
 </template>
 
 <style>

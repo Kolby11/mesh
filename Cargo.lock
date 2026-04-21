@@ -696,6 +696,7 @@ dependencies = [
  "mesh-capability",
  "mesh-component-backend",
  "mesh-config",
+ "mesh-debug",
  "mesh-diagnostics",
  "mesh-events",
  "mesh-locale",
@@ -712,6 +713,10 @@ dependencies = [
  "tokio",
  "tracing",
 ]
+
+[[package]]
+name = "mesh-debug"
+version = "0.1.0"
 
 [[package]]
 name = "mesh-diagnostics"
@@ -764,6 +769,7 @@ dependencies = [
  "fontdb",
  "fontdue",
  "memmap2 0.9.10",
+ "mesh-debug",
  "mesh-theme",
  "mesh-ui",
  "mesh-wayland",

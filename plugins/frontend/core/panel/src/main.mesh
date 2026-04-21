@@ -1,17 +1,20 @@
 <template>
-  <row class="panel">
-    <row class="left">
-      <text class="workspace" :content="activeWorkspace"/>
-    </row>
-    <row class="center">
-      <text class="clock" :content="time"/>
-    </row>
-    <row class="right">
-      <icon name="network" :status="networkStatus"/>
-      <icon name="volume" :level="volumeLevel" @click="onVolumeClick"/>
-      <text class="battery" :content="batteryText"/>
-    </row>
-  </row>
+  <div class="panel">
+    <div class="left">
+      <span class="workspace">{activeWorkspace}</span>
+    </div>
+    <div class="center">
+      <span class="clock">{time}</span>
+    </div>
+    <div class="right">
+      <span class="indicator network-indicator" title="{networkStatus}" aria-label="Network status">{networkStatus}</span>
+      <button class="indicator volume-indicator" onclick={onVolumeClick} title="Open audio controls" aria-label="Open audio controls">
+        <span class="indicator-glyph" aria-hidden="true">VOL</span>
+        <span class="indicator-value">{volumeLevel}</span>
+      </button>
+      <span class="battery">{batteryText}</span>
+    </div>
+  </div>
 </template>
 
 <script lang="luau">
@@ -92,6 +95,21 @@ end
     flex-grow: 1;
     justify-content: end;
     gap: token(spacing.sm);
+}
+
+.indicator {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.sm);
+}
+
+.volume-indicator {
+    align-items: center;
+    gap: token(spacing.xs);
+}
+
+.indicator-glyph {
+    font-size: token(typography.size.xs);
+    font-weight: 700;
 }
 
 .clock {

@@ -1,10 +1,10 @@
 <template>
-  <column class="sidebar">
-    <text class="heading">Quick actions</text>
+  <aside class="sidebar">
+    <span class="heading">Quick actions</span>
     <button>Mark all read</button>
     <button>Pause notifications</button>
     <button>Open settings</button>
-  </column>
+  </aside>
 </template>
 
 <style>

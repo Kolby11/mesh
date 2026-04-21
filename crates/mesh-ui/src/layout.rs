@@ -106,8 +106,9 @@ fn layout_node(node: &mut WidgetNode, x: f32, y: f32, available_w: f32, availabl
     // accumulate flex-grow total for the rest.
     let mut total_flex_grow = 0.0f32;
     let mut fixed_main = 0.0f32;
-    let mut child_sizes: Vec<f32> = vec![0.0; node.children.len()];
-    let mut child_sized: Vec<bool> = vec![false; node.children.len()];
+    // NAN is the sentinel for "not yet sized" — avoids a separate Vec<bool> and
+    // correctly handles children whose intrinsic size is legitimately 0.
+    let mut child_sizes: Vec<f32> = vec![f32::NAN; node.children.len()];
 
     for &idx in &visible_children {
         let child_style = &node.children[idx].computed_style;
@@ -127,13 +128,11 @@ fn layout_node(node: &mut WidgetNode, x: f32, y: f32, available_w: f32, availabl
         match main_dim {
             Dimension::Px(px) => {
                 child_sizes[idx] = px;
-                child_sized[idx] = true;
                 fixed_main += px;
             }
             Dimension::Percent(pct) => {
                 let s = main_available * pct / 100.0;
                 child_sizes[idx] = s;
-                child_sized[idx] = true;
                 fixed_main += s;
             }
             Dimension::Auto => {
@@ -156,7 +155,6 @@ fn layout_node(node: &mut WidgetNode, x: f32, y: f32, available_w: f32, availabl
                         dummy.layout.width
                     };
                     child_sizes[idx] = size;
-                    child_sized[idx] = true;
                     fixed_main += size;
                 }
             }
@@ -166,7 +164,7 @@ fn layout_node(node: &mut WidgetNode, x: f32, y: f32, available_w: f32, availabl
     // Second pass: distribute remaining space to flex-grow children.
     let remaining = (main_available - fixed_main).max(0.0);
     for &idx in &visible_children {
-        if child_sized[idx] {
+        if !child_sizes[idx].is_nan() {
             continue;
         }
         let grow = node.children[idx].computed_style.flex_grow.max(0.0);
@@ -187,9 +185,9 @@ fn layout_node(node: &mut WidgetNode, x: f32, y: f32, available_w: f32, availabl
             } else {
                 dummy.layout.width
             };
+        } else {
+            child_sizes[idx] = 0.0;
         }
-        // else: remains 0 (empty / degenerate case)
-        child_sized[idx] = true;
     }
 
     // Third pass: apply justify-content initial offset and inter-item spacing.
@@ -216,6 +214,7 @@ fn layout_node(node: &mut WidgetNode, x: f32, y: f32, available_w: f32, availabl
     };
 
     let container_align = style.align_items;
+    let mut content_main = 0.0f32;
     for &idx in &visible_children {
         let child_main_size = child_sizes[idx];
         let child_style = &node.children[idx].computed_style;
@@ -241,17 +240,20 @@ fn layout_node(node: &mut WidgetNode, x: f32, y: f32, available_w: f32, availabl
         };
 
         layout_node(&mut node.children[idx], cx, cy, cw, ch);
+        content_main += child_main_size;
         cursor += child_main_size + style.gap + extra_gap;
     }
+    // Add gaps between children (not after the last one).
+    let content_main = content_main + total_gap;
 
     // Shrink auto dimensions to fit children (bottom-up sizing).
     let style = &node.computed_style;
     if matches!(style.height, Dimension::Auto) && is_column {
-        let content_h = (cursor - style.gap + padding.vertical()).max(0.0);
+        let content_h = (content_main + padding.vertical()).max(0.0);
         node.layout.height = clamp_dimension(content_h, style.min_height, style.max_height);
     }
     if matches!(style.width, Dimension::Auto) && !is_column {
-        let content_w = (cursor - style.gap + padding.horizontal()).max(0.0);
+        let content_w = (content_main + padding.horizontal()).max(0.0);
         node.layout.width = clamp_dimension(content_w, style.min_width, style.max_width);
     }
     // Row containers: shrink height to max child height when height is Auto.

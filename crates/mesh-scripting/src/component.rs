@@ -133,8 +133,8 @@ fn build_node(
                             widget.attributes.insert(attr.name.clone(), val.clone());
                         }
                     }
-                    mesh_component::AttributeValue::Binding(expr) => {
-                        // Resolve binding from script state.
+                    mesh_component::AttributeValue::Binding(expr)
+                    | mesh_component::AttributeValue::TwoWayBinding(expr) => {
                         let value = state
                             .get(expr)
                             .map(|v| match v {
@@ -187,7 +187,7 @@ fn build_node(
                     serde_json::Value::String(s) => s,
                     other => other.to_string(),
                 })
-                .unwrap_or_else(|| format!("{{{{{}}}}}", expr.expression));
+                .unwrap_or_else(|| format!("{{ {} }}", expr.expression));
             widget.attributes.insert("content".to_string(), value);
             widget
         }
@@ -211,9 +211,9 @@ mod tests {
     fn component_instance_lifecycle() {
         let source = r#"
 <template>
-  <column>
-    <text class="title">Hello</text>
-  </column>
+  <div>
+    <span class="title">Hello</span>
+  </div>
 </template>
 
 <script lang="luau">
@@ -248,7 +248,7 @@ end
     fn dirty_state_triggers_rebuild() {
         let source = r#"
 <template>
-  <text :content="message"/>
+  <span>{message}</span>
 </template>
 "#;
         let file = parse_component(source).unwrap();

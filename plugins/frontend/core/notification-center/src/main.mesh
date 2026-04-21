@@ -1,14 +1,14 @@
 <template>
-  <row class="notifications">
-    <column class="main">
+  <section class="notifications">
+    <div class="main">
       <NotificationFeed/>
       <slot name="content"/>
-    </column>
-    <column class="rail">
+    </div>
+    <aside class="rail">
       <NotificationSidebar/>
       <slot name="sidebar"/>
-    </column>
-  </row>
+    </aside>
+  </section>
 </template>
 
 <style>

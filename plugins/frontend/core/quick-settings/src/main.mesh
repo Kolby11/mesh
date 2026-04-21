@@ -1,16 +1,16 @@
 <template>
-  <column class="quick-settings">
-    <text class="title">Quick Settings</text>
-    <row class="toggles">
+  <section class="quick-settings">
+    <span class="title">Quick Settings</span>
+    <div class="toggles">
       <button class="chip">Wi-Fi</button>
       <button class="chip">Bluetooth</button>
       <button class="chip">Do Not Disturb</button>
-    </row>
-    <column class="audio">
-      <text class="label">Volume</text>
-      <slider class="volume" min="0" max="100" value="42" />
-    </column>
-  </column>
+    </div>
+    <div class="audio">
+      <span class="label">Volume</span>
+      <input class="volume" type="range" min="0" max="100" value="42" />
+    </div>
+  </section>
 </template>
 
 <style>

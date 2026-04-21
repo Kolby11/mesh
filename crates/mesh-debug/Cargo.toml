@@ -1,0 +1,6 @@
+[package]
+name = "mesh-debug"
+description = "Debug overlay data types for MESH shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true

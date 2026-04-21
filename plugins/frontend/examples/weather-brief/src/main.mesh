@@ -1,11 +1,11 @@
 <template>
-  <row class="weather">
-    <column class="copy">
-      <text class="location" :content="location"/>
-      <text class="condition" :content="condition"/>
-    </column>
-    <text class="temperature" :content="temperature"/>
-  </row>
+  <section class="weather">
+    <div class="copy">
+      <span class="location">{location}</span>
+      <span class="condition">{condition}</span>
+    </div>
+    <span class="temperature">{temperature}</span>
+  </section>
 </template>
 
 <style>

@@ -1,4 +1,11 @@
 {
+  "i18n": {
+    "available_locales": [
+      "en",
+      "sk"
+    ],
+    "default_locale": "en"
+  },
   "surface": {
     "anchor": "top",
     "layer": "top",

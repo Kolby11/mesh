@@ -358,7 +358,7 @@ fn build_widget_node(
             let mut node = WidgetNode::new("text");
             let content = state
                 .map(|store| eval_expr(&expr.expression, store))
-                .unwrap_or_else(|| format!("{{{{ {} }}}}", expr.expression));
+                .unwrap_or_else(|| format!("{{ {} }}", expr.expression));
             node.attributes.insert("content".into(), content);
             node.computed_style = text_style();
             if let Some(parent_style) = parent_style {
@@ -516,6 +516,21 @@ fn build_element_node(
         node.attributes.insert("class".into(), classes.join(" "));
     }
 
+    // Inline text element: fold all Text/Expr children into a single "content" attribute
+    // instead of building child nodes. This makes <span>{x}</span> and <p>Hello</p> work
+    // as leaf text nodes so the painter can render them directly.
+    if tag == "text" && !element.children.is_empty()
+        && element.children.iter().all(is_inline_template_node)
+    {
+        let content: String = element
+            .children
+            .iter()
+            .map(|c| resolve_inline_content(c, state))
+            .collect();
+        node.attributes.insert("content".into(), content);
+        return node;
+    }
+
     let child_context = child_style_context(&node.computed_style, container_context);
     node.children = element
         .children
@@ -536,6 +551,20 @@ fn build_element_node(
         .collect();
 
     node
+}
+
+fn is_inline_template_node(node: &TemplateNode) -> bool {
+    matches!(node, TemplateNode::Text(_) | TemplateNode::Expr(_))
+}
+
+fn resolve_inline_content(node: &TemplateNode, state: Option<&dyn VariableStore>) -> String {
+    match node {
+        TemplateNode::Text(t) => t.content.clone(),
+        TemplateNode::Expr(e) => state
+            .map(|store| eval_expr(&e.expression, store))
+            .unwrap_or_else(|| format!("{{ {} }}", e.expression)),
+        _ => String::new(),
+    }
 }
 
 fn build_component_ref(
@@ -715,19 +744,23 @@ fn parse_attributes(
                     resolved.insert(attr.name.clone(), value.clone());
                 }
             }
-            AttributeValue::Binding(binding) => {
+            AttributeValue::Binding(binding) | AttributeValue::TwoWayBinding(binding) => {
                 let value = state
                     .map(|store| eval_expr(binding, store))
                     .unwrap_or_default();
                 resolved.insert(attr.name.clone(), value);
             }
             AttributeValue::EventHandler(handler) => {
-                event_handlers.insert(attr.name.clone(), handler.clone());
+                event_handlers.insert(normalize_event_handler_name(&attr.name), handler.clone());
             }
         }
     }
 
     (classes, id, resolved, event_handlers)
+}
+
+fn normalize_event_handler_name(name: &str) -> String {
+    name.strip_prefix("on").unwrap_or(name).to_string()
 }
 
 fn json_value_to_string(value: serde_json::Value) -> String {
@@ -808,16 +841,27 @@ fn strip_string_literal(s: &str) -> Option<String> {
 
 fn normalize_tag(tag: &str) -> String {
     match tag {
+        // Internal tags — pass through.
         "row" | "column" | "text" | "button" | "input" | "slider" | "scroll" | "icon" | "box" => {
             tag.to_string()
         }
-        other => {
-            if other.chars().next().is_some_and(char::is_uppercase) {
-                "box".into()
-            } else {
-                other.to_string()
-            }
-        }
+        // HTML semantic / block containers.
+        "nav" | "header" => "row".into(),
+        "main" | "section" | "article" | "aside" => "column".into(),
+        // Generic block container — direction controlled by CSS flex-direction.
+        "div" => "box".into(),
+        // List containers.
+        "ul" | "ol" => "column".into(),
+        "li" => "row".into(),
+        // Inline and block text elements — folded to leaf text nodes.
+        "span" | "label" | "em" | "strong" | "p"
+        | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => "text".into(),
+        // Image.
+        "img" => "icon".into(),
+        // PascalCase → component placeholder.
+        other if other.chars().next().is_some_and(char::is_uppercase) => "box".into(),
+        // Unknown tags — generic container.
+        _ => "box".into(),
     }
 }
 
@@ -967,10 +1011,8 @@ fn default_leaf_style(tag: &str) -> ComputedStyle {
             style
         }
         "box" => {
-            let mut style = container_style("column");
-            style.background_color =
-                mesh_ui::Color::from_hex("#24202b").unwrap_or(mesh_ui::Color::BLACK);
-            style.border_radius = mesh_ui::Corners::all(16.0);
+            let mut style = ComputedStyle::default();
+            style.background_color = mesh_ui::Color::TRANSPARENT;
             style
         }
         "text" => text_style(),
@@ -995,4 +1037,26 @@ fn accessibility_for_tag(tag: &str) -> AccessibilityInfo {
     };
     info.focusable = matches!(tag, "button" | "input" | "slider");
     info
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mesh_component::template::{Attribute, AttributeValue};
+
+    #[test]
+    fn normalizes_html_style_event_handler_names() {
+        let attrs = vec![Attribute {
+            name: "onclick".into(),
+            value: AttributeValue::EventHandler("openPanel".into()),
+        }];
+
+        let (_, _, _, handlers) = parse_attributes(&attrs, None);
+
+        assert_eq!(
+            handlers.get("click").map(String::as_str),
+            Some("openPanel")
+        );
+        assert!(!handlers.contains_key("onclick"));
+    }
 }

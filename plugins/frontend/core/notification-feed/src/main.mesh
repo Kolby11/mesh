@@ -1,17 +1,17 @@
 <template>
-  <column class="notifications">
-    <text class="title">Notifications</text>
-    <column class="list">
-      <box class="item">
-        <text class="summary">System ready</text>
-        <text class="body">MESH notification center initialized.</text>
-      </box>
-      <box class="item">
-        <text class="summary">Plugin composition enabled</text>
-        <text class="body">Notification center content now comes from widget plugins.</text>
-      </box>
-    </column>
-  </column>
+  <section class="notifications">
+    <span class="title">Notifications</span>
+    <div class="list">
+      <article class="item">
+        <span class="summary">System ready</span>
+        <span class="body">MESH notification center initialized.</span>
+      </article>
+      <article class="item">
+        <span class="summary">Plugin composition enabled</span>
+        <span class="body">Notification center content now comes from widget plugins.</span>
+      </article>
+    </div>
+  </section>
 </template>
 
 <style>

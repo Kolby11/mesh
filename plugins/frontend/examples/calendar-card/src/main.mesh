@@ -1,37 +1,37 @@
 <template>
-  <column class="card">
-    <row class="header">
-      <column class="copy">
-        <text class="heading" :content="heading"/>
-        <text class="note" :content="note"/>
-      </column>
-      <box class="accent">
-        <text class="accent-text" :content="accent"/>
-      </box>
-    </row>
-    <row class="days">
-      <column class="day">
-        <text class="label">Mon</text>
-        <text class="value">3</text>
-      </column>
-      <column class="day">
-        <text class="label">Tue</text>
-        <text class="value">5</text>
-      </column>
-      <column class="day active">
-        <text class="label">Wed</text>
-        <text class="value">2</text>
-      </column>
-      <column class="day">
-        <text class="label">Thu</text>
-        <text class="value">4</text>
-      </column>
-      <column class="day">
-        <text class="label">Fri</text>
-        <text class="value">1</text>
-      </column>
-    </row>
-  </column>
+  <section class="card">
+    <div class="header">
+      <div class="copy">
+        <span class="heading">{heading}</span>
+        <span class="note">{note}</span>
+      </div>
+      <div class="accent">
+        <span class="accent-text">{accent}</span>
+      </div>
+    </div>
+    <div class="days">
+      <div class="day">
+        <span class="label">Mon</span>
+        <span class="value">3</span>
+      </div>
+      <div class="day">
+        <span class="label">Tue</span>
+        <span class="value">5</span>
+      </div>
+      <div class="day active">
+        <span class="label">Wed</span>
+        <span class="value">2</span>
+      </div>
+      <div class="day">
+        <span class="label">Thu</span>
+        <span class="value">4</span>
+      </div>
+      <div class="day">
+        <span class="label">Fri</span>
+        <span class="value">1</span>
+      </div>
+    </div>
+  </section>
 </template>
 
 <style>

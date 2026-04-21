@@ -33,9 +33,16 @@ pub enum DevWindowEvent {
     },
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct KeyMods {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum DevWindowKeyEvent {
-    Pressed(String),
+    Pressed(String, KeyMods),
     Released(String),
 }
 
@@ -148,10 +155,18 @@ impl DevWindowBackend {
                 }
             }
 
+            let mods = KeyMods {
+                ctrl: surface.window.is_key_down(Key::LeftCtrl)
+                    || surface.window.is_key_down(Key::RightCtrl),
+                shift: surface.window.is_key_down(Key::LeftShift)
+                    || surface.window.is_key_down(Key::RightShift),
+                alt: surface.window.is_key_down(Key::LeftAlt)
+                    || surface.window.is_key_down(Key::RightAlt),
+            };
             for key in surface.window.get_keys_pressed(KeyRepeat::Yes) {
                 events.push(DevWindowEvent::Key {
                     surface_id: surface_id.clone(),
-                    event: DevWindowKeyEvent::Pressed(key_name(key)),
+                    event: DevWindowKeyEvent::Pressed(key_name(key), mods.clone()),
                 });
             }
 

@@ -1,22 +1,22 @@
 <template>
-  <column class="sidebar">
-    <text class="title">Sidebar Pane</text>
-    <text class="copy">A second imported widget that gives the host surface a stable right rail.</text>
+  <aside class="sidebar">
+    <span class="title">Sidebar Pane</span>
+    <span class="copy">A second imported widget that gives the host surface a stable right rail.</span>
 
-    <column class="card">
-      <text class="label">Pinned tools</text>
-      <text>Notifications</text>
-      <text>Quick settings</text>
-      <text>Scratchpad</text>
-    </column>
+    <div class="card">
+      <span class="label">Pinned tools</span>
+      <span>Notifications</span>
+      <span>Quick settings</span>
+      <span>Scratchpad</span>
+    </div>
 
-    <column class="card">
-      <text class="label">Composition notes</text>
-      <text>Direct imports use exported component tags.</text>
-      <text>Slots can layer extra widgets on top later.</text>
-      <text>Surface placement comes from config/settings.json.</text>
-    </column>
-  </column>
+    <div class="card">
+      <span class="label">Composition notes</span>
+      <span>Direct imports use exported component tags.</span>
+      <span>Slots can layer extra widgets on top later.</span>
+      <span>Surface placement comes from config/settings.json.</span>
+    </div>
+  </aside>
 </template>
 
 <style>

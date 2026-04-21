@@ -130,8 +130,76 @@ fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
     Ok(blocks)
 }
 
+/// Convert unquoted brace attribute values to quoted form so quick_xml can parse them.
+///
+/// `onclick={handler}` → `onclick="{handler}"`
+/// `value="{expr}"` is left unchanged (already quoted).
+fn preprocess_template(source: &str) -> String {
+    let mut out = String::with_capacity(source.len() + 32);
+    let bytes = source.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut in_tag = false;
+    let mut in_quoted = false;
+    let mut quote_char = b'"';
+
+    while i < len {
+        let b = bytes[i];
+
+        if !in_tag {
+            if b == b'<' {
+                in_tag = true;
+            }
+            out.push(b as char);
+            i += 1;
+        } else if in_quoted {
+            if b == quote_char {
+                in_quoted = false;
+            }
+            out.push(b as char);
+            i += 1;
+        } else if b == b'"' || b == b'\'' {
+            in_quoted = true;
+            quote_char = b;
+            out.push(b as char);
+            i += 1;
+        } else if b == b'>' {
+            in_tag = false;
+            out.push(b as char);
+            i += 1;
+        } else if b == b'=' && i + 1 < len && bytes[i + 1] == b'{' {
+            // Unquoted brace value: wrap it.
+            out.push('=');
+            out.push('"');
+            i += 1; // skip '=', now pointing at '{'
+            let mut depth: i32 = 0;
+            while i < len {
+                let c = bytes[i] as char;
+                out.push(c);
+                if c == '{' {
+                    depth += 1;
+                } else if c == '}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        i += 1;
+                        break;
+                    }
+                }
+                i += 1;
+            }
+            out.push('"');
+        } else {
+            out.push(b as char);
+            i += 1;
+        }
+    }
+
+    out
+}
+
 fn parse_template(source: &str) -> Result<TemplateBlock, ParseError> {
-    let wrapped = format!("<mesh-root>{}</mesh-root>", source.trim());
+    let preprocessed = preprocess_template(source.trim());
+    let wrapped = format!("<mesh-root>{}</mesh-root>", preprocessed);
     let mut reader = Reader::from_str(&wrapped);
     reader.config_mut().trim_text(false);
 
@@ -243,10 +311,16 @@ fn parse_xml_attributes(
             })?
             .into_owned();
 
-        let (attr_name, attr_value) = if let Some(stripped) = name.strip_prefix(':') {
-            (stripped.to_string(), AttributeValue::Binding(value))
-        } else if let Some(stripped) = name.strip_prefix('@') {
-            (stripped.to_string(), AttributeValue::EventHandler(value))
+        let (attr_name, attr_value) = if let Some(var) = name.strip_prefix("bind:") {
+            // bind:value="variable" — two-way binding.
+            (var.to_string(), AttributeValue::TwoWayBinding(value))
+        } else if is_event_attr(&name) {
+            // onclick="handler" or onclick="{handler}" — strip braces if present.
+            let handler = extract_brace_expr(&value).unwrap_or(value);
+            (name, AttributeValue::EventHandler(handler))
+        } else if let Some(expr) = extract_brace_expr(&value) {
+            // title="{expr}" — dynamic binding, expression inside braces.
+            (name, AttributeValue::Binding(expr))
         } else {
             (name, AttributeValue::Static(value))
         };
@@ -260,12 +334,28 @@ fn parse_xml_attributes(
     Ok(attrs)
 }
 
+/// Returns true if the attribute name is an HTML event handler (`onclick`, `oninput`, etc.).
+fn is_event_attr(name: &str) -> bool {
+    name.len() > 2
+        && name.starts_with("on")
+        && name[2..].chars().all(|c| c.is_ascii_alphabetic())
+}
+
+/// If `value` is exactly `{expr}`, returns the inner expression; otherwise `None`.
+fn extract_brace_expr(value: &str) -> Option<String> {
+    if value.starts_with('{') && value.ends_with('}') && value.len() >= 2 {
+        Some(value[1..value.len() - 1].trim().to_string())
+    } else {
+        None
+    }
+}
+
 fn parse_inline_nodes(text: &str) -> Vec<TemplateNode> {
     let mut nodes = Vec::new();
     let mut remaining = text;
 
     while !remaining.is_empty() {
-        // Find the next `{` — could be `{{expr}}` or `{expr}`.
+        // Find the next `{expr}` expression.
         let Some(start) = remaining.find('{') else {
             break;
         };
@@ -277,45 +367,22 @@ fn parse_inline_nodes(text: &str) -> Vec<TemplateNode> {
             }));
         }
 
-        let after_brace = &remaining[start + 1..];
-
-        if after_brace.starts_with('{') {
-            // `{{expr}}` — double-brace form
-            let expr_body = &after_brace[1..];
-            if let Some(end) = expr_body.find("}}") {
-                let expr = expr_body[..end].trim();
-                if !expr.is_empty() {
-                    nodes.push(TemplateNode::Expr(ExprNode {
-                        expression: expr.to_string(),
-                    }));
-                }
-                remaining = &expr_body[end + 2..];
-            } else {
-                // Unclosed `{{` — emit as literal and stop processing
-                nodes.push(TemplateNode::Text(TextNode {
-                    content: remaining[start..].to_string(),
+        // `{expr}` — find the matching `}` respecting nested parens so `{t(a.b)}` works.
+        let expr_body = &remaining[start + 1..];
+        if let Some(end) = find_closing_brace(expr_body) {
+            let expr = expr_body[..end].trim();
+            if !expr.is_empty() {
+                nodes.push(TemplateNode::Expr(ExprNode {
+                    expression: expr.to_string(),
                 }));
-                remaining = "";
             }
+            remaining = &expr_body[end + 1..];
         } else {
-            // `{expr}` — single-brace form; find the matching `}`
-            // respecting nested parens so `{t(a.b)}` works correctly.
-            let expr_body = after_brace;
-            if let Some(end) = find_closing_brace(expr_body) {
-                let expr = expr_body[..end].trim();
-                if !expr.is_empty() {
-                    nodes.push(TemplateNode::Expr(ExprNode {
-                        expression: expr.to_string(),
-                    }));
-                }
-                remaining = &expr_body[end + 1..];
-            } else {
-                // Unclosed `{` — emit as literal and stop
-                nodes.push(TemplateNode::Text(TextNode {
-                    content: remaining[start..].to_string(),
-                }));
-                remaining = "";
-            }
+            // Unclosed `{` — emit as literal and stop.
+            nodes.push(TemplateNode::Text(TextNode {
+                content: remaining[start..].to_string(),
+            }));
+            remaining = "";
         }
     }
 
@@ -841,7 +908,7 @@ mod tests {
     fn parse_minimal_component() {
         let source = r#"
 <template>
-  <text>Hello</text>
+  <span>Hello</span>
 </template>
 "#;
         let file = parse_component(source).unwrap();
@@ -854,10 +921,10 @@ mod tests {
     fn parse_full_component() {
         let source = r#"
 <template>
-  <column>
-    <text class="title">{{ title }}</text>
-    <button @click="onTap">Click me</button>
-  </column>
+  <div>
+    <span class="title">{ title }</span>
+    <button onclick="onTap">Click me</button>
+  </div>
 </template>
 
 <script lang="luau">
@@ -927,14 +994,14 @@ role = "region"
     fn parse_expression_interpolation() {
         let source = r#"
 <template>
-  <text>Time: {{ formatTime(time) }}</text>
+  <span>Time: { formatTime(time) }</span>
 </template>
 "#;
         let file = parse_component(source).unwrap();
         let tmpl = file.template.unwrap();
         match &tmpl.root[0] {
             TemplateNode::Element(el) => {
-                assert_eq!(el.tag, "text");
+                assert_eq!(el.tag, "span");
                 assert!(!el.children.is_empty());
             }
             _ => panic!("expected element"),
@@ -945,7 +1012,7 @@ role = "region"
     fn parse_style_tokens_and_literals() {
         let source = r#"
 <style>
-row {
+div {
     gap: 8px;
     padding: token(spacing.md);
     background: var(--bg);
@@ -1026,7 +1093,7 @@ row {
     fn parse_binding_and_event_attributes() {
         let source = r#"
 <template>
-  <slider :value="volume" @change="onVolumeChange"/>
+  <input value="{volume}" onchange="onVolumeChange"/>
 </template>
 "#;
         let file = parse_component(source).unwrap();
@@ -1045,12 +1112,51 @@ row {
     }
 
     #[test]
+    fn parse_unquoted_brace_event_attribute() {
+        let source = r#"
+<template>
+  <button onclick={onTap}>Click</button>
+</template>
+"#;
+        let file = parse_component(source).unwrap();
+        let tmpl = file.template.unwrap();
+        match &tmpl.root[0] {
+            TemplateNode::Element(el) => {
+                assert!(
+                    matches!(&el.attributes[0].value, AttributeValue::EventHandler(v) if v == "onTap")
+                );
+            }
+            _ => panic!("expected element"),
+        }
+    }
+
+    #[test]
+    fn parse_two_way_binding() {
+        let source = r#"
+<template>
+  <input type="text" bind:value="searchQuery"/>
+</template>
+"#;
+        let file = parse_component(source).unwrap();
+        let tmpl = file.template.unwrap();
+        match &tmpl.root[0] {
+            TemplateNode::Element(el) => {
+                assert!(matches!(&el.attributes[0].value, AttributeValue::Static(_)));
+                assert!(
+                    matches!(&el.attributes[1].value, AttributeValue::TwoWayBinding(v) if v == "searchQuery")
+                );
+            }
+            _ => panic!("expected element"),
+        }
+    }
+
+    #[test]
     fn parse_named_slot() {
         let source = r#"
 <template>
-  <column>
+  <div>
     <slot name="sidebar"/>
-  </column>
+  </div>
 </template>
 "#;
         let file = parse_component(source).unwrap();

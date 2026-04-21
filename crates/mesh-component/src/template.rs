@@ -13,7 +13,7 @@ pub enum TemplateNode {
     Element(ElementNode),
     /// Raw text content.
     Text(TextNode),
-    /// An expression interpolation: `{{ variable }}`.
+    /// An expression interpolation: `{ variable }`.
     Expr(ExprNode),
     /// Conditional rendering: `@if condition`.
     If(IfNode),
@@ -48,9 +48,11 @@ pub struct Attribute {
 pub enum AttributeValue {
     /// Static string: `class="container"`.
     Static(String),
-    /// Data binding: `:text="title"` — resolves from script state.
+    /// Dynamic binding: `title="{audio.tooltip}"` — expression resolved from script state.
     Binding(String),
-    /// Event handler: `@click="onTap"` — calls a script function.
+    /// Two-way binding: `bind:value="volume"` — reads from and writes back to script state.
+    TwoWayBinding(String),
+    /// Event handler: `onclick="onTap"` — calls a script function.
     EventHandler(String),
 }
 
@@ -60,7 +62,7 @@ pub struct TextNode {
     pub content: String,
 }
 
-/// An interpolation expression: `{{ formatTime(time) }}`.
+/// An interpolation expression: `{ formatTime(time) }`.
 #[derive(Debug, Clone)]
 pub struct ExprNode {
     pub expression: String,

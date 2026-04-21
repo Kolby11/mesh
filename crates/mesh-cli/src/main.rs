@@ -13,6 +13,7 @@ fn main() {
         Some("start") | None => cmd_start(),
         Some("list") => cmd_list(),
         Some("services") => cmd_services(),
+        Some("debug") => cmd_debug(),
         Some("ipc") => cmd_ipc(&args[2..]),
         Some("ipc-socket-path") => cmd_ipc_socket_path(),
         Some("status") => cmd_status(),
@@ -112,6 +113,31 @@ fn cmd_status() {
     println!("locale: {}", shell.locale.current());
 }
 
+fn cmd_debug() {
+    send_ipc_command("shell:debug_overlay");
+}
+
+fn send_ipc_command(command: &str) {
+    let socket_path = default_ipc_socket_path();
+    let mut stream = match UnixStream::connect(&socket_path) {
+        Ok(stream) => stream,
+        Err(err) => {
+            eprintln!(
+                "failed to connect to shell ipc socket {}: {err}",
+                socket_path.display()
+            );
+            std::process::exit(1);
+        }
+    };
+    if let Err(err) = writeln!(stream, "{command}") {
+        eprintln!("failed to send ipc command: {err}");
+        std::process::exit(1);
+    }
+    let mut reader = BufReader::new(stream);
+    let mut response = String::new();
+    let _ = reader.read_line(&mut response);
+}
+
 fn cmd_ipc(args: &[String]) {
     if args.is_empty() {
         eprintln!("usage: mesh ipc <command>");
@@ -175,6 +201,7 @@ fn cmd_help() {
     println!("  start     Start the shell (default)");
     println!("  list      List discovered plugins");
     println!("  services  List available service backends");
+    println!("  debug     Toggle the debug overlay on the running shell");
     println!("  ipc       Send an IPC command to the running shell");
     println!("  ipc-socket-path  Print the shell IPC socket path");
     println!("  status    Show shell status");

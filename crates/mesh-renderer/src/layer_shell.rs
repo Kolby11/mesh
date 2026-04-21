@@ -85,6 +85,7 @@ struct State {
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer_focus: Option<String>,
     keyboard_focus: Option<String>,
+    keyboard_mods: Modifiers,
 
     events: Vec<DevWindowEvent>,
 }
@@ -131,6 +132,7 @@ impl LayerShellBackend {
             keyboard: None,
             pointer_focus: None,
             keyboard_focus: None,
+            keyboard_mods: Modifiers::default(),
             events: Vec::new(),
         };
 
@@ -583,9 +585,14 @@ impl KeyboardHandler for State {
             return;
         };
         let name = keysym_name(event.keysym);
+        let mods = crate::dev_window::KeyMods {
+            ctrl: self.keyboard_mods.ctrl,
+            shift: self.keyboard_mods.shift,
+            alt: self.keyboard_mods.alt,
+        };
         self.events.push(DevWindowEvent::Key {
             surface_id: surface_id.clone(),
-            event: DevWindowKeyEvent::Pressed(name),
+            event: DevWindowKeyEvent::Pressed(name, mods),
         });
         if let Some(ch) = event
             .utf8
@@ -621,9 +628,10 @@ impl KeyboardHandler for State {
         _qh: &QueueHandle<Self>,
         _keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
-        _modifiers: Modifiers,
+        modifiers: Modifiers,
         _layout: u32,
     ) {
+        self.keyboard_mods = modifiers;
     }
 }
 

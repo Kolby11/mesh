@@ -18,6 +18,7 @@ lifecycle spec see [`../spec/pluggable-backend.md`](../spec/pluggable-backend.md
   - [`plugins/backend/core/`](./plugins/backend/core/README.md) — shipped
     backends and interface packages.
 - **Frontend**
+  - [`frontend/mesh-syntax.md`](./frontend/mesh-syntax.md) — `.mesh` component syntax: tags, text interpolation, attribute binding, two-way binding, event handlers, accessibility.
   - [`frontend/slots.md`](./frontend/slots.md) — slot points for extending
     surfaces without forking them.
 - **Theming & localization**

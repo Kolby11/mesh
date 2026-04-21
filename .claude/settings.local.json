@@ -12,7 +12,9 @@
       "Read(//usr/**)",
       "Bash(find /lib -name \"xkbcommon.pc\")",
       "Bash(dpkg -l libxkbcommon-dev)",
-      "Bash(apt-cache show *)"
+      "Bash(apt-cache show *)",
+      "Bash(awk -F: '$2 <= 2300 && $2 >= 2260 {print}')",
+      "Bash(awk -F: '$2 >= 2380 && $2 <= 2430')"
     ]
   }
 }

@@ -1,22 +1,22 @@
 <template>
-  <column class="launcher">
-    <text class="title">Launcher Pane</text>
-    <text class="copy">Use this widget as the primary imported component inside a host surface.</text>
-    <input class="search" placeholder="Search apps, actions, files" />
+  <section class="launcher">
+    <span class="title">Launcher Pane</span>
+    <span class="copy">Use this widget as the primary imported component inside a host surface.</span>
+    <input class="search" type="text" placeholder="Search apps, actions, files" />
 
-    <row class="chips">
+    <div class="chips">
       <button class="chip">Terminal</button>
       <button class="chip">Browser</button>
       <button class="chip">Editor</button>
-    </row>
+    </div>
 
-    <column class="stack">
+    <div class="stack">
       <button class="item">Open workspace dashboard</button>
       <button class="item">Jump to recent project</button>
       <button class="item">Create scratch note</button>
       <button class="item">Launch system monitor</button>
-    </column>
-  </column>
+    </div>
+  </section>
 </template>
 
 <style>

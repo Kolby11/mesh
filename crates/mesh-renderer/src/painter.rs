@@ -10,11 +10,11 @@ pub struct Painter {
 }
 
 #[derive(Clone, Copy)]
-struct ClipRect {
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
+pub(crate) struct ClipRect {
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) width: i32,
+    pub(crate) height: i32,
 }
 
 impl Painter {
@@ -641,7 +641,7 @@ fn clip_to_tuple(clip: ClipRect) -> (u32, u32, u32, u32) {
     )
 }
 
-fn fill_rect_clipped(buffer: &mut PixelBuffer, rect: ClipRect, color: Color, clip: ClipRect) {
+pub(crate) fn fill_rect_clipped(buffer: &mut PixelBuffer, rect: ClipRect, color: Color, clip: ClipRect) {
     let clipped = intersect_clip(rect, clip);
     if clipped.width <= 0 || clipped.height <= 0 {
         return;
@@ -654,7 +654,7 @@ fn fill_rect_clipped(buffer: &mut PixelBuffer, rect: ClipRect, color: Color, cli
     }
 }
 
-fn fill_rounded_rect_clipped(
+pub(crate) fn fill_rounded_rect_clipped(
     buffer: &mut PixelBuffer,
     rect: ClipRect,
     radius: f32,

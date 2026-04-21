@@ -12,11 +12,12 @@ use mesh_events::EventBus;
 use mesh_locale::LocaleEngine;
 use mesh_plugin::lifecycle::{PluginInstance, PluginState};
 use mesh_plugin::{DependencyGraphError, PluginType, manifest, validate_plugin_dependency_graph};
+use mesh_debug::{DebugOverlayState, DebugSnapshot, HealthEntry, InterfaceEntry, PluginEntry, ProviderEntry};
 use mesh_renderer::{
-    DevWindowBackend, DevWindowEvent, DevWindowKeyEvent, LayerShellBackend, LayerSurfaceConfig,
-    Painter, PixelBuffer,
+    DebugOverlay, DevWindowBackend, DevWindowEvent, DevWindowKeyEvent, LayerShellBackend,
+    LayerSurfaceConfig, Painter, PixelBuffer,
 };
-use mesh_scripting::{LocaleBoundState, ScriptContext, ScriptError, ScriptState};
+use mesh_scripting::{LocaleBoundState, PublishedEvent, ScriptContext, ScriptError, ScriptState};
 use mesh_service::{
     InterfaceProvider, InterfaceRegistry, ServiceRegistry, canonical_interface_name,
     load_interface_contract,
@@ -44,6 +45,8 @@ pub enum CoreRequest {
     ShowSurface { surface_id: SurfaceId },
     HideSurface { surface_id: SurfaceId },
     PublishDiagnostics { message: String },
+    ToggleDebugOverlay,
+    CycleDebugTab,
     Shutdown,
 }
 
@@ -144,6 +147,10 @@ pub trait ShellComponent: Send {
     }
     fn reload_plugin_settings(&mut self) -> Result<bool, ComponentError> {
         Ok(false)
+    }
+    /// Return the last widget tree built by `paint`, for the debug layout inspector.
+    fn last_widget_tree(&self) -> Option<&WidgetNode> {
+        None
     }
 }
 
@@ -252,6 +259,8 @@ pub struct Shell {
     windows: WindowBackend,
     theme_watch: ThemeWatchState,
     settings_watch: SettingsWatchState,
+    debug: DebugOverlayState,
+    debug_overlay: DebugOverlay,
 }
 
 enum WindowBackend {
@@ -376,6 +385,8 @@ impl Shell {
             windows: WindowBackend::select(),
             theme_watch,
             settings_watch,
+            debug: DebugOverlayState::default(),
+            debug_overlay: DebugOverlay::new(),
         }
     }
 
@@ -479,6 +490,54 @@ impl Shell {
 
     pub fn plugin(&self, id: &str) -> Option<&PluginInstance> {
         self.plugins.get(id)
+    }
+
+    fn build_debug_snapshot(&self) -> DebugSnapshot {
+        let plugins = self
+            .plugins
+            .values()
+            .map(|inst| PluginEntry {
+                id: inst.manifest.package.id.clone(),
+                plugin_type: format!("{:?}", inst.manifest.package.plugin_type).to_lowercase(),
+                state: inst.state.to_string(),
+                error_count: inst.error_count,
+                last_error: inst.last_error.clone(),
+            })
+            .collect();
+
+        let catalog = self.interfaces.catalog();
+        let mut interfaces: Vec<InterfaceEntry> = catalog
+            .providers
+            .iter()
+            .map(|(name, providers)| {
+                let providers = providers
+                    .iter()
+                    .map(|p| ProviderEntry {
+                        backend_name: p.backend_name.clone(),
+                        priority: p.priority,
+                    })
+                    .collect();
+                InterfaceEntry { name: name.clone(), providers }
+            })
+            .collect();
+        interfaces.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let health = self
+            .diagnostics
+            .snapshot()
+            .into_iter()
+            .map(|(id, status)| HealthEntry { plugin_id: id, status: status.to_string() })
+            .collect();
+
+        let active_surfaces = self
+            .core
+            .surfaces
+            .iter()
+            .filter(|(_, s)| s.visible)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        DebugSnapshot { plugins, interfaces, health, active_surfaces }
     }
 
     pub fn plugins(&self) -> impl Iterator<Item = (&str, PluginState)> {
@@ -831,6 +890,15 @@ impl Shell {
                 tracing::info!("diagnostic: {message}");
                 Ok(VecDeque::new())
             }
+            CoreRequest::ToggleDebugOverlay => {
+                self.debug.toggle();
+                tracing::debug!("debug overlay: {}", if self.debug.enabled { "on" } else { "off" });
+                Ok(VecDeque::new())
+            }
+            CoreRequest::CycleDebugTab => {
+                self.debug.cycle_tab();
+                Ok(VecDeque::new())
+            }
             CoreRequest::Shutdown => {
                 self.core.shutting_down = true;
                 Ok(VecDeque::new())
@@ -856,13 +924,16 @@ impl Shell {
     }
 
     fn render_components(&mut self) -> Result<(), ShellRunError> {
+        // Build the snapshot once per frame if the overlay is active.
+        let debug_snapshot = self.debug.enabled.then(|| self.build_debug_snapshot());
+
         for runtime in &mut self.components {
             if !runtime.component.wants_render() {
                 continue;
             }
 
             let mut rerender_attempts = 0;
-            let buffer = loop {
+            let mut buffer = loop {
                 let surface = self
                     .surfaces
                     .get_mut(&runtime.surface_id)
@@ -888,6 +959,16 @@ impl Shell {
 
                 rerender_attempts += 1;
             };
+
+            // Paint debug overlay on top of the rendered buffer.
+            if let Some(snapshot) = &debug_snapshot {
+                if self.debug.show_layout_bounds {
+                    if let Some(tree) = runtime.component.last_widget_tree() {
+                        self.debug_overlay.paint_layout_bounds(tree, &mut buffer, 1.0);
+                    }
+                }
+                self.debug_overlay.paint_panel(snapshot, self.debug.active_tab, &mut buffer, 1.0);
+            }
 
             let visible = self
                 .core
@@ -947,6 +1028,26 @@ impl Shell {
                 continue;
             };
 
+            // Intercept global shortcuts before routing to components.
+            // Key names vary by backend (minifb: "D", xkbcommon: "d") so
+            // we normalise to lowercase. Modifier state comes from KeyMods
+            // embedded in the event, not shell-side tracking.
+            if let DevWindowEvent::Key { event: DevWindowKeyEvent::Pressed(key, mods), .. } = &event {
+                match key.to_ascii_lowercase().as_str() {
+                    "d" if mods.ctrl && mods.shift => {
+                        let mut pending = VecDeque::from([CoreRequest::ToggleDebugOverlay]);
+                        self.drain_requests(&mut pending)?;
+                        continue;
+                    }
+                    "tab" | "iso_left_tab" if mods.ctrl && self.debug.enabled => {
+                        let mut pending = VecDeque::from([CoreRequest::CycleDebugTab]);
+                        self.drain_requests(&mut pending)?;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
             let input = match event {
                 DevWindowEvent::PointerMove { x, y, .. } => ComponentInput::PointerMove { x, y },
                 DevWindowEvent::PointerButton { x, y, pressed, .. } => {
@@ -956,7 +1057,7 @@ impl Shell {
                     ComponentInput::Scroll { x, y, dx, dy }
                 }
                 DevWindowEvent::Key {
-                    event: DevWindowKeyEvent::Pressed(key),
+                    event: DevWindowKeyEvent::Pressed(key, _mods),
                     ..
                 } => ComponentInput::KeyPressed { key },
                 DevWindowEvent::Key {
@@ -1305,6 +1406,7 @@ struct FrontendSurfaceComponent {
     measured_size: Option<(u32, u32)>,
     locale: LocaleEngine,
     interface_catalog: mesh_service::InterfaceCatalog,
+    last_tree: Option<WidgetNode>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -1516,6 +1618,7 @@ impl FrontendSurfaceComponent {
             measured_size: None,
             locale: LocaleEngine::new("en"),
             interface_catalog,
+            last_tree: None,
         }
     }
 
@@ -1800,7 +1903,7 @@ impl FrontendSurfaceComponent {
         tree
     }
 
-    fn call_namespaced_handler(&mut self, handler: &str) -> Result<(), ComponentError> {
+    fn call_namespaced_handler(&mut self, handler: &str) -> Result<Vec<CoreRequest>, ComponentError> {
         let (instance_key, handler_name, component_id) =
             if let Some((instance_key, handler_name)) = parse_namespaced_handler(handler) {
                 let component_id = self
@@ -1824,7 +1927,7 @@ impl FrontendSurfaceComponent {
 
         let mut runtimes = self.runtimes.borrow_mut();
         let Some(runtime) = runtimes.get_mut(&instance_key) else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         runtime
             .script_ctx
@@ -1835,7 +1938,9 @@ impl FrontendSurfaceComponent {
             })?;
         self.dirty = true;
 
-        Ok(())
+        Ok(script_events_to_requests(
+            runtime.script_ctx.drain_published_events(),
+        ))
     }
 }
 
@@ -2068,6 +2173,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         buffer.clear(tree.computed_style.background_color);
         let painter = Painter::new();
         painter.paint(&tree, buffer, 1.0);
+        self.last_tree = Some(tree.clone());
 
         // Paint tooltip overlay when the hover delay has elapsed.
         if let (Some(start), Some(hovered_key)) = (self.hover_start, self.hovered_key.as_ref()) {
@@ -2210,7 +2316,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                     if let Some(node_key) = find_focusable_at(&tree, x, y) {
                         if self.pointer_down_key.as_deref() == Some(node_key.as_str()) {
                             if let Some(handler) = find_click_handler(&tree, &node_key) {
-                                self.call_namespaced_handler(&handler)?;
+                                return self.call_namespaced_handler(&handler);
                             }
                         }
                     }
@@ -2276,6 +2382,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
 
         Ok(Vec::new())
+    }
+
+    fn last_widget_tree(&self) -> Option<&WidgetNode> {
+        self.last_tree.as_ref()
     }
 }
 
@@ -2445,6 +2555,45 @@ fn build_audio_service_state(
         "summary": summary,
         "source_plugin": source_plugin.unwrap_or(""),
     })
+}
+
+fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<CoreRequest> {
+    let mut requests = Vec::new();
+
+    for event in events {
+        match event.channel.as_str() {
+            "shell.toggle-quick-settings" => requests.push(CoreRequest::ToggleSurface {
+                surface_id: "@mesh/quick-settings".into(),
+            }),
+            "shell.open-quick-settings" => requests.push(CoreRequest::ShowSurface {
+                surface_id: "@mesh/quick-settings".into(),
+            }),
+            "shell.close-quick-settings" => requests.push(CoreRequest::HideSurface {
+                surface_id: "@mesh/quick-settings".into(),
+            }),
+            "shell.toggle-launcher" => requests.push(CoreRequest::ToggleSurface {
+                surface_id: "@mesh/launcher".into(),
+            }),
+            "shell.open-launcher" => requests.push(CoreRequest::ShowSurface {
+                surface_id: "@mesh/launcher".into(),
+            }),
+            "shell.close-launcher" => requests.push(CoreRequest::HideSurface {
+                surface_id: "@mesh/launcher".into(),
+            }),
+            "shell.toggle-notification-center" => requests.push(CoreRequest::ToggleSurface {
+                surface_id: "@mesh/notification-center".into(),
+            }),
+            "shell.open-notification-center" => requests.push(CoreRequest::ShowSurface {
+                surface_id: "@mesh/notification-center".into(),
+            }),
+            "shell.close-notification-center" => requests.push(CoreRequest::HideSurface {
+                surface_id: "@mesh/notification-center".into(),
+            }),
+            _ => {}
+        }
+    }
+
+    requests
 }
 
 fn find_node_by_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetNode> {
@@ -3040,6 +3189,8 @@ fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
         "shell:toggle_notification_center" => Some(CoreRequest::ToggleSurface {
             surface_id: "@mesh/notification-center".into(),
         }),
+        "shell:debug_overlay" => Some(CoreRequest::ToggleDebugOverlay),
+        "shell:debug_cycle_tab" => Some(CoreRequest::CycleDebugTab),
         "shell:shutdown" => Some(CoreRequest::Shutdown),
         _ => {
             if let Some(surface_id) = command.strip_prefix("shell:show_surface:") {
