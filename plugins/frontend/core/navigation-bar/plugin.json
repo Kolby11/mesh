@@ -1,10 +1,10 @@
 {
-  "id": "@mesh/panel",
-  "name": "MESH Panel",
+  "id": "@mesh/navigation-bar",
+  "name": "Navigation Bar",
   "version": "0.1.0",
   "type": "surface",
   "api_version": "0.1",
-  "description": "Top panel shell surface",
+  "description": "Top-edge navigation bar surface.",
   "authors": ["MESH Project"],
   "compatibility": {
     "mesh": ">=0.1.0",
@@ -14,17 +14,13 @@
     "required": [
       "shell.surface",
       "service.audio.read",
-      "service.network.read",
-      "service.power.read",
       "theme.read",
       "locale.read"
     ]
   },
   "dependencies": {
     "plugins": {
-      "@mesh/audio-interface": ">=1.0.0, <2.0.0",
-      "@mesh/network-interface": ">=1.0.0, <2.0.0",
-      "@mesh/power-interface": ">=1.0.0, <2.0.0"
+      "@mesh/audio-interface": ">=1.0.0, <2.0.0"
     }
   },
   "entrypoints": {
@@ -32,7 +28,7 @@
   },
   "accessibility": {
     "role": "toolbar",
-    "label": "System panel",
-    "description": "Default top panel with clock, system tray, and status indicators"
+    "label": "Navigation bar",
+    "description": "Top-level navigation bar surface"
   }
 }

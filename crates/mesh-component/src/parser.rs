@@ -9,7 +9,17 @@ use crate::{
     style::{ContainerQuery, Declaration, Selector, StyleBlock, StyleRule, StyleValue},
     template::*,
 };
-use cssparser::{Parser, ParserInput, ToCss, Token};
+use cssparser::{Parser, ParserInput, ToCss as CssParserToCss, Token};
+use lightningcss::{
+    media_query::{
+        MediaFeatureComparison, MediaFeatureName, MediaFeatureValue, Operator,
+        QueryFeature as LightningQueryFeature,
+    },
+    rules::{CssRule as LightningCssRule, style::StyleRule as LightningStyleRule},
+    rules::container::{ContainerCondition, ContainerSizeFeatureId, ContainerSizeFeature},
+    stylesheet::{ParserOptions as CssParserOptions, PrinterOptions, StyleSheet},
+    traits::ToCss as LightningToCss,
+};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use std::collections::HashMap;
@@ -415,185 +425,327 @@ fn parse_script(source: &str, blocks: &HashMap<String, String>) -> ScriptBlock {
 }
 
 fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
-    let mut rules = Vec::new();
-    parse_style_rules(source, None, &mut rules)?;
+    let stylesheet = StyleSheet::parse(
+        source,
+        CssParserOptions {
+            filename: "<style>".into(),
+            error_recovery: false,
+            ..CssParserOptions::default()
+        },
+    )
+    .map_err(map_lightning_error)?;
 
+    let mut rules = Vec::new();
+    lower_css_rules(&stylesheet.rules.0, None, &mut rules)?;
     Ok(StyleBlock { rules })
 }
 
-fn parse_style_rules(
-    source: &str,
+fn lower_css_rules(
+    source_rules: &[LightningCssRule<'_>],
     inherited_query: Option<ContainerQuery>,
     rules: &mut Vec<StyleRule>,
 ) -> Result<(), ParseError> {
-    let mut remaining = source.trim();
-
-    while !remaining.is_empty() {
-        remaining = remaining.trim_start();
-        if remaining.is_empty() {
-            break;
-        }
-
-        let (header, body, rest) = take_style_block(remaining)?;
-        if header.starts_with("@container") {
-            let query = parse_container_query(header)?;
-            let combined_query = inherited_query
-                .map(|existing| existing.intersect(query))
-                .or(Some(query));
-            parse_style_rules(body, combined_query, rules)?;
-        } else if header.starts_with('@') {
-            return Err(ParseError::InvalidStyle {
-                message: format!("unsupported at-rule '{header}'"),
-                line: 0,
-            });
-        } else {
-            let selector = parse_selector(header)?;
-            let declarations = parse_declarations(body)?;
-            rules.push(StyleRule {
-                selector,
-                declarations,
-                container_query: inherited_query,
-            });
-        }
-
-        remaining = rest;
-    }
-
-    Ok(())
-}
-
-fn take_style_block(source: &str) -> Result<(&str, &str, &str), ParseError> {
-    let Some(brace_start) = source.find('{') else {
-        return Err(ParseError::InvalidStyle {
-            message: "expected '{' in style block".to_string(),
-            line: 0,
-        });
-    };
-    let Some(brace_end) = find_matching_delimiter(source, brace_start, '{', '}') else {
-        return Err(ParseError::InvalidStyle {
-            message: "unclosed rule block".to_string(),
-            line: 0,
-        });
-    };
-
-    Ok((
-        source[..brace_start].trim(),
-        &source[brace_start + 1..brace_end],
-        &source[brace_end + 1..],
-    ))
-}
-
-fn find_matching_delimiter(source: &str, start: usize, open: char, close: char) -> Option<usize> {
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut string_char = '\0';
-    let mut escaped = false;
-
-    for (index, ch) in source
-        .char_indices()
-        .skip_while(|(index, _)| *index < start)
-    {
-        if in_string {
-            if escaped {
-                escaped = false;
-                continue;
+    for rule in source_rules {
+        match rule {
+            LightningCssRule::Style(style_rule) => {
+                lower_style_rule(style_rule, inherited_query, rules)?;
             }
-            match ch {
-                '\\' => escaped = true,
-                _ if ch == string_char => in_string = false,
-                _ => {}
+            LightningCssRule::Container(container_rule) => {
+                let query = lower_container_query(container_rule)?;
+                let combined_query = inherited_query
+                    .map(|existing| existing.intersect(query))
+                    .or(Some(query));
+                lower_css_rules(&container_rule.rules.0, combined_query, rules)?;
             }
-            continue;
-        }
-
-        match ch {
-            '"' | '\'' => {
-                in_string = true;
-                string_char = ch;
+            LightningCssRule::Ignored => {}
+            other => {
+                return Err(ParseError::InvalidStyle {
+                    message: format!("unsupported at-rule '{}'", css_rule_name(other)),
+                    line: 0,
+                });
             }
-            _ if ch == open => depth += 1,
-            _ if ch == close => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return Some(index);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    None
-}
-
-fn parse_container_query(source: &str) -> Result<ContainerQuery, ParseError> {
-    let mut query = ContainerQuery::default();
-    let mut found_clause = false;
-    let mut remaining = source
-        .trim()
-        .strip_prefix("@container")
-        .ok_or_else(|| ParseError::InvalidStyle {
-            message: format!("invalid container query '{source}'"),
-            line: 0,
-        })?
-        .trim();
-
-    while let Some(start) = remaining.find('(') {
-        let Some(end) = find_matching_delimiter(remaining, start, '(', ')') else {
-            return Err(ParseError::InvalidStyle {
-                message: format!("unclosed container query '{source}'"),
-                line: 0,
-            });
-        };
-        let clause = remaining[start + 1..end].trim();
-        apply_container_clause(&mut query, clause)?;
-        found_clause = true;
-        remaining = remaining[end + 1..].trim();
-    }
-
-    if !found_clause {
-        return Err(ParseError::InvalidStyle {
-            message: format!("container query '{source}' is missing a condition"),
-            line: 0,
-        });
-    }
-
-    Ok(query)
-}
-
-fn apply_container_clause(query: &mut ContainerQuery, clause: &str) -> Result<(), ParseError> {
-    let (property, value) = clause
-        .split_once(':')
-        .ok_or_else(|| ParseError::InvalidStyle {
-            message: format!("invalid container clause '{clause}'"),
-            line: 0,
-        })?;
-    let parsed_value = parse_style_length(value)?;
-
-    match property.trim().to_ascii_lowercase().as_str() {
-        "min-width" => query.min_width = Some(parsed_value),
-        "max-width" => query.max_width = Some(parsed_value),
-        "min-height" => query.min_height = Some(parsed_value),
-        "max-height" => query.max_height = Some(parsed_value),
-        other => {
-            return Err(ParseError::InvalidStyle {
-                message: format!("unsupported container query property '{other}'"),
-                line: 0,
-            });
         }
     }
 
     Ok(())
 }
 
-fn parse_style_length(value: &str) -> Result<f32, ParseError> {
-    value
-        .trim()
-        .trim_end_matches("px")
-        .parse::<f32>()
-        .map_err(|_| ParseError::InvalidStyle {
-            message: format!("invalid style length '{value}'"),
+fn lower_style_rule(
+    source_rule: &LightningStyleRule<'_>,
+    inherited_query: Option<ContainerQuery>,
+    rules: &mut Vec<StyleRule>,
+) -> Result<(), ParseError> {
+    if !source_rule.rules.0.is_empty() {
+        return Err(ParseError::InvalidStyle {
+            message: "nested style rules are not supported".into(),
             line: 0,
-        })
+        });
+    }
+
+    let declarations = lower_declarations(&source_rule.declarations)?;
+    for selector in &source_rule.selectors.0 {
+        let selector_source = selector
+            .to_css_string(PrinterOptions::default())
+            .map_err(map_lightning_printer_error)?;
+        let selector = parse_selector(&selector_source)?;
+        rules.push(StyleRule {
+            selector,
+            declarations: declarations.clone(),
+            container_query: inherited_query,
+        });
+    }
+
+    Ok(())
+}
+
+fn lower_declarations(
+    source_block: &lightningcss::declaration::DeclarationBlock<'_>,
+) -> Result<Vec<Declaration>, ParseError> {
+    let mut declarations = Vec::new();
+
+    for property in &source_block.declarations {
+        declarations.push(lower_property(property)?);
+    }
+    for property in &source_block.important_declarations {
+        declarations.push(lower_property(property)?);
+    }
+
+    Ok(declarations)
+}
+
+fn lower_property(
+    property: &lightningcss::properties::Property<'_>,
+) -> Result<Declaration, ParseError> {
+    let property_name = property.property_id().name().to_string();
+    let value = property
+        .value_to_css_string(PrinterOptions::default())
+        .map_err(map_lightning_printer_error)?;
+
+    Ok(Declaration {
+        property: property_name,
+        value: classify_style_value(&value),
+    })
+}
+
+fn lower_container_query(
+    source_rule: &lightningcss::rules::container::ContainerRule<'_>,
+) -> Result<ContainerQuery, ParseError> {
+    let Some(condition) = &source_rule.condition else {
+        return Err(ParseError::InvalidStyle {
+            message: "container query is missing a condition".into(),
+            line: 0,
+        });
+    };
+
+    lower_container_condition(condition)
+}
+
+fn css_rule_name(rule: &LightningCssRule<'_>) -> &'static str {
+    match rule {
+        LightningCssRule::Media(_) => "@media",
+        LightningCssRule::Import(_) => "@import",
+        LightningCssRule::Style(_) => "style",
+        LightningCssRule::Keyframes(_) => "@keyframes",
+        LightningCssRule::FontFace(_) => "@font-face",
+        LightningCssRule::FontPaletteValues(_) => "@font-palette-values",
+        LightningCssRule::FontFeatureValues(_) => "@font-feature-values",
+        LightningCssRule::Page(_) => "@page",
+        LightningCssRule::Supports(_) => "@supports",
+        LightningCssRule::CounterStyle(_) => "@counter-style",
+        LightningCssRule::Namespace(_) => "@namespace",
+        LightningCssRule::MozDocument(_) => "@-moz-document",
+        LightningCssRule::Nesting(_) => "@nest",
+        LightningCssRule::NestedDeclarations(_) => "nested declarations",
+        LightningCssRule::Viewport(_) => "@viewport",
+        LightningCssRule::CustomMedia(_) => "@custom-media",
+        LightningCssRule::LayerStatement(_) => "@layer",
+        LightningCssRule::LayerBlock(_) => "@layer",
+        LightningCssRule::Property(_) => "@property",
+        LightningCssRule::Container(_) => "@container",
+        LightningCssRule::Scope(_) => "@scope",
+        LightningCssRule::StartingStyle(_) => "@starting-style",
+        LightningCssRule::ViewTransition(_) => "@view-transition",
+        LightningCssRule::Ignored => "ignored rule",
+        LightningCssRule::Unknown(_) => "unknown at-rule",
+        LightningCssRule::Custom(_) => "custom at-rule",
+    }
+}
+
+fn map_lightning_error<T: std::fmt::Display>(err: lightningcss::error::Error<T>) -> ParseError {
+    ParseError::InvalidStyle {
+        message: err.kind.to_string(),
+        line: err.loc.map(|loc| loc.line as usize + 1).unwrap_or(0),
+    }
+}
+
+fn map_lightning_printer_error(err: lightningcss::error::PrinterError) -> ParseError {
+    ParseError::InvalidStyle {
+        message: err.to_string(),
+        line: 0,
+    }
+}
+
+fn lower_container_condition(condition: &ContainerCondition<'_>) -> Result<ContainerQuery, ParseError> {
+    match condition {
+        ContainerCondition::Feature(feature) => lower_container_feature(feature),
+        ContainerCondition::Operation {
+            operator: Operator::And,
+            conditions,
+        } => {
+            let mut query = ContainerQuery::default();
+            for condition in conditions {
+                query = query.intersect(lower_container_condition(condition)?);
+            }
+            Ok(query)
+        }
+        ContainerCondition::Operation {
+            operator: Operator::Or,
+            ..
+        } => Err(ParseError::InvalidStyle {
+            message: "container queries with 'or' are not supported".into(),
+            line: 0,
+        }),
+        ContainerCondition::Not(_) => Err(ParseError::InvalidStyle {
+            message: "negated container queries are not supported".into(),
+            line: 0,
+        }),
+        ContainerCondition::Style(_) => Err(ParseError::InvalidStyle {
+            message: "style container queries are not supported".into(),
+            line: 0,
+        }),
+        ContainerCondition::ScrollState(_) => Err(ParseError::InvalidStyle {
+            message: "scroll-state container queries are not supported".into(),
+            line: 0,
+        }),
+        ContainerCondition::Unknown(_) => Err(ParseError::InvalidStyle {
+            message: "unsupported container query condition".into(),
+            line: 0,
+        }),
+    }
+}
+
+fn lower_container_feature(feature: &ContainerSizeFeature<'_>) -> Result<ContainerQuery, ParseError> {
+    match feature {
+        LightningQueryFeature::Plain { name, value } => {
+            let axis = container_feature_axis(name)?;
+            let value = container_feature_length(value)?;
+            let mut query = ContainerQuery::default();
+            apply_container_bound(&mut query, axis, MediaFeatureComparison::Equal, value);
+            Ok(query)
+        }
+        LightningQueryFeature::Range {
+            name,
+            operator,
+            value,
+        } => {
+            let axis = container_feature_axis(name)?;
+            let value = container_feature_length(value)?;
+            let mut query = ContainerQuery::default();
+            apply_container_bound(&mut query, axis, *operator, value);
+            Ok(query)
+        }
+        LightningQueryFeature::Interval {
+            name,
+            start,
+            start_operator,
+            end,
+            end_operator,
+        } => {
+            let axis = container_feature_axis(name)?;
+            let start = container_feature_length(start)?;
+            let end = container_feature_length(end)?;
+            let mut query = ContainerQuery::default();
+            apply_container_bound(&mut query, axis, invert_comparison(*start_operator), start);
+            apply_container_bound(&mut query, axis, *end_operator, end);
+            Ok(query)
+        }
+        LightningQueryFeature::Boolean { .. } => Err(ParseError::InvalidStyle {
+            message: "boolean container queries are not supported".into(),
+            line: 0,
+        }),
+    }
+}
+
+fn container_feature_axis(
+    name: &MediaFeatureName<'_, ContainerSizeFeatureId>,
+) -> Result<ContainerAxis, ParseError> {
+    match name {
+        MediaFeatureName::Standard(ContainerSizeFeatureId::Width)
+        | MediaFeatureName::Standard(ContainerSizeFeatureId::InlineSize) => Ok(ContainerAxis::Width),
+        MediaFeatureName::Standard(ContainerSizeFeatureId::Height)
+        | MediaFeatureName::Standard(ContainerSizeFeatureId::BlockSize) => Ok(ContainerAxis::Height),
+        MediaFeatureName::Standard(other) => Err(ParseError::InvalidStyle {
+            message: format!("unsupported container query property '{other:?}'"),
+            line: 0,
+        }),
+        MediaFeatureName::Custom(_) | MediaFeatureName::Unknown(_) => Err(ParseError::InvalidStyle {
+            message: "custom container query properties are not supported".into(),
+            line: 0,
+        }),
+    }
+}
+
+fn container_feature_length(value: &MediaFeatureValue<'_>) -> Result<f32, ParseError> {
+    match value {
+        MediaFeatureValue::Length(length) => length.to_px().ok_or_else(|| ParseError::InvalidStyle {
+            message: "container query length must be convertible to px".into(),
+            line: 0,
+        }),
+        other => Err(ParseError::InvalidStyle {
+            message: format!("unsupported container query value '{other:?}'"),
+            line: 0,
+        }),
+    }
+}
+
+fn apply_container_bound(
+    query: &mut ContainerQuery,
+    axis: ContainerAxis,
+    operator: MediaFeatureComparison,
+    value: f32,
+) {
+    match (axis, operator) {
+        (ContainerAxis::Width, MediaFeatureComparison::GreaterThan)
+        | (ContainerAxis::Width, MediaFeatureComparison::GreaterThanEqual) => {
+            query.min_width = Some(query.min_width.map_or(value, |current| current.max(value)));
+        }
+        (ContainerAxis::Width, MediaFeatureComparison::LessThan)
+        | (ContainerAxis::Width, MediaFeatureComparison::LessThanEqual) => {
+            query.max_width = Some(query.max_width.map_or(value, |current| current.min(value)));
+        }
+        (ContainerAxis::Width, MediaFeatureComparison::Equal) => {
+            query.min_width = Some(query.min_width.map_or(value, |current| current.max(value)));
+            query.max_width = Some(query.max_width.map_or(value, |current| current.min(value)));
+        }
+        (ContainerAxis::Height, MediaFeatureComparison::GreaterThan)
+        | (ContainerAxis::Height, MediaFeatureComparison::GreaterThanEqual) => {
+            query.min_height = Some(query.min_height.map_or(value, |current| current.max(value)));
+        }
+        (ContainerAxis::Height, MediaFeatureComparison::LessThan)
+        | (ContainerAxis::Height, MediaFeatureComparison::LessThanEqual) => {
+            query.max_height = Some(query.max_height.map_or(value, |current| current.min(value)));
+        }
+        (ContainerAxis::Height, MediaFeatureComparison::Equal) => {
+            query.min_height = Some(query.min_height.map_or(value, |current| current.max(value)));
+            query.max_height = Some(query.max_height.map_or(value, |current| current.min(value)));
+        }
+    }
+}
+
+fn invert_comparison(operator: MediaFeatureComparison) -> MediaFeatureComparison {
+    match operator {
+        MediaFeatureComparison::Equal => MediaFeatureComparison::Equal,
+        MediaFeatureComparison::GreaterThan => MediaFeatureComparison::LessThan,
+        MediaFeatureComparison::GreaterThanEqual => MediaFeatureComparison::LessThanEqual,
+        MediaFeatureComparison::LessThan => MediaFeatureComparison::GreaterThan,
+        MediaFeatureComparison::LessThanEqual => MediaFeatureComparison::GreaterThanEqual,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ContainerAxis {
+    Width,
+    Height,
 }
 
 fn parse_selector(source: &str) -> Result<Selector, ParseError> {
@@ -659,55 +811,6 @@ fn parse_selector(source: &str) -> Result<Selector, ParseError> {
     }
 }
 
-fn parse_declarations(source: &str) -> Result<Vec<Declaration>, ParseError> {
-    let mut input = ParserInput::new(source);
-    let mut parser = Parser::new(&mut input);
-    let mut declarations = Vec::new();
-
-    while !parser.is_exhausted() {
-        parser.skip_whitespace();
-        if parser.is_exhausted() {
-            break;
-        }
-
-        let property = parser
-            .expect_ident_cloned()
-            .map_err(|err| ParseError::InvalidStyle {
-                message: format!("{err:?}"),
-                line: 0,
-            })?;
-        parser
-            .expect_colon()
-            .map_err(|err| ParseError::InvalidStyle {
-                message: format!("{err:?}"),
-                line: 0,
-            })?;
-
-        let raw_value = parser
-            .parse_until_before(
-                cssparser::Delimiter::Bang | cssparser::Delimiter::Semicolon,
-                |input| serialize_css_value(input),
-            )
-            .map_err(|err| ParseError::InvalidStyle {
-                message: format!("{err:?}"),
-                line: 0,
-            })?;
-
-        let _ = parser.try_parse(|input| {
-            input.expect_delim('!')?;
-            input.expect_ident_matching("important")
-        });
-        let _ = parser.try_parse(|input| input.expect_semicolon());
-
-        declarations.push(Declaration {
-            property: property.to_string(),
-            value: classify_style_value(&raw_value),
-        });
-    }
-
-    Ok(declarations)
-}
-
 fn classify_style_value(value: &str) -> StyleValue {
     let value = value.trim();
     if value.starts_with("token(") && value.ends_with(')') {
@@ -717,45 +820,6 @@ fn classify_style_value(value: &str) -> StyleValue {
     } else {
         StyleValue::Literal(value.to_string())
     }
-}
-
-fn serialize_css_value<'i, 't>(
-    input: &mut Parser<'i, 't>,
-) -> Result<String, cssparser::ParseError<'i, ()>> {
-    let mut rendered = String::new();
-
-    while let Ok(token) = input.next_including_whitespace_and_comments() {
-        match token {
-            Token::Function(name) => {
-                rendered.push_str(name);
-                rendered.push('(');
-                let inner = input.parse_nested_block(serialize_css_value)?;
-                rendered.push_str(&inner);
-                rendered.push(')');
-            }
-            Token::ParenthesisBlock => {
-                rendered.push('(');
-                let inner = input.parse_nested_block(serialize_css_value)?;
-                rendered.push_str(&inner);
-                rendered.push(')');
-            }
-            Token::SquareBracketBlock => {
-                rendered.push('[');
-                let inner = input.parse_nested_block(serialize_css_value)?;
-                rendered.push_str(&inner);
-                rendered.push(']');
-            }
-            Token::CurlyBracketBlock => {
-                rendered.push('{');
-                let inner = input.parse_nested_block(serialize_css_value)?;
-                rendered.push_str(&inner);
-                rendered.push('}');
-            }
-            other => rendered.push_str(&other.to_css_string()),
-        }
-    }
-
-    Ok(rendered.trim().to_string())
 }
 
 fn parse_schema(source: &str) -> Result<SchemaBlock, ParseError> {
@@ -895,6 +959,22 @@ row {
         assert!(matches!(&decls[1].value, StyleValue::Token(v) if v == "spacing.md"));
         assert!(matches!(&decls[2].value, StyleValue::Var(v) if v == "--bg"));
         assert!(style.rules[0].container_query.is_none());
+    }
+
+    #[test]
+    fn parse_grouped_selectors_into_multiple_rules() {
+        let source = r#"
+<style>
+.panel, #main {
+    color: #fff;
+}
+</style>
+"#;
+        let file = parse_component(source).unwrap();
+        let style = file.style.unwrap();
+        assert_eq!(style.rules.len(), 2);
+        assert!(matches!(&style.rules[0].selector, Selector::Class(name) if name == "panel"));
+        assert!(matches!(&style.rules[1].selector, Selector::Id(name) if name == "main"));
     }
 
     #[test]

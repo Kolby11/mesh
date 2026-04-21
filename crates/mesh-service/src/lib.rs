@@ -1,44 +1,29 @@
-pub mod contract;
-pub mod interface;
-/// Service and interface plumbing for MESH.
+/// Interface plumbing for MESH's plugin runtime.
 ///
-/// This crate hosts the registry, contract loader, and transitional typed
-/// bindings used by backends and frontends.
+/// The source of truth is the interface contract plugin on disk plus the
+/// backend plugin that provides it. This crate hosts the registry and contract
+/// loader. All service interfaces are declared by plugins; there are no
+/// hardcoded Rust trait adapters.
 ///
-/// # Architecture
+/// # Runtime model
 ///
 /// ```text
-///  ┌─────────────────────────────────────────────────────┐
-///  │                   Service Trait                      │
-///  │            (e.g. AudioService, NetworkService)       │
-///  └──────────────┬────────────────────┬─────────────────┘
-///                  │                    │
-///       ┌─────────▼──────┐   ┌─────────▼──────┐
-///       │  Backend Plugin │   │  Backend Plugin │
-///       │  (PipeWire)     │   │  (PulseAudio)   │
-///       └────────────────┘   └────────────────┘
-///                  │                    │
-///                  └────────┬───────────┘
-///                           │
-///              ┌────────────▼────────────┐
-///              │    ServiceRegistry      │
-///              │  (one active per trait)  │
-///              └────────────┬────────────┘
-///                           │
-///              ┌────────────▼────────────┐
-///              │   Frontend / UI Widget  │
-///              │  (uses trait, not impl) │
-///              └─────────────────────────┘
+///  interface contract plugin  +  backend plugin implementation
+///                 |                         |
+///                 +-----------+-------------+
+///                             |
+///                    InterfaceRegistry
+///                             |
+///                 frontend / scripting bindings
 /// ```
 ///
-/// - An **interface contract** defines what a service can do (read volume, list networks, etc.)
-/// - A **backend** is a plugin that implements an interface for a specific system
-/// - A **frontend** is a UI component that consumes the interface through bindings
-/// - The **registry** holds discovered contracts/providers and exposes them to frontends
-///
-/// Frontends never import backend crates. They only see the interface bridge.
+/// - An **interface contract** defines methods, events, and capability names.
+/// - A **backend plugin** provides an implementation of that contract.
+/// - A **frontend plugin** consumes the interface through runtime bindings.
+/// - The **registry** tracks discovered contracts and providers.
+pub mod contract;
+pub mod interface;
 pub mod registry;
-pub mod traits;
 
 pub use contract::{
     ContractCapabilities, ContractError, InterfaceArgument, InterfaceContract, InterfaceEvent,
@@ -50,9 +35,3 @@ pub use interface::{
     canonical_interface_name,
 };
 pub use registry::{ServiceEntry, ServiceError, ServiceRegistry};
-pub use traits::audio::{AudioDevice, AudioEvent, AudioService, AudioStream};
-pub use traits::brightness::{BrightnessEvent, BrightnessService};
-pub use traits::media::{MediaEvent, MediaInfo, MediaService, PlaybackState};
-pub use traits::network::{NetworkConnection, NetworkDevice, NetworkEvent, NetworkService};
-pub use traits::notifications::{Notification, NotificationEvent, NotificationService, Urgency};
-pub use traits::power::{BatteryInfo, PowerEvent, PowerProfile, PowerService};

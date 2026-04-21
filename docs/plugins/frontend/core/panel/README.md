@@ -12,6 +12,9 @@ first surface a user sees.
 Required:
 
 - `shell.surface` — anchor to the top screen edge
+- `service.audio.read` — read default output volume
+- `service.network.read` — read active network status
+- `service.power.read` — read battery level
 - `theme.read` — consume theme tokens
 - `locale.read` — localized strings
 

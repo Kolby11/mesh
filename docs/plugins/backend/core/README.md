@@ -12,7 +12,7 @@ it by discovering these packages from disk. See
 [`../../../extensibility.md`](../../../extensibility.md) for the full model;
 this page documents the core defaults.
 
-Two plugin kinds live side by side in `plugins/backend/core/`:
+Two plugin kinds live side by side in the backend core tree:
 
 - `type = "interface"` packages that ship `interface.toml`
 - `type = "backend"` providers that implement one of those interfaces

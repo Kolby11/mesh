@@ -7,7 +7,7 @@
 ///
 /// ```text
 /// mesh.interfaces.get(name, version?) → interface proxy
-/// mesh.services.get(type)     → compatibility shim to mesh.interfaces.get("mesh.<type>")
+/// mesh.services.get(type)     → legacy compatibility shim to mesh.interfaces.get("mesh.<type>")
 /// mesh.theme.token(name)      → value          (requires theme.read)
 /// mesh.theme.tokens(group)    → table          (requires theme.read)
 /// mesh.theme.on_change(cb)    → subscription   (requires theme.read)
@@ -23,8 +23,8 @@
 /// mesh.log.error(msg)
 /// ```
 use mesh_capability::{Capability, CapabilitySet};
-// ServiceRegistry will be used when the real Luau VM is integrated
-// to create proxy tables for service access.
+// The runtime is interface-first now; mesh.services remains only as a
+// compatibility alias for older scripts.
 
 /// Describes what host APIs should be injected based on capabilities.
 #[derive(Debug)]

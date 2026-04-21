@@ -8,7 +8,11 @@
       "Read(//home/kolby/.rustup/**)",
       "Bash(cargo --version)",
       "Bash(rustup default *)",
-      "Bash(nix develop *)"
+      "Bash(nix develop *)",
+      "Read(//usr/**)",
+      "Bash(find /lib -name \"xkbcommon.pc\")",
+      "Bash(dpkg -l libxkbcommon-dev)",
+      "Bash(apt-cache show *)"
     ]
   }
 }

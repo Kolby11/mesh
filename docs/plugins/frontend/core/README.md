@@ -49,6 +49,7 @@ these blocks:
 | Plugin | Manifest ID | Purpose |
 |--------|-------------|---------|
 | [base-surface](./base-surface/README.md) | `@mesh/base-surface` | Composition test surface with imported launcher/sidebar widgets and configurable placement |
+| [navigation-bar](./navigation-bar/README.md) | `@mesh/navigation-bar` | Top-edge navigation bar surface |
 | [panel](./panel/README.md) | `@mesh/panel` | Top panel with clock, status icons, system tray |
 | [launcher](./launcher/README.md) | `@mesh/launcher` | Application launcher surface |
 | [notification-center](./notification-center/README.md) | `@mesh/notification-center` | Notification host surface with content/sidebar slots |

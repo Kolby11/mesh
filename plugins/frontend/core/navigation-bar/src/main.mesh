@@ -1,0 +1,204 @@
+<template>
+  <row class="nav-shell">
+    <row class="brand">
+      <box class="brand-mark">
+        <text class="brand-mark-text">M</text>
+      </box>
+      <column class="brand-copy">
+        <text class="eyebrow" :content="eyebrow"/>
+        <text class="brand-name" :content="brand"/>
+      </column>
+    </row>
+
+    <row class="links">
+      <box class="link active">
+        <text class="link-text" :content="primary"/>
+      </box>
+      <box class="link">
+        <text class="link-text" :content="secondary"/>
+      </box>
+      <box class="link">
+        <text class="link-text" :content="tertiary"/>
+      </box>
+      <box class="link">
+        <text class="link-text" :content="quaternary"/>
+      </box>
+    </row>
+
+    <row class="meta">
+      <text class="meta-label">Current</text>
+      <box class="meta-pill">
+        <text class="meta-pill-text" :content="active"/>
+      </box>
+      <button
+        class="volume-widget"
+        @click="onVolumeClick"
+        :title="audio.tooltip"
+        aria-label="Open audio controls"
+      >
+        <text class="volume-glyph" :content="audio.glyph"/>
+        <column class="volume-copy">
+          <text class="volume-label">Volume</text>
+          <text class="volume-value" :content="audio.label"/>
+        </column>
+      </button>
+    </row>
+  </row>
+</template>
+
+<script lang="luau">
+function onVolumeClick()
+    mesh.events.publish("shell.toggle-quick-settings", {})
+end
+</script>
+
+<style>
+.nav-shell {
+    width: 100%;
+    height: 100%;
+    justify-content: space-between;
+    align-items: center;
+    gap: token(spacing.md);
+    padding-inline: token(spacing.lg);
+    padding-block: token(spacing.sm);
+    background: token(color.surface);
+    color: token(color.on-surface);
+}
+
+.brand {
+    align-items: center;
+    gap: token(spacing.sm);
+}
+
+.brand-mark {
+    width: 42px;
+    height: 42px;
+    justify-content: center;
+    align-items: center;
+    border-radius: token(radius.md);
+    background: token(color.primary-container);
+}
+
+.brand-mark-text {
+    color: token(color.on-primary-container);
+    font-weight: 800;
+    font-size: token(typography.size.lg);
+}
+
+.brand-copy {
+    gap: 2px;
+}
+
+.eyebrow {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.xs);
+}
+
+.brand-name {
+    font-size: token(typography.size.md);
+    font-weight: 700;
+}
+
+.links {
+    flex-grow: 1;
+    justify-content: center;
+    align-items: center;
+    gap: token(spacing.xs);
+}
+
+.link {
+    padding-block: token(spacing.sm);
+    padding-inline: token(spacing.md);
+    border-radius: token(radius.full);
+    background: token(color.surface-container);
+}
+
+.active {
+    background: token(color.secondary-container);
+}
+
+.link-text {
+    color: token(color.on-surface);
+    font-size: token(typography.size.sm);
+    font-weight: 600;
+}
+
+.meta {
+    align-items: center;
+    gap: token(spacing.xs);
+}
+
+.meta-label {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.xs);
+}
+
+.meta-pill {
+    padding-block: token(spacing.xs);
+    padding-inline: token(spacing.sm);
+    border-radius: token(radius.full);
+    background: token(color.tertiary-container);
+}
+
+.meta-pill-text {
+    color: token(color.on-tertiary-container);
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+}
+
+.volume-widget {
+    align-items: center;
+    gap: token(spacing.xs);
+    padding-block: token(spacing.xs);
+    padding-inline: token(spacing.sm);
+    border-radius: token(radius.full);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+}
+
+.volume-glyph {
+    color: token(color.secondary);
+    font-size: token(typography.size.xs);
+    font-weight: 800;
+}
+
+.volume-copy {
+    gap: 1px;
+}
+
+.volume-label {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.xs);
+}
+
+.volume-value {
+    color: token(color.on-surface);
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+}
+
+@container (max-width: 760px) {
+    .brand-copy {
+        display: none;
+    }
+
+    .meta-label,
+    .meta-pill,
+    .volume-label {
+        display: none;
+    }
+
+    .links {
+        justify-content: end;
+        gap: token(spacing.xs);
+    }
+
+    .link {
+        padding-inline: token(spacing.sm);
+    }
+
+    .volume-widget {
+        padding-inline: token(spacing.xs);
+    }
+}
+</style>

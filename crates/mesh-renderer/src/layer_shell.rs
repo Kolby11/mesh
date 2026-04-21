@@ -304,10 +304,13 @@ fn map_layer(layer: MeshLayer) -> Layer {
 
 fn map_anchor(edge: Option<Edge>) -> Anchor {
     match edge {
-        Some(Edge::Top) => Anchor::TOP,
-        Some(Edge::Bottom) => Anchor::BOTTOM,
-        Some(Edge::Left) => Anchor::LEFT,
-        Some(Edge::Right) => Anchor::RIGHT,
+        // Treat a single edge as a normal shell placement, not a centered popup.
+        // Top/bottom bars stretch across the output width, and left/right rails
+        // pin to the top corner instead of floating in the vertical center.
+        Some(Edge::Top) => Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
+        Some(Edge::Bottom) => Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+        Some(Edge::Left) => Anchor::TOP | Anchor::LEFT,
+        Some(Edge::Right) => Anchor::TOP | Anchor::RIGHT,
         None => Anchor::empty(),
     }
 }

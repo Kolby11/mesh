@@ -1,7 +1,7 @@
 /// Paints a `WidgetNode` tree into a `PixelBuffer`.
 use crate::buffer::PixelBuffer;
 use crate::text::TextRenderer;
-use mesh_ui::style::{Color, Display, Overflow};
+use mesh_ui::style::{Color, Display, Overflow, TextAlign, TextOverflow};
 use mesh_ui::tree::WidgetNode;
 
 /// Walks a widget tree and paints each node into a pixel buffer.
@@ -184,8 +184,36 @@ impl Painter {
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
         let ty = (y + (style.padding.top * scale) as i32).max(0) as u32;
         let inner_width = ((node.layout.width - style.padding.horizontal()) * scale).max(0.0);
+
+        let display_text: std::borrow::Cow<'_, str> =
+            if style.text_overflow == TextOverflow::Ellipsis && inner_width > 0.0 {
+                let (tw, _) = self.text_renderer.measure_styled(
+                    text,
+                    &style.font_family,
+                    style.font_size * scale,
+                    style.font_weight,
+                    style.line_height,
+                    None,
+                );
+                if tw > inner_width {
+                    std::borrow::Cow::Owned(truncate_with_ellipsis(
+                        &self.text_renderer,
+                        text,
+                        &style.font_family,
+                        style.font_size * scale,
+                        style.font_weight,
+                        style.line_height,
+                        inner_width,
+                    ))
+                } else {
+                    std::borrow::Cow::Borrowed(text)
+                }
+            } else {
+                std::borrow::Cow::Borrowed(text)
+            };
+
         self.text_renderer.render_clipped(
-            text,
+            &display_text,
             &style.font_family,
             style.font_size * scale,
             style.font_weight,
@@ -197,6 +225,85 @@ impl Painter {
             ty,
             clip_to_tuple(clip),
             Some(inner_width),
+        );
+    }
+
+    /// Paint a tooltip overlay at the given logical position.
+    pub fn paint_tooltip(
+        &self,
+        text: &str,
+        cursor_x: f32,
+        cursor_y: f32,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+    ) {
+        let font_size = 12.0 * scale;
+        let pad_h = (8.0 * scale) as i32;
+        let pad_v = (5.0 * scale) as i32;
+        let max_text_w = 220.0 * scale;
+
+        let (text_w, text_h) =
+            self.text_renderer
+                .measure_styled(text, "Inter", font_size, 400, 1.3, Some(max_text_w));
+
+        let box_w =
+            (text_w.ceil() as i32 + pad_h * 2).min((max_text_w + pad_h as f32 * 2.0) as i32);
+        let box_h = (text_h.ceil() as i32 + pad_v * 2).max((font_size + pad_v as f32 * 2.0) as i32);
+
+        let cx = ((cursor_x + 14.0) * scale) as i32;
+        let cy = ((cursor_y + 18.0) * scale) as i32;
+        let tx = cx.min(buffer.width as i32 - box_w - 6).max(4);
+        let ty = cy.min(buffer.height as i32 - box_h - 6).max(4);
+
+        let full_clip = ClipRect {
+            x: 0,
+            y: 0,
+            width: buffer.width as i32,
+            height: buffer.height as i32,
+        };
+
+        let bg = Color::from_hex("#1c1822").unwrap_or(Color::BLACK);
+        let border = Color::from_hex("#3d3648").unwrap_or(Color::WHITE);
+        let text_color = Color::from_hex("#e2d9f0").unwrap_or(Color::WHITE);
+        let radius = (6.0 * scale).max(3.0);
+
+        fill_rounded_rect_clipped(
+            buffer,
+            ClipRect {
+                x: tx - 1,
+                y: ty - 1,
+                width: box_w + 2,
+                height: box_h + 2,
+            },
+            radius + 1.0,
+            border,
+            full_clip,
+        );
+        fill_rounded_rect_clipped(
+            buffer,
+            ClipRect {
+                x: tx,
+                y: ty,
+                width: box_w,
+                height: box_h,
+            },
+            radius,
+            bg,
+            full_clip,
+        );
+        self.text_renderer.render_clipped(
+            text,
+            "Inter",
+            font_size,
+            400,
+            1.3,
+            TextAlign::Left,
+            text_color,
+            buffer,
+            (tx + pad_h) as u32,
+            (ty + pad_v) as u32,
+            (0, 0, buffer.width, buffer.height),
+            Some(max_text_w),
         );
     }
 
@@ -616,4 +723,36 @@ fn node_attr_f32(node: &WidgetNode, key: &str) -> f32 {
 fn node_clips_children(node: &WidgetNode) -> bool {
     node.computed_style.overflow_x != Overflow::Visible
         || node.computed_style.overflow_y != Overflow::Visible
+}
+
+fn truncate_with_ellipsis(
+    renderer: &crate::text::TextRenderer,
+    text: &str,
+    font_family: &str,
+    font_size: f32,
+    font_weight: u16,
+    line_height: f32,
+    max_width: f32,
+) -> String {
+    const ELLIPSIS: &str = "…";
+    let (ellipsis_w, _) = renderer.measure_styled(
+        ELLIPSIS,
+        font_family,
+        font_size,
+        font_weight,
+        line_height,
+        None,
+    );
+    let target = (max_width - ellipsis_w).max(0.0);
+
+    let chars: Vec<char> = text.chars().collect();
+    for len in (0..=chars.len()).rev() {
+        let s: String = chars[..len].iter().collect();
+        let (w, _) =
+            renderer.measure_styled(&s, font_family, font_size, font_weight, line_height, None);
+        if w <= target {
+            return format!("{s}{ELLIPSIS}");
+        }
+    }
+    ELLIPSIS.to_string()
 }

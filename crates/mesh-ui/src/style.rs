@@ -32,14 +32,23 @@ pub struct ComputedStyle {
     pub text_align: TextAlign,
     pub line_height: f32,
 
+    // Text extended
+    pub font_style: FontStyle,
+    pub letter_spacing: f32,
+    pub text_overflow: TextOverflow,
+
     // Layout
     pub display: Display,
     pub direction: FlexDirection,
     pub justify_content: JustifyContent,
     pub align_items: AlignItems,
+    pub align_content: AlignContent,
     pub gap: f32,
     pub flex_grow: f32,
     pub flex_shrink: f32,
+    pub flex_basis: Dimension,
+    pub flex_wrap: FlexWrap,
+    pub align_self: AlignSelf,
 }
 
 impl Default for ComputedStyle {
@@ -66,13 +75,20 @@ impl Default for ComputedStyle {
             color: Color::WHITE,
             text_align: TextAlign::Left,
             line_height: 1.4,
+            font_style: FontStyle::Normal,
+            letter_spacing: 0.0,
+            text_overflow: TextOverflow::Clip,
             display: Display::Flex,
             direction: FlexDirection::Row,
             justify_content: JustifyContent::Start,
             align_items: AlignItems::Stretch,
+            align_content: AlignContent::Stretch,
             gap: 0.0,
             flex_grow: 0.0,
             flex_shrink: 1.0,
+            flex_basis: Dimension::Auto,
+            flex_wrap: FlexWrap::NoWrap,
+            align_self: AlignSelf::Auto,
         }
     }
 }
@@ -268,6 +284,45 @@ pub enum TextAlign {
     Right,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontStyle {
+    Normal,
+    Italic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextOverflow {
+    Clip,
+    Ellipsis,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlexWrap {
+    NoWrap,
+    Wrap,
+    WrapReverse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignSelf {
+    Auto,
+    Start,
+    End,
+    Center,
+    Stretch,
+    Baseline,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignContent {
+    Start,
+    End,
+    Center,
+    SpaceBetween,
+    SpaceAround,
+    Stretch,
+}
+
 /// Resolves style values against a theme's design tokens.
 pub struct StyleResolver<'a> {
     theme: &'a Theme,
@@ -376,12 +431,66 @@ fn apply_declaration(
         "font-size" => style.font_size = resolver.resolve_number(value),
         "font-weight" => style.font_weight = resolver.resolve_number(value) as u16,
         "font-family" => style.font_family = resolver.resolve_value(value),
+        "font-style" => {
+            style.font_style = match resolver.resolve_value(value).as_str() {
+                "italic" | "oblique" => FontStyle::Italic,
+                _ => FontStyle::Normal,
+            };
+        }
+        "letter-spacing" => style.letter_spacing = resolver.resolve_number(value),
+        "text-overflow" => {
+            style.text_overflow = match resolver.resolve_value(value).as_str() {
+                "ellipsis" => TextOverflow::Ellipsis,
+                _ => TextOverflow::Clip,
+            };
+        }
         "line-height" => style.line_height = resolver.resolve_number(value),
         "padding" => style.padding = Edges::all(resolver.resolve_number(value)),
+        "padding-top" => style.padding.top = resolver.resolve_number(value),
+        "padding-right" => style.padding.right = resolver.resolve_number(value),
+        "padding-bottom" => style.padding.bottom = resolver.resolve_number(value),
+        "padding-left" => style.padding.left = resolver.resolve_number(value),
+        "padding-x" | "padding-inline" => {
+            let v = resolver.resolve_number(value);
+            style.padding.left = v;
+            style.padding.right = v;
+        }
+        "padding-y" | "padding-block" => {
+            let v = resolver.resolve_number(value);
+            style.padding.top = v;
+            style.padding.bottom = v;
+        }
         "margin" => style.margin = Edges::all(resolver.resolve_number(value)),
+        "margin-top" => style.margin.top = resolver.resolve_number(value),
+        "margin-right" => style.margin.right = resolver.resolve_number(value),
+        "margin-bottom" => style.margin.bottom = resolver.resolve_number(value),
+        "margin-left" => style.margin.left = resolver.resolve_number(value),
+        "margin-x" | "margin-inline" => {
+            let v = resolver.resolve_number(value);
+            style.margin.left = v;
+            style.margin.right = v;
+        }
+        "margin-y" | "margin-block" => {
+            let v = resolver.resolve_number(value);
+            style.margin.top = v;
+            style.margin.bottom = v;
+        }
         "gap" => style.gap = resolver.resolve_number(value),
+        "column-gap" | "gap-x" => style.gap = resolver.resolve_number(value),
         "border-radius" => style.border_radius = Corners::all(resolver.resolve_number(value)),
+        "border-top-left-radius" => style.border_radius.top_left = resolver.resolve_number(value),
+        "border-top-right-radius" => style.border_radius.top_right = resolver.resolve_number(value),
+        "border-bottom-right-radius" => {
+            style.border_radius.bottom_right = resolver.resolve_number(value)
+        }
+        "border-bottom-left-radius" => {
+            style.border_radius.bottom_left = resolver.resolve_number(value)
+        }
         "border-width" => style.border_width = Edges::all(resolver.resolve_number(value)),
+        "border-top-width" => style.border_width.top = resolver.resolve_number(value),
+        "border-right-width" => style.border_width.right = resolver.resolve_number(value),
+        "border-bottom-width" => style.border_width.bottom = resolver.resolve_number(value),
+        "border-left-width" => style.border_width.left = resolver.resolve_number(value),
         "opacity" => style.opacity = resolver.resolve_number(value),
         "overflow" => {
             let overflow = parse_overflow(&resolver.resolve_value(value));
@@ -392,11 +501,60 @@ fn apply_declaration(
         "overflow-y" => style.overflow_y = parse_overflow(&resolver.resolve_value(value)),
         "width" => style.width = parse_dimension(&resolver.resolve_value(value)),
         "height" => style.height = parse_dimension(&resolver.resolve_value(value)),
+        "min-width" => style.min_width = Some(resolver.resolve_number(value)),
+        "max-width" => style.max_width = Some(resolver.resolve_number(value)),
+        "min-height" => style.min_height = Some(resolver.resolve_number(value)),
+        "max-height" => style.max_height = Some(resolver.resolve_number(value)),
         "flex-grow" => style.flex_grow = resolver.resolve_number(value),
         "flex-shrink" => style.flex_shrink = resolver.resolve_number(value),
+        "flex-basis" => style.flex_basis = parse_dimension(&resolver.resolve_value(value)),
+        "flex" => {
+            let v = resolver.resolve_value(value);
+            let v = v.trim();
+            if v == "none" {
+                style.flex_grow = 0.0;
+                style.flex_shrink = 0.0;
+                style.flex_basis = Dimension::Auto;
+            } else if v == "auto" {
+                style.flex_grow = 1.0;
+                style.flex_shrink = 1.0;
+                style.flex_basis = Dimension::Auto;
+            } else if let Ok(n) = v.parse::<f32>() {
+                style.flex_grow = n;
+                style.flex_shrink = 1.0;
+                style.flex_basis = Dimension::Px(0.0);
+            }
+        }
+        "flex-wrap" => {
+            style.flex_wrap = match resolver.resolve_value(value).as_str() {
+                "wrap" => FlexWrap::Wrap,
+                "wrap-reverse" => FlexWrap::WrapReverse,
+                _ => FlexWrap::NoWrap,
+            };
+        }
+        "align-self" => {
+            style.align_self = match resolver.resolve_value(value).as_str() {
+                "auto" => AlignSelf::Auto,
+                "start" | "flex-start" => AlignSelf::Start,
+                "end" | "flex-end" => AlignSelf::End,
+                "center" => AlignSelf::Center,
+                "baseline" => AlignSelf::Baseline,
+                _ => AlignSelf::Stretch,
+            };
+        }
+        "align-content" => {
+            style.align_content = match resolver.resolve_value(value).as_str() {
+                "start" | "flex-start" => AlignContent::Start,
+                "end" | "flex-end" => AlignContent::End,
+                "center" => AlignContent::Center,
+                "space-between" => AlignContent::SpaceBetween,
+                "space-around" => AlignContent::SpaceAround,
+                _ => AlignContent::Stretch,
+            };
+        }
         "direction" | "flex-direction" => {
             style.direction = match resolver.resolve_value(value).as_str() {
-                "column" => FlexDirection::Column,
+                "column" | "column-reverse" => FlexDirection::Column,
                 _ => FlexDirection::Row,
             };
         }

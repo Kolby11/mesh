@@ -16,7 +16,7 @@ use mesh_renderer::{
     DevWindowBackend, DevWindowEvent, DevWindowKeyEvent, LayerShellBackend, LayerSurfaceConfig,
     Painter, PixelBuffer,
 };
-use mesh_scripting::{LocaleBoundState, ScriptContext, ScriptError};
+use mesh_scripting::{LocaleBoundState, ScriptContext, ScriptError, ScriptState};
 use mesh_service::{
     InterfaceProvider, InterfaceRegistry, ServiceRegistry, canonical_interface_name,
     load_interface_contract,
@@ -1076,14 +1076,10 @@ fn default_plugin_dirs() -> Vec<PathBuf> {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
 
     vec![
-        workspace_root.join("plugins/backend/core"),
-        workspace_root.join("plugins/frontend/core"),
-        PathBuf::from("/usr/share/mesh/plugins/backend"),
-        PathBuf::from("/usr/share/mesh/plugins/frontend"),
-        PathBuf::from(&home).join(".local/share/mesh/plugins/backend"),
-        PathBuf::from(&home).join(".local/share/mesh/plugins/frontend"),
-        PathBuf::from(&home).join(".local/share/mesh/dev-plugins/backend"),
-        PathBuf::from(&home).join(".local/share/mesh/dev-plugins/frontend"),
+        workspace_root.join("plugins"),
+        PathBuf::from("/usr/share/mesh/plugins"),
+        PathBuf::from(&home).join(".local/share/mesh/plugins"),
+        PathBuf::from(&home).join(".local/share/mesh/dev-plugins"),
     ]
 }
 
@@ -1110,7 +1106,7 @@ fn default_surface_layout(surface_id: &str) -> SurfaceLayoutSettings {
             height: 344,
             exclusive_zone: 0,
             keyboard_mode: KeyboardMode::OnDemand,
-            visible_on_start: true,
+            visible_on_start: false,
             size_policy: SurfaceSizePolicy::ContentMeasured,
         },
         "@mesh/notification-center" => SurfaceLayoutSettings {
@@ -1299,6 +1295,10 @@ struct FrontendSurfaceComponent {
     input_values: HashMap<String, String>,
     slider_values: HashMap<String, f32>,
     scroll_offsets: HashMap<String, ScrollOffsetState>,
+    // Hover tracking for tooltip system
+    hovered_key: Option<String>,
+    hovered_pos: (f32, f32),
+    hover_start: Option<std::time::Instant>,
     runtimes: RefCell<HashMap<String, EmbeddedFrontendRuntime>>,
     render_stack: RefCell<Vec<String>>,
     active_theme: RefCell<Theme>,
@@ -1507,6 +1507,9 @@ impl FrontendSurfaceComponent {
             input_values: HashMap::new(),
             slider_values: HashMap::new(),
             scroll_offsets: HashMap::new(),
+            hovered_key: None,
+            hovered_pos: (0.0, 0.0),
+            hover_start: None,
             runtimes: RefCell::new(HashMap::new()),
             render_stack: RefCell::new(Vec::new()),
             active_theme: RefCell::new(default_theme()),
@@ -1673,6 +1676,8 @@ impl FrontendSurfaceComponent {
             source,
         })?;
         script_ctx.set_interface_catalog(self.interface_catalog.clone());
+        let has_audio_read = manifest_grants_capability(&compiled.manifest, "service.audio.read");
+        seed_service_state(script_ctx.state_mut(), has_audio_read);
 
         for (key, value) in props {
             script_ctx.state_mut().set(key.clone(), value.clone());
@@ -1981,11 +1986,30 @@ impl ShellComponent for FrontendSurfaceComponent {
             summary,
         } = event;
         self.last_service_update = Some(format!("{service}:{source_plugin}:{summary}"));
+        for runtime in self.runtimes.borrow_mut().values_mut() {
+            let has_audio_read = runtime
+                .script_ctx
+                .capabilities
+                .is_granted(&Capability::new("service.audio.read"));
+            apply_service_update(
+                runtime.script_ctx.state_mut(),
+                has_audio_read,
+                service,
+                source_plugin,
+                summary,
+            );
+        }
         self.dirty = true;
         Ok(Vec::new())
     }
 
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
+        // Trigger a repaint once the tooltip delay has elapsed so the tooltip appears.
+        if let Some(start) = self.hover_start {
+            if start.elapsed() >= Duration::from_millis(500) && !self.dirty {
+                self.dirty = true;
+            }
+        }
         Ok(Vec::new())
     }
 
@@ -2012,7 +2036,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let role = root_accessibility_role(&self.compiled.manifest, &self.compiled.component)
             .unwrap_or_else(|| "unknown".into());
 
-        tracing::info!(
+        tracing::debug!(
             "rendered frontend '{}' visible={} nodes={} role={}{}",
             self.id(),
             self.visible,
@@ -2042,7 +2066,19 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.dirty = true;
         }
         buffer.clear(tree.computed_style.background_color);
-        Painter::new().paint(&tree, buffer, 1.0);
+        let painter = Painter::new();
+        painter.paint(&tree, buffer, 1.0);
+
+        // Paint tooltip overlay when the hover delay has elapsed.
+        if let (Some(start), Some(hovered_key)) = (self.hover_start, self.hovered_key.as_ref()) {
+            if start.elapsed() >= Duration::from_millis(500) {
+                if let Some(tooltip_text) = find_tooltip_text_by_key(&tree, hovered_key) {
+                    let (cx, cy) = self.hovered_pos;
+                    painter.paint_tooltip(&tooltip_text, cx, cy, buffer, 1.0);
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -2182,9 +2218,18 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.active_slider_key = None;
                 }
             }
-            ComponentInput::PointerMove { x, .. } => {
+            ComponentInput::PointerMove { x, y } => {
                 if let Some(slider_key) = self.active_slider_key.clone() {
                     self.update_slider_from_position(&tree, &slider_key, x);
+                    self.dirty = true;
+                }
+
+                // Update hover state for tooltip system.
+                self.hovered_pos = (x, y);
+                let new_key = find_tooltip_at(&tree, x, y).map(|(k, _)| k);
+                if new_key != self.hovered_key {
+                    self.hovered_key = new_key.clone();
+                    self.hover_start = new_key.map(|_| std::time::Instant::now());
                     self.dirty = true;
                 }
             }
@@ -2306,6 +2351,102 @@ fn grant_capabilities_from_manifest(manifest: &mesh_plugin::Manifest) -> Capabil
     granted
 }
 
+fn manifest_grants_capability(manifest: &mesh_plugin::Manifest, capability: &str) -> bool {
+    manifest.capabilities.required.iter().any(|value| value == capability)
+        || manifest
+            .capabilities
+            .optional
+            .iter()
+            .any(|value| value == capability)
+}
+
+fn seed_service_state(state: &mut ScriptState, has_audio_read: bool) {
+    state.set(
+        "last_service_update",
+        serde_json::json!({
+            "name": "",
+            "source_plugin": "",
+            "summary": "",
+        }),
+    );
+    if has_audio_read {
+        state.set("audio", build_audio_service_state(None, None));
+    }
+}
+
+fn apply_service_update(
+    state: &mut ScriptState,
+    has_audio_read: bool,
+    service: &str,
+    source_plugin: &str,
+    summary: &str,
+) {
+    state.set(
+        "last_service_update",
+        serde_json::json!({
+            "name": service,
+            "source_plugin": source_plugin,
+            "summary": summary,
+        }),
+    );
+
+    if service == "audio" && has_audio_read {
+        state.set("audio", build_audio_service_state(Some(summary), Some(source_plugin)));
+    }
+}
+
+fn build_audio_service_state(
+    summary: Option<&str>,
+    source_plugin: Option<&str>,
+) -> serde_json::Value {
+    let Some(summary) = summary else {
+        return serde_json::json!({
+            "available": false,
+            "percent": 0,
+            "label": "Unavailable",
+            "glyph": "VOL",
+            "tooltip": "Audio backend unavailable",
+            "summary": "",
+            "source_plugin": source_plugin.unwrap_or(""),
+        });
+    };
+
+    let percent = summary
+        .strip_prefix("volume=")
+        .and_then(|value| value.strip_suffix('%'))
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0);
+
+    let label = if percent == 0 {
+        "Muted".to_string()
+    } else {
+        format!("{percent}%")
+    };
+    let glyph = if percent == 0 {
+        "MUTE"
+    } else if percent >= 70 {
+        "LOUD"
+    } else {
+        "VOL"
+    };
+    let tooltip = match source_plugin {
+        Some(source_plugin) if !source_plugin.is_empty() => {
+            format!("{source_plugin}: {label}")
+        }
+        _ => format!("Audio: {label}"),
+    };
+
+    serde_json::json!({
+        "available": true,
+        "percent": percent,
+        "label": label,
+        "glyph": glyph,
+        "tooltip": tooltip,
+        "summary": summary,
+        "source_plugin": source_plugin.unwrap_or(""),
+    })
+}
+
 fn find_node_by_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetNode> {
     if node
         .attributes
@@ -2354,6 +2495,64 @@ fn find_focusable_at(node: &WidgetNode, x: f32, y: f32) -> Option<String> {
 
 fn find_scrollable_at(node: &WidgetNode, x: f32, y: f32) -> Option<String> {
     find_scrollable_at_with_offset(node, x, y, 0.0, 0.0)
+}
+
+/// Return (key, tooltip_text) for the deepest node under the cursor that has tooltip content.
+fn find_tooltip_at(node: &WidgetNode, x: f32, y: f32) -> Option<(String, String)> {
+    find_tooltip_at_offset(node, x, y, 0.0, 0.0)
+}
+
+fn find_tooltip_at_offset(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<(String, String)> {
+    let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
+    if !inside && node_clips_children(node) {
+        return None;
+    }
+
+    let (child_ox, child_oy) = child_offsets_with_scroll(node, offset_x, offset_y);
+    for child in node.children.iter().rev() {
+        if let Some(result) = find_tooltip_at_offset(child, x, y, child_ox, child_oy) {
+            return Some(result);
+        }
+    }
+
+    if inside {
+        let key = node.attributes.get("_mesh_key")?.clone();
+        let tooltip = node_tooltip_text(node)?;
+        return Some((key, tooltip));
+    }
+
+    None
+}
+
+/// Extract tooltip text from a node's attributes and accessibility metadata.
+fn node_tooltip_text(node: &WidgetNode) -> Option<String> {
+    node.attributes
+        .get("title")
+        .cloned()
+        .or_else(|| node.attributes.get("aria-label").cloned())
+        .or_else(|| node.attributes.get("description").cloned())
+        .or_else(|| node.attributes.get("aria-description").cloned())
+        .or_else(|| node.accessibility.label.clone())
+        .or_else(|| node.accessibility.description.clone())
+}
+
+/// Find tooltip text for a specific node key in the tree.
+fn find_tooltip_text_by_key(node: &WidgetNode, key: &str) -> Option<String> {
+    if node.attributes.get("_mesh_key").is_some_and(|k| k == key) {
+        return node_tooltip_text(node);
+    }
+    for child in &node.children {
+        if let Some(text) = find_tooltip_text_by_key(child, key) {
+            return Some(text);
+        }
+    }
+    None
 }
 
 fn is_input_key(tree: &WidgetNode, key: &str) -> bool {
@@ -2866,10 +3065,12 @@ fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
 #[cfg(test)]
 mod tests {
     use super::{
-        SurfaceSizePolicy, default_surface_layout, load_frontend_plugin_settings,
-        measure_content_size,
+        SurfaceSizePolicy, apply_service_update, build_audio_service_state,
+        default_surface_layout, load_frontend_plugin_settings, measure_content_size,
+        seed_service_state,
     };
-    use mesh_ui::{LayoutRect, WidgetNode};
+    use mesh_scripting::ScriptState;
+    use mesh_ui::{LayoutRect, VariableStore, WidgetNode};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -2911,7 +3112,7 @@ mod tests {
     fn surface_layout_defaults_preserve_launcher_content_sizing() {
         let layout = default_surface_layout("@mesh/launcher");
         assert_eq!(layout.size_policy, SurfaceSizePolicy::ContentMeasured);
-        assert!(layout.visible_on_start);
+        assert!(!layout.visible_on_start);
     }
 
     #[test]
@@ -2947,6 +3148,41 @@ mod tests {
         );
         assert!(settings.layout.visible_on_start);
         assert_eq!(settings.layout.size_policy, SurfaceSizePolicy::Fixed);
+    }
+
+    #[test]
+    fn audio_service_state_defaults_to_unavailable() {
+        let audio = build_audio_service_state(None, None);
+
+        assert_eq!(
+            audio.get("label").and_then(|value| value.as_str()),
+            Some("Unavailable")
+        );
+        assert_eq!(
+            audio.get("available").and_then(|value| value.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn audio_service_update_populates_frontend_state() {
+        let mut state = ScriptState::new();
+        seed_service_state(&mut state, true);
+        apply_service_update(
+            &mut state,
+            true,
+            "audio",
+            "@mesh/pipewire-audio",
+            "volume=65%",
+        );
+
+        let audio = state.get("audio").expect("audio state should exist");
+        assert_eq!(audio.get("label").and_then(|value| value.as_str()), Some("65%"));
+        assert_eq!(audio.get("glyph").and_then(|value| value.as_str()), Some("VOL"));
+        assert_eq!(
+            audio.get("tooltip").and_then(|value| value.as_str()),
+            Some("@mesh/pipewire-audio: 65%")
+        );
     }
 
     fn unique_test_file(prefix: &str) -> PathBuf {

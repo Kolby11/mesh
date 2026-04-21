@@ -19,7 +19,9 @@ pub use accessibility::{
 pub use events::{EventDispatcher, Modifiers, RawInputEvent, UiEvent};
 pub use layout::{LayoutEngine, LayoutRect};
 pub use style::{
-    Color, ComputedStyle, Corners, Dimension, Edges, Overflow, StyleContext, StyleResolver,
+    AlignContent, AlignItems, AlignSelf, Color, ComputedStyle, Corners, Dimension, Display, Edges,
+    FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow, StyleContext, StyleResolver,
+    TextAlign, TextOverflow,
 };
 pub use tree::{NodeId, WidgetNode};
 

@@ -17,8 +17,8 @@ earlier drafts of `spec/pluggable-backend.md`.
 > code — treat them as synonyms during the transition.
 
 The shell core starts with an empty service registry. Default interfaces and
-providers are discovered from plugins on disk under `plugins/backend/core/`,
-so the core acts as the bridge and validator rather than the source of service
+providers are discovered from plugins on disk under the `plugins/` tree, so
+the core acts as the bridge and validator rather than the source of service
 functionality.
 
 ## Design goals

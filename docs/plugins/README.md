@@ -1,8 +1,8 @@
 # MESH Core Plugins
 
-This directory contains the core plugins shipped with MESH under the `@mesh`
-scope. They provide the default shell experience and reference implementations
-for system service integrations.
+This directory contains the plugins shipped with MESH under the `@mesh`
+scope. They provide the default shell experience, reference implementations
+for system service integrations, and example compositions for plugin authors.
 
 Plugins are split into two kinds, enforced by the architecture described in
 [`spec/pluggable-backend.md`](../../spec/pluggable-backend.md):
@@ -15,9 +15,9 @@ Plugins are split into two kinds, enforced by the architecture described in
   register with the interface registry and are looked up by interface name, not
   by plugin ID.
 
-Core contract packages now live alongside the default backends under
-`plugins/backend/core/` as ordinary `type = "interface"` plugins. The shell
-core no longer hardcodes those service APIs.
+Core contract packages now live alongside the default backends under the
+backend tree as ordinary `type = "interface"` plugins. The shell core no
+longer hardcodes those service APIs.
 
 The interface registry is the only bridge between the two.
 
@@ -28,6 +28,10 @@ The interface registry is the only bridge between the two.
 > dynamic, D-Bus-style interface registry that powers this.
 
 ## Layout
+
+The shell discovers plugins by scanning the `plugins/` tree recursively.
+Folders like `core/` and `examples/` are organizational only; they do not
+change whether a plugin is discoverable.
 
 ```
 plugins/

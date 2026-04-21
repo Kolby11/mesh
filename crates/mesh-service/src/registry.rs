@@ -1,8 +1,9 @@
-/// Service registry — the bridge between backends and frontends.
+/// Legacy typed registry used while Rust-side callers finish migrating to
+/// plugin-declared interfaces.
 ///
-/// The registry holds one active backend per service type. Frontends look up
-/// services by type, not by backend name. The user (or config) decides which
-/// backend is active.
+/// The long-term runtime path is contract + provider lookup via the interface
+/// registry. This registry still holds one active typed backend per service so
+/// older Rust integrations can keep working during the transition.
 ///
 /// ```text
 /// Backend plugin registers:   registry.register_audio(Box::new(PipewireBackend))
@@ -23,10 +24,10 @@ pub struct ServiceEntry {
     pub plugin_id: String,
 }
 
-/// Central registry that holds one active backend per service type.
+/// Central registry that holds one active typed backend per service type.
 ///
-/// Backends register trait objects. Frontends retrieve them by type.
-/// Only one backend per service type is active at a time.
+/// New frontend plugins should prefer `mesh.interfaces.get(...)` and contract
+/// providers. This registry is for compatibility with older Rust call sites.
 #[derive(Default)]
 pub struct ServiceRegistry {
     services: RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,

@@ -12,9 +12,11 @@ lifecycle spec see [`../spec/pluggable-backend.md`](../spec/pluggable-backend.md
 - **Plugins**
   - [`plugins/README.md`](./plugins/README.md) — core-plugin index.
   - [`plugins/frontend/core/`](./plugins/frontend/core/README.md) — shipped
-    surfaces (panel, launcher, notification-center, quick-settings).
+    frontend surfaces and widgets.
+  - [`plugins/frontend/examples/`](./plugins/frontend/examples/README.md) —
+    example frontend compositions and reusable sample widgets.
   - [`plugins/backend/core/`](./plugins/backend/core/README.md) — shipped
-    backends (PipeWire, PulseAudio, NetworkManager, UPower, MPRIS).
+    backends and interface packages.
 - **Frontend**
   - [`frontend/slots.md`](./frontend/slots.md) — slot points for extending
     surfaces without forking them.
