@@ -15,6 +15,7 @@ members = [
     "crates/mesh-component",
     "crates/mesh-ui",
     "crates/mesh-renderer",
+    "crates/mesh-icon",
     "crates/mesh-scripting",
     "crates/mesh-cli",
     "crates/mesh-component-backend",
@@ -52,5 +53,5 @@ toml = "0.8"
 semver = "1"
 thiserror = "2"
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["full"] }

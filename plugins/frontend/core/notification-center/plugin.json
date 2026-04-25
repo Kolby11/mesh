@@ -28,6 +28,64 @@
   "entrypoints": {
     "main": "src/main.mesh"
   },
+  "settings": {
+    "namespace": "@mesh/notification-center",
+    "schema": {
+      "surface": {
+        "type": "object",
+        "description": "Placement and sizing for the notification center surface.",
+        "properties": {
+          "anchor": {
+            "type": "enum",
+            "values": ["top", "bottom", "left", "right"],
+            "default": "right",
+            "description": "Screen edge this surface anchors to."
+          },
+          "layer": {
+            "type": "enum",
+            "values": ["background", "bottom", "top", "overlay"],
+            "default": "overlay",
+            "description": "Layer-shell stacking layer."
+          },
+          "width": {
+            "type": "integer",
+            "default": 420,
+            "min": 320,
+            "max": 640,
+            "description": "Surface width in pixels."
+          },
+          "height": {
+            "type": "integer",
+            "default": 720,
+            "min": 400,
+            "max": 1440,
+            "description": "Surface height in pixels."
+          },
+          "exclusive_zone": {
+            "type": "integer",
+            "default": 0,
+            "min": 0,
+            "max": 256,
+            "description": "Reserved compositor space in pixels."
+          },
+          "keyboard_mode": {
+            "type": "enum",
+            "values": ["none", "exclusive", "on_demand"],
+            "default": "on_demand",
+            "description": "Keyboard interactivity policy for the surface."
+          },
+          "visible_on_start": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether this surface starts visible when Mesh boots."
+          }
+        }
+      }
+    }
+  },
+  "surface_layout": {
+    "size_policy": "fixed"
+  },
   "provides_slots": {
     "content": {
       "accepts": "widget",

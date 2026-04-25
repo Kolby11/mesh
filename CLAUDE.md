@@ -1,5 +1,7 @@
 # MESH
 
+@docs/llm-context.md
+
 MESH is a Wayland-only shell framework built in Rust.
 
 It is not a compositor or window manager. It runs on top of existing Wayland compositors and provides shell UI such as panels, launchers, notifications, quick settings, overlays, widgets, and settings surfaces.

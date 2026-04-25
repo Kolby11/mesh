@@ -1,4 +1,5 @@
 /// Style resolution — converts style AST + theme tokens into computed styles.
+use crate::tree::ElementState;
 use mesh_component::style::{Selector, StyleRule, StyleValue};
 use mesh_theme::{Theme, TokenValue};
 
@@ -36,6 +37,7 @@ pub struct ComputedStyle {
     pub font_style: FontStyle,
     pub letter_spacing: f32,
     pub text_overflow: TextOverflow,
+    pub text_direction: TextDirection,
 
     // Layout
     pub display: Display,
@@ -49,6 +51,14 @@ pub struct ComputedStyle {
     pub flex_basis: Dimension,
     pub flex_wrap: FlexWrap,
     pub align_self: AlignSelf,
+
+    // Positioning
+    pub position: Position,
+    pub z_index: i32,
+    pub inset_top: Option<f32>,
+    pub inset_right: Option<f32>,
+    pub inset_bottom: Option<f32>,
+    pub inset_left: Option<f32>,
 }
 
 impl Default for ComputedStyle {
@@ -78,6 +88,7 @@ impl Default for ComputedStyle {
             font_style: FontStyle::Normal,
             letter_spacing: 0.0,
             text_overflow: TextOverflow::Clip,
+            text_direction: TextDirection::Ltr,
             display: Display::Flex,
             direction: FlexDirection::Row,
             justify_content: JustifyContent::Start,
@@ -89,6 +100,12 @@ impl Default for ComputedStyle {
             flex_basis: Dimension::Auto,
             flex_wrap: FlexWrap::NoWrap,
             align_self: AlignSelf::Auto,
+            position: Position::Static,
+            z_index: 0,
+            inset_top: None,
+            inset_right: None,
+            inset_bottom: None,
+            inset_left: None,
         }
     }
 }
@@ -98,6 +115,10 @@ pub enum Dimension {
     Auto,
     Px(f32),
     Percent(f32),
+    /// Shrink-wrap to intrinsic content size. Maps from `content`, `fit-content`,
+    /// `max-content`, `min-content` in CSS. Resolved to `Px` before children are
+    /// laid out, so children always see a concrete available size.
+    Content,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -290,6 +311,16 @@ pub enum FontStyle {
     Italic,
 }
 
+/// Base text direction for a node and its subtree.
+///
+/// Affects default text alignment and flex main-axis start/end semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextDirection {
+    #[default]
+    Ltr,
+    Rtl,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextOverflow {
     Clip,
@@ -311,6 +342,17 @@ pub enum AlignSelf {
     Center,
     Stretch,
     Baseline,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Position {
+    /// Normal flow — the default.
+    #[default]
+    Static,
+    /// In flow but offset by top/left/right/bottom.
+    Relative,
+    /// Out of flow; positioned against the nearest containing block.
+    Absolute,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -373,6 +415,7 @@ impl<'a> StyleResolver<'a> {
         classes: &[String],
         id: Option<&str>,
         context: StyleContext,
+        state: ElementState,
     ) -> ComputedStyle {
         let mut style = ComputedStyle::default();
 
@@ -383,7 +426,7 @@ impl<'a> StyleResolver<'a> {
 
         // Apply matching rules in order.
         for rule in rules {
-            if rule_matches(rule, tag, classes, id, context) {
+            if rule_matches(rule, tag, classes, id, context, state) {
                 for decl in &rule.declarations {
                     apply_declaration(&mut style, &decl.property, &decl.value, self);
                 }
@@ -392,16 +435,90 @@ impl<'a> StyleResolver<'a> {
 
         style
     }
+
+    /// Re-resolve computed styles for every node in a subtree using each node's
+    /// current `ElementState`. Call this after `InputState::process` changes
+    /// hover/focus/active flags to apply pseudo-class rules without rebuilding
+    /// the entire component tree.
+    pub fn restyle_subtree(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        context: StyleContext,
+    ) {
+        // Only overlay pseudo-state rules — the base style was already computed by
+        // build_element_node (which applied non-state rules, tag defaults, and inherited
+        // styles). Recomputing from scratch here would wipe all of that.
+        if node.state != ElementState::default() {
+            let classes: Vec<String> = node
+                .attributes
+                .get("class")
+                .map(|s| s.split_whitespace().map(str::to_owned).collect())
+                .unwrap_or_default();
+            let id = node.attributes.get("id").map(|s| s.as_str());
+            let state = node.state;
+
+            tracing::debug!(
+                "[hover] restyle: tag={} classes={:?} state={state:?}",
+                node.tag, classes
+            );
+            for rule in rules {
+                if selector_involves_state(&rule.selector)
+                    && rule_matches(rule, &node.tag, &classes, id, context, state)
+                {
+                    tracing::debug!("[hover] restyle: applying rule selector={:?}", rule.selector);
+                    for decl in &rule.declarations {
+                        apply_declaration(&mut node.computed_style, &decl.property, &decl.value, self);
+                    }
+                }
+            }
+        }
+
+        let children = std::mem::take(&mut node.children);
+        let mut restyled = children;
+        for child in &mut restyled {
+            self.restyle_subtree(child, rules, context);
+        }
+        node.children = restyled;
+    }
 }
 
-fn selector_matches(selector: &Selector, tag: &str, classes: &[String], id: Option<&str>) -> bool {
+fn selector_matches(
+    selector: &Selector,
+    tag: &str,
+    classes: &[String],
+    id: Option<&str>,
+    state: ElementState,
+) -> bool {
     match selector {
         Selector::Universal => true,
         Selector::Tag(t) => t == tag,
         Selector::Class(c) => classes.iter().any(|cls| cls == c),
         Selector::Id(i) => id == Some(i.as_str()),
-        Selector::State(t, _state) => t == tag, // State matching is simplified for now.
-        Selector::Compound(parts) => parts.iter().all(|s| selector_matches(s, tag, classes, id)),
+        Selector::State(t, pseudo) => {
+            let tag_matches = t == "*" || t == tag;
+            let state_matches = match pseudo.as_str() {
+                "hover" | "hovered" => state.hovered,
+                "focus" | "focused" => state.focused,
+                "active" => state.active,
+                "disabled" => state.disabled,
+                "checked" => state.checked,
+                "focus-visible" => state.focused,
+                _ => false,
+            };
+            tag_matches && state_matches
+        }
+        Selector::Compound(parts) => {
+            parts.iter().all(|s| selector_matches(s, tag, classes, id, state))
+        }
+    }
+}
+
+fn selector_involves_state(selector: &Selector) -> bool {
+    match selector {
+        Selector::State(_, _) => true,
+        Selector::Compound(parts) => parts.iter().any(|s| matches!(s, Selector::State(_, _))),
+        _ => false,
     }
 }
 
@@ -411,8 +528,9 @@ fn rule_matches(
     classes: &[String],
     id: Option<&str>,
     context: StyleContext,
+    state: ElementState,
 ) -> bool {
-    selector_matches(&rule.selector, tag, classes, id)
+    selector_matches(&rule.selector, tag, classes, id, state)
         && rule
             .container_query
             .is_none_or(|query| query.matches(context.container_width, context.container_height))
@@ -552,11 +670,22 @@ fn apply_declaration(
                 _ => AlignContent::Stretch,
             };
         }
-        "direction" | "flex-direction" => {
+        "flex-direction" => {
             style.direction = match resolver.resolve_value(value).as_str() {
                 "column" | "column-reverse" => FlexDirection::Column,
                 _ => FlexDirection::Row,
             };
+        }
+        "direction" => {
+            match resolver.resolve_value(value).as_str() {
+                "rtl" => style.text_direction = TextDirection::Rtl,
+                "ltr" => style.text_direction = TextDirection::Ltr,
+                // Legacy alias kept for .mesh files that used direction: column/row
+                // before flex-direction was introduced. Warn and ignore.
+                other => tracing::warn!(
+                    "direction: {other} is not valid; use flex-direction for layout direction"
+                ),
+            }
         }
         "justify-content" => {
             style.justify_content = match resolver.resolve_value(value).as_str() {
@@ -588,6 +717,28 @@ fn apply_declaration(
                 _ => Display::Flex,
             };
         }
+        "position" => {
+            style.position = match resolver.resolve_value(value).as_str() {
+                "relative" => Position::Relative,
+                "absolute" => Position::Absolute,
+                _ => Position::Static,
+            };
+        }
+        "z-index" => {
+            let v = resolver.resolve_value(value);
+            style.z_index = v.trim().parse::<i32>().unwrap_or(0);
+        }
+        "top" => style.inset_top = Some(resolver.resolve_number(value)),
+        "right" => style.inset_right = Some(resolver.resolve_number(value)),
+        "bottom" => style.inset_bottom = Some(resolver.resolve_number(value)),
+        "left" => style.inset_left = Some(resolver.resolve_number(value)),
+        "inset" => {
+            let v = resolver.resolve_number(value);
+            style.inset_top = Some(v);
+            style.inset_right = Some(v);
+            style.inset_bottom = Some(v);
+            style.inset_left = Some(v);
+        }
         _ => {
             tracing::debug!("unknown style property: {property}");
         }
@@ -610,12 +761,13 @@ fn parse_px(s: &str) -> f32 {
 
 fn parse_dimension(s: &str) -> Dimension {
     let s = s.trim();
-    if s == "auto" {
-        Dimension::Auto
-    } else if let Some(pct) = s.strip_suffix('%') {
-        Dimension::Percent(pct.parse().unwrap_or(0.0))
-    } else {
-        Dimension::Px(parse_px(s))
+    match s {
+        "auto" => Dimension::Auto,
+        "content" | "fit-content" | "max-content" | "min-content" => Dimension::Content,
+        _ if s.ends_with('%') => {
+            Dimension::Percent(s.trim_end_matches('%').parse().unwrap_or(0.0))
+        }
+        _ => Dimension::Px(parse_px(s)),
     }
 }
 
@@ -684,7 +836,7 @@ mod tests {
             container_query: None,
         }];
 
-        let style = resolver.resolve_node_style(&rules, "text", &[], None, StyleContext::default());
+        let style = resolver.resolve_node_style(&rules, "text", &[], None, StyleContext::default(), ElementState::default());
         assert_eq!(style.font_size, 20.0);
         assert_eq!(
             style.color,
@@ -722,6 +874,7 @@ mod tests {
                 container_width: 320.0,
                 container_height: 240.0,
             },
+            ElementState::default(),
         );
         assert_eq!(narrow.overflow_y, Overflow::Visible);
 
@@ -734,7 +887,147 @@ mod tests {
                 container_width: 640.0,
                 container_height: 240.0,
             },
+            ElementState::default(),
         );
         assert_eq!(wide.overflow_y, Overflow::Auto);
+    }
+
+    #[test]
+    fn pseudo_state_rules_apply_when_state_matches() {
+        use mesh_component::style::{Declaration, Selector};
+        use crate::tree::ElementState;
+
+        let theme = mesh_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+
+        let rules = vec![
+            StyleRule {
+                selector: Selector::Tag("button".to_string()),
+                declarations: vec![Declaration {
+                    property: "background-color".to_string(),
+                    value: StyleValue::Literal("#333333".to_string()),
+                }],
+                container_query: None,
+            },
+            StyleRule {
+                selector: Selector::State("button".to_string(), "hover".to_string()),
+                declarations: vec![Declaration {
+                    property: "background-color".to_string(),
+                    value: StyleValue::Literal("#ffffff".to_string()),
+                }],
+                container_query: None,
+            },
+        ];
+
+        let idle = resolver.resolve_node_style(
+            &rules, "button", &[], None, StyleContext::default(), ElementState::default(),
+        );
+        assert_eq!(idle.background_color, Color::from_hex("#333333").unwrap());
+
+        let hovered = resolver.resolve_node_style(
+            &rules, "button", &[], None, StyleContext::default(),
+            ElementState { hovered: true, ..Default::default() },
+        );
+        assert_eq!(hovered.background_color, Color::from_hex("#ffffff").unwrap());
+    }
+
+    #[test]
+    fn input_state_sets_hover_flags_on_nodes() {
+        use crate::events::{InputState, RawInputEvent, UiEvent};
+        use crate::layout::LayoutEngine;
+        use crate::style::Dimension;
+        use crate::tree::WidgetNode;
+
+        let mut root = WidgetNode::new("root");
+        root.computed_style.width = Dimension::Px(200.0);
+        root.computed_style.height = Dimension::Px(100.0);
+
+        let mut btn = WidgetNode::new("button");
+        btn.computed_style.width = Dimension::Px(100.0);
+        btn.computed_style.height = Dimension::Px(50.0);
+        let btn_id = btn.id;
+        root.children = vec![btn];
+        LayoutEngine::compute(&mut root, 200.0, 100.0);
+
+        let mut input = InputState::new();
+
+        // Move pointer over the button.
+        let events = input.process(&mut root, &RawInputEvent::PointerMotion { x: 50.0, y: 25.0 });
+        assert!(root.children[0].state.hovered, "button should be hovered");
+        assert!(!root.state.hovered, "root should not be hovered");
+        assert!(events.iter().any(|e| matches!(e, UiEvent::PointerEnter { node_id } if *node_id == btn_id)));
+
+        // Move pointer off the button onto the root.
+        let events = input.process(&mut root, &RawInputEvent::PointerMotion { x: 150.0, y: 75.0 });
+        assert!(!root.children[0].state.hovered, "button hover should be cleared");
+        assert!(root.state.hovered, "root should now be hovered");
+        assert!(events.iter().any(|e| matches!(e, UiEvent::PointerLeave { node_id } if *node_id == btn_id)));
+    }
+
+    #[test]
+    fn padding_inline_and_block_tokens_resolve_to_computed_edges() {
+        use mesh_component::parser::parse_component;
+
+        let source = r#"
+<style>
+.panel {
+    padding-inline: token(spacing.lg);
+    padding-block: token(spacing.sm);
+}
+</style>
+"#;
+        let file = parse_component(source).unwrap();
+        let rules = file.style.unwrap().rules;
+
+        let theme = mesh_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "div",
+            &["panel".to_owned()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        // spacing.lg = 24, spacing.sm = 8
+        assert_eq!(style.padding.left, 24.0, "padding-inline left");
+        assert_eq!(style.padding.right, 24.0, "padding-inline right");
+        assert_eq!(style.padding.top, 8.0, "padding-block top");
+        assert_eq!(style.padding.bottom, 8.0, "padding-block bottom");
+    }
+
+    #[test]
+    fn padding_shorthand_and_overrides_resolve_correctly() {
+        use mesh_component::parser::parse_component;
+
+        let source = r#"
+<style>
+.card {
+    padding: 16px;
+    padding-top: 4px;
+}
+</style>
+"#;
+        let file = parse_component(source).unwrap();
+        let rules = file.style.unwrap().rules;
+
+        let theme = mesh_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "div",
+            &["card".to_owned()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.padding.top, 4.0, "padding-top override");
+        assert_eq!(style.padding.right, 16.0, "shorthand right");
+        assert_eq!(style.padding.bottom, 16.0, "shorthand bottom");
+        assert_eq!(style.padding.left, 16.0, "shorthand left");
     }
 }

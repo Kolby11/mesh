@@ -16,14 +16,14 @@ pub mod tree;
 pub use accessibility::{
     AccessibilityInfo, AccessibilityState, AccessibilityTree, AccessibilityTreeNode,
 };
-pub use events::{EventDispatcher, Modifiers, RawInputEvent, UiEvent};
-pub use layout::{LayoutEngine, LayoutRect};
+pub use events::{EventDispatcher, InputState, Modifiers, RawInputEvent, UiEvent};
+pub use layout::{LayoutEngine, LayoutRect, TextMeasurer};
 pub use style::{
     AlignContent, AlignItems, AlignSelf, Color, ComputedStyle, Corners, Dimension, Display, Edges,
-    FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow, StyleContext, StyleResolver,
-    TextAlign, TextOverflow,
+    FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow, Position, StyleContext,
+    StyleResolver, TextAlign, TextDirection, TextOverflow,
 };
-pub use tree::{NodeId, WidgetNode};
+pub use tree::{ElementState, NodeId, WidgetNode};
 
 /// Abstraction over the source of variable values for template evaluation.
 ///

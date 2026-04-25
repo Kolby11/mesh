@@ -40,23 +40,23 @@ Only `<template>` is required. All other blocks are optional.
 
 Use standard HTML tags. MESH renders these as shell UI primitives.
 
-| Tag | Purpose |
-|---|---|
-| `div` | Generic block container |
-| `span` | Generic inline container |
-| `p` | Paragraph text |
-| `nav` | Navigation region |
-| `header` | Surface header region |
-| `aside` | Sidebar or supplementary region |
-| `section` | Logical content section |
-| `article` | Self-contained content block |
-| `main` | Primary content region |
-| `ul` / `ol` / `li` | Lists |
-| `button` | Clickable action |
-| `input` | Text or range input |
-| `label` | Input label |
-| `img` | Image |
-| `hr` | Divider |
+| Tag                | Purpose                         |
+| ------------------ | ------------------------------- |
+| `div`              | Generic block container         |
+| `span`             | Generic inline container        |
+| `p`                | Paragraph text                  |
+| `nav`              | Navigation region               |
+| `header`           | Surface header region           |
+| `aside`            | Sidebar or supplementary region |
+| `section`          | Logical content section         |
+| `article`          | Self-contained content block    |
+| `main`             | Primary content region          |
+| `ul` / `ol` / `li` | Lists                           |
+| `button`           | Clickable action                |
+| `input`            | Text or range input             |
+| `label`            | Input label                     |
+| `img`              | Image                           |
+| `hr`               | Divider                         |
 
 Do not use tags that imply compositor-level layout (`footer`, `dialog`, `frame`) unless the surface role explicitly warrants it. Prefer semantic tags over generic `div` wherever meaning is clear.
 
@@ -118,17 +118,17 @@ Use standard HTML event attribute names with a Luau function reference in `{}`:
 
 Common event attributes:
 
-| Attribute | Fires when |
-|---|---|
-| `onclick` | element is clicked |
-| `oninput` | input value changes |
-| `onchange` | input value commits |
-| `onkeydown` | key pressed while focused |
-| `onkeyup` | key released while focused |
-| `onfocus` | element gains focus |
-| `onblur` | element loses focus |
-| `onmouseenter` | pointer enters element |
-| `onmouseleave` | pointer leaves element |
+| Attribute      | Fires when                 |
+| -------------- | -------------------------- |
+| `onclick`      | element is clicked         |
+| `oninput`      | input value changes        |
+| `onchange`     | input value commits        |
+| `onkeydown`    | key pressed while focused  |
+| `onkeyup`      | key released while focused |
+| `onfocus`      | element gains focus        |
+| `onblur`       | element loses focus        |
+| `onmouseenter` | pointer enters element     |
+| `onmouseleave` | pointer leaves element     |
 
 Do not use `@click=` or `:on*=` — those are not valid MESH syntax.
 
@@ -294,15 +294,15 @@ end
 
 ## Quick reference
 
-| Goal | Syntax |
-|---|---|
-| Static text | `<span>Hello</span>` |
-| Dynamic text | `<span>{variable}</span>` |
-| Dynamic attribute | `title="{expr}"` |
-| Two-way bind | `bind:value=variable` |
-| Event handler | `onclick={handler}` |
-| Theme token | `token(color.surface)` |
-| Translation key | `{t("key")}` |
-| Tooltip | `title="..."` |
-| Screen reader label | `aria-label="..."` |
-| Hide from AT | `aria-hidden="true"` |
+| Goal                | Syntax                    |
+| ------------------- | ------------------------- |
+| Static text         | `<span>Hello</span>`      |
+| Dynamic text        | `<span>{variable}</span>` |
+| Dynamic attribute   | `title="{expr}"`          |
+| Two-way bind        | `bind:value=variable`     |
+| Event handler       | `onclick={handler}`       |
+| Theme token         | `token(color.surface)`    |
+| Translation key     | `{t("key")}`              |
+| Tooltip             | `title="..."`             |
+| Screen reader label | `aria-label="..."`        |
+| Hide from AT        | `aria-hidden="true"`      |

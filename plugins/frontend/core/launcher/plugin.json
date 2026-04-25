@@ -22,6 +22,97 @@
   "entrypoints": {
     "main": "src/main.mesh"
   },
+  "settings": {
+    "namespace": "@mesh/launcher",
+    "schema": {
+      "surface": {
+        "type": "object",
+        "description": "Placement and sizing for the launcher surface.",
+        "properties": {
+          "anchor": {
+            "type": "enum",
+            "values": ["top", "bottom", "left", "right"],
+            "default": "top",
+            "description": "Screen edge this surface anchors to."
+          },
+          "layer": {
+            "type": "enum",
+            "values": ["background", "bottom", "top", "overlay"],
+            "default": "overlay",
+            "description": "Layer-shell stacking layer."
+          },
+          "width": {
+            "type": "integer",
+            "default": 372,
+            "min": 320,
+            "max": 640,
+            "description": "Initial surface width in pixels (sized to content at runtime)."
+          },
+          "height": {
+            "type": "integer",
+            "default": 344,
+            "min": 180,
+            "max": 420,
+            "description": "Initial surface height in pixels (sized to content at runtime)."
+          },
+          "exclusive_zone": {
+            "type": "integer",
+            "default": 0,
+            "min": 0,
+            "max": 256,
+            "description": "Reserved compositor space in pixels."
+          },
+          "keyboard_mode": {
+            "type": "enum",
+            "values": ["none", "exclusive", "on_demand"],
+            "default": "on_demand",
+            "description": "Keyboard interactivity policy for the surface."
+          },
+          "visible_on_start": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether this surface starts visible when Mesh boots."
+          },
+          "margin_top": {
+            "type": "integer",
+            "default": 32,
+            "min": 0,
+            "max": 256,
+            "description": "Top margin in pixels (positions the surface below the panel)."
+          },
+          "margin_right": {
+            "type": "integer",
+            "default": 0,
+            "min": 0,
+            "max": 256,
+            "description": "Right margin in pixels."
+          },
+          "margin_bottom": {
+            "type": "integer",
+            "default": 0,
+            "min": 0,
+            "max": 256,
+            "description": "Bottom margin in pixels."
+          },
+          "margin_left": {
+            "type": "integer",
+            "default": 0,
+            "min": 0,
+            "max": 256,
+            "description": "Left margin in pixels."
+          }
+        }
+      }
+    }
+  },
+  "surface_layout": {
+    "size_policy": "content_measured",
+    "prefers_content_children_sizing": true,
+    "min_width": 320,
+    "max_width": 640,
+    "min_height": 180,
+    "max_height": 420
+  },
   "accessibility": {
     "role": "dialog",
     "label": "Application launcher",

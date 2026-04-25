@@ -14,7 +14,12 @@
       "Bash(dpkg -l libxkbcommon-dev)",
       "Bash(apt-cache show *)",
       "Bash(awk -F: '$2 <= 2300 && $2 >= 2260 {print}')",
-      "Bash(awk -F: '$2 >= 2380 && $2 <= 2430')"
+      "Bash(awk -F: '$2 >= 2380 && $2 <= 2430')",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(k,v\\) for k,v in d['tokens'].items\\(\\) if 'spacing' in k]\")",
+      "Bash(grep -E \"\\(test result|FAILED|ok$\\)\")",
+      "Bash(rustc --edition 2021 --crate-type lib crates/mesh-core/src/shell.rs --extern mesh_ui=target/debug/libmesh_ui.rlib)",
+      "Bash(awk NR>=2060 && NR<=2075 || NR>=2395 && NR<=2420 *)",
+      "WebSearch"
     ]
   }
 }

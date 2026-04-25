@@ -152,13 +152,15 @@ fn build_node(
                 }
             }
 
-            // Resolve computed style.
+            // Resolve computed style. State is always default at build time;
+            // InputState::process updates it at runtime and restyle_subtree re-resolves.
             widget.computed_style = style_resolver.resolve_node_style(
                 rules,
                 &el.tag,
                 &classes,
                 id.as_deref(),
                 mesh_ui::StyleContext::default(),
+                mesh_ui::ElementState::default(),
             );
 
             // Recurse into children.

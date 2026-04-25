@@ -71,6 +71,7 @@ impl CompiledFrontendPlugin {
             FrontendRenderMode::Surface,
             &self.manifest.package.id,
             None,
+            None,
         )
     }
 
@@ -83,6 +84,7 @@ impl CompiledFrontendPlugin {
         mode: FrontendRenderMode,
         instance_key: &str,
         composition: Option<&dyn FrontendCompositionResolver>,
+        measurer: Option<&dyn mesh_ui::TextMeasurer>,
     ) -> WidgetNode {
         let mut root = WidgetNode::new("surface");
         root.attributes
@@ -159,7 +161,7 @@ impl CompiledFrontendPlugin {
                 .collect();
         }
 
-        LayoutEngine::compute(&mut root, width as f32, height as f32);
+        LayoutEngine::compute_with_measurer(&mut root, width as f32, height as f32, measurer);
         root
     }
 
@@ -501,8 +503,14 @@ fn build_element_node(
     let mut node = WidgetNode::new(tag.clone());
     node.attributes = attributes;
     node.event_handlers = event_handlers;
-    node.computed_style =
-        resolver.resolve_node_style(rules, &tag, &classes, id.as_deref(), container_context);
+    node.computed_style = resolver.resolve_node_style(
+        rules,
+        &tag,
+        &classes,
+        id.as_deref(),
+        container_context,
+        Default::default(),
+    );
     merge_missing_defaults(&tag, &mut node.computed_style);
     if let Some(parent_style) = parent_style {
         inherit_text_style(&mut node.computed_style, parent_style, inherited_mask);
@@ -519,7 +527,8 @@ fn build_element_node(
     // Inline text element: fold all Text/Expr children into a single "content" attribute
     // instead of building child nodes. This makes <span>{x}</span> and <p>Hello</p> work
     // as leaf text nodes so the painter can render them directly.
-    if tag == "text" && !element.children.is_empty()
+    if tag == "text"
+        && !element.children.is_empty()
         && element.children.iter().all(is_inline_template_node)
     {
         let content: String = element
@@ -715,7 +724,7 @@ fn resolve_dimension_for_context(dimension: Dimension, available: f32) -> f32 {
     match dimension {
         Dimension::Px(px) => px,
         Dimension::Percent(percent) => available * percent / 100.0,
-        Dimension::Auto => available.max(0.0),
+        Dimension::Auto | Dimension::Content => available.max(0.0),
     }
 }
 
@@ -773,29 +782,157 @@ fn json_value_to_string(value: serde_json::Value) -> String {
 
 /// Evaluate a template expression against the current variable store.
 ///
-/// Supported forms:
-/// - `t("literal key")` — translate a string literal
-/// - `t(variable)` — translate the string value of a variable
-/// - `t(a.b)` — translate the value at a dotted path
-/// - `variable` — look up a variable by name
-/// - `a.b.c` — look up a dotted path (falls back to flat key if not found)
+/// Supports a subset of Luau expression syntax:
+/// - `"string literal"` / `'string literal'`
+/// - `not x` — boolean negation
+/// - `cond and a or b` — ternary (Lua idiom)
+/// - `x == y`, `x ~= y`, `x > y`, `x >= y`, `x < y`, `x <= y` — comparisons
+/// - `x .. y` — string concatenation
+/// - `t("key")` / `t(variable)` — translation
+/// - `variable` / `a.b.c` — variable lookup
 fn eval_expr(expr: &str, store: &dyn mesh_ui::VariableStore) -> String {
     let expr = expr.trim();
+
+    // Parenthesized: (expr)
+    if expr.starts_with('(') && expr.ends_with(')') && balanced_parens(expr) {
+        return eval_expr(&expr[1..expr.len() - 1], store);
+    }
+
+    // not X — boolean negation
+    if let Some(inner) = expr.strip_prefix("not ") {
+        let value = eval_expr(inner.trim(), store);
+        let is_truthy = !matches!(value.as_str(), "false" | "nil" | "" | "0");
+        return if is_truthy {
+            "false".into()
+        } else {
+            "true".into()
+        };
+    }
+
+    // Ternary: cond and then_val or else_val
+    if let Some((cond, rest)) = split_op(expr, " and ") {
+        if let Some((then_val, else_val)) = split_op(rest, " or ") {
+            let cond_result = eval_expr(cond, store);
+            let truthy = !matches!(cond_result.as_str(), "false" | "nil" | "" | "0");
+            return if truthy {
+                eval_expr(then_val, store)
+            } else {
+                eval_expr(else_val, store)
+            };
+        }
+    }
+
+    // Comparison operators (check multi-char first to avoid partial match)
+    for op in &["~=", "==", ">=", "<=", ">", "<"] {
+        if let Some((lhs, rhs)) = split_op(expr, op) {
+            let l = eval_expr(lhs, store);
+            let r = eval_expr(rhs, store);
+            let result = if let (Ok(ln), Ok(rn)) = (l.parse::<f64>(), r.parse::<f64>()) {
+                match *op {
+                    "==" => (ln - rn).abs() < f64::EPSILON,
+                    "~=" => (ln - rn).abs() >= f64::EPSILON,
+                    ">=" => ln >= rn,
+                    "<=" => ln <= rn,
+                    ">" => ln > rn,
+                    "<" => ln < rn,
+                    _ => false,
+                }
+            } else {
+                match *op {
+                    "==" => l == r,
+                    "~=" => l != r,
+                    _ => false,
+                }
+            };
+            return if result {
+                "true".into()
+            } else {
+                "false".into()
+            };
+        }
+    }
+
+    // String concatenation: x .. y
+    if let Some((lhs, rhs)) = split_op(expr, " .. ") {
+        let l = eval_expr(lhs, store);
+        let r = eval_expr(rhs, store);
+        return format!("{l}{r}");
+    }
 
     // t(...) — translation call
     if let Some(arg) = expr.strip_prefix("t(").and_then(|s| s.strip_suffix(')')) {
         let arg = arg.trim();
-        // String literal argument: t("key") or t('key')
         if let Some(key) = strip_string_literal(arg) {
             return store.translate(&key).unwrap_or(key);
         }
-        // Variable/path argument: t(variable) or t(a.b)
         let resolved = eval_path(arg, store);
         return store.translate(&resolved).unwrap_or(resolved);
     }
 
+    // String literal: "..." or '...'
+    if let Some(s) = strip_string_literal(expr) {
+        return s;
+    }
+
     // Plain variable or dotted path
     eval_path(expr, store)
+}
+
+/// Split `expr` on the first occurrence of `op` (not inside parens or quotes).
+fn split_op<'a>(expr: &'a str, op: &str) -> Option<(&'a str, &'a str)> {
+    let bytes = expr.as_bytes();
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut quote = b'"';
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_string {
+            if b == quote && (i == 0 || bytes[i - 1] != b'\\') {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if b == b'"' || b == b'\'' {
+            in_string = true;
+            quote = b;
+            i += 1;
+            continue;
+        }
+        if b == b'(' {
+            depth += 1;
+            i += 1;
+            continue;
+        }
+        if b == b')' {
+            depth -= 1;
+            i += 1;
+            continue;
+        }
+        if depth == 0 && expr[i..].starts_with(op) {
+            return Some((&expr[..i], &expr[i + op.len()..]));
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Returns true if an expression's outer parens are balanced (matching).
+fn balanced_parens(expr: &str) -> bool {
+    let mut depth = 0i32;
+    for (i, b) in expr.bytes().enumerate() {
+        if b == b'(' {
+            depth += 1;
+        } else if b == b')' {
+            depth -= 1;
+            if depth == 0 && i < expr.len() - 1 {
+                return false;
+            }
+        }
+    }
+    depth == 0
 }
 
 /// Resolve a variable name or dotted path from the store.
@@ -854,8 +991,9 @@ fn normalize_tag(tag: &str) -> String {
         "ul" | "ol" => "column".into(),
         "li" => "row".into(),
         // Inline and block text elements — folded to leaf text nodes.
-        "span" | "label" | "em" | "strong" | "p"
-        | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => "text".into(),
+        "span" | "label" | "em" | "strong" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
+            "text".into()
+        }
         // Image.
         "img" => "icon".into(),
         // PascalCase → component placeholder.
@@ -867,6 +1005,12 @@ fn normalize_tag(tag: &str) -> String {
 
 fn merge_missing_defaults(tag: &str, style: &mut ComputedStyle) {
     let defaults = default_leaf_style(tag);
+
+    if tag == "icon" {
+        style.background_color = mesh_ui::Color::TRANSPARENT;
+        style.border_radius = mesh_ui::Corners::zero();
+        style.padding = mesh_ui::Edges::zero();
+    }
 
     if style.background_color.a == 0 && defaults.background_color.a > 0 {
         style.background_color = defaults.background_color;
@@ -905,6 +1049,8 @@ fn merge_missing_defaults(tag: &str, style: &mut ComputedStyle) {
 
 fn surface_style(surface_id: &str, width: u32, height: u32) -> ComputedStyle {
     let mut style = container_style("column");
+    style.padding = mesh_ui::Edges::all(0.0);
+    style.gap = 0.0;
     style.width = mesh_ui::Dimension::Px(width as f32);
     style.height = mesh_ui::Dimension::Px(height as f32);
     style.background_color = match surface_id {
@@ -1005,9 +1151,7 @@ fn default_leaf_style(tag: &str) -> ComputedStyle {
             let mut style = ComputedStyle::default();
             style.width = mesh_ui::Dimension::Px(18.0);
             style.height = mesh_ui::Dimension::Px(18.0);
-            style.background_color =
-                mesh_ui::Color::from_hex("#7f67be").unwrap_or(mesh_ui::Color::WHITE);
-            style.border_radius = mesh_ui::Corners::all(9.0);
+            style.background_color = mesh_ui::Color::TRANSPARENT;
             style
         }
         "box" => {
@@ -1053,10 +1197,7 @@ mod tests {
 
         let (_, _, _, handlers) = parse_attributes(&attrs, None);
 
-        assert_eq!(
-            handlers.get("click").map(String::as_str),
-            Some("openPanel")
-        );
+        assert_eq!(handlers.get("click").map(String::as_str), Some("openPanel"));
         assert!(!handlers.contains_key("onclick"));
     }
 }

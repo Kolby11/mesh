@@ -1,6 +1,8 @@
 {
   "nav.current": "Current",
   "nav.dashboard": "Dashboard",
+  "nav.settings": "Settings",
+  "nav.open_settings": "Open quick settings",
   "nav.volume": "Volume",
   "nav.open_audio": "Open audio controls"
 }

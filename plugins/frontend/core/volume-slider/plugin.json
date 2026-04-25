@@ -1,0 +1,121 @@
+{
+  "id": "@mesh/volume-slider",
+  "name": "MESH Volume Slider",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "description": "Compact audio volume slider popover.",
+  "authors": ["MESH Project"],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "capabilities": {
+    "required": [
+      "shell.surface",
+      "service.audio.read",
+      "service.audio.control",
+      "theme.read",
+      "locale.read"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/audio-interface": ">=1.0.0, <2.0.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "settings": {
+    "namespace": "@mesh/volume-slider",
+    "schema": {
+      "surface": {
+        "type": "object",
+        "description": "Placement and sizing for the volume slider popover.",
+        "properties": {
+          "anchor": {
+            "type": "enum",
+            "values": ["top", "bottom", "left", "right"],
+            "default": "left",
+            "description": "Screen edge this surface anchors to."
+          },
+          "layer": {
+            "type": "enum",
+            "values": ["background", "bottom", "top", "overlay"],
+            "default": "overlay",
+            "description": "Layer-shell stacking layer."
+          },
+          "width": {
+            "type": "integer",
+            "default": 360,
+            "min": 240,
+            "max": 480,
+            "description": "Surface width in pixels."
+          },
+          "height": {
+            "type": "integer",
+            "default": 148,
+            "min": 80,
+            "max": 240,
+            "description": "Surface height in pixels."
+          },
+          "exclusive_zone": {
+            "type": "integer",
+            "default": 0,
+            "min": 0,
+            "max": 256,
+            "description": "Reserved compositor space in pixels."
+          },
+          "keyboard_mode": {
+            "type": "enum",
+            "values": ["none", "exclusive", "on_demand"],
+            "default": "on_demand",
+            "description": "Keyboard interactivity policy for the surface."
+          },
+          "visible_on_start": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether this surface starts visible when Mesh boots."
+          },
+          "margin_top": {
+            "type": "integer",
+            "default": 0,
+            "min": 0,
+            "max": 256,
+            "description": "Top margin in pixels relative to the bottom of the exclusive zone."
+          },
+          "margin_right": {
+            "type": "integer",
+            "default": 8,
+            "min": 0,
+            "max": 256,
+            "description": "Right margin in pixels."
+          },
+          "margin_bottom": {
+            "type": "integer",
+            "default": 0,
+            "min": 0,
+            "max": 256,
+            "description": "Bottom margin in pixels."
+          },
+          "margin_left": {
+            "type": "integer",
+            "default": 0,
+            "min": 0,
+            "max": 256,
+            "description": "Left margin in pixels."
+          }
+        }
+      }
+    }
+  },
+  "surface_layout": {
+    "size_policy": "fixed"
+  },
+  "accessibility": {
+    "role": "dialog",
+    "label": "Volume controls",
+    "description": "Compact audio volume controls"
+  }
+}
+

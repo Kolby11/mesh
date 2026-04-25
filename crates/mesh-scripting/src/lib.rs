@@ -1,3 +1,4 @@
+pub mod backend;
 pub mod component;
 /// Luau scripting bridge for MESH.
 ///
@@ -15,5 +16,6 @@ pub mod component;
 pub mod context;
 pub mod host_api;
 
+pub use backend::{BackendScriptContext, BackendScriptError};
 pub use component::ComponentInstance;
 pub use context::{LocaleBoundState, PublishedEvent, ScriptContext, ScriptError, ScriptState};

@@ -1,0 +1,149 @@
+<template>
+  <section class="volume-popover">
+    <div class="volume-header">
+      <icon class="speaker" name="{audio.icon_name}" size="18" />
+      <div class="volume-copy">
+        <span class="title">Volume</span>
+        <span class="backend">{audio.source_plugin}</span>
+      </div>
+      <span class="value">{audio.label}</span>
+    </div>
+    <div class="volume-row">
+      <button class="volume-step" onclick={onVolumeDown} title="Volume down" aria-label="Volume down">-</button>
+      <slider class="slider" min="0" max="100" value="{audio.percent}" mesh-action="audio-volume" title="{audio.tooltip}" aria-label="Volume" />
+      <button class="volume-step" onclick={onVolumeUp} title="Volume up" aria-label="Volume up">+</button>
+    </div>
+    <div class="actions">
+      <button class="mute" onclick={onToggleMute} title="Toggle mute" aria-label="Toggle mute">
+        <icon class="mute-icon" name="{audio.icon_name}" size="18" />
+      </button>
+      <button class="close" onclick={onClose} title="Close volume controls" aria-label="Close volume controls">Close</button>
+    </div>
+  </section>
+</template>
+
+<script lang="luau">
+function onVolumeDown()
+    mesh.events.publish("mesh.audio.volume-down", {})
+end
+
+function onVolumeUp()
+    mesh.events.publish("mesh.audio.volume-up", {})
+end
+
+function onToggleMute()
+    mesh.events.publish("mesh.audio.toggle-mute", {})
+end
+
+function onClose()
+    mesh.events.publish("shell.close-volume-slider", {})
+end
+</script>
+
+<style>
+.volume-popover {
+    width: 100%;
+    height: 100%;
+    padding: token(spacing.md);
+    gap: token(spacing.sm);
+    background: token(color.surface);
+    color: token(color.on-surface);
+}
+
+.volume-header {
+    align-items: center;
+    gap: token(spacing.sm);
+}
+
+.speaker {
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    color: token(color.on-secondary-container);
+}
+
+.volume-copy {
+    width: 100%;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.title {
+    font-size: token(typography.size.md);
+    font-weight: 700;
+}
+
+.backend {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.xs);
+}
+
+.value {
+    width: 68px;
+    flex-shrink: 0;
+    justify-content: end;
+    font-size: token(typography.size.lg);
+    font-weight: 800;
+    text-wrap: none;
+}
+
+.volume-row {
+    align-items: center;
+    gap: token(spacing.sm);
+}
+
+.volume-step {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    border-radius: token(radius.sm);
+    background: token(color.tertiary-container);
+    color: token(color.on-tertiary-container);
+    font-size: token(typography.size.lg);
+    font-weight: 800;
+}
+
+.volume-step:hover {
+    background: token(color.primary-container);
+    color: token(color.on-primary-container);
+}
+
+.slider {
+    width: 100%;
+    height: 36px;
+    flex-grow: 1;
+    color: token(color.primary);
+}
+
+.actions {
+    justify-content: space-between;
+    align-items: center;
+    gap: token(spacing.sm);
+}
+
+.mute,
+.close {
+    width: content;
+    flex-shrink: 0;
+    padding-block: token(spacing.xs);
+    padding-inline: token(spacing.sm);
+    border-radius: token(radius.sm);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+    text-wrap: none;
+}
+
+.mute-icon {
+    width: 18px;
+    height: 18px;
+    color: token(color.on-surface);
+}
+
+.mute:hover,
+.close:hover {
+    background: token(color.primary-container);
+    color: token(color.on-primary-container);
+}
+</style>

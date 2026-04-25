@@ -42,6 +42,8 @@ pub struct Manifest {
     pub assets: Option<AssetsSection>,
     #[serde(default)]
     pub translations: HashMap<String, HashMap<String, String>>,
+    #[serde(default)]
+    pub surface_layout: Option<SurfaceLayoutSection>,
 }
 
 impl Manifest {
@@ -405,6 +407,24 @@ pub struct SlotContribution {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SurfaceLayoutSection {
+    /// "fixed" | "content_measured"
+    #[serde(default)]
+    pub size_policy: Option<String>,
+    /// Use content-children bounds (vs root bounds) when measuring size
+    #[serde(default)]
+    pub prefers_content_children_sizing: Option<bool>,
+    #[serde(default)]
+    pub min_width: Option<u32>,
+    #[serde(default)]
+    pub max_width: Option<u32>,
+    #[serde(default)]
+    pub min_height: Option<u32>,
+    #[serde(default)]
+    pub max_height: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssetsSection {
     #[serde(default)]
     pub icons: Option<String>,
@@ -598,6 +618,8 @@ struct TomlManifest {
     assets: Option<AssetsSection>,
     #[serde(default)]
     translations: HashMap<String, HashMap<String, String>>,
+    #[serde(default, rename = "surface-layout")]
+    surface_layout: Option<SurfaceLayoutSection>,
 }
 
 impl TomlManifest {
@@ -624,6 +646,7 @@ impl TomlManifest {
             slot_contributions: self.slot_contributions,
             assets: self.assets,
             translations: self.translations,
+            surface_layout: self.surface_layout,
         }
     }
 }
@@ -743,6 +766,8 @@ struct JsonManifest {
     assets: Option<AssetsSection>,
     #[serde(default)]
     translations: HashMap<String, HashMap<String, String>>,
+    #[serde(default, rename = "surface_layout")]
+    surface_layout: Option<SurfaceLayoutSection>,
 }
 
 impl JsonManifest {
@@ -776,6 +801,7 @@ impl JsonManifest {
             slot_contributions: self.slot_contributions,
             assets: self.assets,
             translations: self.translations,
+            surface_layout: self.surface_layout,
         }
     }
 }
@@ -1006,6 +1032,7 @@ main = "src/main.mesh"
                 .collect(),
             assets: None,
             translations: HashMap::new(),
+            surface_layout: None,
         }
     }
 

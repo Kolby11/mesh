@@ -26,9 +26,14 @@ pub use schema::{SchemaBlock, SchemaFieldDef};
 pub use style::*;
 pub use template::*;
 
+use std::collections::HashMap;
+
 /// A parsed `.mesh` single-file component.
 #[derive(Debug, Clone)]
 pub struct ComponentFile {
+    /// Component imports declared with `import "plugin-id" as Alias` in the script block.
+    /// Maps alias name → plugin ID. These are stripped from the script source before Luau sees it.
+    pub imports: HashMap<String, String>,
     pub template: Option<TemplateBlock>,
     pub script: Option<ScriptBlock>,
     pub style: Option<StyleBlock>,
@@ -40,7 +45,11 @@ pub struct ComponentFile {
 #[derive(Debug, Clone)]
 pub struct ScriptBlock {
     pub lang: ScriptLang,
+    /// Transformed source — top-level `local x = val` declarations are rewritten
+    /// to `mesh.state.set("x", val)` calls so the runtime can track them reactively.
     pub source: String,
+    /// Variable names extracted from top-level `local` declarations.
+    pub reactive_vars: Vec<String>,
 }
 
 /// Supported scripting languages.

@@ -36,6 +36,7 @@ pub trait ShellSurface {
     fn set_exclusive_zone(&mut self, zone: i32);
     fn set_layer(&mut self, layer: Layer);
     fn set_keyboard_interactivity(&mut self, mode: KeyboardMode);
+    fn set_margin(&mut self, top: i32, right: i32, bottom: i32, left: i32);
     fn show(&mut self);
     fn hide(&mut self);
 }
@@ -80,6 +81,10 @@ pub struct StubSurface {
     pub layer: Option<Layer>,
     pub exclusive_zone: i32,
     pub keyboard_mode: KeyboardMode,
+    pub margin_top: i32,
+    pub margin_right: i32,
+    pub margin_bottom: i32,
+    pub margin_left: i32,
 }
 
 impl Default for StubSurface {
@@ -92,6 +97,10 @@ impl Default for StubSurface {
             layer: None,
             exclusive_zone: 0,
             keyboard_mode: KeyboardMode::None,
+            margin_top: 0,
+            margin_right: 0,
+            margin_bottom: 0,
+            margin_left: 0,
         }
     }
 }
@@ -116,6 +125,13 @@ impl ShellSurface for StubSurface {
 
     fn set_keyboard_interactivity(&mut self, mode: KeyboardMode) {
         self.keyboard_mode = mode;
+    }
+
+    fn set_margin(&mut self, top: i32, right: i32, bottom: i32, left: i32) {
+        self.margin_top = top;
+        self.margin_right = right;
+        self.margin_bottom = bottom;
+        self.margin_left = left;
     }
 
     fn show(&mut self) {

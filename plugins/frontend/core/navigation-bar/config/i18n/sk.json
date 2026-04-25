@@ -1,6 +1,8 @@
 {
   "nav.current": "Aktivne",
   "nav.dashboard": "Prehlad",
+  "nav.settings": "Nastavenia",
+  "nav.open_settings": "Otvorit rychle nastavenia",
   "nav.volume": "Hlasitost",
   "nav.open_audio": "Otvorit ovladanie zvuku"
 }

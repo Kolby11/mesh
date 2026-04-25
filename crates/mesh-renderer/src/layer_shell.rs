@@ -7,6 +7,7 @@
 use crate::dev_window::{DevWindowEvent, DevWindowKeyEvent};
 use crate::{PixelBuffer, RenderError};
 use mesh_wayland::{Edge, KeyboardMode, Layer as MeshLayer};
+use rustix::event::{PollFd, PollFlags, poll};
 
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
@@ -30,8 +31,10 @@ use smithay_client_toolkit::{
     shm::{Shm, ShmHandler, slot::SlotPool},
 };
 use std::collections::HashMap;
+use std::io::ErrorKind;
 use wayland_client::{
     Connection, EventQueue, QueueHandle,
+    backend::WaylandError,
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
 };
@@ -46,6 +49,10 @@ pub struct LayerSurfaceConfig {
     pub exclusive_zone: i32,
     pub keyboard_mode: KeyboardMode,
     pub namespace: String,
+    pub margin_top: i32,
+    pub margin_right: i32,
+    pub margin_bottom: i32,
+    pub margin_left: i32,
 }
 
 impl Default for LayerSurfaceConfig {
@@ -58,6 +65,10 @@ impl Default for LayerSurfaceConfig {
             exclusive_zone: 0,
             keyboard_mode: KeyboardMode::None,
             namespace: "mesh".to_string(),
+            margin_top: 0,
+            margin_right: 0,
+            margin_bottom: 0,
+            margin_left: 0,
         }
     }
 }
@@ -149,14 +160,21 @@ impl LayerShellBackend {
         let entry = self.state.surfaces.get_mut(surface_id);
         match entry {
             Some(entry) => {
-                if entry.cfg.edge != cfg.edge
+                let config_changed = entry.cfg.edge != cfg.edge
                     || entry.cfg.layer != cfg.layer
                     || entry.cfg.exclusive_zone != cfg.exclusive_zone
                     || entry.cfg.keyboard_mode != cfg.keyboard_mode
                     || entry.cfg.width != cfg.width
                     || entry.cfg.height != cfg.height
-                {
+                    || entry.cfg.margin_top != cfg.margin_top
+                    || entry.cfg.margin_right != cfg.margin_right
+                    || entry.cfg.margin_bottom != cfg.margin_bottom
+                    || entry.cfg.margin_left != cfg.margin_left;
+                if config_changed || !entry.configured {
+                    // Re-commit to re-map the surface and prompt the compositor to
+                    // send a fresh configure event before we attach a buffer.
                     apply_config(&entry.layer_surface, &cfg);
+                    entry.layer_surface.commit();
                     entry.cfg = cfg;
                 }
             }
@@ -193,8 +211,20 @@ impl LayerShellBackend {
         buffer: &PixelBuffer,
     ) -> Result<(), RenderError> {
         if !visible {
-            if let Some(entry) = self.state.surfaces.remove(surface_id) {
-                drop(entry);
+            // Only detach a buffer (to hide) if the compositor has already configured this
+            // surface. Before the first configure event the surface has no buffer attached
+            // and is already invisible; committing a null buffer before configure arrives
+            // triggers a Wayland protocol error.
+            if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
+                if entry.configured {
+                    let wl_surface = entry.layer_surface.wl_surface();
+                    wl_surface.attach(None, 0, 0);
+                    entry.layer_surface.commit();
+                    // Reset configured so that on the next show we wait for a fresh
+                    // configure event before attaching a buffer. Some compositors send
+                    // a new configure when a surface is re-mapped after a null commit.
+                    entry.configured = false;
+                }
             }
             self.dispatch_pending()?;
             return Ok(());
@@ -268,18 +298,95 @@ impl LayerShellBackend {
     }
 
     pub fn pump(&mut self) {
-        let _ = self.dispatch_pending();
+        let _ = self.dispatch_available();
     }
 
     pub fn poll_events(&mut self) -> Vec<DevWindowEvent> {
-        let _ = self.dispatch_pending();
-        std::mem::take(&mut self.state.events)
+        let _ = self.dispatch_available();
+        let events = std::mem::take(&mut self.state.events);
+        if !events.is_empty() {
+            tracing::trace!(
+                "[hover] layer_shell: draining {} input event(s)",
+                events.len()
+            );
+        }
+        events
     }
 
     fn dispatch_pending(&mut self) -> Result<(), RenderError> {
         self.event_queue
             .flush()
             .map_err(|e| RenderError::SurfaceCreate(format!("flush: {e}")))?;
+        self.event_queue
+            .dispatch_pending(&mut self.state)
+            .map_err(|e| RenderError::SurfaceCreate(format!("dispatch: {e}")))?;
+        Ok(())
+    }
+
+    fn dispatch_available(&mut self) -> Result<(), RenderError> {
+        self.event_queue
+            .flush()
+            .map_err(|e| RenderError::SurfaceCreate(format!("flush: {e}")))?;
+
+        for _ in 0..32 {
+            self.event_queue
+                .dispatch_pending(&mut self.state)
+                .map_err(|e| RenderError::SurfaceCreate(format!("dispatch: {e}")))?;
+
+            let Some(read_guard) = self.event_queue.prepare_read() else {
+                continue;
+            };
+
+            let poll_result = {
+                let fd = read_guard.connection_fd();
+                let mut fds = [PollFd::new(
+                    &fd,
+                    PollFlags::IN | PollFlags::ERR | PollFlags::HUP,
+                )];
+                poll(&mut fds, 0).map(|ready| {
+                    if ready == 0 {
+                        None
+                    } else {
+                        Some(fds[0].revents())
+                    }
+                })
+            };
+
+            match poll_result {
+                Ok(None) => {
+                    drop(read_guard);
+                    break;
+                }
+                Ok(Some(revents)) => {
+                    if !revents.intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP) {
+                        drop(read_guard);
+                        break;
+                    }
+
+                    match read_guard.read() {
+                        Ok(read_count) => {
+                            tracing::trace!("read {read_count} Wayland event(s)");
+                            if read_count == 0 {
+                                break;
+                            }
+                        }
+                        Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => break,
+                        Err(err) => {
+                            return Err(RenderError::SurfaceCreate(format!("read: {err}")));
+                        }
+                    }
+                }
+                Err(rustix::io::Errno::INTR) => {
+                    drop(read_guard);
+                    break;
+                }
+                Err(err) => {
+                    drop(read_guard);
+                    return Err(RenderError::SurfaceCreate(format!("poll: {err}")));
+                }
+            }
+        }
+
         self.event_queue
             .dispatch_pending(&mut self.state)
             .map_err(|e| RenderError::SurfaceCreate(format!("dispatch: {e}")))?;
@@ -293,6 +400,7 @@ fn apply_config(layer_surface: &LayerSurface, cfg: &LayerSurfaceConfig) {
     layer_surface.set_exclusive_zone(cfg.exclusive_zone);
     layer_surface.set_keyboard_interactivity(map_keyboard(cfg.keyboard_mode));
     layer_surface.set_size(cfg.width, cfg.height);
+    layer_surface.set_margin(cfg.margin_top, cfg.margin_right, cfg.margin_bottom, cfg.margin_left);
 }
 
 fn map_layer(layer: MeshLayer) -> Layer {
@@ -446,6 +554,7 @@ impl SeatHandler for State {
     ) {
         if capability == SeatCapability::Pointer && self.pointer.is_none() {
             if let Ok(ptr) = self.seat_state.get_pointer(qh, &seat) {
+                tracing::debug!("[hover] layer_shell: pointer capability acquired");
                 self.pointer = Some(ptr);
             }
         }
@@ -491,21 +600,29 @@ impl PointerHandler for State {
             };
             match event.kind {
                 PointerEventKind::Enter { .. } => {
+                    tracing::debug!("[hover] layer_shell: pointer enter surface_id={surface_id}");
                     self.pointer_focus = Some(surface_id.clone());
                 }
                 PointerEventKind::Leave { .. } => {
+                    tracing::debug!("[hover] layer_shell: pointer leave surface_id={surface_id}");
                     if self.pointer_focus.as_deref() == Some(&surface_id) {
                         self.pointer_focus = None;
                     }
                 }
                 PointerEventKind::Motion { .. } => {
                     let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+                    tracing::trace!(
+                        "[hover] layer_shell: pointer motion surface_id={surface_id} x={x:.1} y={y:.1}"
+                    );
                     self.events
                         .push(DevWindowEvent::PointerMove { surface_id, x, y });
                 }
                 PointerEventKind::Press { button, .. } => {
                     if button == 0x110 {
                         let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+                        tracing::debug!(
+                            "[hover] layer_shell: pointer press surface_id={surface_id} x={x:.1} y={y:.1}"
+                        );
                         self.events.push(DevWindowEvent::PointerButton {
                             surface_id,
                             x,
@@ -517,6 +634,9 @@ impl PointerHandler for State {
                 PointerEventKind::Release { button, .. } => {
                     if button == 0x110 {
                         let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+                        tracing::debug!(
+                            "[hover] layer_shell: pointer release surface_id={surface_id} x={x:.1} y={y:.1}"
+                        );
                         self.events.push(DevWindowEvent::PointerButton {
                             surface_id,
                             x,

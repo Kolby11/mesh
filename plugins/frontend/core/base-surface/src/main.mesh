@@ -96,7 +96,7 @@
 
 @container (max-width: 900px) {
     .surface {
-        direction: column;
+        flex-direction: column;
     }
 
     .sidebar {
@@ -104,7 +104,7 @@
     }
 
     .settings-grid {
-        direction: column;
+        flex-direction: column;
     }
 }
 

@@ -9,6 +9,7 @@
 pub mod buffer;
 pub mod debug_overlay;
 pub mod dev_window;
+pub mod icon;
 pub mod layer_shell;
 pub mod painter;
 pub mod surface;
@@ -20,6 +21,43 @@ pub use dev_window::{DevWindowBackend, DevWindowEvent, DevWindowKeyEvent, KeyMod
 pub use layer_shell::{LayerShellBackend, LayerSurfaceConfig};
 pub use painter::Painter;
 pub use surface::{RenderSurface, SurfaceConfig, SurfaceId};
+pub use text_measurer::SharedTextMeasurer;
+
+mod text_measurer {
+    use crate::text::TextRenderer;
+    use std::cell::RefCell;
+
+    thread_local! {
+        static RENDERER: RefCell<TextRenderer> = RefCell::new(TextRenderer::new());
+    }
+
+    /// Zero-size token; implements [`mesh_ui::TextMeasurer`] via a thread-local
+    /// `TextRenderer` so callers avoid creating a new renderer each frame.
+    pub struct SharedTextMeasurer;
+
+    impl mesh_ui::TextMeasurer for SharedTextMeasurer {
+        fn measure_text(
+            &self,
+            text: &str,
+            font_family: &str,
+            font_size: f32,
+            font_weight: u16,
+            line_height: f32,
+            max_width: Option<f32>,
+        ) -> (f32, f32) {
+            RENDERER.with(|r| {
+                r.borrow().measure_styled(
+                    text,
+                    font_family,
+                    font_size,
+                    font_weight,
+                    line_height,
+                    max_width,
+                )
+            })
+        }
+    }
+}
 
 /// Errors from the rendering subsystem.
 #[derive(Debug, thiserror::Error)]

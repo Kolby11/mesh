@@ -4,7 +4,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 
 fn main() {
-    tracing_subscriber::fmt().init();
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
     let args: Vec<String> = std::env::args().collect();
     let command = args.get(1).map(|s| s.as_str());

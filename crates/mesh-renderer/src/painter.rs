@@ -1,7 +1,9 @@
 /// Paints a `WidgetNode` tree into a `PixelBuffer`.
 use crate::buffer::PixelBuffer;
+use crate::icon;
 use crate::text::TextRenderer;
-use mesh_ui::style::{Color, Display, Overflow, TextAlign, TextOverflow};
+use mesh_icon::resolve_icon as resolve_icon_path;
+use mesh_ui::style::{Color, Display, Overflow, TextAlign, TextDirection, TextOverflow};
 use mesh_ui::tree::WidgetNode;
 
 /// Walks a widget tree and paints each node into a pixel buffer.
@@ -133,6 +135,25 @@ impl Painter {
             "text" => self.paint_text_node(node, buffer, scale, x, y, node_clip),
             "input" => self.paint_input_node(node, buffer, scale, x, y, node_clip),
             "slider" => self.paint_slider_node(node, buffer, scale, x, y, w, h, node_clip),
+            "icon" => {
+                // attributes: name or src, size
+                let src = node.attributes.get("src").map(|s| s.as_str());
+                let name = node.attributes.get("name").map(|s| s.as_str());
+                let size = node
+                    .attributes
+                    .get("size")
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .unwrap_or(w.max(h) as u32);
+
+                if let Some(src) = src {
+                    let p = std::path::Path::new(src);
+                    icon::draw_icon_from_path(buffer, p, x, y, w, h, style.color);
+                } else if let Some(name) = name {
+                    if let Some(p) = resolve_icon_path(name, size) {
+                        icon::draw_icon_from_path(buffer, &p, x, y, w, h, style.color);
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -146,9 +167,14 @@ impl Painter {
             clip
         };
 
-        for child in &node.children {
+        // Stable sort by z_index so tree order is preserved for equal values.
+        // z_index = 0 is the default; negative values paint behind, positive in front.
+        let mut child_order: Vec<usize> = (0..node.children.len()).collect();
+        child_order.sort_by_key(|&i| node.children[i].computed_style.z_index);
+
+        for i in child_order {
             self.paint_node(
-                child,
+                &node.children[i],
                 buffer,
                 scale,
                 child_offset_x,
@@ -212,13 +238,21 @@ impl Painter {
                 std::borrow::Cow::Borrowed(text)
             };
 
+        // In RTL mode, default text alignment flips to right unless explicitly overridden.
+        let effective_align =
+            if style.text_direction == TextDirection::Rtl && style.text_align == TextAlign::Left {
+                TextAlign::Right
+            } else {
+                style.text_align
+            };
+
         self.text_renderer.render_clipped(
             &display_text,
             &style.font_family,
             style.font_size * scale,
             style.font_weight,
             style.line_height,
-            style.text_align,
+            effective_align,
             style.color,
             buffer,
             tx,
@@ -426,51 +460,106 @@ impl Painter {
             0.0
         };
 
+        let is_vertical = node
+            .attributes
+            .get("orient")
+            .map(|v| v == "vertical")
+            .unwrap_or(false);
+
         let track_margin = (16.0 * scale).round() as i32;
-        let track_height = (4.0 * scale).round().max(2.0) as i32;
-        let track_x = x + track_margin;
-        let track_y = y + (h / 2) - (track_height / 2);
-        let track_w = (w - track_margin * 2).max(8);
-        fill_rect_clipped(
-            buffer,
-            ClipRect {
-                x: track_x,
-                y: track_y,
-                width: track_w,
-                height: track_height,
-            },
-            dim_color(style.color, 0.35),
-            clip,
-        );
-
-        let active_w = ((track_w as f32) * pct).round() as i32;
-        fill_rect_clipped(
-            buffer,
-            ClipRect {
-                x: track_x,
-                y: track_y,
-                width: active_w.max(0),
-                height: track_height,
-            },
-            style.color,
-            clip,
-        );
-
+        let track_thick = (4.0 * scale).round().max(2.0) as i32;
         let thumb_radius = (8.0 * scale).round().max(5.0) as i32;
-        let thumb_x = track_x + active_w - thumb_radius;
-        let thumb_y = y + h / 2 - thumb_radius;
-        fill_rounded_rect_clipped(
-            buffer,
-            ClipRect {
-                x: thumb_x,
-                y: thumb_y,
-                width: thumb_radius * 2,
-                height: thumb_radius * 2,
-            },
-            thumb_radius as f32,
-            style.color,
-            clip,
-        );
+
+        if is_vertical {
+            // Vertical slider: track runs top-to-bottom, thumb at top = 100%.
+            let track_x = x + (w / 2) - (track_thick / 2);
+            let track_y = y + track_margin;
+            let track_h = (h - track_margin * 2).max(8);
+
+            fill_rect_clipped(
+                buffer,
+                ClipRect {
+                    x: track_x,
+                    y: track_y,
+                    width: track_thick,
+                    height: track_h,
+                },
+                dim_color(style.color, 0.35),
+                clip,
+            );
+
+            // High value = thumb near top: active fill from top down to thumb.
+            let active_h = ((track_h as f32) * (1.0 - pct)).round() as i32;
+            fill_rect_clipped(
+                buffer,
+                ClipRect {
+                    x: track_x,
+                    y: track_y,
+                    width: track_thick,
+                    height: active_h.max(0),
+                },
+                style.color,
+                clip,
+            );
+
+            let thumb_y = track_y + active_h - thumb_radius;
+            let thumb_x = x + w / 2 - thumb_radius;
+            fill_rounded_rect_clipped(
+                buffer,
+                ClipRect {
+                    x: thumb_x,
+                    y: thumb_y,
+                    width: thumb_radius * 2,
+                    height: thumb_radius * 2,
+                },
+                thumb_radius as f32,
+                style.color,
+                clip,
+            );
+        } else {
+            let track_x = x + track_margin;
+            let track_y = y + (h / 2) - (track_thick / 2);
+            let track_w = (w - track_margin * 2).max(8);
+            fill_rect_clipped(
+                buffer,
+                ClipRect {
+                    x: track_x,
+                    y: track_y,
+                    width: track_w,
+                    height: track_thick,
+                },
+                dim_color(style.color, 0.35),
+                clip,
+            );
+
+            let active_w = ((track_w as f32) * pct).round() as i32;
+            fill_rect_clipped(
+                buffer,
+                ClipRect {
+                    x: track_x,
+                    y: track_y,
+                    width: active_w.max(0),
+                    height: track_thick,
+                },
+                style.color,
+                clip,
+            );
+
+            let thumb_x = track_x + active_w - thumb_radius;
+            let thumb_y = y + h / 2 - thumb_radius;
+            fill_rounded_rect_clipped(
+                buffer,
+                ClipRect {
+                    x: thumb_x,
+                    y: thumb_y,
+                    width: thumb_radius * 2,
+                    height: thumb_radius * 2,
+                },
+                thumb_radius as f32,
+                style.color,
+                clip,
+            );
+        }
     }
 
     fn paint_scrollbars(
@@ -641,7 +730,12 @@ fn clip_to_tuple(clip: ClipRect) -> (u32, u32, u32, u32) {
     )
 }
 
-pub(crate) fn fill_rect_clipped(buffer: &mut PixelBuffer, rect: ClipRect, color: Color, clip: ClipRect) {
+pub(crate) fn fill_rect_clipped(
+    buffer: &mut PixelBuffer,
+    rect: ClipRect,
+    color: Color,
+    clip: ClipRect,
+) {
     let clipped = intersect_clip(rect, clip);
     if clipped.width <= 0 || clipped.height <= 0 {
         return;

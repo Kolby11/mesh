@@ -157,7 +157,7 @@ impl TextRenderer {
         line_height: f32,
         max_width: Option<f32>,
     ) -> (f32, f32) {
-        let Some((_font, layout)) = self.layout_text(
+        let Some((font, layout)) = self.layout_text(
             text,
             font_family,
             font_size,
@@ -173,11 +173,23 @@ impl TextRenderer {
 
         let mut max_x = 0.0f32;
         let mut min_x = f32::MAX;
+        let mut any_glyph = false;
         for glyph in layout.glyphs() {
-            min_x = min_x.min(glyph.x);
-            max_x = max_x.max(glyph.x + glyph.width as f32);
+            // Use cursor_x + ceil(advance_width) for the right edge. This matches
+            // fontdue's own line-wrap check (`cursor + ceil(advance) > max_width`),
+            // so the measured width is never narrower than what fontdue needs to
+            // place all characters on one line. Using only glyph.width (bitmap width)
+            // omits the right-side bearing and causes the last character to wrap.
+            let m = font.metrics_indexed(glyph.key.glyph_index, font_size.max(1.0));
+            let cursor_x = glyph.x - m.bounds.xmin;
+            let advance_end = (cursor_x + m.advance_width).ceil();
+            max_x = max_x.max(advance_end);
+            if glyph.width > 0 {
+                min_x = min_x.min(glyph.x);
+                any_glyph = true;
+            }
         }
-        let width = if layout.glyphs().is_empty() {
+        let width = if !any_glyph {
             0.0
         } else {
             (max_x - min_x.min(0.0)).max(0.0)
@@ -338,6 +350,20 @@ impl TextRenderer {
 impl Default for TextRenderer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl mesh_ui::TextMeasurer for TextRenderer {
+    fn measure_text(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        max_width: Option<f32>,
+    ) -> (f32, f32) {
+        self.measure_styled(text, font_family, font_size, font_weight, line_height, max_width)
     }
 }
 

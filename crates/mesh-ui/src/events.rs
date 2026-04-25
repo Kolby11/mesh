@@ -1,5 +1,5 @@
 /// UI event types and dispatch.
-use crate::tree::{NodeId, WidgetNode};
+use crate::tree::{ElementState, NodeId, WidgetNode};
 
 /// A UI event targeted at a specific node.
 #[derive(Debug, Clone)]
@@ -115,6 +115,169 @@ pub enum RawInputEvent {
         dx: f32,
         dy: f32,
     },
+}
+
+/// Tracks pointer and keyboard interaction state across frames.
+///
+/// Call `process` with each raw input event to update node state flags
+/// (hover, active, focus) on the widget tree and produce the resulting UI events.
+/// After `process` returns, any node whose `state` changed should have its
+/// computed style re-resolved via `StyleResolver::restyle_subtree`.
+#[derive(Debug, Default)]
+pub struct InputState {
+    hovered_node: Option<NodeId>,
+    active_node: Option<NodeId>,
+    focused_node: Option<NodeId>,
+}
+
+impl InputState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Apply a raw input event to the tree, updating node state flags and
+    /// returning the resulting UI events.
+    pub fn process(&mut self, root: &mut WidgetNode, raw: &RawInputEvent) -> Vec<UiEvent> {
+        let mut events = Vec::new();
+
+        match raw {
+            RawInputEvent::PointerMotion { x, y } => {
+                let new_hovered = EventDispatcher::hit_test(root, *x, *y);
+                self.update_hover(root, new_hovered, &mut events);
+
+                if let Some(node_id) = new_hovered {
+                    events.push(UiEvent::PointerMove { node_id, x: *x, y: *y });
+                }
+            }
+
+            RawInputEvent::PointerButton { x, y, pressed, .. } => {
+                if *pressed {
+                    // Ensure hover state is current (pointer may not have moved first).
+                    let target = EventDispatcher::hit_test(root, *x, *y);
+                    self.update_hover(root, target, &mut events);
+
+                    // Transfer focus to the clicked node.
+                    if self.focused_node != target {
+                        if let Some(old_id) = self.focused_node {
+                            set_state_flag(root, old_id, |s| s.focused = false);
+                            events.push(UiEvent::Blur { node_id: old_id });
+                        }
+                        if let Some(new_id) = target {
+                            set_state_flag(root, new_id, |s| s.focused = true);
+                            events.push(UiEvent::Focus { node_id: new_id });
+                        }
+                        self.focused_node = target;
+                    }
+
+                    // Mark the pressed node as active.
+                    if let Some(node_id) = target {
+                        set_state_flag(root, node_id, |s| s.active = true);
+                        self.active_node = Some(node_id);
+                        events.push(UiEvent::PointerDown { node_id, x: *x, y: *y });
+                    }
+                } else {
+                    // Release active state.
+                    if let Some(node_id) = self.active_node.take() {
+                        set_state_flag(root, node_id, |s| s.active = false);
+                    }
+
+                    if let Some(node_id) = EventDispatcher::hit_test(root, *x, *y) {
+                        events.push(UiEvent::PointerUp { node_id, x: *x, y: *y });
+                    }
+                }
+            }
+
+            RawInputEvent::Key { keycode, pressed, modifiers } => {
+                let node_id = self.focused_node.unwrap_or(root.id);
+                let key = format!("{keycode}");
+                if *pressed {
+                    events.push(UiEvent::KeyDown { node_id, key, modifiers: *modifiers });
+                } else {
+                    events.push(UiEvent::KeyUp { node_id, key, modifiers: *modifiers });
+                }
+            }
+
+            RawInputEvent::Scroll { x, y, dx, dy } => {
+                if let Some(node_id) = EventDispatcher::hit_test(root, *x, *y) {
+                    events.push(UiEvent::Scroll { node_id, dx: *dx, dy: *dy });
+                }
+            }
+        }
+
+        events
+    }
+
+    /// Returns the currently hovered node, if any.
+    pub fn hovered_node(&self) -> Option<NodeId> {
+        self.hovered_node
+    }
+
+    /// Returns the currently focused node, if any.
+    pub fn focused_node(&self) -> Option<NodeId> {
+        self.focused_node
+    }
+
+    /// Returns the currently active (pressed) node, if any.
+    pub fn active_node(&self) -> Option<NodeId> {
+        self.active_node
+    }
+
+    /// Explicitly move keyboard focus to a node (e.g. for Tab navigation).
+    pub fn set_focus(&mut self, root: &mut WidgetNode, target: Option<NodeId>) -> Vec<UiEvent> {
+        let mut events = Vec::new();
+        if self.focused_node == target {
+            return events;
+        }
+        if let Some(old_id) = self.focused_node {
+            set_state_flag(root, old_id, |s| s.focused = false);
+            events.push(UiEvent::Blur { node_id: old_id });
+        }
+        if let Some(new_id) = target {
+            set_state_flag(root, new_id, |s| s.focused = true);
+            events.push(UiEvent::Focus { node_id: new_id });
+        }
+        self.focused_node = target;
+        events
+    }
+
+    /// Reset all tracked state (e.g. when the surface loses pointer/keyboard focus).
+    pub fn reset(&mut self, root: &mut WidgetNode) {
+        if let Some(id) = self.hovered_node.take() {
+            set_state_flag(root, id, |s| s.hovered = false);
+        }
+        if let Some(id) = self.active_node.take() {
+            set_state_flag(root, id, |s| s.active = false);
+        }
+        if let Some(id) = self.focused_node.take() {
+            set_state_flag(root, id, |s| s.focused = false);
+        }
+    }
+
+    fn update_hover(
+        &mut self,
+        root: &mut WidgetNode,
+        new_hovered: Option<NodeId>,
+        events: &mut Vec<UiEvent>,
+    ) {
+        if new_hovered == self.hovered_node {
+            return;
+        }
+        if let Some(old_id) = self.hovered_node {
+            set_state_flag(root, old_id, |s| s.hovered = false);
+            events.push(UiEvent::PointerLeave { node_id: old_id });
+        }
+        if let Some(new_id) = new_hovered {
+            set_state_flag(root, new_id, |s| s.hovered = true);
+            events.push(UiEvent::PointerEnter { node_id: new_id });
+        }
+        self.hovered_node = new_hovered;
+    }
+}
+
+fn set_state_flag(root: &mut WidgetNode, id: NodeId, f: impl FnOnce(&mut ElementState)) {
+    if let Some(node) = root.find_mut(id) {
+        f(&mut node.state);
+    }
 }
 
 /// Performs hit-testing and event routing on a widget tree.

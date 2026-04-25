@@ -5,6 +5,19 @@ use crate::style::ComputedStyle;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Live interaction state for a single node.
+///
+/// Updated by `InputState::process` as pointer and keyboard events arrive.
+/// Read by `selector_matches` to evaluate pseudo-class selectors like `:hover`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ElementState {
+    pub hovered: bool,
+    pub active: bool,
+    pub focused: bool,
+    pub disabled: bool,
+    pub checked: bool,
+}
+
 /// Unique identifier for a node in the widget tree.
 pub type NodeId = u64;
 
@@ -36,6 +49,8 @@ pub struct WidgetNode {
     pub accessibility: AccessibilityInfo,
     /// Event handler mappings: event name → script handler name.
     pub event_handlers: HashMap<String, String>,
+    /// Live interaction state (hover, focus, active, etc.).
+    pub state: ElementState,
 }
 
 impl WidgetNode {
@@ -50,6 +65,7 @@ impl WidgetNode {
             children: Vec::new(),
             accessibility: AccessibilityInfo::default(),
             event_handlers: HashMap::new(),
+            state: ElementState::default(),
         }
     }
 
@@ -60,6 +76,19 @@ impl WidgetNode {
         }
         for child in &self.children {
             if let Some(found) = child.find(id) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Recursively find a node by ID, returning a mutable reference.
+    pub fn find_mut(&mut self, id: NodeId) -> Option<&mut WidgetNode> {
+        if self.id == id {
+            return Some(self);
+        }
+        for child in &mut self.children {
+            if let Some(found) = child.find_mut(id) {
                 return Some(found);
             }
         }

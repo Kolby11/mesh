@@ -3,31 +3,38 @@
     <div class="meta">
       <span class="meta-label">{t("nav.current")}</span>
       <div class="meta-pill">
-        <span class="meta-pill-text">{t(active_key)}</span>
+        <span class="meta-pill-text">{t("nav.dashboard")}</span>
       </div>
+      <button
+        class="settings-button"
+        onclick={onSettingsClick}
+        title="{t('nav.open_settings')}"
+        aria-label="{t('nav.open_settings')}"
+      >
+        <icon class="settings-glyph" name="settings" size="18" />
+        <span class="settings-label">{t("nav.settings")}</span>
+      </button>
       <button
         class="volume-widget"
         onclick={onVolumeClick}
         title="{audio.tooltip}"
         aria-label="{t('nav.open_audio')}"
       >
-        <span class="volume-glyph" aria-hidden="true">{audio.glyph}</span>
-        <div class="volume-copy">
-          <span class="volume-label">{t("nav.volume")}</span>
-          <span class="volume-value">{audio.label}</span>
-        </div>
+        <icon class="volume-glyph" name="{audio.icon_name}" size="18" />
       </button>
     </div>
   </nav>
 </template>
 
 <script lang="luau">
-function init()
-    mesh.state.set("active_key", "nav.dashboard")
+function onVolumeClick()
+    mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/volume-bar" })
+    mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/quick-settings" })
 end
 
-function onVolumeClick()
-    mesh.events.publish("shell.toggle-quick-settings", {})
+function onSettingsClick()
+    mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/quick-settings" })
+    mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/volume-bar" })
 end
 </script>
 
@@ -102,7 +109,7 @@ end
 }
 
 .meta {
-    width: auto;
+    width: 100%;
     justify-content: start;
     align-items: center;
     gap: token(spacing.xs);
@@ -115,7 +122,9 @@ end
 }
 
 .meta-pill {
-    width: 200px;
+    width: content;
+    flex-shrink: 0;
+    text-wrap: none;
     justify-content: center;
     align-items: center;
     padding-block: token(spacing.xs);
@@ -130,46 +139,69 @@ end
     font-weight: 700;
 }
 
-.volume-widget {
-    width: 164px;
-    justify-content: start;
+.meta-pill:hover {
+    background: token(color.secondary-container);
+}
+
+.meta-pill-text:hover {
+    color: token(color.on-secondary-container);
+}
+
+.settings-button {
+    width: 132px;
+    flex-shrink: 0;
+    justify-content: center;
     align-items: center;
     gap: token(spacing.xs);
     padding-block: token(spacing.xs);
     padding-inline: token(spacing.sm);
+    border-radius: token(radius.sm);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+    text-wrap: none;
+}
+
+.settings-button:hover {
+    background: token(color.primary-container);
+    color: token(color.on-primary-container);
     border-radius: token(radius.full);
+}
+
+.settings-glyph {
+    width: 28px;
+    height: 26px;
+    flex-shrink: 0;
+    color: token(color.on-tertiary-container);
+}
+
+.settings-label {
+    color: token(color.on-surface);
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+}
+
+.volume-widget {
+    width: 44px;
+    height: 40px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    padding-block: token(spacing.xs);
+    padding-inline: token(spacing.xs);
+    border-radius: token(radius.sm);
     background: token(color.surface-container);
     color: token(color.on-surface);
 }
 
-.volume-glyph {
-    width: 26px;
-    height: 26px;
-    justify-content: center;
-    align-items: center;
+.volume-widget:hover {
+    background: token(color.surface-container-high);
     border-radius: token(radius.full);
-    background: token(color.secondary-container);
+}
+
+.volume-glyph {
+    width: 30px;
+    height: 28px;
     color: token(color.on-secondary-container);
-    color: token(color.secondary);
-    font-size: token(typography.size.xs);
-    font-weight: 800;
-}
-
-.volume-copy {
-    width: 92px;
-    direction: column;
-    gap: 1px;
-}
-
-.volume-label {
-    color: token(color.on-surface-variant);
-    font-size: token(typography.size.xs);
-}
-
-.volume-value {
-    color: token(color.on-surface);
-    font-size: token(typography.size.sm);
-    font-weight: 700;
 }
 
 @container (max-width: 760px) {
@@ -179,7 +211,7 @@ end
 
     .meta-label,
     .meta-pill,
-    .volume-label {
+    .settings-label {
         display: none;
     }
 
@@ -192,14 +224,9 @@ end
         padding-inline: token(spacing.sm);
     }
 
-    .volume-widget {
+    .settings-button {
         width: 44px;
-        justify-content: center;
         padding-inline: token(spacing.xs);
-    }
-
-    .volume-copy {
-        width: auto;
     }
 }
 </style>

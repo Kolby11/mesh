@@ -9,7 +9,7 @@
     <div class="right">
       <span class="indicator network-indicator" title="{networkStatus}" aria-label="Network status">{networkStatus}</span>
       <button class="indicator volume-indicator" onclick={onVolumeClick} title="Open audio controls" aria-label="Open audio controls">
-        <span class="indicator-glyph" aria-hidden="true">VOL</span>
+        <icon class="indicator-glyph" name="{volumeIcon}" size="16" />
         <span class="indicator-value">{volumeLevel}</span>
       </button>
       <span class="battery">{batteryText}</span>
@@ -25,6 +25,7 @@ local network = mesh.interfaces.get("mesh.network", ">=1.0")
 local time = ""
 local batteryText = ""
 local volumeLevel = "0"
+local volumeIcon = "audio-volume-muted"
 local networkStatus = "disconnected"
 local activeWorkspace = "1"
 
@@ -54,6 +55,15 @@ function updateVolume()
         local dev = audio.default_output()
         if dev then
             volumeLevel = tostring(math.floor(dev.volume * 100))
+            if dev.muted or dev.volume <= 0 then
+                volumeIcon = "audio-volume-muted"
+            elseif dev.volume < 0.34 then
+                volumeIcon = "audio-volume-low"
+            elseif dev.volume < 0.67 then
+                volumeIcon = "audio-volume-medium"
+            else
+                volumeIcon = "audio-volume-high"
+            end
         end
     end
 end
@@ -108,8 +118,9 @@ end
 }
 
 .indicator-glyph {
-    font-size: token(typography.size.xs);
-    font-weight: 700;
+    width: 16px;
+    height: 16px;
+    color: token(color.on-surface-variant);
 }
 
 .clock {

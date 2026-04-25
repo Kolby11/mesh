@@ -6,6 +6,8 @@ use mesh_service::{InterfaceCatalog, InterfaceResolution};
 use mesh_ui::VariableStore;
 use serde_json::Value;
 use std::collections::HashMap;
+// (no external sync types needed here)
+use std::fmt;
 
 #[derive(Debug, Clone)]
 pub struct PublishedEvent {
@@ -42,10 +44,14 @@ pub enum ScriptError {
 ///
 /// When a script sets a variable, the state is marked dirty.
 /// The UI layer checks this flag to know when to rebuild the widget tree.
-#[derive(Debug, Clone)]
 pub struct ScriptState {
     variables: HashMap<String, Value>,
     dirty: bool,
+    // Optional proxies that forward get/set to external sources (used by the
+    // host to expose imported component variables as if they lived in the
+    // same namespace). The getter is invoked on reads; the setter, if
+    // provided, is invoked on writes from scripts.
+    proxies: HashMap<String, Proxy>,
 }
 
 impl ScriptState {
@@ -53,12 +59,23 @@ impl ScriptState {
         Self {
             variables: HashMap::new(),
             dirty: false,
+            proxies: HashMap::new(),
         }
     }
 
     /// Set a variable and mark state as dirty.
     pub fn set(&mut self, name: impl Into<String>, value: Value) {
         let name = name.into();
+        // If a proxy is registered for this name and exposes a setter,
+        // forward the write to the proxy instead of storing locally. If the
+        // proxy is read-only, fall back to storing locally.
+        if let Some(proxy) = self.proxies.get(&name) {
+            if let Some(setter) = &proxy.setter {
+                (setter)(value);
+                return;
+            }
+        }
+
         if self.variables.get(&name) == Some(&value) {
             return;
         }
@@ -85,11 +102,74 @@ impl Default for ScriptState {
 
 impl VariableStore for ScriptState {
     fn get(&self, name: &str) -> Option<Value> {
+        // If a proxy exists, call its getter, otherwise read from local
+        // variables.
+        if let Some(proxy) = self.proxies.get(name) {
+            return Some((proxy.getter)());
+        }
         self.variables.get(name).cloned()
     }
 
     fn keys(&self) -> Vec<String> {
-        self.variables.keys().cloned().collect()
+        // Merge local variable keys with proxy keys. Proxies may shadow
+        // local variables.
+        let mut keys: Vec<String> = self.variables.keys().cloned().collect();
+        for k in self.proxies.keys() {
+            if !keys.contains(k) {
+                keys.push(k.clone());
+            }
+        }
+        keys
+    }
+}
+
+// A lightweight proxy that forwards get/set operations to host-provided
+// closures.
+struct Proxy {
+    getter: Box<dyn Fn() -> Value + Send + 'static>,
+    setter: Option<Box<dyn Fn(Value) + Send + 'static>>,
+}
+
+impl Clone for ScriptState {
+    fn clone(&self) -> Self {
+        Self {
+            variables: self.variables.clone(),
+            dirty: self.dirty,
+            proxies: HashMap::new(), // proxies are host-registered and not cloned
+        }
+    }
+}
+
+impl fmt::Debug for ScriptState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ScriptState")
+            .field("variables", &self.variables)
+            .field("dirty", &self.dirty)
+            .field("proxies_count", &self.proxies.len())
+            .finish()
+    }
+}
+
+impl ScriptState {
+    /// Register or replace a proxy for a variable name.
+    pub fn register_proxy(
+        &mut self,
+        name: impl Into<String>,
+        getter: Box<dyn Fn() -> Value + Send + 'static>,
+        setter: Option<Box<dyn Fn(Value) + Send + 'static>>,
+    ) {
+        let name = name.into();
+        self.proxies.insert(name, Proxy { getter, setter });
+    }
+
+    /// Remove a previously-registered proxy.
+    pub fn unregister_proxy(&mut self, name: &str) {
+        self.proxies.remove(name);
+    }
+
+    /// Check if a proxy exists for the given name.
+    pub fn has_proxy(&self, name: &str) -> bool {
+        self.proxies.contains_key(name)
     }
 }
 
@@ -134,13 +214,14 @@ impl ScriptContext {
         self.interface_catalog = catalog;
     }
 
-    /// Load a script source. Parses and registers functions.
-    ///
-    /// Stub: extracts function names from the source text.
-    /// Real implementation will execute in the Luau VM.
+    /// Load a script source. Parses and registers functions, then seeds state
+    /// from top-level `local name = value` declarations.
     pub fn load_script(&mut self, source: &str) -> Result<(), ScriptError> {
         self.handlers = parse_functions(source);
         self.interface_bindings.clear();
+        for (name, value) in parse_top_level_locals(source) {
+            self.state.variables.entry(name).or_insert(value);
+        }
         tracing::info!("loaded script for plugin {}", self.plugin_id);
         Ok(())
     }
@@ -186,12 +267,62 @@ impl ScriptContext {
         let Some(function) = self.handlers.get(name).cloned() else {
             return Err(ScriptError::HandlerNotFound(name.to_string()));
         };
+        self.execute_lines(&function.body)
+    }
 
-        for line in function.body {
-            self.execute_statement(&line)?;
+    /// Execute a slice of Luau lines, handling if/then/else/end blocks.
+    fn execute_lines(&mut self, lines: &[String]) -> Result<(), ScriptError> {
+        let mut i = 0;
+        while i < lines.len() {
+            let trimmed = lines[i].trim().to_string();
+            if trimmed.is_empty() || trimmed.starts_with("--") {
+                i += 1;
+                continue;
+            }
+
+            // if ... then ... [else ...] end
+            if let Some(cond_expr) = trimmed
+                .strip_prefix("if ")
+                .and_then(|s| s.strip_suffix(" then"))
+            {
+                let (then_end, else_idx, end_idx) = find_if_block_bounds(lines, i + 1);
+                let condition = self.eval_condition(cond_expr.trim());
+                if condition {
+                    let branch = lines[i + 1..then_end].to_vec();
+                    self.execute_lines(&branch)?;
+                } else if let Some(else_i) = else_idx {
+                    let branch = lines[else_i + 1..end_idx].to_vec();
+                    self.execute_lines(&branch)?;
+                }
+                i = end_idx + 1;
+                continue;
+            }
+
+            self.execute_statement(&trimmed)?;
+            i += 1;
         }
-
         Ok(())
+    }
+
+    /// Evaluate a simple Luau boolean condition against current state.
+    fn eval_condition(&self, expr: &str) -> bool {
+        let expr = expr.trim();
+        if let Some(inner) = expr.strip_prefix("not ") {
+            let val = self
+                .state
+                .variables
+                .get(inner.trim())
+                .cloned()
+                .unwrap_or(Value::Bool(false));
+            return !is_luau_truthy(&val);
+        }
+        let val = self
+            .state
+            .variables
+            .get(expr)
+            .cloned()
+            .unwrap_or(Value::Bool(false));
+        is_luau_truthy(&val)
     }
 
     fn execute_statement(&mut self, line: &str) -> Result<(), ScriptError> {
@@ -280,7 +411,8 @@ impl ScriptContext {
                     .and_then(|value| parse_event_payload(value))
                     .unwrap_or(Value::Null);
                 tracing::info!("{} published event {}", self.plugin_id, channel);
-                self.published_events.push(PublishedEvent { channel, payload });
+                self.published_events
+                    .push(PublishedEvent { channel, payload });
             }
             return Ok(());
         }
@@ -314,8 +446,115 @@ impl ScriptContext {
             return Ok(());
         }
 
+        // Simple variable assignment: `name = expr` or `local name = expr`
+        let decl = trimmed.strip_prefix("local ").unwrap_or(trimmed);
+        if let Some((lhs, rhs)) = decl.split_once('=') {
+            let lhs = lhs.trim();
+            let rhs = rhs.trim();
+            if is_simple_identifier(lhs) {
+                // not expr
+                if let Some(inner) = rhs.strip_prefix("not ") {
+                    let current = self
+                        .state
+                        .variables
+                        .get(inner.trim())
+                        .cloned()
+                        .unwrap_or(Value::Bool(false));
+                    self.state.set(lhs, Value::Bool(!is_luau_truthy(&current)));
+                    return Ok(());
+                }
+                // literal value
+                if let Some(value) = parse_literal_value(rhs) {
+                    self.state.set(lhs, value);
+                    return Ok(());
+                }
+                // copy from another variable
+                if is_simple_identifier(rhs) {
+                    if let Some(value) = self.state.variables.get(rhs).cloned() {
+                        self.state.set(lhs, value);
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
+}
+
+fn is_luau_truthy(value: &Value) -> bool {
+    !matches!(value, Value::Bool(false) | Value::Null)
+}
+
+fn is_simple_identifier(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// Parse top-level `local name = literal` declarations (outside any function).
+fn parse_top_level_locals(source: &str) -> Vec<(String, Value)> {
+    let mut locals = Vec::new();
+    let mut depth = 0usize;
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("function ") {
+            depth += 1;
+            continue;
+        }
+        if trimmed == "end" {
+            depth = depth.saturating_sub(1);
+            continue;
+        }
+        if depth > 0 {
+            continue;
+        }
+        // Top-level local declaration
+        if let Some(rest) = trimmed.strip_prefix("local ") {
+            if let Some((name, value_str)) = rest.split_once('=') {
+                let name = name.trim();
+                let value_str = value_str.trim();
+                // Skip interface bindings — handled separately
+                if value_str.contains("mesh.interfaces.get")
+                    || value_str.contains("mesh.services.get")
+                {
+                    continue;
+                }
+                if is_simple_identifier(name) {
+                    if let Some(value) = parse_literal_value(value_str) {
+                        locals.push((name.to_string(), value));
+                    }
+                }
+            }
+        }
+    }
+
+    locals
+}
+
+/// Find the bounds of an if/then/[else]/end block starting from `start`.
+/// Returns (then_end, else_idx, end_idx).
+fn find_if_block_bounds(lines: &[String], start: usize) -> (usize, Option<usize>, usize) {
+    let mut depth = 1usize;
+    let mut else_idx = None;
+    let mut end_idx = start;
+
+    while end_idx < lines.len() {
+        let inner = lines[end_idx].trim();
+        if inner.starts_with("if ") && inner.ends_with(" then") {
+            depth += 1;
+        } else if inner == "end" {
+            depth -= 1;
+            if depth == 0 {
+                break;
+            }
+        } else if inner == "else" && depth == 1 {
+            else_idx = Some(end_idx);
+        }
+        end_idx += 1;
+    }
+
+    let then_end = else_idx.unwrap_or(end_idx);
+    (then_end, else_idx, end_idx)
 }
 
 fn parse_functions(source: &str) -> HashMap<String, ScriptFunction> {
@@ -478,11 +717,34 @@ fn parse_literal_value(value: &str) -> Option<Value> {
 
 fn parse_event_payload(value: &str) -> Option<Value> {
     let trimmed = value.trim();
-    match trimmed {
-        "{}" => Some(Value::Object(serde_json::Map::new())),
-        "[]" => Some(Value::Array(Vec::new())),
-        _ => parse_literal_value(trimmed),
+    if trimmed == "{}" {
+        return Some(Value::Object(serde_json::Map::new()));
     }
+    if trimmed == "[]" {
+        return Some(Value::Array(Vec::new()));
+    }
+    // Handle Luau table literal: { key = value, key2 = value2 }
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        let mut map = serde_json::Map::new();
+        for pair in inner.split(',') {
+            let pair = pair.trim();
+            if pair.is_empty() {
+                continue;
+            }
+            if let Some(eq) = pair.find('=') {
+                let key = pair[..eq].trim().trim_matches('"').trim_matches('\'');
+                let val_str = pair[eq + 1..].trim();
+                if let Some(val) = parse_literal_value(val_str) {
+                    map.insert(key.to_string(), val);
+                }
+            }
+        }
+        if !map.is_empty() {
+            return Some(Value::Object(map));
+        }
+    }
+    parse_literal_value(trimmed)
 }
 
 /// A `VariableStore` that combines script state with locale engine access.
@@ -645,5 +907,62 @@ end
             ScriptError::UnsupportedOperation { interface, method }
             if interface == "mesh.audio" && method == "mute_all"
         ));
+    }
+
+    #[test]
+    fn top_level_locals_seed_state() {
+        let caps = CapabilitySet::new();
+        let mut ctx = ScriptContext::new("@test/local", caps).unwrap();
+        ctx.load_script(
+            r#"
+local volumeHidden = true
+local count = 0
+
+function toggle()
+    volumeHidden = not volumeHidden
+end
+"#,
+        )
+        .unwrap();
+
+        // Initial state from top-level locals
+        assert_eq!(ctx.state.get("volumeHidden"), Some(Value::Bool(true)));
+        assert_eq!(ctx.state.get("count"), Some(Value::Number(0.into())));
+
+        // Toggle negates the boolean
+        ctx.call_handler("toggle", &[]).unwrap();
+        assert_eq!(ctx.state.get("volumeHidden"), Some(Value::Bool(false)));
+
+        ctx.call_handler("toggle", &[]).unwrap();
+        assert_eq!(ctx.state.get("volumeHidden"), Some(Value::Bool(true)));
+    }
+
+    #[test]
+    fn if_then_end_executes_conditionally() {
+        let caps = CapabilitySet::new();
+        let mut ctx = ScriptContext::new("@test/if", caps).unwrap();
+        ctx.load_script(
+            r#"
+local a = true
+local b = false
+
+function run()
+    a = not a
+    if not a then
+        b = true
+    end
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.call_handler("run", &[]).unwrap();
+        assert_eq!(ctx.state.get("a"), Some(Value::Bool(false)));
+        assert_eq!(ctx.state.get("b"), Some(Value::Bool(true)));
+
+        ctx.call_handler("run", &[]).unwrap();
+        assert_eq!(ctx.state.get("a"), Some(Value::Bool(true)));
+        // b stays true — the if branch doesn't reset it
+        assert_eq!(ctx.state.get("b"), Some(Value::Bool(true)));
     }
 }

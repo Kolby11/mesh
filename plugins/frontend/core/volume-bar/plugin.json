@@ -1,0 +1,115 @@
+{
+  "id": "@mesh/volume-bar",
+  "name": "MESH Volume Bar",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "description": "Compact vertical audio volume bar for inline placement below a trigger.",
+  "authors": [
+    "MESH Project"
+  ],
+  "compatibility": {
+    "mesh": ">=0.1.0"
+  },
+  "capabilities": {
+    "required": [
+      "shell.surface",
+      "service.audio.read",
+      "service.audio.control",
+      "theme.read"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/audio-interface": ">=1.0.0, <2.0.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "settings": {
+    "namespace": "@mesh/volume-bar",
+    "schema": {
+      "surface": {
+        "type": "object",
+        "properties": {
+          "anchor": {
+            "type": "enum",
+            "values": [
+              "top",
+              "bottom",
+              "left",
+              "right"
+            ],
+            "default": "left",
+            "description": "Screen edge this surface anchors to."
+          },
+          "layer": {
+            "type": "enum",
+            "values": [
+              "background",
+              "bottom",
+              "top",
+              "overlay"
+            ],
+            "default": "overlay"
+          },
+          "width": {
+            "type": "integer",
+            "default": 44,
+            "min": 36,
+            "max": 80
+          },
+          "height": {
+            "type": "integer",
+            "default": 180,
+            "min": 100,
+            "max": 320
+          },
+          "exclusive_zone": {
+            "type": "integer",
+            "default": 0
+          },
+          "keyboard_mode": {
+            "type": "enum",
+            "values": [
+              "none",
+              "exclusive",
+              "on_demand"
+            ],
+            "default": "none"
+          },
+          "visible_on_start": {
+            "type": "boolean",
+            "default": false
+          },
+          "margin_top": {
+            "type": "integer",
+            "default": 0,
+            "description": "Top margin in pixels relative to the bottom of the exclusive zone."
+          },
+          "margin_right": {
+            "type": "integer",
+            "default": 8
+          },
+          "margin_bottom": {
+            "type": "integer",
+            "default": 0
+          },
+          "margin_left": {
+            "type": "integer",
+            "default": 0
+          }
+        }
+      }
+    }
+  },
+  "surface_layout": {
+    "size_policy": "fixed"
+  },
+  "accessibility": {
+    "role": "slider",
+    "label": "Volume bar",
+    "description": "Compact vertical audio volume control"
+  }
+}

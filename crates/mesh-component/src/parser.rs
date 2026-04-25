@@ -15,8 +15,8 @@ use lightningcss::{
         MediaFeatureComparison, MediaFeatureName, MediaFeatureValue, Operator,
         QueryFeature as LightningQueryFeature,
     },
+    rules::container::{ContainerCondition, ContainerSizeFeature, ContainerSizeFeatureId},
     rules::{CssRule as LightningCssRule, style::StyleRule as LightningStyleRule},
-    rules::container::{ContainerCondition, ContainerSizeFeatureId, ContainerSizeFeature},
     stylesheet::{ParserOptions as CssParserOptions, PrinterOptions, StyleSheet},
     traits::ToCss as LightningToCss,
 };
@@ -59,7 +59,12 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
         .map(|s| parse_template(s))
         .transpose()?;
 
-    let script = blocks.get("script").map(|s| parse_script(s, &blocks));
+    let (imports, script) = if let Some(s) = blocks.get("script") {
+        let (imports, stripped) = extract_imports(s);
+        (imports, Some(parse_script(&stripped, &blocks)))
+    } else {
+        (HashMap::new(), None)
+    };
 
     let style = blocks.get("style").map(|s| parse_style(s)).transpose()?;
 
@@ -68,12 +73,76 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
     let meta = blocks.get("meta").map(|s| parse_meta(s)).transpose()?;
 
     Ok(ComponentFile {
+        imports,
         template,
         script,
         style,
         schema,
         meta,
     })
+}
+
+/// Extract `import "plugin-id" as Alias` lines from the script source.
+/// Returns (imports map, script with those lines removed).
+fn extract_imports(source: &str) -> (HashMap<String, String>, String) {
+    let mut imports = HashMap::new();
+    let mut stripped = String::new();
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("import ") {
+            // expect: import "<plugin-id>" as Alias
+            if let Some((plugin_id, alias)) = parse_import_line(rest) {
+                imports.insert(alias, plugin_id);
+                stripped.push('\n'); // preserve line count for error messages
+                continue;
+            }
+        }
+        stripped.push_str(line);
+        stripped.push('\n');
+    }
+
+    (imports, stripped)
+}
+
+fn parse_import_line(rest: &str) -> Option<(String, String)> {
+    // Support two forms:
+    // 1) import "@mesh/foo" as Alias
+    // 2) import Alias from "@mesh/foo"
+    let rest = rest.trim();
+
+    // form 1: starts with quoted plugin id
+    if rest.starts_with('"') || rest.starts_with('\'') {
+        let quote = rest.chars().next().unwrap();
+        let end = rest[1..].find(quote)?;
+        let plugin_id = rest[1..end + 1].to_string();
+        let after_id = rest[plugin_id.len() + 2..].trim();
+        let alias = after_id.strip_prefix("as ")?.trim().to_string();
+        if alias.is_empty() || alias.contains(|c: char| !c.is_alphanumeric() && c != '_') {
+            return None;
+        }
+        return Some((plugin_id, alias));
+    }
+
+    // form 2: import Alias from "plugin-id"
+    // expect: <Alias> from "<plugin-id>"
+    let parts: Vec<&str> = rest.splitn(2, " from ").collect();
+    if parts.len() == 2 {
+        let alias = parts[0].trim();
+        if alias.is_empty() || alias.contains(|c: char| !c.is_alphanumeric() && c != '_') {
+            return None;
+        }
+        let rhs = parts[1].trim();
+        if !(rhs.starts_with('"') || rhs.starts_with('\'')) {
+            return None;
+        }
+        let quote = rhs.chars().next().unwrap();
+        let end = rhs[1..].find(quote)?;
+        let plugin_id = rhs[1..end + 1].to_string();
+        return Some((plugin_id, alias.to_string()));
+    }
+
+    None
 }
 
 fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
@@ -336,9 +405,7 @@ fn parse_xml_attributes(
 
 /// Returns true if the attribute name is an HTML event handler (`onclick`, `oninput`, etc.).
 fn is_event_attr(name: &str) -> bool {
-    name.len() > 2
-        && name.starts_with("on")
-        && name[2..].chars().all(|c| c.is_ascii_alphabetic())
+    name.len() > 2 && name.starts_with("on") && name[2..].chars().all(|c| c.is_ascii_alphabetic())
 }
 
 /// If `value` is exactly `{expr}`, returns the inner expression; otherwise `None`.
@@ -485,10 +552,111 @@ struct OpenNode {
 
 fn parse_script(source: &str, blocks: &HashMap<String, String>) -> ScriptBlock {
     let _ = blocks;
+    let (transformed, reactive_vars) = extract_reactive_vars(source);
     ScriptBlock {
         lang: ScriptLang::Luau,
-        source: source.to_string(),
+        source: transformed,
+        reactive_vars,
     }
+}
+
+/// Scan the script for top-level `local var = value` declarations and rewrite
+/// them to `mesh.state.set("var", value)` so the runtime tracks them reactively.
+///
+/// "Top-level" means outside any function body. Depth is tracked by counting
+/// `function` openers and `end` closers at word boundaries. Function-valued
+/// locals (`local f = function() ... end`) are left untouched.
+fn extract_reactive_vars(source: &str) -> (String, Vec<String>) {
+    let mut reactive_vars = Vec::new();
+    let mut output = String::new();
+    let mut depth: i32 = 0;
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("--") {
+            output.push_str(line);
+            output.push('\n');
+            continue;
+        }
+
+        if depth == 0 {
+            if let Some((name, value)) = parse_local_assignment(trimmed) {
+                let indent = &line[..line.len() - line.trim_start().len()];
+                output.push_str(&format!(
+                    "{}mesh.state.set(\"{}\", {})\n",
+                    indent, name, value
+                ));
+                reactive_vars.push(name);
+                continue;
+            }
+        }
+
+        depth += count_whole_word(trimmed, "function") as i32;
+        depth -= count_whole_word(trimmed, "end") as i32;
+        if depth < 0 {
+            depth = 0;
+        }
+
+        output.push_str(line);
+        output.push('\n');
+    }
+
+    (output, reactive_vars)
+}
+
+/// Parse `local <ident> = <expr>` from a trimmed line.
+/// Returns `None` for function-valued locals or lines without an assignment.
+fn parse_local_assignment(line: &str) -> Option<(String, String)> {
+    let rest = line.strip_prefix("local")?;
+    if !rest.starts_with(|c: char| c.is_whitespace()) {
+        return None;
+    }
+    let rest = rest.trim_start();
+
+    let end = rest
+        .find(|c: char| !c.is_alphanumeric() && c != '_')
+        .unwrap_or(rest.len());
+    if end == 0 {
+        return None;
+    }
+    let name = &rest[..end];
+
+    let after_name = rest[end..].trim_start();
+    let value = after_name.strip_prefix('=')?;
+    let value = value.trim();
+
+    if value.is_empty() || value.starts_with("function") {
+        return None;
+    }
+
+    Some((name.to_string(), value.to_string()))
+}
+
+fn count_whole_word(text: &str, word: &str) -> usize {
+    let mut count = 0;
+    let mut start = 0;
+    while start < text.len() {
+        let Some(pos) = text[start..].find(word) else {
+            break;
+        };
+        let abs = start + pos;
+        let before_ok = abs == 0
+            || !text[..abs]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_');
+        let after_ok = abs + word.len() >= text.len()
+            || !text[abs + word.len()..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_');
+        if before_ok && after_ok {
+            count += 1;
+        }
+        start = abs + word.len();
+    }
+    count
 }
 
 fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
@@ -652,7 +820,9 @@ fn map_lightning_printer_error(err: lightningcss::error::PrinterError) -> ParseE
     }
 }
 
-fn lower_container_condition(condition: &ContainerCondition<'_>) -> Result<ContainerQuery, ParseError> {
+fn lower_container_condition(
+    condition: &ContainerCondition<'_>,
+) -> Result<ContainerQuery, ParseError> {
     match condition {
         ContainerCondition::Feature(feature) => lower_container_feature(feature),
         ContainerCondition::Operation {
@@ -691,7 +861,9 @@ fn lower_container_condition(condition: &ContainerCondition<'_>) -> Result<Conta
     }
 }
 
-fn lower_container_feature(feature: &ContainerSizeFeature<'_>) -> Result<ContainerQuery, ParseError> {
+fn lower_container_feature(
+    feature: &ContainerSizeFeature<'_>,
+) -> Result<ContainerQuery, ParseError> {
     match feature {
         LightningQueryFeature::Plain { name, value } => {
             let axis = container_feature_axis(name)?;
@@ -738,26 +910,34 @@ fn container_feature_axis(
 ) -> Result<ContainerAxis, ParseError> {
     match name {
         MediaFeatureName::Standard(ContainerSizeFeatureId::Width)
-        | MediaFeatureName::Standard(ContainerSizeFeatureId::InlineSize) => Ok(ContainerAxis::Width),
+        | MediaFeatureName::Standard(ContainerSizeFeatureId::InlineSize) => {
+            Ok(ContainerAxis::Width)
+        }
         MediaFeatureName::Standard(ContainerSizeFeatureId::Height)
-        | MediaFeatureName::Standard(ContainerSizeFeatureId::BlockSize) => Ok(ContainerAxis::Height),
+        | MediaFeatureName::Standard(ContainerSizeFeatureId::BlockSize) => {
+            Ok(ContainerAxis::Height)
+        }
         MediaFeatureName::Standard(other) => Err(ParseError::InvalidStyle {
             message: format!("unsupported container query property '{other:?}'"),
             line: 0,
         }),
-        MediaFeatureName::Custom(_) | MediaFeatureName::Unknown(_) => Err(ParseError::InvalidStyle {
-            message: "custom container query properties are not supported".into(),
-            line: 0,
-        }),
+        MediaFeatureName::Custom(_) | MediaFeatureName::Unknown(_) => {
+            Err(ParseError::InvalidStyle {
+                message: "custom container query properties are not supported".into(),
+                line: 0,
+            })
+        }
     }
 }
 
 fn container_feature_length(value: &MediaFeatureValue<'_>) -> Result<f32, ParseError> {
     match value {
-        MediaFeatureValue::Length(length) => length.to_px().ok_or_else(|| ParseError::InvalidStyle {
-            message: "container query length must be convertible to px".into(),
-            line: 0,
-        }),
+        MediaFeatureValue::Length(length) => {
+            length.to_px().ok_or_else(|| ParseError::InvalidStyle {
+                message: "container query length must be convertible to px".into(),
+                line: 0,
+            })
+        }
         other => Err(ParseError::InvalidStyle {
             message: format!("unsupported container query value '{other:?}'"),
             line: 0,
@@ -1131,6 +1311,50 @@ div {
     }
 
     #[test]
+    fn reactive_vars_extracted_from_top_level_locals() {
+        let source = r#"
+<template>
+  <span>{title}</span>
+</template>
+
+<script lang="luau">
+local title = "Hello"
+local count = 0
+
+function onTap()
+    local tmp = count + 1
+    count = tmp
+end
+</script>
+"#;
+        let file = parse_component(source).unwrap();
+        let script = file.script.unwrap();
+        assert_eq!(script.reactive_vars, vec!["title", "count"]);
+        assert!(
+            script
+                .source
+                .contains("mesh.state.set(\"title\", \"Hello\")")
+        );
+        assert!(script.source.contains("mesh.state.set(\"count\", 0)"));
+        // Inner local should not be hoisted
+        assert!(!script.source.contains("mesh.state.set(\"tmp\""));
+        assert!(script.source.contains("local tmp = count + 1"));
+    }
+
+    #[test]
+    fn local_function_def_not_treated_as_reactive() {
+        let source = r#"
+<script lang="luau">
+local handler = function() end
+</script>
+"#;
+        let file = parse_component(source).unwrap();
+        let script = file.script.unwrap();
+        assert!(script.reactive_vars.is_empty());
+        assert!(script.source.contains("local handler = function()"));
+    }
+
+    #[test]
     fn parse_two_way_binding() {
         let source = r#"
 <template>
@@ -1168,5 +1392,47 @@ div {
             },
             other => panic!("expected element node, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn padding_property_names_from_lightningcss() {
+        // Verify which property names lightningcss emits for the padding variants
+        // we use in .mesh components so apply_declaration handles them all.
+        let source = r#"
+<style>
+.box {
+    padding: 8px;
+    padding-inline: 16px;
+    padding-block: 12px;
+    padding-top: 4px;
+    padding-right: 5px;
+    padding-bottom: 6px;
+    padding-left: 7px;
+}
+</style>
+"#;
+        let file = parse_component(source).unwrap();
+        let style = file.style.unwrap();
+        let decls = &style.rules[0].declarations;
+        let props: Vec<&str> = decls.iter().map(|d| d.property.as_str()).collect();
+        // Confirm every declaration landed under a name our style resolver knows.
+        let known = [
+            "padding",
+            "padding-top",
+            "padding-right",
+            "padding-bottom",
+            "padding-left",
+            "padding-inline",
+            "padding-block",
+            "padding-inline-start",
+            "padding-inline-end",
+            "padding-block-start",
+            "padding-block-end",
+        ];
+        for p in &props {
+            assert!(known.contains(p), "unrecognised padding property: {p}");
+        }
+        // Spot-check that the shorthand emitted individual sides (lightningcss expands it).
+        eprintln!("padding properties emitted by lightningcss: {props:?}");
     }
 }
