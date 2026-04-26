@@ -177,6 +177,15 @@ impl ScriptState {
 ///
 /// Owns the Luau VM, reactive state, and capability set.
 /// When `mlua` is integrated, this will hold the `mlua::Lua` instance.
+/// A reactive binding from a service field to a local script variable.
+/// Declared in scripts as: `local x = mesh.service.bind("service.field")`
+#[derive(Debug, Clone)]
+struct ServiceBinding {
+    var_name: String,
+    service: String,
+    field: String,
+}
+
 #[derive(Debug)]
 pub struct ScriptContext {
     pub plugin_id: String,
@@ -185,6 +194,7 @@ pub struct ScriptContext {
     handlers: HashMap<String, ScriptFunction>,
     interface_catalog: InterfaceCatalog,
     interface_bindings: HashMap<String, InterfaceResolution>,
+    service_bindings: Vec<ServiceBinding>,
     published_events: Vec<PublishedEvent>,
 }
 
@@ -206,6 +216,7 @@ impl ScriptContext {
             handlers: HashMap::new(),
             interface_catalog: InterfaceCatalog::default(),
             interface_bindings: HashMap::new(),
+            service_bindings: Vec::new(),
             published_events: Vec::new(),
         })
     }
@@ -214,16 +225,34 @@ impl ScriptContext {
         self.interface_catalog = catalog;
     }
 
-    /// Load a script source. Parses and registers functions, then seeds state
-    /// from top-level `local name = value` declarations.
+    /// Load a script source. Parses and registers functions, seeds state from
+    /// top-level `local name = value` declarations, and registers service bindings.
     pub fn load_script(&mut self, source: &str) -> Result<(), ScriptError> {
         self.handlers = parse_functions(source);
         self.interface_bindings.clear();
+        self.service_bindings = parse_service_bindings(source);
         for (name, value) in parse_top_level_locals(source) {
             self.state.variables.entry(name).or_insert(value);
         }
         tracing::info!("loaded script for plugin {}", self.plugin_id);
         Ok(())
+    }
+
+    /// Copy service payload fields into bound local state variables.
+    ///
+    /// Called by core after each service update, before `on_<service>_update()`.
+    /// Enables scripts to read `muted`, `percent`, etc. as plain local variables
+    /// rather than accessing `state["audio"]["muted"]` via dot notation.
+    pub fn apply_service_bindings(&mut self, service: &str, payload: &Value) {
+        let updates: Vec<(String, Value)> = self
+            .service_bindings
+            .iter()
+            .filter(|b| b.service == service)
+            .filter_map(|b| payload.get(&b.field).map(|v| (b.var_name.clone(), v.clone())))
+            .collect();
+        for (var, val) in updates {
+            self.state.set(var, val);
+        }
     }
 
     /// Call the script's `init()` function if it exists.
@@ -304,18 +333,40 @@ impl ScriptContext {
         Ok(())
     }
 
-    /// Evaluate a simple Luau boolean condition against current state.
+    /// Evaluate a Luau boolean condition against current state.
+    ///
+    /// Supports: `or`, `and`, `not`, `==`, `~=`, `<`, `<=`, `>`, `>=`,
+    /// and plain variable truthy checks.
     fn eval_condition(&self, expr: &str) -> bool {
         let expr = expr.trim();
-        if let Some(inner) = expr.strip_prefix("not ") {
-            let val = self
-                .state
-                .variables
-                .get(inner.trim())
-                .cloned()
-                .unwrap_or(Value::Bool(false));
-            return !is_luau_truthy(&val);
+
+        // `or` — lowest precedence (split left-to-right)
+        if let Some(pos) = expr.find(" or ") {
+            return self.eval_condition(&expr[..pos]) || self.eval_condition(&expr[pos + 4..]);
         }
+
+        // `and`
+        if let Some(pos) = expr.find(" and ") {
+            return self.eval_condition(&expr[..pos]) && self.eval_condition(&expr[pos + 5..]);
+        }
+
+        // `not x`
+        if let Some(inner) = expr.strip_prefix("not ") {
+            return !self.eval_condition(inner.trim());
+        }
+
+        // comparisons — check multi-char ops before single-char to avoid prefix matches
+        for (op, op_len) in &[("==", 2usize), ("~=", 2), ("<=", 2), (">=", 2), ("<", 1), (">", 1)] {
+            if let Some(pos) = expr.find(op) {
+                let lhs = expr[..pos].trim();
+                let rhs = expr[pos + op_len..].trim();
+                if !lhs.is_empty() && !rhs.is_empty() {
+                    return self.eval_comparison(lhs, op, rhs);
+                }
+            }
+        }
+
+        // plain truthy check
         let val = self
             .state
             .variables
@@ -323,6 +374,32 @@ impl ScriptContext {
             .cloned()
             .unwrap_or(Value::Bool(false));
         is_luau_truthy(&val)
+    }
+
+    fn eval_comparison(&self, lhs: &str, op: &str, rhs: &str) -> bool {
+        let lval = self.state.variables.get(lhs).cloned().unwrap_or(Value::Null);
+
+        if let Some(ln) = value_as_f64(&lval) {
+            if let Ok(rn) = rhs.parse::<f64>() {
+                return match op {
+                    "==" => ln == rn,
+                    "~=" => ln != rn,
+                    "<" => ln < rn,
+                    "<=" => ln <= rn,
+                    ">" => ln > rn,
+                    ">=" => ln >= rn,
+                    _ => false,
+                };
+            }
+        }
+
+        let lstr = value_as_string(&lval);
+        let rstr = rhs.trim_matches('"').trim_matches('\'');
+        match op {
+            "==" => lstr == rstr,
+            "~=" => lstr != rstr,
+            _ => false,
+        }
     }
 
     fn execute_statement(&mut self, line: &str) -> Result<(), ScriptError> {
@@ -486,6 +563,19 @@ fn is_luau_truthy(value: &Value) -> bool {
     !matches!(value, Value::Bool(false) | Value::Null)
 }
 
+fn value_as_f64(v: &Value) -> Option<f64> {
+    v.as_f64()
+}
+
+fn value_as_string(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => "nil".to_string(),
+        _ => v.to_string(),
+    }
+}
+
 fn is_simple_identifier(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
@@ -513,9 +603,10 @@ fn parse_top_level_locals(source: &str) -> Vec<(String, Value)> {
             if let Some((name, value_str)) = rest.split_once('=') {
                 let name = name.trim();
                 let value_str = value_str.trim();
-                // Skip interface bindings — handled separately
+                // Skip interface/service bindings — handled separately
                 if value_str.contains("mesh.interfaces.get")
                     || value_str.contains("mesh.services.get")
+                    || value_str.contains("mesh.service.bind")
                 {
                     continue;
                 }
@@ -529,6 +620,50 @@ fn parse_top_level_locals(source: &str) -> Vec<(String, Value)> {
     }
 
     locals
+}
+
+/// Parse top-level `local x = mesh.service.bind("service.field")` declarations.
+/// These create reactive bindings: when the named service emits, `x` is updated
+/// from the specified field before `on_<service>_update()` is called.
+fn parse_service_bindings(source: &str) -> Vec<ServiceBinding> {
+    let mut bindings = Vec::new();
+    let mut depth = 0usize;
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("function ") {
+            depth += 1;
+            continue;
+        }
+        if trimmed == "end" {
+            depth = depth.saturating_sub(1);
+            continue;
+        }
+        if depth > 0 {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("local ") {
+            if let Some((var_name, expr)) = rest.split_once('=') {
+                let var_name = var_name.trim();
+                let expr = expr.trim();
+                if let Some(args) = extract_call_args(expr, "mesh.service.bind") {
+                    if let Some(path) = args.first().and_then(|a| parse_string_literal(a)) {
+                        if let Some((service, field)) = path.split_once('.') {
+                            if is_simple_identifier(var_name) {
+                                bindings.push(ServiceBinding {
+                                    var_name: var_name.to_string(),
+                                    service: service.to_string(),
+                                    field: field.to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    bindings
 }
 
 /// Find the bounds of an if/then/[else]/end block starting from `start`.
@@ -964,5 +1099,68 @@ end
         assert_eq!(ctx.state.get("a"), Some(Value::Bool(true)));
         // b stays true — the if branch doesn't reset it
         assert_eq!(ctx.state.get("b"), Some(Value::Bool(true)));
+    }
+
+    #[test]
+    fn service_bindings_update_local_vars_and_trigger_handler() {
+        let caps = CapabilitySet::new();
+        let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
+        ctx.load_script(
+            r#"
+local icon_name = "audio-volume-muted"
+local muted = mesh.service.bind("audio.muted")
+local percent = mesh.service.bind("audio.percent")
+
+function on_audio_update()
+    if muted then
+        icon_name = "audio-volume-muted"
+    else
+        if percent < 34 then
+            icon_name = "audio-volume-low"
+        else
+            if percent < 67 then
+                icon_name = "audio-volume-medium"
+            else
+                icon_name = "audio-volume-high"
+            end
+        end
+    end
+end
+"#,
+        )
+        .unwrap();
+
+        // Initial default
+        assert_eq!(
+            ctx.state.get("icon_name"),
+            Some(Value::String("audio-volume-muted".into()))
+        );
+
+        // Simulate 65% volume, not muted
+        let payload = serde_json::json!({ "percent": 65, "muted": false });
+        ctx.apply_service_bindings("audio", &payload);
+        ctx.call_handler("on_audio_update", &[]).unwrap();
+        assert_eq!(
+            ctx.state.get("icon_name"),
+            Some(Value::String("audio-volume-medium".into()))
+        );
+
+        // High volume
+        let payload = serde_json::json!({ "percent": 90, "muted": false });
+        ctx.apply_service_bindings("audio", &payload);
+        ctx.call_handler("on_audio_update", &[]).unwrap();
+        assert_eq!(
+            ctx.state.get("icon_name"),
+            Some(Value::String("audio-volume-high".into()))
+        );
+
+        // Muted
+        let payload = serde_json::json!({ "percent": 90, "muted": true });
+        ctx.apply_service_bindings("audio", &payload);
+        ctx.call_handler("on_audio_update", &[]).unwrap();
+        assert_eq!(
+            ctx.state.get("icon_name"),
+            Some(Value::String("audio-volume-muted".into()))
+        );
     }
 }

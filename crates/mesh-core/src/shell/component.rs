@@ -36,7 +36,6 @@ use crate::shell::ShellRunError;
 #[derive(Debug, Clone)]
 pub(super) struct BackendServiceCandidate {
     pub(super) plugin_id: String,
-    pub(super) service: String,
     pub(super) priority: u32,
 }
 
@@ -415,7 +414,7 @@ impl FrontendSurfaceComponent {
                 // child variables appear in the root namespace. If a name would
                 // collide with an existing root variable, register under
                 // "{alias}.{name}" instead.
-                let mut existing_keys: Vec<String> = root_runtime.script_ctx.state().keys();
+                let existing_keys: Vec<String> = root_runtime.script_ctx.state().keys();
 
                 let runtimes_ref = self.runtimes.lock().unwrap();
                 if let Some(child_runtime) = runtimes_ref.get(&instance_key) {
@@ -1194,6 +1193,13 @@ impl ShellComponent for FrontendSurfaceComponent {
                 source_plugin,
                 payload.clone(),
             );
+            if has_read {
+                runtime.script_ctx.apply_service_bindings(&service_name, &payload);
+            }
+            let handler = format!("on_{service_name}_update");
+            if has_read && runtime.script_ctx.has_handler(&handler) {
+                let _ = runtime.script_ctx.call_handler(&handler, &[]);
+            }
         }
         self.dirty = true;
         Ok(Vec::new())
@@ -1465,9 +1471,19 @@ impl ShellComponent for FrontendSurfaceComponent {
                                     .and_then(|opens| {
                                         find_node_bounds_by_key(&tree, &node_key, 0.0, 0.0).map(
                                             |(left, _top, _right, bottom)| {
+                                                // Layer-shell margins for overlay popovers are
+                                                // applied relative to the compositor's usable
+                                                // area after top exclusive zones. Buttons inside
+                                                // top bars report bounds in the surface's local
+                                                // coordinates, so using their raw bottom here
+                                                // adds an extra vertical gap equal to that local
+                                                // offset. Convert to a margin relative to the
+                                                // current surface bottom instead.
+                                                let margin_top =
+                                                    (bottom - tree.layout.height).max(0.0) as i32;
                                                 CoreRequest::PositionSurface {
                                                     surface_id: opens,
-                                                    margin_top: bottom as i32,
+                                                    margin_top,
                                                     margin_left: left as i32,
                                                 }
                                             },
@@ -1669,20 +1685,4 @@ pub(super) fn grant_capabilities_from_manifest(manifest: &mesh_plugin::Manifest)
     }
 
     granted
-}
-
-pub(super) fn manifest_grants_capability(
-    manifest: &mesh_plugin::Manifest,
-    capability: &str,
-) -> bool {
-    manifest
-        .capabilities
-        .required
-        .iter()
-        .any(|value| value == capability)
-        || manifest
-            .capabilities
-            .optional
-            .iter()
-            .any(|value| value == capability)
 }

@@ -21,7 +21,6 @@ const FONT_MD: f32 = 13.0;
 // Palette
 const BG: Color = Color { r: 18, g: 15, b: 24, a: 220 };
 const BORDER: Color = Color { r: 60, g: 50, b: 80, a: 255 };
-const HEADER_BG: Color = Color { r: 30, g: 24, b: 40, a: 255 };
 const TAB_ACTIVE_BG: Color = Color { r: 103, g: 80, b: 164, a: 255 };
 const TAB_INACTIVE_BG: Color = Color { r: 45, g: 38, b: 60, a: 255 };
 const TEXT_PRIMARY: Color = Color { r: 220, g: 210, b: 235, a: 255 };

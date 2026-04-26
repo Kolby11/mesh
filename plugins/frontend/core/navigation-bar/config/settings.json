@@ -4,14 +4,14 @@
       "en",
       "sk"
     ],
-    "default_locale": "sk"
+    "default_locale": "en"
   },
   "surface": {
     "anchor": "top",
     "layer": "top",
     "width": 1920,
-    "height": 72,
-    "exclusive_zone": 72,
+    "height": 56,
+    "exclusive_zone": 56,
     "keyboard_mode": "none",
     "visible_on_start": true
   }

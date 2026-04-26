@@ -16,7 +16,6 @@ pub(super) fn seed_service_state(state: &mut ScriptState) {
             "percent": 0,
             "label": "Unavailable",
             "glyph": "VOL",
-            "icon_name": "audio-volume-muted",
             "source_plugin": "",
         }),
     );
@@ -34,17 +33,6 @@ pub(super) fn apply_service_update(
     source_plugin: &str,
     payload: serde_json::Value,
 ) {
-    let mut payload = payload;
-    if has_read && service_name_from_interface(service) == "audio" {
-        if let Some(obj) = payload.as_object_mut() {
-            let percent = obj.get("percent").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            let muted = obj.get("muted").and_then(|v| v.as_bool()).unwrap_or(false);
-            let icon_name = audio_icon_name(percent, muted);
-            obj.entry("icon_name")
-                .or_insert_with(|| serde_json::Value::String(icon_name.to_string()));
-        }
-    }
-
     let service_name = service_name_from_interface(service);
     state.set(
         "last_service_update",
@@ -52,18 +40,6 @@ pub(super) fn apply_service_update(
     );
     if has_read {
         state.set(service_name, payload);
-    }
-}
-
-fn audio_icon_name(percent: u32, muted: bool) -> &'static str {
-    if muted || percent == 0 {
-        "audio-volume-muted"
-    } else if percent < 34 {
-        "audio-volume-low"
-    } else if percent < 67 {
-        "audio-volume-medium"
-    } else {
-        "audio-volume-high"
     }
 }
 

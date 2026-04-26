@@ -1,0 +1,11 @@
+{
+  "surface": {
+    "anchor": "top",
+    "layer": "top",
+    "width": 1920,
+    "height": 32,
+    "exclusive_zone": 32,
+    "keyboard_mode": "none",
+    "visible_on_start": false
+  }
+}

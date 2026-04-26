@@ -230,6 +230,7 @@ fn load_json_settings_file(path: &Path) -> Result<ShellSettings, ConfigError> {
 fn merge_shell_settings(base: &mut ShellSettings, overrides: ShellSettings) {
     base.theme = overrides.theme;
     base.i18n = overrides.i18n;
+    base.sounds = overrides.sounds;
 }
 
 /// Write a per-plugin overrides file under XDG config (~/..../mesh/plugins/<scope>/<name>.json).

@@ -1,6 +1,6 @@
 <template>
   <section class="volume-bar">
-    <icon class="glyph" name="{audio.icon_name}" size="18" />
+    <icon class="glyph" name="{icon_name}" size="18" />
     <slider
       class="track"
       orient="vertical"
@@ -16,6 +16,30 @@
 </template>
 
 <script lang="luau">
+local icon_name = "audio-volume-muted"
+local muted = mesh.service.bind("audio.muted")
+local percent = mesh.service.bind("audio.percent")
+
+function on_audio_update()
+    if muted then
+        icon_name = "audio-volume-muted"
+    else
+        if percent == 0 then
+            icon_name = "audio-volume-muted"
+        else
+            if percent < 34 then
+                icon_name = "audio-volume-low"
+            else
+                if percent < 67 then
+                    icon_name = "audio-volume-medium"
+                else
+                    icon_name = "audio-volume-high"
+                end
+            end
+        end
+    end
+end
+
 function onToggleMute()
     mesh.events.publish("mesh.audio.toggle-mute", {})
 end

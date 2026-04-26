@@ -1,3 +1,4 @@
+use super::types::ServiceCommandMsg;
 /// Shell sound event dispatch.
 ///
 /// Core's only audio responsibility: when a system event occurs (startup,
@@ -5,7 +6,6 @@
 /// backend plugin is registered. The plugin does the actual playback.
 use mesh_config::ShellSounds;
 use tokio::sync::mpsc;
-use super::types::ServiceCommandMsg;
 
 pub(super) enum SoundKind {
     Startup,

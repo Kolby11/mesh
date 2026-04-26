@@ -556,10 +556,26 @@ impl Shell {
             }
         };
 
-        let old_i18n = &self.settings.i18n;
+        let old_theme = self.settings.theme.clone();
+        let old_i18n = self.settings.i18n.clone();
         let new_i18n = &new_settings.i18n;
-        if old_i18n.locale != new_i18n.locale
-            || old_i18n.fallback_locale != new_i18n.fallback_locale
+        let locale_changed = old_i18n.locale != new_i18n.locale
+            || old_i18n.fallback_locale != new_i18n.fallback_locale;
+
+        let theme_changed = old_theme.active != new_settings.theme.active;
+        if theme_changed {
+            let (theme, theme_watch) = load_active_theme(&new_settings);
+            tracing::info!(
+                "active theme changed: {} -> {}",
+                old_theme.active,
+                new_settings.theme.active
+            );
+            self.theme = theme;
+            self.theme_watch = theme_watch;
+            self.mark_components_theme_changed()?;
+        }
+
+        if locale_changed
         {
             tracing::info!(
                 "locale changed: {} (fallback: {}) -> {} (fallback: {})",
@@ -572,16 +588,26 @@ impl Shell {
                 new_i18n.locale.clone(),
                 new_i18n.fallback_locale.clone(),
             );
-            self.settings.i18n = new_i18n.clone();
             self.mark_components_locale_changed()?;
         }
+
+        self.settings = new_settings;
 
         Ok(())
     }
 
     fn reload_plugin_settings_if_changed(&mut self) -> Result<(), ShellRunError> {
         for runtime in &mut self.components {
-            let Some(settings_path) = runtime.plugin_settings_path.as_ref() else {
+            let current_settings_path = runtime.component.plugin_settings_path().map(PathBuf::from);
+            if runtime.plugin_settings_path != current_settings_path {
+                runtime.plugin_settings_path = current_settings_path.clone();
+                runtime.plugin_settings_modified_at = None;
+            }
+
+            let Some(settings_path) = current_settings_path
+                .as_ref()
+                .or(runtime.plugin_settings_path.as_ref())
+            else {
                 continue;
             };
 
@@ -829,18 +855,37 @@ impl Shell {
                     .get(&runtime.surface_id)
                     .map(|state| state.visible)
                     .unwrap_or(surface.visible);
-                let cfg = LayerSurfaceConfig {
-                    edge: surface.edge,
-                    layer: surface.layer.unwrap_or(Layer::Top),
-                    width: surface.width,
-                    height: surface.height,
-                    exclusive_zone: surface.exclusive_zone,
-                    keyboard_mode: surface.keyboard_mode,
-                    namespace: runtime.surface_id.clone(),
-                    margin_top: surface.margin_top,
-                    margin_right: surface.margin_right,
-                    margin_bottom: surface.margin_bottom,
-                    margin_left: surface.margin_left,
+                let cfg = if visible {
+                    LayerSurfaceConfig {
+                        edge: surface.edge,
+                        layer: surface.layer.unwrap_or(Layer::Top),
+                        width: surface.width,
+                        height: surface.height,
+                        exclusive_zone: surface.exclusive_zone,
+                        keyboard_mode: surface.keyboard_mode,
+                        namespace: runtime.surface_id.clone(),
+                        margin_top: surface.margin_top,
+                        margin_right: surface.margin_right,
+                        margin_bottom: surface.margin_bottom,
+                        margin_left: surface.margin_left,
+                    }
+                } else {
+                    // Hidden surfaces should not keep reserving layer-shell space.
+                    // Configure them to a harmless unmapped footprint before the
+                    // null-buffer present below.
+                    LayerSurfaceConfig {
+                        edge: surface.edge,
+                        layer: surface.layer.unwrap_or(Layer::Top),
+                        width: 1,
+                        height: 1,
+                        exclusive_zone: 0,
+                        keyboard_mode: surface.keyboard_mode,
+                        namespace: runtime.surface_id.clone(),
+                        margin_top: 0,
+                        margin_right: 0,
+                        margin_bottom: 0,
+                        margin_left: 0,
+                    }
                 };
                 self.windows.configure(&runtime.surface_id, cfg);
 
@@ -1031,7 +1076,6 @@ impl Shell {
                 .or_default()
                 .push(BackendServiceCandidate {
                     plugin_id: plugin.manifest.package.id.clone(),
-                    service: service_name,
                     priority: service.priority,
                 });
         }

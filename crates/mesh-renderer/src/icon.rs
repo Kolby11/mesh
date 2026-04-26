@@ -1,5 +1,4 @@
 use crate::buffer::PixelBuffer;
-use image::GenericImageView;
 use mesh_ui::style::Color;
 use std::collections::HashMap;
 use std::path::Path;

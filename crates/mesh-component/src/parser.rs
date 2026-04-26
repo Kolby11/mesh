@@ -582,6 +582,14 @@ fn extract_reactive_vars(source: &str) -> (String, Vec<String>) {
 
         if depth == 0 {
             if let Some((name, value)) = parse_local_assignment(trimmed) {
+                if value.contains("mesh.interfaces.get")
+                    || value.contains("mesh.services.get")
+                    || value.contains("mesh.service.bind")
+                {
+                    output.push_str(line);
+                    output.push('\n');
+                    continue;
+                }
                 let indent = &line[..line.len() - line.trim_start().len()];
                 output.push_str(&format!(
                     "{}mesh.state.set(\"{}\", {})\n",
@@ -1352,6 +1360,28 @@ local handler = function() end
         let script = file.script.unwrap();
         assert!(script.reactive_vars.is_empty());
         assert!(script.source.contains("local handler = function()"));
+    }
+
+    #[test]
+    fn service_bindings_are_not_rewritten_as_reactive_state_sets() {
+        let source = r#"
+<script lang="luau">
+local icon_name = "audio-volume-muted"
+local muted = mesh.service.bind("audio.muted")
+local percent = mesh.service.bind("audio.percent")
+</script>
+"#;
+        let file = parse_component(source).unwrap();
+        let script = file.script.unwrap();
+        assert!(
+            script
+                .source
+                .contains("mesh.state.set(\"icon_name\", \"audio-volume-muted\")")
+        );
+        assert!(script.source.contains("local muted = mesh.service.bind(\"audio.muted\")"));
+        assert!(script.source.contains("local percent = mesh.service.bind(\"audio.percent\")"));
+        assert!(!script.source.contains("mesh.state.set(\"muted\""));
+        assert!(!script.source.contains("mesh.state.set(\"percent\""));
     }
 
     #[test]

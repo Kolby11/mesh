@@ -351,6 +351,61 @@ service.emit("audio", { volume = parse_volume(volume) })
 
 Core wires the plugin. The plugin does the work.
 
+### CRITICAL: Frontend and backend plugins are standalone — each owns its own state
+
+**Frontend plugins must never read derived state that was injected by core.** Each plugin computes its own display state from the raw service payload inside its `<script>` block.
+
+Backend plugins emit raw data (volume percent, mute flag, etc.). Frontend plugins transform that into display-ready state (icon names, labels, formatted strings) inside their own scripts.
+
+The mechanism: when a service update arrives, core calls `on_<service>_update()` on the frontend script if it declares that handler. The handler reads from `audio.*` (the raw payload) and writes to local script variables, which the template then binds to.
+
+Example of what is WRONG:
+```rust
+// mesh-core/src/shell/service.rs — core computing display state
+let icon_name = audio_icon_name(percent, muted); // core should not know about this
+obj.insert("icon_name", icon_name);
+```
+
+Example of what is RIGHT:
+```lua
+-- plugins/frontend/core/volume-slider/src/main.mesh <script>
+local icon_name = "audio-volume-muted"
+
+function on_audio_update()
+    if audio.muted or audio.percent == 0 then
+        icon_name = "audio-volume-muted"
+    elseif audio.percent < 67 then
+        icon_name = "audio-volume-medium"
+    else
+        icon_name = "audio-volume-high"
+    end
+end
+```
+
+The template then binds `{icon_name}` — a local script variable, not a service field.
+
+**If you find core injecting computed display fields (icon names, formatted labels, derived booleans) into service payloads, that is a bug.**
+
+### Reactive service bindings
+
+Frontend scripts declare reactive bindings to service fields with `mesh.service.bind("service.field")`:
+
+```lua
+local muted = mesh.service.bind("audio.muted")
+local percent = mesh.service.bind("audio.percent")
+```
+
+When the `audio` backend emits, core:
+1. Updates `state["audio"]` (full payload accessible from templates as `{audio.percent}`)
+2. Copies bound fields into local script variables (`muted`, `percent`)
+3. Calls `on_audio_update()` if the script declares it
+
+This lets `on_audio_update()` read simple local variables in conditions rather than needing object property access (`audio.muted`), which the stub interpreter does not support.
+
+**Two-way binding** (planned): writing to a bound variable will publish the change back to the backend service via an event channel.
+
+**Interpreter limitation**: `elseif` is not yet supported. Use nested `if/else/end` chains instead.
+
 ---
 
 - **Everything is a plugin.** The shell core must not hardcode plugin IDs or behavior. Layout defaults, size policies, and content sizing are declared in `plugin.json`, not in Rust match arms.
