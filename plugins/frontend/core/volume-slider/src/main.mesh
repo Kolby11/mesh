@@ -4,13 +4,13 @@
       <icon class="speaker" name="{icon_name}" size="18" />
       <div class="volume-copy">
         <span class="title">Volume</span>
-        <span class="backend">{audio.source_plugin}</span>
+        <span class="backend">{audio_backend}</span>
       </div>
-      <span class="value">{audio.label}</span>
+      <span class="value">{audio_label}</span>
     </div>
     <div class="volume-row">
       <button class="volume-step" onclick={onVolumeDown} title="Volume down" aria-label="Volume down">-</button>
-      <slider class="slider" min="0" max="100" value="{audio.percent}" mesh-action="audio-volume" title="{audio.tooltip}" aria-label="Volume" />
+      <slider class="slider" min="0" max="100" value="{audio.percent}" mesh-action="audio-volume" title="{audio_tooltip}" aria-label="Volume" />
       <button class="volume-step" onclick={onVolumeUp} title="Volume up" aria-label="Volume up">+</button>
     </div>
     <div class="actions">
@@ -23,27 +23,41 @@
 </template>
 
 <script lang="luau">
-local icon_name = "audio-volume-muted"
-local muted = mesh.service.bind("audio.muted")
-local percent = mesh.service.bind("audio.percent")
+mesh.state.set("icon_name", "audio-volume-muted")
+mesh.state.set("audio_label", "0%")
+mesh.state.set("audio_tooltip", "Volume unavailable")
+mesh.state.set("audio_backend", "Unavailable")
+mesh.service.bind("audio.muted", "audio_muted")
+mesh.service.bind("audio.percent", "audio_percent")
+mesh.service.bind("audio.source_plugin", "audio_source_plugin")
+mesh.service.on("audio", "sync_audio_state")
 
-function on_audio_update()
-    if muted then
+function sync_audio_state()
+    if audio_muted then
         icon_name = "audio-volume-muted"
     else
-        if percent == 0 then
+        if audio_percent == 0 then
             icon_name = "audio-volume-muted"
         else
-            if percent < 34 then
+            if audio_percent < 34 then
                 icon_name = "audio-volume-low"
             else
-                if percent < 67 then
+                if audio_percent < 67 then
                     icon_name = "audio-volume-medium"
                 else
                     icon_name = "audio-volume-high"
                 end
             end
         end
+    end
+
+    local safe_percent = audio_percent or 0
+    audio_label = string.format("%d%%", safe_percent)
+    audio_backend = audio_source_plugin or "Unavailable"
+    if audio_muted then
+        audio_tooltip = string.format("Volume muted at %d%%", safe_percent)
+    else
+        audio_tooltip = string.format("Volume %d%%", safe_percent)
     end
 end
 

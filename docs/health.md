@@ -1,7 +1,7 @@
 # Plugin Health
 
 Every plugin has a **health state** — a first-class runtime primitive the
-core tracks and frontends subscribe to. Health is how a missing system
+core tracks and frontends can subscribe to. Health is how a missing system
 dependency, a daemon that stopped, or a degraded capability becomes
 something the user sees as "Audio unavailable: install `playerctl`" rather
 than a silent broken widget.
@@ -141,39 +141,24 @@ audio:on_health(function(h) refreshUI(h) end)
 carries the reason (no provider, provider is unavailable, capability
 denied, version range unsatisfiable).
 
-### Via `widget-fallback`
+### Via ordinary frontend state
 
 For the very common "show a default state when the backing service is
-unavailable" pattern, the core provides a turnkey template:
+unavailable" pattern, keep the rendering logic in the frontend plugin and use
+health events as just another input:
 
-```xml
-<widget-fallback interface="mesh.audio" version=">=1.0">
-  <template slot="healthy">
-    <icon name="volume" :level="volumeLevel"/>
-  </template>
+```luau
+mesh.state.set("health_reason", "")
+mesh.state.set("service_available", true)
 
-  <template slot="degraded">
-    <icon name="volume" :level="volumeLevel"/>
-    <badge>{{degraded_features | join(', ')}} unavailable</badge>
-  </template>
-
-  <template slot="unavailable">
-    <column class="fallback">
-      <icon name="volume-off"/>
-      <text class="muted">{reason}</text>
-      <text class="hint">{fix_suggestion}</text>
-    </column>
-  </template>
-</widget-fallback>
+mesh.events.on("interface.health/mesh.audio", function(h)
+    service_available = h.state ~= "unavailable"
+    health_reason = h.reason or ""
+end)
 ```
 
-The core switches templates as the interface's health state changes. No
-JavaScript-style conditional rendering, no polling — subscription is wired
-by the renderer.
-
-The templates are all optional: omit `degraded` to collapse it into
-`healthy`; omit `unavailable` to get the core's default "Service
-unavailable" card.
+The core publishes health data on the bus. The frontend decides how to turn
+that into badges, muted states, fallback cards, or hidden UI.
 
 ## Backend health and `unavailable` impl registration
 
@@ -275,6 +260,6 @@ Surfaces
 - Unavailable backends don't register; the registry and frontends see a
   single "no active provider" story.
 - Frontends subscribe to per-interface health through the normal event
-  bus; `widget-fallback` handles the common template-switch case
+  bus; frontend plugins decide how to render degraded or unavailable states
   declaratively.
 - `mesh doctor` is the one command a user runs when things look wrong.

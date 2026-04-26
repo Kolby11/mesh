@@ -15,7 +15,7 @@ mesh-cli
   └─ mesh-core          ← shell orchestrator, owns the main event loop
        ├─ mesh-component-backend  ← compiles + runs .mesh frontend plugins
        │    ├─ mesh-component     ← parser for .mesh single-file components
-       │    └─ mesh-scripting     ← Luau bridge (ScriptContext, ScriptState)
+       │    └─ mesh-scripting     ← Luau bridge (frontend transition layer + backend runtime)
        ├─ mesh-renderer  ← paints WidgetNode trees into pixel buffers
        │    └─ mesh-ui   ← layout engine, style resolver, WidgetNode
        ├─ mesh-service   ← interface/service registry (InterfaceRegistry)
@@ -35,11 +35,11 @@ mesh-cli
 
 | Crate | Key types / files |
 |---|---|
-| `mesh-core` | `Shell` in `shell.rs` — owns everything; `FrontendSurfaceComponent`, `ShellComponent` trait, `CoreRequest`, `CoreEvent` |
+| `mesh-core` | `Shell` in `shell/mod.rs` — plugin host and shell orchestrator; `FrontendSurfaceComponent`, `ShellComponent` trait, `CoreRequest`, `CoreEvent` |
 | `mesh-plugin` | `Manifest`, `PluginType`, `SurfaceLayoutSection` in `manifest.rs`; `PluginInstance` in `lifecycle.rs` |
 | `mesh-component` | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>`, `<schema>` blocks |
 | `mesh-component-backend` | `CompiledFrontendPlugin`, `FrontendCatalog`, `FrontendCompositionResolver` |
-| `mesh-scripting` | `ScriptContext`, `ScriptState`, `LocaleBoundState` — the only crate crossing the UI/service boundary |
+| `mesh-scripting` | `ScriptContext`, `BackendScriptContext`, `ScriptState`, `LocaleBoundState` — the only crate crossing the UI/service boundary |
 | `mesh-ui` | `WidgetNode`, `LayoutRect`, `StyleContext`, `StyleResolver`, `VariableStore`, `ElementState` |
 | `mesh-renderer` | `Painter`, `PixelBuffer`, `SharedTextMeasurer`, `LayerShellBackend`, `LayerSurfaceConfig` |
 | `mesh-service` | `InterfaceRegistry`, `ServiceRegistry`, `InterfaceProvider`, `canonical_interface_name` |
@@ -67,7 +67,7 @@ plugins/
     notification-feed/
     notification-sidebar/
 
-  backend/core/         ← service plugins (Rust, mesh.toml manifests)
+  backend/core/         ← service plugins (scripted backends, declared by plugin.json)
     pipewire-audio/     ← audio via PipeWire
     pulseaudio-audio/   ← audio via PulseAudio
     mpris-media/        ← media via MPRIS
@@ -114,7 +114,7 @@ Surface layout defaults live in `plugin.json`, **not** in Rust. `mesh-core` read
 
 1. `mesh-cli` → `Shell::run()` in `mesh-core/src/shell.rs`
 2. Shell discovers plugins via `plugin_search_paths()` (workspace, `/usr/share/mesh`, `~/.local/share/mesh`)
-3. Each plugin dir is compiled: backend plugins via `PluginInstance`, frontend via `compile_frontend_plugin()`
+3. Each plugin dir is loaded from manifest metadata; frontend plugins are compiled via `compile_frontend_plugin()`, backend plugins are hosted as Luau entrypoints
 4. `FrontendSurfaceComponent::new()` is created per surface plugin:
    - reads `plugin.json` manifest → `surface_layout_from_manifest()` for layout defaults
    - reads `config/settings.json` → user overrides applied on top of manifest defaults
@@ -149,7 +149,7 @@ backend plugin (mesh.toml, provides = "mesh.audio")
   → registered in InterfaceRegistry
   → emits events on EventBus
   → Shell applies to ScriptState via apply_service_update()
-  → frontend reads state["audio"] in Luau / template bindings
+  → frontend plugins derive local state from `state["audio"]` in Luau / template bindings
 ```
 
 ---
@@ -161,7 +161,7 @@ backend plugin (mesh.toml, provides = "mesh.audio")
 | Add a CSS property | `mesh-ui/src/style.rs` (parse), `mesh-renderer/src/painter.rs` (paint) |
 | Add a new surface plugin | Create `plugins/frontend/core/<name>/`, `plugin.json` with `"type": "surface"`, `src/main.mesh` |
 | Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core/src/shell.rs`; manifest's `surface_layout` section |
-| Add a service (backend plugin) | `plugins/backend/core/<name>/`, `mesh.toml` with `[service]`, implement the interface contract |
+| Add a service (backend plugin) | `plugins/backend/core/<name>/`, `plugin.json` + `src/main.luau`, implement the interface contract in the plugin script |
 | Add a new CoreRequest action | `CoreRequest` enum + match arm in `handle_request()` in `mesh-core/src/shell.rs` |
 | Add a theme token | `mesh-theme/src/lib.rs`, default theme JSON, then reference with `token(group.name)` in `.mesh` |
 | Add localization | Plugin's `<i18n>` block or `config/i18n/<locale>.json`; `LocaleEngine` in `mesh-locale` |
@@ -330,9 +330,20 @@ Core's only job is:
 
 Everything else — reading audio volume, querying network status, checking battery, calling system tools like `wpctl` or `pactl` — belongs exclusively in backend plugins, written in Luau using the exec host API.
 
+Backend plugins should always be implemented in Luau, or in the plugin's
+respective scripting language if the runtime grows beyond Luau. Do not move
+service-specific parsing, polling, command shaping, or fallback behavior into
+Rust just because the current host API is missing a helper.
+
 **If you find Rust code in `mesh-core` that calls system tools, spawns polling loops for a specific service, or has `if service_name == "audio"` style branches, that is a bug, not a pattern to follow.**
 
-The exec host API in `mesh-scripting` is what enables backend Luau plugins to call system commands. When it does not exist yet for a given capability, the right fix is to implement the host API — not to move the logic into core.
+The exec host API in `mesh-scripting` is what enables backend Luau plugins to call system commands. When it does not exist yet for a given capability, the right fix is to implement a generic host API primitive — not to move the logic into core.
+
+Backend scripts now run in a real Luau VM through `mlua`. Do not add new
+hand-written backend parsers or mini-interpreters in Rust.
+
+Frontend scripts run in a real Luau VM through `mlua` with no source preprocessing.
+Do not add handwritten execution logic or mini-language semantics in Rust.
 
 Example of what is WRONG:
 ```rust
@@ -369,42 +380,63 @@ obj.insert("icon_name", icon_name);
 Example of what is RIGHT:
 ```lua
 -- plugins/frontend/core/volume-slider/src/main.mesh <script>
-local icon_name = "audio-volume-muted"
+mesh.state.set("icon_name", "audio-volume-muted")
+mesh.service.bind("audio.muted", "audio_muted")
+mesh.service.bind("audio.percent", "audio_percent")
+mesh.service.on("audio", "sync_audio_state")
 
-function on_audio_update()
-    if audio.muted or audio.percent == 0 then
+function sync_audio_state()
+    if audio_muted or audio_percent == 0 then
         icon_name = "audio-volume-muted"
-    elseif audio.percent < 67 then
-        icon_name = "audio-volume-medium"
     else
-        icon_name = "audio-volume-high"
+        if audio_percent < 67 then
+            icon_name = "audio-volume-medium"
+        else
+            icon_name = "audio-volume-high"
+        end
     end
 end
 ```
 
-The template then binds `{icon_name}` — a local script variable, not a service field.
+The template then binds `{icon_name}` — a reactive state variable, not a service field.
 
 **If you find core injecting computed display fields (icon names, formatted labels, derived booleans) into service payloads, that is a bug.**
 
-### Reactive service bindings
+### Reactive state
 
-Frontend scripts declare reactive bindings to service fields with `mesh.service.bind("service.field")`:
+Scripts declare reactive state via `mesh.state.set(key, value)`. This:
+1. Sets a Lua global with that name (so handlers can read and write it directly)
+2. Registers the key for syncing back to `ScriptState` after each handler call
+
+Templates bind to `{key}` which reads from `ScriptState`.
+
+### Service bindings
+
+`mesh.service.bind("service.field", "local_name")` registers a runtime binding:
+- Sets a Lua global named `local_name` to nil initially
+- When the service emits, core updates that Lua global and `ScriptState`
+
+`mesh.service.on("service", "handler_name")` registers the update handler explicitly.
 
 ```lua
-local muted = mesh.service.bind("audio.muted")
-local percent = mesh.service.bind("audio.percent")
+mesh.service.bind("audio.muted", "audio_muted")
+mesh.service.bind("audio.percent", "audio_percent")
+mesh.service.on("audio", "sync_audio_state")
+
+function sync_audio_state()
+    if audio_muted then ...   -- reads explicit Lua global 'audio_muted'
 ```
-
-When the `audio` backend emits, core:
-1. Updates `state["audio"]` (full payload accessible from templates as `{audio.percent}`)
-2. Copies bound fields into local script variables (`muted`, `percent`)
-3. Calls `on_audio_update()` if the script declares it
-
-This lets `on_audio_update()` read simple local variables in conditions rather than needing object property access (`audio.muted`), which the stub interpreter does not support.
 
 **Two-way binding** (planned): writing to a bound variable will publish the change back to the backend service via an event channel.
 
-**Interpreter limitation**: `elseif` is not yet supported. Use nested `if/else/end` chains instead.
+### Interface proxies
+
+`mesh.interfaces.get("mesh.audio", ">=1.0")` returns a proxy object. Use as a Lua local — it is NOT reactive state and should not be passed to `mesh.state.set`:
+
+```lua
+local audio = mesh.interfaces.get("mesh.audio", ">=1.0")  -- chunk-local, used as upvalue
+local power  = mesh.interfaces.get("mesh.power",  ">=1.0")
+```
 
 ---
 

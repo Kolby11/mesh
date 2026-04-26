@@ -552,119 +552,10 @@ struct OpenNode {
 
 fn parse_script(source: &str, blocks: &HashMap<String, String>) -> ScriptBlock {
     let _ = blocks;
-    let (transformed, reactive_vars) = extract_reactive_vars(source);
     ScriptBlock {
         lang: ScriptLang::Luau,
-        source: transformed,
-        reactive_vars,
+        source: source.to_string(),
     }
-}
-
-/// Scan the script for top-level `local var = value` declarations and rewrite
-/// them to `mesh.state.set("var", value)` so the runtime tracks them reactively.
-///
-/// "Top-level" means outside any function body. Depth is tracked by counting
-/// `function` openers and `end` closers at word boundaries. Function-valued
-/// locals (`local f = function() ... end`) are left untouched.
-fn extract_reactive_vars(source: &str) -> (String, Vec<String>) {
-    let mut reactive_vars = Vec::new();
-    let mut output = String::new();
-    let mut depth: i32 = 0;
-
-    for line in source.lines() {
-        let trimmed = line.trim();
-
-        if trimmed.starts_with("--") {
-            output.push_str(line);
-            output.push('\n');
-            continue;
-        }
-
-        if depth == 0 {
-            if let Some((name, value)) = parse_local_assignment(trimmed) {
-                if value.contains("mesh.interfaces.get")
-                    || value.contains("mesh.services.get")
-                    || value.contains("mesh.service.bind")
-                {
-                    output.push_str(line);
-                    output.push('\n');
-                    continue;
-                }
-                let indent = &line[..line.len() - line.trim_start().len()];
-                output.push_str(&format!(
-                    "{}mesh.state.set(\"{}\", {})\n",
-                    indent, name, value
-                ));
-                reactive_vars.push(name);
-                continue;
-            }
-        }
-
-        depth += count_whole_word(trimmed, "function") as i32;
-        depth -= count_whole_word(trimmed, "end") as i32;
-        if depth < 0 {
-            depth = 0;
-        }
-
-        output.push_str(line);
-        output.push('\n');
-    }
-
-    (output, reactive_vars)
-}
-
-/// Parse `local <ident> = <expr>` from a trimmed line.
-/// Returns `None` for function-valued locals or lines without an assignment.
-fn parse_local_assignment(line: &str) -> Option<(String, String)> {
-    let rest = line.strip_prefix("local")?;
-    if !rest.starts_with(|c: char| c.is_whitespace()) {
-        return None;
-    }
-    let rest = rest.trim_start();
-
-    let end = rest
-        .find(|c: char| !c.is_alphanumeric() && c != '_')
-        .unwrap_or(rest.len());
-    if end == 0 {
-        return None;
-    }
-    let name = &rest[..end];
-
-    let after_name = rest[end..].trim_start();
-    let value = after_name.strip_prefix('=')?;
-    let value = value.trim();
-
-    if value.is_empty() || value.starts_with("function") {
-        return None;
-    }
-
-    Some((name.to_string(), value.to_string()))
-}
-
-fn count_whole_word(text: &str, word: &str) -> usize {
-    let mut count = 0;
-    let mut start = 0;
-    while start < text.len() {
-        let Some(pos) = text[start..].find(word) else {
-            break;
-        };
-        let abs = start + pos;
-        let before_ok = abs == 0
-            || !text[..abs]
-                .chars()
-                .next_back()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_');
-        let after_ok = abs + word.len() >= text.len()
-            || !text[abs + word.len()..]
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_');
-        if before_ok && after_ok {
-            count += 1;
-        }
-        start = abs + word.len();
-    }
-    count
 }
 
 fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
@@ -1319,15 +1210,15 @@ div {
     }
 
     #[test]
-    fn reactive_vars_extracted_from_top_level_locals() {
+    fn script_source_passed_through_unchanged() {
         let source = r#"
 <template>
   <span>{title}</span>
 </template>
 
 <script lang="luau">
-local title = "Hello"
-local count = 0
+mesh.state.set("title", "Hello")
+mesh.state.set("count", 0)
 
 function onTap()
     local tmp = count + 1
@@ -1337,51 +1228,26 @@ end
 "#;
         let file = parse_component(source).unwrap();
         let script = file.script.unwrap();
-        assert_eq!(script.reactive_vars, vec!["title", "count"]);
-        assert!(
-            script
-                .source
-                .contains("mesh.state.set(\"title\", \"Hello\")")
-        );
-        assert!(script.source.contains("mesh.state.set(\"count\", 0)"));
-        // Inner local should not be hoisted
-        assert!(!script.source.contains("mesh.state.set(\"tmp\""));
+        assert!(script.source.contains("mesh.state.set(\"title\", \"Hello\")"));
         assert!(script.source.contains("local tmp = count + 1"));
     }
 
     #[test]
-    fn local_function_def_not_treated_as_reactive() {
+    fn local_declarations_preserved_verbatim() {
         let source = r#"
 <script lang="luau">
 local handler = function() end
+local audio = mesh.interfaces.get("mesh.audio")
+mesh.service.bind("audio.muted", "audio_muted")
+mesh.service.on("audio", "sync_audio_state")
 </script>
 "#;
         let file = parse_component(source).unwrap();
         let script = file.script.unwrap();
-        assert!(script.reactive_vars.is_empty());
         assert!(script.source.contains("local handler = function()"));
-    }
-
-    #[test]
-    fn service_bindings_are_not_rewritten_as_reactive_state_sets() {
-        let source = r#"
-<script lang="luau">
-local icon_name = "audio-volume-muted"
-local muted = mesh.service.bind("audio.muted")
-local percent = mesh.service.bind("audio.percent")
-</script>
-"#;
-        let file = parse_component(source).unwrap();
-        let script = file.script.unwrap();
-        assert!(
-            script
-                .source
-                .contains("mesh.state.set(\"icon_name\", \"audio-volume-muted\")")
-        );
-        assert!(script.source.contains("local muted = mesh.service.bind(\"audio.muted\")"));
-        assert!(script.source.contains("local percent = mesh.service.bind(\"audio.percent\")"));
-        assert!(!script.source.contains("mesh.state.set(\"muted\""));
-        assert!(!script.source.contains("mesh.state.set(\"percent\""));
+        assert!(script.source.contains("local audio = mesh.interfaces.get(\"mesh.audio\")"));
+        assert!(script.source.contains("mesh.service.bind(\"audio.muted\", \"audio_muted\")"));
+        assert!(script.source.contains("mesh.service.on(\"audio\", \"sync_audio_state\")"));
     }
 
     #[test]

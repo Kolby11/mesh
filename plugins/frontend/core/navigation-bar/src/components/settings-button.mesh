@@ -1,0 +1,49 @@
+<template>
+  <button
+    class="settings-button"
+    onclick={onSettingsClick}
+    title="{t('nav.open_settings')}"
+    aria-label="{t('nav.open_settings')}"
+  >
+    <icon class="settings-glyph" name="settings" title="{t('nav.settings')}" size="18" />
+  </button>
+</template>
+
+<style>
+.settings-button {
+    width: 44px;
+    height: 40px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    padding-block: token(spacing.xs);
+    padding-inline: token(spacing.xs);
+    border-radius: token(radius.sm);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+    text-wrap: none;
+}
+
+.settings-button:hover {
+    background: token(color.primary-container);
+    color: token(color.on-primary-container);
+    border-radius: token(radius.full);
+}
+
+.settings-glyph {
+    width: 28px;
+    height: 26px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    color: token(color.on-tertiary-container);
+}
+
+@container (max-width: 760px) {
+    .settings-button {
+        width: 44px;
+        gap: 0;
+        padding-inline: token(spacing.xs);
+    }
+}
+</style>

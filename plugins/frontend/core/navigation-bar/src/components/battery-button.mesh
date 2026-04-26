@@ -1,0 +1,56 @@
+<template>
+  <button
+    class="battery-widget"
+    onclick={onBatteryClick}
+    title="{battery_tooltip}"
+    aria-label="{battery_aria_label}"
+  >
+    <icon class="battery-glyph" name="{battery_icon_name}" size="18" />
+    <span class="battery-value">{battery_label}</span>
+  </button>
+</template>
+
+<style>
+.battery-widget {
+    height: 40px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    gap: token(spacing.xs);
+    padding-inline: token(spacing.sm);
+    border-radius: token(radius.full);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+    text-wrap: none;
+}
+
+.battery-widget:hover {
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
+}
+
+.battery-glyph {
+    width: 24px;
+    height: 24px;
+    justify-content: center;
+    align-items: center;
+    color: inherit;
+}
+
+.battery-value {
+    color: inherit;
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+}
+
+@container (max-width: 760px) {
+    .battery-value {
+        display: none;
+    }
+
+    .battery-widget {
+        width: 44px;
+        padding-inline: token(spacing.xs);
+    }
+}
+</style>

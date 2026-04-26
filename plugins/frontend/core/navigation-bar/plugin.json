@@ -5,22 +5,28 @@
   "type": "surface",
   "api_version": "0.1",
   "description": "Top-edge navigation bar surface.",
-  "authors": ["MESH Project"],
+  "authors": [
+    "MESH Project"
+  ],
   "compatibility": {
     "mesh": ">=0.1.0",
-    "compositors": ["wlr-layer-shell-v1"]
+    "compositors": [
+      "wlr-layer-shell-v1"
+    ]
   },
   "capabilities": {
     "required": [
       "shell.surface",
       "service.audio.read",
+      "service.power.read",
       "theme.read",
       "locale.read"
     ]
   },
   "dependencies": {
     "plugins": {
-      "@mesh/audio-interface": ">=1.0.0, <2.0.0"
+      "@mesh/audio-interface": ">=1.0.0, <2.0.0",
+      "@mesh/power-interface": ">=1.0.0, <2.0.0"
     }
   },
   "entrypoints": {
@@ -35,13 +41,23 @@
         "properties": {
           "anchor": {
             "type": "enum",
-            "values": ["top", "bottom", "left", "right"],
+            "values": [
+              "top",
+              "bottom",
+              "left",
+              "right"
+            ],
             "default": "top",
             "description": "Screen edge this surface anchors to."
           },
           "layer": {
             "type": "enum",
-            "values": ["background", "bottom", "top", "overlay"],
+            "values": [
+              "background",
+              "bottom",
+              "top",
+              "overlay"
+            ],
             "default": "top",
             "description": "Layer-shell stacking layer."
           },
@@ -68,13 +84,17 @@
           },
           "keyboard_mode": {
             "type": "enum",
-            "values": ["none", "exclusive", "on_demand"],
+            "values": [
+              "none",
+              "exclusive",
+              "on_demand"
+            ],
             "default": "none",
             "description": "Keyboard interactivity policy for the surface."
           },
           "visible_on_start": {
             "type": "boolean",
-            "default": false,
+            "default": true,
             "description": "Whether this surface starts visible when Mesh boots."
           }
         }

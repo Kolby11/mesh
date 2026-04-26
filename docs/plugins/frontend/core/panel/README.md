@@ -26,14 +26,16 @@ The panel is a three-column row:
 - **Center** — clock (`%H:%M`)
 - **Right** — network icon, clickable volume icon, battery percentage
 
-Clicking the volume icon emits the `shell.toggle-quick-settings` channel so
-the quick-settings surface can react.
+This plugin is a legacy reference surface. It derives its own clock, battery,
+volume, and network display state inside the frontend script rather than
+asking the core for presentation-ready values.
 
 ## Consumed interfaces
 
 Looked up via `mesh.interfaces.get(name, range)`; all are optional and fall
 back to `"N/A"` / `"0"` / `"disconnected"` when no implementation is
-registered.
+registered. The core only brokers those lookups and payloads; formatting and
+fallback presentation live in the plugin script.
 
 | Interface | Used for |
 |-----------|----------|

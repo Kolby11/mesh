@@ -1,12 +1,14 @@
-use crate::host_api::InterfaceProxy;
+use crate::host_api::{HostApiManifest, InterfaceProxy};
 /// Script execution context — one per plugin/component instance.
 use mesh_capability::CapabilitySet;
 use mesh_locale::LocaleEngine;
+use mesh_service::contract::InterfaceTypeDef;
 use mesh_service::{InterfaceCatalog, InterfaceResolution};
 use mesh_ui::VariableStore;
+use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value;
-use std::collections::HashMap;
-// (no external sync types needed here)
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -16,7 +18,7 @@ pub struct PublishedEvent {
 }
 
 /// Errors from the scripting runtime.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ScriptError {
     #[error("Luau error: {0}")]
     LuaError(String),
@@ -173,12 +175,9 @@ impl ScriptState {
     }
 }
 
-/// A script execution context for one component instance.
-///
-/// Owns the Luau VM, reactive state, and capability set.
-/// When `mlua` is integrated, this will hold the `mlua::Lua` instance.
-/// A reactive binding from a service field to a local script variable.
-/// Declared in scripts as: `local x = mesh.service.bind("service.field")`
+/// A reactive binding from a service field to a Lua global variable.
+/// Registered at runtime when scripts call
+/// `mesh.service.bind("service.field", "local_name")`.
 #[derive(Debug, Clone)]
 struct ServiceBinding {
     var_name: String,
@@ -186,21 +185,37 @@ struct ServiceBinding {
     field: String,
 }
 
+/// An explicit service subscription registered by `mesh.service.on`.
+#[derive(Debug, Clone)]
+struct ServiceSubscription {
+    service: String,
+    handler_name: String,
+}
+
+/// A script execution context for one component instance.
+///
+/// Owns frontend script state, capability metadata, and the mlua runtime.
+/// Scripts run as-written with no source preprocessing. Reactive state is
+/// tracked via `mesh.state.set(key, value)` calls at runtime, and service
+/// bindings/subscriptions are registered via `mesh.service.bind(...)` and
+/// `mesh.service.on(...)`.
 #[derive(Debug)]
 pub struct ScriptContext {
     pub plugin_id: String,
     pub capabilities: CapabilitySet,
     pub state: ScriptState,
-    handlers: HashMap<String, ScriptFunction>,
+    lua: Lua,
     interface_catalog: InterfaceCatalog,
     interface_bindings: HashMap<String, InterfaceResolution>,
-    service_bindings: Vec<ServiceBinding>,
+    shared_interface_bindings: Arc<Mutex<HashMap<String, InterfaceResolution>>>,
+    /// Keys registered by `mesh.state.set` — synced back from Lua globals after each call.
+    tracked_state_keys: Arc<Mutex<HashSet<String>>>,
+    /// Service bindings registered by `mesh.service.bind` at script load time.
+    runtime_service_bindings: Arc<Mutex<Vec<ServiceBinding>>>,
+    /// Service update handlers registered explicitly via `mesh.service.on`.
+    runtime_service_subscriptions: Arc<Mutex<Vec<ServiceSubscription>>>,
     published_events: Vec<PublishedEvent>,
-}
-
-#[derive(Debug, Clone)]
-struct ScriptFunction {
-    body: Vec<String>,
+    shared_published_events: Arc<Mutex<Vec<PublishedEvent>>>,
 }
 
 impl ScriptContext {
@@ -213,11 +228,15 @@ impl ScriptContext {
             plugin_id: plugin_id.into(),
             capabilities,
             state: ScriptState::new(),
-            handlers: HashMap::new(),
+            lua: Lua::new(),
             interface_catalog: InterfaceCatalog::default(),
             interface_bindings: HashMap::new(),
-            service_bindings: Vec::new(),
+            shared_interface_bindings: Arc::new(Mutex::new(HashMap::new())),
+            tracked_state_keys: Arc::new(Mutex::new(HashSet::new())),
+            runtime_service_bindings: Arc::new(Mutex::new(Vec::new())),
+            runtime_service_subscriptions: Arc::new(Mutex::new(Vec::new())),
             published_events: Vec::new(),
+            shared_published_events: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -225,57 +244,103 @@ impl ScriptContext {
         self.interface_catalog = catalog;
     }
 
-    /// Load a script source. Parses and registers functions, seeds state from
-    /// top-level `local name = value` declarations, and registers service bindings.
+    /// Load a script source. Executes the script, registering functions and
+    /// seeding reactive state from `mesh.state.set` calls at the top level.
     pub fn load_script(&mut self, source: &str) -> Result<(), ScriptError> {
-        self.handlers = parse_functions(source);
         self.interface_bindings.clear();
-        self.service_bindings = parse_service_bindings(source);
-        for (name, value) in parse_top_level_locals(source) {
-            self.state.variables.entry(name).or_insert(value);
-        }
+        self.shared_interface_bindings.lock().unwrap().clear();
+        self.shared_published_events.lock().unwrap().clear();
+        self.tracked_state_keys.lock().unwrap().clear();
+        self.runtime_service_bindings.lock().unwrap().clear();
+        self.runtime_service_subscriptions.lock().unwrap().clear();
+        self.install_host_api()?;
+        self.lua
+            .load(source)
+            .set_name(&self.plugin_id)
+            .exec()
+            .map_err(|err| map_lua_error(&self.interface_catalog, err))?;
+        self.sync_state_from_lua();
         tracing::info!("loaded script for plugin {}", self.plugin_id);
         Ok(())
     }
 
-    /// Copy service payload fields into bound local state variables.
+    /// Copy service payload fields into bound Lua globals and script state.
     ///
-    /// Called by core after each service update, before `on_<service>_update()`.
-    /// Enables scripts to read `muted`, `percent`, etc. as plain local variables
-    /// rather than accessing `state["audio"]["muted"]` via dot notation.
+    /// Called by core after each service update, before any subscribed handlers.
+    /// Bindings are registered at runtime via `mesh.service.bind(...)`.
     pub fn apply_service_bindings(&mut self, service: &str, payload: &Value) {
-        let updates: Vec<(String, Value)> = self
-            .service_bindings
+        let bindings = self.runtime_service_bindings.lock().unwrap().clone();
+        let updates: Vec<(String, Value)> = bindings
             .iter()
             .filter(|b| b.service == service)
             .filter_map(|b| payload.get(&b.field).map(|v| (b.var_name.clone(), v.clone())))
             .collect();
         for (var, val) in updates {
-            self.state.set(var, val);
+            self.state.set(var.clone(), val.clone());
+            self.set_lua_global(&var, &val);
         }
+    }
+
+    /// Call all handlers registered for a specific service.
+    pub fn call_service_handlers(&mut self, service: &str) -> Result<(), ScriptError> {
+        let handlers: Vec<String> = self
+            .runtime_service_subscriptions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|subscription| subscription.service == service)
+            .map(|subscription| subscription.handler_name.clone())
+            .collect();
+
+        for handler_name in handlers {
+            self.call_handler(&handler_name, &[])?;
+        }
+
+        Ok(())
     }
 
     /// Call the script's `init()` function if it exists.
     pub fn call_init(&mut self) -> Result<(), ScriptError> {
-        if self.handlers.contains_key("init") {
+        if let Ok(init) = self.lua.globals().get::<Function>("init") {
             tracing::debug!("calling init() for {}", self.plugin_id);
-            self.execute_function("init")?;
+            init.call::<()>(())
+                .map_err(|err| map_lua_error(&self.interface_catalog, err))?;
+            self.sync_state_from_lua();
+            self.sync_side_channels();
         }
         Ok(())
     }
 
     /// Call a named event handler.
     pub fn call_handler(&mut self, name: &str, _args: &[Value]) -> Result<(), ScriptError> {
-        if !self.handlers.contains_key(name) {
-            return Err(ScriptError::HandlerNotFound(name.to_string()));
-        }
+        let globals = self.lua.globals();
+        let handler = globals
+            .get::<Function>(name)
+            .map_err(|_| ScriptError::HandlerNotFound(name.to_string()))?;
         tracing::debug!("calling handler {name}() for {}", self.plugin_id);
-        self.execute_function(name)
-    }
-
-    /// Check if a handler exists.
-    pub fn has_handler(&self, name: &str) -> bool {
-        self.handlers.contains_key(name)
+        match _args.len() {
+            0 => handler
+                .call::<()>(())
+                .map_err(|err| map_lua_error(&self.interface_catalog, err))?,
+            1 => {
+                let arg = self.lua.to_value(&_args[0]).map_err(lua_err)?;
+                handler
+                    .call::<()>(arg)
+                    .map_err(|err| map_lua_error(&self.interface_catalog, err))?;
+            }
+            _ => {
+                let mut args = mlua::MultiValue::new();
+                for arg in _args {
+                    args.push_back(self.lua.to_value(arg).map_err(lua_err)?);
+                }
+                handler
+                    .call::<()>(args)
+                    .map_err(|err| map_lua_error(&self.interface_catalog, err))?;
+            }
+        }
+        self.sync_state_from_lua();
+        self.sync_side_channels();
+        Ok(())
     }
 
     /// Get a reference to the current state for tree building.
@@ -289,597 +354,369 @@ impl ScriptContext {
     }
 
     pub fn drain_published_events(&mut self) -> Vec<PublishedEvent> {
+        self.sync_side_channels();
         std::mem::take(&mut self.published_events)
     }
 
-    fn execute_function(&mut self, name: &str) -> Result<(), ScriptError> {
-        let Some(function) = self.handlers.get(name).cloned() else {
-            return Err(ScriptError::HandlerNotFound(name.to_string()));
-        };
-        self.execute_lines(&function.body)
+    /// Check if a handler exists.
+    pub fn has_handler(&self, name: &str) -> bool {
+        self.lua.globals().get::<Function>(name).is_ok()
     }
 
-    /// Execute a slice of Luau lines, handling if/then/else/end blocks.
-    fn execute_lines(&mut self, lines: &[String]) -> Result<(), ScriptError> {
-        let mut i = 0;
-        while i < lines.len() {
-            let trimmed = lines[i].trim().to_string();
-            if trimmed.is_empty() || trimmed.starts_with("--") {
-                i += 1;
-                continue;
-            }
+    fn install_host_api(&mut self) -> Result<(), ScriptError> {
+        let globals = self.lua.globals();
+        let mesh = self.lua.create_table().map_err(lua_err)?;
+        let mesh_state = self.lua.create_table().map_err(lua_err)?;
+        let mesh_service = self.lua.create_table().map_err(lua_err)?;
+        let mesh_interfaces = self.lua.create_table().map_err(lua_err)?;
+        let mesh_services = self.lua.create_table().map_err(lua_err)?;
+        let mesh_events = self.lua.create_table().map_err(lua_err)?;
+        let mesh_ui = self.lua.create_table().map_err(lua_err)?;
+        let mesh_log = self.lua.create_table().map_err(lua_err)?;
 
-            // if ... then ... [else ...] end
-            if let Some(cond_expr) = trimmed
-                .strip_prefix("if ")
-                .and_then(|s| s.strip_suffix(" then"))
-            {
-                let (then_end, else_idx, end_idx) = find_if_block_bounds(lines, i + 1);
-                let condition = self.eval_condition(cond_expr.trim());
-                if condition {
-                    let branch = lines[i + 1..then_end].to_vec();
-                    self.execute_lines(&branch)?;
-                } else if let Some(else_i) = else_idx {
-                    let branch = lines[else_i + 1..end_idx].to_vec();
-                    self.execute_lines(&branch)?;
-                }
-                i = end_idx + 1;
-                continue;
-            }
+        let tracked = Arc::clone(&self.tracked_state_keys);
+        mesh_state.set(
+            "set",
+            self.lua
+                .create_function(move |lua, (key, value): (String, LuaValue)| {
+                    lua.globals().set(key.clone(), value)?;
+                    tracked.lock().unwrap().insert(key);
+                    Ok(())
+                })
+                .map_err(lua_err)?,
+        )
+        .map_err(lua_err)?;
 
-            self.execute_statement(&trimmed)?;
-            i += 1;
-        }
-        Ok(())
-    }
+        let service_bindings = Arc::clone(&self.runtime_service_bindings);
+        mesh_service.set(
+            "bind",
+            self.lua
+                .create_function(move |lua, (path, alias): (String, Option<String>)| {
+                    let Some((service, field)) = path.split_once('.') else {
+                        return Ok(LuaValue::Nil);
+                    };
+                    let var_name = alias.unwrap_or_else(|| field.to_string());
+                    lua.globals().set(var_name.clone(), LuaValue::Nil)?;
+                    service_bindings.lock().unwrap().push(ServiceBinding {
+                        var_name,
+                        service: service.to_string(),
+                        field: field.to_string(),
+                    });
+                    Ok(LuaValue::Nil)
+                })
+                .map_err(lua_err)?,
+        )
+        .map_err(lua_err)?;
 
-    /// Evaluate a Luau boolean condition against current state.
-    ///
-    /// Supports: `or`, `and`, `not`, `==`, `~=`, `<`, `<=`, `>`, `>=`,
-    /// and plain variable truthy checks.
-    fn eval_condition(&self, expr: &str) -> bool {
-        let expr = expr.trim();
+        let service_subscriptions = Arc::clone(&self.runtime_service_subscriptions);
+        mesh_service.set(
+            "on",
+            self.lua
+                .create_function(move |_lua, (service, handler_name): (String, String)| {
+                    service_subscriptions
+                        .lock()
+                        .unwrap()
+                        .push(ServiceSubscription {
+                            service,
+                            handler_name,
+                        });
+                    Ok(LuaValue::Nil)
+                })
+                .map_err(lua_err)?,
+        )
+        .map_err(lua_err)?;
 
-        // `or` — lowest precedence (split left-to-right)
-        if let Some(pos) = expr.find(" or ") {
-            return self.eval_condition(&expr[..pos]) || self.eval_condition(&expr[pos + 4..]);
-        }
-
-        // `and`
-        if let Some(pos) = expr.find(" and ") {
-            return self.eval_condition(&expr[..pos]) && self.eval_condition(&expr[pos + 5..]);
-        }
-
-        // `not x`
-        if let Some(inner) = expr.strip_prefix("not ") {
-            return !self.eval_condition(inner.trim());
-        }
-
-        // comparisons — check multi-char ops before single-char to avoid prefix matches
-        for (op, op_len) in &[("==", 2usize), ("~=", 2), ("<=", 2), (">=", 2), ("<", 1), (">", 1)] {
-            if let Some(pos) = expr.find(op) {
-                let lhs = expr[..pos].trim();
-                let rhs = expr[pos + op_len..].trim();
-                if !lhs.is_empty() && !rhs.is_empty() {
-                    return self.eval_comparison(lhs, op, rhs);
-                }
-            }
-        }
-
-        // plain truthy check
-        let val = self
-            .state
-            .variables
-            .get(expr)
-            .cloned()
-            .unwrap_or(Value::Bool(false));
-        is_luau_truthy(&val)
-    }
-
-    fn eval_comparison(&self, lhs: &str, op: &str, rhs: &str) -> bool {
-        let lval = self.state.variables.get(lhs).cloned().unwrap_or(Value::Null);
-
-        if let Some(ln) = value_as_f64(&lval) {
-            if let Ok(rn) = rhs.parse::<f64>() {
-                return match op {
-                    "==" => ln == rn,
-                    "~=" => ln != rn,
-                    "<" => ln < rn,
-                    "<=" => ln <= rn,
-                    ">" => ln > rn,
-                    ">=" => ln >= rn,
-                    _ => false,
-                };
-            }
-        }
-
-        let lstr = value_as_string(&lval);
-        let rstr = rhs.trim_matches('"').trim_matches('\'');
-        match op {
-            "==" => lstr == rstr,
-            "~=" => lstr != rstr,
-            _ => false,
-        }
-    }
-
-    fn execute_statement(&mut self, line: &str) -> Result<(), ScriptError> {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("--") {
-            return Ok(());
-        }
-
-        if let Some((binding, interface, version)) = parse_interface_binding(trimmed) {
-            let canonical = InterfaceProxy::canonical_name(&interface);
-            if canonical.starts_with("mesh.")
-                && !InterfaceProxy::can_read(&self.capabilities, &canonical)
-            {
-                return Err(ScriptError::CapabilityDenied(canonical));
-            }
-
-            let resolution = self
-                .interface_catalog
-                .resolve(&canonical, version.as_deref());
-            if resolution.contract.is_none() || resolution.provider.is_none() {
-                return Err(ScriptError::InterfaceUnavailable(format!(
-                    "{}{}",
-                    canonical,
-                    version
-                        .as_deref()
-                        .map(|value| format!(" ({value})"))
-                        .unwrap_or_default()
-                )));
-            }
-
-            tracing::debug!(
-                "{} bound interface alias '{}' -> {}{}",
-                self.plugin_id,
-                binding,
-                canonical,
-                version
-                    .as_deref()
-                    .map(|value| format!(" {value}"))
-                    .unwrap_or_default()
-            );
-            self.interface_bindings.insert(binding, resolution);
-            return Ok(());
-        }
-
-        if let Some(args) = extract_call_args(trimmed, "mesh.state.set") {
-            if args.len() != 2 {
-                return Err(ScriptError::LuaError(format!(
-                    "mesh.state.set expects 2 arguments in {}",
-                    self.plugin_id
-                )));
-            }
-
-            let key = parse_string_literal(&args[0]).ok_or_else(|| {
-                ScriptError::LuaError(format!("invalid mesh.state.set key: {}", args[0]))
-            })?;
-            let value = parse_literal_value(&args[1]).ok_or_else(|| {
-                ScriptError::LuaError(format!("invalid mesh.state.set value: {}", args[1]))
-            })?;
-            self.state.set(key, value);
-            return Ok(());
-        }
-
-        if let Some(args) = extract_call_args(trimmed, "mesh.log.info") {
-            if let Some(message) = args.first().and_then(|value| parse_string_literal(value)) {
-                tracing::info!("{}: {}", self.plugin_id, message);
-            }
-            return Ok(());
-        }
-
-        if let Some(args) = extract_call_args(trimmed, "mesh.log.warn") {
-            if let Some(message) = args.first().and_then(|value| parse_string_literal(value)) {
-                tracing::warn!("{}: {}", self.plugin_id, message);
-            }
-            return Ok(());
-        }
-
-        if trimmed == "mesh.ui.request_redraw()" {
-            self.state.dirty = true;
-            return Ok(());
-        }
-
-        if let Some(args) = extract_call_args(trimmed, "mesh.events.publish") {
-            if let Some(channel) = args.first().and_then(|value| parse_string_literal(value)) {
-                let payload = args
-                    .get(1)
-                    .and_then(|value| parse_event_payload(value))
-                    .unwrap_or(Value::Null);
-                tracing::info!("{} published event {}", self.plugin_id, channel);
-                self.published_events
-                    .push(PublishedEvent { channel, payload });
-            }
-            return Ok(());
-        }
-
-        if let Some((binding, method)) = parse_bound_method_call(trimmed, &self.interface_bindings)
-        {
-            let resolution = self
-                .interface_bindings
-                .get(binding)
-                .expect("bound interface must exist");
-            let contract = resolution
-                .contract
-                .as_ref()
-                .ok_or_else(|| ScriptError::InterfaceUnavailable(resolution.requested.clone()))?;
-            if !contract
-                .methods
-                .iter()
-                .any(|candidate| candidate.name == method)
-            {
-                return Err(ScriptError::UnsupportedOperation {
-                    interface: contract.interface.clone(),
-                    method: method.to_string(),
-                });
-            }
-            tracing::debug!(
-                "{} invoked {} on interface alias '{}'",
-                self.plugin_id,
-                method,
-                binding
-            );
-            return Ok(());
-        }
-
-        // Simple variable assignment: `name = expr` or `local name = expr`
-        let decl = trimmed.strip_prefix("local ").unwrap_or(trimmed);
-        if let Some((lhs, rhs)) = decl.split_once('=') {
-            let lhs = lhs.trim();
-            let rhs = rhs.trim();
-            if is_simple_identifier(lhs) {
-                // not expr
-                if let Some(inner) = rhs.strip_prefix("not ") {
-                    let current = self
-                        .state
-                        .variables
-                        .get(inner.trim())
-                        .cloned()
-                        .unwrap_or(Value::Bool(false));
-                    self.state.set(lhs, Value::Bool(!is_luau_truthy(&current)));
-                    return Ok(());
-                }
-                // literal value
-                if let Some(value) = parse_literal_value(rhs) {
-                    self.state.set(lhs, value);
-                    return Ok(());
-                }
-                // copy from another variable
-                if is_simple_identifier(rhs) {
-                    if let Some(value) = self.state.variables.get(rhs).cloned() {
-                        self.state.set(lhs, value);
-                        return Ok(());
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-fn is_luau_truthy(value: &Value) -> bool {
-    !matches!(value, Value::Bool(false) | Value::Null)
-}
-
-fn value_as_f64(v: &Value) -> Option<f64> {
-    v.as_f64()
-}
-
-fn value_as_string(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Bool(b) => b.to_string(),
-        Value::Null => "nil".to_string(),
-        _ => v.to_string(),
-    }
-}
-
-fn is_simple_identifier(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_')
-}
-
-/// Parse top-level `local name = literal` declarations (outside any function).
-fn parse_top_level_locals(source: &str) -> Vec<(String, Value)> {
-    let mut locals = Vec::new();
-    let mut depth = 0usize;
-
-    for line in source.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("function ") {
-            depth += 1;
-            continue;
-        }
-        if trimmed == "end" {
-            depth = depth.saturating_sub(1);
-            continue;
-        }
-        if depth > 0 {
-            continue;
-        }
-        // Top-level local declaration
-        if let Some(rest) = trimmed.strip_prefix("local ") {
-            if let Some((name, value_str)) = rest.split_once('=') {
-                let name = name.trim();
-                let value_str = value_str.trim();
-                // Skip interface/service bindings — handled separately
-                if value_str.contains("mesh.interfaces.get")
-                    || value_str.contains("mesh.services.get")
-                    || value_str.contains("mesh.service.bind")
-                {
-                    continue;
-                }
-                if is_simple_identifier(name) {
-                    if let Some(value) = parse_literal_value(value_str) {
-                        locals.push((name.to_string(), value));
-                    }
-                }
-            }
-        }
-    }
-
-    locals
-}
-
-/// Parse top-level `local x = mesh.service.bind("service.field")` declarations.
-/// These create reactive bindings: when the named service emits, `x` is updated
-/// from the specified field before `on_<service>_update()` is called.
-fn parse_service_bindings(source: &str) -> Vec<ServiceBinding> {
-    let mut bindings = Vec::new();
-    let mut depth = 0usize;
-
-    for line in source.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("function ") {
-            depth += 1;
-            continue;
-        }
-        if trimmed == "end" {
-            depth = depth.saturating_sub(1);
-            continue;
-        }
-        if depth > 0 {
-            continue;
-        }
-        if let Some(rest) = trimmed.strip_prefix("local ") {
-            if let Some((var_name, expr)) = rest.split_once('=') {
-                let var_name = var_name.trim();
-                let expr = expr.trim();
-                if let Some(args) = extract_call_args(expr, "mesh.service.bind") {
-                    if let Some(path) = args.first().and_then(|a| parse_string_literal(a)) {
-                        if let Some((service, field)) = path.split_once('.') {
-                            if is_simple_identifier(var_name) {
-                                bindings.push(ServiceBinding {
-                                    var_name: var_name.to_string(),
-                                    service: service.to_string(),
-                                    field: field.to_string(),
-                                });
-                            }
+        let interface_catalog = self.interface_catalog.clone();
+        let manifest = HostApiManifest::from_capabilities(&self.capabilities);
+        let allowed_interfaces = manifest.interface_capabilities.clone();
+        let has_theme_read = manifest.has_theme_read;
+        let has_locale_read = manifest.has_locale_read;
+        let bindings = Arc::clone(&self.shared_interface_bindings);
+        mesh_interfaces
+            .set(
+                "get",
+                self.lua
+                    .create_function(move |lua, (name, version): (String, Option<String>)| {
+                        let canonical = InterfaceProxy::canonical_name(&name);
+                        let readable = canonical == "mesh.theme" && has_theme_read
+                            || canonical == "mesh.locale" && has_locale_read
+                            || allowed_interfaces.contains(&canonical)
+                            || !canonical.starts_with("mesh.");
+                        if canonical.starts_with("mesh.") && !readable {
+                            return Err(mlua::Error::external(ScriptError::CapabilityDenied(
+                                canonical,
+                            )));
                         }
-                    }
+
+                        let resolution = interface_catalog.resolve(&canonical, version.as_deref());
+                        if resolution.contract.is_none() || resolution.provider.is_none() {
+                            return Err(mlua::Error::external(ScriptError::InterfaceUnavailable(
+                                format!(
+                                    "{}{}",
+                                    canonical,
+                                    version
+                                        .as_deref()
+                                        .map(|value| format!(" ({value})"))
+                                        .unwrap_or_default()
+                                ),
+                            )));
+                        }
+
+                        bindings.lock().unwrap().insert(name.clone(), resolution.clone());
+                        create_interface_proxy(lua, resolution)
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
+
+        let interfaces_get: Function = mesh_interfaces.get("get").map_err(lua_err)?;
+        mesh_services
+            .set(
+                "get",
+                self.lua
+                    .create_function(move |_lua, name: String| {
+                        interfaces_get.call::<LuaValue>((name, Option::<String>::None))
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
+
+        let published_events = Arc::clone(&self.shared_published_events);
+        let plugin_id = self.plugin_id.clone();
+        mesh_events
+            .set(
+                "publish",
+                self.lua
+                    .create_function(move |lua, (channel, payload): (String, Option<LuaValue>)| {
+                        let payload = payload.unwrap_or(LuaValue::Nil);
+                        let payload = lua.from_value::<Value>(payload)?;
+                        tracing::info!("{} published event {}", plugin_id, channel);
+                        published_events
+                            .lock()
+                            .unwrap()
+                            .push(PublishedEvent { channel, payload });
+                        Ok(())
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
+
+        mesh_ui
+            .set(
+                "request_redraw",
+                self.lua
+                    .create_function(|lua, ()| {
+                        lua.globals().set("__mesh_request_redraw", true)?;
+                        Ok(())
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
+
+        let plugin_id = self.plugin_id.clone();
+        mesh_log
+            .set(
+                "info",
+                self.lua
+                    .create_function(move |_lua, message: String| {
+                        tracing::info!("{}: {}", plugin_id, message);
+                        Ok(())
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
+        let plugin_id = self.plugin_id.clone();
+        mesh_log
+            .set(
+                "warn",
+                self.lua
+                    .create_function(move |_lua, message: String| {
+                        tracing::warn!("{}: {}", plugin_id, message);
+                        Ok(())
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
+        let plugin_id = self.plugin_id.clone();
+        mesh_log
+            .set(
+                "error",
+                self.lua
+                    .create_function(move |_lua, message: String| {
+                        tracing::error!("{}: {}", plugin_id, message);
+                        Ok(())
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
+
+        mesh.set("state", mesh_state).map_err(lua_err)?;
+        mesh.set("service", mesh_service).map_err(lua_err)?;
+        mesh.set("interfaces", mesh_interfaces).map_err(lua_err)?;
+        mesh.set("services", mesh_services).map_err(lua_err)?;
+        mesh.set("events", mesh_events).map_err(lua_err)?;
+        mesh.set("ui", mesh_ui).map_err(lua_err)?;
+        mesh.set("log", mesh_log).map_err(lua_err)?;
+        globals.set("mesh", mesh).map_err(lua_err)?;
+        globals.set("__mesh_request_redraw", false).map_err(lua_err)?;
+
+        let require = self
+            .lua
+            .create_function(|lua, module: String| {
+                if module == "@mesh/i18n" {
+                    let exports = lua.create_table()?;
+                    exports.set(
+                        "t",
+                        lua.create_function(|_lua, key: LuaValue| match key {
+                            LuaValue::String(s) => Ok(s.to_str()?.to_string()),
+                            other => Ok(lua_value_to_string(other)),
+                        })?,
+                    )?;
+                    return Ok(exports);
+                }
+                Err(mlua::Error::external(ScriptError::LuaError(format!(
+                    "unsupported require: {module}"
+                ))))
+            })
+            .map_err(lua_err)?;
+        globals.set("require", require).map_err(lua_err)?;
+        Ok(())
+    }
+
+    fn set_lua_global(&self, name: &str, value: &Value) {
+        if let Ok(lua_value) = self.lua.to_value(value) {
+            let _ = self.lua.globals().set(name, lua_value);
+        }
+    }
+
+    /// Sync Lua global values back into ScriptState for all keys registered
+    /// via `mesh.state.set`. Called after every script execution.
+    fn sync_state_from_lua(&mut self) {
+        let keys: Vec<String> = self.tracked_state_keys.lock().unwrap().iter().cloned().collect();
+        let globals = self.lua.globals();
+        for name in &keys {
+            if let Ok(lua_value) = globals.get::<LuaValue>(name.as_str()) {
+                if let Ok(value) = self.lua.from_value::<Value>(lua_value) {
+                    self.state.set(name.clone(), value);
                 }
             }
         }
-    }
-
-    bindings
-}
-
-/// Find the bounds of an if/then/[else]/end block starting from `start`.
-/// Returns (then_end, else_idx, end_idx).
-fn find_if_block_bounds(lines: &[String], start: usize) -> (usize, Option<usize>, usize) {
-    let mut depth = 1usize;
-    let mut else_idx = None;
-    let mut end_idx = start;
-
-    while end_idx < lines.len() {
-        let inner = lines[end_idx].trim();
-        if inner.starts_with("if ") && inner.ends_with(" then") {
-            depth += 1;
-        } else if inner == "end" {
-            depth -= 1;
-            if depth == 0 {
-                break;
-            }
-        } else if inner == "else" && depth == 1 {
-            else_idx = Some(end_idx);
-        }
-        end_idx += 1;
-    }
-
-    let then_end = else_idx.unwrap_or(end_idx);
-    (then_end, else_idx, end_idx)
-}
-
-fn parse_functions(source: &str) -> HashMap<String, ScriptFunction> {
-    let mut functions = HashMap::new();
-    let mut current_name: Option<String> = None;
-    let mut current_body = Vec::new();
-
-    for line in source.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("function ") {
-            if let Some(name) = rest.split('(').next() {
-                let name = name.trim();
-                if !name.is_empty() {
-                    current_name = Some(name.to_string());
-                    current_body.clear();
-                }
-            }
-            continue;
-        }
-
-        if trimmed == "end" {
-            if let Some(name) = current_name.take() {
-                tracing::debug!("registered handler: {name}");
-                functions.insert(
-                    name.clone(),
-                    ScriptFunction {
-                        body: std::mem::take(&mut current_body),
-                    },
-                );
-            }
-            continue;
-        }
-
-        if current_name.is_some() {
-            current_body.push(trimmed.to_string());
+        if globals
+            .get::<bool>("__mesh_request_redraw")
+            .unwrap_or(false)
+        {
+            self.state.dirty = true;
+            let _ = globals.set("__mesh_request_redraw", false);
         }
     }
 
-    functions
+    fn sync_side_channels(&mut self) {
+        {
+            let mut published = self.shared_published_events.lock().unwrap();
+            if !published.is_empty() {
+                self.published_events.extend(published.drain(..));
+            }
+        }
+        self.interface_bindings = self.shared_interface_bindings.lock().unwrap().clone();
+    }
 }
 
-fn extract_call_args(line: &str, prefix: &str) -> Option<Vec<String>> {
-    let call = line.strip_prefix(prefix)?;
-    let call = call.trim();
-    let inner = call.strip_prefix('(')?.strip_suffix(')')?;
-    Some(split_call_args(inner))
+fn create_interface_proxy(lua: &Lua, resolution: InterfaceResolution) -> mlua::Result<Table> {
+    let proxy = lua.create_table()?;
+    let meta = lua.create_table()?;
+    let resolution_for_index = resolution.clone();
+    meta.set(
+        "__index",
+        lua.create_function(move |lua, (_table, key): (Table, String)| {
+            let resolution = resolution_for_index.clone();
+            let method_name = key.clone();
+            lua.create_function(move |lua, _args: mlua::Variadic<LuaValue>| {
+                let contract = resolution.contract.as_ref().ok_or_else(|| {
+                    mlua::Error::external(ScriptError::InterfaceUnavailable(
+                        resolution.requested.clone(),
+                    ))
+                })?;
+
+                let method = contract.methods.iter().find(|candidate| candidate.name == method_name);
+                let Some(method) = method else {
+                    return Err(mlua::Error::external(ScriptError::UnsupportedOperation {
+                        interface: contract.interface.clone(),
+                        method: method_name.clone(),
+                    }));
+                };
+
+                default_lua_value_for_type(lua, &contract.types, method.returns.as_deref())
+            })
+        })?,
+    )?;
+    proxy.set_metatable(Some(meta))?;
+    Ok(proxy)
 }
 
-fn parse_interface_binding(line: &str) -> Option<(String, String, Option<String>)> {
-    let trimmed = line.trim();
-    let assignment = trimmed.strip_prefix("local ")?;
-    let (binding, expr) = assignment.split_once('=')?;
-    let binding = binding.trim().to_string();
-    let expr = expr.trim();
-
-    let (args, _kind) = if let Some(args) = extract_call_args(expr, "mesh.interfaces.get") {
-        (args, "interface")
-    } else if let Some(args) = extract_call_args(expr, "mesh.services.get") {
-        (args, "service")
-    } else {
-        return None;
+fn default_lua_value_for_type(
+    lua: &Lua,
+    types: &HashMap<String, InterfaceTypeDef>,
+    ty: Option<&str>,
+) -> mlua::Result<LuaValue> {
+    let Some(ty) = ty.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(LuaValue::Nil);
     };
 
-    let interface = parse_string_literal(args.first()?)?;
-    let version = args.get(1).and_then(|value| parse_string_literal(value));
-    Some((binding, interface, version))
-}
-
-fn parse_bound_method_call<'a>(
-    line: &'a str,
-    bindings: &HashMap<String, InterfaceResolution>,
-) -> Option<(&'a str, &'a str)> {
-    let trimmed = line.trim();
-    let call_target = trimmed.split('(').next()?.trim();
-
-    if let Some((binding, method)) = call_target.split_once(':') {
-        if bindings.contains_key(binding.trim()) {
-            return Some((binding.trim(), method.trim()));
-        }
+    if ty.ends_with('?') {
+        return Ok(LuaValue::Nil);
     }
 
-    if let Some((binding, method)) = call_target.split_once('.') {
-        if bindings.contains_key(binding.trim()) {
-            return Some((binding.trim(), method.trim()));
-        }
+    if ty.starts_with('[') && ty.ends_with(']') {
+        return Ok(LuaValue::Table(lua.create_table()?));
     }
 
-    None
-}
-
-fn split_call_args(inner: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    let mut current = String::new();
-    let mut in_string = false;
-    let mut quote = '\0';
-
-    for ch in inner.chars() {
-        match ch {
-            '"' | '\'' => {
-                current.push(ch);
-                if in_string && ch == quote {
-                    in_string = false;
-                    quote = '\0';
-                } else if !in_string {
-                    in_string = true;
-                    quote = ch;
+    let value = match ty {
+        "string" => LuaValue::String(lua.create_string("")?),
+        "boolean" => LuaValue::Boolean(false),
+        "float" | "number" | "integer" | "int" => LuaValue::Integer(0),
+        "Result" => LuaValue::Nil,
+        custom => {
+            if let Some(def) = types.get(custom) {
+                let table = lua.create_table()?;
+                for field in &def.fields {
+                    let field_value = default_lua_value_for_type(lua, types, Some(&field.arg_type))?;
+                    table.set(field.name.as_str(), field_value)?;
                 }
+                LuaValue::Table(table)
+            } else {
+                LuaValue::Nil
             }
-            ',' if !in_string => {
-                if !current.trim().is_empty() {
-                    args.push(current.trim().to_string());
-                }
-                current.clear();
-            }
-            _ => current.push(ch),
         }
-    }
+    };
 
-    if !current.trim().is_empty() {
-        args.push(current.trim().to_string());
-    }
-
-    args
+    Ok(value)
 }
 
-fn parse_string_literal(value: &str) -> Option<String> {
-    let value = value.trim();
-    if value.len() < 2 {
-        return None;
-    }
-
-    let quote = value.chars().next()?;
-    if (quote == '"' || quote == '\'') && value.ends_with(quote) {
-        return Some(value[1..value.len() - 1].to_string());
-    }
-
-    None
+fn map_lua_error(_catalog: &InterfaceCatalog, err: mlua::Error) -> ScriptError {
+    extract_script_error(&err).unwrap_or_else(|| ScriptError::LuaError(err.to_string()))
 }
 
-fn parse_literal_value(value: &str) -> Option<Value> {
-    if let Some(string) = parse_string_literal(value) {
-        return Some(Value::String(string));
-    }
-
-    match value.trim() {
-        "true" => Some(Value::Bool(true)),
-        "false" => Some(Value::Bool(false)),
-        "null" | "nil" => Some(Value::Null),
-        other => {
-            if let Ok(number) = other.parse::<i64>() {
-                return Some(Value::Number(number.into()));
-            }
-            if let Ok(number) = other.parse::<f64>() {
-                return serde_json::Number::from_f64(number).map(Value::Number);
-            }
-            None
-        }
+fn extract_script_error(err: &mlua::Error) -> Option<ScriptError> {
+    match err {
+        mlua::Error::CallbackError { cause, .. } => extract_script_error(cause),
+        mlua::Error::ExternalError(err) => err.downcast_ref::<ScriptError>().cloned(),
+        _ => None,
     }
 }
 
-fn parse_event_payload(value: &str) -> Option<Value> {
-    let trimmed = value.trim();
-    if trimmed == "{}" {
-        return Some(Value::Object(serde_json::Map::new()));
+fn lua_err(err: mlua::Error) -> ScriptError {
+    ScriptError::LuaError(err.to_string())
+}
+
+fn lua_value_to_string(value: LuaValue) -> String {
+    match value {
+        LuaValue::Nil => "nil".to_string(),
+        LuaValue::Boolean(v) => v.to_string(),
+        LuaValue::Integer(v) => v.to_string(),
+        LuaValue::Number(v) => v.to_string(),
+        LuaValue::String(v) => v.to_string_lossy(),
+        other => format!("{other:?}"),
     }
-    if trimmed == "[]" {
-        return Some(Value::Array(Vec::new()));
-    }
-    // Handle Luau table literal: { key = value, key2 = value2 }
-    if trimmed.starts_with('{') && trimmed.ends_with('}') {
-        let inner = &trimmed[1..trimmed.len() - 1];
-        let mut map = serde_json::Map::new();
-        for pair in inner.split(',') {
-            let pair = pair.trim();
-            if pair.is_empty() {
-                continue;
-            }
-            if let Some(eq) = pair.find('=') {
-                let key = pair[..eq].trim().trim_matches('"').trim_matches('\'');
-                let val_str = pair[eq + 1..].trim();
-                if let Some(val) = parse_literal_value(val_str) {
-                    map.insert(key.to_string(), val);
-                }
-            }
-        }
-        if !map.is_empty() {
-            return Some(Value::Object(map));
-        }
-    }
-    parse_literal_value(trimmed)
 }
 
 /// A `VariableStore` that combines script state with locale engine access.
@@ -954,7 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn binds_interface_aliases_from_new_api() {
+    fn binds_interface_from_new_api() {
         let mut caps = CapabilitySet::new();
         caps.grant(Capability::new("service.audio.read"));
         let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
@@ -971,14 +808,14 @@ end
 
         assert_eq!(
             ctx.interface_bindings
-                .get("audio")
+                .get("mesh.audio")
                 .map(|resolution| resolution.requested.as_str()),
             Some("mesh.audio")
         );
     }
 
     #[test]
-    fn binds_interface_aliases_from_legacy_service_api() {
+    fn binds_interface_from_legacy_service_api() {
         let mut caps = CapabilitySet::new();
         caps.grant(Capability::new("service.audio.read"));
 
@@ -1045,13 +882,13 @@ end
     }
 
     #[test]
-    fn top_level_locals_seed_state() {
+    fn explicit_state_set_seeds_and_tracks_state() {
         let caps = CapabilitySet::new();
         let mut ctx = ScriptContext::new("@test/local", caps).unwrap();
         ctx.load_script(
             r#"
-local volumeHidden = true
-local count = 0
+mesh.state.set("volumeHidden", true)
+mesh.state.set("count", 0)
 
 function toggle()
     volumeHidden = not volumeHidden
@@ -1060,11 +897,9 @@ end
         )
         .unwrap();
 
-        // Initial state from top-level locals
         assert_eq!(ctx.state.get("volumeHidden"), Some(Value::Bool(true)));
         assert_eq!(ctx.state.get("count"), Some(Value::Number(0.into())));
 
-        // Toggle negates the boolean
         ctx.call_handler("toggle", &[]).unwrap();
         assert_eq!(ctx.state.get("volumeHidden"), Some(Value::Bool(false)));
 
@@ -1078,8 +913,8 @@ end
         let mut ctx = ScriptContext::new("@test/if", caps).unwrap();
         ctx.load_script(
             r#"
-local a = true
-local b = false
+mesh.state.set("a", true)
+mesh.state.set("b", false)
 
 function run()
     a = not a
@@ -1102,23 +937,24 @@ end
     }
 
     #[test]
-    fn service_bindings_update_local_vars_and_trigger_handler() {
+    fn service_bindings_update_globals_and_trigger_handler() {
         let caps = CapabilitySet::new();
         let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
         ctx.load_script(
             r#"
-local icon_name = "audio-volume-muted"
-local muted = mesh.service.bind("audio.muted")
-local percent = mesh.service.bind("audio.percent")
+mesh.state.set("icon_name", "audio-volume-muted")
+mesh.service.bind("audio.muted", "audio_muted")
+mesh.service.bind("audio.percent", "audio_percent")
+mesh.service.on("audio", "sync_audio_state")
 
-function on_audio_update()
-    if muted then
+function sync_audio_state()
+    if audio_muted then
         icon_name = "audio-volume-muted"
     else
-        if percent < 34 then
+        if audio_percent < 34 then
             icon_name = "audio-volume-low"
         else
-            if percent < 67 then
+            if audio_percent < 67 then
                 icon_name = "audio-volume-medium"
             else
                 icon_name = "audio-volume-high"
@@ -1139,7 +975,7 @@ end
         // Simulate 65% volume, not muted
         let payload = serde_json::json!({ "percent": 65, "muted": false });
         ctx.apply_service_bindings("audio", &payload);
-        ctx.call_handler("on_audio_update", &[]).unwrap();
+        ctx.call_service_handlers("audio").unwrap();
         assert_eq!(
             ctx.state.get("icon_name"),
             Some(Value::String("audio-volume-medium".into()))
@@ -1148,7 +984,7 @@ end
         // High volume
         let payload = serde_json::json!({ "percent": 90, "muted": false });
         ctx.apply_service_bindings("audio", &payload);
-        ctx.call_handler("on_audio_update", &[]).unwrap();
+        ctx.call_service_handlers("audio").unwrap();
         assert_eq!(
             ctx.state.get("icon_name"),
             Some(Value::String("audio-volume-high".into()))
@@ -1157,10 +993,48 @@ end
         // Muted
         let payload = serde_json::json!({ "percent": 90, "muted": true });
         ctx.apply_service_bindings("audio", &payload);
-        ctx.call_handler("on_audio_update", &[]).unwrap();
+        ctx.call_service_handlers("audio").unwrap();
         assert_eq!(
             ctx.state.get("icon_name"),
             Some(Value::String("audio-volume-muted".into()))
         );
+    }
+
+    #[test]
+    fn handler_receives_event_payload_argument() {
+        let caps = CapabilitySet::new();
+        let mut ctx = ScriptContext::new("@test/click", caps).unwrap();
+        ctx.load_script(
+            r#"
+mesh.state.set("last_margin_left", 0)
+mesh.state.set("last_pointer_x", 0)
+
+function on_click(event)
+    last_margin_left = event.current_target.position.margin_left
+    last_pointer_x = event.pointer.x
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.call_handler(
+            "on_click",
+            &[serde_json::json!({
+                "pointer": { "x": 42.0, "y": 10.0 },
+                "current_target": {
+                    "position": {
+                        "margin_left": 128,
+                        "margin_top": 8
+                    }
+                }
+            })],
+        )
+        .unwrap();
+
+        assert_eq!(
+            ctx.state.get("last_margin_left"),
+            Some(Value::Number(128.into()))
+        );
+        assert_eq!(ctx.state.get("last_pointer_x"), Some(serde_json::json!(42)));
     }
 }

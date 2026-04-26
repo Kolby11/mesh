@@ -77,6 +77,16 @@ Extensions can implement:
 - themes
 - language packs
 
+Backend/service plugins must be implemented in the plugin's scripting language
+through the extension runtime host API, not in Rust shell code. If a plugin
+needs a new system capability, add a generic host API to the runtime and keep
+the service-specific logic inside the plugin script.
+
+Luau execution should go through a real runtime library, not hand-written
+string parsing. Use `mlua` in Luau mode for script execution and treat any
+custom parsing/interpreting as temporary migration code to remove, not a model
+to expand.
+
 ### 4. UI component format
 
 Single-file components inspired by Svelte.

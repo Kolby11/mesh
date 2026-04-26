@@ -8,17 +8,6 @@ pub(super) fn seed_service_state(state: &mut ScriptState) {
         "last_service_update",
         serde_json::json!({ "name": "", "source_plugin": "" }),
     );
-    // Default unavailable stub — replaced by the audio backend plugin's first emission.
-    state.set(
-        "audio",
-        serde_json::json!({
-            "available": false,
-            "percent": 0,
-            "label": "Unavailable",
-            "glyph": "VOL",
-            "source_plugin": "",
-        }),
-    );
 }
 
 /// Apply a service update payload into a component's script state.
@@ -75,6 +64,27 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                 .map(|id| CoreRequest::ToggleSurface {
                     surface_id: id.to_string(),
                 }),
+            "shell.position-surface" => {
+                let surface_id = event
+                    .payload
+                    .get("surface_id")
+                    .and_then(|v| v.as_str())?;
+                let margin_top = event
+                    .payload
+                    .get("margin_top")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as i32;
+                let margin_left = event
+                    .payload
+                    .get("margin_left")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as i32;
+                Some(CoreRequest::PositionSurface {
+                    surface_id: surface_id.to_string(),
+                    margin_top,
+                    margin_left,
+                })
+            }
             other => other.rfind('.').map(|pos| CoreRequest::ServiceCommand {
                 interface: other[..pos].to_string(),
                 command: other[pos + 1..].to_string(),

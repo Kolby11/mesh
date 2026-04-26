@@ -45,6 +45,9 @@ pub struct CompiledFrontendPlugin {
     pub manifest: Manifest,
     pub source_path: PathBuf,
     pub component: ComponentFile,
+    /// Local single-file components shipped in `src/components/*.mesh` inside
+    /// the plugin directory. Keyed by filename stem (e.g. `settings-button`).
+    pub local_components: std::collections::HashMap<String, mesh_component::ComponentFile>,
 }
 
 impl CompiledFrontendPlugin {
@@ -194,6 +197,70 @@ fn collect_component_tags(nodes: &[TemplateNode], tags: &mut Vec<String>) {
     }
 }
 
+/// Build a WidgetNode subtree from a parsed local ComponentFile.
+/// This is a public helper so other crates (core) can render local
+/// component templates without duplicating the template->widget logic.
+///
+/// `host_rules` are the parent plugin's CSS rules. They are merged before the
+/// component's own rules so that parent-defined classes (e.g. `.battery-widget`)
+/// apply inside child component templates as intended.
+pub fn build_widget_tree_from_component(
+    component: &mesh_component::ComponentFile,
+    host_manifest: &Manifest,
+    theme: &Theme,
+    container_width: f32,
+    container_height: f32,
+    composition: Option<&dyn FrontendCompositionResolver>,
+    instance_key: &str,
+    state: Option<&dyn VariableStore>,
+    host_rules: &[mesh_component::style::StyleRule],
+) -> WidgetNode {
+    let resolver = StyleResolver::new(theme);
+    let component_rules: &[mesh_component::style::StyleRule] = component
+        .style
+        .as_ref()
+        .map(|s| s.rules.as_slice())
+        .unwrap_or(&[]);
+    let merged: Vec<mesh_component::style::StyleRule>;
+    let rules: &[mesh_component::style::StyleRule] = if host_rules.is_empty() {
+        component_rules
+    } else if component_rules.is_empty() {
+        host_rules
+    } else {
+        merged = host_rules.iter().chain(component_rules.iter()).cloned().collect();
+        &merged
+    };
+
+    if let Some(template) = &component.template {
+        let child_context = StyleContext {
+            container_width,
+            container_height,
+        };
+        let children: Vec<WidgetNode> = template
+            .root
+            .iter()
+            .map(|node| {
+                build_widget_node(
+                    node,
+                    host_manifest,
+                    rules,
+                    &resolver,
+                    None,
+                    child_context,
+                    state,
+                    instance_key,
+                    composition,
+                )
+            })
+            .collect();
+        let mut container = WidgetNode::new("box");
+        container.children = children;
+        container
+    } else {
+        WidgetNode::new("box")
+    }
+}
+
 fn parse_accessibility_role(role: &str) -> AccessibilityRole {
     match role.trim().to_ascii_lowercase().as_str() {
         "button" => AccessibilityRole::Button,
@@ -289,11 +356,124 @@ pub fn compile_frontend_plugin(
             source,
         }
     })?;
-    let component =
+    let mut component =
         parse_component(&source).map_err(|source| CompileFrontendError::ParseSource {
             path: source_path.clone(),
             source,
         })?;
+
+    // Scan for local component files in `src/components/*.mesh` and parse them.
+    let mut local_components: std::collections::HashMap<String, mesh_component::ComponentFile> =
+        std::collections::HashMap::new();
+    let components_dir = plugin_dir.join("src").join("components");
+    if components_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&components_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("mesh") {
+                    if let Ok(src) = std::fs::read_to_string(&path) {
+                        match parse_component(&src) {
+                            Ok(comp) => {
+                                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                                    // register by kebab-case stem
+                                    local_components.insert(stem.to_string(), comp.clone());
+                                    // also register PascalCase variant so <MyWidget/>
+                                    // resolves when file is `my-widget.mesh`.
+                                    let pascal = stem
+                                        .split('-')
+                                        .filter(|p| !p.is_empty())
+                                        .map(|p| {
+                                            let mut c = p.chars();
+                                            match c.next() {
+                                                Some(first) => {
+                                                    first.to_ascii_uppercase().to_string()
+                                                        + c.as_str()
+                                                }
+                                                None => String::new(),
+                                            }
+                                        })
+                                        .collect::<String>();
+                                    if !pascal.is_empty() {
+                                        local_components.insert(pascal.clone(), comp.clone());
+                                    }
+
+                                    // Expose these local components implicitly by adding
+                                    // import entries mapping alias -> host plugin id so
+                                    // templates can reference them directly.
+                                    component
+                                        .imports
+                                        .entry(stem.to_string())
+                                        .or_insert_with(|| manifest.package.id.clone());
+                                    if !pascal.is_empty() {
+                                        component
+                                            .imports
+                                            .entry(pascal)
+                                            .or_insert_with(|| manifest.package.id.clone());
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                tracing::warn!(
+                                    "plugin '{}': failed to parse local component {}: {}",
+                                    manifest.package.id,
+                                    path.display(),
+                                    err
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Post-process imports: values starting with '@' are treated as
+    // relative paths inside the plugin directory. Parse those files and
+    // register them as local components keyed by the import alias so the
+    // template may reference them using the alias name.
+    let mut imports_to_fix: Vec<String> = Vec::new();
+    for (alias, target) in component.imports.iter() {
+        if target.starts_with('@') {
+            imports_to_fix.push(alias.clone());
+        }
+    }
+
+    for alias in imports_to_fix {
+        if let Some(target) = component.imports.get(&alias) {
+            let rel = target.trim_start_matches('@');
+            let mut candidate = plugin_dir.join(rel);
+            if candidate.extension().is_none() {
+                candidate.set_extension("mesh");
+            }
+            if let Ok(src) = std::fs::read_to_string(&candidate) {
+                match parse_component(&src) {
+                    Ok(comp) => {
+                        // register by alias so render_import can find it
+                        local_components.insert(alias.clone(), comp);
+                        // make scripts see the host plugin id under this alias
+                        // so existing code that seeds aliases keeps working.
+                        // (alias -> host plugin id)
+                        // Note: mutate the component.imports map accordingly.
+                        // We need a mutable reference; recreate a new map.
+                    }
+                    Err(err) => tracing::warn!(
+                        "plugin '{}': failed to parse imported local component {}: {}",
+                        manifest.package.id,
+                        candidate.display(),
+                        err
+                    ),
+                }
+            }
+        }
+    }
+
+    // Replace any import values that were local paths with the host plugin id
+    // so the runtime alias seeding remains compatible with existing behavior.
+    for (_alias, value) in component.imports.iter_mut() {
+        if value.starts_with('@') {
+            *value = manifest.package.id.clone();
+        }
+    }
 
     tracing::info!(
         "compiled frontend plugin '{}' from {}",
@@ -305,6 +485,7 @@ pub fn compile_frontend_plugin(
         manifest: manifest.clone(),
         source_path,
         component,
+        local_components,
     })
 }
 

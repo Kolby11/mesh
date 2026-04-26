@@ -414,6 +414,14 @@ impl FrontendSurfaceComponent {
                 // child variables appear in the root namespace. If a name would
                 // collide with an existing root variable, register under
                 // "{alias}.{name}" instead.
+                //
+                // Local-component aliases (plugin_id == self) have no child
+                // runtime; skip the re-lock to avoid deadlocking the mutex
+                // that is already held by root_runtime above.
+                if plugin_id == self.id() {
+                    continue;
+                }
+
                 let existing_keys: Vec<String> = root_runtime.script_ctx.state().keys();
 
                 let runtimes_ref = self.runtimes.lock().unwrap();
@@ -954,6 +962,7 @@ impl FrontendSurfaceComponent {
     fn call_namespaced_handler(
         &mut self,
         handler: &str,
+        args: &[serde_json::Value],
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let (instance_key, handler_name, component_id) =
             if let Some((instance_key, handler_name)) = parse_namespaced_handler(handler) {
@@ -983,7 +992,7 @@ impl FrontendSurfaceComponent {
         };
         runtime
             .script_ctx
-            .call_handler(&handler_name, &[])
+            .call_handler(&handler_name, args)
             .map_err(|source| ComponentError::Script {
                 component_id,
                 source,
@@ -993,6 +1002,58 @@ impl FrontendSurfaceComponent {
         Ok(script_events_to_requests(
             runtime.script_ctx.drain_published_events(),
         ))
+    }
+
+    fn build_click_event(
+        &self,
+        tree: &WidgetNode,
+        node_key: &str,
+        x: f32,
+        y: f32,
+    ) -> serde_json::Value {
+        let target = find_node_by_key(tree, node_key);
+        let (left, top, right, bottom) =
+            find_node_bounds_by_key(tree, node_key, 0.0, 0.0).unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let width = (right - left).max(0.0);
+        let height = (bottom - top).max(0.0);
+        let bounds = serde_json::json!({
+            "left": left,
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+            "width": width,
+            "height": height,
+        });
+        let position = serde_json::json!({
+            "margin_left": left as i32,
+            "margin_top": (bottom - tree.layout.height).max(0.0) as i32,
+        });
+        let tag = target.map(|node| node.tag.clone()).unwrap_or_default();
+
+        serde_json::json!({
+            "type": "click",
+            "pointer": {
+                "x": x,
+                "y": y,
+            },
+            "surface": {
+                "id": self.surface_id(),
+                "width": tree.layout.width,
+                "height": tree.layout.height,
+            },
+            "current": {
+                "key": node_key,
+                "tag": tag,
+                "bounds": bounds,
+                "position": position,
+            },
+            "current_target": {
+                "key": node_key,
+                "tag": tag,
+                "bounds": bounds,
+                "position": position,
+            }
+        })
     }
 }
 
@@ -1038,6 +1099,38 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             .get(&plugin_id)
             .map(|e| e.compiled.manifest.package.plugin_type == PluginType::Surface)
             .unwrap_or(false);
+        // If the resolved plugin is the host itself, allow local components
+        // shipped under `src/components/<alias>.mesh` to be rendered inline.
+        if plugin_id == host.package.id {
+            if let Some(entry) = self.frontend_catalog.plugins.get(&host.package.id) {
+                if let Some(local) = entry.compiled.local_components.get(alias) {
+                    let theme = self.active_theme.borrow().clone();
+                    let host_state = self
+                        .runtime_state(host_instance_key)
+                        .unwrap_or_default();
+                    let bound = LocaleBoundState::new(&host_state, &self.locale);
+                    let host_rules = entry
+                        .compiled
+                        .component
+                        .style
+                        .as_ref()
+                        .map(|s| s.rules.as_slice())
+                        .unwrap_or(&[]);
+                    let node = mesh_component_backend::build_widget_tree_from_component(
+                        local,
+                        host,
+                        &theme,
+                        container_width,
+                        container_height,
+                        Some(self),
+                        host_instance_key,
+                        Some(&bound),
+                        host_rules,
+                    );
+                    return Some(node);
+                }
+            }
+        }
         if is_surface {
             let hidden = props
                 .get("hidden")
@@ -1194,11 +1287,10 @@ impl ShellComponent for FrontendSurfaceComponent {
                 payload.clone(),
             );
             if has_read {
-                runtime.script_ctx.apply_service_bindings(&service_name, &payload);
-            }
-            let handler = format!("on_{service_name}_update");
-            if has_read && runtime.script_ctx.has_handler(&handler) {
-                let _ = runtime.script_ctx.call_handler(&handler, &[]);
+                runtime
+                    .script_ctx
+                    .apply_service_bindings(&service_name, &payload);
+                let _ = runtime.script_ctx.call_service_handlers(&service_name);
             }
         }
         self.dirty = true;
@@ -1466,34 +1558,8 @@ impl ShellComponent for FrontendSurfaceComponent {
                     if let Some(node_key) = find_focusable_at(&tree, x, y) {
                         if self.pointer_down_key.as_deref() == Some(node_key.as_str()) {
                             if let Some(handler) = find_click_handler(&tree, &node_key) {
-                                let position_request = find_node_by_key(&tree, &node_key)
-                                    .and_then(|n| n.attributes.get("data-opens").cloned())
-                                    .and_then(|opens| {
-                                        find_node_bounds_by_key(&tree, &node_key, 0.0, 0.0).map(
-                                            |(left, _top, _right, bottom)| {
-                                                // Layer-shell margins for overlay popovers are
-                                                // applied relative to the compositor's usable
-                                                // area after top exclusive zones. Buttons inside
-                                                // top bars report bounds in the surface's local
-                                                // coordinates, so using their raw bottom here
-                                                // adds an extra vertical gap equal to that local
-                                                // offset. Convert to a margin relative to the
-                                                // current surface bottom instead.
-                                                let margin_top =
-                                                    (bottom - tree.layout.height).max(0.0) as i32;
-                                                CoreRequest::PositionSurface {
-                                                    surface_id: opens,
-                                                    margin_top,
-                                                    margin_left: left as i32,
-                                                }
-                                            },
-                                        )
-                                    });
-                                let mut requests = self.call_namespaced_handler(&handler)?;
-                                if let Some(pos_req) = position_request {
-                                    requests.insert(0, pos_req);
-                                }
-                                return Ok(requests);
+                                let click_event = self.build_click_event(&tree, &node_key, x, y);
+                                return Ok(self.call_namespaced_handler(&handler, &[click_event])?);
                             }
                         }
                     }

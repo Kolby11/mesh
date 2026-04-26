@@ -35,4 +35,4 @@ lifecycle spec see [`../spec/pluggable-backend.md`](../spec/pluggable-backend.md
   - [`installation.md`](./installation.md) — `plugin.json` manifest,
     dependency kinds, resolution, multi-provider handling, lockfile.
   - [`health.md`](./health.md) — plugin health states, dep-driven fix
-    suggestions, `widget-fallback`, `mesh doctor`.
+    suggestions, health subscriptions, `mesh doctor`.

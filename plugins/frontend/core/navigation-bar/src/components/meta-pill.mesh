@@ -1,0 +1,43 @@
+<template>
+  <div class="meta-pill">
+    <span class="meta-pill-text">{t('nav.dashboard')}</span>
+  </div>
+</template>
+
+<script lang="luau">
+-- Presentational. Translates could be localized by parent if needed.
+</script>
+
+<style>
+.meta-pill {
+    width: content;
+    flex-shrink: 0;
+    text-wrap: none;
+    justify-content: center;
+    align-items: center;
+    padding-block: token(spacing.xs);
+    padding-inline: token(spacing.sm);
+    border-radius: token(radius.full);
+    background: token(color.tertiary-container);
+}
+
+.meta-pill-text {
+    color: token(color.on-tertiary-container);
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+}
+
+.meta-pill:hover {
+    background: token(color.secondary-container);
+}
+
+.meta-pill-text:hover {
+    color: token(color.on-secondary-container);
+}
+
+@container (max-width: 760px) {
+    .meta-pill {
+        display: none;
+    }
+}
+</style>

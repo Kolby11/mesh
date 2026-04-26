@@ -1,0 +1,21 @@
+<template>
+  <span class="meta-label">{t('nav.current')}</span>
+</template>
+
+<script lang="luau">
+-- Presentational label that reads the translation function from the parent scope.
+</script>
+
+<style>
+.meta-label {
+    width: 64px;
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.xs);
+}
+
+@container (max-width: 760px) {
+    .meta-label {
+        display: none;
+    }
+}
+</style>

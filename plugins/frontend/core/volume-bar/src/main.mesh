@@ -8,35 +8,46 @@
       max="100"
       value="{audio.percent}"
       mesh-action="audio-volume"
-      title="{audio.tooltip}"
+      title="{audio_tooltip}"
       aria-label="Volume"
     />
-    <span class="label">{audio.label}</span>
+    <span class="label">{audio_label}</span>
   </section>
 </template>
 
 <script lang="luau">
-local icon_name = "audio-volume-muted"
-local muted = mesh.service.bind("audio.muted")
-local percent = mesh.service.bind("audio.percent")
+mesh.state.set("icon_name", "audio-volume-muted")
+mesh.state.set("audio_label", "0%")
+mesh.state.set("audio_tooltip", "Volume unavailable")
+mesh.service.bind("audio.muted", "audio_muted")
+mesh.service.bind("audio.percent", "audio_percent")
+mesh.service.on("audio", "sync_audio_state")
 
-function on_audio_update()
-    if muted then
+function sync_audio_state()
+    if audio_muted then
         icon_name = "audio-volume-muted"
     else
-        if percent == 0 then
+        if audio_percent == 0 then
             icon_name = "audio-volume-muted"
         else
-            if percent < 34 then
+            if audio_percent < 34 then
                 icon_name = "audio-volume-low"
             else
-                if percent < 67 then
+                if audio_percent < 67 then
                     icon_name = "audio-volume-medium"
                 else
                     icon_name = "audio-volume-high"
                 end
             end
         end
+    end
+
+    local safe_percent = audio_percent or 0
+    audio_label = string.format("%d%%", safe_percent)
+    if audio_muted then
+        audio_tooltip = string.format("Volume muted at %d%%", safe_percent)
+    else
+        audio_tooltip = string.format("Volume %d%%", safe_percent)
     end
 end
 

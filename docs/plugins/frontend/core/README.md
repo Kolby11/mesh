@@ -8,6 +8,11 @@ Frontends look up services **by interface name only** — never by backend plugi
 ID. If no implementation is registered, the lookup returns `nil` and the
 frontend is expected to degrade gracefully.
 
+The core's job here is generic: compile the `.mesh` file, host the Luau
+runtime, forward raw service payloads into script state, and route emitted
+events back into shell requests or backend commands. Frontend-specific display
+logic still lives in the plugin.
+
 Frontend composition now happens in two ways:
 
 - Dependency-backed component imports: add a frontend plugin to
@@ -15,17 +20,28 @@ Frontend composition now happens in two ways:
   `plugin.json.exports.component.tag` in `<template>` markup
 - Slot hosting via `provides_slots` and `slot_contributions`
 
+Common frontend pattern:
+
 ```luau
-local audio = mesh.interfaces.get("mesh.audio", ">=1.0")  -- may be nil
-if audio then
-    local dev = audio:default_output()
-    ...
+mesh.state.set("volume_icon_name", "audio-volume-muted")
+mesh.service.bind("audio.muted", "audio_muted")
+mesh.service.bind("audio.percent", "audio_percent")
+mesh.service.on("audio", "sync_audio_state")
+
+function sync_audio_state()
+    if audio_muted or audio_percent == 0 then
+        volume_icon_name = "audio-volume-muted"
+    elseif audio_percent < 67 then
+        volume_icon_name = "audio-volume-medium"
+    else
+        volume_icon_name = "audio-volume-high"
+    end
 end
 ```
 
-The returned handle is a proxy over the `mesh.audio` contract — see
-[`docs/extensibility.md`](../../../extensibility.md) for the full interface
-model.
+`mesh.interfaces.get(...)` is still available for request/response style
+lookups, but most reactive UI should treat service payloads as plugin-owned
+data and derive its own labels, icons, and tooltips locally.
 
 For a larger copyable composition example, see
 [`docs/plugins/frontend/examples/README.md`](../examples/README.md).
@@ -37,8 +53,8 @@ these blocks:
 
 | Block | Purpose |
 |-------|---------|
-| `<template>` | XHTML-like markup describing the UI tree. Attributes prefixed with `:` are bindings; `@event` attributes are handlers. |
-| `<script lang="luau">` | Luau code implementing state, lifecycle hooks (`init`), and event handlers. |
+| `<template>` | XHTML-like markup describing the UI tree. Dynamic attributes use `{}` and event handlers use `onclick={handler}`-style attributes. |
+| `<script lang="luau">` | Luau code implementing state, explicit `mesh.service.bind(...)` and `mesh.service.on(...)` subscriptions, and event handlers. |
 | `<style>` | CSS-like styling. Token references use `token(group.name)` and inherit the active theme. Supports `overflow`, `overflow-x`, `overflow-y`, and container breakpoints via `@container (min-width: 640px) { ... }`. |
 | `<schema>` | TOML-style declaration of the plugin's public settings. The shell validates user input and can auto-generate a settings UI. |
 | `<i18n>` | Translations scoped to the component (optional). |

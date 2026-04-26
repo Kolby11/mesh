@@ -66,7 +66,7 @@ Embed dynamic values directly in element content using `{}`:
 
 ```xml
 <span class="label">{active}</span>
-<span class="value">{audio.label}</span>
+<span class="value">{volume_label}</span>
 <p>{t("greeting", { name = userName })}</p>
 ```
 
@@ -87,8 +87,8 @@ Write static attributes exactly as in HTML:
 Use `{}` to bind an expression to any attribute value:
 
 ```xml
-<button title="{audio.tooltip}" aria-label="{audio.ariaLabel}">
-  <span>{audio.glyph}</span>
+<button title="{volume_tooltip}" aria-label="{volume_aria_label}">
+  <span>{volume_icon_name}</span>
 </button>
 
 <div class="chip {active ? 'chip--on' : 'chip--off'}">{label}</div>
@@ -96,15 +96,17 @@ Use `{}` to bind an expression to any attribute value:
 
 ### Two-way binding
 
-Use `bind:attr=variable` to sync an element's attribute back to a Luau variable. This follows the same pattern as Svelte.
+Use `bind:attr="variable"` to sync an element's attribute back to script
+state.
 
 ```xml
-<input type="text" bind:value=searchQuery />
-<input type="range" min="0" max="100" bind:value=volume />
-<input type="checkbox" bind:checked=enabled />
+<input type="text" bind:value="searchQuery" />
+<input type="range" min="0" max="100" bind:value="volume" />
+<input type="checkbox" bind:checked="enabled" />
 ```
 
-The runtime reads the initial value from the variable and writes back on change. The variable must be declared in `<script>`.
+The runtime reads the initial value from script state and writes back on
+change. The variable should be initialized in `<script>`.
 
 ### Event handlers
 
@@ -115,6 +117,10 @@ Use standard HTML event attribute names with a Luau function reference in `{}`:
 <input type="text" oninput={onSearch} />
 <div onmouseenter={onHover} onmouseleave={onBlur}>...</div>
 ```
+
+Handlers receive an event object. For click handlers, that includes trigger
+geometry under `event.current_target`, so a callback can position a surface
+explicitly before showing it.
 
 Common event attributes:
 
@@ -143,8 +149,8 @@ Always include accessibility attributes where they add meaning. MESH treats thes
   aria-pressed="{isMuted}"
   onclick={onVolumeClick}
 >
-  <span aria-hidden="true">{audio.glyph}</span>
-  <span class="volume-value">{audio.label}</span>
+  <span aria-hidden="true">{volume_icon_name}</span>
+  <span class="volume-value">{volume_label}</span>
 </button>
 ```
 
@@ -158,11 +164,16 @@ Logic lives in the `<script lang="luau">` block. Variables declared here are rea
 
 ```xml
 <script lang="luau">
-local active = "Dashboard"
-local volume = 42
+mesh.state.set("active", "Dashboard")
+mesh.state.set("volume", 42)
 
-function onVolumeClick()
-  mesh.events.publish("shell.toggle-quick-settings", {})
+function onVolumeClick(event)
+  mesh.events.publish("shell.position-surface", {
+    surface_id = "@mesh/quick-settings",
+    margin_top = event.current_target.position.margin_top,
+    margin_left = event.current_target.position.margin_left,
+  })
+  mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/quick-settings" })
 end
 
 function onSearch(event)
@@ -173,14 +184,56 @@ end
 
 ### Receiving service data
 
-The shell injects service data as top-level variables. Reference them directly in the template:
+Service data is produced by backend plugins, routed by the core, and exposed
+to frontend scripts as raw payload. Frontends should derive display state
+locally in their own script code.
 
 ```xml
 <script lang="luau">
--- audio is injected by the shell from the audio service
--- audio.glyph, audio.label, audio.tooltip are read-only
+mesh.state.set("volume_icon_name", "audio-volume-muted")
+mesh.state.set("volume_label", "0%")
+mesh.state.set("volume_tooltip", "Volume unavailable")
+
+mesh.service.bind("audio.muted", "audio_muted")
+mesh.service.bind("audio.percent", "audio_percent")
+mesh.service.on("audio", "sync_audio_state")
+
+function sync_audio_state()
+  if audio_muted or audio_percent == 0 then
+    volume_icon_name = "audio-volume-muted"
+  elseif audio_percent < 34 then
+    volume_icon_name = "audio-volume-low"
+  elseif audio_percent < 67 then
+    volume_icon_name = "audio-volume-medium"
+  else
+    volume_icon_name = "audio-volume-high"
+  end
+
+  volume_label = string.format("%d%%", audio_percent or 0)
+  volume_tooltip = string.format("Volume %d%%", audio_percent or 0)
+end
 </script>
 ```
+
+The template can read the raw service object as `{audio.*}` after updates
+arrive. The script can opt into explicit local names like `audio_muted` and
+`audio_percent` through `mesh.service.bind("audio.field", "local_name")`, and
+it subscribes to updates explicitly with `mesh.service.on("audio", "handler")`.
+
+For pointer-driven handlers like `onclick`, the callback also receives an
+event table with:
+
+```lua
+event.pointer.x
+event.pointer.y
+event.current_target.bounds.left
+event.current_target.bounds.bottom
+event.current_target.position.margin_left
+event.current_target.position.margin_top
+```
+
+That makes "open this popover at the trigger position" fully explicit in the
+frontend script.
 
 ---
 
@@ -229,13 +282,13 @@ Container queries are supported:
       <button
         class="volume-widget"
         onclick={onVolumeClick}
-        title="{audio.tooltip}"
+        title="{volume_tooltip}"
         aria-label="Open audio controls"
       >
-        <span class="volume-glyph" aria-hidden="true">{audio.glyph}</span>
+        <span class="volume-glyph" aria-hidden="true">{volume_icon_name}</span>
         <div class="volume-copy">
           <span class="volume-label">Volume</span>
-          <span class="volume-value">{audio.label}</span>
+          <span class="volume-value">{volume_label}</span>
         </div>
       </button>
     </div>
@@ -243,10 +296,32 @@ Container queries are supported:
 </template>
 
 <script lang="luau">
-local active = "Dashboard"
+mesh.state.set("active", "Dashboard")
+mesh.state.set("volume_icon_name", "audio-volume-muted")
+mesh.state.set("volume_label", "0%")
+mesh.state.set("volume_tooltip", "Volume unavailable")
+
+mesh.service.bind("audio.muted", "audio_muted")
+mesh.service.bind("audio.percent", "audio_percent")
+mesh.service.on("audio", "sync_audio_state")
+
+function sync_audio_state()
+    if audio_muted or audio_percent == 0 then
+        volume_icon_name = "audio-volume-muted"
+    elseif audio_percent < 34 then
+        volume_icon_name = "audio-volume-low"
+    elseif audio_percent < 67 then
+        volume_icon_name = "audio-volume-medium"
+    else
+        volume_icon_name = "audio-volume-high"
+    end
+
+    volume_label = string.format("%d%%", audio_percent or 0)
+    volume_tooltip = string.format("Volume %d%%", audio_percent or 0)
+end
 
 function onVolumeClick()
-  mesh.events.publish("shell.toggle-quick-settings", {})
+  mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/quick-settings" })
 end
 </script>
 
@@ -299,7 +374,7 @@ end
 | Static text         | `<span>Hello</span>`      |
 | Dynamic text        | `<span>{variable}</span>` |
 | Dynamic attribute   | `title="{expr}"`          |
-| Two-way bind        | `bind:value=variable`     |
+| Two-way bind        | `bind:value="variable"`   |
 | Event handler       | `onclick={handler}`       |
 | Theme token         | `token(color.surface)`    |
 | Translation key     | `{t("key")}`              |

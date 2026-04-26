@@ -16,8 +16,9 @@ Plugins are split into two kinds, enforced by the architecture described in
   by plugin ID.
 
 Core contract packages now live alongside the default backends under the
-backend tree as ordinary `type = "interface"` plugins. The shell core no
-longer hardcodes those service APIs.
+backend tree as ordinary `type = "interface"` plugins. The shell core does
+not define service behavior; it only discovers contracts, validates them, and
+bridges providers to consumers.
 
 The interface registry is the only bridge between the two.
 

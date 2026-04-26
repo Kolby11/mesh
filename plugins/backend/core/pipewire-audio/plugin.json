@@ -16,7 +16,31 @@
   "dependencies": {
     "plugins": {
       "@mesh/audio-interface": ">=1.0.0, <2.0.0"
-    }
+    },
+    "binaries": [
+      {
+        "name": "wpctl",
+        "reason": "PipeWire volume and mute control.",
+        "packages": {
+          "debian": "wireplumber",
+          "arch": "wireplumber",
+          "fedora": "wireplumber"
+        }
+      },
+      {
+        "name": "awk",
+        "reason": "Shell-side parsing for backend state emission."
+      },
+      {
+        "name": "aplay",
+        "reason": "Playback for configured shell sounds.",
+        "packages": {
+          "debian": "alsa-utils",
+          "arch": "alsa-utils",
+          "fedora": "alsa-utils"
+        }
+      }
+    ]
   },
   "entrypoints": {
     "main": "src/main.luau"

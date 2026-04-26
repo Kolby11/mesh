@@ -17,9 +17,14 @@ payload = "{ battery: BatteryInfo }"
 
 [types.BatteryInfo]
 fields = [
+  { name = "available", type = "boolean" },
   { name = "level", type = "float" },
   { name = "charging", type = "boolean" },
-  { name = "time_remaining_minutes", type = "integer" }
+  { name = "time_remaining_minutes", type = "integer" },
+  { name = "time_to_full_minutes", type = "integer" },
+  { name = "power_draw_watts", type = "float" },
+  { name = "energy_now_watt_hours", type = "float" },
+  { name = "energy_full_watt_hours", type = "float" }
 ]
 
 [types.PowerProfile]

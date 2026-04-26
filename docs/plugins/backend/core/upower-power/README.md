@@ -12,7 +12,7 @@ Power and battery backend implemented against **UPower** over the system D-Bus.
 
 Required:
 
-- `service.power.read` — battery level, charging state, time-to-empty
+- `service.power.read` — battery level, charging state, time estimates, power draw
 - `dbus.system` — UPower lives on the system bus
 
 Optional:
@@ -24,8 +24,8 @@ Optional:
 
 Implements the methods declared by `mesh.power`:
 
-- return a `battery()` snapshot (level, charging, time-to-empty) — consumed by
-  `@mesh/panel`
+- return a `battery()` snapshot (level, charging, time-to-empty, time-to-full,
+  power draw, current/full charge) — consumed by shell frontends
 - list and switch power profiles (if `service.power.control` is granted)
 - emit the contract's events when state changes
 

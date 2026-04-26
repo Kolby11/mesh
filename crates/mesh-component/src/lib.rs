@@ -45,11 +45,7 @@ pub struct ComponentFile {
 #[derive(Debug, Clone)]
 pub struct ScriptBlock {
     pub lang: ScriptLang,
-    /// Transformed source — top-level `local x = val` declarations are rewritten
-    /// to `mesh.state.set("x", val)` calls so the runtime can track them reactively.
     pub source: String,
-    /// Variable names extracted from top-level `local` declarations.
-    pub reactive_vars: Vec<String>,
 }
 
 /// Supported scripting languages.

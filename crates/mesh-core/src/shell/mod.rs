@@ -44,7 +44,7 @@ use surface_layout::{
     default_surface_visibility, load_active_theme,
 };
 use component::{BackendServiceCandidate, FrontendCatalog, FrontendSurfaceComponent};
-use backend::{spawn_backend_service, spawn_mock_backend_service};
+use backend::spawn_backend_service;
 use ipc::spawn_ipc_server;
 use sounds::{SoundKind, play_shell_sound};
 
@@ -1115,15 +1115,7 @@ impl Shell {
                     ));
                 }
                 None => {
-                    tracing::warn!(
-                        "backend plugin {} has no readable script, using mock",
-                        candidate.plugin_id
-                    );
-                    runtime.spawn(spawn_mock_backend_service(
-                        tx.clone(),
-                        candidate.plugin_id,
-                        service_name,
-                    ));
+                    tracing::warn!("backend plugin {} has no readable script", candidate.plugin_id);
                 }
             }
         }
@@ -1363,9 +1355,7 @@ mod tests {
             "@mesh/pipewire-audio",
             serde_json::json!({ "available": true, "percent": 99 }),
         );
-        // State should remain at the seeded default (unavailable), not 99
-        let audio = state.get("audio").expect("audio state should exist");
-        assert_eq!(audio.get("available").and_then(|v| v.as_bool()), Some(false));
+        assert!(state.get("audio").is_none());
     }
 
     #[test]

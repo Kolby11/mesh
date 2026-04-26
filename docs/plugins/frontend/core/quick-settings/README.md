@@ -33,8 +33,9 @@ A column containing:
 - A row of toggle chips: **Wi-Fi**, **Bluetooth**, **Do Not Disturb**
 - A *Volume* label with a slider (`min=0`, `max=100`)
 
-The surface is opened in response to the `shell.toggle-quick-settings` event
-that other surfaces (e.g. the panel's volume icon) emit on the shared channel.
+The surface is intended to be opened by shared shell events from other
+frontends. The core only routes those events into shell requests; the
+frontend plugins decide when to publish them and how the surface should react.
 
 ## Theme tokens
 

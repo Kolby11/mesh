@@ -22,12 +22,12 @@ local audio = mesh.interfaces.get("mesh.audio", ">=1.0")
 local power = mesh.interfaces.get("mesh.power", ">=1.0")
 local network = mesh.interfaces.get("mesh.network", ">=1.0")
 
-local time = ""
-local batteryText = ""
-local volumeLevel = "0"
-local volumeIcon = "audio-volume-muted"
-local networkStatus = "disconnected"
-local activeWorkspace = "1"
+mesh.state.set("time", "")
+mesh.state.set("batteryText", "")
+mesh.state.set("volumeLevel", "0")
+mesh.state.set("volumeIcon", "audio-volume-muted")
+mesh.state.set("networkStatus", "disconnected")
+mesh.state.set("activeWorkspace", "1")
 
 function init()
     updateClock()

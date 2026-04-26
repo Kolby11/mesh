@@ -11,8 +11,10 @@ pub mod component;
 /// - `mesh-renderer` cannot import `mesh-service`
 /// - Only `mesh-scripting` bridges both sides
 ///
-/// The actual Luau VM will use the `mlua` crate with Luau mode.
-/// For now, this module defines the interface and a stub runtime.
+/// Both frontend and backend scripts run through `mlua` in Luau mode with
+/// no source preprocessing. Reactive state is tracked via `mesh.state.set`,
+/// and service bindings / subscriptions are registered at runtime via
+/// `mesh.service.bind` and `mesh.service.on`.
 pub mod context;
 pub mod host_api;
 

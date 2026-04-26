@@ -18,7 +18,22 @@
   "dependencies": {
     "plugins": {
       "@mesh/power-interface": ">=1.0.0, <2.0.0"
-    }
+    },
+    "binaries": [
+      {
+        "name": "upower",
+        "reason": "Battery state polling through the UPower CLI.",
+        "packages": {
+          "debian": "upower",
+          "arch": "upower",
+          "fedora": "upower"
+        }
+      },
+      {
+        "name": "awk",
+        "reason": "Shell-side parsing for backend state emission."
+      }
+    ]
   },
   "entrypoints": {
     "main": "src/main.luau"

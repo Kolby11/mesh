@@ -1,0 +1,19 @@
+<template>
+  <div
+    class="battery-widget"
+    title="{battery_tooltip}"
+    aria-label="{battery_aria_label}"
+  >
+    <icon class="battery-glyph" name="{battery_icon_name}" size="18" />
+    <span class="battery-value">{battery_label}</span>
+  </div>
+</template>
+
+<script lang="luau">
+-- Stateless presentational component. It reads reactive globals defined by the
+-- parent (for example `battery_icon_name`, `battery_label`, etc.).
+</script>
+
+<style>
+/* Rely on styles defined in the parent `main.mesh` stylesheet. */
+</style>
