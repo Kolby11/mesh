@@ -33,6 +33,37 @@ use std::time::Duration;
 
 use crate::shell::ShellRunError;
 
+/// Overlays resolved prop values on top of a local component's host state so
+/// that template expressions like `{network_name}` resolve to the prop value
+/// passed at the call site rather than falling back to the host variable.
+struct LocalComponentStore<'a> {
+    base: &'a dyn VariableStore,
+    props: &'a HashMap<String, String>,
+}
+
+impl VariableStore for LocalComponentStore<'_> {
+    fn get(&self, name: &str) -> Option<serde_json::Value> {
+        if let Some(v) = self.props.get(name) {
+            return Some(serde_json::Value::String(v.clone()));
+        }
+        self.base.get(name)
+    }
+
+    fn keys(&self) -> Vec<String> {
+        let mut keys = self.base.keys();
+        for k in self.props.keys() {
+            if !keys.iter().any(|existing| existing == k) {
+                keys.push(k.clone());
+            }
+        }
+        keys
+    }
+
+    fn translate(&self, key: &str) -> Option<String> {
+        self.base.translate(key)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct BackendServiceCandidate {
     pub(super) plugin_id: String,
@@ -1109,6 +1140,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                         .runtime_state(host_instance_key)
                         .unwrap_or_default();
                     let bound = LocaleBoundState::new(&host_state, &self.locale);
+                    let store = LocalComponentStore { base: &bound, props };
                     let host_rules = entry
                         .compiled
                         .component
@@ -1124,7 +1156,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                         container_height,
                         Some(self),
                         host_instance_key,
-                        Some(&bound),
+                        Some(&store),
                         host_rules,
                     );
                     return Some(node);

@@ -13,6 +13,37 @@ use mesh_ui::{
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// A `VariableStore` overlay used during `{#for}` iteration.
+/// Shadows one variable name with the current loop item value while
+/// delegating everything else to the underlying store.
+struct LayeredStore<'a> {
+    base: &'a dyn VariableStore,
+    item_name: &'a str,
+    item_value: serde_json::Value,
+}
+
+impl VariableStore for LayeredStore<'_> {
+    fn get(&self, name: &str) -> Option<serde_json::Value> {
+        if name == self.item_name {
+            Some(self.item_value.clone())
+        } else {
+            self.base.get(name)
+        }
+    }
+
+    fn keys(&self) -> Vec<String> {
+        let mut keys = self.base.keys();
+        if !keys.iter().any(|k| k == self.item_name) {
+            keys.push(self.item_name.to_string());
+        }
+        keys
+    }
+
+    fn translate(&self, key: &str) -> Option<String> {
+        self.base.translate(key)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrontendRenderMode {
     Surface,
@@ -554,13 +585,22 @@ fn build_widget_node(
             node
         }
         TemplateNode::If(if_node) => {
+            let show_then = match state {
+                Some(store) => {
+                    let result = eval_expr(&if_node.condition, store);
+                    !matches!(result.as_str(), "false" | "nil" | "" | "0")
+                }
+                None => true,
+            };
+            let active_children = if show_then {
+                &if_node.then_children
+            } else {
+                &if_node.else_children
+            };
             let mut node = WidgetNode::new("column");
-            node.attributes
-                .insert("condition".into(), if_node.condition.clone());
             node.computed_style = container_style("column");
             let child_context = child_style_context(&node.computed_style, container_context);
-            node.children = if_node
-                .then_children
+            node.children = active_children
                 .iter()
                 .map(|child| {
                     build_widget_node(
@@ -587,29 +627,34 @@ fn build_widget_node(
         }
         TemplateNode::For(for_node) => {
             let mut node = WidgetNode::new("column");
-            node.attributes.insert(
-                "content".into(),
-                format!("for {} in {}", for_node.item_name, for_node.iterable),
-            );
             node.computed_style = container_style("column");
             let child_context = child_style_context(&node.computed_style, container_context);
-            node.children = for_node
-                .children
-                .iter()
-                .map(|child| {
-                    build_widget_node(
-                        child,
-                        manifest,
-                        rules,
-                        resolver,
-                        Some(&node.computed_style),
-                        child_context,
-                        state,
-                        instance_key,
-                        composition,
-                    )
-                })
-                .collect();
+
+            if let Some(store) = state {
+                if let Some(serde_json::Value::Array(items)) = store.get(&for_node.iterable) {
+                    for item_val in items {
+                        let item_store = LayeredStore {
+                            base: store,
+                            item_name: &for_node.item_name,
+                            item_value: item_val,
+                        };
+                        for child in &for_node.children {
+                            node.children.push(build_widget_node(
+                                child,
+                                manifest,
+                                rules,
+                                resolver,
+                                Some(&node.computed_style),
+                                child_context,
+                                Some(&item_store as &dyn VariableStore),
+                                instance_key,
+                                composition,
+                            ));
+                        }
+                    }
+                }
+            }
+
             if let Some(parent_style) = parent_style {
                 inherit_text_style(
                     &mut node.computed_style,
@@ -979,6 +1024,17 @@ fn eval_expr(expr: &str, store: &dyn mesh_ui::VariableStore) -> String {
         return eval_expr(&expr[1..expr.len() - 1], store);
     }
 
+    // #expr — Luau length operator: returns array/string/object length.
+    if let Some(inner) = expr.strip_prefix('#') {
+        let inner = inner.trim();
+        return match store.get(inner) {
+            Some(serde_json::Value::Array(arr)) => arr.len().to_string(),
+            Some(serde_json::Value::String(s)) => s.len().to_string(),
+            Some(serde_json::Value::Object(obj)) => obj.len().to_string(),
+            _ => "0".into(),
+        };
+    }
+
     // not X — boolean negation
     if let Some(inner) = expr.strip_prefix("not ") {
         let value = eval_expr(inner.trim(), store);
@@ -991,9 +1047,11 @@ fn eval_expr(expr: &str, store: &dyn mesh_ui::VariableStore) -> String {
     }
 
     // Ternary: cond and then_val or else_val
-    if let Some((cond, rest)) = split_op(expr, " and ") {
+    // Boolean and: cond and expr  (no trailing 'or')
+    if let Some((lhs, rest)) = split_op(expr, " and ") {
         if let Some((then_val, else_val)) = split_op(rest, " or ") {
-            let cond_result = eval_expr(cond, store);
+            // Ternary idiom: A and B or C
+            let cond_result = eval_expr(lhs, store);
             let truthy = !matches!(cond_result.as_str(), "false" | "nil" | "" | "0");
             return if truthy {
                 eval_expr(then_val, store)
@@ -1001,6 +1059,31 @@ fn eval_expr(expr: &str, store: &dyn mesh_ui::VariableStore) -> String {
                 eval_expr(else_val, store)
             };
         }
+        // Plain boolean AND: A and B
+        let l = eval_expr(lhs, store);
+        if matches!(l.as_str(), "false" | "nil" | "" | "0") {
+            return "false".into();
+        }
+        let r = eval_expr(rest, store);
+        return if matches!(r.as_str(), "false" | "nil" | "" | "0") {
+            "false".into()
+        } else {
+            "true".into()
+        };
+    }
+
+    // Boolean or: A or B
+    if let Some((lhs, rhs)) = split_op(expr, " or ") {
+        let l = eval_expr(lhs, store);
+        if !matches!(l.as_str(), "false" | "nil" | "" | "0") {
+            return "true".into();
+        }
+        let r = eval_expr(rhs, store);
+        return if matches!(r.as_str(), "false" | "nil" | "" | "0") {
+            "false".into()
+        } else {
+            "true".into()
+        };
     }
 
     // Comparison operators (check multi-char first to avoid partial match)
@@ -1380,5 +1463,120 @@ mod tests {
 
         assert_eq!(handlers.get("click").map(String::as_str), Some("openPanel"));
         assert!(!handlers.contains_key("onclick"));
+    }
+
+    struct MapStore(HashMap<String, serde_json::Value>);
+    impl mesh_ui::VariableStore for MapStore {
+        fn get(&self, name: &str) -> Option<serde_json::Value> { self.0.get(name).cloned() }
+        fn keys(&self) -> Vec<String> { self.0.keys().cloned().collect() }
+    }
+
+    #[test]
+    fn eval_expr_length_operator() {
+        let store = MapStore(
+            [("items".to_string(), serde_json::json!(["a", "b", "c"]))]
+                .into_iter()
+                .collect(),
+        );
+        assert_eq!(eval_expr("#items", &store), "3");
+        assert_eq!(eval_expr("#missing", &store), "0");
+    }
+
+    #[test]
+    fn eval_expr_boolean_and() {
+        let store = MapStore(
+            [
+                ("a".to_string(), serde_json::json!(true)),
+                ("b".to_string(), serde_json::json!(false)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(eval_expr("a and b", &store), "false");
+        assert_eq!(eval_expr("a and a", &store), "true");
+        assert_eq!(eval_expr("b and a", &store), "false");
+    }
+
+    #[test]
+    fn for_node_iterates_over_list() {
+        let source = r#"
+<template>
+  <div>
+    {#for item in items}
+      <span>{item.name}</span>
+    {/for}
+  </div>
+</template>
+"#;
+        let plugin = mesh_component::parse_component(source).unwrap();
+        let manifest = mesh_plugin::Manifest {
+            package: mesh_plugin::PackageSection {
+                id: "test".into(),
+                version: "0.1.0".into(),
+                plugin_type: mesh_plugin::PluginType::Widget,
+                api_version: "0.1.0".into(),
+                name: None,
+                license: None,
+                description: None,
+                authors: vec![],
+                repository: None,
+            },
+            compatibility: Default::default(),
+            dependencies: Default::default(),
+            capabilities: Default::default(),
+            entrypoints: Default::default(),
+            accessibility: None,
+            settings: None,
+            i18n: None,
+            theme: None,
+            service: None,
+            provides: vec![],
+            interface: None,
+            extensions: vec![],
+            exports: Default::default(),
+            provides_slots: Default::default(),
+            slot_contributions: Default::default(),
+            surface_layout: None,
+            assets: None,
+            translations: Default::default(),
+        };
+        let theme = mesh_theme::default_theme();
+        let store = MapStore(
+            [(
+                "items".to_string(),
+                serde_json::json!([{"name": "Alice"}, {"name": "Bob"}]),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let compiled = CompiledFrontendPlugin {
+            manifest,
+            source_path: std::path::PathBuf::from("test.mesh"),
+            component: plugin,
+            local_components: Default::default(),
+        };
+        let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&store));
+        let texts = collect_text_content(&tree);
+        assert!(
+            texts.contains(&"Alice".to_string()),
+            "expected Alice in {texts:?}"
+        );
+        assert!(
+            texts.contains(&"Bob".to_string()),
+            "expected Bob in {texts:?}"
+        );
+    }
+
+    fn collect_text_content(node: &mesh_ui::WidgetNode) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(c) = node.attributes.get("content") {
+            if !c.is_empty() {
+                out.push(c.clone());
+            }
+        }
+        for child in &node.children {
+            out.extend(collect_text_content(child));
+        }
+        out
     }
 }

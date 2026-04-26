@@ -1,0 +1,120 @@
+<template>
+  <div class="section">
+    <div class="audio-header">
+      <div class="audio-copy">
+        <span class="section-title">Audio</span>
+        <span class="audio-subtitle">{audio_backend}</span>
+      </div>
+      <span class="audio-value">{audio_label}</span>
+    </div>
+    <div class="volume-row">
+      <button class="volume-button" onclick={onVolumeDown} title="Volume down" aria-label="Volume down">-</button>
+      <slider class="volume-slider" min="0" max="100" value="{audio_percent}" title="{audio_tooltip}" aria-label="Volume" />
+      <button class="volume-button" onclick={onVolumeUp} title="Volume up" aria-label="Volume up">+</button>
+    </div>
+    <div class="audio-actions">
+      <button class="mute-button" onclick={onToggleMute} title="Toggle mute" aria-label="Toggle mute">
+        <icon class="mute-icon" name="{icon_name}" size="18" />
+      </button>
+    </div>
+  </div>
+</template>
+
+<style>
+.section {
+    width: 100%;
+    gap: token(spacing.md);
+}
+
+.audio-header {
+    justify-content: space-between;
+    align-items: center;
+    gap: token(spacing.md);
+}
+
+.audio-copy {
+    flex-direction: column;
+    gap: 2px;
+}
+
+.section-title {
+    font-size: token(typography.size.xs);
+    font-weight: 700;
+    color: token(color.on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.audio-subtitle {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.xs);
+}
+
+.audio-value {
+    width: 56px;
+    justify-content: end;
+    color: token(color.on-surface);
+    font-size: token(typography.size.lg);
+    font-weight: 800;
+    text-wrap: none;
+}
+
+.volume-row {
+    align-items: center;
+    gap: token(spacing.sm);
+}
+
+.volume-button {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    border-radius: token(radius.sm);
+    background: token(color.tertiary-container);
+    color: token(color.on-tertiary-container);
+    font-size: token(typography.size.lg);
+    font-weight: 800;
+}
+
+.volume-button:hover {
+    background: token(color.primary-container);
+    color: token(color.on-primary-container);
+}
+
+.volume-slider {
+    width: 100%;
+    height: 36px;
+    flex-grow: 1;
+    color: token(color.primary);
+}
+
+.audio-actions {
+    justify-content: start;
+    align-items: center;
+}
+
+.mute-button {
+    width: content;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    padding-block: token(spacing.sm);
+    padding-inline: token(spacing.md);
+    border-radius: token(radius.sm);
+    background: token(color.surface-container-high);
+    color: token(color.on-surface);
+    text-wrap: none;
+}
+
+.mute-icon {
+    width: 18px;
+    height: 18px;
+    color: token(color.on-surface);
+}
+
+.mute-button:hover {
+    background: token(color.primary-container);
+    color: token(color.on-primary-container);
+}
+</style>

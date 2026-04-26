@@ -1,0 +1,64 @@
+<template>
+  <button class="network-item" onclick={onConnectWiFi}>
+    <div class="network-info">
+      <span class="network-name">{network_name}</span>
+      <span class="network-strength">{network_strength}&#37;</span>
+    </div>
+  </button>
+</template>
+
+<script lang="luau">
+mesh.state.set("network_id", "")
+mesh.state.set("network_name", "")
+mesh.state.set("network_strength", "0")
+
+function onConnectWiFi(event)
+    if mesh.interfaces.get("mesh.network", ">=1.0") and network_id and network_id ~= "" then
+        local network_iface = mesh.interfaces.get("mesh.network", ">=1.0")
+        local result = network_iface.connect(network_id)
+        if result.ok then
+            mesh.log.info("Connected to WiFi network: " .. network_id)
+        else
+            mesh.log.warn("Failed to connect: " .. (result.error or "unknown error"))
+        end
+    end
+end
+</script>
+
+<style>
+.network-item {
+    width: 100%;
+    padding: token(spacing.sm);
+    padding-inline: token(spacing.md);
+    border-radius: token(radius.sm);
+    background: token(color.surface-container-high);
+    color: token(color.on-surface);
+    text-align: start;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.network-item:hover {
+    background: token(color.primary-container);
+    color: token(color.on-primary-container);
+}
+
+.network-info {
+    flex-direction: column;
+    gap: 2px;
+    flex-grow: 1;
+}
+
+.network-name {
+    font-size: token(typography.size.sm);
+    font-weight: 600;
+    text-wrap: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.network-strength {
+    font-size: token(typography.size.xs);
+    color: token(color.on-surface-variant);
+}
+</style>

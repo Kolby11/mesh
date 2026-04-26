@@ -33,20 +33,20 @@ mesh-cli
 
 ### Key types per crate
 
-| Crate | Key types / files |
-|---|---|
-| `mesh-core` | `Shell` in `shell/mod.rs` — plugin host and shell orchestrator; `FrontendSurfaceComponent`, `ShellComponent` trait, `CoreRequest`, `CoreEvent` |
-| `mesh-plugin` | `Manifest`, `PluginType`, `SurfaceLayoutSection` in `manifest.rs`; `PluginInstance` in `lifecycle.rs` |
-| `mesh-component` | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>`, `<schema>` blocks |
-| `mesh-component-backend` | `CompiledFrontendPlugin`, `FrontendCatalog`, `FrontendCompositionResolver` |
-| `mesh-scripting` | `ScriptContext`, `BackendScriptContext`, `ScriptState`, `LocaleBoundState` — the only crate crossing the UI/service boundary |
-| `mesh-ui` | `WidgetNode`, `LayoutRect`, `StyleContext`, `StyleResolver`, `VariableStore`, `ElementState` |
-| `mesh-renderer` | `Painter`, `PixelBuffer`, `SharedTextMeasurer`, `LayerShellBackend`, `LayerSurfaceConfig` |
-| `mesh-service` | `InterfaceRegistry`, `ServiceRegistry`, `InterfaceProvider`, `canonical_interface_name` |
-| `mesh-theme` | `ThemeEngine`, `Theme`, `default_theme()`, `load_theme_from_path()` |
-| `mesh-wayland` | `ShellSurface` trait, `Layer`, `Edge`, `KeyboardMode`, `StubSurface` |
-| `mesh-config` | `ShellConfig`, `ShellSettings`, `load_config()`, `load_shell_settings()` |
-| `mesh-events` | `EventBus` |
+| Crate                    | Key types / files                                                                                                                              |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mesh-core`              | `Shell` in `shell/mod.rs` — plugin host and shell orchestrator; `FrontendSurfaceComponent`, `ShellComponent` trait, `CoreRequest`, `CoreEvent` |
+| `mesh-plugin`            | `Manifest`, `PluginType`, `SurfaceLayoutSection` in `manifest.rs`; `PluginInstance` in `lifecycle.rs`                                          |
+| `mesh-component`         | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>`, `<schema>` blocks                                                   |
+| `mesh-component-backend` | `CompiledFrontendPlugin`, `FrontendCatalog`, `FrontendCompositionResolver`                                                                     |
+| `mesh-scripting`         | `ScriptContext`, `BackendScriptContext`, `ScriptState`, `LocaleBoundState` — the only crate crossing the UI/service boundary                   |
+| `mesh-ui`                | `WidgetNode`, `LayoutRect`, `StyleContext`, `StyleResolver`, `VariableStore`, `ElementState`                                                   |
+| `mesh-renderer`          | `Painter`, `PixelBuffer`, `SharedTextMeasurer`, `LayerShellBackend`, `LayerSurfaceConfig`                                                      |
+| `mesh-service`           | `InterfaceRegistry`, `ServiceRegistry`, `InterfaceProvider`, `canonical_interface_name`                                                        |
+| `mesh-theme`             | `ThemeEngine`, `Theme`, `default_theme()`, `load_theme_from_path()`                                                                            |
+| `mesh-wayland`           | `ShellSurface` trait, `Layer`, `Edge`, `KeyboardMode`, `StubSurface`                                                                           |
+| `mesh-config`            | `ShellConfig`, `ShellSettings`, `load_config()`, `load_shell_settings()`                                                                       |
+| `mesh-events`            | `EventBus`                                                                                                                                     |
 
 ---
 
@@ -106,6 +106,8 @@ Surface layout defaults live in `plugin.json`, **not** in Rust. `mesh-core` read
 <meta>       ← accessibility metadata (optional)
 ```
 
+**CRITICAL CODE STYLE**: Component files should be small and focused. Always extract layout sections, list items, and logically distinct UI blocks into their own separate components (e.g., in a `components/` subdirectory) and import them. This is especially important for items inside `{#for ...}` loops so they can encapsulate their own event state (like capturing list item IDs) instead of relying on DOM dataset attributes (which are not supported in event handlers).
+
 ---
 
 ## Key Data Flows
@@ -156,18 +158,18 @@ backend plugin (mesh.toml, provides = "mesh.audio")
 
 ## Common Task Entry Points
 
-| Task | Where to start |
-|---|---|
-| Add a CSS property | `mesh-ui/src/style.rs` (parse), `mesh-renderer/src/painter.rs` (paint) |
-| Add a new surface plugin | Create `plugins/frontend/core/<name>/`, `plugin.json` with `"type": "surface"`, `src/main.mesh` |
-| Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core/src/shell.rs`; manifest's `surface_layout` section |
+| Task                           | Where to start                                                                                                         |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| Add a CSS property             | `mesh-ui/src/style.rs` (parse), `mesh-renderer/src/painter.rs` (paint)                                                 |
+| Add a new surface plugin       | Create `plugins/frontend/core/<name>/`, `plugin.json` with `"type": "surface"`, `src/main.mesh`                        |
+| Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core/src/shell.rs`; manifest's `surface_layout` section                      |
 | Add a service (backend plugin) | `plugins/backend/core/<name>/`, `plugin.json` + `src/main.luau`, implement the interface contract in the plugin script |
-| Add a new CoreRequest action | `CoreRequest` enum + match arm in `handle_request()` in `mesh-core/src/shell.rs` |
-| Add a theme token | `mesh-theme/src/lib.rs`, default theme JSON, then reference with `token(group.name)` in `.mesh` |
-| Add localization | Plugin's `<i18n>` block or `config/i18n/<locale>.json`; `LocaleEngine` in `mesh-locale` |
-| Debug rendering | `ToggleDebugOverlay` / `CoreRequest::CycleDebugTab`; see `mesh-debug/src/lib.rs` |
-| Plugin manifest parsing | `mesh-plugin/src/manifest.rs` — `JsonManifest`, `TomlManifest`, `into_manifest()` |
-| Fix icons | See "Icon System" section below — four specific files need changes |
+| Add a new CoreRequest action   | `CoreRequest` enum + match arm in `handle_request()` in `mesh-core/src/shell.rs`                                       |
+| Add a theme token              | `mesh-theme/src/lib.rs`, default theme JSON, then reference with `token(group.name)` in `.mesh`                        |
+| Add localization               | Plugin's `<i18n>` block or `config/i18n/<locale>.json`; `LocaleEngine` in `mesh-locale`                                |
+| Debug rendering                | `ToggleDebugOverlay` / `CoreRequest::CycleDebugTab`; see `mesh-debug/src/lib.rs`                                       |
+| Plugin manifest parsing        | `mesh-plugin/src/manifest.rs` — `JsonManifest`, `TomlManifest`, `into_manifest()`                                      |
+| Fix icons                      | See "Icon System" section below — four specific files need changes                                                     |
 
 ---
 

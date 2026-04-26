@@ -4,70 +4,166 @@
       <span class="title">Quick Settings</span>
       <button class="close-button" onclick={onClose} title="Close quick settings" aria-label="Close quick settings">Close</button>
     </div>
-    <div class="toggles">
-      <button class="chip">Wi-Fi</button>
-      <button class="chip">Bluetooth</button>
+    <div class="chips">
+      <button class="chip" onclick={onToggleWiFi} title="Toggle WiFi" aria-label="Toggle WiFi">Wi-Fi</button>
+      <button class="chip" onclick={onToggleBluetooth} title="Toggle Bluetooth" aria-label="Toggle Bluetooth">Bluetooth</button>
       <button class="chip wide">Do Not Disturb</button>
     </div>
-    <section class="audio-widget">
-      <div class="audio-header">
-        <div class="audio-copy">
-          <span class="audio-title">Audio</span>
-          <span class="audio-subtitle">{audio_backend}</span>
-        </div>
-        <span class="audio-value">{audio_label}</span>
-      </div>
-      <div class="volume-row">
-        <button class="volume-button" onclick={onVolumeDown} title="Volume down" aria-label="Volume down">-</button>
-        <slider class="volume-slider" min="0" max="100" value="{audio.percent}" mesh-action="audio-volume" title="{audio_tooltip}" aria-label="Volume" />
-        <button class="volume-button" onclick={onVolumeUp} title="Volume up" aria-label="Volume up">+</button>
-      </div>
-      <div class="audio-actions">
-        <button class="mute-button" onclick={onToggleMute} title="Toggle mute" aria-label="Toggle mute">
-          <icon class="mute-icon" name="{icon_name}" size="18" />
+    <div class="body">
+      <div class="nav-rail">
+        <button class="{wifi_nav_class}" onclick={onSelectWifi} title="Wi-Fi settings" aria-label="Wi-Fi settings">
+          <icon name="network-wireless" size="18" />
+          <span class="nav-label">Wi-Fi</span>
+        </button>
+        <button class="{bt_nav_class}" onclick={onSelectBluetooth} title="Bluetooth settings" aria-label="Bluetooth settings">
+          <icon name="bluetooth" size="18" />
+          <span class="nav-label">Bluetooth</span>
+        </button>
+        <button class="{audio_nav_class}" onclick={onSelectAudio} title="Audio settings" aria-label="Audio settings">
+          <icon name="{icon_name}" size="18" />
+          <span class="nav-label">Audio</span>
         </button>
       </div>
-    </section>
+      <div class="drawer">
+        {#if active_section == "wifi"}
+          <WifiSection />
+        {/if}
+        {#if active_section == "bluetooth"}
+          <BluetoothSection />
+        {/if}
+        {#if active_section == "audio"}
+          <AudioSection />
+        {/if}
+        {#if active_section == ""}
+          <div class="drawer-empty">
+            <span class="drawer-hint">Select a section from the left</span>
+          </div>
+        {/if}
+      </div>
+    </div>
   </section>
 </template>
 
 <script lang="luau">
+import "@src/components/wifi-section" as WifiSection
+import "@src/components/bluetooth-section" as BluetoothSection
+import "@src/components/audio-section" as AudioSection
+import "@src/components/wifi-item" as WiFiItem
+import "@src/components/bluetooth-item" as BluetoothItem
+
+mesh.state.set("active_section", "wifi")
+mesh.state.set("wifi_nav_class", "nav-btn nav-active")
+mesh.state.set("bt_nav_class", "nav-btn")
+mesh.state.set("audio_nav_class", "nav-btn")
+
 mesh.state.set("icon_name", "audio-volume-muted")
 mesh.state.set("audio_label", "0%")
 mesh.state.set("audio_tooltip", "Volume unavailable")
 mesh.state.set("audio_backend", "Unavailable")
+mesh.state.set("audio_percent", 0)
+mesh.state.set("wifi_enabled", false)
+mesh.state.set("wifi_networks", {})
+mesh.state.set("bluetooth_devices", {})
+
 mesh.service.bind("audio.muted", "audio_muted")
 mesh.service.bind("audio.percent", "audio_percent")
 mesh.service.bind("audio.source_plugin", "audio_source_plugin")
 mesh.service.on("audio", "sync_audio_state")
 
+-- Guard network registration: mesh.interfaces.get throws if the interface is
+-- unavailable, so wrap in pcall to avoid aborting the entire script init.
+local _net_ok, _net_iface = pcall(mesh.interfaces.get, "mesh.network", ">=1.0")
+if _net_ok and _net_iface then
+    mesh.service.on("network", "sync_network_state")
+end
+
 function sync_audio_state()
+    -- audio_percent may be nil until the first service update arrives because
+    -- mesh.service.bind() initialises the global to nil, overriding the
+    -- mesh.state.set() default. Guard every numeric comparison with `or 0`.
+    local pct = audio_percent or 0
     if audio_muted then
         icon_name = "audio-volume-muted"
+    elseif pct == 0 then
+        icon_name = "audio-volume-muted"
+    elseif pct < 34 then
+        icon_name = "audio-volume-low"
+    elseif pct < 67 then
+        icon_name = "audio-volume-medium"
     else
-        if audio_percent == 0 then
-            icon_name = "audio-volume-muted"
-        else
-            if audio_percent < 34 then
-                icon_name = "audio-volume-low"
-            else
-                if audio_percent < 67 then
-                    icon_name = "audio-volume-medium"
-                else
-                    icon_name = "audio-volume-high"
-                end
+        icon_name = "audio-volume-high"
+    end
+
+    audio_label = string.format("%d%%", pct)
+    audio_backend = audio_source_plugin or "Unavailable"
+    if audio_muted then
+        audio_tooltip = string.format("Volume muted at %d%%", pct)
+    else
+        audio_tooltip = string.format("Volume %d%%", pct)
+    end
+end
+
+function sync_network_state()
+    local ok, network_iface = pcall(mesh.interfaces.get, "mesh.network", ">=1.0")
+    if not ok or not network_iface then return end
+    local networks = network_iface.wifi_scan()
+    wifi_networks = networks or {}
+
+    local devices = network_iface.devices()
+    local bt_devices = {}
+    if devices then
+        for _, device in ipairs(devices) do
+            if device.kind == "bluetooth" then
+                table.insert(bt_devices, device)
             end
         end
     end
+    bluetooth_devices = bt_devices
+end
 
-    local safe_percent = audio_percent or 0
-    audio_label = string.format("%d%%", safe_percent)
-    audio_backend = audio_source_plugin or "Unavailable"
-    if audio_muted then
-        audio_tooltip = string.format("Volume muted at %d%%", safe_percent)
+function sync_nav_classes()
+    wifi_nav_class = active_section == "wifi" and "nav-btn nav-active" or "nav-btn"
+    bt_nav_class = active_section == "bluetooth" and "nav-btn nav-active" or "nav-btn"
+    audio_nav_class = active_section == "audio" and "nav-btn nav-active" or "nav-btn"
+end
+
+function onSelectWifi()
+    if active_section == "wifi" then
+        active_section = ""
     else
-        audio_tooltip = string.format("Volume %d%%", safe_percent)
+        active_section = "wifi"
     end
+    sync_nav_classes()
+end
+
+function onSelectBluetooth()
+    if active_section == "bluetooth" then
+        active_section = ""
+    else
+        active_section = "bluetooth"
+    end
+    sync_nav_classes()
+end
+
+function onSelectAudio()
+    if active_section == "audio" then
+        active_section = ""
+    else
+        active_section = "audio"
+    end
+    sync_nav_classes()
+end
+
+function onToggleWiFi()
+    local ok, network_iface = pcall(mesh.interfaces.get, "mesh.network", ">=1.0")
+    if ok and network_iface then
+        wifi_enabled = not wifi_enabled
+        network_iface.set_wifi_enabled(wifi_enabled)
+    end
+end
+
+function onToggleBluetooth()
+    mesh.log.debug("Bluetooth toggle clicked")
 end
 
 function onClose()
@@ -123,7 +219,7 @@ end
     background: token(color.surface-container-high);
 }
 
-.toggles {
+.chips {
     flex-wrap: nowrap;
     gap: token(spacing.sm);
 }
@@ -148,100 +244,67 @@ end
     color: token(color.on-primary-container);
 }
 
-.audio-widget {
+.body {
+    flex-grow: 1;
+    flex-direction: row;
+    gap: token(spacing.md);
+    overflow-y: hidden;
+}
+
+.nav-rail {
+    width: 96px;
+    flex-shrink: 0;
+    flex-direction: column;
+    gap: token(spacing.xs);
+}
+
+.nav-btn {
     width: 100%;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding-block: token(spacing.sm);
+    padding-inline: token(spacing.xs);
+    border-radius: token(radius.sm);
+    background: token(color.surface-container);
+    color: token(color.on-surface-variant);
+    text-wrap: none;
+}
+
+.nav-btn:hover {
+    background: token(color.surface-container-high);
+    color: token(color.on-surface);
+}
+
+.nav-active {
+    background: token(color.primary-container);
+    color: token(color.on-primary-container);
+}
+
+.nav-label {
+    font-size: token(typography.size.xs);
+    font-weight: 600;
+}
+
+.drawer {
+    flex-grow: 1;
+    flex-direction: column;
     gap: token(spacing.md);
     padding: token(spacing.md);
     border-radius: token(radius.sm);
     background: token(color.surface-container);
+    overflow-y: auto;
 }
 
-.audio-header {
-    justify-content: space-between;
-    align-items: center;
-    gap: token(spacing.md);
-}
-
-.audio-copy {
-    flex-direction: column;
-    gap: 2px;
-}
-
-.audio-title {
-    font-size: token(typography.size.md);
-    font-weight: 700;
-}
-
-.audio-subtitle {
-    color: token(color.on-surface-variant);
-    font-size: token(typography.size.xs);
-}
-
-.audio-value {
-    width: 72px;
-    justify-content: end;
-    color: token(color.on-surface);
-    font-size: token(typography.size.lg);
-    font-weight: 800;
-    text-wrap: none;
-}
-
-.volume-row {
-    align-items: center;
-    gap: token(spacing.sm);
-}
-
-.volume-button {
-    width: 40px;
-    height: 40px;
-    flex-shrink: 0;
-    justify-content: center;
-    align-items: center;
-    border-radius: token(radius.sm);
-    background: token(color.tertiary-container);
-    color: token(color.on-tertiary-container);
-    font-size: token(typography.size.lg);
-    font-weight: 800;
-}
-
-.volume-button:hover {
-    background: token(color.primary-container);
-    color: token(color.on-primary-container);
-}
-
-.volume-slider {
-    width: 100%;
-    height: 40px;
+.drawer-empty {
     flex-grow: 1;
-    color: token(color.primary);
-}
-
-.audio-actions {
-    justify-content: start;
-    align-items: center;
-}
-
-.mute-button {
-    width: content;
-    flex-shrink: 0;
     justify-content: center;
     align-items: center;
-    padding-block: token(spacing.sm);
-    padding-inline: token(spacing.md);
-    border-radius: token(radius.sm);
-    background: token(color.surface-container-high);
-    color: token(color.on-surface);
-    text-wrap: none;
 }
 
-.mute-icon {
-    width: 18px;
-    height: 18px;
-    color: token(color.on-surface);
-}
-
-.mute-button:hover {
-    background: token(color.primary-container);
-    color: token(color.on-primary-container);
+.drawer-hint {
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.sm);
+    text-align: center;
 }
 </style>

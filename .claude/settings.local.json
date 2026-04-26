@@ -19,7 +19,9 @@
       "Bash(grep -E \"\\(test result|FAILED|ok$\\)\")",
       "Bash(rustc --edition 2021 --crate-type lib crates/mesh-core/src/shell.rs --extern mesh_ui=target/debug/libmesh_ui.rlib)",
       "Bash(awk NR>=2060 && NR<=2075 || NR>=2395 && NR<=2420 *)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(rustc --edition 2021 --crate-type lib crates/mesh-core/src/shell/component.rs --extern mesh_ui=target/debug/libmesh_ui.rlib)",
+      "Bash(cargo rustc *)"
     ]
   }
 }

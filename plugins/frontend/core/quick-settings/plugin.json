@@ -12,7 +12,6 @@
   "capabilities": {
     "required": [
       "shell.surface",
-      "service.network.read",
       "service.audio.read",
       "service.audio.control",
       "service.power.read",
@@ -20,6 +19,7 @@
       "locale.read"
     ],
     "optional": [
+      "service.network.read",
       "service.bluetooth.read",
       "service.bluetooth.control",
       "service.network.control",

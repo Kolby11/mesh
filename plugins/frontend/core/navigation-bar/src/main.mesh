@@ -64,10 +64,13 @@ function sync_audio_state()
 end
 
 function onSettingsClick(event)
+    local trigger_left = event.current_target.position.margin_left or 0
+    local quick_settings_width = 480
+    local trigger_width = 44
     mesh.events.publish("shell.position-surface", {
         surface_id = "@mesh/quick-settings",
         margin_top = event.current_target.position.margin_top,
-        margin_left = event.current_target.position.margin_left,
+        margin_left = math.max(0, trigger_left - (quick_settings_width - trigger_width)),
     })
     mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/quick-settings" })
     mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/volume-bar" })

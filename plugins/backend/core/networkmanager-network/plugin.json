@@ -16,7 +16,18 @@
   "dependencies": {
     "plugins": {
       "@mesh/network-interface": ">=1.0.0, <2.0.0"
-    }
+    },
+    "binaries": [
+      {
+        "name": "nmcli",
+        "reason": "NetworkManager device, connection, and Wi-Fi control.",
+        "packages": {
+          "debian": "network-manager",
+          "arch": "networkmanager",
+          "fedora": "NetworkManager"
+        }
+      }
+    ]
   },
   "entrypoints": {
     "main": "src/main.luau"

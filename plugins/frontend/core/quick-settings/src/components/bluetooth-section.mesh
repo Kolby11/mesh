@@ -1,0 +1,51 @@
+<template>
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Bluetooth Devices</span>
+    </div>
+    <div class="section-list">
+      {#if bluetooth_devices and #bluetooth_devices > 0}
+        {#for device in bluetooth_devices}
+          <BluetoothItem device_id="{device.id}" device_name="{device.name}" device_state="{device.state}" />
+        {/for}
+      {:else}
+        <div class="section-message">No Bluetooth devices found</div>
+      {/if}
+    </div>
+  </div>
+</template>
+
+<style>
+.section {
+    width: 100%;
+    gap: token(spacing.sm);
+}
+
+.section-header {
+    align-items: center;
+    gap: token(spacing.sm);
+}
+
+.section-title {
+    font-size: token(typography.size.xs);
+    font-weight: 700;
+    color: token(color.on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.section-list {
+    width: 100%;
+    gap: token(spacing.xs);
+}
+
+.section-message {
+    padding: token(spacing.sm);
+    padding-inline: token(spacing.md);
+    border-radius: token(radius.sm);
+    background: token(color.surface-container-high);
+    color: token(color.on-surface-variant);
+    font-size: token(typography.size.sm);
+    text-align: center;
+}
+</style>

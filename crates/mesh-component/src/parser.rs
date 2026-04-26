@@ -199,6 +199,177 @@ fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
     Ok(blocks)
 }
 
+/// Convert `{#for}`, `{#if}`, `{:else if}`, `{:else}`, `{/for}`, `{/if}` directives
+/// into custom XML tags so quick_xml can build a proper element tree.
+///
+/// `{#for item in list}` → `<mesh-for item="item" iterable="list">`
+/// `{/for}`              → `</mesh-for>`
+/// `{#if cond}`          → `<mesh-if><mesh-ifthen condition="ESCAPED">`
+/// `{:else if cond}`     → `</mesh-ifthen><mesh-ifthen condition="ESCAPED">`
+/// `{:else}`             → `</mesh-ifthen><mesh-else>`
+/// `{/if}`               → close current branch + `</mesh-if>`
+fn preprocess_control_flow(source: &str) -> String {
+    let mut out = String::with_capacity(source.len() + 128);
+    let mut remaining = source;
+    // Stack entries: "for" | "if-outer" | "ifthen" | "else"
+    let mut cf_stack: Vec<&'static str> = Vec::new();
+
+    while !remaining.is_empty() {
+        let Some(brace_pos) = remaining.find('{') else {
+            out.push_str(remaining);
+            break;
+        };
+
+        out.push_str(&remaining[..brace_pos]);
+        remaining = &remaining[brace_pos..];
+
+        // {#for item in iterable}
+        if let Some(rest) = remaining.strip_prefix("{#for ") {
+            if let Some(end) = find_cf_end(rest) {
+                let inner = rest[..end].trim();
+                if let Some(sep) = inner.find(" in ") {
+                    let item = inner[..sep].trim();
+                    let iterable = inner[sep + 4..].trim();
+                    out.push_str(&format!(
+                        "<mesh-for item=\"{}\" iterable=\"{}\">",
+                        xml_attr_escape(item),
+                        xml_attr_escape(iterable)
+                    ));
+                    cf_stack.push("for");
+                    remaining = &rest[end + 1..];
+                    continue;
+                }
+            }
+        }
+        // {/for}
+        else if remaining.starts_with("{/for}") {
+            out.push_str("</mesh-for>");
+            if cf_stack.last() == Some(&"for") {
+                cf_stack.pop();
+            }
+            remaining = &remaining[6..];
+            continue;
+        }
+        // {#if condition}
+        else if let Some(rest) = remaining.strip_prefix("{#if ") {
+            if let Some(end) = find_cf_end(rest) {
+                let cond = rest[..end].trim();
+                out.push_str(&format!(
+                    "<mesh-if><mesh-ifthen condition=\"{}\">",
+                    xml_attr_escape(cond)
+                ));
+                cf_stack.push("if-outer");
+                cf_stack.push("ifthen");
+                remaining = &rest[end + 1..];
+                continue;
+            }
+        }
+        // {:else if condition}  — must be checked before {:else}
+        else if let Some(rest) = remaining.strip_prefix("{:else if ") {
+            if let Some(end) = find_cf_end(rest) {
+                let cond = rest[..end].trim();
+                match cf_stack.last() {
+                    Some(&"ifthen") => {
+                        out.push_str("</mesh-ifthen>");
+                        cf_stack.pop();
+                    }
+                    Some(&"else") => {
+                        out.push_str("</mesh-else>");
+                        cf_stack.pop();
+                    }
+                    _ => {}
+                }
+                out.push_str(&format!(
+                    "<mesh-ifthen condition=\"{}\">",
+                    xml_attr_escape(cond)
+                ));
+                cf_stack.push("ifthen");
+                remaining = &rest[end + 1..];
+                continue;
+            }
+        }
+        // {:else}
+        else if remaining.starts_with("{:else}") {
+            match cf_stack.last() {
+                Some(&"ifthen") => {
+                    out.push_str("</mesh-ifthen>");
+                    cf_stack.pop();
+                }
+                Some(&"else") => {
+                    out.push_str("</mesh-else>");
+                    cf_stack.pop();
+                }
+                _ => {}
+            }
+            out.push_str("<mesh-else>");
+            cf_stack.push("else");
+            remaining = &remaining[7..];
+            continue;
+        }
+        // {/if}
+        else if remaining.starts_with("{/if}") {
+            match cf_stack.last() {
+                Some(&"ifthen") => {
+                    out.push_str("</mesh-ifthen>");
+                    cf_stack.pop();
+                }
+                Some(&"else") => {
+                    out.push_str("</mesh-else>");
+                    cf_stack.pop();
+                }
+                _ => {}
+            }
+            if cf_stack.last() == Some(&"if-outer") {
+                out.push_str("</mesh-if>");
+                cf_stack.pop();
+            }
+            remaining = &remaining[5..];
+            continue;
+        }
+
+        // Not a control-flow token — keep `{` and advance.
+        out.push('{');
+        remaining = &remaining[1..];
+    }
+
+    out
+}
+
+/// Find the index of the `}` that closes the outer `{`, depth-aware.
+/// `s` is the text AFTER the opening `{`.
+fn find_cf_end(s: &str) -> Option<usize> {
+    let mut depth = 1usize;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Escape special XML attribute characters so conditions survive the round-trip
+/// through quick_xml (it will unescape them back when reading the attribute).
+fn xml_attr_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// Convert unquoted brace attribute values to quoted form so quick_xml can parse them.
 ///
 /// `onclick={handler}` → `onclick="{handler}"`
@@ -267,7 +438,8 @@ fn preprocess_template(source: &str) -> String {
 }
 
 fn parse_template(source: &str) -> Result<TemplateBlock, ParseError> {
-    let preprocessed = preprocess_template(source.trim());
+    let cf_processed = preprocess_control_flow(source.trim());
+    let preprocessed = preprocess_template(&cf_processed);
     let wrapped = format!("<mesh-root>{}</mesh-root>", preprocessed);
     let mut reader = Reader::from_str(&wrapped);
     reader.config_mut().trim_text(false);
@@ -502,6 +674,17 @@ fn build_template_node(
     attributes: Vec<Attribute>,
     children: Vec<TemplateNode>,
 ) -> TemplateNode {
+    // Control-flow nodes produced by preprocess_control_flow.
+    if tag == "mesh-for" {
+        let item_name = find_static_attr(&attributes, "item").unwrap_or_default();
+        let iterable = find_static_attr(&attributes, "iterable").unwrap_or_default();
+        return TemplateNode::For(ForNode { item_name, iterable, children });
+    }
+    if tag == "mesh-if" {
+        return build_if_node(children);
+    }
+    // mesh-ifthen / mesh-else remain as Element so build_if_node can extract them.
+
     if tag == "slot" {
         let name = attributes.iter().find_map(|attribute| {
             if attribute.name != "name" {
@@ -529,6 +712,57 @@ fn build_template_node(
         tag,
         attributes,
         children,
+    })
+}
+
+/// Build a nested `IfNode` tree from the `mesh-ifthen` / `mesh-else` children
+/// that `preprocess_control_flow` placed inside a `mesh-if` element.
+///
+/// Multiple `mesh-ifthen` branches are folded into a chain of nested `IfNode`s
+/// so that `{:else if}` is handled correctly.
+fn build_if_node(children: Vec<TemplateNode>) -> TemplateNode {
+    let mut branches: Vec<(String, Vec<TemplateNode>)> = Vec::new();
+    let mut else_children: Vec<TemplateNode> = Vec::new();
+
+    for child in children {
+        match child {
+            TemplateNode::Element(el) if el.tag == "mesh-ifthen" => {
+                let cond = find_static_attr(&el.attributes, "condition").unwrap_or_default();
+                branches.push((cond, el.children));
+            }
+            TemplateNode::Element(el) if el.tag == "mesh-else" => {
+                else_children = el.children;
+            }
+            _ => {}
+        }
+    }
+
+    if branches.is_empty() {
+        return TemplateNode::Element(ElementNode {
+            tag: "box".into(),
+            attributes: vec![],
+            children: else_children,
+        });
+    }
+
+    // Fold branches from last to first into a nested IfNode chain.
+    let mut current_else = else_children;
+    for (cond, then_children) in branches.into_iter().rev() {
+        let node = TemplateNode::If(IfNode {
+            condition: cond,
+            then_children,
+            else_children: current_else,
+        });
+        current_else = vec![node];
+    }
+
+    current_else.remove(0)
+}
+
+fn find_static_attr(attrs: &[Attribute], name: &str) -> Option<String> {
+    attrs.iter().find(|a| a.name == name).and_then(|a| match &a.value {
+        AttributeValue::Static(v) => Some(v.clone()),
+        _ => None,
     })
 }
 
@@ -1330,5 +1564,140 @@ mesh.service.on("audio", "sync_audio_state")
         }
         // Spot-check that the shorthand emitted individual sides (lightningcss expands it).
         eprintln!("padding properties emitted by lightningcss: {props:?}");
+    }
+
+    #[test]
+    fn parse_for_loop() {
+        let source = r#"
+<template>
+  <div>
+    {#for item in items}
+      <span>{item.name}</span>
+    {/for}
+  </div>
+</template>
+"#;
+        let file = parse_component(source).unwrap();
+        let tmpl = file.template.unwrap();
+        match &tmpl.root[0] {
+            TemplateNode::Element(el) => {
+                assert_eq!(el.tag, "div");
+                assert_eq!(el.children.len(), 1);
+                match &el.children[0] {
+                    TemplateNode::For(f) => {
+                        assert_eq!(f.item_name, "item");
+                        assert_eq!(f.iterable, "items");
+                        assert_eq!(f.children.len(), 1);
+                    }
+                    other => panic!("expected ForNode, got {other:?}"),
+                }
+            }
+            other => panic!("expected element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_if_else() {
+        let source = r#"
+<template>
+  <div>
+    {#if show}
+      <span>visible</span>
+    {:else}
+      <span>hidden</span>
+    {/if}
+  </div>
+</template>
+"#;
+        let file = parse_component(source).unwrap();
+        let tmpl = file.template.unwrap();
+        match &tmpl.root[0] {
+            TemplateNode::Element(el) => {
+                assert_eq!(el.children.len(), 1);
+                match &el.children[0] {
+                    TemplateNode::If(n) => {
+                        assert_eq!(n.condition, "show");
+                        assert_eq!(n.then_children.len(), 1);
+                        assert_eq!(n.else_children.len(), 1);
+                    }
+                    other => panic!("expected IfNode, got {other:?}"),
+                }
+            }
+            other => panic!("expected element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_if_elif_else() {
+        let source = r#"
+<template>
+  <div>
+    {#if a}
+      <span>a</span>
+    {:else if b}
+      <span>b</span>
+    {:else}
+      <span>c</span>
+    {/if}
+  </div>
+</template>
+"#;
+        let file = parse_component(source).unwrap();
+        let tmpl = file.template.unwrap();
+        let div = match &tmpl.root[0] {
+            TemplateNode::Element(el) => el,
+            other => panic!("expected element, got {other:?}"),
+        };
+        // Outer if: condition "a"
+        let outer = match &div.children[0] {
+            TemplateNode::If(n) => n,
+            other => panic!("expected IfNode, got {other:?}"),
+        };
+        assert_eq!(outer.condition, "a");
+        // Else branch is another IfNode (the elif chain)
+        assert_eq!(outer.else_children.len(), 1);
+        let inner = match &outer.else_children[0] {
+            TemplateNode::If(n) => n,
+            other => panic!("expected nested IfNode, got {other:?}"),
+        };
+        assert_eq!(inner.condition, "b");
+        assert_eq!(inner.else_children.len(), 1); // the final else
+    }
+
+    #[test]
+    fn parse_for_inside_if() {
+        let source = r#"
+<template>
+  <div>
+    {#if items and #items > 0}
+      {#for item in items}
+        <span>{item.name}</span>
+      {/for}
+    {:else}
+      <span>empty</span>
+    {/if}
+  </div>
+</template>
+"#;
+        let file = parse_component(source).unwrap();
+        let tmpl = file.template.unwrap();
+        let div = match &tmpl.root[0] {
+            TemplateNode::Element(el) => el,
+            other => panic!("expected element, got {other:?}"),
+        };
+        let if_node = match &div.children[0] {
+            TemplateNode::If(n) => n,
+            other => panic!("expected IfNode, got {other:?}"),
+        };
+        assert_eq!(if_node.condition, "items and #items > 0");
+        assert_eq!(if_node.then_children.len(), 1);
+        match &if_node.then_children[0] {
+            TemplateNode::For(f) => {
+                assert_eq!(f.item_name, "item");
+                assert_eq!(f.iterable, "items");
+            }
+            other => panic!("expected ForNode, got {other:?}"),
+        }
+        assert_eq!(if_node.else_children.len(), 1);
     }
 }

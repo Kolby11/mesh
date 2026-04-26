@@ -1,6 +1,6 @@
 # `@mesh/networkmanager`
 
-Network backend implemented against **NetworkManager** over the system D-Bus.
+Network backend implemented against **NetworkManager** via the `nmcli` CLI.
 
 - **Type:** `backend`
 - **Implements:** interface `mesh.network` (contract `@mesh/network-contract`)
@@ -14,7 +14,8 @@ Required:
 
 - `service.network.read` — read devices, active connections, Wi-Fi scan results
 - `service.network.control` — connect, disconnect, manage connections
-- `dbus.system` — high-privilege, required to talk to the NetworkManager daemon
+- `dbus.system` — reserved for the planned native NetworkManager integration
+- `nmcli` — required for device, connection, and Wi-Fi control in the current implementation
 
 ## Responsibilities
 
@@ -25,6 +26,12 @@ Implements the methods declared by `mesh.network`:
 - scan Wi-Fi networks and initiate connections
 - toggle radios (Wi-Fi, Bluetooth-coordinated state if applicable)
 - emit the contract's events so frontend surfaces redraw the status icon
+
+## Current status
+
+The checked-in backend is still a shell-based placeholder. It depends on
+`nmcli` being present on the host and reports itself unavailable when that
+tool is missing. A direct D-Bus implementation remains the long-term target.
 
 ## Notes
 

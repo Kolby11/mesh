@@ -13,3 +13,5 @@ Layer system, so that we can specify what to render on what layer
 make sure positioning system works (relative, absolute, fixed)
 
 Variable state management and and binding for components
+
+Clean up the backend plugins and interfaces, right now interfaces are separate from the backend, we should check our options and consider moving the interface into the plugin itself
