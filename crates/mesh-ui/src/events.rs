@@ -146,7 +146,11 @@ impl InputState {
                 self.update_hover(root, new_hovered, &mut events);
 
                 if let Some(node_id) = new_hovered {
-                    events.push(UiEvent::PointerMove { node_id, x: *x, y: *y });
+                    events.push(UiEvent::PointerMove {
+                        node_id,
+                        x: *x,
+                        y: *y,
+                    });
                 }
             }
 
@@ -173,7 +177,11 @@ impl InputState {
                     if let Some(node_id) = target {
                         set_state_flag(root, node_id, |s| s.active = true);
                         self.active_node = Some(node_id);
-                        events.push(UiEvent::PointerDown { node_id, x: *x, y: *y });
+                        events.push(UiEvent::PointerDown {
+                            node_id,
+                            x: *x,
+                            y: *y,
+                        });
                     }
                 } else {
                     // Release active state.
@@ -182,24 +190,44 @@ impl InputState {
                     }
 
                     if let Some(node_id) = EventDispatcher::hit_test(root, *x, *y) {
-                        events.push(UiEvent::PointerUp { node_id, x: *x, y: *y });
+                        events.push(UiEvent::PointerUp {
+                            node_id,
+                            x: *x,
+                            y: *y,
+                        });
                     }
                 }
             }
 
-            RawInputEvent::Key { keycode, pressed, modifiers } => {
+            RawInputEvent::Key {
+                keycode,
+                pressed,
+                modifiers,
+            } => {
                 let node_id = self.focused_node.unwrap_or(root.id);
                 let key = format!("{keycode}");
                 if *pressed {
-                    events.push(UiEvent::KeyDown { node_id, key, modifiers: *modifiers });
+                    events.push(UiEvent::KeyDown {
+                        node_id,
+                        key,
+                        modifiers: *modifiers,
+                    });
                 } else {
-                    events.push(UiEvent::KeyUp { node_id, key, modifiers: *modifiers });
+                    events.push(UiEvent::KeyUp {
+                        node_id,
+                        key,
+                        modifiers: *modifiers,
+                    });
                 }
             }
 
             RawInputEvent::Scroll { x, y, dx, dy } => {
                 if let Some(node_id) = EventDispatcher::hit_test(root, *x, *y) {
-                    events.push(UiEvent::Scroll { node_id, dx: *dx, dy: *dy });
+                    events.push(UiEvent::Scroll {
+                        node_id,
+                        dx: *dx,
+                        dy: *dy,
+                    });
                 }
             }
         }

@@ -20,15 +20,22 @@ use mesh_component_backend::{
 use mesh_locale::LocaleEngine;
 use mesh_plugin::PluginType;
 use mesh_plugin::lifecycle::PluginInstance;
+use mesh_plugin::manifest::PluginHost;
 use mesh_renderer::{PixelBuffer, SharedTextMeasurer};
+use mesh_runtime::protocol::HostRequest;
 use mesh_scripting::{LocaleBoundState, ScriptContext};
 use mesh_theme::{Theme, default_theme};
 use mesh_ui::{ElementState, StyleContext, StyleResolver, VariableStore, WidgetNode};
-use mesh_wayland::{Edge, ShellSurface};
+use mesh_wayland::{Edge, KeyboardMode, Layer, ShellSurface};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpListener;
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex, OnceLock, mpsc as std_mpsc};
 use std::time::Duration;
 
 use crate::shell::ShellRunError;
@@ -68,6 +75,114 @@ impl VariableStore for LocalComponentStore<'_> {
 pub(super) struct BackendServiceCandidate {
     pub(super) plugin_id: String,
     pub(super) priority: u32,
+}
+
+pub(super) struct HostedFrontendComponent {
+    plugin_id: String,
+    plugin_dir: PathBuf,
+    frontend_entry: Option<String>,
+    dev_url: Option<String>,
+    surface_layout: SurfaceLayoutSettings,
+    dev_server: Option<Child>,
+    launch_attempted: bool,
+}
+
+impl HostedFrontendComponent {
+    pub(super) fn new(
+        plugin_id: String,
+        plugin_dir: PathBuf,
+        frontend_entry: Option<String>,
+        dev_url: Option<String>,
+        surface_layout: SurfaceLayoutSettings,
+    ) -> Self {
+        Self {
+            plugin_id,
+            plugin_dir,
+            frontend_entry,
+            dev_url,
+            surface_layout,
+            dev_server: None,
+            launch_attempted: false,
+        }
+    }
+
+    fn spawn_hosted_frontend(&mut self) -> Result<(), ComponentError> {
+        if self.launch_attempted {
+            return Ok(());
+        }
+
+        self.launch_attempted = true;
+        ensure_hosted_frontend_dependencies(&self.plugin_id, &self.plugin_dir)?;
+        let resolved_dev_url =
+            resolve_hosted_frontend_url(&self.plugin_dir, self.dev_url.as_deref());
+
+        if let Some((program, args)) = frontend_dev_server_command(&self.plugin_dir) {
+            let mut command = Command::new(&program);
+            command
+                .args(&args)
+                .current_dir(&self.plugin_dir)
+                .stdin(Stdio::null())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .env("MESH_PLUGIN_ID", &self.plugin_id);
+            if let Some(frontend_entry) = &self.frontend_entry {
+                command.env("MESH_FRONTEND_ENTRY", frontend_entry);
+            }
+            if let Some((host, port)) = resolved_dev_url.as_deref().and_then(parse_http_host_port) {
+                command.env("MESH_DEV_HOST", host);
+                command.env("MESH_DEV_PORT", port.to_string());
+                command.env("PORT", port.to_string());
+            }
+
+            let child = command.spawn().map_err(|err| ComponentError::Failed {
+                component_id: self.plugin_id.clone(),
+                message: format!(
+                    "failed to spawn frontend dev server '{}': {} {} ({err})",
+                    self.plugin_id,
+                    program,
+                    args.join(" ")
+                ),
+            })?;
+
+            tracing::info!(
+                "spawned frontend dev server '{}' with command: {} {}",
+                self.plugin_id,
+                program,
+                args.join(" ")
+            );
+            self.dev_server = Some(child);
+        }
+
+        let url = resolved_dev_url.ok_or_else(|| ComponentError::Failed {
+            component_id: self.plugin_id.clone(),
+            message: format!(
+                "no hosted frontend URL or local index found in {}",
+                self.plugin_dir.display()
+            ),
+        })?;
+
+        if url.starts_with("http://") || url.starts_with("https://") {
+            wait_for_http_endpoint(&url, Duration::from_secs(10)).map_err(|message| {
+                ComponentError::Failed {
+                    component_id: self.plugin_id.clone(),
+                    message,
+                }
+            })?;
+        }
+
+        spawn_hosted_frontend_window(
+            &self.plugin_id,
+            &url,
+            &self.surface_layout,
+            self.surface_layout.visible_on_start,
+        )
+        .map_err(|message| ComponentError::Failed {
+            component_id: self.plugin_id.clone(),
+            message,
+        })?;
+
+        Ok(())
+    }
 }
 
 pub(super) struct FrontendSurfaceComponent {
@@ -160,21 +275,20 @@ impl FrontendCatalog {
                 continue;
             }
 
-            let compiled =
-                compile_frontend_plugin(&plugin.manifest, &plugin.path).map_err(|source| {
-                    ShellRunError::FrontendCompile {
-                        plugin_id: plugin_id.clone(),
-                        source,
-                    }
-                })?;
+            if !matches!(plugin.manifest.runtime.host, Some(PluginHost::Tauri)) {
+                tracing::info!(
+                    "skipping non-tauri frontend plugin '{}'",
+                    plugin.manifest.package.id
+                );
+                continue;
+            }
 
-            catalog.plugins.insert(
-                plugin_id.clone(),
-                FrontendCatalogEntry {
-                    plugin_dir: plugin.path.clone(),
-                    compiled,
-                },
+            tracing::info!(
+                "tauri frontend plugin '{}' discovered; legacy mesh frontend runtime is disabled",
+                plugin.manifest.package.id
             );
+
+            continue;
         }
 
         for (plugin_id, entry) in &catalog.plugins {
@@ -287,6 +401,851 @@ impl FrontendCatalog {
             _ => Err(format!(
                 "multiple required widget dependencies export '{tag}': {matches:?}"
             )),
+        }
+    }
+}
+
+impl ShellComponent for HostedFrontendComponent {
+    fn id(&self) -> &str {
+        &self.plugin_id
+    }
+
+    fn surface_id(&self) -> &str {
+        &self.plugin_id
+    }
+
+    fn initial_visibility(&self) -> Option<bool> {
+        Some(self.surface_layout.visible_on_start)
+    }
+
+    fn mount(&mut self, _ctx: ComponentContext) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.spawn_hosted_frontend()?;
+        tracing::info!(
+            "hosted frontend component '{}' mounted with entry {:?}",
+            self.plugin_id,
+            self.frontend_entry
+        );
+        Ok(Vec::new())
+    }
+
+    fn handle_core_event(
+        &mut self,
+        event: &CoreEvent,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        if let CoreEvent::SurfaceVisibilityChanged { surface_id, visible } = event {
+            if surface_id == &self.plugin_id {
+                set_hosted_frontend_visible(&self.plugin_id, *visible);
+            }
+        }
+        Ok(Vec::new())
+    }
+
+    fn handle_service_event(
+        &mut self,
+        _event: &ServiceEvent,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn wants_render(&self) -> bool {
+        false
+    }
+
+    fn render(&mut self, _surface: &mut dyn ShellSurface) -> Result<(), ComponentError> {
+        Ok(())
+    }
+
+    fn paint(
+        &mut self,
+        _theme: &Theme,
+        _width: u32,
+        _height: u32,
+        _buffer: &mut PixelBuffer,
+    ) -> Result<(), ComponentError> {
+        Ok(())
+    }
+
+    fn theme_changed(&mut self) -> Result<(), ComponentError> {
+        Ok(())
+    }
+
+    fn source_path(&self) -> Option<&Path> {
+        None
+    }
+
+    fn plugin_settings_path(&self) -> Option<&Path> {
+        None
+    }
+}
+
+impl Drop for HostedFrontendComponent {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.dev_server {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        destroy_hosted_frontend_window(&self.plugin_id);
+    }
+}
+
+fn frontend_dev_server_command(plugin_dir: &Path) -> Option<(String, Vec<String>)> {
+    let package_json_path = plugin_dir.join("package.json");
+    let package_json = std::fs::read_to_string(&package_json_path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&package_json).ok()?;
+    let scripts = value.get("scripts")?.as_object()?;
+
+    let run_script = |name: &str| -> Option<(String, Vec<String>)> {
+        if scripts.contains_key(name) {
+            Some((
+                "pnpm".to_string(),
+                vec!["run".to_string(), name.to_string()],
+            ))
+        } else {
+            None
+        }
+    };
+
+    run_script("dev")
+}
+
+fn hosted_frontend_url(plugin_dir: &Path, dev_url: Option<&str>) -> Option<String> {
+    if let Some(url) = dev_url.filter(|url| !url.trim().is_empty()) {
+        return Some(url.to_string());
+    }
+
+    let dist_index = plugin_dir.join("dist").join("index.html");
+    if dist_index.exists() {
+        return Some(format!("file://{}", dist_index.display()));
+    }
+
+    let root_index = plugin_dir.join("index.html");
+    if root_index.exists() {
+        return Some(format!("file://{}", root_index.display()));
+    }
+
+    None
+}
+
+fn resolve_hosted_frontend_url(plugin_dir: &Path, dev_url: Option<&str>) -> Option<String> {
+    let url = hosted_frontend_url(plugin_dir, dev_url)?;
+    Some(resolve_available_http_url(&url).unwrap_or(url))
+}
+
+fn resolve_available_http_url(url: &str) -> Option<String> {
+    let (host, port) = parse_http_host_port(url)?;
+    let available_port = find_available_port(&host, port)?;
+
+    if available_port == port {
+        return Some(url.to_string());
+    }
+
+    Some(replace_url_port(url, available_port))
+}
+
+fn find_available_port(host: &str, preferred_port: u16) -> Option<u16> {
+    for port in preferred_port..preferred_port.saturating_add(32) {
+        if TcpListener::bind((host, port)).is_ok() {
+            return Some(port);
+        }
+    }
+
+    None
+}
+
+fn replace_url_port(url: &str, port: u16) -> String {
+    let Some((host, current_port)) = parse_http_host_port(url) else {
+        return url.to_string();
+    };
+
+    url.replacen(
+        &format!("{host}:{current_port}"),
+        &format!("{host}:{port}"),
+        1,
+    )
+}
+
+fn wait_for_http_endpoint(url: &str, timeout: Duration) -> Result<(), String> {
+    let Some((host, port)) = parse_http_host_port(url) else {
+        return Ok(());
+    };
+
+    let started = std::time::Instant::now();
+    while started.elapsed() < timeout {
+        if std::net::TcpStream::connect((&*host, port)).is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    }
+
+    Err(format!(
+        "timed out waiting for hosted frontend endpoint {}:{}",
+        host, port
+    ))
+}
+
+fn parse_http_host_port(url: &str) -> Option<(String, u16)> {
+    let rest = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))?;
+    let authority = rest.split('/').next()?;
+    let (host, port) = authority.rsplit_once(':')?;
+    Some((host.to_string(), port.parse().ok()?))
+}
+
+fn ensure_hosted_frontend_dependencies(
+    plugin_id: &str,
+    plugin_dir: &Path,
+) -> Result<(), ComponentError> {
+    if !plugin_dir.join("package.json").exists() || plugin_dir.join("node_modules").exists() {
+        return Ok(());
+    }
+
+    tracing::info!(
+        "installing hosted frontend dependencies for '{}' in {}",
+        plugin_id,
+        plugin_dir.display()
+    );
+
+    let status = Command::new("pnpm")
+        .arg("install")
+        .current_dir(plugin_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .map_err(|err| ComponentError::Failed {
+            component_id: plugin_id.to_string(),
+            message: format!(
+                "failed to run 'pnpm install' for hosted frontend in {}: {err}",
+                plugin_dir.display()
+            ),
+        })?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(ComponentError::Failed {
+            component_id: plugin_id.to_string(),
+            message: format!(
+                "'pnpm install' failed for hosted frontend in {} with status {}",
+                plugin_dir.display(),
+                status
+            ),
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct HostedFrontendWindow {
+    window: gtk::Window,
+    fixed: gtk::Fixed,
+    webview: wry::WebView,
+    configured_width: u32,
+    configured_height: u32,
+    edge: mesh_wayland::Edge,
+}
+
+#[cfg(target_os = "linux")]
+enum HostedFrontendHostCommand {
+    Create {
+        plugin_id: String,
+        url: String,
+        surface_layout: SurfaceLayoutSettings,
+        visible: bool,
+    },
+    Destroy {
+        plugin_id: String,
+    },
+    SetVisible {
+        plugin_id: String,
+        visible: bool,
+    },
+    ContentSize {
+        plugin_id: String,
+        width: u32,
+        height: u32,
+    },
+}
+
+#[cfg(target_os = "linux")]
+static HOSTED_FRONTEND_HOST: OnceLock<std_mpsc::Sender<HostedFrontendHostCommand>> =
+    OnceLock::new();
+
+#[cfg(target_os = "linux")]
+fn spawn_hosted_frontend_window(
+    plugin_id: &str,
+    url: &str,
+    surface_layout: &SurfaceLayoutSettings,
+    visible: bool,
+) -> Result<(), String> {
+    hosted_frontend_host_sender()?
+        .send(HostedFrontendHostCommand::Create {
+            plugin_id: plugin_id.to_string(),
+            url: url.to_string(),
+            surface_layout: surface_layout.clone(),
+            visible,
+        })
+        .map_err(|err| format!("failed to send hosted frontend create command: {err}"))
+}
+
+#[cfg(target_os = "linux")]
+fn set_hosted_frontend_visible(plugin_id: &str, visible: bool) {
+    if let Some(sender) = HOSTED_FRONTEND_HOST.get() {
+        let _ = sender.send(HostedFrontendHostCommand::SetVisible {
+            plugin_id: plugin_id.to_string(),
+            visible,
+        });
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn destroy_hosted_frontend_window(plugin_id: &str) {
+    if let Some(sender) = HOSTED_FRONTEND_HOST.get() {
+        let _ = sender.send(HostedFrontendHostCommand::Destroy {
+            plugin_id: plugin_id.to_string(),
+        });
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn spawn_hosted_frontend_window(
+    plugin_id: &str,
+    _url: &str,
+    _surface_layout: &SurfaceLayoutSettings,
+    _visible: bool,
+) -> Result<(), String> {
+    Err(format!(
+        "gtk-layer-shell webview host is only implemented on Linux for plugin '{}'",
+        plugin_id
+    ))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn set_hosted_frontend_visible(_plugin_id: &str, _visible: bool) {}
+
+#[cfg(not(target_os = "linux"))]
+fn destroy_hosted_frontend_window(_plugin_id: &str) {}
+
+#[cfg(target_os = "linux")]
+fn hosted_frontend_host_sender()
+-> Result<&'static std_mpsc::Sender<HostedFrontendHostCommand>, String> {
+    if let Some(sender) = HOSTED_FRONTEND_HOST.get() {
+        return Ok(sender);
+    }
+
+    let (tx, rx) = std_mpsc::channel();
+    std::thread::spawn(move || run_hosted_frontend_host_loop(rx));
+    HOSTED_FRONTEND_HOST
+        .set(tx)
+        .map_err(|_| "hosted frontend host already initialized".to_string())?;
+    HOSTED_FRONTEND_HOST
+        .get()
+        .ok_or_else(|| "hosted frontend host unavailable".to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn run_hosted_frontend_host_loop(rx: std_mpsc::Receiver<HostedFrontendHostCommand>) {
+    use gtk::prelude::*;
+
+    if std::env::var_os("WAYLAND_DISPLAY").is_some()
+        && std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none()
+    {
+        tracing::info!("setting WEBKIT_DISABLE_COMPOSITING_MODE=1 for hosted frontends on Wayland");
+        unsafe {
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        }
+    }
+
+    if let Err(err) = gtk::init() {
+        tracing::error!("gtk init failed for hosted frontend host: {}", err);
+        return;
+    }
+    if !gtk_layer_shell::is_supported() {
+        tracing::error!("gtk-layer-shell is not supported by the current Wayland compositor");
+        return;
+    }
+
+    let windows: Arc<Mutex<HashMap<String, HostedFrontendWindow>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let windows_for_commands = Arc::clone(&windows);
+
+    gtk::glib::timeout_add_local(Duration::from_millis(16), move || {
+        while let Ok(command) = rx.try_recv() {
+            match command {
+                HostedFrontendHostCommand::Create {
+                    plugin_id,
+                    url,
+                    surface_layout,
+                    visible,
+                } => match build_hosted_frontend_window(&plugin_id, &url, &surface_layout) {
+                    Ok(hosted_window) => {
+                        if let Some(existing) =
+                            windows_for_commands.lock().unwrap().remove(&plugin_id)
+                        {
+                            existing.window.close();
+                        }
+                        if visible {
+                            hosted_window.window.show_all();
+                        }
+                        windows_for_commands
+                            .lock()
+                            .unwrap()
+                            .insert(plugin_id, hosted_window);
+                    }
+                    Err(err) => {
+                        tracing::error!("hosted frontend window create failed: {}", err);
+                    }
+                },
+                HostedFrontendHostCommand::SetVisible { plugin_id, visible } => {
+                    use gtk::prelude::WidgetExt;
+                    let guard = windows_for_commands.lock().unwrap();
+                    if let Some(hosted) = guard.get(&plugin_id) {
+                        if visible {
+                            hosted.window.show_all();
+                        } else {
+                            hosted.window.hide();
+                        }
+                    }
+                }
+                HostedFrontendHostCommand::Destroy { plugin_id } => {
+                    if let Some(existing) = windows_for_commands.lock().unwrap().remove(&plugin_id)
+                    {
+                        existing.window.close();
+                    }
+                }
+                HostedFrontendHostCommand::ContentSize {
+                    plugin_id,
+                    width,
+                    height,
+                } => {
+                    use gtk::prelude::*;
+                    use wry::dpi::{LogicalPosition, LogicalSize};
+                    use wry::Rect;
+
+                    let mut guard = windows_for_commands.lock().unwrap();
+                    if let Some(hosted) = guard.get_mut(&plugin_id) {
+                        // Resize the GTK Fixed container and webview bounds to fit the
+                        // reported content. For Top/Bottom edges the compositor controls
+                        // width via L+R anchors, so only the height changes; for Left/Right
+                        // edges only the width changes.
+                        let w = width.max(1);
+                        let h = height.max(1);
+                        let (new_w, new_h) = match hosted.edge {
+                            mesh_wayland::Edge::Top | mesh_wayland::Edge::Bottom => {
+                                (hosted.configured_width, h)
+                            }
+                            mesh_wayland::Edge::Left | mesh_wayland::Edge::Right => {
+                                (w, hosted.configured_height)
+                            }
+                        };
+                        hosted.fixed.set_size_request(new_w as i32, new_h as i32);
+                        // Update geometry hints so the compositor sees the new size.
+                        let (max_w, max_h) = match hosted.edge {
+                            mesh_wayland::Edge::Top | mesh_wayland::Edge::Bottom => {
+                                (32767i32, new_h as i32)
+                            }
+                            mesh_wayland::Edge::Left | mesh_wayland::Edge::Right => {
+                                (new_w as i32, 32767i32)
+                            }
+                        };
+                        let geometry = gtk::gdk::Geometry::new(
+                            new_w as i32,
+                            new_h as i32,
+                            max_w,
+                            max_h,
+                            0, 0, 0, 0, 0.0, 0.0,
+                            gtk::gdk::Gravity::NorthWest,
+                        );
+                        hosted.window.set_geometry_hints(
+                            None::<&gtk::Widget>,
+                            Some(&geometry),
+                            gtk::gdk::WindowHints::MIN_SIZE | gtk::gdk::WindowHints::MAX_SIZE,
+                        );
+                        let _ = hosted.webview.set_bounds(Rect {
+                            position: LogicalPosition::new(0, 0).into(),
+                            size: LogicalSize::new(new_w, new_h).into(),
+                        });
+                    }
+                }
+            }
+        }
+
+        gtk::glib::ControlFlow::Continue
+    });
+
+    let main_loop = gtk::glib::MainLoop::new(None, false);
+    main_loop.run();
+}
+
+#[cfg(target_os = "linux")]
+fn build_hosted_frontend_window(
+    plugin_id: &str,
+    url: &str,
+    surface_layout: &SurfaceLayoutSettings,
+) -> Result<HostedFrontendWindow, String> {
+    use gtk::prelude::*;
+    use gtk_layer_shell::{Edge as LayerEdge, LayerShell};
+    use wry::WebViewBuilderExtUnix;
+    use wry::dpi::{LogicalPosition, LogicalSize};
+    use wry::{Rect, WebViewBuilder};
+
+    let (resolved_width, resolved_height) = resolve_hosted_frontend_window_size(surface_layout);
+    let window = gtk::Window::new(gtk::WindowType::Toplevel);
+    window.set_title(plugin_id);
+    window.set_default_size(resolved_width as i32, resolved_height as i32);
+    window.set_decorated(false);
+    window.set_resizable(false);
+    window.set_app_paintable(true);
+
+    // Enable RGBA visual so the window background is transparent on Wayland.
+    {
+        use gtk::prelude::WidgetExt;
+        if let Some(screen) = gtk::prelude::WidgetExt::screen(&window) {
+            if let Some(visual) = screen.rgba_visual() {
+                window.set_visual(Some(&visual));
+            }
+        }
+    }
+    window.connect_draw(|_, cr| {
+        cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+        cr.set_operator(gtk::cairo::Operator::Source);
+        let _ = cr.paint();
+        gtk::glib::Propagation::Proceed
+    });
+
+    window.init_layer_shell();
+    window.set_namespace("mesh");
+    window.set_layer(map_layer_shell_layer(surface_layout.layer));
+    apply_layer_shell_anchors(&window, surface_layout.edge);
+    window.set_layer_shell_margin(LayerEdge::Top, surface_layout.margin_top);
+    window.set_layer_shell_margin(LayerEdge::Right, surface_layout.margin_right);
+    window.set_layer_shell_margin(LayerEdge::Bottom, surface_layout.margin_bottom);
+    window.set_layer_shell_margin(LayerEdge::Left, surface_layout.margin_left);
+    window.set_exclusive_zone(surface_layout.exclusive_zone);
+    window.set_keyboard_mode(map_layer_shell_keyboard_mode(surface_layout.keyboard_mode));
+
+    let fixed = gtk::Fixed::new();
+    fixed.set_size_request(resolved_width as i32, resolved_height as i32);
+    window.add(&fixed);
+    fixed.show();
+    window.realize();
+
+    let webview = WebViewBuilder::new()
+        .with_url(url)
+        .with_transparent(true)
+        .with_devtools(true)
+        .with_initialization_script(mesh_host_init_script())
+        .with_bounds(Rect {
+            position: LogicalPosition::new(0, 0).into(),
+            size: LogicalSize::new(resolved_width, resolved_height).into(),
+        })
+        .with_ipc_handler({
+            let plugin_id = plugin_id.to_string();
+            move |request| {
+                handle_hosted_frontend_ipc(&plugin_id, request.body());
+            }
+        })
+        .build_gtk(&fixed)
+        .map_err(|err| format!("build_gtk failed: {err}"))?;
+
+    // Hard-clamp the GTK window to exactly the configured dimensions.  Without this,
+    // WebKit's internal natural size (reported to GTK during layout) can make the layer
+    // surface taller than configured.  Setting equal min/max geometry hints forces GTK to
+    // allocate exactly resolved_height regardless of child preferred sizes.
+    //
+    // For Top/Bottom edges the compositor controls width (Left+Right anchors), so we leave
+    // max_width unconstrained (32767) to avoid fighting the compositor's allocation.
+    // For Left/Right edges the compositor controls height, so max_height is left open.
+    {
+        let (max_w, max_h) = match surface_layout.edge {
+            Edge::Top | Edge::Bottom => (32767, resolved_height as i32),
+            Edge::Left | Edge::Right => (resolved_width as i32, 32767),
+        };
+        let geometry = gtk::gdk::Geometry::new(
+            resolved_width as i32,
+            resolved_height as i32,
+            max_w,
+            max_h,
+            0,
+            0,
+            0,
+            0,
+            0.0,
+            0.0,
+            gtk::gdk::Gravity::NorthWest,
+        );
+        window.set_geometry_hints(
+            None::<&gtk::Widget>,
+            Some(&geometry),
+            gtk::gdk::WindowHints::MIN_SIZE | gtk::gdk::WindowHints::MAX_SIZE,
+        );
+    }
+
+    Ok(HostedFrontendWindow {
+        window,
+        fixed,
+        webview,
+        configured_width: resolved_width,
+        configured_height: resolved_height,
+        edge: surface_layout.edge,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn resolve_hosted_frontend_window_size(surface_layout: &SurfaceLayoutSettings) -> (u32, u32) {
+    use gtk::prelude::MonitorExt;
+
+    let fallback_width = surface_layout.width.max(1);
+    let fallback_height = surface_layout.height.max(1);
+
+    let Some(display) = gtk::gdk::Display::default() else {
+        return (fallback_width, fallback_height);
+    };
+    let Some(monitor) = display.primary_monitor() else {
+        return (fallback_width, fallback_height);
+    };
+
+    let geometry = monitor.geometry();
+    let monitor_width = u32::try_from(geometry.width())
+        .unwrap_or(fallback_width)
+        .max(1);
+    let monitor_height = u32::try_from(geometry.height())
+        .unwrap_or(fallback_height)
+        .max(1);
+
+    let resolved_width = match surface_layout.edge {
+        Edge::Top | Edge::Bottom => monitor_width,
+        Edge::Left | Edge::Right => fallback_width.min(monitor_width),
+    };
+
+    let resolved_height = match surface_layout.edge {
+        Edge::Left | Edge::Right => monitor_height,
+        Edge::Top | Edge::Bottom => fallback_height.min(monitor_height),
+    };
+
+    (resolved_width, resolved_height)
+}
+
+#[cfg(target_os = "linux")]
+fn mesh_host_init_script() -> &'static str {
+    r#"
+if (!window.__MESH_CORE__) {
+  const listeners = new Set();
+  window.__MESH_CORE__ = Object.freeze({
+    postMessage(message) {
+      window.ipc.postMessage(JSON.stringify(message));
+    },
+    addEventListener(handler) {
+      listeners.add(handler);
+      return () => listeners.delete(handler);
+    },
+  });
+  window.__dispatchMeshCoreEvent = (event) => {
+    for (const handler of listeners) {
+      try {
+        handler(event);
+      } catch (error) {
+        console.error("mesh host event handler failed", error);
+      }
+    }
+  };
+
+  // Report content dimensions so the host can resize the webview window to fit.
+  // Use offsetWidth/offsetHeight which exclude absolutely-positioned overflow (e.g.
+  // popovers that extend beyond the bar) so the window stays nav-bar-height only.
+  const reportContentSize = () => {
+    const body = document.body;
+    if (!body) return;
+    const w = body.offsetWidth;
+    const h = body.offsetHeight;
+    if (w > 0 && h > 0) {
+      window.ipc.postMessage(JSON.stringify({ kind: "content_size", width: w, height: h }));
+    }
+  };
+  const ro = new ResizeObserver(reportContentSize);
+  ro.observe(document.body);
+}
+"#
+}
+
+#[cfg(target_os = "linux")]
+fn handle_hosted_frontend_ipc(plugin_id: &str, message: &str) {
+    // Handle content-size reports sent by the ResizeObserver in the init script.
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(message) {
+        if value.get("kind").and_then(|v| v.as_str()) == Some("content_size") {
+            let width = value
+                .get("width")
+                .and_then(|v| v.as_f64())
+                .map(|v| v.ceil() as u32)
+                .unwrap_or(0);
+            let height = value
+                .get("height")
+                .and_then(|v| v.as_f64())
+                .map(|v| v.ceil() as u32)
+                .unwrap_or(0);
+            if width > 0 && height > 0 {
+                if let Some(sender) = HOSTED_FRONTEND_HOST.get() {
+                    let _ = sender.send(HostedFrontendHostCommand::ContentSize {
+                        plugin_id: plugin_id.to_string(),
+                        width,
+                        height,
+                    });
+                }
+            }
+            return;
+        }
+    }
+
+    let request = match serde_json::from_str::<HostRequest>(message) {
+        Ok(request) => request,
+        Err(err) => {
+            tracing::warn!("hosted frontend emitted invalid IPC JSON: {}", err);
+            return;
+        }
+    };
+
+    if let Err(err) = dispatch_host_request_via_ipc_socket(request) {
+        tracing::warn!("failed to dispatch hosted frontend IPC: {}", err);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn dispatch_host_request_via_ipc_socket(request: HostRequest) -> Result<(), String> {
+    match request {
+        HostRequest::InvokeCore { command, payload } => {
+            dispatch_shell_command(&command, &payload)?;
+        }
+        HostRequest::EmitEvent { channel, payload } => {
+            dispatch_shell_command(&channel, &payload)?;
+        }
+        HostRequest::RegisterFrontend { .. }
+        | HostRequest::RegisterBackend { .. }
+        | HostRequest::RegisterBindable { .. }
+        | HostRequest::UpdateBindable { .. }
+        | HostRequest::SubscribeBindable { .. }
+        | HostRequest::UnsubscribeBindable { .. } => {}
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn dispatch_shell_command(command: &str, payload: &serde_json::Value) -> Result<(), String> {
+    let ipc_command = match command {
+        "shell.toggle-surface" => payload
+            .get("surface_id")
+            .and_then(serde_json::Value::as_str)
+            .map(|surface_id| format!("shell:toggle_surface:{surface_id}")),
+        "shell.show-surface" => payload
+            .get("surface_id")
+            .and_then(serde_json::Value::as_str)
+            .map(|surface_id| format!("shell:show_surface:{surface_id}")),
+        "shell.hide-surface" => payload
+            .get("surface_id")
+            .and_then(serde_json::Value::as_str)
+            .map(|surface_id| format!("shell:hide_surface:{surface_id}")),
+        "shell.position-surface" => {
+            let surface_id = payload
+                .get("surface_id")
+                .and_then(serde_json::Value::as_str);
+            let margin_top = payload
+                .get("margin_top")
+                .and_then(serde_json::Value::as_i64)
+                .and_then(|value| i32::try_from(value).ok());
+            let margin_left = payload
+                .get("margin_left")
+                .and_then(serde_json::Value::as_i64)
+                .and_then(|value| i32::try_from(value).ok());
+
+            match (surface_id, margin_top, margin_left) {
+                (Some(surface_id), Some(margin_top), Some(margin_left)) => Some(format!(
+                    "shell:position_surface:{surface_id}:{margin_top}:{margin_left}"
+                )),
+                _ => None,
+            }
+        }
+        "shell:debug_overlay" | "shell:debug_cycle_tab" | "shell:shutdown" => {
+            Some(command.to_string())
+        }
+        _ => None,
+    };
+
+    if let Some(ipc_command) = ipc_command {
+        send_ipc_command(&ipc_command)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn send_ipc_command(command: &str) -> Result<(), String> {
+    let socket_path = super::default_ipc_socket_path();
+    let mut stream = UnixStream::connect(&socket_path)
+        .map_err(|err| format!("connect {}: {err}", socket_path.display()))?;
+    stream
+        .write_all(format!("{command}\n").as_bytes())
+        .map_err(|err| format!("write {}: {err}", socket_path.display()))?;
+
+    let mut response = String::new();
+    let mut reader = BufReader::new(stream);
+    reader
+        .read_line(&mut response)
+        .map_err(|err| format!("read {}: {err}", socket_path.display()))?;
+
+    if response.starts_with("ok") {
+        Ok(())
+    } else {
+        Err(response.trim().to_string())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn map_layer_shell_layer(layer: Layer) -> gtk_layer_shell::Layer {
+    match layer {
+        Layer::Background => gtk_layer_shell::Layer::Background,
+        Layer::Bottom => gtk_layer_shell::Layer::Bottom,
+        Layer::Top => gtk_layer_shell::Layer::Top,
+        Layer::Overlay => gtk_layer_shell::Layer::Overlay,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn map_layer_shell_keyboard_mode(mode: KeyboardMode) -> gtk_layer_shell::KeyboardMode {
+    match mode {
+        KeyboardMode::None => gtk_layer_shell::KeyboardMode::None,
+        KeyboardMode::Exclusive => gtk_layer_shell::KeyboardMode::Exclusive,
+        KeyboardMode::OnDemand => gtk_layer_shell::KeyboardMode::OnDemand,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn apply_layer_shell_anchors(window: &gtk::Window, edge: Edge) {
+    use gtk_layer_shell::{Edge as LayerEdge, LayerShell};
+
+    match edge {
+        Edge::Top => {
+            window.set_anchor(LayerEdge::Top, true);
+            window.set_anchor(LayerEdge::Left, true);
+            window.set_anchor(LayerEdge::Right, true);
+        }
+        Edge::Bottom => {
+            window.set_anchor(LayerEdge::Bottom, true);
+            window.set_anchor(LayerEdge::Left, true);
+            window.set_anchor(LayerEdge::Right, true);
+        }
+        Edge::Left => {
+            window.set_anchor(LayerEdge::Left, true);
+            window.set_anchor(LayerEdge::Top, true);
+            window.set_anchor(LayerEdge::Bottom, true);
+        }
+        Edge::Right => {
+            window.set_anchor(LayerEdge::Right, true);
+            window.set_anchor(LayerEdge::Top, true);
+            window.set_anchor(LayerEdge::Bottom, true);
         }
     }
 }
@@ -1136,11 +2095,12 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             if let Some(entry) = self.frontend_catalog.plugins.get(&host.package.id) {
                 if let Some(local) = entry.compiled.local_components.get(alias) {
                     let theme = self.active_theme.borrow().clone();
-                    let host_state = self
-                        .runtime_state(host_instance_key)
-                        .unwrap_or_default();
+                    let host_state = self.runtime_state(host_instance_key).unwrap_or_default();
                     let bound = LocaleBoundState::new(&host_state, &self.locale);
-                    let store = LocalComponentStore { base: &bound, props };
+                    let store = LocalComponentStore {
+                        base: &bound,
+                        props,
+                    };
                     let host_rules = entry
                         .compiled
                         .component

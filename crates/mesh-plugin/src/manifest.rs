@@ -17,6 +17,8 @@ pub struct Manifest {
     #[serde(default)]
     pub entrypoints: EntrypointsSection,
     #[serde(default)]
+    pub runtime: RuntimeSection,
+    #[serde(default)]
     pub accessibility: Option<AccessibilitySection>,
     #[serde(default)]
     pub settings: Option<SettingsSection>,
@@ -322,6 +324,32 @@ pub struct EntrypointsSection {
     pub main: Option<String>,
     #[serde(default)]
     pub settings_ui: Option<String>,
+    #[serde(default)]
+    pub backend: Option<String>,
+    #[serde(default)]
+    pub frontend: Option<String>,
+    #[serde(default)]
+    pub preload: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RuntimeSection {
+    #[serde(default)]
+    pub host: Option<PluginHost>,
+    #[serde(default)]
+    pub framework: Option<String>,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub dev_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PluginHost {
+    Native,
+    TypeScript,
+    Tauri,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -593,6 +621,8 @@ struct TomlManifest {
     #[serde(default)]
     entrypoints: EntrypointsSection,
     #[serde(default)]
+    runtime: RuntimeSection,
+    #[serde(default)]
     accessibility: Option<AccessibilitySection>,
     #[serde(default)]
     settings: Option<TomlSettingsSection>,
@@ -633,6 +663,7 @@ impl TomlManifest {
             },
             capabilities: self.capabilities,
             entrypoints: self.entrypoints,
+            runtime: self.runtime,
             accessibility: self.accessibility,
             settings: self.settings.map(TomlSettingsSection::into_settings),
             i18n: self.i18n.map(TomlI18nSection::into_i18n),
@@ -743,6 +774,8 @@ struct JsonManifest {
     #[serde(default)]
     entrypoints: EntrypointsSection,
     #[serde(default)]
+    runtime: RuntimeSection,
+    #[serde(default)]
     accessibility: Option<AccessibilitySection>,
     #[serde(default)]
     settings: Option<JsonSettingsSection>,
@@ -788,6 +821,7 @@ impl JsonManifest {
             dependencies: self.dependencies.into_dependencies(),
             capabilities: self.capabilities,
             entrypoints: self.entrypoints,
+            runtime: self.runtime,
             accessibility: self.accessibility,
             settings: self.settings.map(JsonSettingsSection::into_settings),
             i18n: self.i18n.map(JsonI18nSection::into_i18n),
@@ -1015,7 +1049,11 @@ main = "src/main.mesh"
             entrypoints: EntrypointsSection {
                 main: Some("src/main.mesh".into()),
                 settings_ui: None,
+                backend: None,
+                frontend: None,
+                preload: None,
             },
+            runtime: RuntimeSection::default(),
             accessibility: None,
             settings: None,
             i18n: None,

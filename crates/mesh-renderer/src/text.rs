@@ -363,7 +363,14 @@ impl mesh_ui::TextMeasurer for TextRenderer {
         line_height: f32,
         max_width: Option<f32>,
     ) -> (f32, f32) {
-        self.measure_styled(text, font_family, font_size, font_weight, line_height, max_width)
+        self.measure_styled(
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            max_width,
+        )
     }
 }
 

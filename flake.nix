@@ -17,6 +17,18 @@
           libxkbcommon
           wayland
           wayland-protocols
+          glib
+          gdk-pixbuf
+          gtk3
+          gtk-layer-shell
+          webkitgtk_4_1
+          libsoup_3
+          glib-networking
+          cairo
+          pango
+          atk
+          harfbuzz
+          librsvg
         ];
       in
       {
@@ -27,13 +39,16 @@
             rustfmt
             clippy
             pkg-config
+            nodejs
+            pnpm
           ] ++ runtimeLibs;
 
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;
 
           shellHook = ''
             echo "MESH dev shell ready"
-            echo "Run: cargo run -p mesh-cli -- start"
+            echo "Run inside this shell so Tauri/WebKitGTK deps are available"
+            echo "Example: cargo run -p mesh-cli -- start"
           '';
         };
       });

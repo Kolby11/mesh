@@ -8,8 +8,8 @@ use mesh_ui::VariableStore;
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
 use std::fmt;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
 pub struct PublishedEvent {
@@ -273,7 +273,11 @@ impl ScriptContext {
         let updates: Vec<(String, Value)> = bindings
             .iter()
             .filter(|b| b.service == service)
-            .filter_map(|b| payload.get(&b.field).map(|v| (b.var_name.clone(), v.clone())))
+            .filter_map(|b| {
+                payload
+                    .get(&b.field)
+                    .map(|v| (b.var_name.clone(), v.clone()))
+            })
             .collect();
         for (var, val) in updates {
             self.state.set(var.clone(), val.clone());
@@ -375,56 +379,59 @@ impl ScriptContext {
         let mesh_log = self.lua.create_table().map_err(lua_err)?;
 
         let tracked = Arc::clone(&self.tracked_state_keys);
-        mesh_state.set(
-            "set",
-            self.lua
-                .create_function(move |lua, (key, value): (String, LuaValue)| {
-                    lua.globals().set(key.clone(), value)?;
-                    tracked.lock().unwrap().insert(key);
-                    Ok(())
-                })
-                .map_err(lua_err)?,
-        )
-        .map_err(lua_err)?;
+        mesh_state
+            .set(
+                "set",
+                self.lua
+                    .create_function(move |lua, (key, value): (String, LuaValue)| {
+                        lua.globals().set(key.clone(), value)?;
+                        tracked.lock().unwrap().insert(key);
+                        Ok(())
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
 
         let service_bindings = Arc::clone(&self.runtime_service_bindings);
-        mesh_service.set(
-            "bind",
-            self.lua
-                .create_function(move |lua, (path, alias): (String, Option<String>)| {
-                    let Some((service, field)) = path.split_once('.') else {
-                        return Ok(LuaValue::Nil);
-                    };
-                    let var_name = alias.unwrap_or_else(|| field.to_string());
-                    lua.globals().set(var_name.clone(), LuaValue::Nil)?;
-                    service_bindings.lock().unwrap().push(ServiceBinding {
-                        var_name,
-                        service: service.to_string(),
-                        field: field.to_string(),
-                    });
-                    Ok(LuaValue::Nil)
-                })
-                .map_err(lua_err)?,
-        )
-        .map_err(lua_err)?;
+        mesh_service
+            .set(
+                "bind",
+                self.lua
+                    .create_function(move |lua, (path, alias): (String, Option<String>)| {
+                        let Some((service, field)) = path.split_once('.') else {
+                            return Ok(LuaValue::Nil);
+                        };
+                        let var_name = alias.unwrap_or_else(|| field.to_string());
+                        lua.globals().set(var_name.clone(), LuaValue::Nil)?;
+                        service_bindings.lock().unwrap().push(ServiceBinding {
+                            var_name,
+                            service: service.to_string(),
+                            field: field.to_string(),
+                        });
+                        Ok(LuaValue::Nil)
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
 
         let service_subscriptions = Arc::clone(&self.runtime_service_subscriptions);
-        mesh_service.set(
-            "on",
-            self.lua
-                .create_function(move |_lua, (service, handler_name): (String, String)| {
-                    service_subscriptions
-                        .lock()
-                        .unwrap()
-                        .push(ServiceSubscription {
-                            service,
-                            handler_name,
-                        });
-                    Ok(LuaValue::Nil)
-                })
-                .map_err(lua_err)?,
-        )
-        .map_err(lua_err)?;
+        mesh_service
+            .set(
+                "on",
+                self.lua
+                    .create_function(move |_lua, (service, handler_name): (String, String)| {
+                        service_subscriptions
+                            .lock()
+                            .unwrap()
+                            .push(ServiceSubscription {
+                                service,
+                                handler_name,
+                            });
+                        Ok(LuaValue::Nil)
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
 
         let interface_catalog = self.interface_catalog.clone();
         let manifest = HostApiManifest::from_capabilities(&self.capabilities);
@@ -462,7 +469,10 @@ impl ScriptContext {
                             )));
                         }
 
-                        bindings.lock().unwrap().insert(name.clone(), resolution.clone());
+                        bindings
+                            .lock()
+                            .unwrap()
+                            .insert(name.clone(), resolution.clone());
                         create_interface_proxy(lua, resolution)
                     })
                     .map_err(lua_err)?,
@@ -558,7 +568,9 @@ impl ScriptContext {
         mesh.set("ui", mesh_ui).map_err(lua_err)?;
         mesh.set("log", mesh_log).map_err(lua_err)?;
         globals.set("mesh", mesh).map_err(lua_err)?;
-        globals.set("__mesh_request_redraw", false).map_err(lua_err)?;
+        globals
+            .set("__mesh_request_redraw", false)
+            .map_err(lua_err)?;
 
         let require = self
             .lua
@@ -592,7 +604,13 @@ impl ScriptContext {
     /// Sync Lua global values back into ScriptState for all keys registered
     /// via `mesh.state.set`. Called after every script execution.
     fn sync_state_from_lua(&mut self) {
-        let keys: Vec<String> = self.tracked_state_keys.lock().unwrap().iter().cloned().collect();
+        let keys: Vec<String> = self
+            .tracked_state_keys
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect();
         let globals = self.lua.globals();
         for name in &keys {
             if let Ok(lua_value) = globals.get::<LuaValue>(name.as_str()) {
@@ -637,7 +655,10 @@ fn create_interface_proxy(lua: &Lua, resolution: InterfaceResolution) -> mlua::R
                     ))
                 })?;
 
-                let method = contract.methods.iter().find(|candidate| candidate.name == method_name);
+                let method = contract
+                    .methods
+                    .iter()
+                    .find(|candidate| candidate.name == method_name);
                 let Some(method) = method else {
                     return Err(mlua::Error::external(ScriptError::UnsupportedOperation {
                         interface: contract.interface.clone(),
@@ -679,7 +700,8 @@ fn default_lua_value_for_type(
             if let Some(def) = types.get(custom) {
                 let table = lua.create_table()?;
                 for field in &def.fields {
-                    let field_value = default_lua_value_for_type(lua, types, Some(&field.arg_type))?;
+                    let field_value =
+                        default_lua_value_for_type(lua, types, Some(&field.arg_type))?;
                     table.set(field.name.as_str(), field_value)?;
                 }
                 LuaValue::Table(table)

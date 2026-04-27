@@ -10,7 +10,7 @@
     "anchor": "top",
     "layer": "top",
     "width": 1920,
-    "height": 56,
+    "height": 260,
     "exclusive_zone": 56,
     "keyboard_mode": "none",
     "visible_on_start": true

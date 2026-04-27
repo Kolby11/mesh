@@ -460,15 +460,24 @@ impl<'a> StyleResolver<'a> {
 
             tracing::debug!(
                 "[hover] restyle: tag={} classes={:?} state={state:?}",
-                node.tag, classes
+                node.tag,
+                classes
             );
             for rule in rules {
                 if selector_involves_state(&rule.selector)
                     && rule_matches(rule, &node.tag, &classes, id, context, state)
                 {
-                    tracing::debug!("[hover] restyle: applying rule selector={:?}", rule.selector);
+                    tracing::debug!(
+                        "[hover] restyle: applying rule selector={:?}",
+                        rule.selector
+                    );
                     for decl in &rule.declarations {
-                        apply_declaration(&mut node.computed_style, &decl.property, &decl.value, self);
+                        apply_declaration(
+                            &mut node.computed_style,
+                            &decl.property,
+                            &decl.value,
+                            self,
+                        );
                     }
                 }
             }
@@ -508,9 +517,9 @@ fn selector_matches(
             };
             tag_matches && state_matches
         }
-        Selector::Compound(parts) => {
-            parts.iter().all(|s| selector_matches(s, tag, classes, id, state))
-        }
+        Selector::Compound(parts) => parts
+            .iter()
+            .all(|s| selector_matches(s, tag, classes, id, state)),
     }
 }
 
@@ -764,9 +773,7 @@ fn parse_dimension(s: &str) -> Dimension {
     match s {
         "auto" => Dimension::Auto,
         "content" | "fit-content" | "max-content" | "min-content" => Dimension::Content,
-        _ if s.ends_with('%') => {
-            Dimension::Percent(s.trim_end_matches('%').parse().unwrap_or(0.0))
-        }
+        _ if s.ends_with('%') => Dimension::Percent(s.trim_end_matches('%').parse().unwrap_or(0.0)),
         _ => Dimension::Px(parse_px(s)),
     }
 }
@@ -836,7 +843,14 @@ mod tests {
             container_query: None,
         }];
 
-        let style = resolver.resolve_node_style(&rules, "text", &[], None, StyleContext::default(), ElementState::default());
+        let style = resolver.resolve_node_style(
+            &rules,
+            "text",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
         assert_eq!(style.font_size, 20.0);
         assert_eq!(
             style.color,
@@ -894,8 +908,8 @@ mod tests {
 
     #[test]
     fn pseudo_state_rules_apply_when_state_matches() {
-        use mesh_component::style::{Declaration, Selector};
         use crate::tree::ElementState;
+        use mesh_component::style::{Declaration, Selector};
 
         let theme = mesh_theme::default_theme();
         let resolver = StyleResolver::new(&theme);
@@ -920,15 +934,30 @@ mod tests {
         ];
 
         let idle = resolver.resolve_node_style(
-            &rules, "button", &[], None, StyleContext::default(), ElementState::default(),
+            &rules,
+            "button",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
         );
         assert_eq!(idle.background_color, Color::from_hex("#333333").unwrap());
 
         let hovered = resolver.resolve_node_style(
-            &rules, "button", &[], None, StyleContext::default(),
-            ElementState { hovered: true, ..Default::default() },
+            &rules,
+            "button",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState {
+                hovered: true,
+                ..Default::default()
+            },
         );
-        assert_eq!(hovered.background_color, Color::from_hex("#ffffff").unwrap());
+        assert_eq!(
+            hovered.background_color,
+            Color::from_hex("#ffffff").unwrap()
+        );
     }
 
     #[test]
@@ -952,16 +981,33 @@ mod tests {
         let mut input = InputState::new();
 
         // Move pointer over the button.
-        let events = input.process(&mut root, &RawInputEvent::PointerMotion { x: 50.0, y: 25.0 });
+        let events = input.process(
+            &mut root,
+            &RawInputEvent::PointerMotion { x: 50.0, y: 25.0 },
+        );
         assert!(root.children[0].state.hovered, "button should be hovered");
         assert!(!root.state.hovered, "root should not be hovered");
-        assert!(events.iter().any(|e| matches!(e, UiEvent::PointerEnter { node_id } if *node_id == btn_id)));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, UiEvent::PointerEnter { node_id } if *node_id == btn_id))
+        );
 
         // Move pointer off the button onto the root.
-        let events = input.process(&mut root, &RawInputEvent::PointerMotion { x: 150.0, y: 75.0 });
-        assert!(!root.children[0].state.hovered, "button hover should be cleared");
+        let events = input.process(
+            &mut root,
+            &RawInputEvent::PointerMotion { x: 150.0, y: 75.0 },
+        );
+        assert!(
+            !root.children[0].state.hovered,
+            "button hover should be cleared"
+        );
         assert!(root.state.hovered, "root should now be hovered");
-        assert!(events.iter().any(|e| matches!(e, UiEvent::PointerLeave { node_id } if *node_id == btn_id)));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, UiEvent::PointerLeave { node_id } if *node_id == btn_id))
+        );
     }
 
     #[test]

@@ -400,7 +400,12 @@ fn apply_config(layer_surface: &LayerSurface, cfg: &LayerSurfaceConfig) {
     layer_surface.set_exclusive_zone(cfg.exclusive_zone);
     layer_surface.set_keyboard_interactivity(map_keyboard(cfg.keyboard_mode));
     layer_surface.set_size(cfg.width, cfg.height);
-    layer_surface.set_margin(cfg.margin_top, cfg.margin_right, cfg.margin_bottom, cfg.margin_left);
+    layer_surface.set_margin(
+        cfg.margin_top,
+        cfg.margin_right,
+        cfg.margin_bottom,
+        cfg.margin_left,
+    );
 }
 
 fn map_layer(layer: MeshLayer) -> Layer {

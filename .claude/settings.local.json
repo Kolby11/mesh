@@ -21,7 +21,9 @@
       "Bash(awk NR>=2060 && NR<=2075 || NR>=2395 && NR<=2420 *)",
       "WebSearch",
       "Bash(rustc --edition 2021 --crate-type lib crates/mesh-core/src/shell/component.rs --extern mesh_ui=target/debug/libmesh_ui.rlib)",
-      "Bash(cargo rustc *)"
+      "Bash(cargo rustc *)",
+      "Bash(pkg-config --libs xkbcommon)",
+      "Bash(pkg-config --list-all)"
     ]
   }
 }

@@ -1,0 +1,28 @@
+{
+  "id": "@mesh/examples/clock-backend-ts",
+  "name": "Clock Backend TS",
+  "version": "0.1.0",
+  "type": "backend",
+  "api_version": "0.1",
+  "description": "Example pure TypeScript backend plugin using bindable values.",
+  "capabilities": {
+    "required": [
+      "service.time.read"
+    ]
+  },
+  "runtime": {
+    "host": "type-script",
+    "framework": "node",
+    "language": "typescript"
+  },
+  "entrypoints": {
+    "backend": "src/index.ts"
+  },
+  "provides": [
+    {
+      "interface": "mesh.time",
+      "backend_name": "clock-backend-ts",
+      "priority": 100
+    }
+  ]
+}

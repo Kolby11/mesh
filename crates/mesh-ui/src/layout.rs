@@ -81,7 +81,11 @@ fn layout_node(
     // For text leaf nodes, measure intrinsic size if a measurer is available.
     let text_dims: Option<(f32, f32)> =
         if let (true, Some(m)) = (node.tag == "text" && node.children.is_empty(), measurer) {
-            let text = node.attributes.get("content").map(|s| s.as_str()).unwrap_or("");
+            let text = node
+                .attributes
+                .get("content")
+                .map(|s| s.as_str())
+                .unwrap_or("");
             let avail_w = (available_w - margin.horizontal()).max(0.0);
             let mw = match style.width {
                 Dimension::Content => None,
@@ -175,213 +179,212 @@ fn layout_node(
 
     // Even with no flow children there may be absolute children — fall through to that pass.
     if child_count > 0 {
+        let total_gap = style.gap * (child_count as f32 - 1.0).max(0.0);
+        let is_column = style.direction == FlexDirection::Column;
 
-    let total_gap = style.gap * (child_count as f32 - 1.0).max(0.0);
-    let is_column = style.direction == FlexDirection::Column;
-
-    // For overflow containers, children can use their natural main-axis size.
-    let overflow_clips_main = if is_column {
-        style.overflow_y != Overflow::Visible
-    } else {
-        style.overflow_x != Overflow::Visible
-    };
-
-    let main_available = if is_column {
-        inner_h - total_gap
-    } else {
-        inner_w - total_gap
-    };
-
-    // First pass: size fixed children; intrinsic-measure auto children with no flex-grow;
-    // accumulate flex-grow total for the rest.
-    let mut total_flex_grow = 0.0f32;
-    let mut fixed_main = 0.0f32;
-    // NAN is the sentinel for "not yet sized" — avoids a separate Vec<bool> and
-    // correctly handles children whose intrinsic size is legitimately 0.
-    let mut child_sizes: Vec<f32> = vec![f32::NAN; node.children.len()];
-
-    for &idx in &visible_children {
-        let child_style = &node.children[idx].computed_style;
-        // flex-basis overrides the main-axis dimension if it is not Auto.
-        let main_dim = if is_column {
-            match child_style.flex_basis {
-                Dimension::Auto => child_style.height,
-                other => other,
-            }
+        // For overflow containers, children can use their natural main-axis size.
+        let overflow_clips_main = if is_column {
+            style.overflow_y != Overflow::Visible
         } else {
-            match child_style.flex_basis {
-                Dimension::Auto => child_style.width,
-                other => other,
-            }
+            style.overflow_x != Overflow::Visible
         };
 
-        match main_dim {
-            Dimension::Px(px) => {
-                child_sizes[idx] = px;
-                fixed_main += px;
-            }
-            Dimension::Percent(pct) => {
-                let s = main_available * pct / 100.0;
-                child_sizes[idx] = s;
-                fixed_main += s;
-            }
-            // Content is resolved to Px at the start of layout_node for that child,
-            // so treat it like Auto here (intrinsic measurement via dry-run below).
-            Dimension::Auto | Dimension::Content => {
-                let grow = child_style.flex_grow.max(0.0);
-                if grow > 0.0 {
-                    total_flex_grow += grow;
-                } else {
-                    // Measure intrinsic main-axis size via dry-run layout.
-                    let large = 32_000.0_f32;
-                    let (mw, mh) = if is_column {
-                        (inner_w, large)
+        let main_available = if is_column {
+            inner_h - total_gap
+        } else {
+            inner_w - total_gap
+        };
+
+        // First pass: size fixed children; intrinsic-measure auto children with no flex-grow;
+        // accumulate flex-grow total for the rest.
+        let mut total_flex_grow = 0.0f32;
+        let mut fixed_main = 0.0f32;
+        // NAN is the sentinel for "not yet sized" — avoids a separate Vec<bool> and
+        // correctly handles children whose intrinsic size is legitimately 0.
+        let mut child_sizes: Vec<f32> = vec![f32::NAN; node.children.len()];
+
+        for &idx in &visible_children {
+            let child_style = &node.children[idx].computed_style;
+            // flex-basis overrides the main-axis dimension if it is not Auto.
+            let main_dim = if is_column {
+                match child_style.flex_basis {
+                    Dimension::Auto => child_style.height,
+                    other => other,
+                }
+            } else {
+                match child_style.flex_basis {
+                    Dimension::Auto => child_style.width,
+                    other => other,
+                }
+            };
+
+            match main_dim {
+                Dimension::Px(px) => {
+                    child_sizes[idx] = px;
+                    fixed_main += px;
+                }
+                Dimension::Percent(pct) => {
+                    let s = main_available * pct / 100.0;
+                    child_sizes[idx] = s;
+                    fixed_main += s;
+                }
+                // Content is resolved to Px at the start of layout_node for that child,
+                // so treat it like Auto here (intrinsic measurement via dry-run below).
+                Dimension::Auto | Dimension::Content => {
+                    let grow = child_style.flex_grow.max(0.0);
+                    if grow > 0.0 {
+                        total_flex_grow += grow;
                     } else {
-                        (large, inner_h)
-                    };
-                    let mut dummy = node.children[idx].clone();
-                    layout_node(&mut dummy, 0.0, 0.0, mw, mh, measurer);
-                    let size = if is_column {
-                        dummy.layout.height
-                    } else {
-                        dummy.layout.width
-                    };
-                    child_sizes[idx] = size;
-                    fixed_main += size;
+                        // Measure intrinsic main-axis size via dry-run layout.
+                        let large = 32_000.0_f32;
+                        let (mw, mh) = if is_column {
+                            (inner_w, large)
+                        } else {
+                            (large, inner_h)
+                        };
+                        let mut dummy = node.children[idx].clone();
+                        layout_node(&mut dummy, 0.0, 0.0, mw, mh, measurer);
+                        let size = if is_column {
+                            dummy.layout.height
+                        } else {
+                            dummy.layout.width
+                        };
+                        child_sizes[idx] = size;
+                        fixed_main += size;
+                    }
                 }
             }
         }
-    }
 
-    // Second pass: distribute remaining space to flex-grow children.
-    let remaining = (main_available - fixed_main).max(0.0);
-    for &idx in &visible_children {
-        if !child_sizes[idx].is_nan() {
-            continue;
-        }
-        let grow = node.children[idx].computed_style.flex_grow.max(0.0);
-        if total_flex_grow > 0.0 && grow > 0.0 {
-            child_sizes[idx] = remaining * (grow / total_flex_grow);
-        } else if overflow_clips_main {
-            // Overflow container: measure natural size so content can scroll.
-            let large = 32_000.0_f32;
-            let (mw, mh) = if is_column {
-                (inner_w, large)
+        // Second pass: distribute remaining space to flex-grow children.
+        let remaining = (main_available - fixed_main).max(0.0);
+        for &idx in &visible_children {
+            if !child_sizes[idx].is_nan() {
+                continue;
+            }
+            let grow = node.children[idx].computed_style.flex_grow.max(0.0);
+            if total_flex_grow > 0.0 && grow > 0.0 {
+                child_sizes[idx] = remaining * (grow / total_flex_grow);
+            } else if overflow_clips_main {
+                // Overflow container: measure natural size so content can scroll.
+                let large = 32_000.0_f32;
+                let (mw, mh) = if is_column {
+                    (inner_w, large)
+                } else {
+                    (large, inner_h)
+                };
+                let mut dummy = node.children[idx].clone();
+                layout_node(&mut dummy, 0.0, 0.0, mw, mh, measurer);
+                child_sizes[idx] = if is_column {
+                    dummy.layout.height
+                } else {
+                    dummy.layout.width
+                };
             } else {
-                (large, inner_h)
-            };
-            let mut dummy = node.children[idx].clone();
-            layout_node(&mut dummy, 0.0, 0.0, mw, mh, measurer);
-            child_sizes[idx] = if is_column {
-                dummy.layout.height
-            } else {
-                dummy.layout.width
-            };
-        } else {
-            child_sizes[idx] = 0.0;
+                child_sizes[idx] = 0.0;
+            }
         }
-    }
 
-    // Third pass: apply justify-content initial offset and inter-item spacing.
-    let justify = style.justify_content;
-    let total_child_main: f32 = visible_children.iter().map(|&i| child_sizes[i]).sum();
-    let leftover = (main_available - total_gap - total_child_main).max(0.0);
+        // Third pass: apply justify-content initial offset and inter-item spacing.
+        let justify = style.justify_content;
+        let total_child_main: f32 = visible_children.iter().map(|&i| child_sizes[i]).sum();
+        let leftover = (main_available - total_gap - total_child_main).max(0.0);
 
-    let (mut cursor, extra_gap) = match justify {
-        JustifyContent::End => (leftover, 0.0),
-        JustifyContent::Center => (leftover / 2.0, 0.0),
-        JustifyContent::SpaceBetween => (
-            0.0,
-            if child_count > 1 {
-                leftover / (child_count as f32 - 1.0)
-            } else {
-                0.0
-            },
-        ),
-        JustifyContent::SpaceAround => {
-            let per = leftover / child_count as f32;
-            (per / 2.0, per)
-        }
-        JustifyContent::Start => (0.0, 0.0),
-    };
-
-    let container_align = style.align_items;
-    let mut content_main = 0.0f32;
-    for &idx in &visible_children {
-        let child_main_size = child_sizes[idx];
-        let child_style = &node.children[idx].computed_style;
-        let effective_align = resolve_align(child_style.align_self, container_align);
-
-        let (cx, cy, cw, ch) = if is_column {
-            let (child_cw, cx_off) = cross_axis_layout(effective_align, inner_w, child_style.width);
-            (
-                inner_x + cx_off,
-                inner_y + cursor,
-                child_cw,
-                child_main_size,
-            )
-        } else {
-            let (child_ch, cy_off) =
-                cross_axis_layout(effective_align, inner_h, child_style.height);
-            (
-                inner_x + cursor,
-                inner_y + cy_off,
-                child_main_size,
-                child_ch,
-            )
+        let (mut cursor, extra_gap) = match justify {
+            JustifyContent::End => (leftover, 0.0),
+            JustifyContent::Center => (leftover / 2.0, 0.0),
+            JustifyContent::SpaceBetween => (
+                0.0,
+                if child_count > 1 {
+                    leftover / (child_count as f32 - 1.0)
+                } else {
+                    0.0
+                },
+            ),
+            JustifyContent::SpaceAround => {
+                let per = leftover / child_count as f32;
+                (per / 2.0, per)
+            }
+            JustifyContent::Start => (0.0, 0.0),
         };
 
-        layout_node(&mut node.children[idx], cx, cy, cw, ch, measurer);
-        content_main += child_main_size;
-        cursor += child_main_size + style.gap + extra_gap;
-    }
-    // Add gaps between children (not after the last one).
-    let content_main = content_main + total_gap;
-
-    // RTL mirror: for row containers with direction:rtl, flip all flow children's
-    // x positions so the start edge is on the right instead of the left.
-    if !is_column && node.computed_style.text_direction == TextDirection::Rtl {
-        let right_edge = inner_x + inner_w;
+        let container_align = style.align_items;
+        let mut content_main = 0.0f32;
         for &idx in &visible_children {
-            let child = &mut node.children[idx];
-            let child_right = child.layout.x + child.layout.width;
-            child.layout.x = right_edge - child_right + inner_x;
+            let child_main_size = child_sizes[idx];
+            let child_style = &node.children[idx].computed_style;
+            let effective_align = resolve_align(child_style.align_self, container_align);
+
+            let (cx, cy, cw, ch) = if is_column {
+                let (child_cw, cx_off) =
+                    cross_axis_layout(effective_align, inner_w, child_style.width);
+                (
+                    inner_x + cx_off,
+                    inner_y + cursor,
+                    child_cw,
+                    child_main_size,
+                )
+            } else {
+                let (child_ch, cy_off) =
+                    cross_axis_layout(effective_align, inner_h, child_style.height);
+                (
+                    inner_x + cursor,
+                    inner_y + cy_off,
+                    child_main_size,
+                    child_ch,
+                )
+            };
+
+            layout_node(&mut node.children[idx], cx, cy, cw, ch, measurer);
+            content_main += child_main_size;
+            cursor += child_main_size + style.gap + extra_gap;
         }
-    }
+        // Add gaps between children (not after the last one).
+        let content_main = content_main + total_gap;
 
-    // Shrink auto/content dimensions to fit children (bottom-up sizing).
-    let style = &node.computed_style;
-    if matches!(style.height, Dimension::Auto | Dimension::Content) && is_column {
-        let content_h = (content_main + padding.vertical()).max(0.0);
-        node.layout.height = clamp_dimension(content_h, style.min_height, style.max_height);
-    }
-    if matches!(style.width, Dimension::Auto | Dimension::Content) && !is_column {
-        let content_w = (content_main + padding.horizontal()).max(0.0);
-        node.layout.width = clamp_dimension(content_w, style.min_width, style.max_width);
-    }
-    // Row containers: shrink height to max child height when height is Auto/Content.
-    if matches!(style.height, Dimension::Auto | Dimension::Content) && !is_column {
-        let max_h = node
-            .children
-            .iter()
-            .filter(|c| c.computed_style.display != Display::None)
-            .map(|c| c.layout.height + c.computed_style.margin.vertical())
-            .fold(0.0f32, f32::max);
-        let content_h = (max_h + padding.vertical()).max(0.0);
-        node.layout.height = clamp_dimension(content_h, style.min_height, style.max_height);
-    }
-    // Column containers: shrink width to max child width when width is Auto/Content.
-    if matches!(style.width, Dimension::Auto | Dimension::Content) && is_column {
-        let max_w = node
-            .children
-            .iter()
-            .filter(|c| c.computed_style.display != Display::None)
-            .map(|c| c.layout.width + c.computed_style.margin.horizontal())
-            .fold(0.0f32, f32::max);
-        let content_w = (max_w + padding.horizontal()).max(0.0);
-        node.layout.width = clamp_dimension(content_w, style.min_width, style.max_width);
-    }
+        // RTL mirror: for row containers with direction:rtl, flip all flow children's
+        // x positions so the start edge is on the right instead of the left.
+        if !is_column && node.computed_style.text_direction == TextDirection::Rtl {
+            let right_edge = inner_x + inner_w;
+            for &idx in &visible_children {
+                let child = &mut node.children[idx];
+                let child_right = child.layout.x + child.layout.width;
+                child.layout.x = right_edge - child_right + inner_x;
+            }
+        }
 
+        // Shrink auto/content dimensions to fit children (bottom-up sizing).
+        let style = &node.computed_style;
+        if matches!(style.height, Dimension::Auto | Dimension::Content) && is_column {
+            let content_h = (content_main + padding.vertical()).max(0.0);
+            node.layout.height = clamp_dimension(content_h, style.min_height, style.max_height);
+        }
+        if matches!(style.width, Dimension::Auto | Dimension::Content) && !is_column {
+            let content_w = (content_main + padding.horizontal()).max(0.0);
+            node.layout.width = clamp_dimension(content_w, style.min_width, style.max_width);
+        }
+        // Row containers: shrink height to max child height when height is Auto/Content.
+        if matches!(style.height, Dimension::Auto | Dimension::Content) && !is_column {
+            let max_h = node
+                .children
+                .iter()
+                .filter(|c| c.computed_style.display != Display::None)
+                .map(|c| c.layout.height + c.computed_style.margin.vertical())
+                .fold(0.0f32, f32::max);
+            let content_h = (max_h + padding.vertical()).max(0.0);
+            node.layout.height = clamp_dimension(content_h, style.min_height, style.max_height);
+        }
+        // Column containers: shrink width to max child width when width is Auto/Content.
+        if matches!(style.width, Dimension::Auto | Dimension::Content) && is_column {
+            let max_w = node
+                .children
+                .iter()
+                .filter(|c| c.computed_style.display != Display::None)
+                .map(|c| c.layout.width + c.computed_style.margin.horizontal())
+                .fold(0.0f32, f32::max);
+            let content_w = (max_w + padding.horizontal()).max(0.0);
+            node.layout.width = clamp_dimension(content_w, style.min_width, style.max_width);
+        }
     } // end if child_count > 0
 
     // Second pass: lay out absolutely-positioned children against this node's inner rect.
@@ -618,8 +621,16 @@ mod tests {
         assert_eq!(root.children[0].layout.y, 0.0);
 
         // Overlay: right=10 → x = 300 - 80 - 10 = 210; bottom=10 → y = 200 - 40 - 10 = 150.
-        assert!((root.children[1].layout.x - 210.0).abs() < 0.5, "overlay x = {}", root.children[1].layout.x);
-        assert!((root.children[1].layout.y - 150.0).abs() < 0.5, "overlay y = {}", root.children[1].layout.y);
+        assert!(
+            (root.children[1].layout.x - 210.0).abs() < 0.5,
+            "overlay x = {}",
+            root.children[1].layout.x
+        );
+        assert!(
+            (root.children[1].layout.y - 150.0).abs() < 0.5,
+            "overlay y = {}",
+            root.children[1].layout.y
+        );
         assert_eq!(root.children[1].layout.width, 80.0);
         assert_eq!(root.children[1].layout.height, 40.0);
     }
@@ -657,8 +668,16 @@ mod tests {
         LayoutEngine::compute(&mut root, 300.0, 50.0);
 
         // In RTL the first child should be at x=200 (right side) and the second at x=100.
-        assert!((root.children[0].layout.x - 200.0).abs() < 0.5, "a.x = {}", root.children[0].layout.x);
-        assert!((root.children[1].layout.x - 100.0).abs() < 0.5, "b.x = {}", root.children[1].layout.x);
+        assert!(
+            (root.children[0].layout.x - 200.0).abs() < 0.5,
+            "a.x = {}",
+            root.children[0].layout.x
+        );
+        assert!(
+            (root.children[1].layout.x - 100.0).abs() < 0.5,
+            "b.x = {}",
+            root.children[1].layout.x
+        );
     }
 
     #[test]

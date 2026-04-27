@@ -1,0 +1,43 @@
+{
+  "id": "@mesh/examples/status-rail-svelte",
+  "name": "Status Rail Svelte",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "description": "Example Tauri/Svelte frontend plugin.",
+  "capabilities": {
+    "required": [
+      "shell.surface",
+      "theme.read"
+    ]
+  },
+  "runtime": {
+    "host": "tauri",
+    "framework": "svelte",
+    "language": "typescript",
+    "dev_url": "http://localhost:1420"
+  },
+  "entrypoints": {
+    "frontend": "src/App.svelte",
+    "preload": "src/mesh-host.ts"
+  },
+  "settings": {
+    "schema": {
+      "surface": {
+        "type": "object",
+        "properties": {
+          "anchor": { "type": "string", "default": "right" },
+          "layer": { "type": "string", "default": "bottom" },
+          "width": { "type": "integer", "default": 280 },
+          "height": { "type": "integer", "default": 400 },
+          "exclusive_zone": { "type": "integer", "default": 0 },
+          "keyboard_mode": { "type": "string", "default": "none" },
+          "visible_on_start": { "type": "boolean", "default": false }
+        }
+      }
+    }
+  },
+  "surface_layout": {
+    "size_policy": "fixed"
+  }
+}

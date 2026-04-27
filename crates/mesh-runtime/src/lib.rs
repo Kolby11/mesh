@@ -1,8 +1,13 @@
 /// Extension runtime for MESH plugins.
 ///
-/// This crate will host the Luau sandbox and provide the bridge between
-/// plugin scripts and the core's capability-gated host APIs.
+/// The long-term runtime direction is external TypeScript plugin processes for
+/// backends and Tauri-hosted frontend plugins. The Rust core remains the source
+/// of truth for capabilities, plugin lifecycle, bindable values, and shell
+/// wiring, while this crate defines the host/runtime contract.
 use mesh_capability::CapabilitySet;
+use serde::{Deserialize, Serialize};
+
+pub mod protocol;
 
 /// Configuration for the plugin sandbox.
 #[derive(Debug, Clone)]
@@ -27,10 +32,10 @@ impl Default for SandboxConfig {
 pub enum ExecutionTier {
     /// In-process Rust. Core plugins only.
     InProcess,
-    /// Sandboxed Luau interpreter. Default for community plugins.
-    Luau,
-    /// Sandboxed WebAssembly. For performance-sensitive community plugins.
-    Wasm,
+    /// External TypeScript process connected to the core host protocol.
+    TypeScript,
+    /// Tauri-hosted frontend runtime using a webview UI.
+    Tauri,
 }
 
 /// A sandboxed runtime instance for a single plugin.
@@ -60,4 +65,11 @@ impl PluginRuntime {
         self.config = config;
         self
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PluginRuntimeRole {
+    Backend,
+    Frontend,
 }

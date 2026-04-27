@@ -17,8 +17,6 @@
   "capabilities": {
     "required": [
       "shell.surface",
-      "service.audio.read",
-      "service.power.read",
       "theme.read",
       "locale.read"
     ]
@@ -30,7 +28,14 @@
     }
   },
   "entrypoints": {
-    "main": "src/main.mesh"
+    "frontend": "src/App.svelte",
+    "preload": "src/mesh-host.ts"
+  },
+  "runtime": {
+    "host": "tauri",
+    "framework": "svelte",
+    "language": "typescript",
+    "dev_url": "http://127.0.0.1:1430"
   },
   "settings": {
     "namespace": "@mesh/navigation-bar",
@@ -103,6 +108,10 @@
   },
   "surface_layout": {
     "size_policy": "fixed"
+  },
+  "i18n": {
+    "default_locale": "sk",
+    "bundled": "config/i18n"
   },
   "accessibility": {
     "role": "toolbar",

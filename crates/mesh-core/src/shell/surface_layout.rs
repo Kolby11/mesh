@@ -1,7 +1,7 @@
-use std::path::Path;
 use mesh_plugin::Manifest;
 use mesh_theme::{ThemeEngine, default_theme, load_theme_from_path, theme_path_for_id};
 use mesh_wayland::{Edge, KeyboardMode, Layer};
+use std::path::Path;
 
 use super::types::ThemeWatchState;
 use mesh_config::ShellSettings;

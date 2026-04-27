@@ -1,25 +1,41 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 use mesh_locale::LocaleEngine;
 use mesh_renderer::PixelBuffer;
 use mesh_scripting::ScriptError;
 use mesh_theme::Theme;
 use mesh_ui::WidgetNode;
 use mesh_wayland::ShellSurface;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 pub type SurfaceId = String;
 
 #[derive(Debug, Clone)]
 pub enum CoreRequest {
-    ToggleSurface { surface_id: SurfaceId },
-    ShowSurface { surface_id: SurfaceId },
-    HideSurface { surface_id: SurfaceId },
+    ToggleSurface {
+        surface_id: SurfaceId,
+    },
+    ShowSurface {
+        surface_id: SurfaceId,
+    },
+    HideSurface {
+        surface_id: SurfaceId,
+    },
     /// Reposition a surface to appear below a trigger element.
     /// Uses top-left anchor; margin_left/top position the surface precisely.
-    PositionSurface { surface_id: SurfaceId, margin_top: i32, margin_left: i32 },
-    PublishDiagnostics { message: String },
-    ServiceCommand { interface: String, command: String, payload: serde_json::Value },
+    PositionSurface {
+        surface_id: SurfaceId,
+        margin_top: i32,
+        margin_left: i32,
+    },
+    PublishDiagnostics {
+        message: String,
+    },
+    ServiceCommand {
+        interface: String,
+        command: String,
+        payload: serde_json::Value,
+    },
     ToggleDebugOverlay,
     CycleDebugTab,
     Shutdown,

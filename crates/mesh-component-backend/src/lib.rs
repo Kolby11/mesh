@@ -2,6 +2,7 @@ use mesh_component::template::{
     Attribute, AttributeValue, ComponentRef, ElementNode, TemplateNode,
 };
 use mesh_component::{AccessibilityRole, ComponentFile, parse_component};
+use mesh_plugin::manifest::PluginHost;
 use mesh_plugin::{Manifest, PluginType};
 use mesh_theme::Theme;
 use mesh_ui::accessibility::AccessibilityInfo;
@@ -258,7 +259,11 @@ pub fn build_widget_tree_from_component(
     } else if component_rules.is_empty() {
         host_rules
     } else {
-        merged = host_rules.iter().chain(component_rules.iter()).cloned().collect();
+        merged = host_rules
+            .iter()
+            .chain(component_rules.iter())
+            .cloned()
+            .collect();
         &merged
     };
 
@@ -359,6 +364,19 @@ pub fn is_frontend_plugin(manifest: &Manifest) -> bool {
         manifest.package.plugin_type,
         PluginType::Surface | PluginType::Widget
     )
+}
+
+pub fn is_mesh_frontend_plugin(manifest: &Manifest) -> bool {
+    if !is_frontend_plugin(manifest) {
+        return false;
+    }
+
+    !matches!(manifest.runtime.host, Some(PluginHost::Tauri))
+        && manifest
+            .entrypoints
+            .main
+            .as_deref()
+            .is_some_and(|path| path.ends_with(".mesh"))
 }
 
 pub fn compile_frontend_plugin(
@@ -1467,8 +1485,12 @@ mod tests {
 
     struct MapStore(HashMap<String, serde_json::Value>);
     impl mesh_ui::VariableStore for MapStore {
-        fn get(&self, name: &str) -> Option<serde_json::Value> { self.0.get(name).cloned() }
-        fn keys(&self) -> Vec<String> { self.0.keys().cloned().collect() }
+        fn get(&self, name: &str) -> Option<serde_json::Value> {
+            self.0.get(name).cloned()
+        }
+        fn keys(&self) -> Vec<String> {
+            self.0.keys().cloned().collect()
+        }
     }
 
     #[test]
@@ -1525,6 +1547,7 @@ mod tests {
             dependencies: Default::default(),
             capabilities: Default::default(),
             entrypoints: Default::default(),
+            runtime: Default::default(),
             accessibility: None,
             settings: None,
             i18n: None,
