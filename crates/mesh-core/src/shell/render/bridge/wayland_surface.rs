@@ -4,8 +4,8 @@
 //! panels/launchers/overlays are placed by the compositor as shell chrome
 //! instead of being tiled as windows.
 
-use crate::dev_window::{DevWindowEvent, DevWindowKeyEvent};
-use crate::{PixelBuffer, RenderError};
+use super::super::{PixelBuffer, RenderError};
+use super::dev_window::{DevWindowEvent, DevWindowKeyEvent};
 use mesh_wayland::{Edge, KeyboardMode, Layer as MeshLayer};
 use rustix::event::{PollFd, PollFlags, poll};
 
@@ -400,7 +400,12 @@ fn apply_config(layer_surface: &LayerSurface, cfg: &LayerSurfaceConfig) {
     layer_surface.set_exclusive_zone(cfg.exclusive_zone);
     layer_surface.set_keyboard_interactivity(map_keyboard(cfg.keyboard_mode));
     layer_surface.set_size(cfg.width, cfg.height);
-    layer_surface.set_margin(cfg.margin_top, cfg.margin_right, cfg.margin_bottom, cfg.margin_left);
+    layer_surface.set_margin(
+        cfg.margin_top,
+        cfg.margin_right,
+        cfg.margin_bottom,
+        cfg.margin_left,
+    );
 }
 
 fn map_layer(layer: MeshLayer) -> Layer {
@@ -705,7 +710,7 @@ impl KeyboardHandler for State {
             return;
         };
         let name = keysym_name(event.keysym);
-        let mods = crate::dev_window::KeyMods {
+        let mods = super::dev_window::KeyMods {
             ctrl: self.keyboard_mods.ctrl,
             shift: self.keyboard_mods.shift,
             alt: self.keyboard_mods.alt,

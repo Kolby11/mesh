@@ -22,6 +22,7 @@ pub struct ComputedStyle {
     pub border_color: Color,
     pub border_radius: Corners,
     pub opacity: f32,
+    pub transition: TransitionStyle,
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
 
@@ -77,6 +78,7 @@ impl Default for ComputedStyle {
             border_color: Color::TRANSPARENT,
             border_radius: Corners::zero(),
             opacity: 1.0,
+            transition: TransitionStyle::default(),
             overflow_x: Overflow::Visible,
             overflow_y: Overflow::Visible,
             font_family: "Inter".to_string(),
@@ -121,7 +123,7 @@ pub enum Dimension {
     Content,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Edges {
     pub top: f32,
     pub right: f32,
@@ -157,7 +159,7 @@ impl Edges {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Corners {
     pub top_left: f32,
     pub top_right: f32,
@@ -211,6 +213,35 @@ impl Corners {
             bottom_left: value,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TransitionProperties {
+    pub all: bool,
+    pub border_radius: bool,
+}
+
+impl TransitionProperties {
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    pub fn all() -> Self {
+        Self {
+            all: true,
+            border_radius: true,
+        }
+    }
+
+    pub fn animates_border_radius(self) -> bool {
+        self.all || self.border_radius
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TransitionStyle {
+    pub duration_ms: u32,
+    pub properties: TransitionProperties,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -407,6 +438,11 @@ impl<'a> StyleResolver<'a> {
         parse_px(&resolved)
     }
 
+    pub fn resolve_time_ms(&self, value: &StyleValue) -> u32 {
+        let resolved = self.resolve_value(value);
+        parse_time_ms(&resolved)
+    }
+
     /// Apply a set of style rules to produce a `ComputedStyle` for a node.
     pub fn resolve_node_style(
         &self,
@@ -460,15 +496,24 @@ impl<'a> StyleResolver<'a> {
 
             tracing::debug!(
                 "[hover] restyle: tag={} classes={:?} state={state:?}",
-                node.tag, classes
+                node.tag,
+                classes
             );
             for rule in rules {
                 if selector_involves_state(&rule.selector)
                     && rule_matches(rule, &node.tag, &classes, id, context, state)
                 {
-                    tracing::debug!("[hover] restyle: applying rule selector={:?}", rule.selector);
+                    tracing::debug!(
+                        "[hover] restyle: applying rule selector={:?}",
+                        rule.selector
+                    );
                     for decl in &rule.declarations {
-                        apply_declaration(&mut node.computed_style, &decl.property, &decl.value, self);
+                        apply_declaration(
+                            &mut node.computed_style,
+                            &decl.property,
+                            &decl.value,
+                            self,
+                        );
                     }
                 }
             }
@@ -508,9 +553,9 @@ fn selector_matches(
             };
             tag_matches && state_matches
         }
-        Selector::Compound(parts) => {
-            parts.iter().all(|s| selector_matches(s, tag, classes, id, state))
-        }
+        Selector::Compound(parts) => parts
+            .iter()
+            .all(|s| selector_matches(s, tag, classes, id, state)),
     }
 }
 
@@ -610,6 +655,17 @@ fn apply_declaration(
         "border-bottom-width" => style.border_width.bottom = resolver.resolve_number(value),
         "border-left-width" => style.border_width.left = resolver.resolve_number(value),
         "opacity" => style.opacity = resolver.resolve_number(value),
+        "transition-duration" => style.transition.duration_ms = resolver.resolve_time_ms(value),
+        "transition-property" => {
+            style.transition.properties =
+                parse_transition_properties(&resolver.resolve_value(value))
+        }
+        "transition" => {
+            let (properties, duration_ms) =
+                parse_transition_shorthand(&resolver.resolve_value(value));
+            style.transition.properties = properties;
+            style.transition.duration_ms = duration_ms;
+        }
         "overflow" => {
             let overflow = parse_overflow(&resolver.resolve_value(value));
             style.overflow_x = overflow;
@@ -754,6 +810,54 @@ fn parse_overflow(value: &str) -> Overflow {
     }
 }
 
+fn parse_transition_properties(value: &str) -> TransitionProperties {
+    let mut properties = TransitionProperties::none();
+    for property in value
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        match property {
+            "all" => return TransitionProperties::all(),
+            "border-radius" => properties.border_radius = true,
+            _ => {}
+        }
+    }
+    properties
+}
+
+fn parse_transition_shorthand(value: &str) -> (TransitionProperties, u32) {
+    let mut properties = TransitionProperties::none();
+    let mut duration_ms = 0;
+
+    for token in value.split_whitespace() {
+        let parsed_ms = parse_time_ms(token);
+        if parsed_ms > 0 {
+            duration_ms = parsed_ms;
+            continue;
+        }
+
+        match token.trim_end_matches(',') {
+            "all" => properties = TransitionProperties::all(),
+            "border-radius" => properties.border_radius = true,
+            _ => {}
+        }
+    }
+
+    (properties, duration_ms)
+}
+
+fn parse_time_ms(value: &str) -> u32 {
+    let raw = value.trim();
+    if let Some(ms) = raw.strip_suffix("ms") {
+        return ms.trim().parse::<f32>().unwrap_or(0.0).max(0.0).round() as u32;
+    }
+    if let Some(seconds) = raw.strip_suffix('s') {
+        return (seconds.trim().parse::<f32>().unwrap_or(0.0).max(0.0) * 1000.0).round() as u32;
+    }
+    0
+}
+
 fn parse_px(s: &str) -> f32 {
     let s = s.trim().trim_end_matches("px");
     s.parse().unwrap_or(0.0)
@@ -764,9 +868,7 @@ fn parse_dimension(s: &str) -> Dimension {
     match s {
         "auto" => Dimension::Auto,
         "content" | "fit-content" | "max-content" | "min-content" => Dimension::Content,
-        _ if s.ends_with('%') => {
-            Dimension::Percent(s.trim_end_matches('%').parse().unwrap_or(0.0))
-        }
+        _ if s.ends_with('%') => Dimension::Percent(s.trim_end_matches('%').parse().unwrap_or(0.0)),
         _ => Dimension::Px(parse_px(s)),
     }
 }
@@ -836,7 +938,14 @@ mod tests {
             container_query: None,
         }];
 
-        let style = resolver.resolve_node_style(&rules, "text", &[], None, StyleContext::default(), ElementState::default());
+        let style = resolver.resolve_node_style(
+            &rules,
+            "text",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
         assert_eq!(style.font_size, 20.0);
         assert_eq!(
             style.color,
@@ -894,8 +1003,8 @@ mod tests {
 
     #[test]
     fn pseudo_state_rules_apply_when_state_matches() {
-        use mesh_component::style::{Declaration, Selector};
         use crate::tree::ElementState;
+        use mesh_component::style::{Declaration, Selector};
 
         let theme = mesh_theme::default_theme();
         let resolver = StyleResolver::new(&theme);
@@ -920,15 +1029,30 @@ mod tests {
         ];
 
         let idle = resolver.resolve_node_style(
-            &rules, "button", &[], None, StyleContext::default(), ElementState::default(),
+            &rules,
+            "button",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
         );
         assert_eq!(idle.background_color, Color::from_hex("#333333").unwrap());
 
         let hovered = resolver.resolve_node_style(
-            &rules, "button", &[], None, StyleContext::default(),
-            ElementState { hovered: true, ..Default::default() },
+            &rules,
+            "button",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState {
+                hovered: true,
+                ..Default::default()
+            },
         );
-        assert_eq!(hovered.background_color, Color::from_hex("#ffffff").unwrap());
+        assert_eq!(
+            hovered.background_color,
+            Color::from_hex("#ffffff").unwrap()
+        );
     }
 
     #[test]
@@ -952,16 +1076,33 @@ mod tests {
         let mut input = InputState::new();
 
         // Move pointer over the button.
-        let events = input.process(&mut root, &RawInputEvent::PointerMotion { x: 50.0, y: 25.0 });
+        let events = input.process(
+            &mut root,
+            &RawInputEvent::PointerMotion { x: 50.0, y: 25.0 },
+        );
         assert!(root.children[0].state.hovered, "button should be hovered");
         assert!(!root.state.hovered, "root should not be hovered");
-        assert!(events.iter().any(|e| matches!(e, UiEvent::PointerEnter { node_id } if *node_id == btn_id)));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, UiEvent::PointerEnter { node_id } if *node_id == btn_id))
+        );
 
         // Move pointer off the button onto the root.
-        let events = input.process(&mut root, &RawInputEvent::PointerMotion { x: 150.0, y: 75.0 });
-        assert!(!root.children[0].state.hovered, "button hover should be cleared");
+        let events = input.process(
+            &mut root,
+            &RawInputEvent::PointerMotion { x: 150.0, y: 75.0 },
+        );
+        assert!(
+            !root.children[0].state.hovered,
+            "button hover should be cleared"
+        );
         assert!(root.state.hovered, "root should now be hovered");
-        assert!(events.iter().any(|e| matches!(e, UiEvent::PointerLeave { node_id } if *node_id == btn_id)));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, UiEvent::PointerLeave { node_id } if *node_id == btn_id))
+        );
     }
 
     #[test]

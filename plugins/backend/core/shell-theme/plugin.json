@@ -1,0 +1,26 @@
+{
+  "id": "@mesh/shell-theme",
+  "name": "MESH Shell Theme",
+  "version": "0.1.0",
+  "type": "backend",
+  "api_version": "0.1",
+  "description": "Theme service backend — exposes available themes and tracks the active theme.",
+  "authors": ["MESH Project"],
+  "capabilities": {
+    "required": [
+      "service.theme.read",
+      "theme.read"
+    ]
+  },
+  "entrypoints": {
+    "main": "src/main.luau"
+  },
+  "provides": [
+    {
+      "interface": "mesh.theme",
+      "version": "1.0",
+      "backend_name": "Shell Theme",
+      "priority": 100
+    }
+  ]
+}

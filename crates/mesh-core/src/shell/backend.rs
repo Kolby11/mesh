@@ -1,3 +1,4 @@
+use super::types::{ServiceCommandMsg, ServiceEvent, ShellMessage};
 /// Generic backend plugin service runner.
 ///
 /// Loads a backend plugin's Luau script via `BackendScriptContext`, then runs
@@ -6,7 +7,6 @@
 use mesh_scripting::BackendScriptContext;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use super::types::{ServiceCommandMsg, ServiceEvent, ShellMessage};
 
 pub(super) async fn spawn_backend_service(
     plugin_id: String,

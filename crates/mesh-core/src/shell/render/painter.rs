@@ -1,43 +1,39 @@
-/// Paints a `WidgetNode` tree into a `PixelBuffer`.
-use crate::buffer::PixelBuffer;
-use crate::icon;
-use crate::text::TextRenderer;
-use mesh_icon::resolve_icon as resolve_icon_path;
+use super::PixelBuffer;
+use super::icon;
+use super::text::TextRenderer;
 use mesh_ui::style::{Color, Display, Overflow, TextAlign, TextDirection, TextOverflow};
 use mesh_ui::tree::WidgetNode;
 
-/// Walks a widget tree and paints each node into a pixel buffer.
-pub struct Painter {
+pub struct FrontendRenderEngine {
     text_renderer: TextRenderer,
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct ClipRect {
-    pub(crate) x: i32,
-    pub(crate) y: i32,
-    pub(crate) width: i32,
-    pub(crate) height: i32,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
 }
 
-impl Painter {
+impl FrontendRenderEngine {
     pub fn new() -> Self {
         Self {
             text_renderer: TextRenderer::new(),
         }
     }
 
-    /// Paint the entire widget tree into the buffer.
-    pub fn paint(&self, root: &WidgetNode, buffer: &mut PixelBuffer, scale: f32) {
+    pub fn render_tree(&self, root: &WidgetNode, buffer: &mut PixelBuffer, scale: f32) {
         let clip = ClipRect {
             x: 0,
             y: 0,
             width: buffer.width as i32,
             height: buffer.height as i32,
         };
-        self.paint_node(root, buffer, scale, 0.0, 0.0, clip);
+        self.render_node(root, buffer, scale, 0.0, 0.0, clip);
     }
 
-    fn paint_node(
+    fn render_node(
         &self,
         node: &WidgetNode,
         buffer: &mut PixelBuffer,
@@ -132,28 +128,10 @@ impl Painter {
         }
 
         match node.tag.as_str() {
-            "text" => self.paint_text_node(node, buffer, scale, x, y, node_clip),
-            "input" => self.paint_input_node(node, buffer, scale, x, y, node_clip),
-            "slider" => self.paint_slider_node(node, buffer, scale, x, y, w, h, node_clip),
-            "icon" => {
-                // attributes: name or src, size
-                let src = node.attributes.get("src").map(|s| s.as_str());
-                let name = node.attributes.get("name").map(|s| s.as_str());
-                let size = node
-                    .attributes
-                    .get("size")
-                    .and_then(|s| s.parse::<u32>().ok())
-                    .unwrap_or(w.max(h) as u32);
-
-                if let Some(src) = src {
-                    let p = std::path::Path::new(src);
-                    icon::draw_icon_from_path(buffer, p, x, y, w, h, style.color);
-                } else if let Some(name) = name {
-                    if let Some(p) = resolve_icon_path(name, size) {
-                        icon::draw_icon_from_path(buffer, &p, x, y, w, h, style.color);
-                    }
-                }
-            }
+            "text" => self.render_text_node(node, buffer, scale, x, y, node_clip),
+            "input" => self.render_input_node(node, buffer, scale, x, y, node_clip),
+            "slider" => self.render_slider_node(node, buffer, scale, x, y, w, h, node_clip),
+            "icon" => self.render_icon_node(node, buffer, x, y, w, h, style.color),
             _ => {}
         }
 
@@ -167,13 +145,11 @@ impl Painter {
             clip
         };
 
-        // Stable sort by z_index so tree order is preserved for equal values.
-        // z_index = 0 is the default; negative values paint behind, positive in front.
         let mut child_order: Vec<usize> = (0..node.children.len()).collect();
         child_order.sort_by_key(|&i| node.children[i].computed_style.z_index);
 
         for i in child_order {
-            self.paint_node(
+            self.render_node(
                 &node.children[i],
                 buffer,
                 scale,
@@ -183,10 +159,10 @@ impl Painter {
             );
         }
 
-        self.paint_scrollbars(node, buffer, scale, bounds, clip);
+        self.render_scrollbars(node, buffer, scale, bounds, clip);
     }
 
-    fn paint_text_node(
+    fn render_text_node(
         &self,
         node: &WidgetNode,
         buffer: &mut PixelBuffer,
@@ -238,7 +214,6 @@ impl Painter {
                 std::borrow::Cow::Borrowed(text)
             };
 
-        // In RTL mode, default text alignment flips to right unless explicitly overridden.
         let effective_align =
             if style.text_direction == TextDirection::Rtl && style.text_align == TextAlign::Left {
                 TextAlign::Right
@@ -262,8 +237,7 @@ impl Painter {
         );
     }
 
-    /// Paint a tooltip overlay at the given logical position.
-    pub fn paint_tooltip(
+    pub fn render_tooltip(
         &self,
         text: &str,
         cursor_x: f32,
@@ -341,7 +315,7 @@ impl Painter {
         );
     }
 
-    fn paint_input_node(
+    fn render_input_node(
         &self,
         node: &WidgetNode,
         buffer: &mut PixelBuffer,
@@ -404,7 +378,7 @@ impl Painter {
         );
 
         if focused {
-            let (text_width, _text_height) = self.text_renderer.measure_styled(
+            let (text_width, _) = self.text_renderer.measure_styled(
                 text,
                 &style.font_family,
                 style.font_size * scale,
@@ -427,7 +401,7 @@ impl Painter {
         }
     }
 
-    fn paint_slider_node(
+    fn render_slider_node(
         &self,
         node: &WidgetNode,
         buffer: &mut PixelBuffer,
@@ -471,7 +445,6 @@ impl Painter {
         let thumb_radius = (8.0 * scale).round().max(5.0) as i32;
 
         if is_vertical {
-            // Vertical slider: track runs top-to-bottom, thumb at top = 100%.
             let track_x = x + (w / 2) - (track_thick / 2);
             let track_y = y + track_margin;
             let track_h = (h - track_margin * 2).max(8);
@@ -488,7 +461,6 @@ impl Painter {
                 clip,
             );
 
-            // High value = thumb near top: active fill from top down to thumb.
             let active_h = ((track_h as f32) * (1.0 - pct)).round() as i32;
             fill_rect_clipped(
                 buffer,
@@ -562,7 +534,32 @@ impl Painter {
         }
     }
 
-    fn paint_scrollbars(
+    fn render_icon_node(
+        &self,
+        node: &WidgetNode,
+        buffer: &mut PixelBuffer,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        color: Color,
+    ) {
+        let src = node.attributes.get("src").map(|s| s.as_str());
+        let name = node.attributes.get("name").map(|s| s.as_str());
+        let size = node
+            .attributes
+            .get("size")
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(w.max(h) as u32);
+
+        if let Some(src) = src {
+            icon::draw_icon_from_path(buffer, std::path::Path::new(src), x, y, w, h, color);
+        } else if let Some(name) = name {
+            icon::draw_named_icon(buffer, name, size, x, y, w, h, color);
+        }
+    }
+
+    fn render_scrollbars(
         &self,
         node: &WidgetNode,
         buffer: &mut PixelBuffer,
@@ -701,7 +698,7 @@ impl Painter {
     }
 }
 
-impl Default for Painter {
+impl Default for FrontendRenderEngine {
     fn default() -> Self {
         Self::new()
     }
@@ -760,42 +757,36 @@ pub(crate) fn fill_rounded_rect_clipped(
         return;
     }
 
-    let r = radius
-        .min(rect.width as f32 / 2.0)
-        .min(rect.height as f32 / 2.0);
-    let ri = r.max(0.0) as i32;
-
     for py in clipped.y..clipped.y + clipped.height {
         for px in clipped.x..clipped.x + clipped.width {
-            let lx = px - rect.x;
-            let ly = py - rect.y;
-
-            let in_corner = (lx < ri && ly < ri)
-                || (lx >= rect.width - ri && ly < ri)
-                || (lx < ri && ly >= rect.height - ri)
-                || (lx >= rect.width - ri && ly >= rect.height - ri);
-
-            if in_corner {
-                let cx = if lx < ri {
-                    rect.x + ri
-                } else {
-                    rect.x + rect.width - ri - 1
-                } as f32;
-                let cy = if ly < ri {
-                    rect.y + ri
-                } else {
-                    rect.y + rect.height - ri - 1
-                } as f32;
-                let dx = px as f32 - cx;
-                let dy = py as f32 - cy;
-                if dx * dx + dy * dy <= r * r {
-                    buffer.set_pixel(px as u32, py as u32, color);
-                }
-            } else {
-                buffer.set_pixel(px as u32, py as u32, color);
+            let coverage = rounded_rect_coverage(rect, radius, px as f32 + 0.5, py as f32 + 0.5);
+            if coverage <= 0.0 {
+                continue;
             }
+            buffer.blend_pixel_f32(px as u32, py as u32, color, coverage);
         }
     }
+}
+
+fn rounded_rect_coverage(rect: ClipRect, radius: f32, px: f32, py: f32) -> f32 {
+    let half_w = rect.width.max(0) as f32 * 0.5;
+    let half_h = rect.height.max(0) as f32 * 0.5;
+    let radius = radius.min(half_w).min(half_h).max(0.0);
+
+    let center_x = rect.x as f32 + half_w;
+    let center_y = rect.y as f32 + half_h;
+    let local_x = (px - center_x).abs();
+    let local_y = (py - center_y).abs();
+
+    let qx = local_x - (half_w - radius);
+    let qy = local_y - (half_h - radius);
+    let outside_x = qx.max(0.0);
+    let outside_y = qy.max(0.0);
+    let outside_dist = (outside_x * outside_x + outside_y * outside_y).sqrt();
+    let inside_dist = qx.max(qy).min(0.0);
+    let signed_distance = outside_dist + inside_dist - radius;
+
+    (0.5 - signed_distance).clamp(0.0, 1.0)
 }
 
 fn dim_color(color: Color, factor: f32) -> Color {
@@ -820,7 +811,7 @@ fn node_clips_children(node: &WidgetNode) -> bool {
 }
 
 fn truncate_with_ellipsis(
-    renderer: &crate::text::TextRenderer,
+    renderer: &TextRenderer,
     text: &str,
     font_family: &str,
     font_size: f32,

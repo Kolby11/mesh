@@ -678,7 +678,11 @@ fn build_template_node(
     if tag == "mesh-for" {
         let item_name = find_static_attr(&attributes, "item").unwrap_or_default();
         let iterable = find_static_attr(&attributes, "iterable").unwrap_or_default();
-        return TemplateNode::For(ForNode { item_name, iterable, children });
+        return TemplateNode::For(ForNode {
+            item_name,
+            iterable,
+            children,
+        });
     }
     if tag == "mesh-if" {
         return build_if_node(children);
@@ -760,10 +764,13 @@ fn build_if_node(children: Vec<TemplateNode>) -> TemplateNode {
 }
 
 fn find_static_attr(attrs: &[Attribute], name: &str) -> Option<String> {
-    attrs.iter().find(|a| a.name == name).and_then(|a| match &a.value {
-        AttributeValue::Static(v) => Some(v.clone()),
-        _ => None,
-    })
+    attrs
+        .iter()
+        .find(|a| a.name == name)
+        .and_then(|a| match &a.value {
+            AttributeValue::Static(v) => Some(v.clone()),
+            _ => None,
+        })
 }
 
 fn push_template_node(stack: &mut [OpenNode], root: &mut Vec<TemplateNode>, node: TemplateNode) {
@@ -1462,7 +1469,11 @@ end
 "#;
         let file = parse_component(source).unwrap();
         let script = file.script.unwrap();
-        assert!(script.source.contains("mesh.state.set(\"title\", \"Hello\")"));
+        assert!(
+            script
+                .source
+                .contains("mesh.state.set(\"title\", \"Hello\")")
+        );
         assert!(script.source.contains("local tmp = count + 1"));
     }
 
@@ -1479,9 +1490,21 @@ mesh.service.on("audio", "sync_audio_state")
         let file = parse_component(source).unwrap();
         let script = file.script.unwrap();
         assert!(script.source.contains("local handler = function()"));
-        assert!(script.source.contains("local audio = mesh.interfaces.get(\"mesh.audio\")"));
-        assert!(script.source.contains("mesh.service.bind(\"audio.muted\", \"audio_muted\")"));
-        assert!(script.source.contains("mesh.service.on(\"audio\", \"sync_audio_state\")"));
+        assert!(
+            script
+                .source
+                .contains("local audio = mesh.interfaces.get(\"mesh.audio\")")
+        );
+        assert!(
+            script
+                .source
+                .contains("mesh.service.bind(\"audio.muted\", \"audio_muted\")")
+        );
+        assert!(
+            script
+                .source
+                .contains("mesh.service.on(\"audio\", \"sync_audio_state\")")
+        );
     }
 
     #[test]

@@ -1,16 +1,14 @@
 use mesh_config::{
     ShellConfig, ShellSettings, default_settings_path, load_config, load_shell_settings,
 };
+use mesh_debug::{
+    DebugOverlayState, DebugSnapshot, HealthEntry, InterfaceEntry, PluginEntry, ProviderEntry,
+};
 use mesh_diagnostics::DiagnosticsCollector;
 use mesh_events::EventBus;
 use mesh_locale::LocaleEngine;
 use mesh_plugin::lifecycle::{PluginInstance, PluginState};
 use mesh_plugin::{DependencyGraphError, PluginType, validate_plugin_dependency_graph};
-use mesh_debug::{DebugOverlayState, DebugSnapshot, HealthEntry, InterfaceEntry, PluginEntry, ProviderEntry};
-use mesh_renderer::{
-    DebugOverlay, DevWindowBackend, DevWindowEvent, DevWindowKeyEvent, LayerShellBackend,
-    LayerSurfaceConfig, Painter, PixelBuffer,
-};
 use mesh_service::{
     InterfaceProvider, InterfaceRegistry, ServiceRegistry, canonical_interface_name,
     load_interface_contract,
@@ -18,7 +16,6 @@ use mesh_service::{
 use mesh_theme::ThemeEngine;
 use mesh_wayland::{Layer, StubSurface};
 
-use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -30,29 +27,32 @@ mod backend;
 mod component;
 mod ipc;
 mod layout;
+mod painter;
+mod render;
 mod service;
 mod sounds;
 mod surface_layout;
 mod types;
 
-pub use types::{
-    ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest,
-    ServiceEvent, ShellComponent, SurfaceId,
-};
-use types::{ComponentRuntime, ServiceCommandMsg, ShellCoreState, ShellMessage, SurfaceState, ThemeWatchState, SettingsWatchState};
-use surface_layout::{
-    default_surface_visibility, load_active_theme,
-};
-use component::{BackendServiceCandidate, FrontendCatalog, FrontendSurfaceComponent};
 use backend::spawn_backend_service;
+use component::{BackendServiceCandidate, FrontendCatalog, FrontendSurfaceComponent};
 use ipc::spawn_ipc_server;
+use render::{
+    DebugOverlay, LayerSurfaceConfig, PixelBuffer, RenderEngine, WindowEvent, WindowKeyEvent,
+    coalesce_pointer_moves, event_surface_id,
+};
 use sounds::{SoundKind, play_shell_sound};
+use surface_layout::{default_surface_visibility, load_active_theme};
+pub use types::{
+    ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, ServiceEvent,
+    ShellComponent, SurfaceId,
+};
+use types::{
+    ComponentRuntime, ServiceCommandMsg, SettingsWatchState, ShellCoreState, ShellMessage,
+    SurfaceState, ThemeWatchState,
+};
 
 use service::service_name_from_interface;
-
-thread_local! {
-    static FRONTEND_PAINTER: RefCell<Painter> = RefCell::new(mesh_renderer::Painter::new());
-}
 
 pub struct Shell {
     pub config: ShellConfig,
@@ -68,115 +68,12 @@ pub struct Shell {
     core: ShellCoreState,
     components: Vec<ComponentRuntime>,
     surfaces: HashMap<SurfaceId, StubSurface>,
-    windows: WindowBackend,
+    render_engine: RenderEngine,
     theme_watch: ThemeWatchState,
     settings_watch: SettingsWatchState,
     debug: DebugOverlayState,
     debug_overlay: DebugOverlay,
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
-}
-
-enum WindowBackend {
-    LayerShell(LayerShellBackend),
-    DevWindow(DevWindowBackend),
-}
-
-impl WindowBackend {
-    fn select() -> Self {
-        let forced = std::env::var("MESH_BACKEND").ok();
-        let want_dev = forced.as_deref() == Some("dev-window");
-        let want_layer = forced.as_deref() == Some("layer-shell");
-        let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
-
-        if !want_dev && (want_layer || wayland) {
-            match LayerShellBackend::new() {
-                Ok(backend) => {
-                    tracing::info!("using wlr-layer-shell backend");
-                    return WindowBackend::LayerShell(backend);
-                }
-                Err(err) => {
-                    tracing::warn!(
-                        "failed to initialise layer-shell backend, falling back to dev window: {err}"
-                    );
-                }
-            }
-        }
-        tracing::info!("using dev-window backend (minifb)");
-        WindowBackend::DevWindow(DevWindowBackend::new())
-    }
-
-    fn configure(&mut self, surface_id: &str, cfg: LayerSurfaceConfig) {
-        if let WindowBackend::LayerShell(backend) = self {
-            backend.configure(surface_id, cfg);
-        }
-    }
-
-    fn present(
-        &mut self,
-        surface_id: &str,
-        title: &str,
-        visible: bool,
-        buffer: &PixelBuffer,
-    ) -> Result<(), mesh_renderer::RenderError> {
-        match self {
-            WindowBackend::LayerShell(b) => b.present(surface_id, title, visible, buffer),
-            WindowBackend::DevWindow(b) => b.present(surface_id, title, visible, buffer),
-        }
-    }
-
-    fn pump(&mut self) {
-        match self {
-            WindowBackend::LayerShell(b) => b.pump(),
-            WindowBackend::DevWindow(b) => b.pump(),
-        }
-    }
-
-    fn poll_events(&mut self) -> Vec<DevWindowEvent> {
-        match self {
-            WindowBackend::LayerShell(b) => b.poll_events(),
-            WindowBackend::DevWindow(b) => b.poll_events(),
-        }
-    }
-}
-
-fn coalesce_pointer_moves(events: Vec<DevWindowEvent>) -> Vec<DevWindowEvent> {
-    if events.len() < 2 {
-        return events;
-    }
-
-    let mut output = Vec::with_capacity(events.len());
-    let mut pending_moves: HashMap<String, DevWindowEvent> = HashMap::new();
-
-    for event in events {
-        match event {
-            DevWindowEvent::PointerMove { surface_id, x, y } => {
-                pending_moves.insert(
-                    surface_id.clone(),
-                    DevWindowEvent::PointerMove { surface_id, x, y },
-                );
-            }
-            event => {
-                let surface_id = dev_window_event_surface_id(&event).to_string();
-                if let Some(pointer_move) = pending_moves.remove(&surface_id) {
-                    output.push(pointer_move);
-                }
-                output.push(event);
-            }
-        }
-    }
-
-    output.extend(pending_moves.into_values());
-    output
-}
-
-fn dev_window_event_surface_id(event: &DevWindowEvent) -> &str {
-    match event {
-        DevWindowEvent::PointerMove { surface_id, .. }
-        | DevWindowEvent::PointerButton { surface_id, .. }
-        | DevWindowEvent::Scroll { surface_id, .. }
-        | DevWindowEvent::Key { surface_id, .. }
-        | DevWindowEvent::Char { surface_id, .. } => surface_id,
-    }
 }
 
 pub fn default_ipc_socket_path() -> PathBuf {
@@ -235,7 +132,7 @@ impl Shell {
             core: ShellCoreState::default(),
             components: Vec::new(),
             surfaces: HashMap::new(),
-            windows: WindowBackend::select(),
+            render_engine: RenderEngine::select(),
             theme_watch,
             settings_watch,
             debug: DebugOverlayState::default(),
@@ -371,7 +268,10 @@ impl Shell {
                         priority: p.priority,
                     })
                     .collect();
-                InterfaceEntry { name: name.clone(), providers }
+                InterfaceEntry {
+                    name: name.clone(),
+                    providers,
+                }
             })
             .collect();
         interfaces.sort_by(|a, b| a.name.cmp(&b.name));
@@ -380,7 +280,10 @@ impl Shell {
             .diagnostics
             .snapshot()
             .into_iter()
-            .map(|(id, status)| HealthEntry { plugin_id: id, status: status.to_string() })
+            .map(|(id, status)| HealthEntry {
+                plugin_id: id,
+                status: status.to_string(),
+            })
             .collect();
 
         let active_surfaces = self
@@ -391,7 +294,12 @@ impl Shell {
             .map(|(id, _)| id.clone())
             .collect();
 
-        DebugSnapshot { plugins, interfaces, health, active_surfaces }
+        DebugSnapshot {
+            plugins,
+            interfaces,
+            health,
+            active_surfaces,
+        }
     }
 
     pub fn plugins(&self) -> impl Iterator<Item = (&str, PluginState)> {
@@ -402,6 +310,10 @@ impl Shell {
 
     pub fn run(&mut self) -> Result<(), ShellRunError> {
         self.discover_plugins();
+        for theme in mesh_theme::load_themes_from_dir(&mesh_theme::theme_dir_path()) {
+            tracing::debug!("registering theme '{}'", theme.id);
+            self.theme.register_theme(theme);
+        }
         self.resolve_plugins()?;
         self.load_frontend_components()?;
 
@@ -453,7 +365,7 @@ impl Shell {
             self.drain_requests(&mut pending)?;
             self.render_components()?;
             self.flush_wayland()?;
-            self.windows.pump();
+            self.render_engine.pump();
 
             std::thread::sleep(Duration::from_millis(16));
         }
@@ -477,7 +389,8 @@ impl Shell {
             return Ok(());
         }
 
-        let theme = mesh_theme::load_theme_from_path(&self.theme_watch.path).map_err(ShellRunError::Theme)?;
+        let theme = mesh_theme::load_theme_from_path(&self.theme_watch.path)
+            .map_err(ShellRunError::Theme)?;
         tracing::info!(
             "reloaded active theme '{}' from {}",
             theme.id,
@@ -534,6 +447,41 @@ impl Shell {
         Ok(())
     }
 
+    fn apply_set_theme(&mut self, theme_id: &str) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        if self.theme.set_active(theme_id).is_err() {
+            let path = mesh_theme::theme_path_for_id(theme_id);
+            match mesh_theme::load_theme_from_path(&path) {
+                Ok(theme) => {
+                    self.theme.register_theme(theme);
+                    if let Err(e) = self.theme.set_active(theme_id) {
+                        tracing::warn!("failed to activate theme '{theme_id}': {e}");
+                        return Ok(VecDeque::new());
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("cannot load theme '{theme_id}': {e}");
+                    return Ok(VecDeque::new());
+                }
+            }
+        }
+        tracing::info!("active theme changed to '{theme_id}'");
+        self.mark_components_theme_changed()?;
+        let is_dark = theme_id.contains("dark");
+        let payload = serde_json::json!({ "current": theme_id, "is_dark": is_dark });
+        // Notify the theme backend so it stays in sync.
+        if let Some(tx) = self.service_handlers.get("mesh.theme") {
+            let _ = tx.send(ServiceCommandMsg {
+                command: "set-current".to_string(),
+                payload: payload.clone(),
+            });
+        }
+        self.broadcast_service_event(ServiceEvent::Updated {
+            service: "mesh.theme".into(),
+            source_plugin: "@mesh/shell".into(),
+            payload,
+        })
+    }
+
     fn reload_locale_if_settings_changed(&mut self) -> Result<(), ShellRunError> {
         let Ok(metadata) = std::fs::metadata(&self.settings_watch.path) else {
             return Ok(());
@@ -575,8 +523,7 @@ impl Shell {
             self.mark_components_theme_changed()?;
         }
 
-        if locale_changed
-        {
+        if locale_changed {
             tracing::info!(
                 "locale changed: {} (fallback: {}) -> {} (fallback: {})",
                 old_i18n.locale,
@@ -756,8 +703,16 @@ impl Shell {
         request: CoreRequest,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         match request {
-            CoreRequest::PositionSurface { surface_id, margin_top, margin_left } => {
-                if let Some(runtime) = self.components.iter_mut().find(|r| r.surface_id == surface_id) {
+            CoreRequest::PositionSurface {
+                surface_id,
+                margin_top,
+                margin_left,
+            } => {
+                if let Some(runtime) = self
+                    .components
+                    .iter_mut()
+                    .find(|r| r.surface_id == surface_id)
+                {
                     runtime.component.apply_position(margin_top, margin_left);
                 }
                 Ok(VecDeque::new())
@@ -781,13 +736,21 @@ impl Shell {
                 tracing::info!("diagnostic: {message}");
                 Ok(VecDeque::new())
             }
-            CoreRequest::ServiceCommand { interface, command, payload } => {
+            CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+            } => {
                 self.dispatch_service_command(&interface, &command, &payload);
                 Ok(VecDeque::new())
             }
+            CoreRequest::SetTheme { theme_id } => self.apply_set_theme(&theme_id),
             CoreRequest::ToggleDebugOverlay => {
                 self.debug.toggle();
-                tracing::debug!("debug overlay: {}", if self.debug.enabled { "on" } else { "off" });
+                tracing::debug!(
+                    "debug overlay: {}",
+                    if self.debug.enabled { "on" } else { "off" }
+                );
                 Ok(VecDeque::new())
             }
             CoreRequest::CycleDebugTab => {
@@ -801,7 +764,12 @@ impl Shell {
         }
     }
 
-    fn dispatch_service_command(&self, interface: &str, command: &str, payload: &serde_json::Value) {
+    fn dispatch_service_command(
+        &self,
+        interface: &str,
+        command: &str,
+        payload: &serde_json::Value,
+    ) {
         if let Some(tx) = self.service_handlers.get(interface) {
             let _ = tx.send(ServiceCommandMsg {
                 command: command.to_string(),
@@ -887,7 +855,7 @@ impl Shell {
                         margin_left: 0,
                     }
                 };
-                self.windows.configure(&runtime.surface_id, cfg);
+                self.render_engine.configure(&runtime.surface_id, cfg);
 
                 if !visible {
                     break PixelBuffer::new(1, 1);
@@ -926,13 +894,15 @@ impl Shell {
             if visible && let Some(snapshot) = &debug_snapshot {
                 if self.debug.show_layout_bounds {
                     if let Some(tree) = runtime.component.last_widget_tree() {
-                        self.debug_overlay.paint_layout_bounds(tree, &mut buffer, 1.0);
+                        self.debug_overlay
+                            .paint_layout_bounds(tree, &mut buffer, 1.0);
                     }
                 }
-                self.debug_overlay.paint_panel(snapshot, self.debug.active_tab, &mut buffer, 1.0);
+                self.debug_overlay
+                    .paint_panel(snapshot, self.debug.active_tab, &mut buffer, 1.0);
             }
 
-            self.windows
+            self.render_engine
                 .present(
                     &runtime.surface_id,
                     runtime.component.id(),
@@ -945,19 +915,13 @@ impl Shell {
     }
 
     fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
-        let events = coalesce_pointer_moves(self.windows.poll_events());
+        let events = coalesce_pointer_moves(self.render_engine.poll_events());
         for event in events {
             tracing::trace!(
                 "[hover] dispatch_wayland: got event {:?}",
                 std::mem::discriminant(&event)
             );
-            let surface_id = match &event {
-                DevWindowEvent::PointerMove { surface_id, .. }
-                | DevWindowEvent::PointerButton { surface_id, .. }
-                | DevWindowEvent::Scroll { surface_id, .. }
-                | DevWindowEvent::Key { surface_id, .. }
-                | DevWindowEvent::Char { surface_id, .. } => surface_id,
-            };
+            let surface_id = event_surface_id(&event);
 
             let Some(index) = self
                 .components
@@ -976,7 +940,11 @@ impl Shell {
             // Key names vary by backend (minifb: "D", xkbcommon: "d") so
             // we normalise to lowercase. Modifier state comes from KeyMods
             // embedded in the event, not shell-side tracking.
-            if let DevWindowEvent::Key { event: DevWindowKeyEvent::Pressed(key, mods), .. } = &event {
+            if let WindowEvent::Key {
+                event: WindowKeyEvent::Pressed(key, mods),
+                ..
+            } = &event
+            {
                 match key.to_ascii_lowercase().as_str() {
                     "d" if mods.ctrl && mods.shift => {
                         let mut pending = VecDeque::from([CoreRequest::ToggleDebugOverlay]);
@@ -993,22 +961,20 @@ impl Shell {
             }
 
             let input = match event {
-                DevWindowEvent::PointerMove { x, y, .. } => ComponentInput::PointerMove { x, y },
-                DevWindowEvent::PointerButton { x, y, pressed, .. } => {
+                WindowEvent::PointerMove { x, y, .. } => ComponentInput::PointerMove { x, y },
+                WindowEvent::PointerButton { x, y, pressed, .. } => {
                     ComponentInput::PointerButton { x, y, pressed }
                 }
-                DevWindowEvent::Scroll { x, y, dx, dy, .. } => {
-                    ComponentInput::Scroll { x, y, dx, dy }
-                }
-                DevWindowEvent::Key {
-                    event: DevWindowKeyEvent::Pressed(key, _mods),
+                WindowEvent::Scroll { x, y, dx, dy, .. } => ComponentInput::Scroll { x, y, dx, dy },
+                WindowEvent::Key {
+                    event: WindowKeyEvent::Pressed(key, _mods),
                     ..
                 } => ComponentInput::KeyPressed { key },
-                DevWindowEvent::Key {
-                    event: DevWindowKeyEvent::Released(key),
+                WindowEvent::Key {
+                    event: WindowKeyEvent::Released(key),
                     ..
                 } => ComponentInput::KeyReleased { key },
-                DevWindowEvent::Char { ch, .. } => ComponentInput::Char { ch },
+                WindowEvent::Char { ch, .. } => ComponentInput::Char { ch },
             };
 
             tracing::trace!(
@@ -1052,7 +1018,11 @@ impl Shell {
         Ok(())
     }
 
-    fn spawn_backend_plugins(&mut self, runtime: &Runtime, tx: mpsc::UnboundedSender<ShellMessage>) {
+    fn spawn_backend_plugins(
+        &mut self,
+        runtime: &Runtime,
+        tx: mpsc::UnboundedSender<ShellMessage>,
+    ) {
         let mut plugin_ids: Vec<String> = self.plugins.keys().cloned().collect();
         plugin_ids.sort();
         let mut services: HashMap<String, Vec<BackendServiceCandidate>> = HashMap::new();
@@ -1092,14 +1062,18 @@ impl Shell {
             };
 
             let interface = format!("mesh.{service_name}");
-            let script_source = self.plugins.get(&candidate.plugin_id).and_then(|plugin| {
-                plugin
-                    .manifest
-                    .entrypoints
-                    .main
-                    .as_deref()
-                    .map(|entry| plugin.path.join(entry))
-            }).and_then(|path| std::fs::read_to_string(&path).ok());
+            let script_source = self
+                .plugins
+                .get(&candidate.plugin_id)
+                .and_then(|plugin| {
+                    plugin
+                        .manifest
+                        .entrypoints
+                        .main
+                        .as_deref()
+                        .map(|entry| plugin.path.join(entry))
+                })
+                .and_then(|path| std::fs::read_to_string(&path).ok());
 
             let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
             self.service_handlers.insert(interface.clone(), cmd_tx);
@@ -1115,7 +1089,10 @@ impl Shell {
                     ));
                 }
                 None => {
-                    tracing::warn!("backend plugin {} has no readable script", candidate.plugin_id);
+                    tracing::warn!(
+                        "backend plugin {} has no readable script",
+                        candidate.plugin_id
+                    );
                 }
             }
         }
@@ -1152,7 +1129,7 @@ pub enum ShellRunError {
     MissingSurface(String),
 
     #[error(transparent)]
-    Render(#[from] mesh_renderer::RenderError),
+    Render(#[from] render::RenderError),
 
     #[error("failed to initialize ipc socket at {path}: {source}")]
     IpcInit {
@@ -1179,14 +1156,13 @@ fn default_plugin_dirs() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        surface_layout::{SurfaceSizePolicy, load_frontend_plugin_settings},
         layout::measure_content_size,
         service::{apply_service_update, seed_service_state, service_name_from_interface},
+        surface_layout::{SurfaceSizePolicy, load_frontend_plugin_settings},
     };
     use mesh_plugin::manifest::{
-        Manifest, PackageSection, PluginType, SurfaceLayoutSection,
         CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
-        ExportsSection,
+        ExportsSection, Manifest, PackageSection, PluginType, SurfaceLayoutSection,
     };
     use mesh_scripting::ScriptState;
     use mesh_ui::{LayoutRect, VariableStore, WidgetNode};
@@ -1264,23 +1240,19 @@ mod tests {
         let mut root = node("root", 0.0, 0.0, 1920.0, 32.0);
         root.children.push(node("row", 0.0, 0.0, 640.0, 32.0));
 
-        assert_eq!(
-            measure_content_size(&root, 1920, 32, None),
-            (1920, 32)
-        );
+        assert_eq!(measure_content_size(&root, 1920, 32, None), (1920, 32));
     }
 
     #[test]
     fn launcher_plugin_json_declares_content_measured_policy() {
-        let workspace_root =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let launcher_plugin_dir =
-            workspace_root.join("plugins/frontend/core/launcher");
-        let plugin_json =
-            std::fs::read_to_string(launcher_plugin_dir.join("plugin.json")).unwrap();
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let launcher_plugin_dir = workspace_root.join("plugins/frontend/core/launcher");
+        let plugin_json = std::fs::read_to_string(launcher_plugin_dir.join("plugin.json")).unwrap();
         let value: serde_json::Value = serde_json::from_str(&plugin_json).unwrap();
         assert_eq!(
-            value.pointer("/surface_layout/size_policy").and_then(|v| v.as_str()),
+            value
+                .pointer("/surface_layout/size_policy")
+                .and_then(|v| v.as_str()),
             Some("content_measured"),
         );
         assert_eq!(

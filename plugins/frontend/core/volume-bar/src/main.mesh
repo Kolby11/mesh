@@ -1,6 +1,5 @@
 <template>
   <section class="volume-bar">
-    <icon class="glyph" name="{icon_name}" size="18" />
     <slider
       class="track"
       orient="vertical"
@@ -66,7 +65,7 @@ end
     gap: token(spacing.xs);
     background: token(color.surface);
     color: token(color.on-surface);
-    border-radius: token(radius.sm);
+    border-radius: token(radius.lg);
 }
 
 .glyph {

@@ -20,18 +20,20 @@ use mesh_component_backend::{
 use mesh_locale::LocaleEngine;
 use mesh_plugin::PluginType;
 use mesh_plugin::lifecycle::PluginInstance;
-use mesh_renderer::{PixelBuffer, SharedTextMeasurer};
 use mesh_scripting::{LocaleBoundState, ScriptContext};
 use mesh_theme::{Theme, default_theme};
-use mesh_ui::{ElementState, StyleContext, StyleResolver, VariableStore, WidgetNode};
+use mesh_ui::{
+    Corners, ElementState, StyleContext, StyleResolver, TransitionStyle, VariableStore, WidgetNode,
+};
 use mesh_wayland::{Edge, ShellSurface};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::shell::ShellRunError;
+use crate::shell::render::{PixelBuffer, SharedTextMeasurer, paint_frontend_tree};
 
 /// Overlays resolved prop values on top of a local component's host state so
 /// that template expressions like `{network_name}` resolve to the prop value
@@ -104,12 +106,63 @@ pub(super) struct FrontendSurfaceComponent {
     pending_surface_states: RefCell<HashMap<String, bool>>,
     /// Last visibility state emitted for each surface portal, to avoid redundant requests.
     last_surface_states: HashMap<String, bool>,
+    style_animations: HashMap<String, StyleAnimation>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct ScrollOffsetState {
     pub(super) x: f32,
     pub(super) y: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct AnimatedVisualStyle {
+    border_radius: Corners,
+}
+
+impl AnimatedVisualStyle {
+    fn from_node(node: &WidgetNode) -> Self {
+        Self::from_corners(node.computed_style.border_radius)
+    }
+
+    fn from_corners(border_radius: Corners) -> Self {
+        Self { border_radius }
+    }
+
+    fn apply_to_node(self, node: &mut WidgetNode) {
+        node.computed_style.border_radius = self.border_radius;
+    }
+
+    fn interpolate(self, target: Self, progress: f32) -> Self {
+        Self {
+            border_radius: lerp_corners(self.border_radius, target.border_radius, progress),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct StyleAnimation {
+    from: AnimatedVisualStyle,
+    to: AnimatedVisualStyle,
+    started_at: Instant,
+    duration: Duration,
+    transition: TransitionStyle,
+}
+
+impl StyleAnimation {
+    fn current_style(&self, now: Instant) -> AnimatedVisualStyle {
+        if self.duration.is_zero() {
+            return self.to;
+        }
+
+        let elapsed = now.saturating_duration_since(self.started_at);
+        let progress = (elapsed.as_secs_f32() / self.duration.as_secs_f32()).clamp(0.0, 1.0);
+        self.from.interpolate(self.to, ease_out_cubic(progress))
+    }
+
+    fn finished(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.started_at) >= self.duration
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -331,6 +384,110 @@ impl FrontendSurfaceComponent {
             last_tree: None,
             pending_surface_states: RefCell::new(HashMap::new()),
             last_surface_states: HashMap::new(),
+            style_animations: HashMap::new(),
+        }
+    }
+
+    fn apply_style_animations(&mut self, tree: &mut WidgetNode) {
+        let previous_styles = self
+            .last_tree
+            .as_ref()
+            .map(collect_visual_styles)
+            .unwrap_or_default();
+        let now = Instant::now();
+        let mut live_keys = HashSet::new();
+        let mut has_active_animation = false;
+
+        self.apply_style_animations_to_node(
+            tree,
+            &previous_styles,
+            now,
+            &mut live_keys,
+            &mut has_active_animation,
+        );
+
+        self.style_animations
+            .retain(|key, animation| live_keys.contains(key) && !animation.finished(now));
+
+        if has_active_animation {
+            self.dirty = true;
+        }
+    }
+
+    fn apply_style_animations_to_node(
+        &mut self,
+        node: &mut WidgetNode,
+        previous_styles: &HashMap<String, AnimatedVisualStyle>,
+        now: Instant,
+        live_keys: &mut HashSet<String>,
+        has_active_animation: &mut bool,
+    ) {
+        if let Some(key) = node.attributes.get("_mesh_key").cloned() {
+            live_keys.insert(key.clone());
+            self.apply_node_style_animation(&key, node, previous_styles, now, has_active_animation);
+        }
+
+        for child in &mut node.children {
+            self.apply_style_animations_to_node(
+                child,
+                previous_styles,
+                now,
+                live_keys,
+                has_active_animation,
+            );
+        }
+    }
+
+    fn apply_node_style_animation(
+        &mut self,
+        key: &str,
+        node: &mut WidgetNode,
+        previous_styles: &HashMap<String, AnimatedVisualStyle>,
+        now: Instant,
+        has_active_animation: &mut bool,
+    ) {
+        let desired = AnimatedVisualStyle::from_node(node);
+        let previous_displayed = self
+            .style_animations
+            .get(key)
+            .map(|animation| animation.current_style(now))
+            .or_else(|| previous_styles.get(key).copied())
+            .unwrap_or(desired);
+
+        let transition = node.computed_style.transition;
+        let should_animate_border_radius = transition.duration_ms > 0
+            && transition.properties.animates_border_radius()
+            && previous_displayed.border_radius != desired.border_radius;
+
+        if should_animate_border_radius {
+            let restart = self.style_animations.get(key).is_none_or(|animation| {
+                animation.to != desired
+                    || animation.transition != transition
+                    || animation.finished(now)
+            });
+
+            if restart {
+                self.style_animations.insert(
+                    key.to_string(),
+                    StyleAnimation {
+                        from: previous_displayed,
+                        to: desired,
+                        started_at: now,
+                        duration: Duration::from_millis(u64::from(transition.duration_ms)),
+                        transition,
+                    },
+                );
+            }
+        } else {
+            self.style_animations.remove(key);
+        }
+
+        if let Some(animation) = self.style_animations.get(key) {
+            let current = animation.current_style(now);
+            current.apply_to_node(node);
+            if !animation.finished(now) {
+                *has_active_animation = true;
+            }
         }
     }
 
@@ -1136,11 +1293,12 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             if let Some(entry) = self.frontend_catalog.plugins.get(&host.package.id) {
                 if let Some(local) = entry.compiled.local_components.get(alias) {
                     let theme = self.active_theme.borrow().clone();
-                    let host_state = self
-                        .runtime_state(host_instance_key)
-                        .unwrap_or_default();
+                    let host_state = self.runtime_state(host_instance_key).unwrap_or_default();
                     let bound = LocaleBoundState::new(&host_state, &self.locale);
-                    let store = LocalComponentStore { base: &bound, props };
+                    let store = LocalComponentStore {
+                        base: &bound,
+                        props,
+                    };
                     let host_rules = entry
                         .compiled
                         .component
@@ -1358,7 +1516,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn wants_render(&self) -> bool {
-        self.dirty
+        self.dirty || !self.style_animations.is_empty()
     }
 
     fn render(&mut self, surface: &mut dyn ShellSurface) -> Result<(), ComponentError> {
@@ -1403,7 +1561,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         height: u32,
         buffer: &mut PixelBuffer,
     ) -> Result<(), ComponentError> {
-        let tree = self.build_tree(theme, width, height);
+        let mut tree = self.build_tree(theme, width, height);
+        self.apply_style_animations(&mut tree);
         if self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured {
             let surface_layout_manifest = self.compiled.manifest.surface_layout.as_ref();
             let measured_size = measure_content_size(&tree, width, height, surface_layout_manifest);
@@ -1412,7 +1571,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 self.dirty = true;
             }
         }
-        buffer.clear(tree.computed_style.background_color);
+        buffer.clear(mesh_ui::style::Color::TRANSPARENT);
 
         let tooltip = if let (Some(start), Some(hovered_key)) =
             (self.hover_start, self.hovered_key.as_ref())
@@ -1429,13 +1588,14 @@ impl ShellComponent for FrontendSurfaceComponent {
             None
         };
 
-        super::FRONTEND_PAINTER.with(|painter| {
-            let painter = painter.borrow();
-            painter.paint(&tree, buffer, 1.0);
-            if let Some((tooltip_text, cx, cy)) = tooltip {
-                painter.paint_tooltip(&tooltip_text, cx, cy, buffer, 1.0);
-            }
-        });
+        paint_frontend_tree(
+            &tree,
+            buffer,
+            1.0,
+            tooltip
+                .as_ref()
+                .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
+        );
         self.last_tree = Some(tree);
 
         Ok(())
@@ -1690,6 +1850,42 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.surface_layout.margin_left = margin_left;
         self.dirty = true;
     }
+}
+
+fn collect_visual_styles(root: &WidgetNode) -> HashMap<String, AnimatedVisualStyle> {
+    let mut styles = HashMap::new();
+    collect_visual_styles_into(root, &mut styles);
+    styles
+}
+
+fn collect_visual_styles_into(
+    node: &WidgetNode,
+    styles: &mut HashMap<String, AnimatedVisualStyle>,
+) {
+    if let Some(key) = node.attributes.get("_mesh_key") {
+        styles.insert(key.clone(), AnimatedVisualStyle::from_node(node));
+    }
+
+    for child in &node.children {
+        collect_visual_styles_into(child, styles);
+    }
+}
+
+fn ease_out_cubic(progress: f32) -> f32 {
+    1.0 - (1.0 - progress).powi(3)
+}
+
+fn lerp_corners(from: Corners, to: Corners, progress: f32) -> Corners {
+    Corners {
+        top_left: lerp_f32(from.top_left, to.top_left, progress),
+        top_right: lerp_f32(from.top_right, to.top_right, progress),
+        bottom_right: lerp_f32(from.bottom_right, to.bottom_right, progress),
+        bottom_left: lerp_f32(from.bottom_left, to.bottom_left, progress),
+    }
+}
+
+fn lerp_f32(from: f32, to: f32, progress: f32) -> f32 {
+    from + (to - from) * progress
 }
 
 pub(super) fn annotate_runtime_tree(

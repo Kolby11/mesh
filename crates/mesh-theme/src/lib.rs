@@ -142,6 +142,21 @@ pub fn theme_path_for_id(theme_id: &str) -> PathBuf {
     theme_dir_path().join(format!("{theme_id}.json"))
 }
 
+/// Load all `*.json` theme files found in a directory. Files that fail to
+/// parse are silently skipped so a single bad file does not block startup.
+pub fn load_themes_from_dir(dir: &Path) -> Vec<Theme> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut themes: Vec<Theme> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "json").unwrap_or(false))
+        .filter_map(|e| load_theme_from_path(&e.path()).ok())
+        .collect();
+    themes.sort_by(|a, b| a.id.cmp(&b.id));
+    themes
+}
+
 pub fn load_theme_from_path(path: &Path) -> Result<Theme, ThemeError> {
     let content = std::fs::read_to_string(path).map_err(|source| ThemeError::Io {
         path: path.to_path_buf(),

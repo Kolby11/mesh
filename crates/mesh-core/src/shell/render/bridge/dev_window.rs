@@ -1,4 +1,4 @@
-use crate::PixelBuffer;
+use super::super::{PixelBuffer, RenderError};
 use minifb::{InputCallback, Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -72,7 +72,7 @@ impl DevWindowBackend {
         title: &str,
         visible: bool,
         buffer: &PixelBuffer,
-    ) -> Result<(), crate::RenderError> {
+    ) -> Result<(), RenderError> {
         if !visible {
             self.windows.remove(surface_id);
             return Ok(());
@@ -87,14 +87,15 @@ impl DevWindowBackend {
             .unwrap_or(true);
 
         if needs_new_window {
-            let surface = create_window_surface(title, width, height)
-                .map_err(crate::RenderError::SurfaceCreate)?;
+            let surface =
+                create_window_surface(title, width, height).map_err(RenderError::SurfaceCreate)?;
             self.windows.insert(surface_id.to_string(), surface);
         }
 
-        let surface = self.windows.get_mut(surface_id).ok_or_else(|| {
-            crate::RenderError::SurfaceCreate("window missing after creation".into())
-        })?;
+        let surface = self
+            .windows
+            .get_mut(surface_id)
+            .ok_or_else(|| RenderError::SurfaceCreate("window missing after creation".into()))?;
 
         surface.window.set_title(title);
         surface.frame.resize((width * height) as usize, 0);
@@ -102,7 +103,7 @@ impl DevWindowBackend {
         surface
             .window
             .update_with_buffer(&surface.frame, width as usize, height as usize)
-            .map_err(|err: minifb::Error| crate::RenderError::SurfaceCreate(format!("{err:?}")))?;
+            .map_err(|err: minifb::Error| RenderError::SurfaceCreate(format!("{err:?}")))?;
 
         Ok(())
     }

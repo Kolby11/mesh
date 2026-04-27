@@ -258,7 +258,11 @@ pub fn build_widget_tree_from_component(
     } else if component_rules.is_empty() {
         host_rules
     } else {
-        merged = host_rules.iter().chain(component_rules.iter()).cloned().collect();
+        merged = host_rules
+            .iter()
+            .chain(component_rules.iter())
+            .cloned()
+            .collect();
         &merged
     };
 
@@ -1311,23 +1315,13 @@ fn merge_missing_defaults(tag: &str, style: &mut ComputedStyle) {
     }
 }
 
-fn surface_style(surface_id: &str, width: u32, height: u32) -> ComputedStyle {
+fn surface_style(_surface_id: &str, width: u32, height: u32) -> ComputedStyle {
     let mut style = container_style("column");
     style.padding = mesh_ui::Edges::all(0.0);
     style.gap = 0.0;
     style.width = mesh_ui::Dimension::Px(width as f32);
     style.height = mesh_ui::Dimension::Px(height as f32);
-    style.background_color = match surface_id {
-        "@mesh/panel" => mesh_ui::Color::from_hex("#1f1a24").unwrap_or(mesh_ui::Color::BLACK),
-        "@mesh/launcher" => mesh_ui::Color::from_hex("#141218").unwrap_or(mesh_ui::Color::BLACK),
-        "@mesh/notification-center" => {
-            mesh_ui::Color::from_hex("#18161d").unwrap_or(mesh_ui::Color::BLACK)
-        }
-        "@mesh/quick-settings" => {
-            mesh_ui::Color::from_hex("#1b1b22").unwrap_or(mesh_ui::Color::BLACK)
-        }
-        _ => mesh_ui::Color::from_hex("#16131a").unwrap_or(mesh_ui::Color::BLACK),
-    };
+    style.background_color = mesh_ui::Color::TRANSPARENT;
     style
 }
 
@@ -1467,8 +1461,12 @@ mod tests {
 
     struct MapStore(HashMap<String, serde_json::Value>);
     impl mesh_ui::VariableStore for MapStore {
-        fn get(&self, name: &str) -> Option<serde_json::Value> { self.0.get(name).cloned() }
-        fn keys(&self) -> Vec<String> { self.0.keys().cloned().collect() }
+        fn get(&self, name: &str) -> Option<serde_json::Value> {
+            self.0.get(name).cloned()
+        }
+        fn keys(&self) -> Vec<String> {
+            self.0.keys().cloned().collect()
+        }
     }
 
     #[test]

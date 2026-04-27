@@ -8,7 +8,7 @@ pub mod component;
 ///
 /// **Separation enforcement**:
 /// - `mesh-ui` cannot import `mesh-service`
-/// - `mesh-renderer` cannot import `mesh-service`
+/// - the shell render stack cannot import `mesh-service`
 /// - Only `mesh-scripting` bridges both sides
 ///
 /// Both frontend and backend scripts run through `mlua` in Luau mode with

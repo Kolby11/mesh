@@ -6,6 +6,7 @@
         <SettingsButton />
         <VolumeButton />
         <BatteryButton />
+        <ThemeButton />
     </div>
   </nav>
 </template>
@@ -16,7 +17,32 @@ import "@src/components/meta-pill" as MetaPill
 import "@src/components/settings-button" as SettingsButton
 import "@src/components/volume-button" as VolumeButton
 import "@src/components/battery-button" as BatteryButton
+import "@src/components/theme-button" as ThemeButton
 mesh.state.set("icon_name", "audio-volume-muted")
+mesh.state.set("theme_icon", "weather-clear-night")
+mesh.state.set("theme_tooltip", "Switch to light theme")
+mesh.service.bind("theme.is_dark", "theme_is_dark")
+mesh.service.on("theme", "sync_theme_state")
+
+function sync_theme_state()
+    if theme_is_dark then
+        theme_icon    = "weather-clear-night"
+        theme_tooltip = "Switch to light theme"
+    else
+        theme_icon    = "weather-clear"
+        theme_tooltip = "Switch to dark theme"
+    end
+end
+
+function onThemeToggle()
+    local next_theme
+    if theme_is_dark then
+        next_theme = "mesh-default-light"
+    else
+        next_theme = "mesh-default-dark"
+    end
+    mesh.events.publish("shell.set-theme", { theme_id = next_theme })
+end
 mesh.state.set("audio_tooltip", "Volume unavailable")
 mesh.state.set("battery_icon_name", "battery-empty")
 mesh.state.set("battery_label", "--%")

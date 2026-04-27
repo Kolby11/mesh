@@ -9,7 +9,7 @@ pub mod style;
 /// on screen but does not paint pixels.
 ///
 /// **Separation boundary**: this crate does NOT depend on `mesh-service`,
-/// `mesh-wayland`, `mesh-renderer`, or `mesh-scripting`. Frontends connect
+/// `mesh-wayland`, the shell render stack in `mesh-core`, or `mesh-scripting`. Frontends connect
 /// to backends only through bindings injected by the scripting layer.
 pub mod tree;
 
@@ -21,7 +21,7 @@ pub use layout::{LayoutEngine, LayoutRect, TextMeasurer};
 pub use style::{
     AlignContent, AlignItems, AlignSelf, Color, ComputedStyle, Corners, Dimension, Display, Edges,
     FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow, Position, StyleContext,
-    StyleResolver, TextAlign, TextDirection, TextOverflow,
+    StyleResolver, TextAlign, TextDirection, TextOverflow, TransitionProperties, TransitionStyle,
 };
 pub use tree::{ElementState, NodeId, WidgetNode};
 

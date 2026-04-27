@@ -19,6 +19,7 @@
       "shell.surface",
       "service.audio.read",
       "service.power.read",
+      "service.theme.read",
       "theme.read",
       "locale.read"
     ]
@@ -26,7 +27,8 @@
   "dependencies": {
     "plugins": {
       "@mesh/audio-interface": ">=1.0.0, <2.0.0",
-      "@mesh/power-interface": ">=1.0.0, <2.0.0"
+      "@mesh/power-interface": ">=1.0.0, <2.0.0",
+      "@mesh/shell-theme": ">=0.1.0, <1.0.0"
     }
   },
   "entrypoints": {

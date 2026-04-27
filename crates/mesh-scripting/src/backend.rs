@@ -158,9 +158,8 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         mesh.set(
             "exec_shell",
-            self.lua.create_function(move |lua, cmd: String| {
-                run_command(&lua, &runtime, &cmd, true)
-            })?,
+            self.lua
+                .create_function(move |lua, cmd: String| run_command(&lua, &runtime, &cmd, true))?,
         )?;
 
         let plugin_id = self.plugin_id.clone();
@@ -288,7 +287,8 @@ mod tests {
     #[test]
     fn loads_poll_interval_from_script() {
         let mut ctx = BackendScriptContext::new("@test/backend");
-        ctx.load_script("mesh.service.set_poll_interval(250)").unwrap();
+        ctx.load_script("mesh.service.set_poll_interval(250)")
+            .unwrap();
         assert_eq!(ctx.poll_interval_ms(), 250);
     }
 
@@ -301,7 +301,12 @@ mod tests {
         )
         .unwrap();
         assert!(ctx.lua.globals().get::<Function>("on_poll").is_ok());
-        assert!(ctx.lua.globals().get::<Function>("on_command_volume_up").is_ok());
+        assert!(
+            ctx.lua
+                .globals()
+                .get::<Function>("on_command_volume_up")
+                .is_ok()
+        );
     }
 
     #[test]
@@ -312,7 +317,10 @@ mod tests {
         )
         .unwrap();
         let payload = ctx.run_poll().unwrap();
-        assert_eq!(payload.get("available").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            payload.get("available").and_then(|v| v.as_bool()),
+            Some(true)
+        );
         assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(65));
     }
 
@@ -322,7 +330,10 @@ mod tests {
         ctx.load_script("function on_poll()\nmesh.service.emit_unavailable()\nend")
             .unwrap();
         let payload = ctx.run_poll().unwrap();
-        assert_eq!(payload.get("available").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            payload.get("available").and_then(|v| v.as_bool()),
+            Some(false)
+        );
         assert_eq!(
             payload.get("source_plugin").and_then(|v| v.as_str()),
             Some("@test/backend")
@@ -365,7 +376,10 @@ mod tests {
         )
         .unwrap();
         let payload = ctx.run_poll().unwrap();
-        assert_eq!(payload.get("available").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            payload.get("available").and_then(|v| v.as_bool()),
+            Some(true)
+        );
         assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(65));
     }
 

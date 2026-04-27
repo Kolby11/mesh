@@ -1,5 +1,5 @@
 /// Pixel buffer for software rendering.
-use mesh_ui::Color;
+use mesh_ui::style::Color;
 
 /// An ARGB8888 pixel buffer.
 #[derive(Debug, Clone)]
@@ -72,6 +72,12 @@ impl PixelBuffer {
         self.data[offset + 1] = ((u16::from(color.g) * src_alpha + dst_g * inv_alpha) / 255) as u8;
         self.data[offset + 2] = ((u16::from(color.r) * src_alpha + dst_r * inv_alpha) / 255) as u8;
         self.data[offset + 3] = (src_alpha + ((dst_a * inv_alpha) / 255)).min(255) as u8;
+    }
+
+    /// Blend a pixel using a normalized floating-point coverage mask.
+    pub fn blend_pixel_f32(&mut self, x: u32, y: u32, color: Color, coverage: f32) {
+        let coverage = (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
+        self.blend_pixel(x, y, color, coverage);
     }
 
     /// Fill a rectangle with a solid color.

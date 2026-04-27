@@ -1,5 +1,5 @@
-use mesh_scripting::{PublishedEvent, ScriptState};
 use super::types::CoreRequest;
+use mesh_scripting::{PublishedEvent, ScriptState};
 
 /// Seed a component's script state with default values before the first
 /// service update arrives. This prevents template crashes on first render.
@@ -65,10 +65,7 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                     surface_id: id.to_string(),
                 }),
             "shell.position-surface" => {
-                let surface_id = event
-                    .payload
-                    .get("surface_id")
-                    .and_then(|v| v.as_str())?;
+                let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
                 let margin_top = event
                     .payload
                     .get("margin_top")
@@ -85,6 +82,13 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                     margin_left,
                 })
             }
+            "shell.set-theme" => event
+                .payload
+                .get("theme_id")
+                .and_then(|v| v.as_str())
+                .map(|id| CoreRequest::SetTheme {
+                    theme_id: id.to_string(),
+                }),
             other => other.rfind('.').map(|pos| CoreRequest::ServiceCommand {
                 interface: other[..pos].to_string(),
                 command: other[pos + 1..].to_string(),

@@ -1,9 +1,9 @@
+use super::types::{CoreRequest, ShellMessage};
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
-use super::types::{CoreRequest, ShellMessage};
 
 pub(super) fn spawn_ipc_server(
     runtime: &Runtime,
@@ -84,13 +84,19 @@ async fn handle_ipc_client(
 
 fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
     if let Some(surface_id) = command.strip_prefix("shell:show_surface:") {
-        return Some(CoreRequest::ShowSurface { surface_id: surface_id.to_string() });
+        return Some(CoreRequest::ShowSurface {
+            surface_id: surface_id.to_string(),
+        });
     }
     if let Some(surface_id) = command.strip_prefix("shell:hide_surface:") {
-        return Some(CoreRequest::HideSurface { surface_id: surface_id.to_string() });
+        return Some(CoreRequest::HideSurface {
+            surface_id: surface_id.to_string(),
+        });
     }
     if let Some(surface_id) = command.strip_prefix("shell:toggle_surface:") {
-        return Some(CoreRequest::ToggleSurface { surface_id: surface_id.to_string() });
+        return Some(CoreRequest::ToggleSurface {
+            surface_id: surface_id.to_string(),
+        });
     }
     match command {
         "shell:debug_overlay" => Some(CoreRequest::ToggleDebugOverlay),

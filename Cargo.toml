@@ -14,7 +14,6 @@ members = [
     "crates/mesh-service",
     "crates/mesh-component",
     "crates/mesh-ui",
-    "crates/mesh-renderer",
     "crates/mesh-icon",
     "crates/mesh-scripting",
     "crates/mesh-cli",
@@ -42,7 +41,7 @@ mesh-runtime = { path = "crates/mesh-runtime" }
 mesh-service = { path = "crates/mesh-service" }
 mesh-component = { path = "crates/mesh-component" }
 mesh-ui = { path = "crates/mesh-ui" }
-mesh-renderer = { path = "crates/mesh-renderer" }
+mesh-icon = { path = "crates/mesh-icon" }
 mesh-scripting = { path = "crates/mesh-scripting" }
 mesh-component-backend = { path = "crates/mesh-component-backend" }
 mesh-debug = { path = "crates/mesh-debug" }

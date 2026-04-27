@@ -11,15 +11,15 @@
     </div>
     <div class="body">
       <div class="nav-rail">
-        <button class="{wifi_nav_class}" onclick={onSelectWifi} title="Wi-Fi settings" aria-label="Wi-Fi settings">
+        <button class="nav-btn" onclick={onSelectWifi} title="Wi-Fi settings" aria-label="Wi-Fi settings">
           <icon name="network-wireless" size="18" />
           <span class="nav-label">Wi-Fi</span>
         </button>
-        <button class="{bt_nav_class}" onclick={onSelectBluetooth} title="Bluetooth settings" aria-label="Bluetooth settings">
+        <button class="nav-btn" onclick={onSelectBluetooth} title="Bluetooth settings" aria-label="Bluetooth settings">
           <icon name="bluetooth" size="18" />
           <span class="nav-label">Bluetooth</span>
         </button>
-        <button class="{audio_nav_class}" onclick={onSelectAudio} title="Audio settings" aria-label="Audio settings">
+        <button class="nav-btn" onclick={onSelectAudio} title="Audio settings" aria-label="Audio settings">
           <icon name="{icon_name}" size="18" />
           <span class="nav-label">Audio</span>
         </button>
@@ -52,9 +52,6 @@ import "@src/components/wifi-item" as WiFiItem
 import "@src/components/bluetooth-item" as BluetoothItem
 
 mesh.state.set("active_section", "wifi")
-mesh.state.set("wifi_nav_class", "nav-btn nav-active")
-mesh.state.set("bt_nav_class", "nav-btn")
-mesh.state.set("audio_nav_class", "nav-btn")
 
 mesh.state.set("icon_name", "audio-volume-muted")
 mesh.state.set("audio_label", "0%")
@@ -259,6 +256,8 @@ end
 }
 
 .nav-btn {
+    border-radius: 10px;
+    transition: border-radius 180ms;
     width: 100%;
     flex-direction: column;
     align-items: center;
@@ -272,6 +271,7 @@ end
 }
 
 .nav-btn:hover {
+    border-radius: full;
     background: token(color.surface-container-high);
     color: token(color.on-surface);
 }

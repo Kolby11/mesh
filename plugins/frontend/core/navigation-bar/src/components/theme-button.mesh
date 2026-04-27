@@ -1,0 +1,41 @@
+<template>
+  <button
+    class="theme-button"
+    onclick={onThemeToggle}
+    title="{theme_tooltip}"
+    aria-label="{theme_tooltip}"
+  >
+    <icon class="theme-glyph" name="{theme_icon}" size="18" />
+  </button>
+</template>
+
+<style>
+.theme-button {
+    width: 44px;
+    height: 40px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    padding-block: token(spacing.xs);
+    padding-inline: token(spacing.xs);
+    border-radius: token(radius.sm);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+    text-wrap: none;
+}
+
+.theme-button:hover {
+    background: token(color.primary-container);
+    color: token(color.on-primary-container);
+    border-radius: token(radius.full);
+}
+
+.theme-glyph {
+    width: 28px;
+    height: 26px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    color: token(color.on-tertiary-container);
+}
+</style>
