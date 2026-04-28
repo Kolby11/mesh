@@ -1,18 +1,18 @@
 <template>
-  <div class="section">
-    <div class="section-header">
-      <span class="section-title">Bluetooth Devices</span>
-    </div>
-    <div class="section-list">
+  <box class="section">
+    <box class="section-header">
+      <text class="section-title">Bluetooth Devices</text>
+    </box>
+    <box class="section-list">
       {#if bluetooth_devices and #bluetooth_devices > 0}
         {#for device in bluetooth_devices}
           <BluetoothItem device_id="{device.id}" device_name="{device.name}" device_state="{device.state}" />
         {/for}
       {:else}
-        <div class="section-message">No Bluetooth devices found</div>
+        <box class="section-message">No Bluetooth devices found</box>
       {/if}
-    </div>
-  </div>
+    </box>
+  </box>
 </template>
 
 <style>

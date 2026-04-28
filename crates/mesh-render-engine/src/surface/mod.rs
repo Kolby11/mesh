@@ -80,11 +80,22 @@ pub fn paint_frontend_tree(
     scale: f32,
     tooltip: Option<(&str, f32, f32)>,
 ) {
+    paint_frontend_tree_at(tree, buffer, scale, 0.0, 0.0, tooltip);
+}
+
+pub fn paint_frontend_tree_at(
+    tree: &mesh_ui::WidgetNode,
+    buffer: &mut PixelBuffer,
+    scale: f32,
+    offset_x: f32,
+    offset_y: f32,
+    tooltip: Option<(&str, f32, f32)>,
+) {
     FRONTEND_RENDERER.with(|engine| {
         let engine = engine.borrow();
-        engine.render_tree(tree, buffer, scale);
+        engine.render_tree_at(tree, buffer, scale, offset_x, offset_y);
         if let Some((tooltip_text, x, y)) = tooltip {
-            engine.render_tooltip(tooltip_text, x, y, buffer, scale);
+            engine.render_tooltip(tooltip_text, x + offset_x, y + offset_y, buffer, scale);
         }
     });
 }

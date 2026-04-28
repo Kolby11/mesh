@@ -5,21 +5,26 @@
 /// scripts.
 use mlua::{Function, Lua, LuaSerdeExt, Value as LuaValue};
 use serde_json::Value as JsonValue;
+use std::collections::HashSet;
 use std::process::Command as StdCommand;
 use std::sync::{Arc, Mutex};
 
 /// Executes a backend plugin's Luau script.
 ///
 /// Exposes these host APIs to scripts:
+/// - `init()` — required backend entrypoint called once after script load
 /// - `mesh.service.set_poll_interval(ms)` — set polling interval
 /// - `mesh.exec("program arg1 arg2 {payload_key}")` — run a system command
 /// - `mesh.exec_shell("shell pipeline {payload_key}")` — run a shell command via `sh -lc`
 /// - `mesh.service.emit(table)` — emit service state
-/// - `mesh.service.emit_json()` — parse `__exec_stdout` as JSON and emit it as state
+/// - `mesh.service.emit_json(value?)` — parse JSON text or emit a Lua table directly
 /// - `mesh.service.emit_unavailable()` — emit unavailable state
+/// - `mesh.service.payload()` — get the current command payload as a Lua table
+/// - `mesh.service.has_capability(name)` — check whether the plugin was granted a capability
 /// - `mesh.log.info(msg)` / `mesh.log.warn(msg)`
 pub struct BackendScriptContext {
     plugin_id: String,
+    capabilities: HashSet<String>,
     lua: Lua,
     runtime: Arc<Mutex<BackendRuntime>>,
 }
@@ -31,8 +36,23 @@ struct BackendRuntime {
     current_payload: JsonValue,
 }
 
+#[derive(Debug, Clone)]
+struct ExecOutcome {
+    success: bool,
+    stdout: String,
+    stderr: String,
+    code: Option<i32>,
+}
+
 impl BackendScriptContext {
     pub fn new(plugin_id: impl Into<String>) -> Self {
+        Self::new_with_capabilities(plugin_id, Vec::<String>::new())
+    }
+
+    pub fn new_with_capabilities(
+        plugin_id: impl Into<String>,
+        capabilities: impl IntoIterator<Item = String>,
+    ) -> Self {
         let plugin_id = plugin_id.into();
         let lua = Lua::new();
         let runtime = Arc::new(Mutex::new(BackendRuntime {
@@ -43,6 +63,7 @@ impl BackendScriptContext {
 
         let mut ctx = Self {
             plugin_id,
+            capabilities: capabilities.into_iter().collect(),
             lua,
             runtime,
         };
@@ -69,6 +90,24 @@ impl BackendScriptContext {
         Ok(())
     }
 
+    /// Call the backend script's required `init()` entrypoint once after load.
+    pub fn call_init(&mut self) -> Result<(), BackendScriptError> {
+        let globals = self.lua.globals();
+        let init =
+            globals
+                .get::<Function>("init")
+                .map_err(|_| BackendScriptError::MissingEntrypoint {
+                    plugin_id: self.plugin_id.clone(),
+                    name: "init".to_string(),
+                })?;
+        init.call::<()>(())
+            .map_err(|err| BackendScriptError::Runtime {
+                plugin_id: self.plugin_id.clone(),
+                message: err.to_string(),
+            })?;
+        Ok(())
+    }
+
     /// Call `on_poll()` if it exists. Returns any emitted payload.
     pub fn run_poll(&mut self) -> Option<JsonValue> {
         self.reset_for_call(JsonValue::Null);
@@ -83,13 +122,16 @@ impl BackendScriptContext {
     /// Call `on_command_<name>()` for the given command. Returns any emitted payload.
     pub fn run_command(&mut self, command: &str, payload: &JsonValue) -> Option<JsonValue> {
         self.reset_for_call(payload.clone());
-        self.install_payload_globals(payload);
+        let normalized = command.replace('-', "_");
 
-        let fn_name = format!("on_command_{}", command.replace('-', "_"));
         let globals = self.lua.globals();
-        let handler = globals.get::<Function>(fn_name.as_str()).ok()?;
+        let handler_name = format!("on_command_{normalized}");
+        let handler = globals
+            .get::<Function>(handler_name.as_str())
+            .or_else(|_| globals.get::<Function>(normalized.as_str()))
+            .ok()?;
         if let Err(err) = handler.call::<()>(()) {
-            tracing::warn!("{} {fn_name} error: {err}", self.plugin_id);
+            tracing::warn!("{} {} error: {err}", self.plugin_id, handler_name);
         }
         self.take_pending_emit()
     }
@@ -123,12 +165,8 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         service.set(
             "emit_json",
-            self.lua.create_function(move |lua, ()| {
-                let stdout = lua
-                    .globals()
-                    .get::<String>("__exec_stdout")
-                    .unwrap_or_default();
-                if let Ok(payload) = serde_json::from_str::<JsonValue>(stdout.trim()) {
+            self.lua.create_function(move |_lua, text: String| {
+                if let Ok(payload) = serde_json::from_str::<JsonValue>(text.trim()) {
                     runtime.lock().unwrap().pending_emit = Some(payload);
                 }
                 Ok(())
@@ -144,6 +182,23 @@ impl BackendScriptContext {
                     "source_plugin": plugin_id,
                 }));
                 Ok(())
+            })?,
+        )?;
+
+        let runtime = Arc::clone(&self.runtime);
+        service.set(
+            "payload",
+            self.lua.create_function(move |lua, ()| {
+                let payload = runtime.lock().unwrap().current_payload.clone();
+                lua.to_value(&payload)
+            })?,
+        )?;
+
+        let capabilities = self.capabilities.clone();
+        service.set(
+            "has_capability",
+            self.lua.create_function(move |_lua, capability: String| {
+                Ok(capabilities.contains(capability.as_str()))
             })?,
         )?;
 
@@ -183,8 +238,6 @@ impl BackendScriptContext {
         mesh.set("service", service)?;
         mesh.set("log", log)?;
         globals.set("mesh", mesh)?;
-        globals.set("__exec_success", false)?;
-        globals.set("__exec_stdout", "")?;
         Ok(())
     }
 
@@ -194,28 +247,6 @@ impl BackendScriptContext {
         runtime.current_payload = payload;
     }
 
-    fn install_payload_globals(&self, payload: &JsonValue) {
-        let globals = self.lua.globals();
-        if let Some(obj) = payload.as_object() {
-            for (key, value) in obj {
-                let global_name = format!("__payload_{key}");
-                match self.lua.to_value(value) {
-                    Ok(lua_value) => {
-                        let _ = globals.set(global_name, lua_value);
-                    }
-                    Err(err) => {
-                        tracing::debug!(
-                            "{} failed to install payload global {}: {}",
-                            self.plugin_id,
-                            key,
-                            err
-                        );
-                    }
-                }
-            }
-        }
-    }
-
     fn take_pending_emit(&self) -> Option<JsonValue> {
         self.runtime.lock().unwrap().pending_emit.take()
     }
@@ -223,61 +254,66 @@ impl BackendScriptContext {
 
 fn run_command(
     lua: &Lua,
-    runtime: &Arc<Mutex<BackendRuntime>>,
-    raw_cmd: &str,
+    _runtime: &Arc<Mutex<BackendRuntime>>,
+    cmd: &str,
     shell: bool,
-) -> mlua::Result<()> {
-    let cmd = substitute_payload_vars(raw_cmd, &runtime.lock().unwrap().current_payload);
+) -> mlua::Result<LuaValue> {
     let result = if shell {
-        StdCommand::new("sh").arg("-lc").arg(&cmd).output()
+        StdCommand::new("sh").arg("-lc").arg(cmd).output()
     } else {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         if let Some((prog, rest)) = parts.split_first() {
             StdCommand::new(prog).args(rest).output()
         } else {
-            lua.globals().set("__exec_success", false)?;
-            lua.globals().set("__exec_stdout", "")?;
-            return Ok(());
+            return exec_outcome_to_lua(
+                lua,
+                ExecOutcome {
+                    success: false,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    code: None,
+                },
+            );
         }
     };
 
-    match result {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-            lua.globals().set("__exec_success", out.status.success())?;
-            lua.globals().set("__exec_stdout", stdout)?;
-        }
+    let outcome = match result {
+        Ok(out) => ExecOutcome {
+            success: out.status.success(),
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+            code: out.status.code(),
+        },
         Err(err) => {
             tracing::debug!("backend exec failed: {}", err);
-            lua.globals().set("__exec_success", false)?;
-            lua.globals().set("__exec_stdout", "")?;
+            ExecOutcome {
+                success: false,
+                stdout: String::new(),
+                stderr: err.to_string(),
+                code: None,
+            }
         }
-    }
+    };
 
-    Ok(())
+    exec_outcome_to_lua(lua, outcome)
 }
 
-fn substitute_payload_vars(s: &str, payload: &JsonValue) -> String {
-    let mut result = s.to_string();
-    if let Some(obj) = payload.as_object() {
-        for (key, value) in obj {
-            let token = format!("{{{key}}}");
-            let replacement = match value {
-                JsonValue::String(v) => v.clone(),
-                JsonValue::Number(v) => v.to_string(),
-                JsonValue::Bool(v) => v.to_string(),
-                _ => continue,
-            };
-            result = result.replace(&token, &replacement);
-        }
-    }
-    result
+fn exec_outcome_to_lua(lua: &Lua, outcome: ExecOutcome) -> mlua::Result<LuaValue> {
+    let table = lua.create_table()?;
+    table.set("success", outcome.success)?;
+    table.set("stdout", outcome.stdout)?;
+    table.set("stderr", outcome.stderr)?;
+    table.set("code", outcome.code)?;
+    Ok(LuaValue::Table(table))
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackendScriptError {
     #[error("script error in {plugin_id}: {message}")]
     Runtime { plugin_id: String, message: String },
+
+    #[error("backend script {plugin_id} is missing required entrypoint {name}()")]
+    MissingEntrypoint { plugin_id: String, name: String },
 }
 
 #[cfg(test)]
@@ -287,8 +323,9 @@ mod tests {
     #[test]
     fn loads_poll_interval_from_script() {
         let mut ctx = BackendScriptContext::new("@test/backend");
-        ctx.load_script("mesh.service.set_poll_interval(250)")
+        ctx.load_script("function init()\nmesh.service.set_poll_interval(250)\nend")
             .unwrap();
+        ctx.call_init().unwrap();
         assert_eq!(ctx.poll_interval_ms(), 250);
     }
 
@@ -296,7 +333,8 @@ mod tests {
     fn registers_handlers_from_script() {
         let mut ctx = BackendScriptContext::new("@test/backend");
         ctx.load_script(
-            "function on_poll()\nmesh.log.info(\"polling\")\nend\n\
+            "function init()\nend\n\
+             function on_poll()\nmesh.log.info(\"polling\")\nend\n\
              function on_command_volume_up()\nmesh.log.info(\"up\")\nend",
         )
         .unwrap();
@@ -313,7 +351,7 @@ mod tests {
     fn emit_stores_pending_payload() {
         let mut ctx = BackendScriptContext::new("@test/backend");
         ctx.load_script(
-            "function on_poll()\nmesh.service.emit({ available = true, percent = 65 })\nend",
+            "function init()\nend\nfunction on_poll()\nmesh.service.emit({ available = true, percent = 65 })\nend",
         )
         .unwrap();
         let payload = ctx.run_poll().unwrap();
@@ -327,8 +365,10 @@ mod tests {
     #[test]
     fn emit_unavailable_stores_unavailable_payload() {
         let mut ctx = BackendScriptContext::new("@test/backend");
-        ctx.load_script("function on_poll()\nmesh.service.emit_unavailable()\nend")
-            .unwrap();
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nmesh.service.emit_unavailable()\nend",
+        )
+        .unwrap();
         let payload = ctx.run_poll().unwrap();
         assert_eq!(
             payload.get("available").and_then(|v| v.as_bool()),
@@ -341,10 +381,10 @@ mod tests {
     }
 
     #[test]
-    fn command_handler_substitutes_payload_vars() {
+    fn command_handler_reads_payload_via_api() {
         let mut ctx = BackendScriptContext::new("@test/backend");
         ctx.load_script(
-            "function on_command_set_volume()\nmesh.exec_shell(\"printf '{\\\"percent\\\":{percent}}'\")\nmesh.service.emit_json()\nend",
+            "function init()\nend\nfunction on_command_set_volume()\nlocal p = mesh.service.payload()\nmesh.service.emit({ percent = p.percent })\nend",
         )
         .unwrap();
         let result = ctx.run_command("set-volume", &serde_json::json!({ "percent": 50 }));
@@ -353,26 +393,35 @@ mod tests {
     }
 
     #[test]
-    fn exec_shell_captures_stdout() {
-        let mut ctx = BackendScriptContext::new("@test/backend");
-        ctx.load_script("function on_poll()\nmesh.exec_shell(\"printf '{\\\"ok\\\":true}'\")\nend")
+    fn shell_theme_backend_accepts_current_payload() {
+        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../plugins/backend/core/shell-theme/src/main.luau");
+        let script = std::fs::read_to_string(script_path).unwrap();
+        let mut ctx = BackendScriptContext::new("@mesh/shell-theme");
+        ctx.load_script(&script).unwrap();
+        ctx.call_init().unwrap();
+
+        let payload = ctx
+            .run_command(
+                "set-current",
+                &serde_json::json!({ "current": "mesh-default-light", "is_dark": false }),
+            )
             .unwrap();
-        ctx.run_poll();
         assert_eq!(
-            ctx.lua.globals().get::<bool>("__exec_success").ok(),
-            Some(true)
+            payload.get("current").and_then(|v| v.as_str()),
+            Some("mesh-default-light")
         );
         assert_eq!(
-            ctx.lua.globals().get::<String>("__exec_stdout").ok(),
-            Some("{\"ok\":true}".to_string())
+            payload.get("is_dark").and_then(|v| v.as_bool()),
+            Some(false)
         );
     }
 
     #[test]
-    fn emit_json_uses_exec_stdout() {
+    fn emit_json_accepts_explicit_string() {
         let mut ctx = BackendScriptContext::new("@test/backend");
         ctx.load_script(
-            "function on_poll()\nmesh.exec_shell(\"printf '{\\\"available\\\":true,\\\"percent\\\":65}'\")\nmesh.service.emit_json()\nend",
+            "function init()\nend\nfunction on_poll()\nlocal r = mesh.exec_shell(\"printf '{\\\"available\\\":true,\\\"percent\\\":65}'\")\nmesh.service.emit_json(r.stdout)\nend",
         )
         .unwrap();
         let payload = ctx.run_poll().unwrap();
@@ -387,11 +436,76 @@ mod tests {
     fn emit_resolves_lua_table_payloads() {
         let mut ctx = BackendScriptContext::new("@test/backend");
         ctx.load_script(
-            "function on_poll()\nmesh.service.emit({ percent = 42, muted = false })\nend",
+            "function init()\nend\nfunction on_poll()\nmesh.service.emit({ percent = 42, muted = false })\nend",
         )
         .unwrap();
         let payload = ctx.run_poll().unwrap();
         assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(42));
         assert_eq!(payload.get("muted").and_then(|v| v.as_bool()), Some(false));
+    }
+
+    #[test]
+    fn command_handler_can_read_payload_table() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_command_set_volume()\nlocal payload = mesh.service.payload()\nmesh.service.emit({ percent = payload.percent })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_command("set-volume", &serde_json::json!({ "percent": 55 }));
+        assert_eq!(
+            payload.unwrap().get("percent").and_then(|v| v.as_u64()),
+            Some(55)
+        );
+    }
+
+    #[test]
+    fn command_handler_can_use_direct_function_name() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction set_volume()\nmesh.service.emit({ ok = true })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_command("set-volume", &serde_json::json!({}));
+        assert_eq!(
+            payload.unwrap().get("ok").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn exec_returns_structured_result() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec_shell(\"printf 'hello'\")\nmesh.service.emit({ ok = result.success, stdout = result.stdout })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_poll().unwrap();
+        assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            payload.get("stdout").and_then(|v| v.as_str()),
+            Some("hello")
+        );
+    }
+
+    #[test]
+    fn capabilities_are_visible_to_backend_scripts() {
+        let mut ctx = BackendScriptContext::new_with_capabilities(
+            "@test/backend",
+            vec!["service.network.control".to_string()],
+        );
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nmesh.service.emit({ allowed = mesh.service.has_capability(\"service.network.control\") })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_poll().unwrap();
+        assert_eq!(payload.get("allowed").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn rejects_backend_script_without_init_entrypoint() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script("function on_poll()\nend").unwrap();
+        let err = ctx.call_init().unwrap_err();
+        assert!(matches!(err, BackendScriptError::MissingEntrypoint { .. }));
     }
 }

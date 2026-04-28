@@ -1,24 +1,24 @@
 <template>
-  <section class="agenda">
-    <div class="header">
-      <span class="heading">{heading}</span>
-      <span class="count">3 items</span>
-    </div>
-    <div class="items">
-      <article class="item emphasis">
-        <span class="title">{first}</span>
-        <span class="meta">North room · 45 min</span>
-      </article>
-      <article class="item">
-        <span class="title">{second}</span>
-        <span class="meta">Remote · notes required</span>
-      </article>
-      <article class="item">
-        <span class="title">{third}</span>
-        <span class="meta">Board deck draft</span>
-      </article>
-    </div>
-  </section>
+  <column class="agenda">
+    <box class="header">
+      <text class="heading">{heading}</text>
+      <text class="count">3 items</text>
+    </box>
+    <box class="items">
+      <column class="item emphasis">
+        <text class="title">{first}</text>
+        <text class="meta">North room · 45 min</text>
+      </column>
+      <column class="item">
+        <text class="title">{second}</text>
+        <text class="meta">Remote · notes required</text>
+      </column>
+      <column class="item">
+        <text class="title">{third}</text>
+        <text class="meta">Board deck draft</text>
+      </column>
+    </box>
+  </column>
 </template>
 
 <style>

@@ -2,6 +2,10 @@
 
 A `.mesh` file is a single-file component. It combines markup, logic, styles, schema, translations, and metadata in one place.
 
+The syntax described here is the current MESH UI authoring model. Historical
+HTML compatibility tags have been removed in favor of shell-specific
+primitives.
+
 ## File structure
 
 ```xml
@@ -38,47 +42,49 @@ Only `<template>` is required. All other blocks are optional.
 
 ### Tags
 
-Use standard HTML tags. MESH renders these as shell UI primitives.
+Use MESH UI tags. These are shell primitives rather than browser DOM elements.
 
 | Tag                | Purpose                         |
 | ------------------ | ------------------------------- |
-| `div`              | Generic block container         |
-| `span`             | Generic inline container        |
-| `p`                | Paragraph text                  |
-| `nav`              | Navigation region               |
-| `header`           | Surface header region           |
-| `aside`            | Sidebar or supplementary region |
-| `section`          | Logical content section         |
-| `article`          | Self-contained content block    |
-| `main`             | Primary content region          |
-| `ul` / `ol` / `li` | Lists                           |
+| `box`              | Generic container               |
+| `row`              | Horizontal layout container     |
+| `column`           | Vertical layout container       |
+| `text`             | Text content                    |
+| `scroll`           | Scrollable region               |
 | `button`           | Clickable action                |
-| `input`            | Text or range input             |
+| `input`            | Text input                      |
+| `slider`           | Range input                     |
 | `label`            | Input label                     |
-| `img`              | Image                           |
-| `hr`               | Divider                         |
+| `icon`             | Icon or image asset             |
+| `separator`        | Divider                         |
+| `spacer`           | Flexible spacing node           |
 
-Do not use tags that imply compositor-level layout (`footer`, `dialog`, `frame`) unless the surface role explicitly warrants it. Prefer semantic tags over generic `div` wherever meaning is clear.
+HTML compatibility tags are intentionally not part of the component vocabulary.
+Use classes, metadata, accessibility attributes, and component boundaries for
+semantics.
+
+Frontend composition can also use custom component tags exported by dependent
+plugins via `plugin.json.exports.component.tag`.
 
 ### Text interpolation
 
 Embed dynamic values directly in element content using `{}`:
 
 ```xml
-<span class="label">{active}</span>
-<span class="value">{volume_label}</span>
-<p>{t("greeting", { name = userName })}</p>
+<text class="label">{active}</text>
+<text class="value">{volume_label}</text>
+<text>{t("greeting", { name = userName })}</text>
 ```
 
 The runtime tracks the referenced variable and re-renders the text node when it changes. Do not use `:content=` — that syntax is not valid.
 
 ### Static attributes
 
-Write static attributes exactly as in HTML:
+Write static attributes as XML-style name/value pairs:
 
 ```xml
 <button class="chip" title="Toggle Wi-Fi" aria-label="Toggle Wi-Fi">Wi-Fi</button>
-<img src="logo.png" alt="MESH logo" />
+<icon src="logo.png" alt="MESH logo" />
 <input type="range" min="0" max="100" />
 ```
 
@@ -88,10 +94,10 @@ Use `{}` to bind an expression to any attribute value:
 
 ```xml
 <button title="{volume_tooltip}" aria-label="{volume_aria_label}">
-  <span>{volume_icon_name}</span>
+  <text>{volume_icon_name}</text>
 </button>
 
-<div class="chip {active ? 'chip--on' : 'chip--off'}">{label}</div>
+<box class="chip {active ? 'chip--on' : 'chip--off'}">{label}</box>
 ```
 
 ### Two-way binding
@@ -110,17 +116,34 @@ change. The variable should be initialized in `<script>`.
 
 ### Event handlers
 
-Use standard HTML event attribute names with a Luau function reference in `{}`:
+Use `on...` event attribute names with a Luau function reference in `{}`:
 
 ```xml
 <button onclick={onVolumeClick}>Volume</button>
 <input type="text" oninput={onSearch} />
-<div onmouseenter={onHover} onmouseleave={onBlur}>...</div>
+<box onmouseenter={onHover} onmouseleave={onBlur}>...</box>
 ```
 
 Handlers receive an event object. For click handlers, that includes trigger
 geometry under `event.current_target`, so a callback can position a surface
 explicitly before showing it.
+
+### Element metrics
+
+After a surface has been laid out once, scripts can read render-derived
+measurements from host-maintained state. Add `id` or `ref` to a node, then read
+`refs.<name>` on the next render tick:
+
+```xml
+<box ref="volumeTrigger" onclick={onVolumeClick}>
+  <text>{volume_label}</text>
+</box>
+```
+
+Available fields include `width`, `height`, `left`, `top`, `right`, `bottom`,
+`client_width`, `client_height`, `client_bound_rect`, `clientBoundRect`, and
+`bounding_client_rect`. Runtime-generated keys are also available in
+`elements`, but `refs` is the stable author-facing API.
 
 Common event attributes:
 
@@ -149,8 +172,8 @@ Always include accessibility attributes where they add meaning. MESH treats thes
   aria-pressed="{isMuted}"
   onclick={onVolumeClick}
 >
-  <span aria-hidden="true">{volume_icon_name}</span>
-  <span class="volume-value">{volume_label}</span>
+  <text aria-hidden="true">{volume_icon_name}</text>
+  <text class="volume-value">{volume_label}</text>
 </button>
 ```
 
@@ -273,26 +296,26 @@ Container queries are supported:
 
 ```xml
 <template>
-  <nav class="nav-shell">
-    <div class="meta">
-      <span class="meta-label">Current</span>
-      <div class="meta-pill">
-        <span class="meta-pill-text">{active}</span>
-      </div>
+  <row class="nav-shell">
+    <box class="meta">
+      <text class="meta-label">Current</text>
+      <box class="meta-pill">
+        <text class="meta-pill-text">{active}</text>
+      </box>
       <button
         class="volume-widget"
         onclick={onVolumeClick}
         title="{volume_tooltip}"
         aria-label="Open audio controls"
       >
-        <span class="volume-glyph" aria-hidden="true">{volume_icon_name}</span>
-        <div class="volume-copy">
-          <span class="volume-label">Volume</span>
-          <span class="volume-value">{volume_label}</span>
-        </div>
+        <text class="volume-glyph" aria-hidden="true">{volume_icon_name}</text>
+        <box class="volume-copy">
+          <text class="volume-label">Volume</text>
+          <text class="volume-value">{volume_label}</text>
+        </box>
       </button>
-    </div>
-  </nav>
+    </box>
+  </row>
 </template>
 
 <script lang="luau">
@@ -371,8 +394,8 @@ end
 
 | Goal                | Syntax                    |
 | ------------------- | ------------------------- |
-| Static text         | `<span>Hello</span>`      |
-| Dynamic text        | `<span>{variable}</span>` |
+| Static text         | `<text>Hello</text>`      |
+| Dynamic text        | `<text>{variable}</text>` |
 | Dynamic attribute   | `title="{expr}"`          |
 | Two-way bind        | `bind:value="variable"`   |
 | Event handler       | `onclick={handler}`       |

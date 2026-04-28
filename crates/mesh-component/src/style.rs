@@ -92,6 +92,36 @@ pub enum Selector {
     Universal,
 }
 
+/// A pre-compiled selector shape used at runtime by `StyleResolver`.
+///
+/// Lowered from `Selector` during the compile/lower stage. Only selectors that
+/// MESH can afford to match at runtime are representable here; unsupported
+/// selectors (descendant combinators, `:has()`, etc.) are rejected with a
+/// diagnostic before reaching this type.
+#[derive(Debug, Clone)]
+pub enum LoweredSelector {
+    Simple(SimpleSelector),
+    State(SimpleSelector, StateSelector),
+}
+
+/// The structural part of a lowered selector: optional tag, optional id, class set.
+#[derive(Debug, Clone, Default)]
+pub struct SimpleSelector {
+    pub tag: Option<String>,
+    pub id: Option<String>,
+    pub classes: Vec<String>,
+}
+
+/// Runtime state that a selector can match against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateSelector {
+    Hover,
+    Focus,
+    Active,
+    Disabled,
+    Checked,
+}
+
 /// A single CSS-like property declaration.
 #[derive(Debug, Clone)]
 pub struct Declaration {

@@ -1,5 +1,106 @@
 /// Template AST — represents the markup structure of a component.
 
+/// Source-level UI tag classification.
+///
+/// Encodes the semantic intent of the tag as written by the plugin author.
+/// Distinct from `UiTag` in `mesh-render-engine`, which is the lowered
+/// runtime primitive set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceTag {
+    // Layout family
+    Panel,
+    Row,
+    Column,
+    Stack,
+    ScrollView,
+    Spacer,
+    Separator,
+    // Content family
+    Text,
+    Label,
+    Icon,
+    Image,
+    // Controls family
+    Button,
+    IconButton,
+    Input,
+    TextInput,
+    PasswordInput,
+    SearchInput,
+    NumberInput,
+    EmailInput,
+    UrlInput,
+    Slider,
+    Switch,
+    Checkbox,
+    // Structure family
+    List,
+    ListItem,
+    Slot,
+    // Composition family
+    Surface,
+    Widget,
+    // Legacy lowercase tags (current plugin authoring convention)
+    LegacyBox,
+    LegacyScroll,
+    // Unrecognized tag
+    Unknown,
+}
+
+impl SourceTag {
+    /// Classify a raw tag name from the template source.
+    pub fn from_tag_name(tag: &str) -> Self {
+        match tag {
+            // MESH UI vocabulary
+            "Panel" => Self::Panel,
+            "Row" => Self::Row,
+            "Column" => Self::Column,
+            "Stack" => Self::Stack,
+            "ScrollView" => Self::ScrollView,
+            "Spacer" => Self::Spacer,
+            "Separator" => Self::Separator,
+            "Text" => Self::Text,
+            "Label" => Self::Label,
+            "Icon" => Self::Icon,
+            "Image" => Self::Image,
+            "Button" => Self::Button,
+            "IconButton" => Self::IconButton,
+            "Input" => Self::Input,
+            "TextInput" => Self::TextInput,
+            "PasswordInput" => Self::PasswordInput,
+            "SearchInput" => Self::SearchInput,
+            "NumberInput" => Self::NumberInput,
+            "EmailInput" => Self::EmailInput,
+            "UrlInput" => Self::UrlInput,
+            "Slider" => Self::Slider,
+            "Switch" => Self::Switch,
+            "Checkbox" => Self::Checkbox,
+            "List" => Self::List,
+            "ListItem" => Self::ListItem,
+            "Slot" => Self::Slot,
+            "Surface" => Self::Surface,
+            "Widget" => Self::Widget,
+            // Legacy lowercase (existing plugin convention)
+            "row" => Self::Row,
+            "column" => Self::Column,
+            "text" => Self::Text,
+            "button" => Self::Button,
+            "input" => Self::Input,
+            "slider" => Self::Slider,
+            "icon" => Self::Icon,
+            "scroll" => Self::LegacyScroll,
+            "box" => Self::LegacyBox,
+            "label" => Self::Label,
+            "image" => Self::Image,
+            "list" => Self::List,
+            "separator" => Self::Separator,
+            "spacer" => Self::Spacer,
+            // Component refs are handled before ElementNode is constructed
+            _ => Self::Unknown,
+        }
+    }
+}
+
 /// The template block containing the root node list.
 #[derive(Debug, Clone)]
 pub struct TemplateBlock {
@@ -28,8 +129,10 @@ pub enum TemplateNode {
 /// An element node with a tag, attributes, and children.
 #[derive(Debug, Clone)]
 pub struct ElementNode {
-    /// Tag name: `row`, `column`, `text`, `button`, `image`, `icon`, `box`, `input`, etc.
+    /// Raw tag name as written in the source.
     pub tag: String,
+    /// Semantic classification of the source tag.
+    pub tag_kind: SourceTag,
     /// Attributes on this element.
     pub attributes: Vec<Attribute>,
     /// Child nodes.

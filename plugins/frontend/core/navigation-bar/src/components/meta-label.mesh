@@ -1,5 +1,5 @@
 <template>
-  <span class="meta-label">{t('nav.current')}</span>
+  <text class="meta-label">{t('nav.current')}</text>
 </template>
 
 <script lang="luau">

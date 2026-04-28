@@ -1,9 +1,9 @@
 <template>
   <button class="network-item" onclick={onConnectWiFi}>
-    <div class="network-info">
-      <span class="network-name">{network_name}</span>
-      <span class="network-strength">{network_strength}&#37;</span>
-    </div>
+    <box class="network-info">
+      <text class="network-name">{network_name}</text>
+      <text class="network-strength">{network_strength}&#37;</text>
+    </box>
   </button>
 </template>
 

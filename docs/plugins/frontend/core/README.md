@@ -20,6 +20,10 @@ Frontend composition now happens in two ways:
   `plugin.json.exports.component.tag` in `<template>` markup
 - Slot hosting via `provides_slots` and `slot_contributions`
 
+If you create a reusable frontend component, export its custom tag explicitly in
+`plugin.json.exports.component.tag` so other plugins can consume it as a normal
+template tag.
+
 Common frontend pattern:
 
 ```luau
@@ -42,6 +46,26 @@ end
 `mesh.interfaces.get(...)` is still available for request/response style
 lookups, but most reactive UI should treat service payloads as plugin-owned
 data and derive its own labels, icons, and tooltips locally.
+
+For interface-centric code, the proxy can now drive both sides of the flow:
+
+```luau
+function init()
+    local audio = mesh.interfaces.get("mesh.audio", ">=1.0")
+    audio:bind("muted", "audio_muted")
+    audio:bind("percent", "audio_percent")
+    audio:on_change("sync_audio_state")
+end
+
+function set_volume(percent)
+    local audio = mesh.interfaces.get("mesh.audio", ">=1.0")
+    audio:set_volume("default", percent / 100)
+end
+```
+
+That keeps the call site pure Lua while preserving a clean ownership model:
+reactive reads come from service state, while writes go through explicit
+interface methods.
 
 For a larger copyable composition example, see
 [`docs/plugins/frontend/examples/README.md`](../examples/README.md).

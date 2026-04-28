@@ -219,6 +219,9 @@ impl Corners {
 pub struct TransitionProperties {
     pub all: bool,
     pub border_radius: bool,
+    pub opacity: bool,
+    pub background_color: bool,
+    pub color: bool,
 }
 
 impl TransitionProperties {
@@ -230,17 +233,44 @@ impl TransitionProperties {
         Self {
             all: true,
             border_radius: true,
+            opacity: true,
+            background_color: true,
+            color: true,
         }
     }
 
     pub fn animates_border_radius(self) -> bool {
         self.all || self.border_radius
     }
+
+    pub fn animates_opacity(self) -> bool {
+        self.all || self.opacity
+    }
+
+    pub fn animates_background_color(self) -> bool {
+        self.all || self.background_color
+    }
+
+    pub fn animates_color(self) -> bool {
+        self.all || self.color
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransitionEasing {
+    Linear,
+    Ease,
+    EaseIn,
+    #[default]
+    EaseOut,
+    EaseInOut,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TransitionStyle {
     pub duration_ms: u32,
+    pub delay_ms: u32,
+    pub easing: TransitionEasing,
     pub properties: TransitionProperties,
 }
 
@@ -656,15 +686,21 @@ fn apply_declaration(
         "border-left-width" => style.border_width.left = resolver.resolve_number(value),
         "opacity" => style.opacity = resolver.resolve_number(value),
         "transition-duration" => style.transition.duration_ms = resolver.resolve_time_ms(value),
+        "transition-delay" => style.transition.delay_ms = resolver.resolve_time_ms(value),
+        "transition-timing-function" => {
+            style.transition.easing = parse_easing_keyword(&resolver.resolve_value(value))
+        }
         "transition-property" => {
             style.transition.properties =
                 parse_transition_properties(&resolver.resolve_value(value))
         }
         "transition" => {
-            let (properties, duration_ms) =
-                parse_transition_shorthand(&resolver.resolve_value(value));
-            style.transition.properties = properties;
-            style.transition.duration_ms = duration_ms;
+            let resolved = resolver.resolve_value(value);
+            let parsed = parse_transition_shorthand(&resolved);
+            style.transition.properties = parsed.0;
+            style.transition.duration_ms = parsed.1;
+            style.transition.delay_ms = parsed.2;
+            style.transition.easing = parsed.3;
         }
         "overflow" => {
             let overflow = parse_overflow(&resolver.resolve_value(value));
@@ -820,31 +856,71 @@ fn parse_transition_properties(value: &str) -> TransitionProperties {
         match property {
             "all" => return TransitionProperties::all(),
             "border-radius" => properties.border_radius = true,
+            "opacity" => properties.opacity = true,
+            "background-color" | "background" => properties.background_color = true,
+            "color" => properties.color = true,
             _ => {}
         }
     }
     properties
 }
 
-fn parse_transition_shorthand(value: &str) -> (TransitionProperties, u32) {
+fn parse_easing_keyword(value: &str) -> TransitionEasing {
+    match value.trim() {
+        "linear" => TransitionEasing::Linear,
+        "ease" => TransitionEasing::Ease,
+        "ease-in" => TransitionEasing::EaseIn,
+        "ease-out" => TransitionEasing::EaseOut,
+        "ease-in-out" => TransitionEasing::EaseInOut,
+        _ => TransitionEasing::EaseOut,
+    }
+}
+
+fn looks_like_time(token: &str) -> bool {
+    if let Some(rest) = token.strip_suffix("ms") {
+        rest.trim().parse::<f32>().is_ok()
+    } else if let Some(rest) = token.strip_suffix('s') {
+        rest.trim().parse::<f32>().is_ok()
+    } else {
+        false
+    }
+}
+
+fn parse_transition_shorthand(value: &str) -> (TransitionProperties, u32, u32, TransitionEasing) {
     let mut properties = TransitionProperties::none();
-    let mut duration_ms = 0;
+    let mut duration_ms = 0u32;
+    let mut delay_ms = 0u32;
+    let mut easing = TransitionEasing::EaseOut;
+    let mut time_count = 0;
 
     for token in value.split_whitespace() {
-        let parsed_ms = parse_time_ms(token);
-        if parsed_ms > 0 {
-            duration_ms = parsed_ms;
+        let trimmed = token.trim_end_matches(',');
+        if looks_like_time(trimmed) {
+            let ms = parse_time_ms(trimmed);
+            if time_count == 0 {
+                duration_ms = ms;
+            } else {
+                delay_ms = ms;
+            }
+            time_count += 1;
             continue;
         }
-
-        match token.trim_end_matches(',') {
+        match trimmed {
             "all" => properties = TransitionProperties::all(),
             "border-radius" => properties.border_radius = true,
+            "opacity" => properties.opacity = true,
+            "background-color" | "background" => properties.background_color = true,
+            "color" => properties.color = true,
+            "linear" => easing = TransitionEasing::Linear,
+            "ease" => easing = TransitionEasing::Ease,
+            "ease-in" => easing = TransitionEasing::EaseIn,
+            "ease-out" => easing = TransitionEasing::EaseOut,
+            "ease-in-out" => easing = TransitionEasing::EaseInOut,
             _ => {}
         }
     }
 
-    (properties, duration_ms)
+    (properties, duration_ms, delay_ms, easing)
 }
 
 fn parse_time_ms(value: &str) -> u32 {

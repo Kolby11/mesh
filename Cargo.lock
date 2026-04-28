@@ -31,12 +31,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "allocator-api2"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
-
-[[package]]
 name = "anyhow"
 version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -487,12 +481,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "font8x8"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "875488b8711a968268c7cf5d139578713097ca4635a76044e8fe8eedf831d07e"
-
-[[package]]
 name = "fontconfig-parser"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -527,16 +515,6 @@ dependencies = [
  "slotmap",
  "tinyvec",
  "ttf-parser 0.25.1",
-]
-
-[[package]]
-name = "fontdue"
-version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e57e16b3fe8ff4364c0661fdaac543fb38b29ea9bc9c2f45612d90adf931d2b"
-dependencies = [
- "hashbrown 0.15.5",
- "ttf-parser 0.21.1",
 ]
 
 [[package]]
@@ -712,8 +690,6 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
- "allocator-api2",
- "equivalent",
  "foldhash",
 ]
 
@@ -1033,6 +1009,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mesh-backend"
+version = "0.1.0"
+dependencies = [
+ "mesh-scripting",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "mesh-capability"
 version = "0.1.0"
 dependencies = [
@@ -1067,19 +1053,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-component-backend"
-version = "0.1.0"
-dependencies = [
- "mesh-component",
- "mesh-plugin",
- "mesh-theme",
- "mesh-ui",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
 name = "mesh-config"
 version = "0.1.0"
 dependencies = [
@@ -1094,35 +1067,25 @@ dependencies = [
 name = "mesh-core"
 version = "0.1.0"
 dependencies = [
- "cosmic-text",
- "font8x8",
- "fontdb 0.23.0",
- "fontdue",
- "image",
+ "mesh-backend",
  "mesh-capability",
- "mesh-component-backend",
  "mesh-config",
  "mesh-debug",
  "mesh-diagnostics",
  "mesh-events",
- "mesh-icon",
  "mesh-locale",
  "mesh-plugin",
+ "mesh-render-engine",
  "mesh-runtime",
  "mesh-scripting",
  "mesh-service",
  "mesh-theme",
  "mesh-ui",
  "mesh-wayland",
- "minifb",
- "resvg",
- "rustix 0.38.44",
  "serde_json",
- "smithay-client-toolkit",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "wayland-client 0.31.14",
 ]
 
 [[package]]
@@ -1183,6 +1146,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "mesh-render-engine"
+version = "0.1.0"
+dependencies = [
+ "cosmic-text",
+ "fontdb 0.23.0",
+ "image",
+ "mesh-component",
+ "mesh-debug",
+ "mesh-icon",
+ "mesh-plugin",
+ "mesh-theme",
+ "mesh-ui",
+ "mesh-wayland",
+ "minifb",
+ "resvg",
+ "rustix 0.38.44",
+ "serde_json",
+ "smithay-client-toolkit",
+ "thiserror 2.0.18",
+ "tracing",
+ "wayland-client 0.31.14",
+]
+
+[[package]]
 name = "mesh-runtime"
 version = "0.1.0"
 dependencies = [
@@ -1239,7 +1226,6 @@ name = "mesh-ui"
 version = "0.1.0"
 dependencies = [
  "mesh-component",
- "mesh-events",
  "mesh-theme",
  "serde",
  "serde_json",
@@ -2326,12 +2312,6 @@ dependencies = [
  "tracing-core",
  "tracing-log",
 ]
-
-[[package]]
-name = "ttf-parser"
-version = "0.21.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c591d83f69777866b9126b24c6dd9a18351f177e49d625920d19f989fd31cf8"
 
 [[package]]
 name = "ttf-parser"

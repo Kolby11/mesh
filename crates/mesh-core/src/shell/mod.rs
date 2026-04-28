@@ -23,21 +23,18 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
-mod backend;
 mod component;
 mod ipc;
 mod layout;
-mod painter;
-mod render;
 mod service;
 mod sounds;
 mod surface_layout;
 mod types;
 
-use backend::spawn_backend_service;
 use component::{BackendServiceCandidate, FrontendCatalog, FrontendSurfaceComponent};
 use ipc::spawn_ipc_server;
-use render::{
+use mesh_backend::{BackendServiceUpdate, spawn_backend_service};
+use mesh_render_engine::{
     DebugOverlay, LayerSurfaceConfig, PixelBuffer, RenderEngine, WindowEvent, WindowKeyEvent,
     coalesce_pointer_moves, event_surface_id,
 };
@@ -465,9 +462,15 @@ impl Shell {
             }
         }
         tracing::info!("active theme changed to '{theme_id}'");
+        let path = mesh_theme::theme_path_for_id(theme_id);
+        let modified_at = std::fs::metadata(&path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok());
+        self.theme_watch = ThemeWatchState { path, modified_at };
         self.mark_components_theme_changed()?;
         let is_dark = theme_id.contains("dark");
-        let payload = serde_json::json!({ "current": theme_id, "is_dark": is_dark });
+        let payload =
+            serde_json::json!({ "current": theme_id, "theme_id": theme_id, "is_dark": is_dark });
         // Notify the theme backend so it stays in sync.
         if let Some(tx) = self.service_handlers.get("mesh.theme") {
             let _ = tx.send(ServiceCommandMsg {
@@ -1062,6 +1065,20 @@ impl Shell {
             };
 
             let interface = format!("mesh.{service_name}");
+            let capabilities = self
+                .plugins
+                .get(&candidate.plugin_id)
+                .map(|plugin| {
+                    plugin
+                        .manifest
+                        .capabilities
+                        .required
+                        .iter()
+                        .chain(plugin.manifest.capabilities.optional.iter())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             let script_source = self
                 .plugins
                 .get(&candidate.plugin_id)
@@ -1080,11 +1097,29 @@ impl Shell {
 
             match script_source {
                 Some(source) => {
+                    let shell_tx = tx.clone();
+                    let (backend_tx, mut backend_rx) =
+                        mpsc::unbounded_channel::<BackendServiceUpdate>();
+                    runtime.spawn(async move {
+                        while let Some(update) = backend_rx.recv().await {
+                            if shell_tx
+                                .send(ShellMessage::Service(ServiceEvent::Updated {
+                                    service: update.service,
+                                    source_plugin: update.source_plugin,
+                                    payload: update.payload,
+                                }))
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                    });
                     runtime.spawn(spawn_backend_service(
                         candidate.plugin_id,
                         service_name,
+                        capabilities,
                         source,
-                        tx.clone(),
+                        backend_tx,
                         cmd_rx,
                     ));
                 }
@@ -1116,7 +1151,7 @@ pub enum ShellRunError {
     #[error("failed to compile frontend plugin '{plugin_id}': {source}")]
     FrontendCompile {
         plugin_id: String,
-        source: mesh_component_backend::CompileFrontendError,
+        source: mesh_render_engine::CompileFrontendError,
     },
 
     #[error(transparent)]
@@ -1129,7 +1164,7 @@ pub enum ShellRunError {
     MissingSurface(String),
 
     #[error(transparent)]
-    Render(#[from] render::RenderError),
+    Render(#[from] mesh_render_engine::RenderError),
 
     #[error("failed to initialize ipc socket at {path}: {source}")]
     IpcInit {

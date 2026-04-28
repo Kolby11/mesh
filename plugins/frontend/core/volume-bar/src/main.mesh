@@ -1,5 +1,5 @@
 <template>
-  <section class="volume-bar">
+  <column class="volume-bar">
     <slider
       class="track"
       orient="vertical"
@@ -10,8 +10,8 @@
       title="{audio_tooltip}"
       aria-label="Volume"
     />
-    <span class="label">{audio_label}</span>
-  </section>
+    <text class="label">{audio_label}</text>
+  </column>
 </template>
 
 <script lang="luau">

@@ -1,6 +1,6 @@
 [package]
 name = "mesh-ui"
-description = "UI runtime: widget tree, layout, style resolution, event dispatch"
+description = "Frontend UI model, layout, style, events, and accessibility primitives"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 mesh-component = { workspace = true }
 mesh-theme = { workspace = true }
-mesh-events = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

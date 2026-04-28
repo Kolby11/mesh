@@ -1,39 +1,39 @@
 <template>
-  <main class="surface">
-    <section class="main">
-      <span class="eyebrow">Composed Surface</span>
-      <span class="title">{settings.layout.title}</span>
-      <span class="subtitle">{settings.layout.subtitle}</span>
+  <column class="surface">
+    <column class="main">
+      <text class="eyebrow">Composed Surface</text>
+      <text class="title">{settings.layout.title}</text>
+      <text class="subtitle">{settings.layout.subtitle}</text>
 
-      <div class="settings-grid">
-        <div class="setting">
-          <span class="label">Anchor</span>
-          <span class="value">{settings.surface.anchor}</span>
-        </div>
-        <div class="setting">
-          <span class="label">Layer</span>
-          <span class="value">{settings.surface.layer}</span>
-        </div>
-        <div class="setting">
-          <span class="label">Size</span>
-          <span class="value">{settings.surface.width}</span>
-          <span class="value">{settings.surface.height}</span>
-        </div>
-        <div class="setting">
-          <span class="label">Keyboard</span>
-          <span class="value">{settings.surface.keyboard_mode}</span>
-        </div>
-      </div>
+      <box class="settings-grid">
+        <box class="setting">
+          <text class="label">Anchor</text>
+          <text class="value">{settings.surface.anchor}</text>
+        </box>
+        <box class="setting">
+          <text class="label">Layer</text>
+          <text class="value">{settings.surface.layer}</text>
+        </box>
+        <box class="setting">
+          <text class="label">Size</text>
+          <text class="value">{settings.surface.width}</text>
+          <text class="value">{settings.surface.height}</text>
+        </box>
+        <box class="setting">
+          <text class="label">Keyboard</text>
+          <text class="value">{settings.surface.keyboard_mode}</text>
+        </box>
+      </box>
 
       <BaseLauncher/>
       <slot name="main"/>
-    </section>
+    </column>
 
-    <aside class="sidebar">
+    <column class="sidebar">
       <BaseSidebar/>
       <slot name="sidebar"/>
-    </aside>
-  </main>
+    </column>
+  </column>
 </template>
 
 <style>

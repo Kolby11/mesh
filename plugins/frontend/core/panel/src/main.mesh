@@ -1,20 +1,20 @@
 <template>
-  <div class="panel">
-    <div class="left">
-      <span class="workspace">{activeWorkspace}</span>
-    </div>
-    <div class="center">
-      <span class="clock">{time}</span>
-    </div>
-    <div class="right">
-      <span class="indicator network-indicator" title="{networkStatus}" aria-label="Network status">{networkStatus}</span>
+  <box class="panel">
+    <box class="left">
+      <text class="workspace">{activeWorkspace}</text>
+    </box>
+    <box class="center">
+      <text class="clock">{time}</text>
+    </box>
+    <box class="right">
+      <text class="indicator network-indicator" title="{networkStatus}" aria-label="Network status">{networkStatus}</text>
       <button class="indicator volume-indicator" onclick={onVolumeClick} title="Open audio controls" aria-label="Open audio controls">
         <icon class="indicator-glyph" name="{volumeIcon}" size="16" />
-        <span class="indicator-value">{volumeLevel}</span>
+        <text class="indicator-value">{volumeLevel}</text>
       </button>
-      <span class="battery">{batteryText}</span>
-    </div>
-  </div>
+      <text class="battery">{batteryText}</text>
+    </box>
+  </box>
 </template>
 
 <script lang="luau">

@@ -29,8 +29,8 @@ like normal shell chrome.
 ### Text interpolation
 
 ```xml
-<span class="meta-pill-text">{active}</span>
-<span class="battery-value">{battery_label}</span>
+<text class="meta-pill-text">{active}</text>
+<text class="battery-value">{battery_label}</text>
 ```
 
 Dynamic values are embedded directly in element content using `{}`. The
@@ -39,7 +39,7 @@ runtime re-renders the text node when the variable changes.
 ### Dynamic attribute binding
 
 ```xml
-<div title="{battery_tooltip}" aria-label="{battery_aria_label}">
+<box title="{battery_tooltip}" aria-label="{battery_aria_label}">
 ```
 
 Any attribute can receive a dynamic value by wrapping the expression in `{}`.
@@ -61,12 +61,12 @@ quick-settings and volume surfaces explicitly from
 ### Accessibility
 
 ```xml
-<div
+<box
   title="{battery_tooltip}"
   aria-label="{battery_aria_label}"
 >
-  <span aria-hidden="true">{battery_icon_name}</span>
-</div>
+  <text aria-hidden="true">{battery_icon_name}</text>
+</box>
 ```
 
 `title` provides a tooltip. `aria-label` provides the accessible name for

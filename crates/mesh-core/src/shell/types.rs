@@ -1,5 +1,5 @@
-use super::render::PixelBuffer;
 use mesh_locale::LocaleEngine;
+use mesh_render_engine::PixelBuffer;
 use mesh_scripting::ScriptError;
 use mesh_theme::Theme;
 use mesh_ui::WidgetNode;
@@ -183,11 +183,7 @@ impl ComponentRuntime {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct ServiceCommandMsg {
-    pub(super) command: String,
-    pub(super) payload: serde_json::Value,
-}
+pub(super) type ServiceCommandMsg = mesh_backend::BackendServiceCommand;
 
 #[derive(Debug, Clone)]
 pub(super) struct ThemeWatchState {

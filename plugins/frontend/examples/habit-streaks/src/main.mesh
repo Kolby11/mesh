@@ -1,16 +1,16 @@
 <template>
-  <div class="streaks">
-    <span class="headline">{headline}</span>
-    <div class="chip">
-      <span class="chip-text">{first}</span>
-    </div>
-    <div class="chip">
-      <span class="chip-text">{second}</span>
-    </div>
-    <div class="chip">
-      <span class="chip-text">{third}</span>
-    </div>
-  </div>
+  <box class="streaks">
+    <text class="headline">{headline}</text>
+    <box class="chip">
+      <text class="chip-text">{first}</text>
+    </box>
+    <box class="chip">
+      <text class="chip-text">{second}</text>
+    </box>
+    <box class="chip">
+      <text class="chip-text">{third}</text>
+    </box>
+  </box>
 </template>
 
 <style>

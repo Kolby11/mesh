@@ -1,11 +1,11 @@
 <template>
-  <section class="weather">
-    <div class="copy">
-      <span class="location">{location}</span>
-      <span class="condition">{condition}</span>
-    </div>
-    <span class="temperature">{temperature}</span>
-  </section>
+  <column class="weather">
+    <box class="copy">
+      <text class="location">{location}</text>
+      <text class="condition">{condition}</text>
+    </box>
+    <text class="temperature">{temperature}</text>
+  </column>
 </template>
 
 <style>

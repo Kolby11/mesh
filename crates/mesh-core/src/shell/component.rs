@@ -13,17 +13,18 @@ use super::types::{
     ShellComponent,
 };
 use mesh_capability::{Capability, CapabilitySet};
-use mesh_component_backend::{
-    CompiledFrontendPlugin, FrontendCompositionResolver, FrontendRenderMode,
-    compile_frontend_plugin, root_accessibility_role,
-};
 use mesh_locale::LocaleEngine;
 use mesh_plugin::PluginType;
 use mesh_plugin::lifecycle::PluginInstance;
+use mesh_render_engine::{
+    CompiledFrontendPlugin, FrontendCompositionResolver, FrontendRenderMode,
+    compile_frontend_plugin, root_accessibility_role,
+};
 use mesh_scripting::{LocaleBoundState, ScriptContext};
 use mesh_theme::{Theme, default_theme};
 use mesh_ui::{
-    Corners, ElementState, StyleContext, StyleResolver, TransitionStyle, VariableStore, WidgetNode,
+    Corners, ElementState, StyleContext, StyleResolver, TransitionEasing, TransitionStyle,
+    VariableStore, WidgetNode, style::Color,
 };
 use mesh_wayland::{Edge, ShellSurface};
 use std::cell::RefCell;
@@ -33,7 +34,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::shell::ShellRunError;
-use crate::shell::render::{PixelBuffer, SharedTextMeasurer, paint_frontend_tree};
+use mesh_render_engine::{PixelBuffer, SharedTextMeasurer, paint_frontend_tree_at};
 
 /// Overlays resolved prop values on top of a local component's host state so
 /// that template expressions like `{network_name}` resolve to the prop value
@@ -42,6 +43,10 @@ struct LocalComponentStore<'a> {
     base: &'a dyn VariableStore,
     props: &'a HashMap<String, String>,
 }
+
+const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
+const TOOLTIP_OVERLAY_WIDTH: u32 = 260;
+const TOOLTIP_OVERLAY_HEIGHT: u32 = 96;
 
 impl VariableStore for LocalComponentStore<'_> {
     fn get(&self, name: &str) -> Option<serde_json::Value> {
@@ -118,24 +123,59 @@ pub(super) struct ScrollOffsetState {
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct AnimatedVisualStyle {
     border_radius: Corners,
+    opacity: f32,
+    background_color: Color,
+    color: Color,
 }
 
 impl AnimatedVisualStyle {
     fn from_node(node: &WidgetNode) -> Self {
-        Self::from_corners(node.computed_style.border_radius)
-    }
-
-    fn from_corners(border_radius: Corners) -> Self {
-        Self { border_radius }
+        Self {
+            border_radius: node.computed_style.border_radius,
+            opacity: node.computed_style.opacity,
+            background_color: node.computed_style.background_color,
+            color: node.computed_style.color,
+        }
     }
 
     fn apply_to_node(self, node: &mut WidgetNode) {
         node.computed_style.border_radius = self.border_radius;
+        node.computed_style.opacity = self.opacity;
+        node.computed_style.background_color = self.background_color;
+        node.computed_style.color = self.color;
     }
 
     fn interpolate(self, target: Self, progress: f32) -> Self {
         Self {
             border_radius: lerp_corners(self.border_radius, target.border_radius, progress),
+            opacity: lerp_f32(self.opacity, target.opacity, progress),
+            background_color: lerp_color(self.background_color, target.background_color, progress),
+            color: lerp_color(self.color, target.color, progress),
+        }
+    }
+
+    fn selective_from(previous: Self, desired: Self, props: mesh_ui::TransitionProperties) -> Self {
+        Self {
+            border_radius: if props.animates_border_radius() {
+                previous.border_radius
+            } else {
+                desired.border_radius
+            },
+            opacity: if props.animates_opacity() {
+                previous.opacity
+            } else {
+                desired.opacity
+            },
+            background_color: if props.animates_background_color() {
+                previous.background_color
+            } else {
+                desired.background_color
+            },
+            color: if props.animates_color() {
+                previous.color
+            } else {
+                desired.color
+            },
         }
     }
 }
@@ -146,6 +186,7 @@ struct StyleAnimation {
     to: AnimatedVisualStyle,
     started_at: Instant,
     duration: Duration,
+    delay: Duration,
     transition: TransitionStyle,
 }
 
@@ -154,14 +195,18 @@ impl StyleAnimation {
         if self.duration.is_zero() {
             return self.to;
         }
-
         let elapsed = now.saturating_duration_since(self.started_at);
-        let progress = (elapsed.as_secs_f32() / self.duration.as_secs_f32()).clamp(0.0, 1.0);
-        self.from.interpolate(self.to, ease_out_cubic(progress))
+        if elapsed < self.delay {
+            return self.from;
+        }
+        let active_elapsed = elapsed - self.delay;
+        let raw = (active_elapsed.as_secs_f32() / self.duration.as_secs_f32()).clamp(0.0, 1.0);
+        self.from
+            .interpolate(self.to, apply_easing(self.transition.easing, raw))
     }
 
     fn finished(&self, now: Instant) -> bool {
-        now.saturating_duration_since(self.started_at) >= self.duration
+        now.saturating_duration_since(self.started_at) >= self.delay + self.duration
     }
 }
 
@@ -209,7 +254,7 @@ impl FrontendCatalog {
                 continue;
             };
 
-            if !mesh_component_backend::is_frontend_plugin(&plugin.manifest) {
+            if !mesh_render_engine::is_frontend_plugin(&plugin.manifest) {
                 continue;
             }
 
@@ -455,11 +500,16 @@ impl FrontendSurfaceComponent {
             .unwrap_or(desired);
 
         let transition = node.computed_style.transition;
-        let should_animate_border_radius = transition.duration_ms > 0
-            && transition.properties.animates_border_radius()
-            && previous_displayed.border_radius != desired.border_radius;
+        let props = transition.properties;
+        let should_animate = transition.duration_ms > 0
+            && ((props.animates_border_radius()
+                && previous_displayed.border_radius != desired.border_radius)
+                || (props.animates_opacity() && previous_displayed.opacity != desired.opacity)
+                || (props.animates_background_color()
+                    && previous_displayed.background_color != desired.background_color)
+                || (props.animates_color() && previous_displayed.color != desired.color));
 
-        if should_animate_border_radius {
+        if should_animate {
             let restart = self.style_animations.get(key).is_none_or(|animation| {
                 animation.to != desired
                     || animation.transition != transition
@@ -467,13 +517,15 @@ impl FrontendSurfaceComponent {
             });
 
             if restart {
+                let from = AnimatedVisualStyle::selective_from(previous_displayed, desired, props);
                 self.style_animations.insert(
                     key.to_string(),
                     StyleAnimation {
-                        from: previous_displayed,
+                        from,
                         to: desired,
                         started_at: now,
                         duration: Duration::from_millis(u64::from(transition.duration_ms)),
+                        delay: Duration::from_millis(u64::from(transition.delay_ms)),
                         transition,
                     },
                 );
@@ -491,16 +543,37 @@ impl FrontendSurfaceComponent {
         }
     }
 
-    fn render_layout(&self, surface: &mut dyn ShellSurface) {
-        surface.anchor(self.surface_layout.edge);
-        surface.set_layer(self.surface_layout.layer);
+    fn layout_content_size(&self) -> (u32, u32) {
         let (width, height) = match self.surface_layout.size_policy {
             SurfaceSizePolicy::Fixed => (self.surface_layout.width, self.surface_layout.height),
             SurfaceSizePolicy::ContentMeasured => self
                 .measured_size
                 .unwrap_or((self.surface_layout.width, self.surface_layout.height)),
         };
-        surface.set_size(width, height);
+        (width.max(1), height.max(1))
+    }
+
+    fn tooltip_overlay_extra_for_content(width: u32) -> (u32, u32) {
+        if width < TOOLTIP_OVERLAY_WIDTH {
+            (
+                TOOLTIP_OVERLAY_WIDTH.saturating_sub(width),
+                TOOLTIP_OVERLAY_HEIGHT,
+            )
+        } else {
+            (0, 0)
+        }
+    }
+
+    fn render_layout(&self, surface: &mut dyn ShellSurface) {
+        surface.anchor(self.surface_layout.edge);
+        surface.set_layer(self.surface_layout.layer);
+        let (width, height) = self.layout_content_size();
+        let (tooltip_extra_width, tooltip_extra_height) =
+            Self::tooltip_overlay_extra_for_content(width);
+        surface.set_size(
+            width.saturating_add(tooltip_extra_width),
+            height.saturating_add(tooltip_extra_height),
+        );
         surface.set_exclusive_zone(self.surface_layout.exclusive_zone);
         surface.set_keyboard_interactivity(self.surface_layout.keyboard_mode);
         surface.set_margin(
@@ -1306,7 +1379,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                         .as_ref()
                         .map(|s| s.rules.as_slice())
                         .unwrap_or(&[]);
-                    let node = mesh_component_backend::build_widget_tree_from_component(
+                    let node = mesh_render_engine::build_widget_tree_from_component(
                         local,
                         host,
                         &theme,
@@ -1490,7 +1563,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
         // Trigger a repaint once the tooltip delay has elapsed so the tooltip appears.
         if let Some(start) = self.hover_start {
-            if start.elapsed() >= Duration::from_millis(500) && !self.dirty {
+            if start.elapsed() >= TOOLTIP_DELAY && !self.dirty {
                 self.dirty = true;
             }
         }
@@ -1557,26 +1630,33 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn paint(
         &mut self,
         theme: &Theme,
-        width: u32,
-        height: u32,
+        _width: u32,
+        _height: u32,
         buffer: &mut PixelBuffer,
     ) -> Result<(), ComponentError> {
-        let mut tree = self.build_tree(theme, width, height);
+        let (content_width, content_height) = self.layout_content_size();
+        let mut tree = self.build_tree(theme, content_width, content_height);
         self.apply_style_animations(&mut tree);
         if self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured {
             let surface_layout_manifest = self.compiled.manifest.surface_layout.as_ref();
-            let measured_size = measure_content_size(&tree, width, height, surface_layout_manifest);
+            let measured_size = measure_content_size(
+                &tree,
+                content_width,
+                content_height,
+                surface_layout_manifest,
+            );
             if self.measured_size != Some(measured_size) {
                 self.measured_size = Some(measured_size);
                 self.dirty = true;
             }
         }
+        self.publish_element_metrics(&tree);
         buffer.clear(mesh_ui::style::Color::TRANSPARENT);
 
         let tooltip = if let (Some(start), Some(hovered_key)) =
             (self.hover_start, self.hovered_key.as_ref())
         {
-            if start.elapsed() >= Duration::from_millis(500) {
+            if start.elapsed() >= TOOLTIP_DELAY {
                 find_tooltip_text_by_key(&tree, hovered_key).map(|text| {
                     let (cx, cy) = self.hovered_pos;
                     (text, cx, cy)
@@ -1588,10 +1668,12 @@ impl ShellComponent for FrontendSurfaceComponent {
             None
         };
 
-        paint_frontend_tree(
+        paint_frontend_tree_at(
             &tree,
             buffer,
             1.0,
+            0.0,
+            0.0,
             tooltip
                 .as_ref()
                 .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
@@ -1814,7 +1896,9 @@ impl ShellComponent for FrontendSurfaceComponent {
             }
             ComponentInput::Char { ch } => {
                 if let Some(focused_key) = self.focused_key.clone() {
-                    if is_input_key(&tree, &focused_key) && !ch.is_control() {
+                    let accepts_char = find_node_by_key(&tree, &focused_key)
+                        .is_some_and(|node| input_accepts_char(node, ch));
+                    if is_input_key(&tree, &focused_key) && accepts_char {
                         self.input_values.entry(focused_key).or_default().push(ch);
                         self.dirty = true;
                     }
@@ -1852,6 +1936,20 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 }
 
+impl FrontendSurfaceComponent {
+    fn publish_element_metrics(&self, tree: &WidgetNode) {
+        let mut elements = serde_json::Map::new();
+        let mut refs = serde_json::Map::new();
+        collect_element_metrics(tree, 0.0, 0.0, &mut elements, &mut refs);
+
+        if let Some(root_runtime) = self.runtimes.lock().unwrap().get_mut(self.id()) {
+            let state = root_runtime.script_ctx.state_mut();
+            state.set_host_value("elements", serde_json::Value::Object(elements));
+            state.set_host_value("refs", serde_json::Value::Object(refs));
+        }
+    }
+}
+
 fn collect_visual_styles(root: &WidgetNode) -> HashMap<String, AnimatedVisualStyle> {
     let mut styles = HashMap::new();
     collect_visual_styles_into(root, &mut styles);
@@ -1871,8 +1969,30 @@ fn collect_visual_styles_into(
     }
 }
 
-fn ease_out_cubic(progress: f32) -> f32 {
-    1.0 - (1.0 - progress).powi(3)
+fn apply_easing(easing: TransitionEasing, t: f32) -> f32 {
+    match easing {
+        TransitionEasing::Linear => t,
+        TransitionEasing::Ease => ease_in_out_cubic(t),
+        TransitionEasing::EaseIn => ease_in_cubic(t),
+        TransitionEasing::EaseOut => ease_out_cubic(t),
+        TransitionEasing::EaseInOut => ease_in_out_cubic(t),
+    }
+}
+
+fn ease_in_cubic(t: f32) -> f32 {
+    t * t * t
+}
+
+fn ease_out_cubic(t: f32) -> f32 {
+    1.0 - (1.0 - t).powi(3)
+}
+
+fn ease_in_out_cubic(t: f32) -> f32 {
+    if t < 0.5 {
+        4.0 * t * t * t
+    } else {
+        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+    }
 }
 
 fn lerp_corners(from: Corners, to: Corners, progress: f32) -> Corners {
@@ -1884,8 +2004,115 @@ fn lerp_corners(from: Corners, to: Corners, progress: f32) -> Corners {
     }
 }
 
+fn lerp_color(from: Color, to: Color, progress: f32) -> Color {
+    Color {
+        r: lerp_f32(from.r as f32, to.r as f32, progress).round() as u8,
+        g: lerp_f32(from.g as f32, to.g as f32, progress).round() as u8,
+        b: lerp_f32(from.b as f32, to.b as f32, progress).round() as u8,
+        a: lerp_f32(from.a as f32, to.a as f32, progress).round() as u8,
+    }
+}
+
 fn lerp_f32(from: f32, to: f32, progress: f32) -> f32 {
     from + (to - from) * progress
+}
+
+fn input_accepts_char(node: &WidgetNode, ch: char) -> bool {
+    if ch.is_control() {
+        return false;
+    }
+
+    match node.attributes.get("type").map(|value| value.as_str()) {
+        Some("number") => ch.is_ascii_digit() || matches!(ch, '.' | '-'),
+        _ => true,
+    }
+}
+
+fn collect_element_metrics(
+    node: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
+    elements: &mut serde_json::Map<String, serde_json::Value>,
+    refs: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    let left = node.layout.x + offset_x;
+    let top = node.layout.y + offset_y;
+    let width = node.layout.width.max(0.0);
+    let height = node.layout.height.max(0.0);
+    let right = left + width;
+    let bottom = top + height;
+    let client_left = left + node.computed_style.padding.left;
+    let client_top = top + node.computed_style.padding.top;
+    let client_width = (width - node.computed_style.padding.horizontal()).max(0.0);
+    let client_height = (height - node.computed_style.padding.vertical()).max(0.0);
+    let client_right = client_left + client_width;
+    let client_bottom = client_top + client_height;
+    let scroll_x = node
+        .attributes
+        .get("_mesh_scroll_x")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let scroll_y = node
+        .attributes
+        .get("_mesh_scroll_y")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0);
+
+    let client_bound_rect = serde_json::json!({
+        "left": client_left,
+        "top": client_top,
+        "right": client_right,
+        "bottom": client_bottom,
+        "width": client_width,
+        "height": client_height,
+    });
+    let bounds = serde_json::json!({
+        "left": left,
+        "top": top,
+        "right": right,
+        "bottom": bottom,
+        "width": width,
+        "height": height,
+    });
+    let metrics = serde_json::json!({
+        "key": node.attributes.get("_mesh_key").cloned().unwrap_or_default(),
+        "id": node.attributes.get("id").cloned().unwrap_or_default(),
+        "ref": node.attributes.get("ref").cloned().unwrap_or_default(),
+        "tag": node.tag,
+        "x": left,
+        "y": top,
+        "left": left,
+        "top": top,
+        "right": right,
+        "bottom": bottom,
+        "width": width,
+        "height": height,
+        "client_left": client_left,
+        "client_top": client_top,
+        "client_width": client_width,
+        "client_height": client_height,
+        "clientBoundRect": client_bound_rect,
+        "client_bound_rect": client_bound_rect,
+        "bounding_client_rect": bounds,
+        "scroll_x": scroll_x,
+        "scroll_y": scroll_y,
+    });
+
+    if let Some(key) = node.attributes.get("_mesh_key") {
+        elements.insert(key.clone(), metrics.clone());
+    }
+    if let Some(id) = node.attributes.get("id") {
+        refs.insert(id.clone(), metrics.clone());
+    }
+    if let Some(reference) = node.attributes.get("ref") {
+        refs.insert(reference.clone(), metrics);
+    }
+
+    let child_offset_x = offset_x - scroll_x;
+    let child_offset_y = offset_y - scroll_y;
+    for child in &node.children {
+        collect_element_metrics(child, child_offset_x, child_offset_y, elements, refs);
+    }
 }
 
 pub(super) fn annotate_runtime_tree(

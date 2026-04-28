@@ -1,19 +1,19 @@
 <template>
-  <aside class="rail">
-    <span class="heading">{heading}</span>
-    <div class="item">
-      <span class="label">Primary</span>
-      <span class="value">{primary}</span>
-    </div>
-    <div class="item">
-      <span class="label">Secondary</span>
-      <span class="value">{secondary}</span>
-    </div>
-    <div class="item">
-      <span class="label">Tertiary</span>
-      <span class="value">{tertiary}</span>
-    </div>
-  </aside>
+  <column class="rail">
+    <text class="heading">{heading}</text>
+    <box class="item">
+      <text class="label">Primary</text>
+      <text class="value">{primary}</text>
+    </box>
+    <box class="item">
+      <text class="label">Secondary</text>
+      <text class="value">{secondary}</text>
+    </box>
+    <box class="item">
+      <text class="label">Tertiary</text>
+      <text class="value">{tertiary}</text>
+    </box>
+  </column>
 </template>
 
 <style>

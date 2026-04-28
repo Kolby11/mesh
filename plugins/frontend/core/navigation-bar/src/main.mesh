@@ -1,14 +1,14 @@
 <template>
-  <nav class="nav-shell">
-    <div class="meta">
+  <row class="nav-shell">
+    <box class="meta">
         <MetaLabel />
         <MetaPill />
         <SettingsButton />
         <VolumeButton />
         <BatteryButton />
         <ThemeButton />
-    </div>
-  </nav>
+    </box>
+  </row>
 </template>
 
 <script lang="luau">

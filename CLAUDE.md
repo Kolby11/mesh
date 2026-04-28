@@ -87,6 +87,15 @@ string parsing. Use `mlua` in Luau mode for script execution and treat any
 custom parsing/interpreting as temporary migration code to remove, not a model
 to expand.
 
+Extension authoring should prefer normal Lua/Luau syntax and semantics by
+default. Only introduce special parsing, custom DSL behavior, magic globals, or
+non-standard syntax when there is a clear product need that cannot be met
+cleanly through regular host APIs or standard language constructs.
+
+Backend `main.luau` files should expose an explicit `init()` entrypoint
+function. Backend setup such as poll interval registration should happen inside
+`init()` rather than relying on top-level side effects.
+
 ### 4. UI component format
 
 Single-file components inspired by Svelte.

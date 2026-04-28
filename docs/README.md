@@ -19,6 +19,7 @@ lifecycle spec see [`../spec/pluggable-backend.md`](../spec/pluggable-backend.md
     backends and interface packages.
 - **Frontend**
   - [`frontend/mesh-syntax.md`](./frontend/mesh-syntax.md) — `.mesh` component syntax: tags, text interpolation, attribute binding, two-way binding, event handlers, accessibility.
+  - [`frontend/html-css-transition.md`](./frontend/html-css-transition.md) — transition sketch for a Qt-style UI XML vocabulary and bounded CSS profile over the current MESH UI/runtime pipeline.
   - [`frontend/slots.md`](./frontend/slots.md) — slot points for extending
     surfaces without forking them.
 - **Theming & localization**

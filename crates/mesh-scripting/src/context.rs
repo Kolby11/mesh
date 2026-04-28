@@ -85,6 +85,14 @@ impl ScriptState {
         self.dirty = true;
     }
 
+    /// Set a host-maintained variable without requesting a component rebuild.
+    ///
+    /// Used for render-derived values, such as element layout metrics, that
+    /// should be visible to scripts but should not themselves cause a repaint.
+    pub fn set_host_value(&mut self, name: impl Into<String>, value: Value) {
+        self.variables.insert(name.into(), value);
+    }
+
     /// Check if any variable changed since last tree build.
     pub fn is_dirty(&self) -> bool {
         self.dirty
@@ -439,6 +447,9 @@ impl ScriptContext {
         let has_theme_read = manifest.has_theme_read;
         let has_locale_read = manifest.has_locale_read;
         let bindings = Arc::clone(&self.shared_interface_bindings);
+        let interface_service_bindings = Arc::clone(&self.runtime_service_bindings);
+        let interface_service_subscriptions = Arc::clone(&self.runtime_service_subscriptions);
+        let published_events = Arc::clone(&self.shared_published_events);
         mesh_interfaces
             .set(
                 "get",
@@ -473,7 +484,13 @@ impl ScriptContext {
                             .lock()
                             .unwrap()
                             .insert(name.clone(), resolution.clone());
-                        create_interface_proxy(lua, resolution)
+                        create_interface_proxy(
+                            lua,
+                            resolution,
+                            Arc::clone(&interface_service_bindings),
+                            Arc::clone(&interface_service_subscriptions),
+                            Arc::clone(&published_events),
+                        )
                     })
                     .map_err(lua_err)?,
             )
@@ -639,7 +656,13 @@ impl ScriptContext {
     }
 }
 
-fn create_interface_proxy(lua: &Lua, resolution: InterfaceResolution) -> mlua::Result<Table> {
+fn create_interface_proxy(
+    lua: &Lua,
+    resolution: InterfaceResolution,
+    service_bindings: Arc<Mutex<Vec<ServiceBinding>>>,
+    service_subscriptions: Arc<Mutex<Vec<ServiceSubscription>>>,
+    published_events: Arc<Mutex<Vec<PublishedEvent>>>,
+) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
     let meta = lua.create_table()?;
     let resolution_for_index = resolution.clone();
@@ -647,7 +670,54 @@ fn create_interface_proxy(lua: &Lua, resolution: InterfaceResolution) -> mlua::R
         "__index",
         lua.create_function(move |lua, (_table, key): (Table, String)| {
             let resolution = resolution_for_index.clone();
+            let service_bindings = Arc::clone(&service_bindings);
+            let service_subscriptions = Arc::clone(&service_subscriptions);
+            let published_events = Arc::clone(&published_events);
             let method_name = key.clone();
+
+            if method_name == "bind" {
+                let service_name = service_name_from_interface(&resolution.requested);
+                return lua.create_function(move |lua, args: mlua::Variadic<LuaValue>| {
+                    let offset = consume_self_arg(&args);
+                    let field =
+                        lua_value_to_string(args.get(offset).cloned().unwrap_or(LuaValue::Nil));
+                    if field.is_empty() {
+                        return Ok(LuaValue::Nil);
+                    }
+                    let alias = args
+                        .get(offset + 1)
+                        .cloned()
+                        .and_then(lua_string_arg)
+                        .unwrap_or_else(|| field.clone());
+                    lua.globals().set(alias.clone(), LuaValue::Nil)?;
+                    service_bindings.lock().unwrap().push(ServiceBinding {
+                        var_name: alias,
+                        service: service_name.clone(),
+                        field,
+                    });
+                    Ok(LuaValue::Nil)
+                });
+            }
+
+            if method_name == "on_change" {
+                let service_name = service_name_from_interface(&resolution.requested);
+                return lua.create_function(move |_lua, args: mlua::Variadic<LuaValue>| {
+                    let offset = consume_self_arg(&args);
+                    let handler_name =
+                        lua_value_to_string(args.get(offset).cloned().unwrap_or(LuaValue::Nil));
+                    if !handler_name.is_empty() {
+                        service_subscriptions
+                            .lock()
+                            .unwrap()
+                            .push(ServiceSubscription {
+                                service: service_name.clone(),
+                                handler_name,
+                            });
+                    }
+                    Ok(LuaValue::Nil)
+                });
+            }
+
             lua.create_function(move |lua, _args: mlua::Variadic<LuaValue>| {
                 let contract = resolution.contract.as_ref().ok_or_else(|| {
                     mlua::Error::external(ScriptError::InterfaceUnavailable(
@@ -666,12 +736,50 @@ fn create_interface_proxy(lua: &Lua, resolution: InterfaceResolution) -> mlua::R
                     }));
                 };
 
+                let offset = consume_self_arg(&_args);
+                let payload = method
+                    .args
+                    .iter()
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        let lua_value = _args.get(index + offset).cloned().unwrap_or(LuaValue::Nil);
+                        lua.from_value::<Value>(lua_value)
+                            .map(|value| (arg.name.clone(), value))
+                    })
+                    .collect::<mlua::Result<serde_json::Map<String, Value>>>()?;
+                published_events.lock().unwrap().push(PublishedEvent {
+                    channel: format!("{}.{}", contract.interface, method.name),
+                    payload: Value::Object(payload),
+                });
+
                 default_lua_value_for_type(lua, &contract.types, method.returns.as_deref())
             })
         })?,
     )?;
     proxy.set_metatable(Some(meta))?;
     Ok(proxy)
+}
+
+fn consume_self_arg(args: &mlua::Variadic<LuaValue>) -> usize {
+    match args.get(0) {
+        Some(LuaValue::Table(_)) => 1,
+        _ => 0,
+    }
+}
+
+fn lua_string_arg(value: LuaValue) -> Option<String> {
+    match value {
+        LuaValue::String(value) => Some(value.to_string_lossy()),
+        LuaValue::Nil => None,
+        other => Some(lua_value_to_string(other)),
+    }
+}
+
+fn service_name_from_interface(interface: &str) -> String {
+    interface
+        .strip_prefix("mesh.")
+        .unwrap_or(interface)
+        .to_string()
 }
 
 fn default_lua_value_for_type(
@@ -775,8 +883,8 @@ mod tests {
     use super::*;
     use mesh_capability::{Capability, CapabilitySet};
     use mesh_service::{
-        ContractCapabilities, InterfaceCatalog, InterfaceContract, InterfaceMethod,
-        InterfaceProvider, parse_contract_version,
+        ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract,
+        InterfaceMethod, InterfaceProvider, parse_contract_version,
     };
     use std::path::PathBuf;
 
@@ -794,7 +902,16 @@ mod tests {
                 },
                 InterfaceMethod {
                     name: "set_volume".into(),
-                    args: Vec::new(),
+                    args: vec![
+                        InterfaceArgument {
+                            name: "device_id".into(),
+                            arg_type: "string".into(),
+                        },
+                        InterfaceArgument {
+                            name: "volume".into(),
+                            arg_type: "float".into(),
+                        },
+                    ],
                     returns: Some("Result".into()),
                 },
             ],
@@ -1019,6 +1136,71 @@ end
         assert_eq!(
             ctx.state.get("icon_name"),
             Some(Value::String("audio-volume-muted".into()))
+        );
+    }
+
+    #[test]
+    fn interface_proxy_can_bind_reactive_fields() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script(
+            r#"
+mesh.state.set("icon_name", "audio-volume-muted")
+
+function init()
+    local audio = mesh.interfaces.get("mesh.audio", ">=1.0")
+    audio:bind("muted", "audio_muted")
+    audio:bind("percent", "audio_percent")
+    audio:on_change("sync_audio_state")
+end
+
+function sync_audio_state()
+    if audio_muted then
+        icon_name = "audio-volume-muted"
+    elseif audio_percent < 50 then
+        icon_name = "audio-volume-low"
+    else
+        icon_name = "audio-volume-high"
+    end
+end
+"#,
+        )
+        .unwrap();
+        ctx.call_init().unwrap();
+
+        let payload = serde_json::json!({ "percent": 80, "muted": false });
+        ctx.apply_service_bindings("audio", &payload);
+        ctx.call_service_handlers("audio").unwrap();
+        assert_eq!(
+            ctx.state.get("icon_name"),
+            Some(Value::String("audio-volume-high".into()))
+        );
+    }
+
+    #[test]
+    fn interface_proxy_method_publishes_service_command() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script(
+            r#"
+function init()
+    local audio = mesh.interfaces.get("mesh.audio", ">=1.0")
+    audio:set_volume("default", 0.5)
+end
+"#,
+        )
+        .unwrap();
+        ctx.call_init().unwrap();
+        let published = ctx.drain_published_events();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].channel, "mesh.audio.set_volume");
+        assert_eq!(
+            published[0].payload,
+            serde_json::json!({ "device_id": "default", "volume": 0.5 })
         );
     }
 

@@ -1,14 +1,14 @@
 <template>
-  <section class="timer">
-    <span class="eyebrow">Focus session</span>
-    <span class="label">{label}</span>
-    <span class="remaining">{remaining}</span>
-    <div class="meta">
-      <span class="phase">{phase}</span>
-      <span class="streak">Streak 4</span>
-    </div>
+  <column class="timer">
+    <text class="eyebrow">Focus session</text>
+    <text class="label">{label}</text>
+    <text class="remaining">{remaining}</text>
+    <box class="meta">
+      <text class="phase">{phase}</text>
+      <text class="streak">Streak 4</text>
+    </box>
     <button class="button">Pause timer</button>
-  </section>
+  </column>
 </template>
 
 <style>

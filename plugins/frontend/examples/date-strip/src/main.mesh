@@ -1,22 +1,22 @@
 <template>
-  <section class="strip">
-    <div class="copy">
-      <span class="context">{context}</span>
-      <span class="title">{title}</span>
-      <span class="summary">{summary}</span>
-    </div>
-    <div class="badges">
-      <div class="badge">
-        <span class="badge-text">Planning</span>
-      </div>
-      <div class="badge">
-        <span class="badge-text">Review</span>
-      </div>
-      <div class="badge">
-        <span class="badge-text">Ship</span>
-      </div>
-    </div>
-  </section>
+  <column class="strip">
+    <box class="copy">
+      <text class="context">{context}</text>
+      <text class="title">{title}</text>
+      <text class="summary">{summary}</text>
+    </box>
+    <box class="badges">
+      <box class="badge">
+        <text class="badge-text">Planning</text>
+      </box>
+      <box class="badge">
+        <text class="badge-text">Review</text>
+      </box>
+      <box class="badge">
+        <text class="badge-text">Ship</text>
+      </box>
+    </box>
+  </column>
 </template>
 
 <style>

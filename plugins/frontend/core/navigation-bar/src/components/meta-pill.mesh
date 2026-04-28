@@ -1,7 +1,7 @@
 <template>
-  <div class="meta-pill">
-    <span class="meta-pill-text">{t('nav.dashboard')}</span>
-  </div>
+  <box class="meta-pill">
+    <text class="meta-pill-text">{t('nav.dashboard')}</text>
+  </box>
 </template>
 
 <script lang="luau">

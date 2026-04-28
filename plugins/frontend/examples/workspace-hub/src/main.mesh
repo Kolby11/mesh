@@ -1,22 +1,22 @@
 <template>
-  <main class="hub">
+  <column class="hub">
     <DateStrip title="Tuesday, April 22" context="Sprint review day" summary="Three meetings, one release train, two focus blocks"/>
-    <div class="body">
-      <section class="main">
+    <box class="body">
+      <column class="main">
         <CalendarCard heading="This week" accent="Launch prep" note="Review milestones before 16:00"/>
         <AgendaList heading="Today's agenda" first="09:30 Design crit" second="11:00 API review" third="14:00 Stakeholder sync"/>
         <slot name="main-extra"/>
-      </section>
-      <aside class="sidebar">
+      </column>
+      <column class="sidebar">
         <FocusTimer label="Deep work" remaining="42:00" phase="Writing" />
         <StatusRail heading="Live systems" primary="Docs build healthy" secondary="2 plugin updates waiting" tertiary="Theme preview synced"/>
         <slot name="sidebar-extra"/>
-      </aside>
-    </div>
-    <div class="footer">
+      </column>
+    </box>
+    <box class="footer">
       <slot name="footer"/>
-    </div>
-  </main>
+    </box>
+  </column>
 </template>
 
 <style>

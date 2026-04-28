@@ -16,8 +16,9 @@ members = [
     "crates/mesh-ui",
     "crates/mesh-icon",
     "crates/mesh-scripting",
+    "crates/mesh-render-engine",
+    "crates/mesh-backend",
     "crates/mesh-cli",
-    "crates/mesh-component-backend",
     "crates/mesh-debug",
 ]
 
@@ -43,7 +44,8 @@ mesh-component = { path = "crates/mesh-component" }
 mesh-ui = { path = "crates/mesh-ui" }
 mesh-icon = { path = "crates/mesh-icon" }
 mesh-scripting = { path = "crates/mesh-scripting" }
-mesh-component-backend = { path = "crates/mesh-component-backend" }
+mesh-render-engine = { path = "crates/mesh-render-engine" }
+mesh-backend = { path = "crates/mesh-backend" }
 mesh-debug = { path = "crates/mesh-debug" }
 
 serde = { version = "1", features = ["derive"] }

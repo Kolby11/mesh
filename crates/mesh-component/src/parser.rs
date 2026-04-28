@@ -467,7 +467,7 @@ fn parse_template(source: &str) -> Result<TemplateBlock, ParseError> {
                     continue;
                 }
                 let attrs = parse_xml_attributes(&reader, &event)?;
-                let node = build_template_node(tag, attrs, Vec::new());
+                let node = build_template_node(tag, attrs, Vec::new())?;
                 push_template_node(&mut stack, &mut root, node);
             }
             Ok(Event::Text(event)) => {
@@ -507,7 +507,7 @@ fn parse_template(source: &str) -> Result<TemplateBlock, ParseError> {
                     return Err(ParseError::UnexpectedClose { tag, line: 0 });
                 }
 
-                let node = build_template_node(open.tag, open.attributes, open.children);
+                let node = build_template_node(open.tag, open.attributes, open.children)?;
                 push_template_node(&mut stack, &mut root, node);
             }
             Ok(Event::Eof) => break,
@@ -575,7 +575,7 @@ fn parse_xml_attributes(
     Ok(attrs)
 }
 
-/// Returns true if the attribute name is an HTML event handler (`onclick`, `oninput`, etc.).
+/// Returns true if the attribute name is an `on...` event handler (`onclick`, `oninput`, etc.).
 fn is_event_attr(name: &str) -> bool {
     name.len() > 2 && name.starts_with("on") && name[2..].chars().all(|c| c.is_ascii_alphabetic())
 }
@@ -673,21 +673,29 @@ fn build_template_node(
     tag: String,
     attributes: Vec<Attribute>,
     children: Vec<TemplateNode>,
-) -> TemplateNode {
+) -> Result<TemplateNode, ParseError> {
     // Control-flow nodes produced by preprocess_control_flow.
     if tag == "mesh-for" {
         let item_name = find_static_attr(&attributes, "item").unwrap_or_default();
         let iterable = find_static_attr(&attributes, "iterable").unwrap_or_default();
-        return TemplateNode::For(ForNode {
+        return Ok(TemplateNode::For(ForNode {
             item_name,
             iterable,
             children,
-        });
+        }));
     }
     if tag == "mesh-if" {
-        return build_if_node(children);
+        return Ok(build_if_node(children));
     }
     // mesh-ifthen / mesh-else remain as Element so build_if_node can extract them.
+    if tag == "mesh-ifthen" || tag == "mesh-else" {
+        return Ok(TemplateNode::Element(ElementNode {
+            tag,
+            tag_kind: crate::template::SourceTag::Unknown,
+            attributes,
+            children,
+        }));
+    }
 
     if tag == "slot" {
         let name = attributes.iter().find_map(|attribute| {
@@ -701,21 +709,31 @@ fn build_template_node(
             }
         });
 
-        return TemplateNode::Slot(SlotNode { name });
+        return Ok(TemplateNode::Slot(SlotNode { name }));
+    }
+
+    let tag_kind = crate::template::SourceTag::from_tag_name(&tag);
+    if tag_kind != crate::template::SourceTag::Unknown {
+        return Ok(TemplateNode::Element(ElementNode {
+            tag,
+            tag_kind,
+            attributes,
+            children,
+        }));
     }
 
     if tag.chars().next().is_some_and(char::is_uppercase) {
-        return TemplateNode::Component(ComponentRef {
+        return Ok(TemplateNode::Component(ComponentRef {
             name: tag,
             props: attributes,
             children,
-        });
+        }));
     }
 
-    TemplateNode::Element(ElementNode {
-        tag,
-        attributes,
-        children,
+    Err(ParseError::InvalidTemplate {
+        message: format!(
+            "unknown UI tag <{tag}>; use MESH primitives like <box>, <row>, <column>, <text>, <button>, <input>, <slider>, <icon>, semantic tags like <TextInput>, <PasswordInput>, <SearchInput>, <NumberInput>, or a PascalCase component tag"
+        ),
     })
 }
 
@@ -744,6 +762,7 @@ fn build_if_node(children: Vec<TemplateNode>) -> TemplateNode {
     if branches.is_empty() {
         return TemplateNode::Element(ElementNode {
             tag: "box".into(),
+            tag_kind: crate::template::SourceTag::LegacyBox,
             attributes: vec![],
             children: else_children,
         });
@@ -1228,7 +1247,7 @@ mod tests {
     fn parse_minimal_component() {
         let source = r#"
 <template>
-  <span>Hello</span>
+  <text>Hello</text>
 </template>
 "#;
         let file = parse_component(source).unwrap();
@@ -1238,13 +1257,27 @@ mod tests {
     }
 
     #[test]
+    fn rejects_removed_html_compat_tags() {
+        let source = r#"
+<template>
+  <div>Hello</div>
+</template>
+"#;
+        let err = parse_component(source).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown UI tag <div>"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn parse_full_component() {
         let source = r#"
 <template>
-  <div>
-    <span class="title">{ title }</span>
+  <box>
+    <text class="title">{ title }</text>
     <button onclick="onTap">Click me</button>
-  </div>
+  </box>
 </template>
 
 <script lang="luau">
@@ -1314,14 +1347,14 @@ role = "region"
     fn parse_expression_interpolation() {
         let source = r#"
 <template>
-  <span>Time: { formatTime(time) }</span>
+  <text>Time: { formatTime(time) }</text>
 </template>
 "#;
         let file = parse_component(source).unwrap();
         let tmpl = file.template.unwrap();
         match &tmpl.root[0] {
             TemplateNode::Element(el) => {
-                assert_eq!(el.tag, "span");
+                assert_eq!(el.tag, "text");
                 assert!(!el.children.is_empty());
             }
             _ => panic!("expected element"),
@@ -1332,7 +1365,7 @@ role = "region"
     fn parse_style_tokens_and_literals() {
         let source = r#"
 <style>
-div {
+box {
     gap: 8px;
     padding: token(spacing.md);
     background: var(--bg);
@@ -1454,7 +1487,7 @@ div {
     fn script_source_passed_through_unchanged() {
         let source = r#"
 <template>
-  <span>{title}</span>
+  <text>{title}</text>
 </template>
 
 <script lang="luau">
@@ -1528,12 +1561,52 @@ mesh.service.on("audio", "sync_audio_state")
     }
 
     #[test]
+    fn parse_semantic_input_tags() {
+        let source = r#"
+<template>
+  <Panel>
+    <TextInput value="{name}"/>
+    <PasswordInput value="{secret}"/>
+    <SearchInput value="{query}"/>
+    <NumberInput value="{count}"/>
+    <EmailInput value="{email}"/>
+    <UrlInput value="{website}"/>
+  </Panel>
+</template>
+"#;
+        let file = parse_component(source).unwrap();
+        let tmpl = file.template.unwrap();
+        let TemplateNode::Element(root) = &tmpl.root[0] else {
+            panic!("expected root element");
+        };
+        let tags: Vec<_> = root
+            .children
+            .iter()
+            .map(|child| match child {
+                TemplateNode::Element(el) => el.tag.as_str(),
+                _ => panic!("expected input element"),
+            })
+            .collect();
+        assert_eq!(
+            tags,
+            [
+                "TextInput",
+                "PasswordInput",
+                "SearchInput",
+                "NumberInput",
+                "EmailInput",
+                "UrlInput",
+            ]
+        );
+    }
+
+    #[test]
     fn parse_named_slot() {
         let source = r#"
 <template>
-  <div>
+  <box>
     <slot name="sidebar"/>
-  </div>
+  </box>
 </template>
 "#;
         let file = parse_component(source).unwrap();
@@ -1593,18 +1666,18 @@ mesh.service.on("audio", "sync_audio_state")
     fn parse_for_loop() {
         let source = r#"
 <template>
-  <div>
+  <box>
     {#for item in items}
-      <span>{item.name}</span>
+      <text>{item.name}</text>
     {/for}
-  </div>
+  </box>
 </template>
 "#;
         let file = parse_component(source).unwrap();
         let tmpl = file.template.unwrap();
         match &tmpl.root[0] {
             TemplateNode::Element(el) => {
-                assert_eq!(el.tag, "div");
+                assert_eq!(el.tag, "box");
                 assert_eq!(el.children.len(), 1);
                 match &el.children[0] {
                     TemplateNode::For(f) => {
@@ -1623,13 +1696,13 @@ mesh.service.on("audio", "sync_audio_state")
     fn parse_if_else() {
         let source = r#"
 <template>
-  <div>
+  <box>
     {#if show}
-      <span>visible</span>
+      <text>visible</text>
     {:else}
-      <span>hidden</span>
+      <text>hidden</text>
     {/if}
-  </div>
+  </box>
 </template>
 "#;
         let file = parse_component(source).unwrap();
@@ -1654,25 +1727,25 @@ mesh.service.on("audio", "sync_audio_state")
     fn parse_if_elif_else() {
         let source = r#"
 <template>
-  <div>
+  <box>
     {#if a}
-      <span>a</span>
+      <text>a</text>
     {:else if b}
-      <span>b</span>
+      <text>b</text>
     {:else}
-      <span>c</span>
+      <text>c</text>
     {/if}
-  </div>
+  </box>
 </template>
 "#;
         let file = parse_component(source).unwrap();
         let tmpl = file.template.unwrap();
-        let div = match &tmpl.root[0] {
+        let root = match &tmpl.root[0] {
             TemplateNode::Element(el) => el,
             other => panic!("expected element, got {other:?}"),
         };
         // Outer if: condition "a"
-        let outer = match &div.children[0] {
+        let outer = match &root.children[0] {
             TemplateNode::If(n) => n,
             other => panic!("expected IfNode, got {other:?}"),
         };
@@ -1691,24 +1764,24 @@ mesh.service.on("audio", "sync_audio_state")
     fn parse_for_inside_if() {
         let source = r#"
 <template>
-  <div>
+  <box>
     {#if items and #items > 0}
       {#for item in items}
-        <span>{item.name}</span>
+        <text>{item.name}</text>
       {/for}
     {:else}
-      <span>empty</span>
+      <text>empty</text>
     {/if}
-  </div>
+  </box>
 </template>
 "#;
         let file = parse_component(source).unwrap();
         let tmpl = file.template.unwrap();
-        let div = match &tmpl.root[0] {
+        let root = match &tmpl.root[0] {
             TemplateNode::Element(el) => el,
             other => panic!("expected element, got {other:?}"),
         };
-        let if_node = match &div.children[0] {
+        let if_node = match &root.children[0] {
             TemplateNode::If(n) => n,
             other => panic!("expected IfNode, got {other:?}"),
         };

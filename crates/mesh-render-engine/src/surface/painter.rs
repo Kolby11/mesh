@@ -24,13 +24,24 @@ impl FrontendRenderEngine {
     }
 
     pub fn render_tree(&self, root: &WidgetNode, buffer: &mut PixelBuffer, scale: f32) {
+        self.render_tree_at(root, buffer, scale, 0.0, 0.0);
+    }
+
+    pub fn render_tree_at(
+        &self,
+        root: &WidgetNode,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        offset_x: f32,
+        offset_y: f32,
+    ) {
         let clip = ClipRect {
             x: 0,
             y: 0,
             width: buffer.width as i32,
             height: buffer.height as i32,
         };
-        self.render_node(root, buffer, scale, 0.0, 0.0, clip);
+        self.render_node(root, buffer, scale, offset_x, offset_y, clip);
     }
 
     fn render_node(
@@ -326,6 +337,11 @@ impl FrontendRenderEngine {
     ) {
         let style = &node.computed_style;
         let value = node.attributes.get("value").cloned().unwrap_or_default();
+        let input_type = node
+            .attributes
+            .get("type")
+            .map(|value| value.as_str())
+            .unwrap_or("text");
         let placeholder = node
             .attributes
             .get("placeholder")
@@ -335,12 +351,17 @@ impl FrontendRenderEngine {
             .attributes
             .get("_mesh_focused")
             .is_some_and(|value| value == "true");
-        let text = if value.is_empty() {
-            &placeholder
+        let display_value = if input_type == "password" && !value.is_empty() {
+            "*".repeat(value.chars().count())
         } else {
-            &value
+            value.clone()
         };
-        let text_color = if value.is_empty() {
+        let text = if display_value.is_empty() {
+            placeholder.as_str()
+        } else {
+            display_value.as_str()
+        };
+        let text_color = if display_value.is_empty() {
             dim_color(style.color, 0.6)
         } else {
             style.color

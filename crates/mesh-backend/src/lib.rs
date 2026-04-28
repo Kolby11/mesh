@@ -1,23 +1,39 @@
-use super::types::{ServiceCommandMsg, ServiceEvent, ShellMessage};
-/// Generic backend plugin service runner.
-///
-/// Loads a backend plugin's Luau script via `BackendScriptContext`, then runs
-/// an async loop that drives polling and command dispatch. Core is not aware of
-/// what the plugin does — it just wires the event bus.
 use mesh_scripting::BackendScriptContext;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-pub(super) async fn spawn_backend_service(
+#[derive(Debug, Clone)]
+pub struct BackendServiceCommand {
+    pub command: String,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackendServiceUpdate {
+    pub service: String,
+    pub source_plugin: String,
+    pub payload: serde_json::Value,
+}
+
+/// Run a backend plugin script and publish service updates.
+///
+/// Core owns plugin discovery and channel wiring; this crate owns the Luau
+/// backend execution loop and polling/command dispatch policy.
+pub async fn spawn_backend_service(
     plugin_id: String,
     service_name: String,
+    capabilities: Vec<String>,
     script_source: String,
-    tx: mpsc::UnboundedSender<ShellMessage>,
-    mut cmd_rx: mpsc::UnboundedReceiver<ServiceCommandMsg>,
+    tx: mpsc::UnboundedSender<BackendServiceUpdate>,
+    mut cmd_rx: mpsc::UnboundedReceiver<BackendServiceCommand>,
 ) {
-    let mut ctx = BackendScriptContext::new(&plugin_id);
+    let mut ctx = BackendScriptContext::new_with_capabilities(&plugin_id, capabilities);
     if let Err(e) = ctx.load_script(&script_source) {
         tracing::error!("{plugin_id} failed to load backend script: {e}");
+        return;
+    }
+    if let Err(e) = ctx.call_init() {
+        tracing::error!("{plugin_id} failed to initialize backend script: {e}");
         return;
     }
 
@@ -33,11 +49,11 @@ pub(super) async fn spawn_backend_service(
                     continue;
                 }
                 last_payload = Some(payload.clone());
-                if tx.send(ShellMessage::Service(ServiceEvent::Updated {
+                if tx.send(BackendServiceUpdate {
                     service: service_name.clone(),
                     source_plugin: plugin_id.clone(),
                     payload,
-                })).is_err() {
+                }).is_err() {
                     break;
                 }
             }
@@ -45,11 +61,11 @@ pub(super) async fn spawn_backend_service(
                 let Some(msg) = cmd else { break };
                 if let Some(payload) = ctx.run_command(&msg.command, &msg.payload) {
                     last_payload = Some(payload.clone());
-                    if tx.send(ShellMessage::Service(ServiceEvent::Updated {
+                    if tx.send(BackendServiceUpdate {
                         service: service_name.clone(),
                         source_plugin: plugin_id.clone(),
                         payload,
-                    })).is_err() {
+                    }).is_err() {
                         break;
                     }
                 }

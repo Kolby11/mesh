@@ -4,11 +4,11 @@
 
 
 <template>
-  <section class="launcher">
-    <span class="title">{headline}</span>
+  <column class="launcher">
+    <text class="title">{headline}</text>
     <input class="search" type="text" placeholder="Search apps" />
-    <span class="status">{statusMessage}</span>
-    <div class="results">
+    <text class="status">{statusMessage}</text>
+    <box class="results">
       <button class="result" onclick={onLaunchTerminal}>Terminal</button>
       <button class="result" onclick={onLaunchFiles}>{t(results.files)}</button>
       <button class="result" onclick={onLaunchBrowser}>{t(results.browser)}</button>
@@ -17,8 +17,8 @@
       <button class="result" onclick={onLaunchSettings}>Settings</button>
       <button class="result" onclick={onLaunchMusic}>Music</button>
       <button class="result" onclick={onLaunchMessages}>Messages</button>
-    </div>
-  </section>
+    </box>
+  </column>
 </template>
 
 <style>

@@ -78,20 +78,20 @@ end
 ## Template Structure
 
 ```mesh
-<section class="network-widget">
-  <div class="network-section">
-    <div class="section-title">WiFi Networks</div>
-    <div class="network-list">
+<column class="network-widget">
+  <box class="network-section">
+    <box class="section-title">WiFi Networks</box>
+    <box class="network-list">
       <!-- WiFi networks list with conditional rendering -->
-    </div>
-  </div>
-  <div class="network-section">
-    <div class="section-title">Bluetooth Devices</div>
-    <div class="network-list">
+    </box>
+  </box>
+  <box class="network-section">
+    <box class="section-title">Bluetooth Devices</box>
+    <box class="network-list">
       <!-- Bluetooth devices list -->
-    </div>
-  </div>
-</section>
+    </box>
+  </box>
+</column>
 ```
 
 ## Event Handling

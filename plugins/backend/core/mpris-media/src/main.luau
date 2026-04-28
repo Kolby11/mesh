@@ -2,9 +2,11 @@
 -- This keeps the plugin loadable while the real MPRIS integration
 -- is still being implemented in Lua.
 
-mesh.service.set_poll_interval(30000)
-
 local warned = false
+
+function init()
+    mesh.service.set_poll_interval(30000)
+end
 
 function on_poll()
     if not warned then

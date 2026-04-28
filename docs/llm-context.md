@@ -13,11 +13,11 @@ downward — lower crates know nothing about higher ones.
 ```
 mesh-cli
   └─ mesh-core          ← shell orchestrator, owns the main event loop
-       ├─ mesh-component-backend  ← compiles + runs .mesh frontend plugins
+       ├─ mesh-render-engine ← compiles .mesh frontend plugins and paints WidgetNode trees
        │    ├─ mesh-component     ← parser for .mesh single-file components
-       │    └─ mesh-scripting     ← Luau bridge (frontend transition layer + backend runtime)
-       ├─ mesh-renderer  ← paints WidgetNode trees into pixel buffers
        │    └─ mesh-ui   ← layout engine, style resolver, WidgetNode
+       ├─ mesh-backend   ← Luau backend plugin polling and command runtime
+       │    └─ mesh-scripting     ← Luau host APIs and script state bridge
        ├─ mesh-service   ← interface/service registry (InterfaceRegistry)
        ├─ mesh-plugin    ← manifest parsing (Manifest, plugin.json / mesh.toml)
        ├─ mesh-theme     ← token-based theming (ThemeEngine, Theme)
@@ -38,10 +38,10 @@ mesh-cli
 | `mesh-core`              | `Shell` in `shell/mod.rs` — plugin host and shell orchestrator; `FrontendSurfaceComponent`, `ShellComponent` trait, `CoreRequest`, `CoreEvent` |
 | `mesh-plugin`            | `Manifest`, `PluginType`, `SurfaceLayoutSection` in `manifest.rs`; `PluginInstance` in `lifecycle.rs`                                          |
 | `mesh-component`         | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>`, `<schema>` blocks                                                   |
-| `mesh-component-backend` | `CompiledFrontendPlugin`, `FrontendCatalog`, `FrontendCompositionResolver`                                                                     |
-| `mesh-scripting`         | `ScriptContext`, `BackendScriptContext`, `ScriptState`, `LocaleBoundState` — the only crate crossing the UI/service boundary                   |
+| `mesh-render-engine`     | `CompiledFrontendPlugin`, `FrontendCompositionResolver`, `RenderEngine`, `PixelBuffer`, `SharedTextMeasurer`, `LayerSurfaceConfig`             |
+| `mesh-backend`           | `spawn_backend_service`, `BackendServiceCommand`, `BackendServiceUpdate`                                                                       |
+| `mesh-scripting`         | `ScriptContext`, `BackendScriptContext`, `ScriptState`, `LocaleBoundState`                                                                     |
 | `mesh-ui`                | `WidgetNode`, `LayoutRect`, `StyleContext`, `StyleResolver`, `VariableStore`, `ElementState`                                                   |
-| `mesh-renderer`          | `Painter`, `PixelBuffer`, `SharedTextMeasurer`, `LayerShellBackend`, `LayerSurfaceConfig`                                                      |
 | `mesh-service`           | `InterfaceRegistry`, `ServiceRegistry`, `InterfaceProvider`, `canonical_interface_name`                                                        |
 | `mesh-theme`             | `ThemeEngine`, `Theme`, `default_theme()`, `load_theme_from_path()`                                                                            |
 | `mesh-wayland`           | `ShellSurface` trait, `Layer`, `Edge`, `KeyboardMode`, `StubSurface`                                                                           |
@@ -116,7 +116,7 @@ Surface layout defaults live in `plugin.json`, **not** in Rust. `mesh-core` read
 
 1. `mesh-cli` → `Shell::run()` in `mesh-core/src/shell.rs`
 2. Shell discovers plugins via `plugin_search_paths()` (workspace, `/usr/share/mesh`, `~/.local/share/mesh`)
-3. Each plugin dir is loaded from manifest metadata; frontend plugins are compiled via `compile_frontend_plugin()`, backend plugins are hosted as Luau entrypoints
+3. Each plugin dir is loaded from manifest metadata; frontend plugins are compiled via `mesh-render-engine`, backend plugins are hosted by `mesh-backend`
 4. `FrontendSurfaceComponent::new()` is created per surface plugin:
    - reads `plugin.json` manifest → `surface_layout_from_manifest()` for layout defaults
    - reads `config/settings.json` → user overrides applied on top of manifest defaults
@@ -160,7 +160,7 @@ backend plugin (mesh.toml, provides = "mesh.audio")
 
 | Task                           | Where to start                                                                                                         |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| Add a CSS property             | `mesh-ui/src/style.rs` (parse), `mesh-renderer/src/painter.rs` (paint)                                                 |
+| Add a CSS property             | `mesh-ui/src/style.rs` (parse), `mesh-render-engine/src/surface/painter.rs` (paint)                                    |
 | Add a new surface plugin       | Create `plugins/frontend/core/<name>/`, `plugin.json` with `"type": "surface"`, `src/main.mesh`                        |
 | Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core/src/shell.rs`; manifest's `surface_layout` section                      |
 | Add a service (backend plugin) | `plugins/backend/core/<name>/`, `plugin.json` + `src/main.luau`, implement the interface contract in the plugin script |
@@ -191,9 +191,9 @@ The full pipeline:
 <icon name="..."> in .mesh template
   → parser (mesh-component/src/parser.rs) — already works
   → WidgetNode { tag: "icon", attributes: { name, size } }
-  → painter (mesh-renderer/src/painter.rs:138) — reads name/src/size attrs
+  → painter (mesh-render-engine/src/surface/painter.rs:138) — reads name/src/size attrs
   → resolve_icon_path(name, size) in mesh-icon/src/lib.rs — BROKEN (see fix 1)
-  → draw_icon_from_path(buffer, path, ...) in mesh-renderer/src/icon.rs — BROKEN for SVG (see fix 2)
+  → draw_icon_from_path(buffer, path, ...) in mesh-render-engine/src/surface/icon.rs — BROKEN for SVG (see fix 2)
 ```
 
 ### Fix 1 — XDG icon resolution (`crates/mesh-icon/src/lib.rs`)
@@ -217,10 +217,10 @@ The fixed resolver must:
 
 Prefer PNG over SVG when both exist at the requested size; prefer SVG (scalable) when no PNG matches the size exactly. Return `None` if nothing is found — do not panic or log a warning on every miss.
 
-### Fix 2 — SVG rasterization (`crates/mesh-renderer/src/icon.rs`)
+### Fix 2 — SVG rasterization (`crates/mesh-render-engine/src/surface/icon.rs`)
 
 The `"svg"` match arm is an empty TODO. To fix it:
-1. Add `resvg = "0.44"` to `crates/mesh-renderer/Cargo.toml`
+1. Add `resvg = "0.44"` to `crates/mesh-render-engine/Cargo.toml`
 2. In the `"svg"` arm:
    ```rust
    "svg" => {
@@ -258,7 +258,7 @@ The `"svg"` match arm is an empty TODO. To fix it:
    ```
    `resvg` re-exports `usvg` and `tiny_skia`, so no extra dependencies are needed beyond `resvg`.
 
-### Fix 3 — Remove the purple placeholder (`crates/mesh-component-backend/src/lib.rs`)
+### Fix 3 — Remove the purple placeholder (`crates/mesh-render-engine/src/style.rs`)
 
 Find the `"icon"` arm in `default_style_for_tag()` (around line 1128). It currently sets `background_color = #7f67be` and `border_radius = 9`. This purple box is a debug placeholder — it masks broken icons by always showing something.
 
@@ -275,7 +275,7 @@ Replace with:
 
 Size defaults remain (18px) because without a `size` attribute the painter uses `w.max(h)` which needs to be non-zero.
 
-### Fix 4 — Add decoded image caching (`crates/mesh-renderer/src/icon.rs`)
+### Fix 4 — Add decoded image caching (`crates/mesh-render-engine/src/surface/icon.rs`)
 
 `draw_icon_from_path` currently calls `image::open(path)` on every paint frame. With a 250ms poll interval, this runs ~4 times per second per icon. Add a static cache:
 

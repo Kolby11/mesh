@@ -2,15 +2,18 @@ pub mod accessibility;
 pub mod events;
 pub mod layout;
 pub mod style;
-/// UI runtime for MESH.
+/// UI model and algorithms for MESH.
 ///
-/// This crate owns the widget tree, layout computation, style resolution,
-/// event dispatch, and accessibility tree. It represents what should be
-/// on screen but does not paint pixels.
+/// This crate owns the shared frontend intermediate representation:
+/// `WidgetNode`, computed style data, layout computation, event primitives,
+/// and accessibility tree data. It represents what should be on screen but
+/// does not compile `.mesh` files, execute scripts, paint pixels, or present
+/// Wayland/dev-window surfaces.
 ///
 /// **Separation boundary**: this crate does NOT depend on `mesh-service`,
-/// `mesh-wayland`, the shell render stack in `mesh-core`, or `mesh-scripting`. Frontends connect
-/// to backends only through bindings injected by the scripting layer.
+/// `mesh-wayland`, `mesh-render-engine`, or `mesh-scripting`. Frontend
+/// rendering orchestration lives in `mesh-render-engine`; core shell wiring
+/// lives in `mesh-core`.
 pub mod tree;
 
 pub use accessibility::{
@@ -21,7 +24,8 @@ pub use layout::{LayoutEngine, LayoutRect, TextMeasurer};
 pub use style::{
     AlignContent, AlignItems, AlignSelf, Color, ComputedStyle, Corners, Dimension, Display, Edges,
     FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow, Position, StyleContext,
-    StyleResolver, TextAlign, TextDirection, TextOverflow, TransitionProperties, TransitionStyle,
+    StyleResolver, TextAlign, TextDirection, TextOverflow, TransitionEasing, TransitionProperties,
+    TransitionStyle,
 };
 pub use tree::{ElementState, NodeId, WidgetNode};
 

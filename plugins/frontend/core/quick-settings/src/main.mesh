@@ -1,30 +1,30 @@
 <template>
-  <section class="quick-settings">
-    <div class="header">
-      <span class="title">Quick Settings</span>
+  <column class="quick-settings">
+    <box class="header">
+      <text class="title">Quick Settings</text>
       <button class="close-button" onclick={onClose} title="Close quick settings" aria-label="Close quick settings">Close</button>
-    </div>
-    <div class="chips">
+    </box>
+    <box class="chips">
       <button class="chip" onclick={onToggleWiFi} title="Toggle WiFi" aria-label="Toggle WiFi">Wi-Fi</button>
       <button class="chip" onclick={onToggleBluetooth} title="Toggle Bluetooth" aria-label="Toggle Bluetooth">Bluetooth</button>
       <button class="chip wide">Do Not Disturb</button>
-    </div>
-    <div class="body">
-      <div class="nav-rail">
+    </box>
+    <box class="body">
+      <box class="nav-rail">
         <button class="nav-btn" onclick={onSelectWifi} title="Wi-Fi settings" aria-label="Wi-Fi settings">
           <icon name="network-wireless" size="18" />
-          <span class="nav-label">Wi-Fi</span>
+          <text class="nav-label">Wi-Fi</text>
         </button>
         <button class="nav-btn" onclick={onSelectBluetooth} title="Bluetooth settings" aria-label="Bluetooth settings">
           <icon name="bluetooth" size="18" />
-          <span class="nav-label">Bluetooth</span>
+          <text class="nav-label">Bluetooth</text>
         </button>
         <button class="nav-btn" onclick={onSelectAudio} title="Audio settings" aria-label="Audio settings">
           <icon name="{icon_name}" size="18" />
-          <span class="nav-label">Audio</span>
+          <text class="nav-label">Audio</text>
         </button>
-      </div>
-      <div class="drawer">
+      </box>
+      <box class="drawer">
         {#if active_section == "wifi"}
           <WifiSection />
         {/if}
@@ -35,13 +35,13 @@
           <AudioSection />
         {/if}
         {#if active_section == ""}
-          <div class="drawer-empty">
-            <span class="drawer-hint">Select a section from the left</span>
-          </div>
+          <box class="drawer-empty">
+            <text class="drawer-hint">Select a section from the left</text>
+          </box>
         {/if}
-      </div>
-    </div>
-  </section>
+      </box>
+    </box>
+  </column>
 </template>
 
 <script lang="luau">

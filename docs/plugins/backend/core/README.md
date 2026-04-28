@@ -38,6 +38,26 @@ Every backend manifest has `type = "backend"` and a `provides` block:
 }
 ```
 
+## Backend script ergonomics
+
+Backend Luau scripts now have a few conveniences that make plugin code much
+closer to the interface contract and much less dependent on magic globals:
+
+- `init()` is the required backend entrypoint and should contain startup setup
+  like poll interval registration
+- `mesh.exec(...)` and `mesh.exec_shell(...)` return a result table with
+  `success`, `stdout`, `stderr`, and `code`
+- `mesh.service.payload()` returns the full current command payload as a Lua
+  table
+- `mesh.service.has_capability("service.network.control")` checks a granted
+  capability directly from the manifest-derived runtime grants
+- `mesh.service.emit_json(value?)` accepts either JSON text or a Lua table
+- backend commands can be declared as either `on_command_set_volume()` or the
+  more direct `set_volume()`
+
+The legacy globals `__exec_success`, `__exec_stdout`, and `__payload_*` still
+exist for compatibility, but new backends should prefer the helpers above.
+
 ## Selection rules
 
 1. If the user pins a backend in `~/.config/mesh/config.toml` under
