@@ -1,6 +1,6 @@
 # `@mesh/base-surface`
 
-Composable base surface used to test dependency-backed widget imports inside a
+Composable base surface used to test dependency-backed widget tags inside a
 single top-level surface.
 
 - **Type:** `surface`
@@ -10,7 +10,7 @@ single top-level surface.
 
 - Direct frontend composition through required plugin dependencies:
   `@mesh/base-launcher-widget` and `@mesh/base-sidebar-widget`
-- Host markup that imports exported component tags directly:
+- Host markup that uses explicitly imported component tags:
   `<BaseLauncher/>` and `<BaseSidebar/>`
 - Two extension slots: `main` and `sidebar`
 - Surface placement and startup visibility coming from

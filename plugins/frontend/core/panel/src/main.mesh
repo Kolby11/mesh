@@ -132,21 +132,3 @@ end
     font-size: token(typography.size.sm);
 }
 </style>
-
-<schema>
-[clock_format]
-type = "enum"
-values = ["12h", "24h"]
-default = "24h"
-description = "Clock display format"
-
-[show_seconds]
-type = "boolean"
-default = false
-description = "Show seconds in clock"
-
-[show_battery_percent]
-type = "boolean"
-default = true
-description = "Show battery percentage"
-</schema>

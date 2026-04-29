@@ -42,7 +42,7 @@ frontend plugins decide when to publish them and how the surface should react.
 `color.surface`, `color.on-surface`, `spacing.sm`, `spacing.md`, `spacing.lg`,
 `typography.size.lg`.
 
-## Accessibility (`<meta>`)
+## Accessibility
 
-- `role = "dialog"`
-- `label = "Quick settings"`
+- role: `dialog`
+- label: `Quick settings`

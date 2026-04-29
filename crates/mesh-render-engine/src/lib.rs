@@ -7,9 +7,9 @@ pub mod surface;
 mod tags;
 
 use mesh_component::ComponentFile;
+use mesh_elements::{LayoutEngine, StyleContext, StyleResolver, VariableStore, WidgetNode};
 use mesh_plugin::Manifest;
 use mesh_theme::Theme;
-use mesh_ui::{LayoutEngine, StyleContext, StyleResolver, VariableStore, WidgetNode};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -90,6 +90,8 @@ pub struct CompiledFrontendPlugin {
     /// Local single-file components shipped in `src/components/*.mesh` inside
     /// the plugin directory. Keyed by filename stem (e.g. `settings-button`).
     pub local_components: std::collections::HashMap<String, mesh_component::ComponentFile>,
+    /// Explicit component plugin imports keyed by template alias.
+    pub plugin_component_imports: std::collections::HashMap<String, String>,
 }
 
 impl CompiledFrontendPlugin {
@@ -129,7 +131,7 @@ impl CompiledFrontendPlugin {
         mode: FrontendRenderMode,
         instance_key: &str,
         composition: Option<&dyn FrontendCompositionResolver>,
-        measurer: Option<&dyn mesh_ui::TextMeasurer>,
+        measurer: Option<&dyn mesh_elements::TextMeasurer>,
     ) -> WidgetNode {
         let mut root = WidgetNode::new("surface");
         root.attributes
@@ -141,12 +143,6 @@ impl CompiledFrontendPlugin {
             FrontendRenderMode::Embedded => style::embedded_root_style(),
         };
 
-        let manifest_has_role = self
-            .manifest
-            .accessibility
-            .as_ref()
-            .and_then(|accessibility| accessibility.role.as_ref())
-            .is_some();
         if let Some(accessibility) = &self.manifest.accessibility {
             if let Some(role) = accessibility.role.as_deref() {
                 root.accessibility.role = accessibility::parse_accessibility_role(role);
@@ -159,19 +155,6 @@ impl CompiledFrontendPlugin {
                 .description
                 .clone()
                 .or_else(|| self.manifest.package.description.clone());
-        }
-        if let Some(meta) = &self.component.meta {
-            if let Some(role) = &meta.role {
-                if !manifest_has_role {
-                    root.accessibility.role = role.clone();
-                }
-            }
-            if root.accessibility.label.is_none() {
-                root.accessibility.label = meta.label.clone();
-            }
-            if root.accessibility.description.is_none() {
-                root.accessibility.description = meta.description.clone();
-            }
         }
 
         let resolver = StyleResolver::new(theme);
@@ -231,7 +214,7 @@ mod tests {
 
     struct MapStore(HashMap<String, serde_json::Value>);
 
-    impl mesh_ui::VariableStore for MapStore {
+    impl mesh_elements::VariableStore for MapStore {
         fn get(&self, name: &str) -> Option<serde_json::Value> {
             self.0.get(name).cloned()
         }
@@ -337,6 +320,7 @@ mod tests {
             source_path: std::path::PathBuf::from("test.mesh"),
             component: plugin,
             local_components: Default::default(),
+            plugin_component_imports: Default::default(),
         };
         let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&store));
         let texts = collect_text_content(&tree);
@@ -350,7 +334,7 @@ mod tests {
         );
     }
 
-    fn collect_text_content(node: &mesh_ui::WidgetNode) -> Vec<String> {
+    fn collect_text_content(node: &mesh_elements::WidgetNode) -> Vec<String> {
         let mut out = Vec::new();
         if let Some(c) = node.attributes.get("content") {
             if !c.is_empty() {

@@ -19,7 +19,7 @@ mesh-service = { workspace = true }
 mesh-render-engine = { workspace = true }
 mesh-backend = { workspace = true }
 mesh-debug = { workspace = true }
-mesh-ui = { workspace = true }
+mesh-elements = { workspace = true }
 mesh-scripting = { workspace = true }
 
 tokio = { workspace = true }

@@ -16,9 +16,20 @@ logic still lives in the plugin.
 Frontend composition now happens in two ways:
 
 - Dependency-backed component imports: add a frontend plugin to
-  `dependencies.plugins`, then use the tag exported by its
-  `plugin.json.exports.component.tag` in `<template>` markup
+  `dependencies.plugins`, then import the plugin ID in the `<script>` block
+  and use the imported PascalCase alias in `<template>` markup
 - Slot hosting via `provides_slots` and `slot_contributions`
+
+Built-in template primitives are lowercase (`<row>`, `<button>`, `<text>`).
+Custom component tags are PascalCase (`<CalendarCard />`) so component
+boundaries are visually distinct from MESH primitives. They must be imported
+explicitly:
+
+```luau
+import CalendarCard from "@mesh/calendar-card"
+import DetailsPanel from "./components/details-panel.mesh"
+import audio from "mesh.audio@>=1.0"
+```
 
 If you create a reusable frontend component, export its custom tag explicitly in
 `plugin.json.exports.component.tag` so other plugins can consume it as a normal
@@ -80,9 +91,7 @@ these blocks:
 | `<template>` | XHTML-like markup describing the UI tree. Dynamic attributes use `{}` and event handlers use `onclick={handler}`-style attributes. |
 | `<script lang="luau">` | Luau code implementing state, explicit `mesh.service.bind(...)` and `mesh.service.on(...)` subscriptions, and event handlers. |
 | `<style>` | CSS-like styling. Token references use `token(group.name)` and inherit the active theme. Supports `overflow`, `overflow-x`, `overflow-y`, and container breakpoints via `@container (min-width: 640px) { ... }`. |
-| `<schema>` | TOML-style declaration of the plugin's public settings. The shell validates user input and can auto-generate a settings UI. |
 | `<i18n>` | Translations scoped to the component (optional). |
-| `<meta>` | Accessibility and display metadata: `name`, `description`, `role`, `label`. |
 
 ## Core surfaces
 

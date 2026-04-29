@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 mesh-component = { workspace = true }
-mesh-ui = { workspace = true }
+mesh-elements = { workspace = true }
 mesh-theme = { workspace = true }
 mesh-locale = { workspace = true }
 mesh-config = { workspace = true }

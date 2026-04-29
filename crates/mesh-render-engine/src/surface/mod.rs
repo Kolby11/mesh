@@ -75,7 +75,7 @@ impl Default for RenderEngine {
 }
 
 pub fn paint_frontend_tree(
-    tree: &mesh_ui::WidgetNode,
+    tree: &mesh_elements::WidgetNode,
     buffer: &mut PixelBuffer,
     scale: f32,
     tooltip: Option<(&str, f32, f32)>,
@@ -84,7 +84,7 @@ pub fn paint_frontend_tree(
 }
 
 pub fn paint_frontend_tree_at(
-    tree: &mesh_ui::WidgetNode,
+    tree: &mesh_elements::WidgetNode,
     buffer: &mut PixelBuffer,
     scale: f32,
     offset_x: f32,

@@ -1,6 +1,6 @@
 [package]
-name = "mesh-ui"
-description = "Frontend UI model, layout, style, events, and accessibility primitives"
+name = "mesh-elements"
+description = "Core element model, layout, style, events, and accessibility primitives"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

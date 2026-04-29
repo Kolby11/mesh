@@ -1,10 +1,10 @@
 use crate::host_api::{HostApiManifest, InterfaceProxy};
 /// Script execution context — one per plugin/component instance.
 use mesh_capability::CapabilitySet;
+use mesh_elements::VariableStore;
 use mesh_locale::LocaleEngine;
 use mesh_service::contract::InterfaceTypeDef;
 use mesh_service::{InterfaceCatalog, InterfaceResolution};
-use mesh_ui::VariableStore;
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -15,6 +15,13 @@ use std::sync::{Arc, Mutex};
 pub struct PublishedEvent {
     pub channel: String,
     pub payload: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptInterfaceImport {
+    pub alias: String,
+    pub interface: String,
+    pub version: Option<String>,
 }
 
 /// Errors from the scripting runtime.
@@ -255,6 +262,15 @@ impl ScriptContext {
     /// Load a script source. Executes the script, registering functions and
     /// seeding reactive state from `mesh.state.set` calls at the top level.
     pub fn load_script(&mut self, source: &str) -> Result<(), ScriptError> {
+        self.load_script_with_interface_imports(source, &[])
+    }
+
+    /// Load a script source after installing explicit interface imports as Lua globals.
+    pub fn load_script_with_interface_imports(
+        &mut self,
+        source: &str,
+        imports: &[ScriptInterfaceImport],
+    ) -> Result<(), ScriptError> {
         self.interface_bindings.clear();
         self.shared_interface_bindings.lock().unwrap().clear();
         self.shared_published_events.lock().unwrap().clear();
@@ -262,6 +278,7 @@ impl ScriptContext {
         self.runtime_service_bindings.lock().unwrap().clear();
         self.runtime_service_subscriptions.lock().unwrap().clear();
         self.install_host_api()?;
+        self.install_interface_imports(imports)?;
         self.lua
             .load(source)
             .set_name(&self.plugin_id)
@@ -383,7 +400,7 @@ impl ScriptContext {
         let mesh_interfaces = self.lua.create_table().map_err(lua_err)?;
         let mesh_services = self.lua.create_table().map_err(lua_err)?;
         let mesh_events = self.lua.create_table().map_err(lua_err)?;
-        let mesh_ui = self.lua.create_table().map_err(lua_err)?;
+        let mesh_ui_api = self.lua.create_table().map_err(lua_err)?;
         let mesh_log = self.lua.create_table().map_err(lua_err)?;
 
         let tracked = Arc::clone(&self.tracked_state_keys);
@@ -528,7 +545,7 @@ impl ScriptContext {
             )
             .map_err(lua_err)?;
 
-        mesh_ui
+        mesh_ui_api
             .set(
                 "request_redraw",
                 self.lua
@@ -582,7 +599,7 @@ impl ScriptContext {
         mesh.set("interfaces", mesh_interfaces).map_err(lua_err)?;
         mesh.set("services", mesh_services).map_err(lua_err)?;
         mesh.set("events", mesh_events).map_err(lua_err)?;
-        mesh.set("ui", mesh_ui).map_err(lua_err)?;
+        mesh.set("ui", mesh_ui_api).map_err(lua_err)?;
         mesh.set("log", mesh_log).map_err(lua_err)?;
         globals.set("mesh", mesh).map_err(lua_err)?;
         globals
@@ -609,6 +626,59 @@ impl ScriptContext {
             })
             .map_err(lua_err)?;
         globals.set("require", require).map_err(lua_err)?;
+        Ok(())
+    }
+
+    fn install_interface_imports(
+        &mut self,
+        imports: &[ScriptInterfaceImport],
+    ) -> Result<(), ScriptError> {
+        if imports.is_empty() {
+            return Ok(());
+        }
+
+        let manifest = HostApiManifest::from_capabilities(&self.capabilities);
+        let globals = self.lua.globals();
+        for import in imports {
+            let canonical = InterfaceProxy::canonical_name(&import.interface);
+            let readable = canonical == "mesh.theme" && manifest.has_theme_read
+                || canonical == "mesh.locale" && manifest.has_locale_read
+                || manifest.interface_capabilities.contains(&canonical)
+                || !canonical.starts_with("mesh.");
+            if canonical.starts_with("mesh.") && !readable {
+                return Err(ScriptError::CapabilityDenied(canonical));
+            }
+
+            let resolution = self
+                .interface_catalog
+                .resolve(&canonical, import.version.as_deref());
+            if resolution.contract.is_none() || resolution.provider.is_none() {
+                return Err(ScriptError::InterfaceUnavailable(format!(
+                    "{}{}",
+                    canonical,
+                    import
+                        .version
+                        .as_deref()
+                        .map(|value| format!(" ({value})"))
+                        .unwrap_or_default()
+                )));
+            }
+
+            self.shared_interface_bindings
+                .lock()
+                .unwrap()
+                .insert(import.alias.clone(), resolution.clone());
+            let proxy = create_interface_proxy(
+                &self.lua,
+                resolution,
+                Arc::clone(&self.runtime_service_bindings),
+                Arc::clone(&self.runtime_service_subscriptions),
+                Arc::clone(&self.shared_published_events),
+            )
+            .map_err(lua_err)?;
+            globals.set(import.alias.as_str(), proxy).map_err(lua_err)?;
+        }
+
         Ok(())
     }
 
@@ -950,6 +1020,47 @@ end
                 .get("mesh.audio")
                 .map(|resolution| resolution.requested.as_str()),
             Some("mesh.audio")
+        );
+    }
+
+    #[test]
+    fn explicit_interface_import_installs_proxy_global() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script_with_interface_imports(
+            r#"
+function init()
+    audio:bind("percent", "audio_percent")
+    audio:on_change("sync_audio_state")
+end
+
+function sync_audio_state()
+end
+"#,
+            &[ScriptInterfaceImport {
+                alias: "audio".into(),
+                interface: "mesh.audio".into(),
+                version: Some(">=1.0".into()),
+            }],
+        )
+        .unwrap();
+        ctx.call_init().unwrap();
+
+        assert_eq!(
+            ctx.interface_bindings
+                .get("audio")
+                .map(|resolution| resolution.requested.as_str()),
+            Some("mesh.audio")
+        );
+        assert_eq!(
+            ctx.runtime_service_bindings.lock().unwrap()[0].service,
+            "audio"
+        );
+        assert_eq!(
+            ctx.runtime_service_subscriptions.lock().unwrap()[0].service,
+            "audio"
         );
     }
 

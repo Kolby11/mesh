@@ -12,12 +12,12 @@
 </template>
 
 <script lang="luau">
-import "@src/components/meta-label" as MetaLabel
-import "@src/components/meta-pill" as MetaPill
-import "@src/components/settings-button" as SettingsButton
-import "@src/components/volume-button" as VolumeButton
-import "@src/components/battery-button" as BatteryButton
-import "@src/components/theme-button" as ThemeButton
+import MetaLabel from "./components/meta-label.mesh"
+import MetaPill from "./components/meta-pill.mesh"
+import SettingsButton from "./components/settings-button.mesh"
+import VolumeButton from "./components/volume-button.mesh"
+import BatteryButton from "./components/battery-button.mesh"
+import ThemeButton from "./components/theme-button.mesh"
 mesh.state.set("icon_name", "audio-volume-muted")
 mesh.state.set("theme_icon", "weather-clear-night")
 mesh.state.set("theme_tooltip", "Switch to light theme")

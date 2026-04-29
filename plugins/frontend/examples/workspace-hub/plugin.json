@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "surface",
   "api_version": "0.1",
-  "description": "Example host surface showing dependency-backed component imports and slot extension points.",
+  "description": "Example host surface showing dependency-backed component tags and slot extension points.",
   "authors": ["MESH Project"],
   "compatibility": {
     "mesh": ">=0.1.0"

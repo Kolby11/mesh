@@ -45,12 +45,9 @@
 </template>
 
 <script lang="luau">
-import "@src/components/wifi-section" as WifiSection
-import "@src/components/bluetooth-section" as BluetoothSection
-import "@src/components/audio-section" as AudioSection
-import "@src/components/wifi-item" as WiFiItem
-import "@src/components/bluetooth-item" as BluetoothItem
-
+import WifiSection from "./components/wifi-section.mesh"
+import BluetoothSection from "./components/bluetooth-section.mesh"
+import AudioSection from "./components/audio-section.mesh"
 mesh.state.set("active_section", "wifi")
 
 mesh.state.set("icon_name", "audio-volume-muted")

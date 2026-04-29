@@ -6,7 +6,7 @@ pub mod backend;
 /// orchestration on top of `BackendScriptContext`.
 ///
 /// **Separation enforcement**:
-/// - `mesh-ui` cannot import `mesh-service`
+/// - `mesh-elements` cannot import `mesh-service`
 /// - the shell render stack cannot import `mesh-service`
 /// - Frontend rendering goes through `mesh-render-engine`
 /// - Backend polling and command routing goes through `mesh-backend`
@@ -19,4 +19,7 @@ pub mod context;
 pub mod host_api;
 
 pub use backend::{BackendScriptContext, BackendScriptError};
-pub use context::{LocaleBoundState, PublishedEvent, ScriptContext, ScriptError, ScriptState};
+pub use context::{
+    LocaleBoundState, PublishedEvent, ScriptContext, ScriptError, ScriptInterfaceImport,
+    ScriptState,
+};

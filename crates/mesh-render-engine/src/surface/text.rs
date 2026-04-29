@@ -5,8 +5,8 @@ use cosmic_text::{
     Align, Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Style as CosmicStyle, SwashCache,
     Weight, Wrap,
 };
-use mesh_ui::Color;
-use mesh_ui::style::TextAlign;
+use mesh_elements::Color;
+use mesh_elements::style::TextAlign;
 use std::cell::RefCell;
 use std::sync::Mutex;
 
@@ -198,7 +198,7 @@ impl Default for TextRenderer {
     }
 }
 
-impl mesh_ui::TextMeasurer for TextRenderer {
+impl mesh_elements::TextMeasurer for TextRenderer {
     fn measure_text(
         &self,
         text: &str,
@@ -219,7 +219,7 @@ impl mesh_ui::TextMeasurer for TextRenderer {
     }
 }
 
-impl mesh_ui::TextMeasurer for SharedTextMeasurer {
+impl mesh_elements::TextMeasurer for SharedTextMeasurer {
     fn measure_text(
         &self,
         text: &str,

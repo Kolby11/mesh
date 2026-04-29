@@ -5,6 +5,46 @@ It covers the crate map, plugin layout, key data flows, and common task entry po
 
 ---
 
+## CRITICAL: Terminology
+
+Use these terms precisely. A lot of MESH design depends on keeping this
+hierarchy clear:
+
+- **Element**: a base UI primitive exposed by MESH core. Examples include
+  `box`, `row`, `column`, `button`, `icon`, `input`, `slider`, `switch`,
+  `checkbox`, `text`, `image`, and `separator`. Elements have predefined
+  runtime behavior: layout participation, style resolution, accessibility
+  metadata, event routing, render-derived metrics, and the Lua-facing API that
+  scripts and LSP types should expose.
+- **Component**: a user-authored reusable `.mesh` unit composed from base
+  elements and, optionally, other components. Components own their template,
+  Luau state and handlers, styles, schema, translations, and metadata. A
+  component is an authoring abstraction, not a built-in core primitive.
+- **Frontend plugin**: a complete frontend implementation for a specific shell
+  feature or capability. It has a `plugin.json`, entrypoint `.mesh`,
+  capabilities, settings, optional exports, and can contain multiple
+  components. For example, an audio controls frontend plugin may include
+  components for the volume mixer, mute toggle, output selector, and device
+  list.
+
+When designing Lua access or intellisense, model this as:
+
+```
+MESH core elements -> user components -> frontend plugin
+```
+
+For example, `icon` is an element with core-defined fields such as `name`,
+`src`, and `size`; `VolumeButton.mesh` is a component that composes `button`,
+`icon`, and `text`; `@mesh/audio-controls` is a frontend plugin that packages
+multiple audio-related components into a complete UI.
+
+The LSP must use the shared `mesh-elements` element model for `refs.<name>`
+completion, hover, and diagnostics. Do not duplicate the Lua-facing fields in
+LSP-only tables; the runtime and tooling should agree on what `IconElement`,
+`InputElement`, and base `MeshElement` expose.
+
+---
+
 ## Crate Map
 
 Each crate in `crates/` has a single responsibility. The dependency arrow goes
@@ -15,7 +55,7 @@ mesh-cli
   └─ mesh-core          ← shell orchestrator, owns the main event loop
        ├─ mesh-render-engine ← compiles .mesh frontend plugins and paints WidgetNode trees
        │    ├─ mesh-component     ← parser for .mesh single-file components
-       │    └─ mesh-ui   ← layout engine, style resolver, WidgetNode
+       │    └─ mesh-elements   ← core element model, layout engine, style resolver, WidgetNode
        ├─ mesh-backend   ← Luau backend plugin polling and command runtime
        │    └─ mesh-scripting     ← Luau host APIs and script state bridge
        ├─ mesh-service   ← interface/service registry (InterfaceRegistry)
@@ -37,11 +77,11 @@ mesh-cli
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mesh-core`              | `Shell` in `shell/mod.rs` — plugin host and shell orchestrator; `FrontendSurfaceComponent`, `ShellComponent` trait, `CoreRequest`, `CoreEvent` |
 | `mesh-plugin`            | `Manifest`, `PluginType`, `SurfaceLayoutSection` in `manifest.rs`; `PluginInstance` in `lifecycle.rs`                                          |
-| `mesh-component`         | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>`, `<schema>` blocks                                                   |
+| `mesh-component`         | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>`, and `<i18n>` blocks                                                   |
 | `mesh-render-engine`     | `CompiledFrontendPlugin`, `FrontendCompositionResolver`, `RenderEngine`, `PixelBuffer`, `SharedTextMeasurer`, `LayerSurfaceConfig`             |
 | `mesh-backend`           | `spawn_backend_service`, `BackendServiceCommand`, `BackendServiceUpdate`                                                                       |
 | `mesh-scripting`         | `ScriptContext`, `BackendScriptContext`, `ScriptState`, `LocaleBoundState`                                                                     |
-| `mesh-ui`                | `WidgetNode`, `LayoutRect`, `StyleContext`, `StyleResolver`, `VariableStore`, `ElementState`                                                   |
+| `mesh-elements`                | `ElementKind`, `ElementTypeDef`, `ElementSnapshot`, `WidgetNode`, `LayoutRect`, `StyleContext`, `StyleResolver`, `VariableStore`, `ElementState` |
 | `mesh-service`           | `InterfaceRegistry`, `ServiceRegistry`, `InterfaceProvider`, `canonical_interface_name`                                                        |
 | `mesh-theme`             | `ThemeEngine`, `Theme`, `default_theme()`, `load_theme_from_path()`                                                                            |
 | `mesh-wayland`           | `ShellSurface` trait, `Layer`, `Edge`, `KeyboardMode`, `StubSurface`                                                                           |
@@ -85,7 +125,8 @@ plugins/
 
 ### Frontend plugin anatomy (`plugin.json`)
 
-Every frontend plugin declares in its `plugin.json`:
+Every frontend plugin is a complete feature package. It declares in its
+`plugin.json`:
 - `type`: `"surface"` | `"widget"` | `"backend"` | `"interface"`
 - `entrypoints.main`: path to the `.mesh` single-file component
 - `settings.schema.surface.properties`: layout defaults (anchor, layer, width, height, etc.) — **user-editable**
@@ -98,15 +139,18 @@ Surface layout defaults live in `plugin.json`, **not** in Rust. `mesh-core` read
 ### `.mesh` single-file component structure
 
 ```
-<template>   ← XHTML-like markup with {expressions} and component tags
+<template>   ← XHTML-like markup with core elements, {expressions}, and component tags
 <script lang="luau">   ← Luau scripting (state, lifecycle, event handlers)
 <style>      ← CSS-like styling with token() references and @container queries
-<schema>     ← typed settings schema (optional)
 <i18n>       ← bundled translations (optional)
-<meta>       ← accessibility metadata (optional)
 ```
 
-**CRITICAL CODE STYLE**: Component files should be small and focused. Always extract layout sections, list items, and logically distinct UI blocks into their own separate components (e.g., in a `components/` subdirectory) and import them. This is especially important for items inside `{#for ...}` loops so they can encapsulate their own event state (like capturing list item IDs) instead of relying on DOM dataset attributes (which are not supported in event handlers).
+Components are reusable authoring units. They should be made from MESH core
+elements (`button`, `icon`, `input`, etc.) or other components. Do not call a
+full frontend plugin a component; the plugin is the package that owns settings,
+capabilities, manifests, and one or more components.
+
+**CRITICAL CODE STYLE**: Component files should be small and focused. Always extract layout sections, list items, and logically distinct UI blocks into their own separate components (e.g., in a `components/` subdirectory). Custom PascalCase component tags must be imported explicitly in the script block, such as `import ItemRow from "./components/item-row.mesh"`. This is especially important for items inside `{#for ...}` loops so they can encapsulate their own event state (like capturing list item IDs) instead of relying on DOM dataset attributes (which are not supported in event handlers).
 
 ---
 
@@ -160,7 +204,7 @@ backend plugin (mesh.toml, provides = "mesh.audio")
 
 | Task                           | Where to start                                                                                                         |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| Add a CSS property             | `mesh-ui/src/style.rs` (parse), `mesh-render-engine/src/surface/painter.rs` (paint)                                    |
+| Add a CSS property             | `mesh-elements/src/style.rs` (parse), `mesh-render-engine/src/surface/painter.rs` (paint)                                    |
 | Add a new surface plugin       | Create `plugins/frontend/core/<name>/`, `plugin.json` with `"type": "surface"`, `src/main.mesh`                        |
 | Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core/src/shell.rs`; manifest's `surface_layout` section                      |
 | Add a service (backend plugin) | `plugins/backend/core/<name>/`, `plugin.json` + `src/main.luau`, implement the interface contract in the plugin script |
@@ -242,7 +286,7 @@ The `"svg"` match arm is an empty TODO. To fix it:
                            buffer.set_pixel(
                                (dest_x + px as i32) as u32,
                                (dest_y + py as i32) as u32,
-                               mesh_ui::style::Color {
+                               mesh_elements::style::Color {
                                    r: data[idx],
                                    g: data[idx + 1],
                                    b: data[idx + 2],
@@ -266,9 +310,9 @@ Replace with:
 ```rust
 "icon" => {
     let mut style = ComputedStyle::default();
-    style.width = mesh_ui::Dimension::Px(18.0);
-    style.height = mesh_ui::Dimension::Px(18.0);
-    style.background_color = mesh_ui::Color::TRANSPARENT;
+    style.width = mesh_elements::Dimension::Px(18.0);
+    style.height = mesh_elements::Dimension::Px(18.0);
+    style.background_color = mesh_elements::Color::TRANSPARENT;
     style
 }
 ```

@@ -6,7 +6,7 @@
     <box class="section-list">
       {#if wifi_enabled and wifi_networks and #wifi_networks > 0}
         {#for network in wifi_networks}
-          <WiFiItem network_id="{network.id}" network_name="{network.name}" network_strength="{network.strength}" />
+          <WifiItem network_id="{network.id}" network_name="{network.name}" network_strength="{network.strength}" />
         {/for}
       {:else if wifi_enabled}
         <box class="section-message">Scanning for networks…</box>
@@ -16,6 +16,10 @@
     </box>
   </box>
 </template>
+
+<script lang="luau">
+import WifiItem from "./wifi-item.mesh"
+</script>
 
 <style>
 .section {

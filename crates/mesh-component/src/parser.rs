@@ -1,11 +1,9 @@
 /// Parser for `.mesh` single-file components.
 ///
 /// Splits the source into top-level blocks (`<template>`, `<script>`, `<style>`,
-/// `<schema>`, `<i18n>`, `<meta>`) then parses each block with parser libraries.
+/// `<i18n>`) then parses each block with parser libraries.
 use crate::{
-    ComponentFile, ScriptBlock, ScriptLang,
-    meta::MetaBlock,
-    schema::SchemaBlock,
+    ComponentFile, ComponentImport, ComponentImportTarget, ScriptBlock, ScriptLang,
     style::{ContainerQuery, Declaration, Selector, StyleBlock, StyleRule, StyleValue},
     template::*,
 };
@@ -38,14 +36,11 @@ pub enum ParseError {
     #[error("invalid style syntax at line {line}: {message}")]
     InvalidStyle { message: String, line: usize },
 
-    #[error("invalid schema TOML: {0}")]
-    InvalidSchema(#[from] toml::de::Error),
-
     #[error("invalid i18n block: {0}")]
     InvalidI18n(String),
 
-    #[error("invalid meta block: {0}")]
-    InvalidMeta(String),
+    #[error("invalid import at line {line}: {message}")]
+    InvalidImport { line: usize, message: String },
 
     #[error("unknown block <{name}> at line {line}")]
     UnknownBlock { name: String, line: usize },
@@ -54,100 +49,153 @@ pub enum ParseError {
 pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
     let blocks = extract_blocks(source)?;
 
+    let (imports, script_source) = if let Some(s) = blocks.get("script") {
+        let (imports, stripped) = extract_imports(s)?;
+        (imports, Some(stripped))
+    } else {
+        (Vec::new(), None)
+    };
+    let imported_components: std::collections::HashSet<String> = imports
+        .iter()
+        .filter(|import| {
+            matches!(
+                import.target,
+                ComponentImportTarget::ComponentLocal(_)
+                    | ComponentImportTarget::ComponentPlugin(_)
+            )
+        })
+        .map(|import| import.alias.clone())
+        .collect();
+
     let template = blocks
         .get("template")
-        .map(|s| parse_template(s))
+        .map(|s| parse_template(s, &imported_components))
         .transpose()?;
 
-    let (imports, script) = if let Some(s) = blocks.get("script") {
-        let (imports, stripped) = extract_imports(s);
-        (imports, Some(parse_script(&stripped, &blocks)))
-    } else {
-        (HashMap::new(), None)
-    };
+    let script = script_source.map(|s| parse_script(&s, &blocks));
 
     let style = blocks.get("style").map(|s| parse_style(s)).transpose()?;
-
-    let schema = blocks.get("schema").map(|s| parse_schema(s)).transpose()?;
-
-    let meta = blocks.get("meta").map(|s| parse_meta(s)).transpose()?;
 
     Ok(ComponentFile {
         imports,
         template,
         script,
         style,
-        schema,
-        meta,
     })
 }
 
-/// Extract `import "plugin-id" as Alias` lines from the script source.
-/// Returns (imports map, script with those lines removed).
-fn extract_imports(source: &str) -> (HashMap<String, String>, String) {
-    let mut imports = HashMap::new();
+fn extract_imports(source: &str) -> Result<(Vec<ComponentImport>, String), ParseError> {
+    let mut imports = Vec::new();
+    let mut aliases = std::collections::HashSet::new();
     let mut stripped = String::new();
 
-    for line in source.lines() {
+    for (index, line) in source.lines().enumerate() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("import ") {
-            // expect: import "<plugin-id>" as Alias
-            if let Some((plugin_id, alias)) = parse_import_line(rest) {
-                imports.insert(alias, plugin_id);
-                stripped.push('\n'); // preserve line count for error messages
-                continue;
+        if trimmed.starts_with("import ") {
+            let import = parse_import_line(trimmed, index + 1)?;
+            if !aliases.insert(import.alias.clone()) {
+                return Err(ParseError::InvalidImport {
+                    line: index + 1,
+                    message: format!("duplicate import alias `{}`", import.alias),
+                });
             }
+            imports.push(import);
+            stripped.push('\n');
+            continue;
         }
         stripped.push_str(line);
         stripped.push('\n');
     }
 
-    (imports, stripped)
+    Ok((imports, stripped))
 }
 
-fn parse_import_line(rest: &str) -> Option<(String, String)> {
-    // Support two forms:
-    // 1) import "@mesh/foo" as Alias
-    // 2) import Alias from "@mesh/foo"
-    let rest = rest.trim();
-
-    // form 1: starts with quoted plugin id
-    if rest.starts_with('"') || rest.starts_with('\'') {
-        let quote = rest.chars().next().unwrap();
-        let end = rest[1..].find(quote)?;
-        let plugin_id = rest[1..end + 1].to_string();
-        let after_id = rest[plugin_id.len() + 2..].trim();
-        let alias = after_id.strip_prefix("as ")?.trim().to_string();
-        if alias.is_empty() || alias.contains(|c: char| !c.is_alphanumeric() && c != '_') {
-            return None;
-        }
-        return Some((plugin_id, alias));
+fn parse_import_line(line: &str, line_number: usize) -> Result<ComponentImport, ParseError> {
+    let rest = line.strip_prefix("import ").unwrap_or(line).trim();
+    let Some((alias, source_part)) = rest.split_once(" from ") else {
+        return Err(ParseError::InvalidImport {
+            line: line_number,
+            message: "expected `import Alias from \"source\"`".into(),
+        });
+    };
+    let alias = alias.trim();
+    if !is_valid_import_alias(alias) {
+        return Err(ParseError::InvalidImport {
+            line: line_number,
+            message: format!("invalid import alias `{alias}`"),
+        });
     }
 
-    // form 2: import Alias from "plugin-id"
-    // expect: <Alias> from "<plugin-id>"
-    let parts: Vec<&str> = rest.splitn(2, " from ").collect();
-    if parts.len() == 2 {
-        let alias = parts[0].trim();
-        if alias.is_empty() || alias.contains(|c: char| !c.is_alphanumeric() && c != '_') {
-            return None;
+    let source = parse_quoted_import_source(source_part.trim()).ok_or_else(|| {
+        ParseError::InvalidImport {
+            line: line_number,
+            message: "import source must be a quoted string".into(),
         }
-        let rhs = parts[1].trim();
-        if !(rhs.starts_with('"') || rhs.starts_with('\'')) {
-            return None;
-        }
-        let quote = rhs.chars().next().unwrap();
-        let end = rhs[1..].find(quote)?;
-        let plugin_id = rhs[1..end + 1].to_string();
-        return Some((plugin_id, alias.to_string()));
-    }
+    })?;
+    let target = classify_import_target(&source).ok_or_else(|| ParseError::InvalidImport {
+        line: line_number,
+        message: format!("unsupported import source `{source}`"),
+    })?;
 
+    Ok(ComponentImport {
+        alias: alias.to_string(),
+        target,
+    })
+}
+
+fn is_valid_import_alias(alias: &str) -> bool {
+    let mut chars = alias.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn parse_quoted_import_source(source: &str) -> Option<String> {
+    let quote = source.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let end = source[1..].find(quote)?;
+    let value = source[1..end + 1].to_string();
+    if !source[end + 2..].trim().is_empty() {
+        return None;
+    }
+    Some(value)
+}
+
+fn classify_import_target(source: &str) -> Option<ComponentImportTarget> {
+    if source.starts_with("./")
+        || source.starts_with("../")
+        || source.starts_with("/")
+        || source.starts_with("@src/")
+    {
+        return Some(ComponentImportTarget::ComponentLocal(source.to_string()));
+    }
+    if source.starts_with("@mesh/") {
+        return Some(ComponentImportTarget::ComponentPlugin(source.to_string()));
+    }
+    if source.starts_with("mesh.") {
+        let (interface, version) = source
+            .split_once('@')
+            .map(|(interface, version)| (interface, Some(version.to_string())))
+            .unwrap_or((source, None));
+        if interface.len() > "mesh.".len() {
+            return Some(ComponentImportTarget::InterfaceApi {
+                interface: interface.to_string(),
+                version,
+            });
+        }
+    }
     None
 }
 
 fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
     let mut blocks = HashMap::new();
-    let known_tags = ["template", "script", "style", "schema", "i18n", "meta"];
+    let known_tags = ["template", "script", "style", "i18n"];
 
     let mut remaining = source;
     let mut line_offset = 1;
@@ -437,7 +485,10 @@ fn preprocess_template(source: &str) -> String {
     out
 }
 
-fn parse_template(source: &str) -> Result<TemplateBlock, ParseError> {
+fn parse_template(
+    source: &str,
+    imported_components: &std::collections::HashSet<String>,
+) -> Result<TemplateBlock, ParseError> {
     let cf_processed = preprocess_control_flow(source.trim());
     let preprocessed = preprocess_template(&cf_processed);
     let wrapped = format!("<mesh-root>{}</mesh-root>", preprocessed);
@@ -467,7 +518,7 @@ fn parse_template(source: &str) -> Result<TemplateBlock, ParseError> {
                     continue;
                 }
                 let attrs = parse_xml_attributes(&reader, &event)?;
-                let node = build_template_node(tag, attrs, Vec::new())?;
+                let node = build_template_node(tag, attrs, Vec::new(), imported_components)?;
                 push_template_node(&mut stack, &mut root, node);
             }
             Ok(Event::Text(event)) => {
@@ -507,7 +558,12 @@ fn parse_template(source: &str) -> Result<TemplateBlock, ParseError> {
                     return Err(ParseError::UnexpectedClose { tag, line: 0 });
                 }
 
-                let node = build_template_node(open.tag, open.attributes, open.children)?;
+                let node = build_template_node(
+                    open.tag,
+                    open.attributes,
+                    open.children,
+                    imported_components,
+                )?;
                 push_template_node(&mut stack, &mut root, node);
             }
             Ok(Event::Eof) => break,
@@ -673,6 +729,7 @@ fn build_template_node(
     tag: String,
     attributes: Vec<Attribute>,
     children: Vec<TemplateNode>,
+    imported_components: &std::collections::HashSet<String>,
 ) -> Result<TemplateNode, ParseError> {
     // Control-flow nodes produced by preprocess_control_flow.
     if tag == "mesh-for" {
@@ -722,7 +779,23 @@ fn build_template_node(
         }));
     }
 
+    if is_reserved_pascal_primitive(&tag) {
+        return Err(ParseError::InvalidTemplate {
+            message: format!(
+                "built-in UI tag <{tag}> must be lowercase; use <{}> instead",
+                lowercase_primitive_name(&tag)
+            ),
+        });
+    }
+
     if tag.chars().next().is_some_and(char::is_uppercase) {
+        if !imported_components.contains(&tag) {
+            return Err(ParseError::InvalidTemplate {
+                message: format!(
+                    "component <{tag}> is not imported; add `import {tag} from \"...\"` to the script block"
+                ),
+            });
+        }
         return Ok(TemplateNode::Component(ComponentRef {
             name: tag,
             props: attributes,
@@ -732,9 +805,77 @@ fn build_template_node(
 
     Err(ParseError::InvalidTemplate {
         message: format!(
-            "unknown UI tag <{tag}>; use MESH primitives like <box>, <row>, <column>, <text>, <button>, <input>, <slider>, <icon>, semantic tags like <TextInput>, <PasswordInput>, <SearchInput>, <NumberInput>, or a PascalCase component tag"
+            "unknown UI tag <{tag}>; use lowercase MESH primitives like <box>, <row>, <column>, <text>, <button>, <input>, <text-input>, <slider>, <icon>, or a PascalCase custom component tag"
         ),
     })
+}
+
+fn is_reserved_pascal_primitive(tag: &str) -> bool {
+    matches!(
+        tag,
+        "Panel"
+            | "Row"
+            | "Column"
+            | "Stack"
+            | "ScrollView"
+            | "Spacer"
+            | "Separator"
+            | "Text"
+            | "Label"
+            | "Icon"
+            | "Image"
+            | "Button"
+            | "IconButton"
+            | "Input"
+            | "TextInput"
+            | "PasswordInput"
+            | "SearchInput"
+            | "NumberInput"
+            | "EmailInput"
+            | "UrlInput"
+            | "Slider"
+            | "Switch"
+            | "Checkbox"
+            | "List"
+            | "ListItem"
+            | "Slot"
+            | "Surface"
+            | "Widget"
+    )
+}
+
+fn lowercase_primitive_name(tag: &str) -> &'static str {
+    match tag {
+        "ScrollView" => "scroll-view",
+        "IconButton" => "icon-button",
+        "TextInput" => "text-input",
+        "PasswordInput" => "password-input",
+        "SearchInput" => "search-input",
+        "NumberInput" => "number-input",
+        "EmailInput" => "email-input",
+        "UrlInput" => "url-input",
+        "ListItem" => "list-item",
+        "Panel" => "panel",
+        "Row" => "row",
+        "Column" => "column",
+        "Stack" => "stack",
+        "Spacer" => "spacer",
+        "Separator" => "separator",
+        "Text" => "text",
+        "Label" => "label",
+        "Icon" => "icon",
+        "Image" => "image",
+        "Button" => "button",
+        "Input" => "input",
+        "Slider" => "slider",
+        "Switch" => "switch",
+        "Checkbox" => "checkbox",
+        "List" => "list",
+        "Slot" => "slot",
+        "Surface" => "surface",
+        "Widget" => "widget",
+        _ => "unknown",
+    }
 }
 
 /// Build a nested `IfNode` tree from the `mesh-ifthen` / `mesh-else` children
@@ -762,7 +903,7 @@ fn build_if_node(children: Vec<TemplateNode>) -> TemplateNode {
     if branches.is_empty() {
         return TemplateNode::Element(ElementNode {
             tag: "box".into(),
-            tag_kind: crate::template::SourceTag::LegacyBox,
+            tag_kind: crate::template::SourceTag::Box,
             attributes: vec![],
             children: else_children,
         });
@@ -1228,17 +1369,6 @@ fn classify_style_value(value: &str) -> StyleValue {
     }
 }
 
-fn parse_schema(source: &str) -> Result<SchemaBlock, ParseError> {
-    let block: SchemaBlock = toml::from_str(source)?;
-    Ok(block)
-}
-
-fn parse_meta(source: &str) -> Result<MetaBlock, ParseError> {
-    let block: MetaBlock =
-        toml::from_str(source).map_err(|e| ParseError::InvalidMeta(e.to_string()))?;
-    Ok(block)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1299,13 +1429,6 @@ button {
 }
 </style>
 
-<schema>
-[greeting]
-type = "string"
-default = "Hello"
-description = "The greeting text"
-</schema>
-
 <i18n>
 [en]
 greeting = "Hello"
@@ -1313,12 +1436,6 @@ greeting = "Hello"
 [fr]
 greeting = "Bonjour"
 </i18n>
-
-<meta>
-name = "Greeter"
-description = "A simple greeting component"
-role = "region"
-</meta>
 "#;
         let file = parse_component(source).unwrap();
 
@@ -1335,12 +1452,6 @@ role = "region"
             StyleValue::Token(name) => assert_eq!(name, "color.on-surface"),
             other => panic!("expected token, got {other:?}"),
         }
-
-        let schema = file.schema.unwrap();
-        assert!(schema.fields.contains_key("greeting"));
-
-        let meta = file.meta.unwrap();
-        assert_eq!(meta.name.unwrap(), "Greeter");
     }
 
     #[test]
@@ -1564,14 +1675,14 @@ mesh.service.on("audio", "sync_audio_state")
     fn parse_semantic_input_tags() {
         let source = r#"
 <template>
-  <Panel>
-    <TextInput value="{name}"/>
-    <PasswordInput value="{secret}"/>
-    <SearchInput value="{query}"/>
-    <NumberInput value="{count}"/>
-    <EmailInput value="{email}"/>
-    <UrlInput value="{website}"/>
-  </Panel>
+  <panel>
+    <text-input value="{name}"/>
+    <password-input value="{secret}"/>
+    <search-input value="{query}"/>
+    <number-input value="{count}"/>
+    <email-input value="{email}"/>
+    <url-input value="{website}"/>
+  </panel>
 </template>
 "#;
         let file = parse_component(source).unwrap();
@@ -1590,13 +1701,128 @@ mesh.service.on("audio", "sync_audio_state")
         assert_eq!(
             tags,
             [
-                "TextInput",
-                "PasswordInput",
-                "SearchInput",
-                "NumberInput",
-                "EmailInput",
-                "UrlInput",
+                "text-input",
+                "password-input",
+                "search-input",
+                "number-input",
+                "email-input",
+                "url-input",
             ]
+        );
+    }
+
+    #[test]
+    fn rejects_uppercase_builtin_tags() {
+        let source = r#"
+<template>
+  <Text>Not a builtin primitive</Text>
+</template>
+"#;
+        let err = parse_component(source).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("built-in UI tag <Text> must be lowercase; use <text> instead"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parses_pascal_case_custom_components() {
+        let source = r#"
+<template>
+  <BatteryWidget percent="{percent}"/>
+</template>
+<script lang="luau">
+import BatteryWidget from "./components/battery-widget.mesh"
+</script>
+"#;
+        let file = parse_component(source).unwrap();
+        assert_eq!(file.imports.len(), 1);
+        let tmpl = file.template.unwrap();
+        match &tmpl.root[0] {
+            TemplateNode::Component(component) => assert_eq!(component.name, "BatteryWidget"),
+            other => panic!("expected component ref, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_unimported_pascal_case_custom_components() {
+        let source = r#"
+<template>
+  <BatteryWidget percent="{percent}"/>
+</template>
+"#;
+        let err = parse_component(source).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("component <BatteryWidget> is not imported"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parses_and_strips_explicit_imports() {
+        let source = r#"
+<template>
+  <BatteryWidget />
+  <VolumeBar />
+</template>
+<script lang="luau">
+import BatteryWidget from "./components/battery-widget.mesh"
+import VolumeBar from "@mesh/volume-bar"
+import audio from "mesh.audio@>=1.0"
+mesh.state.set("ready", true)
+</script>
+"#;
+        let file = parse_component(source).unwrap();
+        assert_eq!(file.imports.len(), 3);
+        assert!(matches!(
+            file.imports[0].target,
+            ComponentImportTarget::ComponentLocal(_)
+        ));
+        assert!(matches!(
+            file.imports[1].target,
+            ComponentImportTarget::ComponentPlugin(_)
+        ));
+        assert!(matches!(
+            file.imports[2].target,
+            ComponentImportTarget::InterfaceApi { .. }
+        ));
+        let script = file.script.unwrap();
+        assert!(!script.source.contains("import BatteryWidget"));
+        assert_eq!(script.source.lines().count(), 5);
+    }
+
+    #[test]
+    fn rejects_api_import_used_as_component_tag() {
+        let source = r#"
+<template>
+  <Audio />
+</template>
+<script lang="luau">
+import Audio from "mesh.audio"
+</script>
+"#;
+        let err = parse_component(source).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("component <Audio> is not imported"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_import_aliases() {
+        let source = r#"
+<script lang="luau">
+import Thing from "./components/one.mesh"
+import Thing from "./components/two.mesh"
+</script>
+"#;
+        let err = parse_component(source).unwrap_err();
+        assert!(
+            err.to_string().contains("duplicate import alias `Thing`"),
+            "unexpected error: {err}"
         );
     }
 

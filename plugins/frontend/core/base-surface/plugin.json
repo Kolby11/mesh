@@ -101,7 +101,7 @@
           },
           "subtitle": {
             "type": "string",
-            "default": "Direct widget imports on the left, a companion sidebar on the right.",
+            "default": "Direct widget tags on the left, a companion sidebar on the right.",
             "description": "Secondary text shown under the heading."
           }
         }

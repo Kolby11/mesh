@@ -25,7 +25,7 @@ A two-column row:
 
 The default core build fills those slots via:
 
-- direct dependency-backed component imports:
+- direct dependency-backed component tags:
   `<NotificationFeed/>` from `@mesh/notification-feed`
   and `<NotificationSidebar/>` from `@mesh/notification-sidebar`
 
@@ -37,7 +37,7 @@ plugins can still contribute to either slot without forking the surface.
 `color.surface`, `color.on-surface`, `color.surface-variant`, `spacing.sm`,
 `spacing.md`, `spacing.lg`, `radius.md`, `typography.size.lg`.
 
-## Accessibility (`<meta>`)
+## Accessibility
 
-- `role = "region"`
-- `label = "Notification center"`
+- role: `region`
+- label: `Notification center`

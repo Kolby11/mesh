@@ -43,7 +43,7 @@ fallback presentation live in the plugin script.
 | `mesh.power` | Reading `battery().level` |
 | `mesh.network` | Reading `active_connection()` |
 
-## Settings (`<schema>`)
+## Settings
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -56,7 +56,7 @@ fallback presentation live in the plugin script.
 Uses `color.surface`, `color.on-surface`, `spacing.sm`, `spacing.md`,
 `typography.size.md`, `typography.size.sm`.
 
-## Accessibility (`<meta>`)
+## Accessibility
 
-- `role = "toolbar"`
-- `label = "System panel"`
+- role: `toolbar`
+- label: `System panel`

@@ -197,9 +197,8 @@ Schemas are JSON. The keys supported today:
 
 ## Frontend plugin schemas
 
-Frontend plugins declare their settings inline in `<schema>` inside the
-`.mesh` file (existing panel example) *or* in a sibling `settings.schema.json`
-next to the manifest. Both are accepted; the JSON file wins if both exist.
+Frontend plugins declare their settings in `plugin.json` or in a sibling
+`settings.schema.json` next to the manifest. The JSON file wins if both exist.
 
 ## Generated UI
 

@@ -14,7 +14,7 @@ organization, not a special discovery boundary.
 - `@mesh/workspace-hub`
   - Surface plugin
   - Declares required plugin dependencies on five widget plugins
-  - Uses exported component tags directly in template markup
+  - Imports dependency-backed component tags directly in template markup
   - Exposes three slot points for third-party extension
 
 ### Exported widget dependencies

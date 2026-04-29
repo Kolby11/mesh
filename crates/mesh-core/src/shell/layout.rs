@@ -1,5 +1,5 @@
+use mesh_elements::WidgetNode;
 use mesh_plugin::manifest::SurfaceLayoutSection;
-use mesh_ui::WidgetNode;
 use std::collections::HashMap;
 
 // ScrollOffsetState is defined in component.rs but layout functions need it.
@@ -362,7 +362,7 @@ fn content_bounds_with_clip(
     offset_y: f32,
     clip: Option<ContentBounds>,
 ) -> Option<ContentBounds> {
-    if node.computed_style.display == mesh_ui::style::Display::None {
+    if node.computed_style.display == mesh_elements::style::Display::None {
         return None;
     }
 

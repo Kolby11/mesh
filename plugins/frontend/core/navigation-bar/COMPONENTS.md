@@ -5,7 +5,7 @@ This plugin has been split into smaller presentational components inside `src/co
 `meta-label.mesh` — presentational component rendering the "current" label.
 `meta-pill.mesh` — presentational pill used for dashboard/section labeling.
 
-The main `src/main.mesh` now uses `<battery-button />` in place of the inline battery markup.
+The main `src/main.mesh` now uses PascalCase custom component tags such as `<BatteryButton />` in place of inline button markup. Built-in template primitives stay lowercase, for example `<button>`, `<icon>`, and `<text>`.
 
 Notes:
 - Components rely on the parent's global reactive state. They don't declare or set those globals.

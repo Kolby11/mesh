@@ -11,7 +11,7 @@ mesh-debug = { workspace = true }
 mesh-icon = { workspace = true }
 mesh-plugin = { workspace = true }
 mesh-theme = { workspace = true }
-mesh-ui = { workspace = true }
+mesh-elements = { workspace = true }
 mesh-wayland = { workspace = true }
 
 cosmic-text = "0.18"

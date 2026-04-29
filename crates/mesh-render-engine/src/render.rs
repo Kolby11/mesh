@@ -9,10 +9,10 @@ use crate::{FrontendCompositionResolver, LayeredStore};
 use mesh_component::template::{
     Attribute, AttributeValue, ComponentRef, ElementNode, SourceTag, TemplateNode,
 };
+use mesh_elements::accessibility::AccessibilityInfo;
+use mesh_elements::{ComputedStyle, StyleContext, StyleResolver, VariableStore, WidgetNode};
 use mesh_plugin::Manifest;
 use mesh_theme::Theme;
-use mesh_ui::accessibility::AccessibilityInfo;
-use mesh_ui::{ComputedStyle, StyleContext, StyleResolver, VariableStore, WidgetNode};
 
 use std::collections::HashMap;
 
@@ -426,7 +426,7 @@ fn build_component_ref(
 
     let fake_element = ElementNode {
         tag: "box".into(),
-        tag_kind: SourceTag::LegacyBox,
+        tag_kind: SourceTag::Box,
         attributes: component.props.clone(),
         children: component.children.clone(),
     };
@@ -493,11 +493,11 @@ fn normalize_event_handler_name(name: &str) -> String {
 fn accessibility_for_tag(tag: &str) -> AccessibilityInfo {
     let mut info = AccessibilityInfo::default();
     info.role = match tag {
-        "button" => mesh_component::meta::AccessibilityRole::Button,
-        "input" => mesh_component::meta::AccessibilityRole::TextInput,
-        "slider" => mesh_component::meta::AccessibilityRole::Slider,
-        "text" => mesh_component::meta::AccessibilityRole::Label,
-        _ => mesh_component::meta::AccessibilityRole::Region,
+        "button" => mesh_elements::AccessibilityRole::Button,
+        "input" => mesh_elements::AccessibilityRole::TextInput,
+        "slider" => mesh_elements::AccessibilityRole::Slider,
+        "text" => mesh_elements::AccessibilityRole::Label,
+        _ => mesh_elements::AccessibilityRole::Region,
     };
     info.focusable = matches!(tag, "button" | "input" | "slider");
     info

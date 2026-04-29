@@ -1195,12 +1195,12 @@ mod tests {
         service::{apply_service_update, seed_service_state, service_name_from_interface},
         surface_layout::{SurfaceSizePolicy, load_frontend_plugin_settings},
     };
+    use mesh_elements::{LayoutRect, VariableStore, WidgetNode};
     use mesh_plugin::manifest::{
         CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
         ExportsSection, Manifest, PackageSection, PluginType, SurfaceLayoutSection,
     };
     use mesh_scripting::ScriptState;
-    use mesh_ui::{LayoutRect, VariableStore, WidgetNode};
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;

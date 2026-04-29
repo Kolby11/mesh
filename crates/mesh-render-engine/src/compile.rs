@@ -1,8 +1,9 @@
 use crate::CompiledFrontendPlugin;
 
-use mesh_component::parse_component;
+use mesh_component::{ComponentFile, ComponentImportTarget, parse_component};
 use mesh_plugin::{Manifest, PluginType};
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +27,9 @@ pub enum CompileFrontendError {
         #[source]
         source: mesh_component::ParseError,
     },
+
+    #[error("component import alias '{alias}' is declared with multiple targets")]
+    ConflictingImportAlias { alias: String },
 }
 
 pub fn is_frontend_plugin(manifest: &Manifest) -> bool {
@@ -55,111 +59,18 @@ pub fn compile_frontend_plugin(
         })?;
 
     let source_path = plugin_dir.join(entrypoint);
-    let source = std::fs::read_to_string(&source_path).map_err(|source| {
-        CompileFrontendError::ReadSource {
-            path: source_path.clone(),
-            source,
-        }
-    })?;
-    let mut component =
-        parse_component(&source).map_err(|source| CompileFrontendError::ParseSource {
-            path: source_path.clone(),
-            source,
-        })?;
-
-    let mut local_components: std::collections::HashMap<String, mesh_component::ComponentFile> =
-        std::collections::HashMap::new();
-    let components_dir = plugin_dir.join("src").join("components");
-    if components_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&components_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("mesh") {
-                    if let Ok(src) = std::fs::read_to_string(&path) {
-                        match parse_component(&src) {
-                            Ok(comp) => {
-                                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                                    local_components.insert(stem.to_string(), comp.clone());
-                                    let pascal = stem
-                                        .split('-')
-                                        .filter(|part| !part.is_empty())
-                                        .map(|part| {
-                                            let mut chars = part.chars();
-                                            match chars.next() {
-                                                Some(first) => {
-                                                    first.to_ascii_uppercase().to_string()
-                                                        + chars.as_str()
-                                                }
-                                                None => String::new(),
-                                            }
-                                        })
-                                        .collect::<String>();
-                                    if !pascal.is_empty() {
-                                        local_components.insert(pascal.clone(), comp.clone());
-                                    }
-
-                                    component
-                                        .imports
-                                        .entry(stem.to_string())
-                                        .or_insert_with(|| manifest.package.id.clone());
-                                    if !pascal.is_empty() {
-                                        component
-                                            .imports
-                                            .entry(pascal)
-                                            .or_insert_with(|| manifest.package.id.clone());
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                tracing::warn!(
-                                    "plugin '{}': failed to parse local component {}: {}",
-                                    manifest.package.id,
-                                    path.display(),
-                                    err
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let mut imports_to_fix = Vec::new();
-    for (alias, target) in component.imports.iter() {
-        if target.starts_with('@') {
-            imports_to_fix.push(alias.clone());
-        }
-    }
-
-    for alias in imports_to_fix {
-        if let Some(target) = component.imports.get(&alias) {
-            let rel = target.trim_start_matches('@');
-            let mut candidate = plugin_dir.join(rel);
-            if candidate.extension().is_none() {
-                candidate.set_extension("mesh");
-            }
-            if let Ok(src) = std::fs::read_to_string(&candidate) {
-                match parse_component(&src) {
-                    Ok(comp) => {
-                        local_components.insert(alias.clone(), comp);
-                    }
-                    Err(err) => tracing::warn!(
-                        "plugin '{}': failed to parse imported local component {}: {}",
-                        manifest.package.id,
-                        candidate.display(),
-                        err
-                    ),
-                }
-            }
-        }
-    }
-
-    for value in component.imports.values_mut() {
-        if value.starts_with('@') {
-            *value = manifest.package.id.clone();
-        }
-    }
+    let component = parse_component_file(&source_path)?;
+    let mut local_components: HashMap<String, ComponentFile> = HashMap::new();
+    let mut plugin_component_imports = HashMap::new();
+    let mut seen_local_paths = HashSet::new();
+    collect_imports(
+        &component,
+        &source_path,
+        plugin_dir,
+        &mut local_components,
+        &mut plugin_component_imports,
+        &mut seen_local_paths,
+    )?;
 
     tracing::info!(
         "compiled frontend plugin '{}' from {}",
@@ -172,5 +83,102 @@ pub fn compile_frontend_plugin(
         source_path,
         component,
         local_components,
+        plugin_component_imports,
     })
+}
+
+fn parse_component_file(path: &Path) -> Result<ComponentFile, CompileFrontendError> {
+    let source =
+        std::fs::read_to_string(path).map_err(|source| CompileFrontendError::ReadSource {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    parse_component(&source).map_err(|source| CompileFrontendError::ParseSource {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn collect_imports(
+    component: &ComponentFile,
+    component_path: &Path,
+    plugin_dir: &Path,
+    local_components: &mut HashMap<String, ComponentFile>,
+    plugin_component_imports: &mut HashMap<String, String>,
+    seen_local_paths: &mut HashSet<PathBuf>,
+) -> Result<(), CompileFrontendError> {
+    for import in &component.imports {
+        match &import.target {
+            ComponentImportTarget::ComponentLocal(source) => {
+                let target_path = resolve_local_component_path(source, component_path, plugin_dir);
+                let parsed = parse_component_file(&target_path)?;
+                insert_local_component(
+                    &import.alias,
+                    target_path.clone(),
+                    parsed.clone(),
+                    local_components,
+                )?;
+                let canonical = target_path.canonicalize().unwrap_or(target_path.clone());
+                if seen_local_paths.insert(canonical) {
+                    collect_imports(
+                        &parsed,
+                        &target_path,
+                        plugin_dir,
+                        local_components,
+                        plugin_component_imports,
+                        seen_local_paths,
+                    )?;
+                }
+            }
+            ComponentImportTarget::ComponentPlugin(plugin_id) => {
+                insert_plugin_component_import(&import.alias, plugin_id, plugin_component_imports)?;
+            }
+            ComponentImportTarget::InterfaceApi { .. } => {}
+        }
+    }
+    Ok(())
+}
+
+fn insert_local_component(
+    alias: &str,
+    path: PathBuf,
+    component: ComponentFile,
+    local_components: &mut HashMap<String, ComponentFile>,
+) -> Result<(), CompileFrontendError> {
+    local_components.insert(alias.to_string(), component);
+    tracing::debug!(
+        "registered local component import {alias} from {}",
+        path.display()
+    );
+    Ok(())
+}
+
+fn insert_plugin_component_import(
+    alias: &str,
+    plugin_id: &str,
+    plugin_component_imports: &mut HashMap<String, String>,
+) -> Result<(), CompileFrontendError> {
+    if let Some(existing) = plugin_component_imports.get(alias) {
+        if existing != plugin_id {
+            return Err(CompileFrontendError::ConflictingImportAlias {
+                alias: alias.to_string(),
+            });
+        }
+    }
+    plugin_component_imports.insert(alias.to_string(), plugin_id.to_string());
+    Ok(())
+}
+
+fn resolve_local_component_path(source: &str, component_path: &Path, plugin_dir: &Path) -> PathBuf {
+    let mut path = if let Some(rest) = source.strip_prefix("@src/") {
+        plugin_dir.join("src").join(rest)
+    } else if source.starts_with('/') {
+        PathBuf::from(source)
+    } else {
+        component_path.parent().unwrap_or(plugin_dir).join(source)
+    };
+    if path.extension().is_none() {
+        path.set_extension("mesh");
+    }
+    path
 }

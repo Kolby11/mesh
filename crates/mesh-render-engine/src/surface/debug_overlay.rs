@@ -7,8 +7,8 @@ use super::buffer::PixelBuffer;
 use super::painter::{ClipRect, fill_rect_clipped, fill_rounded_rect_clipped};
 use super::text::TextRenderer;
 use mesh_debug::{DebugSnapshot, DebugTab};
-use mesh_ui::style::Color;
-use mesh_ui::tree::WidgetNode;
+use mesh_elements::style::Color;
+use mesh_elements::tree::WidgetNode;
 
 const PANEL_WIDTH: i32 = 320;
 const HEADER_H: i32 = 36;
@@ -608,7 +608,7 @@ impl DebugOverlay {
             size,
             weight,
             1.3,
-            mesh_ui::style::TextAlign::Left,
+            mesh_elements::style::TextAlign::Left,
             color,
             buffer,
             x,
@@ -641,7 +641,7 @@ impl DebugOverlay {
             size,
             weight,
             1.3,
-            mesh_ui::style::TextAlign::Left,
+            mesh_elements::style::TextAlign::Left,
             color,
             buffer,
             x,
@@ -670,7 +670,7 @@ fn paint_bounds_recursive(
     clip: ClipRect,
     depth: usize,
 ) {
-    use mesh_ui::style::Display;
+    use mesh_elements::style::Display;
     if node.computed_style.display == Display::None {
         return;
     }

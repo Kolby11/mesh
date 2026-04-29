@@ -16,7 +16,7 @@ pub(crate) fn json_value_to_string(value: serde_json::Value) -> String {
 /// - `x .. y` - string concatenation
 /// - `t("key")` / `t(variable)` - translation
 /// - `variable` / `a.b.c` - variable lookup
-pub(crate) fn eval_expr(expr: &str, store: &dyn mesh_ui::VariableStore) -> String {
+pub(crate) fn eval_expr(expr: &str, store: &dyn mesh_elements::VariableStore) -> String {
     let expr = expr.trim();
 
     if expr.starts_with('(') && expr.ends_with(')') && balanced_parens(expr) {
@@ -184,7 +184,7 @@ fn balanced_parens(expr: &str) -> bool {
     depth == 0
 }
 
-fn eval_path(expr: &str, store: &dyn mesh_ui::VariableStore) -> String {
+fn eval_path(expr: &str, store: &dyn mesh_elements::VariableStore) -> String {
     if let Some(value) = store.get(expr) {
         return json_value_to_string(value);
     }

@@ -13,13 +13,14 @@ members = [
     "crates/mesh-runtime",
     "crates/mesh-service",
     "crates/mesh-component",
-    "crates/mesh-ui",
+    "crates/mesh-elements",
     "crates/mesh-icon",
     "crates/mesh-scripting",
     "crates/mesh-render-engine",
     "crates/mesh-backend",
     "crates/mesh-cli",
     "crates/mesh-debug",
+    "crates/mesh-lsp",
 ]
 
 [workspace.package]
@@ -41,7 +42,7 @@ mesh-wayland = { path = "crates/mesh-wayland" }
 mesh-runtime = { path = "crates/mesh-runtime" }
 mesh-service = { path = "crates/mesh-service" }
 mesh-component = { path = "crates/mesh-component" }
-mesh-ui = { path = "crates/mesh-ui" }
+mesh-elements = { path = "crates/mesh-elements" }
 mesh-icon = { path = "crates/mesh-icon" }
 mesh-scripting = { path = "crates/mesh-scripting" }
 mesh-render-engine = { path = "crates/mesh-render-engine" }

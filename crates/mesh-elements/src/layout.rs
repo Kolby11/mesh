@@ -8,7 +8,7 @@ use crate::style::{
 };
 use crate::tree::WidgetNode;
 
-/// Trait for measuring text dimensions. Implemented outside `mesh-ui` (in the
+/// Trait for measuring text dimensions. Implemented outside `mesh-elements` (in the
 /// shell render stack) and injected so the layout engine can shrink-wrap text
 /// nodes without taking a direct dependency on the renderer.
 pub trait TextMeasurer {

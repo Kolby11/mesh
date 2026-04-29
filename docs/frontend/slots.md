@@ -40,8 +40,8 @@ Slot attributes:
 | `min` | Minimum expected. Below this, a placeholder / empty-state hint renders. |
 | `default` | ID of a widget to render when no contributions exist (e.g. a clock in `panel:center`). |
 
-A surface **should document its slots** in its README and in `<meta>`. This
-is the plugin's public contribution API.
+A surface **should document its slots** in its README. This is the plugin's
+public contribution API.
 
 ## Contributing a widget
 

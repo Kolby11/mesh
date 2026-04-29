@@ -15,6 +15,10 @@
   </box>
 </template>
 
+<script lang="luau">
+import BluetoothItem from "./bluetooth-item.mesh"
+</script>
+
 <style>
 .section {
     width: 100%;

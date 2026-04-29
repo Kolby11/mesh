@@ -12,7 +12,7 @@
 
     <box class="card">
       <text class="label">Composition notes</text>
-      <text>Direct imports use exported component tags.</text>
+      <text>Direct composition uses exported component tags.</text>
       <text>Slots can layer extra widgets on top later.</text>
       <text>Surface placement comes from config/settings.json.</text>
     </box>

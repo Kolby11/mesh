@@ -50,7 +50,7 @@ Translation bundles live in `config/i18n/` (`en.json`, `sk.json`).
 `spacing.sm`, `spacing.md`, `spacing.lg`, `typography.size.lg`,
 `typography.size.sm`.
 
-## Accessibility (`<meta>`)
+## Accessibility
 
-- `role = "dialog"`
-- `label = "Application launcher"`
+- role: `dialog`
+- label: `Application launcher`

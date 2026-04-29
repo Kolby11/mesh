@@ -21,6 +21,30 @@ MESH is a platform for building desktop shell experiences with:
 - localization support
 - typed external configuration
 
+## Critical terminology
+
+Use these terms precisely in code, documentation, and architecture discussions:
+
+- **Element**: a base UI primitive exposed by MESH core, such as `box`,
+  `row`, `button`, `icon`, `input`, `slider`, or `text`. Elements are the
+  built-in building blocks with predefined runtime behavior, styling hooks,
+  accessibility handling, layout participation, event handling, and Lua-facing
+  functionality.
+- **Component**: a user-authored reusable `.mesh` unit made from base elements
+  and, optionally, other components. Components encapsulate markup, Luau state
+  and handlers, styles, schema, translations, and metadata. A component is not
+  a core primitive.
+- **Frontend plugin**: a complete frontend implementation for a specific shell
+  capability or feature. A frontend plugin has a `plugin.json`, an entrypoint
+  `.mesh` file, capabilities, settings, and may contain multiple reusable
+  components. For example, an audio controls frontend plugin can contain
+  separate components for a volume mixer, output selector, mute button, and
+  device list.
+
+When modeling Lua or LSP APIs, prefer this hierarchy: core **elements** expose
+the base typed API; user **components** compose elements; **frontend plugins**
+package one or more components into a complete shell feature.
+
 ## Main goals
 
 - extensible shell platform, not hardcoded widgets
@@ -56,7 +80,7 @@ Responsible for:
 
 ### 2. Wayland frontend
 
-Responsible for shell surfaces such as:
+Responsible for frontend plugins that implement shell surfaces and widgets such as:
 
 - panel
 - launcher
@@ -98,7 +122,8 @@ function. Backend setup such as poll interval registration should happen inside
 
 ### 4. UI component format
 
-Single-file components inspired by Svelte.
+Single-file user components inspired by Svelte. Components are authored from
+MESH core elements and other components.
 
 Conceptual blocks:
 

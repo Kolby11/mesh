@@ -65,7 +65,7 @@ Every plugin has a `plugin.json` manifest at its root declaring identity,
 capabilities, dependencies, entrypoints, and its settings schema — see
 [`../installation.md`](../installation.md) for the full format. Frontend surfaces have a
 `src/main.mesh` single-file component (`<template>`, `<script lang="luau">`,
-`<style>`, `<schema>`, `<meta>`). Backends have a `src/main.luau` entrypoint
+`<style>`, `<i18n>`). Backends have a `src/main.luau` entrypoint
 that registers an interface implementation with the interface registry.
 Interface packages ship an `interface.toml` declaration instead of an
 executable entrypoint.

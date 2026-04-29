@@ -26,8 +26,8 @@ Functional now:
 - `UiTag` exists in `crates/mesh-render-engine/src/tags.rs`.
 - Source tags are lowered through `lower_source_tag()` before `WidgetNode`
   construction in `crates/mesh-render-engine/src/render.rs`.
-- Existing shipped lowercase tags still work as legacy authoring syntax.
-- PascalCase component references still work for imported/local components.
+- Built-in template primitives are lowercase.
+- PascalCase references are reserved for explicitly imported custom components.
 - CSS is parsed with `lightningcss`.
 - Supported selector shapes include tag, class, id, universal, compound, simple
   pseudo-state selectors, selector lists, and bounded container queries.
@@ -43,12 +43,12 @@ Partially functional:
   direction, but `StyleResolver` still matches the source `Selector` form.
 - The lowering boundary exists for tags, but there is not yet a complete
   `LoweredFrontend` IR with lowered templates, lowered styles, and diagnostics.
-- `Image`, `List`, `ListItem`, `Separator`, and `Spacer` lower to existing
+- `image`, `list`, `list-item`, `separator`, and `spacer` lower to existing
   primitives; they do not yet have distinct runtime/layout/render behavior.
-- `Switch` and `Checkbox` lower to an input-like primitive, but checked-state
+- `switch` and `checkbox` lower to an input-like primitive, but checked-state
   interaction and native toggle painting are not complete.
-- Input controls support text-like editing. `PasswordInput` masks its display,
-  and `NumberInput` filters typed characters lightly, but there is no cursor
+- Input controls support text-like editing. `password-input` masks its display,
+  and `number-input` filters typed characters lightly, but there is no cursor
   movement, selection, validation, or form semantics.
 
 Not functional yet:
@@ -72,7 +72,7 @@ Today the path is already close to a compiler pipeline:
   -> ComponentFile { template, script, style, ... }
   -> crates/mesh-render-engine/src/lib.rs::build_widget_tree_from_component
   -> WidgetNode tree
-  -> mesh-ui StyleResolver / LayoutEngine
+  -> mesh-elements StyleResolver / LayoutEngine
   -> mesh-core surface runtime
   -> mesh-render-engine surface painter / presentation bridge
 ```
@@ -87,9 +87,9 @@ The main transition pressure points are:
   Compiles frontend plugins and builds widget trees.
 - `crates/mesh-render-engine/src/tags.rs`
   Lowers source-level `SourceTag` values to runtime `UiTag` primitives.
-- `crates/mesh-ui/src/style.rs`
+- `crates/mesh-elements/src/style.rs`
   Style resolution is fast because selector matching is shallow and property support is bounded.
-- `crates/mesh-ui/src/layout.rs`
+- `crates/mesh-elements/src/layout.rs`
   Layout is a flexbox-like subset, not browser layout.
 - `crates/mesh-render-engine/src/surface/painter.rs`
   Rendering is by UI primitive tag, not by browser semantics.
@@ -119,7 +119,7 @@ Use three layers instead of one:
 
 Keep a source-faithful representation of what the plugin author wrote.
 
-- UI tags stay intact: `Panel`, `Row`, `Column`, `Text`, `Icon`, `Button`
+- UI tags stay intact: `panel`, `row`, `column`, `text`, `icon`, `button`
 - CSS is parsed with a real parser, including syntax we may later reject
 - source spans are preserved for diagnostics
 
@@ -170,7 +170,7 @@ This preserves performance and avoids turning shell rendering into browser emula
 - SFC outer blocks in `parse_component`
 - quick template parsing model
 - control-flow preprocessing for `{#if}` / `{#for}`
-- component references for PascalCase imports
+- component references for PascalCase tags
 
 ### What to change
 
@@ -190,32 +190,32 @@ template source
 
 Suggested source vocabulary:
 
-- `Panel`
-- `Row`
-- `Column`
-- `Text`
-- `Label`
-- `Button`
-- `Input`
-- `TextInput`
-- `PasswordInput`
-- `SearchInput`
-- `NumberInput`
-- `EmailInput`
-- `UrlInput`
-- `Slider`
-- `Switch`
-- `Checkbox`
-- `Icon`
-- `Image`
-- `ScrollView`
-- `List`
-- `ListItem`
-- `Slot`
-- `Spacer`
-- `Separator`
-- `Surface`
-- `Widget`
+- `panel`
+- `row`
+- `column`
+- `text`
+- `label`
+- `button`
+- `input`
+- `text-input`
+- `password-input`
+- `search-input`
+- `number-input`
+- `email-input`
+- `url-input`
+- `slider`
+- `switch`
+- `checkbox`
+- `icon`
+- `image`
+- `scroll-view`
+- `list`
+- `list-item`
+- `slot`
+- `spacer`
+- `separator`
+- `surface`
+- `widget`
 
 Built-in tags are not the only tags the language should allow.
 Frontend plugins should also be able to introduce custom tags by exporting a
@@ -241,33 +241,33 @@ Suggested lowered `UiTag` set:
 
 Suggested source-to-UI mapping:
 
-- `Panel`, `Row`, `Column` -> `Container`
-- `Text`, `Label` -> `Text`
-- `Button` -> `Button`
-- `Input kind="text"` -> `InputText`
-- `TextInput` or `Input type="text"` -> `InputText`
-- `PasswordInput` or `Input type="password"` -> `InputText` with masked display
-- `SearchInput` or `Input type="search"` -> `InputText`
-- `NumberInput` or `Input type="number"` -> `InputText` with numeric editing rules
-- `EmailInput` or `Input type="email"` -> `InputText`
-- `UrlInput` or `Input type="url"` -> `InputText`
-- `Slider` or `Input kind="range"` -> `InputRange`
-- `Switch`, `Checkbox` -> `Toggle`
-- `Icon` -> `Icon`
-- `Image` -> `Image`
-- `ScrollView` -> `ScrollArea`
-- `List` -> `List`
-- `ListItem` -> `ListItem`
-- `Spacer` -> `Spacer`
-- `Separator` -> `Separator`
+- `panel`, `row`, `column` -> `Container`
+- `text`, `label` -> `Text`
+- `button` -> `Button`
+- `input type="text"` -> `InputText`
+- `text-input` or `input type="text"` -> `InputText`
+- `password-input` or `input type="password"` -> `InputText` with masked display
+- `search-input` or `input type="search"` -> `InputText`
+- `number-input` or `input type="number"` -> `InputText` with numeric editing rules
+- `email-input` or `input type="email"` -> `InputText`
+- `url-input` or `input type="url"` -> `InputText`
+- `slider` or `input type="range"` -> `InputRange`
+- `switch`, `checkbox` -> `Toggle`
+- `icon` -> `Icon`
+- `image` -> `Image`
+- `scroll-view` -> `ScrollArea`
+- `list` -> `List`
+- `list-item` -> `ListItem`
+- `spacer` -> `Spacer`
+- `separator` -> `Separator`
 
 Important: the tag should not directly imply browser layout behavior.
 For example:
 
-- `Row` does mean primary horizontal layout intent, but not full web flexbox semantics
-- `Column` does mean primary vertical layout intent
-- `Panel` means a generic styled container, not a browser block element
-- `List` does not imply browser bullets unless we add them explicitly
+- `row` does mean primary horizontal layout intent, but not full web flexbox semantics
+- `column` does mean primary vertical layout intent
+- `panel` means a generic styled container, not a browser block element
+- `list` does not imply browser bullets unless we add them explicitly
 
 This gives us semantic authoring without inheriting browser baggage.
 
@@ -277,21 +277,21 @@ Inputs should stay shell-oriented rather than growing into browser forms.
 
 Functional now:
 
-- `Input` / `input type="text"` for basic text editing
-- `TextInput` as a semantic text input tag
-- `PasswordInput` as a semantic password input tag with masked display
-- `SearchInput` as a semantic search input tag
-- `NumberInput` as a semantic number input tag with light character filtering
-- `EmailInput` and `UrlInput` as semantic text-like tags
-- `Slider` / `slider` as the current range control
+- `input type="text"` for basic text editing
+- `text-input` as a semantic text input tag
+- `password-input` as a semantic password input tag with masked display
+- `search-input` as a semantic search input tag
+- `number-input` as a semantic number input tag with light character filtering
+- `email-input` and `url-input` as semantic text-like tags
+- `slider` as the current range control
 
 Still needed:
 
 - cursor movement and selection for text-like inputs
 - submit/change/input events with consistent payloads
 - validation states for email/url/number without browser form semantics
-- `Checkbox` and `Switch` checked-state storage, interaction, and painting
-- optional step/min/max enforcement for `NumberInput`
+- `checkbox` and `switch` checked-state storage, interaction, and painting
+- optional step/min/max enforcement for `number-input`
 - a future date/time story only if shell UI needs it
 
 ### Custom exported tags
@@ -318,9 +318,9 @@ Then another frontend plugin that declares the dependency can write:
 
 ```xml
 <template>
-  <Panel>
+  <panel>
     <BatteryWidget percent="{percent}" />
-  </Panel>
+  </panel>
 </template>
 ```
 
@@ -337,12 +337,12 @@ first-class feature, not an incidental implementation detail.
 
 ```xml
 <template>
-  <Panel class="panel-root">
-    <Row gap="8" align="center">
-      <Icon name="battery" />
-      <Text>Battery {percent}%</Text>
-    </Row>
-  </Panel>
+  <panel class="panel-root">
+    <row gap="8" align="center">
+      <icon name="battery" />
+      <text>Battery {percent}%</text>
+    </row>
+  </panel>
 </template>
 ```
 
@@ -373,7 +373,7 @@ This is better than inventing a CSS parser, and better than pretending full CSS 
 
 ### Recommended supported subset
 
-Keep the subset aligned with `mesh-ui` and shell performance needs.
+Keep the subset aligned with `mesh-elements` and shell performance needs.
 
 Selectors to support:
 
@@ -481,7 +481,7 @@ button.primary:hover
   -> { tag=button, classes=[primary], state=hover }
 ```
 
-This keeps `mesh-ui::StyleResolver` fast and predictable.
+This keeps `mesh-elements::StyleResolver` fast and predictable.
 
 ### Phase 3: move tag lowering earlier
 
@@ -524,13 +524,13 @@ UI intent directly.
 
 Recommended first-pass tag families:
 
-- Layout: `Panel`, `Row`, `Column`, `Stack`, `ScrollView`, `Spacer`, `Separator`
-- Content: `Text`, `Label`, `Icon`, `Image`
-- Controls: `Button`, `IconButton`, `Input`, `TextInput`, `PasswordInput`,
-  `SearchInput`, `NumberInput`, `EmailInput`, `UrlInput`, `Slider`, `Switch`,
-  `Checkbox`
-- Structure: `List`, `ListItem`, `Slot`
-- Composition: `Surface`, `Widget`, plugin-exported custom tags like `BatteryWidget`
+- Layout: `panel`, `row`, `column`, `stack`, `scroll-view`, `spacer`, `separator`
+- Content: `text`, `label`, `icon`, `image`
+- Controls: `button`, `icon-button`, `input`, `text-input`, `password-input`,
+  `search-input`, `number-input`, `email-input`, `url-input`, `slider`, `switch`,
+  `checkbox`
+- Structure: `list`, `list-item`, `slot`
+- Composition: `surface`, `widget`, plugin-exported custom tags like `BatteryWidget`
 
 That set is small enough to optimize well and expressive enough for shell UI.
 
@@ -585,7 +585,7 @@ pub enum UiTag {
 
 Then build `WidgetNode` from `UiTag` rather than from raw source tags.
 
-### In `mesh-ui`
+### In `mesh-elements`
 
 Prefer runtime enums over strings where possible.
 
@@ -632,4 +632,4 @@ In this repo, the best place to introduce that boundary is between:
 - `crates/mesh-component` as source parser
 - `crates/mesh-render-engine` as compiler/lowerer
 
-That keeps `mesh-ui` and `mesh-core` small, predictable, and fast.
+That keeps `mesh-elements` and `mesh-core` small, predictable, and fast.

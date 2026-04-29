@@ -1,6 +1,6 @@
 use super::PixelBuffer;
 use image::imageops::FilterType;
-use mesh_ui::style::Color;
+use mesh_elements::style::Color;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};

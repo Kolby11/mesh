@@ -19,6 +19,14 @@
   </column>
 </template>
 
+<script lang="luau">
+import DateStrip from "@mesh/date-strip"
+import CalendarCard from "@mesh/calendar-card"
+import AgendaList from "@mesh/agenda-list"
+import FocusTimer from "@mesh/focus-timer"
+import StatusRail from "@mesh/status-rail"
+</script>
+
 <style>
 .hub {
     width: 1080px;

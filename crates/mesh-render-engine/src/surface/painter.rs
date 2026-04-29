@@ -1,8 +1,8 @@
 use super::PixelBuffer;
 use super::icon;
 use super::text::TextRenderer;
-use mesh_ui::style::{Color, Display, Overflow, TextAlign, TextDirection, TextOverflow};
-use mesh_ui::tree::WidgetNode;
+use mesh_elements::style::{Color, Display, Overflow, TextAlign, TextDirection, TextOverflow};
+use mesh_elements::tree::WidgetNode;
 
 pub struct FrontendRenderEngine {
     text_renderer: TextRenderer,

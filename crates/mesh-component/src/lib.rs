@@ -1,18 +1,14 @@
-pub mod meta;
 pub mod parser;
-pub mod schema;
 pub mod style;
 /// Single-file component parser for `.mesh` files.
 ///
-/// A `.mesh` file contains up to six blocks:
+/// A `.mesh` file contains these blocks:
 ///
 /// ```text
 /// <template>  — XHTML-like markup
 /// <script>    — Luau logic
 /// <style>     — CSS-like styling with theme token references
-/// <schema>    — Typed settings schema (TOML)
 /// <i18n>      — Translations keyed by locale
-/// <meta>      — Component metadata and accessibility info
 /// ```
 ///
 /// This crate parses these blocks into a typed AST. It has no runtime
@@ -20,25 +16,38 @@ pub mod style;
 /// any other mesh crate.
 pub mod template;
 
-pub use meta::{AccessibilityRole, MetaBlock};
 pub use parser::{ParseError, parse_component};
-pub use schema::{SchemaBlock, SchemaFieldDef};
 pub use style::*;
 pub use template::*;
 
-use std::collections::HashMap;
+/// A parsed authoring-time import from a `.mesh` script block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentImport {
+    pub alias: String,
+    pub target: ComponentImportTarget,
+}
+
+/// Supported explicit import targets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComponentImportTarget {
+    /// A local component file, either relative to the importing file or `@src/...`.
+    ComponentLocal(String),
+    /// A frontend plugin ID, such as `@mesh/volume-bar`.
+    ComponentPlugin(String),
+    /// A MESH interface API, such as `mesh.audio` with an optional version requirement.
+    InterfaceApi {
+        interface: String,
+        version: Option<String>,
+    },
+}
 
 /// A parsed `.mesh` single-file component.
 #[derive(Debug, Clone)]
 pub struct ComponentFile {
-    /// Component imports declared with `import "plugin-id" as Alias` in the script block.
-    /// Maps alias name → plugin ID. These are stripped from the script source before Luau sees it.
-    pub imports: HashMap<String, String>,
+    pub imports: Vec<ComponentImport>,
     pub template: Option<TemplateBlock>,
     pub script: Option<ScriptBlock>,
     pub style: Option<StyleBlock>,
-    pub schema: Option<SchemaBlock>,
-    pub meta: Option<MetaBlock>,
 }
 
 /// A script block with its language and source code.

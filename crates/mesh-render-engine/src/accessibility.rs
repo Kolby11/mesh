@@ -1,4 +1,4 @@
-use mesh_component::{AccessibilityRole, ComponentFile};
+use mesh_elements::AccessibilityRole;
 use mesh_plugin::Manifest;
 
 pub(crate) fn parse_accessibility_role(role: &str) -> AccessibilityRole {
@@ -27,15 +27,9 @@ pub(crate) fn parse_accessibility_role(role: &str) -> AccessibilityRole {
     }
 }
 
-pub fn root_accessibility_role(manifest: &Manifest, component: &ComponentFile) -> Option<String> {
+pub fn root_accessibility_role(manifest: &Manifest) -> Option<String> {
     manifest
         .accessibility
         .as_ref()
         .and_then(|accessibility| accessibility.role.clone())
-        .or_else(|| {
-            component
-                .meta
-                .as_ref()
-                .and_then(|meta| meta.role.as_ref().map(ToString::to_string))
-        })
 }

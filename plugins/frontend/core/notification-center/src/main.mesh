@@ -11,6 +11,11 @@
   </column>
 </template>
 
+<script lang="luau">
+import NotificationFeed from "@mesh/notification-feed"
+import NotificationSidebar from "@mesh/notification-sidebar"
+</script>
+
 <style>
 .notifications {
     background: token(color.surface);

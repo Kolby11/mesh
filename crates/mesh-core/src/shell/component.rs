@@ -13,6 +13,10 @@ use super::types::{
     ShellComponent,
 };
 use mesh_capability::{Capability, CapabilitySet};
+use mesh_elements::{
+    Corners, ElementState, StyleContext, StyleResolver, TransitionEasing, TransitionStyle,
+    VariableStore, WidgetNode, element_snapshot_json, style::Color,
+};
 use mesh_locale::LocaleEngine;
 use mesh_plugin::PluginType;
 use mesh_plugin::lifecycle::PluginInstance;
@@ -20,12 +24,8 @@ use mesh_render_engine::{
     CompiledFrontendPlugin, FrontendCompositionResolver, FrontendRenderMode,
     compile_frontend_plugin, root_accessibility_role,
 };
-use mesh_scripting::{LocaleBoundState, ScriptContext};
+use mesh_scripting::{LocaleBoundState, ScriptContext, ScriptInterfaceImport};
 use mesh_theme::{Theme, default_theme};
-use mesh_ui::{
-    Corners, ElementState, StyleContext, StyleResolver, TransitionEasing, TransitionStyle,
-    VariableStore, WidgetNode, style::Color,
-};
 use mesh_wayland::{Edge, ShellSurface};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -154,7 +154,11 @@ impl AnimatedVisualStyle {
         }
     }
 
-    fn selective_from(previous: Self, desired: Self, props: mesh_ui::TransitionProperties) -> Self {
+    fn selective_from(
+        previous: Self,
+        desired: Self,
+        props: mesh_elements::TransitionProperties,
+    ) -> Self {
         Self {
             border_radius: if props.animates_border_radius() {
                 previous.border_radius
@@ -309,23 +313,31 @@ impl FrontendCatalog {
         }
 
         for (plugin_id, entry) in &catalog.plugins {
+            for (alias, target_plugin_id) in &entry.compiled.plugin_component_imports {
+                catalog
+                    .validate_component_plugin_import(&entry.compiled.manifest, target_plugin_id)
+                    .map_err(|message| ShellRunError::FrontendComposition {
+                        message: format!(
+                            "plugin '{plugin_id}' cannot import {alias} from '{target_plugin_id}': {message}"
+                        ),
+                    })?;
+            }
             for component_tag in entry.compiled.referenced_component_tags() {
-                // Tags that appear in the component's import map are resolved at render time.
+                if entry.compiled.local_components.contains_key(&component_tag) {
+                    continue;
+                }
                 if entry
                     .compiled
-                    .component
-                    .imports
+                    .plugin_component_imports
                     .contains_key(&component_tag)
                 {
                     continue;
                 }
-                catalog
-                    .resolve_component_plugin_id(&entry.compiled.manifest, &component_tag)
-                    .map_err(|message| ShellRunError::FrontendComposition {
-                        message: format!(
-                            "plugin '{plugin_id}' cannot resolve <{component_tag}>: {message}"
-                        ),
-                    })?;
+                return Err(ShellRunError::FrontendComposition {
+                    message: format!(
+                        "plugin '{plugin_id}' references <{component_tag}> but no explicit component import was compiled for that tag"
+                    ),
+                });
             }
         }
 
@@ -356,36 +368,44 @@ impl FrontendCatalog {
         entries
     }
 
-    fn resolve_component_plugin_id(
+    fn validate_component_plugin_import(
         &self,
         host: &mesh_plugin::Manifest,
-        tag: &str,
+        plugin_id: &str,
+    ) -> Result<(), String> {
+        if !host
+            .required_plugin_dependencies()
+            .iter()
+            .any(|dependency_id| dependency_id == plugin_id)
+        {
+            return Err("target plugin is not a required dependency".into());
+        }
+        let Some(entry) = self.plugins.get(plugin_id) else {
+            return Err("target plugin is not loaded".into());
+        };
+        match entry.compiled.manifest.package.plugin_type {
+            PluginType::Widget | PluginType::Surface => Ok(()),
+            other => Err(format!(
+                "target plugin must be a frontend widget or surface, got {other}"
+            )),
+        }
+    }
+
+    fn imported_component_plugin_id(
+        &self,
+        host: &mesh_plugin::Manifest,
+        alias: &str,
     ) -> Result<String, String> {
-        let mut matches = Vec::new();
-
-        for dependency_id in host.required_plugin_dependencies() {
-            let Some(entry) = self.plugins.get(&dependency_id) else {
-                continue;
-            };
-
-            if entry.compiled.manifest.package.plugin_type != PluginType::Widget {
-                continue;
-            }
-
-            if entry.compiled.manifest.exported_component_tag() == Some(tag) {
-                matches.push(dependency_id);
-            }
-        }
-
-        match matches.len() {
-            1 => Ok(matches.remove(0)),
-            0 => Err(format!(
-                "no required widget dependency exports that tag; add a plugin dependency whose plugin.json exports.component.tag is '{tag}'"
-            )),
-            _ => Err(format!(
-                "multiple required widget dependencies export '{tag}': {matches:?}"
-            )),
-        }
+        let Some(entry) = self.plugins.get(&host.package.id) else {
+            return Err("host plugin is not loaded".into());
+        };
+        let Some(plugin_id) = entry.compiled.plugin_component_imports.get(alias) else {
+            return Err(format!(
+                "no explicit plugin import for component alias '{alias}'"
+            ));
+        };
+        self.validate_component_plugin_import(host, plugin_id)?;
+        Ok(plugin_id.clone())
     }
 }
 
@@ -628,115 +648,6 @@ impl FrontendSurfaceComponent {
 
     fn build_tree(&mut self, theme: &Theme, width: u32, height: u32) -> WidgetNode {
         self.active_theme.replace(theme.clone());
-        // Before building the tree, update the host/root runtime state with
-        // snapshots of any imported embedded instances so that imported
-        // aliases expose their internal variables via `Alias.state` in Luau
-        // templates and scripts.
-        // Register proxies on the root runtime so imported components expose
-        // their variables directly in the host namespace and also as an
-        // alias object. We create closures that forward reads/writes to the
-        // child runtime's ScriptContext. Use an Rc clone of the runtimes map
-        // so closures can access runtimes without holding borrows on `self`.
-        let runtimes_rc = self.runtimes.clone();
-        if let Some(root_runtime) = self.runtimes.lock().unwrap().get_mut(self.id()) {
-            for (alias, plugin_id) in &self.compiled.component.imports {
-                let instance_key = format!("{}/import:{}", self.id(), alias);
-                let plugin_id_clone = plugin_id.clone();
-                let runtimes_for_closure = runtimes_rc.clone();
-
-                // Getter for the alias object: returns { plugin_id, state = { ... } }
-                let instance_key_for_closure = instance_key.clone();
-                let alias_getter = Box::new(move || {
-                    let runtimes_ref = runtimes_for_closure.lock().unwrap();
-                    if let Some(child_runtime) = runtimes_ref.get(&instance_key_for_closure) {
-                        let mut obj = serde_json::Map::new();
-                        let child_state = child_runtime.script_ctx.state();
-                        for k in child_state.keys() {
-                            if let Some(v) = child_state.get(&k) {
-                                obj.insert(k.clone(), v);
-                            }
-                        }
-                        return serde_json::json!({
-                            "plugin_id": plugin_id_clone,
-                            "state": serde_json::Value::Object(obj),
-                        });
-                    }
-                    serde_json::json!({ "plugin_id": plugin_id_clone })
-                });
-
-                // Register alias proxy (read-only)
-                root_runtime.script_ctx.state_mut().register_proxy(
-                    alias.clone(),
-                    alias_getter,
-                    None,
-                );
-
-                // If a child instance exists, register per-variable proxies so
-                // child variables appear in the root namespace. If a name would
-                // collide with an existing root variable, register under
-                // "{alias}.{name}" instead.
-                //
-                // Local-component aliases (plugin_id == self) have no child
-                // runtime; skip the re-lock to avoid deadlocking the mutex
-                // that is already held by root_runtime above.
-                if plugin_id == self.id() {
-                    continue;
-                }
-
-                let existing_keys: Vec<String> = root_runtime.script_ctx.state().keys();
-
-                let runtimes_ref = self.runtimes.lock().unwrap();
-                if let Some(child_runtime) = runtimes_ref.get(&instance_key) {
-                    let child_state = child_runtime.script_ctx.state().clone();
-                    for key in child_state.keys() {
-                        let target_name = if existing_keys.contains(&key) {
-                            format!("{}.{}", alias, key)
-                        } else {
-                            key.clone()
-                        };
-
-                        let runtimes_for_get = self.runtimes.clone();
-                        let instance_key_get = instance_key.clone();
-                        let key_clone = key.clone();
-                        // Getter returns the child variable value or Null.
-                        let getter = Box::new(move || {
-                            let runtimes_ref = runtimes_for_get.lock().unwrap();
-                            if let Some(child) = runtimes_ref.get(&instance_key_get) {
-                                return child
-                                    .script_ctx
-                                    .state()
-                                    .get(&key_clone)
-                                    .unwrap_or(serde_json::Value::Null);
-                            }
-                            serde_json::Value::Null
-                        });
-
-                        // Setter forwards the write into the child runtime state.
-                        let runtimes_for_set = self.runtimes.clone();
-                        let instance_key_set = instance_key.clone();
-                        let key_set = key.clone();
-                        let setter = Box::new(move |v: serde_json::Value| {
-                            if let Some(child) =
-                                runtimes_for_set.lock().unwrap().get_mut(&instance_key_set)
-                            {
-                                child.script_ctx.state_mut().set(key_set.clone(), v);
-                            }
-                        });
-
-                        // Only register if not already a proxy; register as proxy
-                        // so reads/writes go to the child runtime.
-                        if !root_runtime.script_ctx.state().has_proxy(&target_name) {
-                            root_runtime.script_ctx.state_mut().register_proxy(
-                                target_name,
-                                getter,
-                                Some(setter),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
         let root_state = self.runtime_state(self.id()).unwrap_or_default();
         let bound = LocaleBoundState::new(&root_state, &self.locale);
         {
@@ -984,18 +895,24 @@ impl FrontendSurfaceComponent {
             script_ctx.state_mut().set(key.clone(), value.clone());
         }
 
-        // Seed imported plugin aliases into script state so Luau scripts can
-        // reference imported components/icons via their alias. The parser
-        // already extracted `import` lines to `compiled.component.imports`.
-        for (alias, plugin_id) in &compiled.component.imports {
-            script_ctx
-                .state_mut()
-                .set(alias.clone(), serde_json::Value::String(plugin_id.clone()));
-        }
-
         if let Some(script) = &compiled.component.script {
+            let interface_imports = compiled
+                .component
+                .imports
+                .iter()
+                .filter_map(|import| match &import.target {
+                    mesh_component::ComponentImportTarget::InterfaceApi { interface, version } => {
+                        Some(ScriptInterfaceImport {
+                            alias: import.alias.clone(),
+                            interface: interface.clone(),
+                            version: version.clone(),
+                        })
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
             script_ctx
-                .load_script(&script.source)
+                .load_script_with_interface_imports(&script.source, &interface_imports)
                 .map_err(|source| ComponentError::Script {
                     component_id: component_id.clone(),
                     source,
@@ -1290,6 +1207,18 @@ impl FrontendSurfaceComponent {
             "margin_top": (bottom - tree.layout.height).max(0.0) as i32,
         });
         let tag = target.map(|node| node.tag.clone()).unwrap_or_default();
+        let mut current_target = target
+            .map(|node| element_snapshot_json(node, left - node.layout.x, top - node.layout.y))
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let Some(object) = current_target.as_object_mut() {
+            object.insert(
+                "key".into(),
+                serde_json::Value::String(node_key.to_string()),
+            );
+            object.insert("tag".into(), serde_json::Value::String(tag.clone()));
+            object.insert("bounds".into(), bounds.clone());
+            object.insert("position".into(), position.clone());
+        }
 
         serde_json::json!({
             "type": "click",
@@ -1308,12 +1237,7 @@ impl FrontendSurfaceComponent {
                 "bounds": bounds,
                 "position": position,
             },
-            "current_target": {
-                "key": node_key,
-                "tag": tag,
-                "bounds": bounds,
-                "position": position,
-            }
+            "current_target": current_target
         })
     }
 }
@@ -1328,29 +1252,44 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         container_width: f32,
         container_height: f32,
     ) -> Option<WidgetNode> {
-        // Check the host component's explicit import map first.
-        let plugin_id =
-            if let Some(host_entry) = self.frontend_catalog.plugins.get(&host.package.id) {
-                if let Some(imported_id) = host_entry.compiled.component.imports.get(alias) {
-                    imported_id.clone()
-                } else {
-                    match self
-                        .frontend_catalog
-                        .resolve_component_plugin_id(host, alias)
-                    {
-                        Ok(id) => id,
-                        Err(message) => return Some(self.build_error_widget(message)),
-                    }
-                }
-            } else {
-                match self
-                    .frontend_catalog
-                    .resolve_component_plugin_id(host, alias)
-                {
-                    Ok(id) => id,
-                    Err(message) => return Some(self.build_error_widget(message)),
-                }
-            };
+        if let Some(entry) = self.frontend_catalog.plugins.get(&host.package.id) {
+            if let Some(local) = entry.compiled.local_components.get(alias) {
+                let theme = self.active_theme.borrow().clone();
+                let host_state = self.runtime_state(host_instance_key).unwrap_or_default();
+                let bound = LocaleBoundState::new(&host_state, &self.locale);
+                let store = LocalComponentStore {
+                    base: &bound,
+                    props,
+                };
+                let host_rules = entry
+                    .compiled
+                    .component
+                    .style
+                    .as_ref()
+                    .map(|s| s.rules.as_slice())
+                    .unwrap_or(&[]);
+                let node = mesh_render_engine::build_widget_tree_from_component(
+                    local,
+                    host,
+                    &theme,
+                    container_width,
+                    container_height,
+                    Some(self),
+                    host_instance_key,
+                    Some(&store),
+                    host_rules,
+                );
+                return Some(node);
+            }
+        }
+
+        let plugin_id = match self
+            .frontend_catalog
+            .imported_component_plugin_id(host, alias)
+        {
+            Ok(id) => id,
+            Err(message) => return Some(self.build_error_widget(message)),
+        };
 
         // Surface plugins are portals: their visibility is tracked via pending_surface_states
         // and translated to ShowSurface/HideSurface requests in tick(). They render nothing inline.
@@ -1360,40 +1299,6 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             .get(&plugin_id)
             .map(|e| e.compiled.manifest.package.plugin_type == PluginType::Surface)
             .unwrap_or(false);
-        // If the resolved plugin is the host itself, allow local components
-        // shipped under `src/components/<alias>.mesh` to be rendered inline.
-        if plugin_id == host.package.id {
-            if let Some(entry) = self.frontend_catalog.plugins.get(&host.package.id) {
-                if let Some(local) = entry.compiled.local_components.get(alias) {
-                    let theme = self.active_theme.borrow().clone();
-                    let host_state = self.runtime_state(host_instance_key).unwrap_or_default();
-                    let bound = LocaleBoundState::new(&host_state, &self.locale);
-                    let store = LocalComponentStore {
-                        base: &bound,
-                        props,
-                    };
-                    let host_rules = entry
-                        .compiled
-                        .component
-                        .style
-                        .as_ref()
-                        .map(|s| s.rules.as_slice())
-                        .unwrap_or(&[]);
-                    let node = mesh_render_engine::build_widget_tree_from_component(
-                        local,
-                        host,
-                        &theme,
-                        container_width,
-                        container_height,
-                        Some(self),
-                        host_instance_key,
-                        Some(&store),
-                        host_rules,
-                    );
-                    return Some(node);
-                }
-            }
-        }
         if is_surface {
             let hidden = props
                 .get("hidden")
@@ -1608,8 +1513,8 @@ impl ShellComponent for FrontendSurfaceComponent {
             .as_ref()
             .map(|template| template.root.len())
             .unwrap_or(0);
-        let role = root_accessibility_role(&self.compiled.manifest, &self.compiled.component)
-            .unwrap_or_else(|| "unknown".into());
+        let role =
+            root_accessibility_role(&self.compiled.manifest).unwrap_or_else(|| "unknown".into());
 
         tracing::debug!(
             "rendered frontend '{}' visible={} nodes={} role={}{}",
@@ -1651,7 +1556,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             }
         }
         self.publish_element_metrics(&tree);
-        buffer.clear(mesh_ui::style::Color::TRANSPARENT);
+        buffer.clear(mesh_elements::style::Color::TRANSPARENT);
 
         let tooltip = if let (Some(start), Some(hovered_key)) =
             (self.hover_start, self.hovered_key.as_ref())
@@ -2035,68 +1940,15 @@ fn collect_element_metrics(
     elements: &mut serde_json::Map<String, serde_json::Value>,
     refs: &mut serde_json::Map<String, serde_json::Value>,
 ) {
-    let left = node.layout.x + offset_x;
-    let top = node.layout.y + offset_y;
-    let width = node.layout.width.max(0.0);
-    let height = node.layout.height.max(0.0);
-    let right = left + width;
-    let bottom = top + height;
-    let client_left = left + node.computed_style.padding.left;
-    let client_top = top + node.computed_style.padding.top;
-    let client_width = (width - node.computed_style.padding.horizontal()).max(0.0);
-    let client_height = (height - node.computed_style.padding.vertical()).max(0.0);
-    let client_right = client_left + client_width;
-    let client_bottom = client_top + client_height;
-    let scroll_x = node
-        .attributes
-        .get("_mesh_scroll_x")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
-    let scroll_y = node
-        .attributes
-        .get("_mesh_scroll_y")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
-
-    let client_bound_rect = serde_json::json!({
-        "left": client_left,
-        "top": client_top,
-        "right": client_right,
-        "bottom": client_bottom,
-        "width": client_width,
-        "height": client_height,
-    });
-    let bounds = serde_json::json!({
-        "left": left,
-        "top": top,
-        "right": right,
-        "bottom": bottom,
-        "width": width,
-        "height": height,
-    });
-    let metrics = serde_json::json!({
-        "key": node.attributes.get("_mesh_key").cloned().unwrap_or_default(),
-        "id": node.attributes.get("id").cloned().unwrap_or_default(),
-        "ref": node.attributes.get("ref").cloned().unwrap_or_default(),
-        "tag": node.tag,
-        "x": left,
-        "y": top,
-        "left": left,
-        "top": top,
-        "right": right,
-        "bottom": bottom,
-        "width": width,
-        "height": height,
-        "client_left": client_left,
-        "client_top": client_top,
-        "client_width": client_width,
-        "client_height": client_height,
-        "clientBoundRect": client_bound_rect,
-        "client_bound_rect": client_bound_rect,
-        "bounding_client_rect": bounds,
-        "scroll_x": scroll_x,
-        "scroll_y": scroll_y,
-    });
+    let metrics = element_snapshot_json(node, offset_x, offset_y);
+    let scroll_x = metrics
+        .get("scroll_x")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0) as f32;
+    let scroll_y = metrics
+        .get("scroll_y")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0) as f32;
 
     if let Some(key) = node.attributes.get("_mesh_key") {
         elements.insert(key.clone(), metrics.clone());

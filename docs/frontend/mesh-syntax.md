@@ -1,6 +1,6 @@
 # `.mesh` Component Syntax
 
-A `.mesh` file is a single-file component. It combines markup, logic, styles, schema, translations, and metadata in one place.
+A `.mesh` file is a single-file component. It combines markup, logic, styles, and translations in one place.
 
 The syntax described here is the current MESH UI authoring model. Historical
 HTML compatibility tags have been removed in favor of shell-specific
@@ -21,17 +21,9 @@ primitives.
 /* CSS goes here */
 </style>
 
-<schema>
-  <!-- typed settings schema -->
-</schema>
-
 <i18n>
   <!-- translation keys -->
 </i18n>
-
-<meta>
-  <!-- accessibility and plugin metadata -->
-</meta>
 ```
 
 Only `<template>` is required. All other blocks are optional.
@@ -42,29 +34,65 @@ Only `<template>` is required. All other blocks are optional.
 
 ### Tags
 
-Use MESH UI tags. These are shell primitives rather than browser DOM elements.
+Use lowercase MESH UI tags for built-in shell primitives. PascalCase tags are
+reserved for explicitly imported custom components.
 
 | Tag                | Purpose                         |
 | ------------------ | ------------------------------- |
+| `panel`            | Generic surface/container root  |
 | `box`              | Generic container               |
 | `row`              | Horizontal layout container     |
 | `column`           | Vertical layout container       |
+| `stack`            | Stacked layout container        |
 | `text`             | Text content                    |
-| `scroll`           | Scrollable region               |
-| `button`           | Clickable action                |
-| `input`            | Text input                      |
-| `slider`           | Range input                     |
 | `label`            | Input label                     |
+| `scroll`           | Scrollable region               |
+| `scroll-view`      | Semantic scrollable region      |
+| `button`           | Clickable action                |
+| `icon-button`      | Icon-only clickable action      |
+| `input`            | Text input                      |
+| `text-input`       | Semantic text input             |
+| `password-input`   | Password text input             |
+| `search-input`     | Search text input               |
+| `number-input`     | Numeric text input              |
+| `email-input`      | Email text input                |
+| `url-input`        | URL text input                  |
+| `slider`           | Range input                     |
+| `switch`           | Switch control                  |
+| `checkbox`         | Checkbox control                |
 | `icon`             | Icon or image asset             |
+| `image`            | Image asset                     |
+| `list`             | List container                  |
+| `list-item`        | List item                       |
 | `separator`        | Divider                         |
 | `spacer`           | Flexible spacing node           |
+| `surface`          | Surface composition primitive   |
+| `widget`           | Widget composition primitive    |
 
 HTML compatibility tags are intentionally not part of the component vocabulary.
 Use classes, metadata, accessibility attributes, and component boundaries for
 semantics.
 
-Frontend composition can also use custom component tags exported by dependent
-plugins via `plugin.json.exports.component.tag`.
+Custom component tags must be PascalCase and must be imported in the script
+block before they can be used:
+
+```luau
+import BatteryWidget from "./components/battery-widget.mesh"
+import VolumeBar from "@mesh/volume-bar"
+import audio from "mesh.audio@>=1.0"
+```
+
+Local component imports resolve relative to the importing file, `@src/...`
+resolves from the plugin's `src/` directory, plugin component imports resolve
+through declared plugin dependencies, and `mesh.*` imports expose the same
+interface proxy returned by `mesh.interfaces.get(...)`.
+
+Conceptually, every built-in tag inherits the common `MeshElement` surface:
+shared attributes like `class`, `id`, `ref`, `style`, accessibility metadata,
+and runtime ref metrics such as `width`, `height`, and
+`bounding_client_rect`. Control tags then layer on their own fields, so an
+input-like tag is effectively `MeshElement` plus things like `value`,
+`placeholder`, and `readonly`.
 
 ### Text interpolation
 

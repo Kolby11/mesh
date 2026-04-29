@@ -36,6 +36,11 @@
   </column>
 </template>
 
+<script lang="luau">
+import BaseLauncher from "@mesh/base-launcher-widget"
+import BaseSidebar from "@mesh/base-sidebar-widget"
+</script>
+
 <style>
 .surface {
     width: 100%;

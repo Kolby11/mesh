@@ -1,7 +1,44 @@
 /// Accessibility tree — semantic representation for AT-SPI and screen readers.
 use crate::layout::LayoutRect;
 use crate::tree::{NodeId, WidgetNode};
-use mesh_component::meta::AccessibilityRole;
+use serde::{Deserialize, Serialize};
+
+/// Accessibility roles for semantic tree construction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccessibilityRole {
+    Button,
+    Slider,
+    Label,
+    TextInput,
+    Checkbox,
+    Switch,
+    Region,
+    List,
+    ListItem,
+    Image,
+    Toolbar,
+    Menu,
+    MenuItem,
+    Dialog,
+    Alert,
+    Status,
+    ProgressBar,
+    Tab,
+    TabPanel,
+    Separator,
+    #[serde(untagged)]
+    Custom(String),
+}
+
+impl std::fmt::Display for AccessibilityRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Custom(s) => write!(f, "{s}"),
+            other => write!(f, "{other:?}"),
+        }
+    }
+}
 
 /// Accessibility metadata for a single widget node.
 #[derive(Debug, Clone)]

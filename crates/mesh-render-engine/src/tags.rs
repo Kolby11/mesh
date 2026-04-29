@@ -77,8 +77,8 @@ pub(crate) fn lower_source_tag(source_tag: &SourceTag) -> UiTag {
         SourceTag::ListItem => UiTag::ListItem,
         SourceTag::Slot => UiTag::Box,
         SourceTag::Surface | SourceTag::Widget => UiTag::Box,
-        SourceTag::LegacyBox => UiTag::Box,
-        SourceTag::LegacyScroll => UiTag::Scroll,
+        SourceTag::Box => UiTag::Box,
+        SourceTag::Scroll => UiTag::Scroll,
         SourceTag::Unknown => UiTag::Box,
     }
 }

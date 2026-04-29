@@ -1,5 +1,5 @@
 /// Pixel buffer for software rendering.
-use mesh_ui::style::Color;
+use mesh_elements::style::Color;
 
 /// An ARGB8888 pixel buffer.
 #[derive(Debug, Clone)]

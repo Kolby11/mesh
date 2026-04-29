@@ -1,5 +1,5 @@
-use mesh_ui::style::{Display, FlexDirection};
-use mesh_ui::{ComputedStyle, Dimension, StyleContext};
+use mesh_elements::style::{Display, FlexDirection};
+use mesh_elements::{ComputedStyle, Dimension, StyleContext};
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct InheritedStyleMask {
@@ -114,9 +114,9 @@ pub(crate) fn merge_missing_defaults(tag: &str, style: &mut ComputedStyle) {
     let defaults = default_leaf_style(tag);
 
     if tag == "icon" {
-        style.background_color = mesh_ui::Color::TRANSPARENT;
-        style.border_radius = mesh_ui::Corners::zero();
-        style.padding = mesh_ui::Edges::zero();
+        style.background_color = mesh_elements::Color::TRANSPARENT;
+        style.border_radius = mesh_elements::Corners::zero();
+        style.padding = mesh_elements::Edges::zero();
     }
 
     if style.background_color.a == 0 && defaults.background_color.a > 0 {
@@ -154,11 +154,11 @@ pub(crate) fn merge_missing_defaults(tag: &str, style: &mut ComputedStyle) {
 
 pub(crate) fn surface_style(_surface_id: &str, width: u32, height: u32) -> ComputedStyle {
     let mut style = container_style("column");
-    style.padding = mesh_ui::Edges::all(0.0);
+    style.padding = mesh_elements::Edges::all(0.0);
     style.gap = 0.0;
-    style.width = mesh_ui::Dimension::Px(width as f32);
-    style.height = mesh_ui::Dimension::Px(height as f32);
-    style.background_color = mesh_ui::Color::TRANSPARENT;
+    style.width = mesh_elements::Dimension::Px(width as f32);
+    style.height = mesh_elements::Dimension::Px(height as f32);
+    style.background_color = mesh_elements::Color::TRANSPARENT;
     style
 }
 
@@ -169,38 +169,38 @@ pub(crate) fn container_style(tag: &str) -> ComputedStyle {
     } else {
         FlexDirection::Row
     };
-    style.padding = mesh_ui::Edges::all(12.0);
+    style.padding = mesh_elements::Edges::all(12.0);
     style.gap = 8.0;
-    style.color = mesh_ui::Color::WHITE;
+    style.color = mesh_elements::Color::WHITE;
     style
 }
 
 pub(crate) fn embedded_root_style() -> ComputedStyle {
     let mut style = container_style("column");
-    style.padding = mesh_ui::Edges::all(0.0);
+    style.padding = mesh_elements::Edges::all(0.0);
     style.gap = 0.0;
-    style.background_color = mesh_ui::Color::TRANSPARENT;
-    style.width = mesh_ui::Dimension::Auto;
-    style.height = mesh_ui::Dimension::Auto;
+    style.background_color = mesh_elements::Color::TRANSPARENT;
+    style.width = mesh_elements::Dimension::Auto;
+    style.height = mesh_elements::Dimension::Auto;
     style
 }
 
 pub(crate) fn slot_style(tag: &str) -> ComputedStyle {
     let mut style = container_style(tag);
-    style.padding = mesh_ui::Edges::all(0.0);
-    style.background_color = mesh_ui::Color::TRANSPARENT;
-    style.border_radius = mesh_ui::Corners::all(0.0);
-    style.width = mesh_ui::Dimension::Auto;
-    style.height = mesh_ui::Dimension::Auto;
+    style.padding = mesh_elements::Edges::all(0.0);
+    style.background_color = mesh_elements::Color::TRANSPARENT;
+    style.border_radius = mesh_elements::Corners::all(0.0);
+    style.width = mesh_elements::Dimension::Auto;
+    style.height = mesh_elements::Dimension::Auto;
     style
 }
 
 pub(crate) fn text_style() -> ComputedStyle {
     let mut style = ComputedStyle::default();
     style.display = Display::Flex;
-    style.color = mesh_ui::Color::WHITE;
+    style.color = mesh_elements::Color::WHITE;
     style.font_size = 14.0;
-    style.background_color = mesh_ui::Color::TRANSPARENT;
+    style.background_color = mesh_elements::Color::TRANSPARENT;
     style
 }
 
@@ -210,48 +210,48 @@ fn default_leaf_style(tag: &str) -> ComputedStyle {
         "button" => {
             let mut style = container_style("row");
             style.background_color =
-                mesh_ui::Color::from_hex("#2b2633").unwrap_or(mesh_ui::Color::BLACK);
-            style.border_radius = mesh_ui::Corners::all(12.0);
-            style.padding = mesh_ui::Edges::all(10.0);
+                mesh_elements::Color::from_hex("#2b2633").unwrap_or(mesh_elements::Color::BLACK);
+            style.border_radius = mesh_elements::Corners::all(12.0);
+            style.padding = mesh_elements::Edges::all(10.0);
             style
         }
         "input" => {
             let mut style = container_style("row");
             style.background_color =
-                mesh_ui::Color::from_hex("#221f28").unwrap_or(mesh_ui::Color::BLACK);
-            style.border_radius = mesh_ui::Corners::all(10.0);
-            style.padding = mesh_ui::Edges::all(10.0);
-            style.height = mesh_ui::Dimension::Px(44.0);
-            style.border_width = mesh_ui::Edges::all(1.0);
+                mesh_elements::Color::from_hex("#221f28").unwrap_or(mesh_elements::Color::BLACK);
+            style.border_radius = mesh_elements::Corners::all(10.0);
+            style.padding = mesh_elements::Edges::all(10.0);
+            style.height = mesh_elements::Dimension::Px(44.0);
+            style.border_width = mesh_elements::Edges::all(1.0);
             style.border_color =
-                mesh_ui::Color::from_hex("#3b3644").unwrap_or(mesh_ui::Color::WHITE);
+                mesh_elements::Color::from_hex("#3b3644").unwrap_or(mesh_elements::Color::WHITE);
             style
         }
         "slider" => {
             let mut style = container_style("row");
-            style.height = mesh_ui::Dimension::Px(36.0);
-            style.padding = mesh_ui::Edges::all(8.0);
+            style.height = mesh_elements::Dimension::Px(36.0);
+            style.padding = mesh_elements::Edges::all(8.0);
             style
         }
         "scroll" => {
             let mut style = container_style("column");
-            style.background_color = mesh_ui::Color::TRANSPARENT;
-            style.height = mesh_ui::Dimension::Px(220.0);
-            style.padding = mesh_ui::Edges::all(0.0);
-            style.overflow_x = mesh_ui::Overflow::Hidden;
-            style.overflow_y = mesh_ui::Overflow::Auto;
+            style.background_color = mesh_elements::Color::TRANSPARENT;
+            style.height = mesh_elements::Dimension::Px(220.0);
+            style.padding = mesh_elements::Edges::all(0.0);
+            style.overflow_x = mesh_elements::Overflow::Hidden;
+            style.overflow_y = mesh_elements::Overflow::Auto;
             style
         }
         "icon" => {
             let mut style = ComputedStyle::default();
-            style.width = mesh_ui::Dimension::Px(18.0);
-            style.height = mesh_ui::Dimension::Px(18.0);
-            style.background_color = mesh_ui::Color::TRANSPARENT;
+            style.width = mesh_elements::Dimension::Px(18.0);
+            style.height = mesh_elements::Dimension::Px(18.0);
+            style.background_color = mesh_elements::Color::TRANSPARENT;
             style
         }
         "box" => {
             let mut style = ComputedStyle::default();
-            style.background_color = mesh_ui::Color::TRANSPARENT;
+            style.background_color = mesh_elements::Color::TRANSPARENT;
             style
         }
         "text" => text_style(),
@@ -259,7 +259,7 @@ fn default_leaf_style(tag: &str) -> ComputedStyle {
     };
 
     if tag == "text" {
-        style.height = mesh_ui::Dimension::Px(22.0);
+        style.height = mesh_elements::Dimension::Px(22.0);
     }
 
     style

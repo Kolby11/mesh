@@ -1,8 +1,8 @@
+use mesh_elements::WidgetNode;
 use mesh_locale::LocaleEngine;
 use mesh_render_engine::PixelBuffer;
 use mesh_scripting::ScriptError;
 use mesh_theme::Theme;
-use mesh_ui::WidgetNode;
 use mesh_wayland::ShellSurface;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
