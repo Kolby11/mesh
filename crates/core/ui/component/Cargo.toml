@@ -1,0 +1,14 @@
+[package]
+name = "mesh-core-component"
+description = "Single-file component parser for .mesh files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+quick-xml = "0.39"
+cssparser = "0.35"
+lightningcss = { version = "1.0.0-alpha.71", default-features = false }

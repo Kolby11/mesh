@@ -32,24 +32,24 @@ asking the core for presentation-ready values.
 
 ## Consumed interfaces
 
-Looked up via `mesh.interfaces.get(name, range)`; all are optional and fall
+Looked up via `require("@mesh/<service>")`; all are optional and fall
 back to `"N/A"` / `"0"` / `"disconnected"` when no implementation is
 registered. The core only brokers those lookups and payloads; formatting and
 fallback presentation live in the plugin script.
 
-| Interface | Used for |
-|-----------|----------|
-| `mesh.audio` | Reading `default_output().volume` |
-| `mesh.power` | Reading `battery().level` |
-| `mesh.network` | Reading `active_connection()` |
+| Interface      | Used for                          |
+| -------------- | --------------------------------- |
+| `mesh.audio`   | Reading `default_output().volume` |
+| `mesh.power`   | Reading `battery().level`         |
+| `mesh.network` | Reading `active_connection()`     |
 
 ## Settings
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `clock_format` | enum(`"12h"`, `"24h"`) | `"24h"` | Clock display format |
-| `show_seconds` | boolean | `false` | Show seconds in clock |
-| `show_battery_percent` | boolean | `true` | Show battery percentage |
+| Key                    | Type                   | Default | Description             |
+| ---------------------- | ---------------------- | ------- | ----------------------- |
+| `clock_format`         | enum(`"12h"`, `"24h"`) | `"24h"` | Clock display format    |
+| `show_seconds`         | boolean                | `false` | Show seconds in clock   |
+| `show_battery_percent` | boolean                | `true`  | Show battery percentage |
 
 ## Theme tokens
 

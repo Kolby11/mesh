@@ -20,12 +20,12 @@ of the transition, while other parts are still only design direction.
 
 Functional now:
 
-- `.mesh` SFC parsing still happens in `crates/mesh-component/src/parser.rs`.
-- `SourceTag` exists in `crates/mesh-component/src/template.rs` and preserves
+- `.mesh` SFC parsing still happens in `crates/core/ui/component/src/parser.rs`.
+- `SourceTag` exists in `crates/core/ui/component/src/template.rs` and preserves
   source-level tag intent.
-- `UiTag` exists in `crates/mesh-render-engine/src/tags.rs`.
+- `UiTag` exists in `crates/core/ui/render/src/tags.rs`.
 - Source tags are lowered through `lower_source_tag()` before `WidgetNode`
-  construction in `crates/mesh-render-engine/src/render.rs`.
+  construction in `crates/core/ui/render/src/render.rs`.
 - Built-in template primitives are lowercase.
 - PascalCase references are reserved for explicitly imported custom components.
 - CSS is parsed with `lightningcss`.
@@ -68,30 +68,30 @@ Today the path is already close to a compiler pipeline:
 
 ```text
 .mesh SFC source
-  -> crates/mesh-component/src/parser.rs::parse_component
+  -> crates/core/ui/component/src/parser.rs::parse_component
   -> ComponentFile { template, script, style, ... }
-  -> crates/mesh-render-engine/src/lib.rs::build_widget_tree_from_component
+  -> crates/core/ui/render/src/lib.rs::build_widget_tree_from_component
   -> WidgetNode tree
-  -> mesh-elements StyleResolver / LayoutEngine
-  -> mesh-core surface runtime
-  -> mesh-render-engine surface painter / presentation bridge
+  -> mesh-core-elements StyleResolver / LayoutEngine
+  -> mesh-core-shell surface runtime
+  -> mesh-core-render surface painter / presentation bridge
 ```
 
 The main transition pressure points are:
 
-- `crates/mesh-component/src/template.rs`
+- `crates/core/ui/component/src/template.rs`
   Current template AST stores raw tag strings and generic attributes.
-- `crates/mesh-component/src/style.rs`
+- `crates/core/ui/component/src/style.rs`
   Current style AST is intentionally small: simple selectors, declarations, container queries.
-- `crates/mesh-render-engine/src/lib.rs`
+- `crates/core/ui/render/src/lib.rs`
   Compiles frontend plugins and builds widget trees.
-- `crates/mesh-render-engine/src/tags.rs`
+- `crates/core/ui/render/src/tags.rs`
   Lowers source-level `SourceTag` values to runtime `UiTag` primitives.
-- `crates/mesh-elements/src/style.rs`
+- `crates/core/ui/elements/src/style.rs`
   Style resolution is fast because selector matching is shallow and property support is bounded.
-- `crates/mesh-elements/src/layout.rs`
+- `crates/core/ui/elements/src/layout.rs`
   Layout is a flexbox-like subset, not browser layout.
-- `crates/mesh-render-engine/src/surface/painter.rs`
+- `crates/core/ui/render/src/surface/painter.rs`
   Rendering is by UI primitive tag, not by browser semantics.
 
 ## What should change conceptually
@@ -175,7 +175,7 @@ This preserves performance and avoids turning shell rendering into browser emula
 ### What to change
 
 The current system parses many HTML tags but normalizes them very late in
-`mesh-render-engine/src/lib.rs`. That makes the runtime path easy, but it
+`mesh-core-render/src/lib.rs`. That makes the runtime path easy, but it
 mixes author syntax with runtime semantics.
 
 Move tag lowering into an explicit phase:
@@ -326,9 +326,9 @@ Then another frontend plugin that declares the dependency can write:
 
 That behavior already fits the current composition path in this repo:
 
-- manifest helper: `crates/mesh-plugin/src/manifest.rs`
-- compile-time reference collection: `crates/mesh-render-engine/src/lib.rs`
-- dependency/tag resolution: `crates/mesh-core/src/shell/component.rs`
+- manifest helper: `crates/core/extension/plugin/src/manifest.rs`
+- compile-time reference collection: `crates/core/ui/render/src/lib.rs`
+- dependency/tag resolution: `crates/core/shell/src/shell/component.rs`
 
 So the planned UI XML system should preserve this and document it as a
 first-class feature, not an incidental implementation detail.
@@ -373,7 +373,7 @@ This is better than inventing a CSS parser, and better than pretending full CSS 
 
 ### Recommended supported subset
 
-Keep the subset aligned with `mesh-elements` and shell performance needs.
+Keep the subset aligned with `mesh-core-elements` and shell performance needs.
 
 Selectors to support:
 
@@ -435,16 +435,16 @@ Add explicit types for "source syntax" vs "runtime primitive".
 
 Suggested changes:
 
-- `crates/mesh-component/src/template.rs`
+- `crates/core/ui/component/src/template.rs`
   Add `SourceTag` and preserve the literal source tag.
-- `crates/mesh-component/src/style.rs`
+- `crates/core/ui/component/src/style.rs`
   Add a richer parsed selector/value model, separate from the supported runtime subset.
-- `crates/mesh-render-engine/src/lib.rs`
+- `crates/core/ui/render/src/lib.rs`
   Replace ad-hoc `normalize_tag()` with a named lowering step.
 
 ### Phase 1: add a compile/lower stage
 
-Introduce a frontend compiler module, likely in `mesh-render-engine`, that produces:
+Introduce a frontend compiler module, likely in `mesh-core-render`, that produces:
 
 - lowered template IR
 - lowered style IR
@@ -481,7 +481,7 @@ button.primary:hover
   -> { tag=button, classes=[primary], state=hover }
 ```
 
-This keeps `mesh-elements::StyleResolver` fast and predictable.
+This keeps `mesh-core-elements::StyleResolver` fast and predictable.
 
 ### Phase 3: move tag lowering earlier
 
@@ -538,7 +538,7 @@ That set is small enough to optimize well and expressive enough for shell UI.
 
 These are the highest-value type changes.
 
-### In `mesh-component`
+### In `mesh-core-component`
 
 Add source fidelity:
 
@@ -561,7 +561,7 @@ pub enum LoweredSelector {
 }
 ```
 
-### In `mesh-render-engine`
+### In `mesh-core-render`
 
 Add a lowering boundary:
 
@@ -585,7 +585,7 @@ pub enum UiTag {
 
 Then build `WidgetNode` from `UiTag` rather than from raw source tags.
 
-### In `mesh-elements`
+### In `mesh-core-elements`
 
 Prefer runtime enums over strings where possible.
 
@@ -629,7 +629,7 @@ It should be:
 
 In this repo, the best place to introduce that boundary is between:
 
-- `crates/mesh-component` as source parser
-- `crates/mesh-render-engine` as compiler/lowerer
+- `crates/core/ui/component` as source parser
+- `crates/core/ui/render` as compiler/lowerer
 
-That keeps `mesh-elements` and `mesh-core` small, predictable, and fast.
+That keeps `mesh-core-elements` and `mesh-core-shell` small, predictable, and fast.

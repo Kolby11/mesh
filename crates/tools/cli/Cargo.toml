@@ -1,0 +1,20 @@
+[package]
+name = "mesh-tools-cli"
+description = "CLI interface for MESH shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mesh-shell"
+path = "src/main.rs"
+
+[dependencies]
+mesh-core-shell = { workspace = true }
+mesh-core-plugin = { workspace = true }
+mesh-core-config = { workspace = true }
+mesh-core-diagnostics = { workspace = true }
+
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -1,12 +1,12 @@
 # Rendering Architecture Refactoring: Summary
 
 ## Overview
-Refactored the rendering pipeline to separate concerns between frontend plugin rendering and core shell surface painting. The `mesh-render-engine` now handles all frontend plugin rendering, while `mesh-core` provides a thin `CorePainter` wrapper for integrating with shell surfaces.
+Refactored the rendering pipeline to separate concerns between frontend plugin rendering and core shell surface painting. The `mesh-core-render` now handles all frontend plugin rendering, while `mesh-core-shell` provides a thin `CorePainter` wrapper for integrating with shell surfaces.
 
 ## Changes Made
 
-### 1. **mesh-render-engine** - Enhanced with FrontendRenderEngine
-**File**: `crates/mesh-render-engine/src/painter.rs` (NEW)
+### 1. **mesh-core-render** - Enhanced with FrontendRenderEngine
+**File**: `crates/core/ui/render/src/painter.rs` (NEW)
 
 Created a high-level `FrontendRenderEngine` that handles:
 - Widget tree traversal and rasterization
@@ -20,19 +20,19 @@ Created a high-level `FrontendRenderEngine` that handles:
 - `render_tooltip()` - Paint tooltip overlays
 - Component-specific renderers: `render_text_node()`, `render_slider_node()`, `render_icon_node()`, etc.
 
-### 2. **mesh-render-engine** - Icon Support
-**File**: `crates/mesh-render-engine/src/icon.rs` (NEW)
+### 2. **mesh-core-render** - Icon Support
+**File**: `crates/core/ui/render/src/icon.rs` (NEW)
 
 Added icon rendering support that delegates to `mesh-renderer`:
 - `draw_icon_from_path()` - Render icons from file paths
 - `draw_named_icon()` - Render icons by name (resolves via icon theme)
 
 **Dependencies Added**:
-- `mesh-icon` workspace dependency
+- `mesh-core-icon` workspace dependency
 - Added to `Cargo.toml`
 
-### 3. **mesh-render-engine** - Updated lib.rs
-**File**: `crates/mesh-render-engine/src/lib.rs` (MODIFIED)
+### 3. **mesh-core-render** - Updated lib.rs
+**File**: `crates/core/ui/render/src/lib.rs` (MODIFIED)
 
 Changes:
 - Added `mod painter` and `pub mod icon` modules
@@ -40,31 +40,31 @@ Changes:
 - Updated `paint_frontend_tree()` to use `FrontendRenderEngine` instead of `mesh-renderer::Painter`
 - Thread-local storage now manages `FrontendRenderEngine` instance
 
-### 4. **mesh-core** - New CorePainter
-**File**: `crates/mesh-core/src/shell/painter.rs` (NEW)
+### 4. **mesh-core-shell** - New CorePainter
+**File**: `crates/core/shell/src/shell/painter.rs` (NEW)
 
 Created `CorePainter` struct that:
 - Wraps `FrontendRenderEngine` for shell surface integration
 - Provides `paint()` and `paint_tooltip()` methods
 - Acts as the bridge between component state and pixel rendering
 
-### 5. **mesh-core** - Module Integration
-**File**: `crates/mesh-core/src/shell/mod.rs` (MODIFIED)
+### 5. **mesh-core-shell** - Module Integration
+**File**: `crates/core/shell/src/shell/mod.rs` (MODIFIED)
 
 Added `mod painter` to make the new painter module part of the shell subsystem.
 
 ### 6. **Workspace Dependencies**
 **File**: `Cargo.toml` (MODIFIED)
 
-Added `mesh-icon` to workspace dependencies:
+Added `mesh-core-icon` to workspace dependencies:
 ```toml
-mesh-icon = { path = "crates/mesh-icon" }
+mesh-core-icon = { path = "crates/core/ui/icon" }
 ```
 
 ## Architecture Flow
 
 ```
-Frontend Component (in mesh-core)
+Frontend Component (in mesh-core-shell)
     ↓ (builds widget tree)
 FrontendSurfaceComponent::paint()
     ↓
@@ -90,12 +90,12 @@ RenderEngine::present() → Wayland surface
 | Component            | Responsibility                               |
 | -------------------- | -------------------------------------------- |
 | `mesh-renderer`      | Low-level pixel operations, Wayland backends |
-| `mesh-render-engine` | Frontend plugin rendering pipeline (new)     |
-| `mesh-core`          | Shell surface orchestration, component state |
+| `mesh-core-render` | Frontend plugin rendering pipeline (new)     |
+| `mesh-core-shell`          | Shell surface orchestration, component state |
 
 ## Benefits
 
-1. **Modularity**: Plugin rendering logic is now cleanly separated into `mesh-render-engine`
+1. **Modularity**: Plugin rendering logic is now cleanly separated into `mesh-core-render`
 2. **Reusability**: The `FrontendRenderEngine` can be used independently for rendering previews or other UIs
 3. **Testability**: Rendering logic can be tested without full shell integration
 4. **Maintenance**: Changes to rendering don't require changes to shell core logic
@@ -103,8 +103,8 @@ RenderEngine::present() → Wayland surface
 
 ## Compilation Status
 
-✅ `mesh-render-engine`: Compiles successfully (with expected unused variable warnings)
-✅ `mesh-core`: Compiles successfully
+✅ `mesh-core-render`: Compiles successfully (with expected unused variable warnings)
+✅ `mesh-core-shell`: Compiles successfully
 ✅ All dependencies properly integrated
 
 ## Notes

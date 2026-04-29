@@ -1198,17 +1198,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-backend"
+name = "mesh-core-backend"
 version = "0.1.0"
 dependencies = [
- "mesh-scripting",
+ "mesh-core-scripting",
  "serde_json",
  "tokio",
  "tracing",
 ]
 
 [[package]]
-name = "mesh-capability"
+name = "mesh-core-capability"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -1216,20 +1216,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-cli"
-version = "0.1.0"
-dependencies = [
- "mesh-config",
- "mesh-core",
- "mesh-diagnostics",
- "mesh-plugin",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "mesh-component"
+name = "mesh-core-component"
 version = "0.1.0"
 dependencies = [
  "cssparser 0.35.0",
@@ -1241,7 +1228,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-config"
+name = "mesh-core-config"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -1252,36 +1239,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-core"
-version = "0.1.0"
-dependencies = [
- "mesh-backend",
- "mesh-capability",
- "mesh-config",
- "mesh-debug",
- "mesh-diagnostics",
- "mesh-elements",
- "mesh-events",
- "mesh-locale",
- "mesh-plugin",
- "mesh-render-engine",
- "mesh-runtime",
- "mesh-scripting",
- "mesh-service",
- "mesh-theme",
- "mesh-wayland",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "mesh-debug"
+name = "mesh-core-debug"
 version = "0.1.0"
 
 [[package]]
-name = "mesh-diagnostics"
+name = "mesh-core-diagnostics"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -1291,11 +1253,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-elements"
+name = "mesh-core-elements"
 version = "0.1.0"
 dependencies = [
- "mesh-component",
- "mesh-theme",
+ "mesh-core-component",
+ "mesh-core-theme",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1303,7 +1265,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-events"
+name = "mesh-core-events"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -1314,7 +1276,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-icon"
+name = "mesh-core-icon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1324,7 +1286,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-locale"
+name = "mesh-core-locale"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -1334,26 +1296,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-lsp"
+name = "mesh-core-plugin"
 version = "0.1.0"
 dependencies = [
- "mesh-component",
- "mesh-elements",
- "mesh-plugin",
- "serde",
- "serde_json",
- "tokio",
- "toml",
- "tower-lsp",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "mesh-plugin"
-version = "0.1.0"
-dependencies = [
- "mesh-capability",
+ "mesh-core-capability",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1362,19 +1308,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-render-engine"
+name = "mesh-core-render"
 version = "0.1.0"
 dependencies = [
  "cosmic-text",
  "fontdb 0.23.0",
  "image",
- "mesh-component",
- "mesh-debug",
- "mesh-elements",
- "mesh-icon",
- "mesh-plugin",
- "mesh-theme",
- "mesh-wayland",
+ "mesh-core-component",
+ "mesh-core-debug",
+ "mesh-core-elements",
+ "mesh-core-icon",
+ "mesh-core-plugin",
+ "mesh-core-theme",
+ "mesh-core-wayland",
  "minifb",
  "resvg",
  "rustix 0.38.44",
@@ -1386,27 +1332,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-runtime"
+name = "mesh-core-runtime"
 version = "0.1.0"
 dependencies = [
- "mesh-capability",
- "mesh-events",
+ "mesh-core-capability",
+ "mesh-core-events",
  "thiserror 2.0.18",
  "tracing",
 ]
 
 [[package]]
-name = "mesh-scripting"
+name = "mesh-core-scripting"
 version = "0.1.0"
 dependencies = [
- "mesh-capability",
- "mesh-component",
- "mesh-config",
- "mesh-elements",
- "mesh-events",
- "mesh-locale",
- "mesh-service",
- "mesh-theme",
+ "mesh-core-capability",
+ "mesh-core-component",
+ "mesh-core-config",
+ "mesh-core-elements",
+ "mesh-core-events",
+ "mesh-core-locale",
+ "mesh-core-service",
+ "mesh-core-theme",
  "mlua",
  "serde",
  "serde_json",
@@ -1415,7 +1361,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-service"
+name = "mesh-core-service"
 version = "0.1.0"
 dependencies = [
  "semver",
@@ -1428,7 +1374,33 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-theme"
+name = "mesh-core-shell"
+version = "0.1.0"
+dependencies = [
+ "mesh-core-backend",
+ "mesh-core-capability",
+ "mesh-core-component",
+ "mesh-core-config",
+ "mesh-core-debug",
+ "mesh-core-diagnostics",
+ "mesh-core-elements",
+ "mesh-core-events",
+ "mesh-core-locale",
+ "mesh-core-plugin",
+ "mesh-core-render",
+ "mesh-core-runtime",
+ "mesh-core-scripting",
+ "mesh-core-service",
+ "mesh-core-theme",
+ "mesh-core-wayland",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "mesh-core-theme"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -1438,11 +1410,40 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-wayland"
+name = "mesh-core-wayland"
 version = "0.1.0"
 dependencies = [
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "mesh-tools-cli"
+version = "0.1.0"
+dependencies = [
+ "mesh-core-config",
+ "mesh-core-diagnostics",
+ "mesh-core-plugin",
+ "mesh-core-shell",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "mesh-tools-lsp"
+version = "0.1.0"
+dependencies = [
+ "mesh-core-component",
+ "mesh-core-elements",
+ "mesh-core-plugin",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+ "tower-lsp",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

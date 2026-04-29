@@ -285,7 +285,7 @@ transaction:
 }
 ```
 
-The lockfile makes `mesh install` reproducible across machines — the same
+The lockfile makes `mesh-shell install` reproducible across machines — the same
 `plugin.json` + `plugins.lock.json` produces the same on-disk layout.
 
 ## Sources
@@ -318,7 +318,7 @@ When installing a plugin that provides an interface already provided by
 something installed:
 
 ```
-$ mesh install @mesh/pulseaudio-audio
+$ mesh-shell install @mesh/pulseaudio-audio
 
 → @mesh/pulseaudio-audio@0.1.0 provides mesh.audio.
   mesh.audio is already provided by:
@@ -363,7 +363,7 @@ block *per plugin* that has unmet system deps:
          Fedora:        sudo dnf install playerctl
 
 The plugin is installed but will start in the 'unavailable' state until
-the missing dependency is present. See `mesh doctor` for status.
+the missing dependency is present. See `mesh-shell doctor` for status.
 ```
 
 The same check runs on every plugin load, producing the plugin's health
@@ -372,16 +372,16 @@ record — see [`health.md`](./health.md).
 ## CLI
 
 ```
-mesh install <id>[@version]            # fetch, resolve, install
-mesh install ./path/to/plugin          # local install
-mesh uninstall <id>
-mesh update [<id>]                     # update one or all
-mesh list                              # installed plugins + versions
-mesh pin <interface> <plugin-id>       # set the active provider
-mesh unpin <interface>                 # clear pin, fall back to priority
-mesh search <query>
-mesh doctor                            # full health + dep check
-mesh why <id>                          # show why a plugin is installed (who depends on it)
+mesh-shell install <id>[@version]            # fetch, resolve, install
+mesh-shell install ./path/to/plugin          # local install
+mesh-shell uninstall <id>
+mesh-shell update [<id>]                     # update one or all
+mesh-shell list                              # installed plugins + versions
+mesh-shell pin <interface> <plugin-id>       # set the active provider
+mesh-shell unpin <interface>                 # clear pin, fall back to priority
+mesh-shell search <query>
+mesh-shell doctor                            # full health + dep check
+mesh-shell why <id>                          # show why a plugin is installed (who depends on it)
 ```
 
 ## Directories
@@ -389,7 +389,7 @@ mesh why <id>                          # show why a plugin is installed (who dep
 ```
 /usr/share/mesh/plugins/               system-installed plugins
 ~/.local/share/mesh/plugins/           user-installed plugins
-~/.local/share/mesh/dev-plugins/       `mesh dev` loaded
+~/.local/share/mesh/dev-plugins/       `mesh-shell dev` loaded
 ~/.cache/mesh/packages/                downloaded package archives
 ~/.config/mesh/settings.json           system-wide user settings
 ~/.config/mesh/plugins/<id>.json       per-plugin user overrides

@@ -33,7 +33,7 @@
 
           shellHook = ''
             echo "MESH dev shell ready"
-            echo "Run: cargo run -p mesh-cli -- start"
+            echo "Run: cargo run -p mesh-tools-cli --bin mesh-shell -- start"
           '';
         };
       });

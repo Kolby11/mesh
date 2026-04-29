@@ -38,7 +38,7 @@ For example, `icon` is an element with core-defined fields such as `name`,
 `icon`, and `text`; `@mesh/audio-controls` is a frontend plugin that packages
 multiple audio-related components into a complete UI.
 
-The LSP must use the shared `mesh-elements` element model for `refs.<name>`
+The LSP must use the shared `mesh-core-elements` element model for `refs.<name>`
 completion, hover, and diagnostics. Do not duplicate the Lua-facing fields in
 LSP-only tables; the runtime and tooling should agree on what `IconElement`,
 `InputElement`, and base `MeshElement` expose.
@@ -51,42 +51,42 @@ Each crate in `crates/` has a single responsibility. The dependency arrow goes
 downward — lower crates know nothing about higher ones.
 
 ```
-mesh-cli
-  └─ mesh-core          ← shell orchestrator, owns the main event loop
-       ├─ mesh-render-engine ← compiles .mesh frontend plugins and paints WidgetNode trees
-       │    ├─ mesh-component     ← parser for .mesh single-file components
-       │    └─ mesh-elements   ← core element model, layout engine, style resolver, WidgetNode
-       ├─ mesh-backend   ← Luau backend plugin polling and command runtime
-       │    └─ mesh-scripting     ← Luau host APIs and script state bridge
-       ├─ mesh-service   ← interface/service registry (InterfaceRegistry)
-       ├─ mesh-plugin    ← manifest parsing (Manifest, plugin.json / mesh.toml)
-       ├─ mesh-theme     ← token-based theming (ThemeEngine, Theme)
-       ├─ mesh-locale    ← localization (LocaleEngine)
-       ├─ mesh-events    ← typed event bus for inter-plugin communication
-       ├─ mesh-config    ← shell-wide settings (ShellConfig, ShellSettings)
-       ├─ mesh-capability← capability/permission model
-       ├─ mesh-wayland   ← Wayland surface abstractions (ShellSurface, Layer)
-       ├─ mesh-diagnostics ← DiagnosticsCollector, health reporting
-       ├─ mesh-debug     ← DebugSnapshot, DebugOverlayState
-       └─ mesh-runtime   ← (stub) future Luau sandbox host
+mesh-tools-cli
+  └─ mesh-core-shell          ← shell orchestrator, owns the main event loop
+       ├─ mesh-core-render ← compiles .mesh frontend plugins and paints WidgetNode trees
+       │    ├─ mesh-core-component     ← parser for .mesh single-file components
+       │    └─ mesh-core-elements   ← core element model, layout engine, style resolver, WidgetNode
+       ├─ mesh-core-backend   ← Luau backend plugin polling and command runtime
+       │    └─ mesh-core-scripting     ← Luau host APIs and script state bridge
+       ├─ mesh-core-service   ← interface/service registry (InterfaceRegistry)
+       ├─ mesh-core-plugin    ← manifest parsing (Manifest, plugin.json / mesh.toml)
+       ├─ mesh-core-theme     ← token-based theming (ThemeEngine, Theme)
+       ├─ mesh-core-locale    ← localization (LocaleEngine)
+       ├─ mesh-core-events    ← typed event bus for inter-plugin communication
+       ├─ mesh-core-config    ← shell-wide settings (ShellConfig, ShellSettings)
+       ├─ mesh-core-capability← capability/permission model
+       ├─ mesh-core-wayland   ← Wayland surface abstractions (ShellSurface, Layer)
+       ├─ mesh-core-diagnostics ← DiagnosticsCollector, health reporting
+       ├─ mesh-core-debug     ← DebugSnapshot, DebugOverlayState
+       └─ mesh-core-runtime   ← (stub) future Luau sandbox host
 ```
 
 ### Key types per crate
 
-| Crate                    | Key types / files                                                                                                                              |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mesh-core`              | `Shell` in `shell/mod.rs` — plugin host and shell orchestrator; `FrontendSurfaceComponent`, `ShellComponent` trait, `CoreRequest`, `CoreEvent` |
-| `mesh-plugin`            | `Manifest`, `PluginType`, `SurfaceLayoutSection` in `manifest.rs`; `PluginInstance` in `lifecycle.rs`                                          |
-| `mesh-component`         | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>`, and `<i18n>` blocks                                                   |
-| `mesh-render-engine`     | `CompiledFrontendPlugin`, `FrontendCompositionResolver`, `RenderEngine`, `PixelBuffer`, `SharedTextMeasurer`, `LayerSurfaceConfig`             |
-| `mesh-backend`           | `spawn_backend_service`, `BackendServiceCommand`, `BackendServiceUpdate`                                                                       |
-| `mesh-scripting`         | `ScriptContext`, `BackendScriptContext`, `ScriptState`, `LocaleBoundState`                                                                     |
-| `mesh-elements`                | `ElementKind`, `ElementTypeDef`, `ElementSnapshot`, `WidgetNode`, `LayoutRect`, `StyleContext`, `StyleResolver`, `VariableStore`, `ElementState` |
-| `mesh-service`           | `InterfaceRegistry`, `ServiceRegistry`, `InterfaceProvider`, `canonical_interface_name`                                                        |
-| `mesh-theme`             | `ThemeEngine`, `Theme`, `default_theme()`, `load_theme_from_path()`                                                                            |
-| `mesh-wayland`           | `ShellSurface` trait, `Layer`, `Edge`, `KeyboardMode`, `StubSurface`                                                                           |
-| `mesh-config`            | `ShellConfig`, `ShellSettings`, `load_config()`, `load_shell_settings()`                                                                       |
-| `mesh-events`            | `EventBus`                                                                                                                                     |
+| Crate                 | Key types / files                                                                                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `mesh-core-shell`     | `Shell` in `shell/mod.rs` — plugin host and shell orchestrator; `FrontendSurfaceComponent`, `ShellComponent` trait, `CoreRequest`, `CoreEvent`   |
+| `mesh-core-plugin`    | `Manifest`, `PluginType`, `SurfaceLayoutSection` in `manifest.rs`; `PluginInstance` in `lifecycle.rs`                                            |
+| `mesh-core-component` | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>`, and `<i18n>` blocks                                                   |
+| `mesh-core-render`    | `CompiledFrontendPlugin`, `FrontendCompositionResolver`, `RenderEngine`, `PixelBuffer`, `SharedTextMeasurer`, `LayerSurfaceConfig`               |
+| `mesh-core-backend`   | `spawn_backend_service`, `BackendServiceCommand`, `BackendServiceUpdate`                                                                         |
+| `mesh-core-scripting` | `ScriptContext`, `BackendScriptContext`, `ScriptState`, `LocaleBoundState`                                                                       |
+| `mesh-core-elements`  | `ElementKind`, `ElementTypeDef`, `ElementSnapshot`, `WidgetNode`, `LayoutRect`, `StyleContext`, `StyleResolver`, `VariableStore`, `ElementState` |
+| `mesh-core-service`   | `InterfaceRegistry`, `ServiceRegistry`, `InterfaceProvider`, `canonical_interface_name`                                                          |
+| `mesh-core-theme`     | `ThemeEngine`, `Theme`, `default_theme()`, `load_theme_from_path()`                                                                              |
+| `mesh-core-wayland`   | `ShellSurface` trait, `Layer`, `Edge`, `KeyboardMode`, `StubSurface`                                                                             |
+| `mesh-core-config`    | `ShellConfig`, `ShellSettings`, `load_config()`, `load_shell_settings()`                                                                         |
+| `mesh-core-events`    | `EventBus`                                                                                                                                       |
 
 ---
 
@@ -134,7 +134,7 @@ Every frontend plugin is a complete feature package. It declares in its
 - `capabilities.required`: permission gates (`shell.surface`, `theme.read`, etc.)
 - `dependencies.plugins`: plugin IDs this plugin depends on
 
-Surface layout defaults live in `plugin.json`, **not** in Rust. `mesh-core` reads them via `surface_layout_from_manifest()` in `shell.rs`.
+Surface layout defaults live in `plugin.json`, **not** in Rust. `mesh-core-shell` reads them via `surface_layout_from_manifest()` in `shell.rs`.
 
 ### `.mesh` single-file component structure
 
@@ -158,9 +158,9 @@ capabilities, manifests, and one or more components.
 
 ### Shell startup
 
-1. `mesh-cli` → `Shell::run()` in `mesh-core/src/shell.rs`
+1. `mesh-tools-cli` → `Shell::run()` in `mesh-core-shell/src/shell.rs`
 2. Shell discovers plugins via `plugin_search_paths()` (workspace, `/usr/share/mesh`, `~/.local/share/mesh`)
-3. Each plugin dir is loaded from manifest metadata; frontend plugins are compiled via `mesh-render-engine`, backend plugins are hosted by `mesh-backend`
+3. Each plugin dir is loaded from manifest metadata; frontend plugins are compiled via `mesh-core-render`, backend plugins are hosted by `mesh-core-backend`
 4. `FrontendSurfaceComponent::new()` is created per surface plugin:
    - reads `plugin.json` manifest → `surface_layout_from_manifest()` for layout defaults
    - reads `config/settings.json` → user overrides applied on top of manifest defaults
@@ -202,18 +202,18 @@ backend plugin (mesh.toml, provides = "mesh.audio")
 
 ## Common Task Entry Points
 
-| Task                           | Where to start                                                                                                         |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| Add a CSS property             | `mesh-elements/src/style.rs` (parse), `mesh-render-engine/src/surface/painter.rs` (paint)                                    |
-| Add a new surface plugin       | Create `plugins/frontend/core/<name>/`, `plugin.json` with `"type": "surface"`, `src/main.mesh`                        |
-| Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core/src/shell.rs`; manifest's `surface_layout` section                      |
-| Add a service (backend plugin) | `plugins/backend/core/<name>/`, `plugin.json` + `src/main.luau`, implement the interface contract in the plugin script |
-| Add a new CoreRequest action   | `CoreRequest` enum + match arm in `handle_request()` in `mesh-core/src/shell.rs`                                       |
-| Add a theme token              | `mesh-theme/src/lib.rs`, default theme JSON, then reference with `token(group.name)` in `.mesh`                        |
-| Add localization               | Plugin's `<i18n>` block or `config/i18n/<locale>.json`; `LocaleEngine` in `mesh-locale`                                |
-| Debug rendering                | `ToggleDebugOverlay` / `CoreRequest::CycleDebugTab`; see `mesh-debug/src/lib.rs`                                       |
-| Plugin manifest parsing        | `mesh-plugin/src/manifest.rs` — `JsonManifest`, `TomlManifest`, `into_manifest()`                                      |
-| Fix icons                      | See "Icon System" section below — four specific files need changes                                                     |
+| Task                           | Where to start                                                                                                                  |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Add a CSS property             | `mesh-core-elements/src/style.rs` (parse), `mesh-core-render/src/surface/painter.rs` (paint)                                    |
+| Add a new surface plugin       | Create `packages/plugins/frontend/core/<name>/`, `plugin.json` with `"type": "surface"`, `src/main.mesh`                        |
+| Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core-shell/src/shell.rs`; manifest's `surface_layout` section                         |
+| Add a service (backend plugin) | `packages/plugins/backend/core/<name>/`, `plugin.json` + `src/main.luau`, implement the interface contract in the plugin script |
+| Add a new CoreRequest action   | `CoreRequest` enum + match arm in `handle_request()` in `mesh-core-shell/src/shell.rs`                                          |
+| Add a theme token              | `mesh-core-theme/src/lib.rs`, default theme JSON, then reference with `token(group.name)` in `.mesh`                            |
+| Add localization               | Plugin's `<i18n>` block or `config/i18n/<locale>.json`; `LocaleEngine` in `mesh-core-locale`                                    |
+| Debug rendering                | `ToggleDebugOverlay` / `CoreRequest::CycleDebugTab`; see `mesh-core-debug/src/lib.rs`                                           |
+| Plugin manifest parsing        | `mesh-core-plugin/src/manifest.rs` — `JsonManifest`, `TomlManifest`, `into_manifest()`                                          |
+| Fix icons                      | See "Icon System" section below — four specific files need changes                                                              |
 
 ---
 
@@ -233,14 +233,14 @@ Template syntax (already parsed correctly — do not change the parser):
 The full pipeline:
 ```
 <icon name="..."> in .mesh template
-  → parser (mesh-component/src/parser.rs) — already works
+  → parser (mesh-core-component/src/parser.rs) — already works
   → WidgetNode { tag: "icon", attributes: { name, size } }
-  → painter (mesh-render-engine/src/surface/painter.rs:138) — reads name/src/size attrs
-  → resolve_icon_path(name, size) in mesh-icon/src/lib.rs — BROKEN (see fix 1)
-  → draw_icon_from_path(buffer, path, ...) in mesh-render-engine/src/surface/icon.rs — BROKEN for SVG (see fix 2)
+  → painter (mesh-core-render/src/surface/painter.rs:138) — reads name/src/size attrs
+  → resolve_icon_path(name, size) in mesh-core-icon/src/lib.rs — BROKEN (see fix 1)
+  → draw_icon_from_path(buffer, path, ...) in mesh-core-render/src/surface/icon.rs — BROKEN for SVG (see fix 2)
 ```
 
-### Fix 1 — XDG icon resolution (`crates/mesh-icon/src/lib.rs`)
+### Fix 1 — XDG icon resolution (`crates/core/ui/icon/src/lib.rs`)
 
 The current resolver only checks 1 level deep. Real system icons live at:
 ```
@@ -261,10 +261,10 @@ The fixed resolver must:
 
 Prefer PNG over SVG when both exist at the requested size; prefer SVG (scalable) when no PNG matches the size exactly. Return `None` if nothing is found — do not panic or log a warning on every miss.
 
-### Fix 2 — SVG rasterization (`crates/mesh-render-engine/src/surface/icon.rs`)
+### Fix 2 — SVG rasterization (`crates/core/ui/render/src/surface/icon.rs`)
 
 The `"svg"` match arm is an empty TODO. To fix it:
-1. Add `resvg = "0.44"` to `crates/mesh-render-engine/Cargo.toml`
+1. Add `resvg = "0.44"` to `crates/core/ui/render/Cargo.toml`
 2. In the `"svg"` arm:
    ```rust
    "svg" => {
@@ -286,7 +286,7 @@ The `"svg"` match arm is an empty TODO. To fix it:
                            buffer.set_pixel(
                                (dest_x + px as i32) as u32,
                                (dest_y + py as i32) as u32,
-                               mesh_elements::style::Color {
+                               mesh_core_elements::style::Color {
                                    r: data[idx],
                                    g: data[idx + 1],
                                    b: data[idx + 2],
@@ -302,7 +302,7 @@ The `"svg"` match arm is an empty TODO. To fix it:
    ```
    `resvg` re-exports `usvg` and `tiny_skia`, so no extra dependencies are needed beyond `resvg`.
 
-### Fix 3 — Remove the purple placeholder (`crates/mesh-render-engine/src/style.rs`)
+### Fix 3 — Remove the purple placeholder (`crates/core/ui/render/src/style.rs`)
 
 Find the `"icon"` arm in `default_style_for_tag()` (around line 1128). It currently sets `background_color = #7f67be` and `border_radius = 9`. This purple box is a debug placeholder — it masks broken icons by always showing something.
 
@@ -310,16 +310,16 @@ Replace with:
 ```rust
 "icon" => {
     let mut style = ComputedStyle::default();
-    style.width = mesh_elements::Dimension::Px(18.0);
-    style.height = mesh_elements::Dimension::Px(18.0);
-    style.background_color = mesh_elements::Color::TRANSPARENT;
+    style.width = mesh_core_elements::Dimension::Px(18.0);
+    style.height = mesh_core_elements::Dimension::Px(18.0);
+    style.background_color = mesh_core_elements::Color::TRANSPARENT;
     style
 }
 ```
 
 Size defaults remain (18px) because without a `size` attribute the painter uses `w.max(h)` which needs to be non-zero.
 
-### Fix 4 — Add decoded image caching (`crates/mesh-render-engine/src/surface/icon.rs`)
+### Fix 4 — Add decoded image caching (`crates/core/ui/render/src/surface/icon.rs`)
 
 `draw_icon_from_path` currently calls `image::open(path)` on every paint frame. With a 250ms poll interval, this runs ~4 times per second per icon. Add a static cache:
 
@@ -381,9 +381,9 @@ respective scripting language if the runtime grows beyond Luau. Do not move
 service-specific parsing, polling, command shaping, or fallback behavior into
 Rust just because the current host API is missing a helper.
 
-**If you find Rust code in `mesh-core` that calls system tools, spawns polling loops for a specific service, or has `if service_name == "audio"` style branches, that is a bug, not a pattern to follow.**
+**If you find Rust code in `mesh-core-shell` that calls system tools, spawns polling loops for a specific service, or has `if service_name == "audio"` style branches, that is a bug, not a pattern to follow.**
 
-The exec host API in `mesh-scripting` is what enables backend Luau plugins to call system commands. When it does not exist yet for a given capability, the right fix is to implement a generic host API primitive — not to move the logic into core.
+The exec host API in `mesh-core-scripting` is what enables backend Luau plugins to call system commands. When it does not exist yet for a given capability, the right fix is to implement a generic host API primitive — not to move the logic into core.
 
 Backend scripts now run in a real Luau VM through `mlua`. Do not add new
 hand-written backend parsers or mini-interpreters in Rust.
@@ -393,7 +393,7 @@ Do not add handwritten execution logic or mini-language semantics in Rust.
 
 Example of what is WRONG:
 ```rust
-// mesh-core/src/shell/audio.rs  ← this file should not exist
+// mesh-core-shell/src/shell/audio.rs  ← this file should not exist
 if service_name == "audio" {
     runtime.spawn(spawn_audio_backend_service(...)); // core doing service work
 }
@@ -401,7 +401,7 @@ if service_name == "audio" {
 
 Example of what is RIGHT:
 ```lua
--- plugins/backend/core/pipewire-audio/src/main.luau
+-- packages/plugins/backend/core/pipewire-audio/src/main.luau
 local volume = exec("wpctl", {"get-volume", "@DEFAULT_AUDIO_SINK@"})
 service.emit("audio", { volume = parse_volume(volume) })
 ```
@@ -418,14 +418,14 @@ The mechanism: when a service update arrives, core calls `on_<service>_update()`
 
 Example of what is WRONG:
 ```rust
-// mesh-core/src/shell/service.rs — core computing display state
+// mesh-core-shell/src/shell/service.rs — core computing display state
 let icon_name = audio_icon_name(percent, muted); // core should not know about this
 obj.insert("icon_name", icon_name);
 ```
 
 Example of what is RIGHT:
 ```lua
--- plugins/frontend/core/volume-slider/src/main.mesh <script>
+-- packages/plugins/frontend/core/volume-slider/src/main.mesh <script>
 mesh.state.set("icon_name", "audio-volume-muted")
 mesh.service.bind("audio.muted", "audio_muted")
 mesh.service.bind("audio.percent", "audio_percent")
@@ -477,17 +477,17 @@ function sync_audio_state()
 
 ### Interface proxies
 
-`mesh.interfaces.get("mesh.audio", ">=1.0")` returns a proxy object. Use as a Lua local — it is NOT reactive state and should not be passed to `mesh.state.set`:
+`require("@mesh/audio")` returns a proxy object (optional version suffix like `@mesh/audio@>=1.0`). Use the proxy as a Lua local — it is NOT reactive state and should not be passed to `mesh.state.set`:
 
 ```lua
-local audio = mesh.interfaces.get("mesh.audio", ">=1.0")  -- chunk-local, used as upvalue
-local power  = mesh.interfaces.get("mesh.power",  ">=1.0")
+local audio = require("@mesh/audio@>=1.0")  -- chunk-local, used as upvalue
+local power  = require("@mesh/power@>=1.0")
 ```
 
 ---
 
 - **Everything is a plugin.** The shell core must not hardcode plugin IDs or behavior. Layout defaults, size policies, and content sizing are declared in `plugin.json`, not in Rust match arms.
-- **`mesh-core/src/shell.rs` is large** (~4000 lines). When reading it, use `Grep` to find specific functions rather than reading the whole file.
+- **`mesh-core-shell/src/shell.rs` is large** (~4000 lines). When reading it, use `Grep` to find specific functions rather than reading the whole file.
 - **Frontend plugins are compiled at startup**, not interpreted at runtime. Hot-reload is supported via file watching (`reload_plugin_settings`, `source_path()` watching).
 - **Luau state is the bridge** between services and UI. Backend plugins emit string updates; `apply_service_update()` parses them into `ScriptState`; templates bind to `{state.field}`.
 - **Surface layout is user-configurable.** Any surface can have its anchor, layer, size, keyboard mode overridden via `config/settings.json` inside the plugin directory.

@@ -108,7 +108,7 @@ defaults before any user has touched anything. The file in this repo's
 Every key has exactly one owner:
 
 - **Shell keys** (`theme.*`, `i18n.*`, `plugins.*`, `interfaces.*`) — owned by
-  the core. Schema lives in `mesh-config`.
+  the core. Schema lives in `mesh-core-config`.
 - **Contract keys** (`mesh.audio.*`, `mesh.network.*`, …) — owned by the
   interface contract. Every implementation inherits them.
 - **Plugin keys** (`@scope/name.*` or the plugin's scoped object) — owned by
@@ -183,16 +183,16 @@ loss. Re-pinning brings them back.
 
 Schemas are JSON. The keys supported today:
 
-| Field | Purpose |
-|-------|---------|
-| `type` | `"string" \| "integer" \| "float" \| "boolean" \| "enum" \| "object" \| "array"` |
-| `default` | Default value. Must match `type`. |
-| `values` | Allowed values when `type = "enum"`. |
-| `min` / `max` | Bounds for numeric types. |
-| `items` | Element schema for arrays. |
-| `properties` | Field schemas for objects. |
-| `description` | Human-readable description, shown in the generated UI. |
-| `scope` | `"system"` or `"user"`. Restricts where this key may appear. Defaults to `"user"`. |
+| Field                 | Purpose                                                                             |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `type`                | `"string" \| "integer" \| "float" \| "boolean" \| "enum" \| "object" \| "array"`    |
+| `default`             | Default value. Must match `type`.                                                   |
+| `values`              | Allowed values when `type = "enum"`.                                                |
+| `min` / `max`         | Bounds for numeric types.                                                           |
+| `items`               | Element schema for arrays.                                                          |
+| `properties`          | Field schemas for objects.                                                          |
+| `description`         | Human-readable description, shown in the generated UI.                              |
+| `scope`               | `"system"` or `"user"`. Restricts where this key may appear. Defaults to `"user"`.  |
 | `requires_capability` | Declares that editing this key requires a specific capability (e.g. `theme.write`). |
 
 ## Frontend plugin schemas
@@ -219,7 +219,7 @@ local cfg = mesh.config
 local fmt = cfg.get("clock_format")   -- resolved through the full stack
 
 -- contract-level settings (via the proxy)
-local audio = mesh.interfaces.get("mesh.audio", ">=1.0")
+local audio = require("@mesh/audio@>=1.0")
 local pri   = audio.config.get("default_output_priority")
 
 -- subscribe to changes

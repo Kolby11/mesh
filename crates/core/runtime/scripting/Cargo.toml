@@ -1,0 +1,22 @@
+[package]
+name = "mesh-core-scripting"
+description = "Luau scripting bridge between UI components and service backends"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-core-component = { workspace = true }
+mesh-core-elements = { workspace = true }
+mesh-core-theme = { workspace = true }
+mesh-core-locale = { workspace = true }
+mesh-core-config = { workspace = true }
+mesh-core-events = { workspace = true }
+mesh-core-capability = { workspace = true }
+mesh-core-service = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+mlua = { version = "0.11", features = ["luau", "serialize", "send"] }

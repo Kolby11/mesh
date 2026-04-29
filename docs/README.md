@@ -11,11 +11,11 @@ lifecycle spec see [`../spec/pluggable-backend.md`](../spec/pluggable-backend.md
   classification. The backbone of the extensibility story.
 - **Plugins**
   - [`plugins/README.md`](./plugins/README.md) — core-plugin index.
-  - [`plugins/frontend/core/`](./plugins/frontend/core/README.md) — shipped
+  - [shipped frontend plugin docs](./plugins/frontend/core/README.md) — shipped
     frontend surfaces and widgets.
-  - [`plugins/frontend/examples/`](./plugins/frontend/examples/README.md) —
+  - [example frontend plugin docs](./plugins/frontend/examples/README.md) —
     example frontend compositions and reusable sample widgets.
-  - [`plugins/backend/core/`](./plugins/backend/core/README.md) — shipped
+  - [shipped backend plugin docs](./plugins/backend/core/README.md) — shipped
     backends and interface packages.
 - **Frontend**
   - [`frontend/mesh-syntax.md`](./frontend/mesh-syntax.md) — `.mesh` component syntax: tags, text interpolation, attribute binding, two-way binding, event handlers, accessibility.

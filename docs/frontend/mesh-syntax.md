@@ -37,37 +37,37 @@ Only `<template>` is required. All other blocks are optional.
 Use lowercase MESH UI tags for built-in shell primitives. PascalCase tags are
 reserved for explicitly imported custom components.
 
-| Tag                | Purpose                         |
-| ------------------ | ------------------------------- |
-| `panel`            | Generic surface/container root  |
-| `box`              | Generic container               |
-| `row`              | Horizontal layout container     |
-| `column`           | Vertical layout container       |
-| `stack`            | Stacked layout container        |
-| `text`             | Text content                    |
-| `label`            | Input label                     |
-| `scroll`           | Scrollable region               |
-| `scroll-view`      | Semantic scrollable region      |
-| `button`           | Clickable action                |
-| `icon-button`      | Icon-only clickable action      |
-| `input`            | Text input                      |
-| `text-input`       | Semantic text input             |
-| `password-input`   | Password text input             |
-| `search-input`     | Search text input               |
-| `number-input`     | Numeric text input              |
-| `email-input`      | Email text input                |
-| `url-input`        | URL text input                  |
-| `slider`           | Range input                     |
-| `switch`           | Switch control                  |
-| `checkbox`         | Checkbox control                |
-| `icon`             | Icon or image asset             |
-| `image`            | Image asset                     |
-| `list`             | List container                  |
-| `list-item`        | List item                       |
-| `separator`        | Divider                         |
-| `spacer`           | Flexible spacing node           |
-| `surface`          | Surface composition primitive   |
-| `widget`           | Widget composition primitive    |
+| Tag              | Purpose                        |
+| ---------------- | ------------------------------ |
+| `panel`          | Generic surface/container root |
+| `box`            | Generic container              |
+| `row`            | Horizontal layout container    |
+| `column`         | Vertical layout container      |
+| `stack`          | Stacked layout container       |
+| `text`           | Text content                   |
+| `label`          | Input label                    |
+| `scroll`         | Scrollable region              |
+| `scroll-view`    | Semantic scrollable region     |
+| `button`         | Clickable action               |
+| `icon-button`    | Icon-only clickable action     |
+| `input`          | Text input                     |
+| `text-input`     | Semantic text input            |
+| `password-input` | Password text input            |
+| `search-input`   | Search text input              |
+| `number-input`   | Numeric text input             |
+| `email-input`    | Email text input               |
+| `url-input`      | URL text input                 |
+| `slider`         | Range input                    |
+| `switch`         | Switch control                 |
+| `checkbox`       | Checkbox control               |
+| `icon`           | Icon or image asset            |
+| `image`          | Image asset                    |
+| `list`           | List container                 |
+| `list-item`      | List item                      |
+| `separator`      | Divider                        |
+| `spacer`         | Flexible spacing node          |
+| `surface`        | Surface composition primitive  |
+| `widget`         | Widget composition primitive   |
 
 HTML compatibility tags are intentionally not part of the component vocabulary.
 Use classes, metadata, accessibility attributes, and component boundaries for
@@ -85,7 +85,7 @@ import audio from "mesh.audio@>=1.0"
 Local component imports resolve relative to the importing file, `@src/...`
 resolves from the plugin's `src/` directory, plugin component imports resolve
 through declared plugin dependencies, and `mesh.*` imports expose the same
-interface proxy returned by `mesh.interfaces.get(...)`.
+interface proxy returned by `require("@mesh/<service>")`.
 
 Conceptually, every built-in tag inherits the common `MeshElement` surface:
 shared attributes like `class`, `id`, `ref`, `style`, accessibility metadata,

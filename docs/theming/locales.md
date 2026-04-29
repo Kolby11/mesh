@@ -208,7 +208,7 @@ differs across locales (decimal separators, date order, first day of
 week, thousand grouping).
 
 ```luau
-local loc = mesh.interfaces.get("mesh.locale", ">=1.0")
+local loc = require("@mesh/locale@>=1.0")
 loc:format_number(1234567.89)           -- "1 234 567,89" in sk-SK
 loc:format_date(os.time(), "short")     -- "20. 4. 2026"
 loc:format_duration(3675)               -- "1 h 1 min"

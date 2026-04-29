@@ -1,7 +1,7 @@
 # Frontend Example Plugins
 
 This directory documents a fuller composition example for frontend plugin
-authors. The example plugins live in `plugins/frontend/examples/`.
+authors. The example plugins live in `packages/plugins/frontend/examples/`.
 
 The shell discovers them the same way it discovers any other plugin under the
 repo `plugins/` tree. The `examples/` folder is a naming convention for human

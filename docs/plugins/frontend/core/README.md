@@ -54,7 +54,7 @@ function sync_audio_state()
 end
 ```
 
-`mesh.interfaces.get(...)` is still available for request/response style
+`require("@mesh/<service>")` is available for request/response style
 lookups, but most reactive UI should treat service payloads as plugin-owned
 data and derive its own labels, icons, and tooltips locally.
 
@@ -62,14 +62,14 @@ For interface-centric code, the proxy can now drive both sides of the flow:
 
 ```luau
 function init()
-    local audio = mesh.interfaces.get("mesh.audio", ">=1.0")
+    local audio = require("@mesh/audio@>=1.0")
     audio:bind("muted", "audio_muted")
     audio:bind("percent", "audio_percent")
     audio:on_change("sync_audio_state")
 end
 
 function set_volume(percent)
-    local audio = mesh.interfaces.get("mesh.audio", ">=1.0")
+    local audio = require("@mesh/audio@>=1.0")
     audio:set_volume("default", percent / 100)
 end
 ```
@@ -86,20 +86,20 @@ For a larger copyable composition example, see
 Each surface's `src/main.mesh` is a Svelte-inspired single-file component with
 these blocks:
 
-| Block | Purpose |
-|-------|---------|
-| `<template>` | XHTML-like markup describing the UI tree. Dynamic attributes use `{}` and event handlers use `onclick={handler}`-style attributes. |
-| `<script lang="luau">` | Luau code implementing state, explicit `mesh.service.bind(...)` and `mesh.service.on(...)` subscriptions, and event handlers. |
-| `<style>` | CSS-like styling. Token references use `token(group.name)` and inherit the active theme. Supports `overflow`, `overflow-x`, `overflow-y`, and container breakpoints via `@container (min-width: 640px) { ... }`. |
-| `<i18n>` | Translations scoped to the component (optional). |
+| Block                  | Purpose                                                                                                                                                                                                          |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<template>`           | XHTML-like markup describing the UI tree. Dynamic attributes use `{}` and event handlers use `onclick={handler}`-style attributes.                                                                               |
+| `<script lang="luau">` | Luau code implementing state, explicit `mesh.service.bind(...)` and `mesh.service.on(...)` subscriptions, and event handlers.                                                                                    |
+| `<style>`              | CSS-like styling. Token references use `token(group.name)` and inherit the active theme. Supports `overflow`, `overflow-x`, `overflow-y`, and container breakpoints via `@container (min-width: 640px) { ... }`. |
+| `<i18n>`               | Translations scoped to the component (optional).                                                                                                                                                                 |
 
 ## Core surfaces
 
-| Plugin | Manifest ID | Purpose |
-|--------|-------------|---------|
-| [base-surface](./base-surface/README.md) | `@mesh/base-surface` | Composition test surface with imported launcher/sidebar widgets and configurable placement |
-| [navigation-bar](./navigation-bar/README.md) | `@mesh/navigation-bar` | Top-edge navigation bar surface |
-| [panel](./panel/README.md) | `@mesh/panel` | Top panel with clock, status icons, system tray |
-| [launcher](./launcher/README.md) | `@mesh/launcher` | Application launcher surface |
-| [notification-center](./notification-center/README.md) | `@mesh/notification-center` | Notification host surface with content/sidebar slots |
-| [quick-settings](./quick-settings/README.md) | `@mesh/quick-settings` | Wi-Fi, Bluetooth, audio, power toggles |
+| Plugin                                                 | Manifest ID                 | Purpose                                                                                    |
+| ------------------------------------------------------ | --------------------------- | ------------------------------------------------------------------------------------------ |
+| [base-surface](./base-surface/README.md)               | `@mesh/base-surface`        | Composition test surface with imported launcher/sidebar widgets and configurable placement |
+| [navigation-bar](./navigation-bar/README.md)           | `@mesh/navigation-bar`      | Top-edge navigation bar surface                                                            |
+| [panel](./panel/README.md)                             | `@mesh/panel`               | Top panel with clock, status icons, system tray                                            |
+| [launcher](./launcher/README.md)                       | `@mesh/launcher`            | Application launcher surface                                                               |
+| [notification-center](./notification-center/README.md) | `@mesh/notification-center` | Notification host surface with content/sidebar slots                                       |
+| [quick-settings](./quick-settings/README.md)           | `@mesh/quick-settings`      | Wi-Fi, Bluetooth, audio, power toggles                                                     |

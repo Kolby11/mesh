@@ -15,10 +15,10 @@ declaration** in `plugin.json` drives the installer's pre-flight check
 
 A plugin reports one of three states at a time:
 
-| State | Meaning |
-|-------|---------|
-| `healthy` | Running normally. All required deps present, all declared features available. |
-| `degraded` | Running, but one or more optional features are unavailable. The plugin works; some capability is missing. |
+| State         | Meaning                                                                                                                                                                        |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `healthy`     | Running normally. All required deps present, all declared features available.                                                                                                  |
+| `degraded`    | Running, but one or more optional features are unavailable. The plugin works; some capability is missing.                                                                      |
 | `unavailable` | Cannot run. A required dependency is missing, the daemon is down, or an unrecoverable error occurred. The plugin is loaded but does not register its interface implementation. |
 
 State transitions emit events (see [Health channel](#health-channel)) so
@@ -53,15 +53,15 @@ useful:
 
 Fields:
 
-| Field | Type | Purpose |
-|-------|------|---------|
-| `state` | enum | `healthy` / `degraded` / `unavailable` |
-| `reason` | string | One-line human-readable summary |
-| `fix_suggestion` | string | What the user can do, in plain language |
-| `missing` | array | Structured list of missing deps (for tooling and package-manager integration) |
-| `degraded_features` | array | Names of optional capabilities that are not available (only on `degraded`) |
-| `since` | ISO 8601 | When the plugin last entered this state |
-| `recoverable` | bool | Whether periodic re-checks may succeed (e.g. user installs `playerctl` without restarting the shell) |
+| Field               | Type     | Purpose                                                                                              |
+| ------------------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| `state`             | enum     | `healthy` / `degraded` / `unavailable`                                                               |
+| `reason`            | string   | One-line human-readable summary                                                                      |
+| `fix_suggestion`    | string   | What the user can do, in plain language                                                              |
+| `missing`           | array    | Structured list of missing deps (for tooling and package-manager integration)                        |
+| `degraded_features` | array    | Names of optional capabilities that are not available (only on `degraded`)                           |
+| `since`             | ISO 8601 | When the plugin last entered this state                                                              |
+| `recoverable`       | bool     | Whether periodic re-checks may succeed (e.g. user installs `playerctl` without restarting the shell) |
 
 `reason` and `fix_suggestion` come from the plugin's dependency
 declaration — the `reason` field on each `native_libs` / `binaries` /
@@ -123,21 +123,22 @@ end)
 
 ### Via the interface proxy
 
-`mesh.interfaces.get(...)` returns the proxy and the current health:
+Use `require("@mesh/<service>")` to load an interface proxy. If the
+interface is unavailable, `require` will throw, so wrap it in `pcall`:
 
 ```luau
-local audio, status = mesh.interfaces.get("mesh.audio", ">=1.0")
+local ok, audio = pcall(require, "@mesh/audio@>=1.0")
 
-if not audio then
-    -- no provider at all
-    showUnavailable(status and status.reason or "No audio backend installed.")
-    return
+if not ok or not audio then
+  showUnavailable("No audio backend installed.")
+  return
 end
 
 audio:on_health(function(h) refreshUI(h) end)
 ```
 
-`status` is always present — even when the lookup returns `nil`, it
+When `require` fails, you can surface a generic unavailable state or
+fallback messaging.
 carries the reason (no provider, provider is unavailable, capability
 denied, version range unsatisfiable).
 
@@ -220,17 +221,17 @@ can be replaced — its contract is `mesh.diagnostics.ui`.
 ## CLI
 
 ```
-mesh doctor                       # full health report for every plugin
-mesh health <plugin-id>           # single plugin
-mesh health --interface mesh.audio
-mesh health --watch               # live stream of health events
+mesh-shell doctor                       # full health report for every plugin
+mesh-shell health <plugin-id>           # single plugin
+mesh-shell health --interface mesh.audio
+mesh-shell health --watch               # live stream of health events
 ```
 
-`mesh doctor` output is designed to be the first thing a user runs when
+`mesh-shell doctor` output is designed to be the first thing a user runs when
 something looks wrong:
 
 ```
-$ mesh doctor
+$ mesh-shell doctor
 
 Shell       healthy
 Theme       @mesh/default-theme (dark)        healthy
@@ -262,4 +263,4 @@ Surfaces
 - Frontends subscribe to per-interface health through the normal event
   bus; frontend plugins decide how to render degraded or unavailable states
   declaratively.
-- `mesh doctor` is the one command a user runs when things look wrong.
+- `mesh-shell doctor` is the one command a user runs when things look wrong.

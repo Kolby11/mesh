@@ -15,3 +15,5 @@ make sure positioning system works (relative, absolute, fixed)
 Variable state management and and binding for components
 
 Clean up the backend plugins and interfaces, right now interfaces are separate from the backend, we should check our options and consider moving the interface into the plugin itself
+
+Remove the icon assts from the core/ui. The icons should be installed into a folder outside the core

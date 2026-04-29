@@ -1,6 +1,6 @@
 # Text Rendering Integration: Next Steps
 
-The current refactoring has successfully separated rendering into the `mesh-render-engine` crate, but text rendering needs to be fully integrated. Here's what needs to happen:
+The current refactoring has successfully separated rendering into the `mesh-core-render` crate, but text rendering needs to be fully integrated. Here's what needs to happen:
 
 ## Current Status
 
@@ -20,7 +20,7 @@ The current refactoring has successfully separated rendering into the `mesh-rend
 
 ### 1. Integrate TextRenderer into FrontendRenderEngine
 
-**File to modify**: `crates/mesh-render-engine/src/painter.rs`
+**File to modify**: `crates/core/ui/render/src/painter.rs`
 
 Currently, `TextRenderContext` is a placeholder. It needs to:
 
@@ -68,7 +68,7 @@ The current implementation doesn't render text. Needs:
 
 ## Files Involved
 
-1. **mesh-render-engine/src/painter.rs**
+1. **mesh-core-render/src/painter.rs**
    - `struct FrontendRenderEngine` - add text_renderer field
    - `render_text_node()` - implement full text rendering
    - `render_input_node()` - implement cursor and text rendering
@@ -101,7 +101,7 @@ The original `mesh-renderer/src/painter.rs` contains the complete implementation
 
 After implementing, verify:
 ```bash
-cd crates/mesh-render-engine && cargo check
+cd crates/core/ui/render && cargo check
 ```
 
 All warnings related to unused text rendering parameters should disappear.

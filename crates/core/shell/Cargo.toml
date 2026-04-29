@@ -1,0 +1,29 @@
+[package]
+name = "mesh-core-shell"
+description = "Core runtime and orchestration for MESH shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-core-plugin = { workspace = true }
+mesh-core-capability = { workspace = true }
+mesh-core-component = { workspace = true }
+mesh-core-events = { workspace = true }
+mesh-core-config = { workspace = true }
+mesh-core-theme = { workspace = true }
+mesh-core-locale = { workspace = true }
+mesh-core-diagnostics = { workspace = true }
+mesh-core-wayland = { workspace = true }
+mesh-core-runtime = { workspace = true }
+mesh-core-service = { workspace = true }
+mesh-core-render = { workspace = true }
+mesh-core-backend = { workspace = true }
+mesh-core-debug = { workspace = true }
+mesh-core-elements = { workspace = true }
+mesh-core-scripting = { workspace = true }
+
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }

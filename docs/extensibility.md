@@ -9,9 +9,9 @@ This document describes the dynamic interface registration model that makes
 that possible. It supersedes the static, compile-time trait list implied by
 earlier drafts of `spec/pluggable-backend.md`.
 
-> **Terminology note.** Earlier docs and the `mesh-service` crate used the
+> **Terminology note.** Earlier docs and the `mesh-core-service` crate used the
 > word *trait* for what this document calls an **interface**. Interfaces are
-> data (a contract package declares them); the `mesh-service` crate is being
+> data (a contract package declares them); the `mesh-core-service` crate is being
 > repositioned to host the registry, proc-macro, and runtime plumbing rather
 > than a fixed list of compiled traits. Both terms may still appear in the
 > code — treat them as synonyms during the transition.
@@ -101,13 +101,13 @@ chosen by:
 
 ### Consumption
 
-Frontends look up interfaces by name and version range:
+Frontends import interfaces by name and version range:
 
 ```luau
-local audio = mesh.interfaces.get("mesh.audio", ">=1.0, <2.0")
-if audio then
-    local dev = audio:default_output()
-    audio:on("VolumeChanged", function(sig) ... end)
+local ok, audio = pcall(require, "@mesh/audio@>=1.0, <2.0")
+if ok and audio then
+  local dev = audio:default_output()
+  audio:on("VolumeChanged", function(sig) ... end)
 end
 ```
 
@@ -185,7 +185,7 @@ priority = 100
 ```
 
 ```luau
-local thermal = mesh.interfaces.get("alice.thermal", ">=1.0")
+local thermal = require("@alice/thermal@>=1.0")
 for _, s in ipairs(thermal:sensors()) do
     print(s.name, thermal:read(s.id))
 end
@@ -298,12 +298,12 @@ supported — the three tiers are part of the install UX.
 
 All default behavior ships as ordinary plugins in the `@mesh` scope:
 
-| Interface | Default implementations |
-|-----------|-------------------------|
-| `mesh.audio` | `@mesh/pipewire-audio` (priority 100), `@mesh/pulseaudio-audio` (50) |
-| `mesh.network` | `@mesh/networkmanager` (100) |
-| `mesh.power` | `@mesh/upower` (100) |
-| `mesh.media` | `@mesh/mpris-media` (100) |
+| Interface      | Default implementations                                              |
+| -------------- | -------------------------------------------------------------------- |
+| `mesh.audio`   | `@mesh/pipewire-audio` (priority 100), `@mesh/pulseaudio-audio` (50) |
+| `mesh.network` | `@mesh/networkmanager` (100)                                         |
+| `mesh.power`   | `@mesh/upower` (100)                                                 |
+| `mesh.media`   | `@mesh/mpris-media` (100)                                            |
 
 They hold no privileged status. A user who prefers `iwd` for network or a
 custom `pw-cli`-based audio daemon just installs a plugin with higher
@@ -363,12 +363,12 @@ candidates.
 `spec/pluggable-backend.md` describes the plugin lifecycle, manifest format,
 capability system, and security model — all of which still apply. This
 document refines its "Backend / frontend separation" section: service traits
-are no longer a fixed list baked into `mesh-service`, they are
+are no longer a fixed list baked into `mesh-core-service`, they are
 user-extensible interface contracts distributed as normal packages.
 
-### The `mesh-service` / `mesh-interface` crates
+### The `mesh-core-service` / `mesh-interface` crates
 
-The `mesh-service` crate in the workspace **no longer owns a list of
+The `mesh-core-service` crate in the workspace **no longer owns a list of
 compiled-in traits**. Its post-migration responsibilities are:
 
 - The interface registry data structures and lookup API.

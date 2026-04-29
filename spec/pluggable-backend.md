@@ -8,10 +8,11 @@ The backend does not define what the shell looks like or how it behaves. That is
 
 1. The shell is defined by its plugins. The backend is infrastructure.
 2. Plugins are isolated by default and granted capabilities explicitly.
-3. The default experience must be complete without third-party plugins.
-4. Plugin APIs are versioned independently from the shell release.
-5. Compositor differences are abstracted behind capability queries.
-6. Performance-critical paths stay in the core. Plugins describe intent; the core executes.
+3. Frontend scripts must explicitly import backend services (via `require("@mesh/<service>")`) before calling methods or subscribing.
+4. The default experience must be complete without third-party plugins.
+5. Plugin APIs are versioned independently from the shell release.
+6. Compositor differences are abstracted behind capability queries.
+7. Performance-critical paths stay in the core. Plugins describe intent; the core executes.
 
 ## Plugin model
 
@@ -25,15 +26,15 @@ A plugin is a distributable unit that extends the shell. Every plugin has:
 
 ### Plugin types
 
-| Type | Purpose | Example |
-|------|---------|---------|
-| `backend` | Service implementation for a specific system | PipeWire audio, NetworkManager network |
-| `surface` | Top-level shell UI (frontend) | Panel, launcher, notification center |
-| `widget` | Embeddable UI inside a surface | Clock, battery indicator, weather card |
-| `service` | State provider or action handler | Battery, network, media, notifications |
-| `theme` | Visual token set | Dark theme, accent color pack |
-| `language-pack` | Translations for core or other plugins | French language pack |
-| `icon-pack` | Icon set | Custom symbolic icon theme |
+| Type            | Purpose                                      | Example                                |
+| --------------- | -------------------------------------------- | -------------------------------------- |
+| `backend`       | Service implementation for a specific system | PipeWire audio, NetworkManager network |
+| `surface`       | Top-level shell UI (frontend)                | Panel, launcher, notification center   |
+| `widget`        | Embeddable UI inside a surface               | Clock, battery indicator, weather card |
+| `service`       | State provider or action handler             | Battery, network, media, notifications |
+| `theme`         | Visual token set                             | Dark theme, accent color pack          |
+| `language-pack` | Translations for core or other plugins       | French language pack                   |
+| `icon-pack`     | Icon set                                     | Custom symbolic icon theme             |
 
 ### Plugin identity
 
@@ -255,59 +256,59 @@ A capability is represented as a handle. Plugins cannot forge handles. The core 
 
 #### Shell capabilities
 
-| Capability | Grants |
-|---|---|
-| `shell.surface` | Create and manage a top-level shell surface |
-| `shell.widget` | Register as an embeddable widget |
-| `shell.overlay` | Display overlay or popup UI |
-| `shell.notification` | Post notifications to the notification system |
-| `shell.clipboard.read` | Read clipboard contents |
-| `shell.clipboard.write` | Write to clipboard |
-| `shell.input.keyboard` | Receive keyboard input events |
-| `shell.input.pointer` | Receive pointer input events |
-| `shell.screenshot` | Capture screen content (high privilege) |
+| Capability              | Grants                                        |
+| ----------------------- | --------------------------------------------- |
+| `shell.surface`         | Create and manage a top-level shell surface   |
+| `shell.widget`          | Register as an embeddable widget              |
+| `shell.overlay`         | Display overlay or popup UI                   |
+| `shell.notification`    | Post notifications to the notification system |
+| `shell.clipboard.read`  | Read clipboard contents                       |
+| `shell.clipboard.write` | Write to clipboard                            |
+| `shell.input.keyboard`  | Receive keyboard input events                 |
+| `shell.input.pointer`   | Receive pointer input events                  |
+| `shell.screenshot`      | Capture screen content (high privilege)       |
 
 #### Service capabilities
 
-| Capability | Grants |
-|---|---|
-| `service.battery.read` | Read battery state |
-| `service.network.read` | Read network state |
-| `service.network.control` | Modify network connections |
-| `service.media.read` | Read media playback state |
-| `service.media.control` | Control media playback |
-| `service.audio.read` | Read audio device/volume state |
-| `service.audio.control` | Change volume, mute, output device |
-| `service.bluetooth.read` | Read bluetooth state |
-| `service.bluetooth.control` | Pair, connect, disconnect bluetooth devices |
-| `service.notifications.read` | Read notification history |
-| `service.notifications.post` | Post new notifications |
-| `service.notifications.manage` | Dismiss or modify existing notifications |
-| `service.location.read` | Read device location |
-| `service.power.read` | Read power profile state |
-| `service.power.control` | Change power profile |
+| Capability                     | Grants                                      |
+| ------------------------------ | ------------------------------------------- |
+| `service.battery.read`         | Read battery state                          |
+| `service.network.read`         | Read network state                          |
+| `service.network.control`      | Modify network connections                  |
+| `service.media.read`           | Read media playback state                   |
+| `service.media.control`        | Control media playback                      |
+| `service.audio.read`           | Read audio device/volume state              |
+| `service.audio.control`        | Change volume, mute, output device          |
+| `service.bluetooth.read`       | Read bluetooth state                        |
+| `service.bluetooth.control`    | Pair, connect, disconnect bluetooth devices |
+| `service.notifications.read`   | Read notification history                   |
+| `service.notifications.post`   | Post new notifications                      |
+| `service.notifications.manage` | Dismiss or modify existing notifications    |
+| `service.location.read`        | Read device location                        |
+| `service.power.read`           | Read power profile state                    |
+| `service.power.control`        | Change power profile                        |
 
 #### Theme and locale capabilities
 
-| Capability | Grants |
-|---|---|
-| `theme.read` | Read current theme tokens |
-| `theme.write` | Modify the active theme (high privilege) |
-| `locale.read` | Read current locale and translations |
-| `locale.write` | Modify active locale (high privilege) |
+| Capability     | Grants                                   |
+| -------------- | ---------------------------------------- |
+| `theme.read`   | Read current theme tokens                |
+| `theme.write`  | Modify the active theme (high privilege) |
+| `locale.read`  | Read current locale and translations     |
+| `locale.write` | Modify active locale (high privilege)    |
 
 #### System capabilities
 
-| Capability | Grants |
-|---|---|
-| `exec.launch-app` | Launch applications via desktop entries |
-| `exec.command` | Execute arbitrary commands (high privilege) |
-| `fs.read` | Read files from a scoped directory |
-| `fs.write` | Write files to a scoped directory |
-| `net.http` | Make outbound HTTP requests |
-| `net.socket` | Open network sockets (high privilege) |
-| `dbus.session` | Access the D-Bus session bus |
-| `dbus.system` | Access the D-Bus system bus (high privilege) |
+| Capability        | Grants                                       |
+| ----------------- | -------------------------------------------- |
+| `exec.launch-app` | Launch applications via desktop entries      |
+| `exec.command`    | Execute arbitrary commands (high privilege)  |
+| `fs.read`         | Read files from a scoped directory           |
+| `fs.write`        | Write files to a scoped directory            |
+| `net.http`        | Make outbound HTTP requests                  |
+| `net.socket`      | Open network sockets (high privilege)        |
+| `dbus.session`    | Access the D-Bus session bus                 |
+| `dbus.system`     | Access the D-Bus system bus (high privilege) |
 
 ### Privilege levels
 
@@ -366,7 +367,7 @@ MESH enforces a strict separation between service backends and UI frontends. The
 
 ```
 ┌─────────────────────────────────────────────────┐
-│              Service Traits (mesh-service)       │
+│              Service Traits (mesh-core-service)       │
 │      AudioService, NetworkService, PowerService  │
 │      MediaService, BrightnessService, ...        │
 └──────────┬──────────────────────────┬────────────┘
@@ -397,7 +398,7 @@ MESH enforces a strict separation between service backends and UI frontends. The
 
 ### Service traits
 
-Each system service is defined as a Rust trait in the `mesh-service` crate:
+Each system service is defined as a Rust trait in the `mesh-core-service` crate:
 
 - `AudioService` — output/input devices, streams, volume, mute
 - `NetworkService` — connections, devices, wifi scan, connect/disconnect
@@ -444,7 +445,10 @@ Frontend plugins (surfaces and widgets) look up services by trait, never by back
 
 ```lua
 -- A volume widget does not know or care if PipeWire or PulseAudio is running
-local audio = mesh.services.get("audio")
+local ok, audio = pcall(require, "@mesh/audio")
+if not ok or not audio then
+  return
+end
 local devices = audio.output_devices()
 local default = audio.default_output()
 
@@ -604,25 +608,25 @@ Scoped per plugin. Persisted to disk by the core. Plugins cannot access other pl
 
 ### Threat model
 
-| Threat | Vector | Mitigation |
-|---|---|---|
-| Malicious plugin code | Compromised or intentionally harmful plugin | Capability sandbox, execution tier isolation |
-| Supply chain attack | Trusted plugin updated with malicious code | Package signing, update diffing, reproducible builds |
-| UI spoofing | Plugin overlays fake auth dialog | Core owns trusted UI chrome (password prompts, capability dialogs). Plugins cannot draw over trusted surfaces |
-| Data exfiltration | Plugin reads sensitive data and sends it out | `net.http` is a capability, not a default. Most plugins should never need it |
-| Resource abuse | Plugin mines crypto or leaks memory | CPU/memory budgets per plugin. Core kills plugins exceeding limits |
-| Keystroke interception | Plugin captures input meant for other contexts | `shell.input.keyboard` is an elevated capability. Input routing is managed by the core |
-| Privilege escalation | Plugin escapes sandbox | Luau has no FFI. WASM is memory-isolated. Rust plugins are review-gated |
-| Dependency confusion | Attacker publishes `@mesh/panel` on community registry | `@mesh` scope is reserved. Scopes are verified at publish time |
+| Threat                 | Vector                                                 | Mitigation                                                                                                    |
+| ---------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Malicious plugin code  | Compromised or intentionally harmful plugin            | Capability sandbox, execution tier isolation                                                                  |
+| Supply chain attack    | Trusted plugin updated with malicious code             | Package signing, update diffing, reproducible builds                                                          |
+| UI spoofing            | Plugin overlays fake auth dialog                       | Core owns trusted UI chrome (password prompts, capability dialogs). Plugins cannot draw over trusted surfaces |
+| Data exfiltration      | Plugin reads sensitive data and sends it out           | `net.http` is a capability, not a default. Most plugins should never need it                                  |
+| Resource abuse         | Plugin mines crypto or leaks memory                    | CPU/memory budgets per plugin. Core kills plugins exceeding limits                                            |
+| Keystroke interception | Plugin captures input meant for other contexts         | `shell.input.keyboard` is an elevated capability. Input routing is managed by the core                        |
+| Privilege escalation   | Plugin escapes sandbox                                 | Luau has no FFI. WASM is memory-isolated. Rust plugins are review-gated                                       |
+| Dependency confusion   | Attacker publishes `@mesh/panel` on community registry | `@mesh` scope is reserved. Scopes are verified at publish time                                                |
 
 ### Trust tiers
 
-| Tier | Description | Isolation | Review |
-|---|---|---|---|
-| Core | Shipped with MESH | In-process | Full code review by MESH maintainers |
-| Verified | Reviewed by MESH project | Luau/WASM sandbox | Code review, signed by MESH |
-| Community | Published by anyone | Luau/WASM sandbox | No review. User accepts risk at install |
-| Local | Developer's own, on their machine | Configurable | None |
+| Tier      | Description                       | Isolation         | Review                                  |
+| --------- | --------------------------------- | ----------------- | --------------------------------------- |
+| Core      | Shipped with MESH                 | In-process        | Full code review by MESH maintainers    |
+| Verified  | Reviewed by MESH project          | Luau/WASM sandbox | Code review, signed by MESH             |
+| Community | Published by anyone               | Luau/WASM sandbox | No review. User accepts risk at install |
+| Local     | Developer's own, on their machine | Configurable      | None                                    |
 
 ### Package signing
 
@@ -654,21 +658,21 @@ MESH provides a central package registry. The registry stores:
 ### Installation
 
 ```
-mesh install @community/weather-widget
-mesh install @community/weather-widget@1.2.0   # pinned version
-mesh uninstall @community/weather-widget
-mesh update @community/weather-widget
-mesh list                                       # installed plugins
-mesh search weather                             # search registry
+mesh-shell install @community/weather-widget
+mesh-shell install @community/weather-widget@1.2.0   # pinned version
+mesh-shell uninstall @community/weather-widget
+mesh-shell update @community/weather-widget
+mesh-shell list                                       # installed plugins
+mesh-shell search weather                             # search registry
 ```
 
 ### Local development
 
 ```
-mesh dev ./my-plugin                            # load from local path with hot reload
-mesh dev ./my-plugin --tier local               # full trust, no sandbox
-mesh package ./my-plugin                        # build distributable archive
-mesh publish ./my-plugin                        # publish to registry
+mesh-shell dev ./my-plugin                            # load from local path with hot reload
+mesh-shell dev ./my-plugin --tier local               # full trust, no sandbox
+mesh-shell package ./my-plugin                        # build distributable archive
+mesh-shell publish ./my-plugin                        # publish to registry
 ```
 
 ### Plugin directories
@@ -676,7 +680,7 @@ mesh publish ./my-plugin                        # publish to registry
 ```
 ~/.local/share/mesh/plugins/          # user-installed plugins
 /usr/share/mesh/plugins/              # system-installed plugins (core, distro)
-~/.local/share/mesh/dev-plugins/      # plugins loaded via `mesh dev`
+~/.local/share/mesh/dev-plugins/      # plugins loaded via `mesh-shell dev`
 ```
 
 Core plugins at the system path take precedence. User plugins override system plugins with the same ID.
@@ -766,11 +770,11 @@ The core tracks per-plugin:
 - Event processing latency
 - Error count and frequency
 
-This data is available through the diagnostics panel and the `mesh status` CLI command.
+This data is available through the diagnostics panel and the `mesh-shell status` CLI command.
 
 ## Hot reload
 
-During development, plugins loaded via `mesh dev` support hot reload:
+During development, plugins loaded via `mesh-shell dev` support hot reload:
 
 - The core watches the plugin directory for file changes
 - On change, the plugin is unloaded and reloaded
