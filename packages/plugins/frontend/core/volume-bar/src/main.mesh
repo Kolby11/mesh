@@ -15,9 +15,9 @@
 </template>
 
 <script lang="luau">
-mesh.state.set("icon_name", "audio-volume-muted")
-mesh.state.set("audio_label", "0%")
-mesh.state.set("audio_tooltip", "Volume unavailable")
+icon_name = "audio-volume-muted"
+audio_label = "0%"
+audio_tooltip = "Volume unavailable"
 mesh.service.bind("audio.muted", "audio_muted")
 mesh.service.bind("audio.percent", "audio_percent")
 mesh.service.on("audio", "sync_audio_state")

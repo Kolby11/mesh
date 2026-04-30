@@ -48,16 +48,16 @@
 import WifiSection from "./components/wifi-section.mesh"
 import BluetoothSection from "./components/bluetooth-section.mesh"
 import AudioSection from "./components/audio-section.mesh"
-mesh.state.set("active_section", "wifi")
+active_section = "wifi"
 
-mesh.state.set("icon_name", "audio-volume-muted")
-mesh.state.set("audio_label", "0%")
-mesh.state.set("audio_tooltip", "Volume unavailable")
-mesh.state.set("audio_backend", "Unavailable")
-mesh.state.set("audio_percent", 0)
-mesh.state.set("wifi_enabled", false)
-mesh.state.set("wifi_networks", {})
-mesh.state.set("bluetooth_devices", {})
+icon_name = "audio-volume-muted"
+audio_label = "0%"
+audio_tooltip = "Volume unavailable"
+audio_backend = "Unavailable"
+audio_percent = 0
+wifi_enabled = false
+wifi_networks = {}
+bluetooth_devices = {}
 
 mesh.service.bind("audio.muted", "audio_muted")
 mesh.service.bind("audio.percent", "audio_percent")
@@ -74,7 +74,7 @@ end
 function sync_audio_state()
     -- audio_percent may be nil until the first service update arrives because
     -- mesh.service.bind() initialises the global to nil, overriding the
-    -- mesh.state.set() default. Guard every numeric comparison with `or 0`.
+    -- Guard every numeric comparison with `or 0`.
     local pct = audio_percent or 0
     if audio_muted then
         icon_name = "audio-volume-muted"

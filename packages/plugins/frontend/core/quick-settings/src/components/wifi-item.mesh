@@ -8,9 +8,9 @@
 </template>
 
 <script lang="luau">
-mesh.state.set("network_id", "")
-mesh.state.set("network_name", "")
-mesh.state.set("network_strength", "0")
+network_id = ""
+network_name = ""
+network_strength = "0"
 
 function onConnectWiFi(event)
     if not network_id or network_id == "" then

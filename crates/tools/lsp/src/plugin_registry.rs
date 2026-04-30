@@ -2,12 +2,23 @@ use mesh_core_plugin::manifest::{Manifest, PluginType, load_manifest};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// State fields and commands exposed by a backend service plugin.
+#[derive(Debug, Default, Clone)]
+pub struct InterfaceShape {
+    /// Fields emitted via `mesh.service.emit({...})` in the backend script.
+    pub state_fields: Vec<String>,
+    /// Commands inferred from `function on_command_<name>()` in the backend script.
+    pub commands: Vec<String>,
+}
+
 /// A discovered and indexed view of all plugins available in the workspace.
 pub struct PluginRegistry {
     /// Maps plugin-id → Manifest for all discovered plugins.
     pub manifests: HashMap<String, Manifest>,
     /// Maps interface name (e.g. "mesh.audio") → list of field names it emits.
     pub interface_fields: HashMap<String, Vec<String>>,
+    /// Maps interface name → inferred shape (state fields + commands) from backend script.
+    pub interface_shapes: HashMap<String, InterfaceShape>,
     /// Maps component tag name → plugin-id for plugins that export a component tag.
     pub exported_tags: HashMap<String, String>,
 }
@@ -17,6 +28,7 @@ impl PluginRegistry {
         Self {
             manifests: HashMap::new(),
             interface_fields: HashMap::new(),
+            interface_shapes: HashMap::new(),
             exported_tags: HashMap::new(),
         }
     }
@@ -88,16 +100,51 @@ impl PluginRegistry {
             }
         }
 
-        // For backend plugins, record what interfaces they provide
-        for provided in &manifest.provides {
-            self.interface_fields
-                .entry(provided.interface.clone())
-                .or_default();
+        // For backend plugins, record what interfaces they provide and analyze
+        // the main script to infer state fields + commands.
+        let is_backend = manifest.package.plugin_type == PluginType::Backend;
+        let interface_names: Vec<String> = {
+            let mut names: Vec<String> = manifest
+                .provides
+                .iter()
+                .map(|p| p.interface.clone())
+                .collect();
+            if let Some(svc) = manifest.primary_service() {
+                if !names.contains(&svc.provides) {
+                    names.push(svc.provides.clone());
+                }
+            }
+            names
+        };
+
+        for iface in &interface_names {
+            self.interface_fields.entry(iface.clone()).or_default();
         }
-        if let Some(svc) = manifest.primary_service() {
-            self.interface_fields
-                .entry(svc.provides.clone())
-                .or_default();
+
+        if is_backend && !interface_names.is_empty() {
+            if let Some(entry) = &manifest.entrypoints.main {
+                let script_path = dir.join(entry);
+                if let Ok(source) = std::fs::read_to_string(&script_path) {
+                    let shape = analyze_backend_script(&source);
+                    for iface in &interface_names {
+                        self.interface_shapes
+                            .entry(iface.clone())
+                            .and_modify(|existing| {
+                                for f in &shape.state_fields {
+                                    if !existing.state_fields.contains(f) {
+                                        existing.state_fields.push(f.clone());
+                                    }
+                                }
+                                for c in &shape.commands {
+                                    if !existing.commands.contains(c) {
+                                        existing.commands.push(c.clone());
+                                    }
+                                }
+                            })
+                            .or_insert_with(|| shape.clone());
+                    }
+                }
+            }
         }
 
         self.manifests.insert(plugin_id, manifest);
@@ -129,4 +176,90 @@ fn search_paths(workspace_root: &Path) -> Vec<PathBuf> {
 
 fn home_dir() -> Option<PathBuf> {
     std::env::var("HOME").ok().map(PathBuf::from)
+}
+
+/// Analyze a backend Luau script to infer the service shape:
+/// - State fields from table literals (`return { key = ... }` or
+///   `mesh.service.emit({ key = ... })`).
+/// - Commands from `function on_command_<name>()` definitions.
+fn analyze_backend_script(source: &str) -> InterfaceShape {
+    let mut state_fields: Vec<String> = Vec::new();
+    let mut commands: Vec<String> = Vec::new();
+
+    for line in source.lines() {
+        let t = line.trim();
+        if t.starts_with("--") {
+            continue;
+        }
+
+        // Command: `function on_command_<name>(`
+        if let Some(rest) = t.strip_prefix("function on_command_") {
+            if let Some(name) = rest.split('(').next() {
+                let name = name.trim().to_string();
+                if is_lua_identifier(&name) && !commands.contains(&name) {
+                    commands.push(name);
+                }
+            }
+            continue;
+        }
+
+        // State field: indented `key = value` line inside a table literal.
+        // Must be indented (leading whitespace) to distinguish from top-level assignments.
+        let indented = line.starts_with("    ") || line.starts_with('\t');
+        if indented {
+            // Split on ` = ` (space-padded) to avoid matching `==`
+            if let Some((key, rest)) = t.split_once(" = ") {
+                let key = key.trim();
+                let rest = rest.trim();
+                // Skip `==` and `~=` comparisons that got through
+                if !rest.starts_with('=')
+                    && is_lua_identifier(key)
+                    && !is_lua_keyword(key)
+                    && !state_fields.contains(&key.to_string())
+                {
+                    state_fields.push(key.to_string());
+                }
+            }
+        }
+    }
+
+    InterfaceShape {
+        state_fields,
+        commands,
+    }
+}
+
+fn is_lua_identifier(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .next()
+            .map_or(false, |c| c.is_ascii_alphabetic() || c == '_')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn is_lua_keyword(s: &str) -> bool {
+    matches!(
+        s,
+        "local"
+            | "function"
+            | "if"
+            | "then"
+            | "else"
+            | "elseif"
+            | "end"
+            | "for"
+            | "while"
+            | "do"
+            | "return"
+            | "and"
+            | "or"
+            | "not"
+            | "true"
+            | "false"
+            | "nil"
+            | "in"
+            | "repeat"
+            | "until"
+            | "break"
+    )
 }

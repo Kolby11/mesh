@@ -55,6 +55,13 @@ pub enum ScriptContext {
     },
     /// Cursor is after `require("@mesh/` or `mesh.service.bind("`.
     ServiceName,
+    /// Cursor is after `<proxy_var>.` where `proxy_var` is bound to an interface via `require`.
+    InterfaceProxy {
+        /// The Lua variable name that holds the proxy (e.g. "audio").
+        var_name: String,
+        /// Characters typed after the dot so far (may be empty).
+        prefix: String,
+    },
     General,
 }
 

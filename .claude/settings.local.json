@@ -30,7 +30,8 @@
       "Bash(cargo clippy *)",
       "Bash(cargo run *)",
       "Bash(echo \"Exit: $?\")",
-      "Bash(timeout 3 /home/kolby/projects/mesh/target/debug/mesh-lsp)"
+      "Bash(timeout 3 /home/kolby/projects/mesh/target/debug/mesh-lsp)",
+      "Bash(perl *)"
     ]
   }
 }

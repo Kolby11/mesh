@@ -210,10 +210,9 @@ struct ServiceSubscription {
 /// A script execution context for one component instance.
 ///
 /// Owns frontend script state, capability metadata, and the mlua runtime.
-/// Scripts run as-written with no source preprocessing. Reactive state is
-/// tracked via `mesh.state.set(key, value)` calls at runtime, and service
-/// bindings/subscriptions are registered via `mesh.service.bind(...)` and
-/// `mesh.service.on(...)`.
+/// Scripts run as-written with no source preprocessing. Reactive state follows
+/// the standard Lua module pattern: bare global assignments are exported and
+/// synced to the template; `local` variables are private to the script.
 #[derive(Debug)]
 pub struct ScriptContext {
     pub plugin_id: String,
@@ -223,8 +222,9 @@ pub struct ScriptContext {
     interface_catalog: InterfaceCatalog,
     interface_bindings: HashMap<String, InterfaceResolution>,
     shared_interface_bindings: Arc<Mutex<HashMap<String, InterfaceResolution>>>,
-    /// Keys registered by `mesh.state.set` — synced back from Lua globals after each call.
-    tracked_state_keys: Arc<Mutex<HashSet<String>>>,
+    /// Global names present before user script execution (stdlib + host API).
+    /// Sync skips these so only user-defined globals become reactive state.
+    builtin_globals: HashSet<String>,
     /// Service bindings registered by `mesh.service.bind` at script load time.
     runtime_service_bindings: Arc<Mutex<Vec<ServiceBinding>>>,
     /// Service update handlers registered explicitly via `mesh.service.on`.
@@ -247,7 +247,7 @@ impl ScriptContext {
             interface_catalog: InterfaceCatalog::default(),
             interface_bindings: HashMap::new(),
             shared_interface_bindings: Arc::new(Mutex::new(HashMap::new())),
-            tracked_state_keys: Arc::new(Mutex::new(HashSet::new())),
+            builtin_globals: HashSet::new(),
             runtime_service_bindings: Arc::new(Mutex::new(Vec::new())),
             runtime_service_subscriptions: Arc::new(Mutex::new(Vec::new())),
             published_events: Vec::new(),
@@ -259,8 +259,8 @@ impl ScriptContext {
         self.interface_catalog = catalog;
     }
 
-    /// Load a script source. Executes the script, registering functions and
-    /// seeding reactive state from `mesh.state.set` calls at the top level.
+    /// Load a script source. Executes the script and seeds reactive state from
+    /// any global variable assignments at the top level.
     pub fn load_script(&mut self, source: &str) -> Result<(), ScriptError> {
         self.load_script_with_interface_imports(source, &[])
     }
@@ -274,11 +274,17 @@ impl ScriptContext {
         self.interface_bindings.clear();
         self.shared_interface_bindings.lock().unwrap().clear();
         self.shared_published_events.lock().unwrap().clear();
-        self.tracked_state_keys.lock().unwrap().clear();
         self.runtime_service_bindings.lock().unwrap().clear();
         self.runtime_service_subscriptions.lock().unwrap().clear();
         self.install_host_api()?;
         self.install_interface_imports(imports)?;
+        // Snapshot all pre-script globals so auto-sync excludes them.
+        self.builtin_globals = self
+            .lua
+            .globals()
+            .pairs::<String, LuaValue>()
+            .filter_map(|r| r.ok().map(|(k, _)| k))
+            .collect();
         self.lua
             .load(source)
             .set_name(&self.plugin_id)
@@ -307,6 +313,12 @@ impl ScriptContext {
         for (var, val) in updates {
             self.state.set(var.clone(), val.clone());
             self.set_lua_global(&var, &val);
+        }
+        // Expose the full payload as __mesh_svc_{service} so interface proxies
+        // can read state fields directly without explicit bind() calls.
+        let svc_key = format!("__mesh_svc_{service}");
+        if let Ok(lua_value) = self.lua.to_value(payload) {
+            let _ = self.lua.globals().set(svc_key, lua_value);
         }
     }
 
@@ -395,25 +407,10 @@ impl ScriptContext {
     fn install_host_api(&mut self) -> Result<(), ScriptError> {
         let globals = self.lua.globals();
         let mesh = self.lua.create_table().map_err(lua_err)?;
-        let mesh_state = self.lua.create_table().map_err(lua_err)?;
         let mesh_core_service = self.lua.create_table().map_err(lua_err)?;
         let mesh_core_events = self.lua.create_table().map_err(lua_err)?;
         let mesh_ui_api = self.lua.create_table().map_err(lua_err)?;
         let mesh_log = self.lua.create_table().map_err(lua_err)?;
-
-        let tracked = Arc::clone(&self.tracked_state_keys);
-        mesh_state
-            .set(
-                "set",
-                self.lua
-                    .create_function(move |lua, (key, value): (String, LuaValue)| {
-                        lua.globals().set(key.clone(), value)?;
-                        tracked.lock().unwrap().insert(key);
-                        Ok(())
-                    })
-                    .map_err(lua_err)?,
-            )
-            .map_err(lua_err)?;
 
         let service_bindings = Arc::clone(&self.runtime_service_bindings);
         mesh_core_service
@@ -525,7 +522,6 @@ impl ScriptContext {
             )
             .map_err(lua_err)?;
 
-        mesh.set("state", mesh_state).map_err(lua_err)?;
         mesh.set("service", mesh_core_service).map_err(lua_err)?;
         mesh.set("events", mesh_core_events).map_err(lua_err)?;
         mesh.set("ui", mesh_ui_api).map_err(lua_err)?;
@@ -680,30 +676,37 @@ impl ScriptContext {
         }
     }
 
-    /// Sync Lua global values back into ScriptState for all keys registered
-    /// via `mesh.state.set`. Called after every script execution.
+    /// Sync Lua globals back into ScriptState.
+    ///
+    /// Any global assigned by the script (i.e. not in the builtin snapshot,
+    /// not prefixed with `__`, and not a function) is reactive state and gets
+    /// synced to the template. Local variables are never synced.
     fn sync_state_from_lua(&mut self) {
-        let keys: Vec<String> = self
-            .tracked_state_keys
-            .lock()
-            .unwrap()
-            .iter()
-            .cloned()
+        let user_globals: Vec<(String, LuaValue)> = self
+            .lua
+            .globals()
+            .pairs::<String, LuaValue>()
+            .filter_map(|r| r.ok())
+            .filter(|(k, v)| {
+                !k.starts_with("__")
+                    && !self.builtin_globals.contains(k)
+                    && !matches!(v, LuaValue::Function(_))
+            })
             .collect();
-        let globals = self.lua.globals();
-        for name in &keys {
-            if let Ok(lua_value) = globals.get::<LuaValue>(name.as_str()) {
-                if let Ok(value) = self.lua.from_value::<Value>(lua_value) {
-                    self.state.set(name.clone(), value);
-                }
+        for (name, lua_value) in user_globals {
+            if let Ok(value) = self.lua.from_value::<Value>(lua_value) {
+                self.state.set(name, value);
             }
         }
-        if globals
+
+        if self
+            .lua
+            .globals()
             .get::<bool>("__mesh_request_redraw")
             .unwrap_or(false)
         {
             self.state.dirty = true;
-            let _ = globals.set("__mesh_request_redraw", false);
+            let _ = self.lua.globals().set("__mesh_request_redraw", false);
         }
     }
 
@@ -727,95 +730,122 @@ fn create_interface_proxy(
 ) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
     let meta = lua.create_table()?;
-    let resolution_for_index = resolution.clone();
+
+    let service_name = service_name_from_interface(&resolution.requested);
+    let contract = resolution.contract.clone();
+    let methods = contract.as_ref().map(|c| c.methods.clone()).unwrap_or_default();
+    let types = contract.as_ref().map(|c| c.types.clone()).unwrap_or_default();
+    let interface_name = contract.as_ref().map(|c| c.interface.clone()).unwrap_or_default();
+    let handler_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
     meta.set(
         "__index",
         lua.create_function(move |lua, (_table, key): (Table, String)| {
-            let resolution = resolution_for_index.clone();
-            let service_bindings = Arc::clone(&service_bindings);
-            let service_subscriptions = Arc::clone(&service_subscriptions);
-            let published_events = Arc::clone(&published_events);
-            let method_name = key.clone();
-
-            if method_name == "bind" {
-                let service_name = service_name_from_interface(&resolution.requested);
-                return lua.create_function(move |lua, args: mlua::Variadic<LuaValue>| {
-                    let offset = consume_self_arg(&args);
-                    let field =
-                        lua_value_to_string(args.get(offset).cloned().unwrap_or(LuaValue::Nil));
-                    if field.is_empty() {
-                        return Ok(LuaValue::Nil);
-                    }
-                    let alias = args
-                        .get(offset + 1)
-                        .cloned()
-                        .and_then(lua_string_arg)
-                        .unwrap_or_else(|| field.clone());
-                    lua.globals().set(alias.clone(), LuaValue::Nil)?;
-                    service_bindings.lock().unwrap().push(ServiceBinding {
-                        var_name: alias,
-                        service: service_name.clone(),
-                        field,
-                    });
-                    Ok(LuaValue::Nil)
-                });
+            // Case A: bind — backward-compat explicit field binding.
+            if key == "bind" {
+                let svc = service_name.clone();
+                let bindings = Arc::clone(&service_bindings);
+                return Ok(LuaValue::Function(lua.create_function(
+                    move |lua, args: mlua::Variadic<LuaValue>| {
+                        let offset = consume_self_arg(&args);
+                        let field = lua_value_to_string(
+                            args.get(offset).cloned().unwrap_or(LuaValue::Nil),
+                        );
+                        if field.is_empty() {
+                            return Ok(LuaValue::Nil);
+                        }
+                        let alias = args
+                            .get(offset + 1)
+                            .cloned()
+                            .and_then(lua_string_arg)
+                            .unwrap_or_else(|| field.clone());
+                        lua.globals().set(alias.clone(), LuaValue::Nil)?;
+                        bindings.lock().unwrap().push(ServiceBinding {
+                            var_name: alias,
+                            service: svc.clone(),
+                            field,
+                        });
+                        Ok(LuaValue::Nil)
+                    },
+                )?));
             }
 
-            if method_name == "on_change" {
-                let service_name = service_name_from_interface(&resolution.requested);
-                return lua.create_function(move |_lua, args: mlua::Variadic<LuaValue>| {
-                    let offset = consume_self_arg(&args);
-                    let handler_name =
-                        lua_value_to_string(args.get(offset).cloned().unwrap_or(LuaValue::Nil));
-                    if !handler_name.is_empty() {
-                        service_subscriptions
-                            .lock()
-                            .unwrap()
-                            .push(ServiceSubscription {
-                                service: service_name.clone(),
-                                handler_name,
-                            });
-                    }
-                    Ok(LuaValue::Nil)
-                });
+            // Case B: on_change — accepts a Lua function or a string handler name.
+            if key == "on_change" {
+                let svc = service_name.clone();
+                let subs = Arc::clone(&service_subscriptions);
+                let counter = Arc::clone(&handler_counter);
+                return Ok(LuaValue::Function(lua.create_function(
+                    move |lua, args: mlua::Variadic<LuaValue>| {
+                        let offset = consume_self_arg(&args);
+                        let arg = args.get(offset).cloned().unwrap_or(LuaValue::Nil);
+                        match arg {
+                            LuaValue::Function(f) => {
+                                let idx = counter.fetch_add(
+                                    1,
+                                    std::sync::atomic::Ordering::Relaxed,
+                                );
+                                let name =
+                                    format!("__mesh_svc_handler_{}_{}", svc, idx);
+                                lua.globals().set(name.clone(), f)?;
+                                subs.lock().unwrap().push(ServiceSubscription {
+                                    service: svc.clone(),
+                                    handler_name: name,
+                                });
+                            }
+                            other => {
+                                let handler_name = lua_value_to_string(other);
+                                if !handler_name.is_empty() && handler_name != "nil" {
+                                    subs.lock().unwrap().push(ServiceSubscription {
+                                        service: svc.clone(),
+                                        handler_name,
+                                    });
+                                }
+                            }
+                        }
+                        Ok(LuaValue::Nil)
+                    },
+                )?));
             }
 
-            lua.create_function(move |lua, _args: mlua::Variadic<LuaValue>| {
-                let contract = resolution.contract.as_ref().ok_or_else(|| {
-                    mlua::Error::external(ScriptError::InterfaceUnavailable(
-                        resolution.requested.clone(),
-                    ))
-                })?;
+            // Case C: known contract method — dispatch as a service command.
+            if let Some(method) = methods.iter().find(|m| m.name == key) {
+                let method = method.clone();
+                let iface = interface_name.clone();
+                let types = types.clone();
+                let events = Arc::clone(&published_events);
+                return Ok(LuaValue::Function(lua.create_function(
+                    move |lua, args: mlua::Variadic<LuaValue>| {
+                        let offset = consume_self_arg(&args);
+                        let payload = method
+                            .args
+                            .iter()
+                            .enumerate()
+                            .map(|(index, arg)| {
+                                let lua_value =
+                                    args.get(index + offset).cloned().unwrap_or(LuaValue::Nil);
+                                lua.from_value::<Value>(lua_value)
+                                    .map(|value| (arg.name.clone(), value))
+                            })
+                            .collect::<mlua::Result<serde_json::Map<String, Value>>>()?;
+                        events.lock().unwrap().push(PublishedEvent {
+                            channel: format!("{}.{}", iface, method.name),
+                            payload: Value::Object(payload),
+                        });
+                        default_lua_value_for_type(lua, &types, method.returns.as_deref())
+                    },
+                )?));
+            }
 
-                let method = contract
-                    .methods
-                    .iter()
-                    .find(|candidate| candidate.name == method_name);
-                let Some(method) = method else {
-                    return Err(mlua::Error::external(ScriptError::UnsupportedOperation {
-                        interface: contract.interface.clone(),
-                        method: method_name.clone(),
-                    }));
-                };
-
-                let offset = consume_self_arg(&_args);
-                let payload = method
-                    .args
-                    .iter()
-                    .enumerate()
-                    .map(|(index, arg)| {
-                        let lua_value = _args.get(index + offset).cloned().unwrap_or(LuaValue::Nil);
-                        lua.from_value::<Value>(lua_value)
-                            .map(|value| (arg.name.clone(), value))
-                    })
-                    .collect::<mlua::Result<serde_json::Map<String, Value>>>()?;
-                published_events.lock().unwrap().push(PublishedEvent {
-                    channel: format!("{}.{}", contract.interface, method.name),
-                    payload: Value::Object(payload),
-                });
-
-                default_lua_value_for_type(lua, &contract.types, method.returns.as_deref())
-            })
+            // Case D: state field read from the live service payload table.
+            let svc_key = format!("__mesh_svc_{}", service_name);
+            let tbl = match lua.globals().get::<LuaValue>(svc_key.as_str()) {
+                Ok(LuaValue::Table(t)) => Some(t),
+                _ => None,
+            };
+            Ok(tbl
+                .and_then(|t| t.get::<LuaValue>(key.as_str()).ok())
+                .unwrap_or(LuaValue::Nil))
         })?,
     )?;
     proxy.set_metatable(Some(meta))?;
@@ -1086,7 +1116,10 @@ end
     }
 
     #[test]
-    fn rejects_unsupported_interface_method() {
+    fn unknown_method_reads_state_field_as_nil() {
+        // Unknown keys fall through to the live service state table (__mesh_svc_audio).
+        // When no service has emitted yet the table doesn't exist, so the result is nil
+        // and the call succeeds without error.
         let mut caps = CapabilitySet::new();
         caps.grant(Capability::new("service.audio.read"));
         let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
@@ -1095,28 +1128,25 @@ end
             r#"
 function init()
     local audio = require("@mesh/audio@>=1.0")
-    audio:mute_all()
+    local val = audio.mute_all  -- unknown key: should return nil, not error
+    assert(val == nil)
 end
 "#,
         )
         .unwrap();
 
-        let err = ctx.call_init().unwrap_err();
-        assert!(matches!(
-            err,
-            ScriptError::UnsupportedOperation { interface, method }
-            if interface == "mesh.audio" && method == "mute_all"
-        ));
+        // Should succeed — no error for unknown keys.
+        ctx.call_init().unwrap();
     }
 
     #[test]
-    fn explicit_state_set_seeds_and_tracks_state() {
+    fn globals_are_reactive_state() {
         let caps = CapabilitySet::new();
         let mut ctx = ScriptContext::new("@test/local", caps).unwrap();
         ctx.load_script(
             r#"
-mesh.state.set("volumeHidden", true)
-mesh.state.set("count", 0)
+volumeHidden = true
+count = 0
 
 function toggle()
     volumeHidden = not volumeHidden
@@ -1141,8 +1171,8 @@ end
         let mut ctx = ScriptContext::new("@test/if", caps).unwrap();
         ctx.load_script(
             r#"
-mesh.state.set("a", true)
-mesh.state.set("b", false)
+a = true
+b = false
 
 function run()
     a = not a
@@ -1170,7 +1200,7 @@ end
         let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
         ctx.load_script(
             r#"
-mesh.state.set("icon_name", "audio-volume-muted")
+icon_name = "audio-volume-muted"
 mesh.service.bind("audio.muted", "audio_muted")
 mesh.service.bind("audio.percent", "audio_percent")
 mesh.service.on("audio", "sync_audio_state")
@@ -1236,7 +1266,7 @@ end
         ctx.set_interface_catalog(audio_catalog());
         ctx.load_script(
             r#"
-mesh.state.set("icon_name", "audio-volume-muted")
+icon_name = "audio-volume-muted"
 
 function init()
     local audio = require("@mesh/audio@>=1.0")
@@ -1299,8 +1329,8 @@ end
         let mut ctx = ScriptContext::new("@test/click", caps).unwrap();
         ctx.load_script(
             r#"
-mesh.state.set("last_margin_left", 0)
-mesh.state.set("last_pointer_x", 0)
+last_margin_left = 0
+last_pointer_x = 0
 
 function on_click(event)
     last_margin_left = event.current_target.position.margin_left

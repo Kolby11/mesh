@@ -194,8 +194,8 @@ ScriptContext state["settings"]  ←  Luau reads {settings.surface.anchor}
 backend plugin (mesh.toml, provides = "mesh.audio")
   → registered in InterfaceRegistry
   → emits events on EventBus
-  → Shell applies to ScriptState via apply_service_update()
-  → frontend plugins derive local state from `state["audio"]` in Luau / template bindings
+  → Shell sets __mesh_svc_audio Lua table and calls on_change handlers via ScriptContext
+  → frontend plugins use require("@mesh/audio") proxy to read state and call commands
 ```
 
 ---
@@ -426,70 +426,70 @@ obj.insert("icon_name", icon_name);
 Example of what is RIGHT:
 ```lua
 -- packages/plugins/frontend/core/volume-slider/src/main.mesh <script>
-mesh.state.set("icon_name", "audio-volume-muted")
-mesh.service.bind("audio.muted", "audio_muted")
-mesh.service.bind("audio.percent", "audio_percent")
-mesh.service.on("audio", "sync_audio_state")
+local audio = require("@mesh/audio@>=1.0")
 
-function sync_audio_state()
-    if audio_muted or audio_percent == 0 then
+icon_name = "audio-volume-muted"
+audio_label = "0%"
+
+audio.on_change(function()
+    local p = audio.percent or 0
+    local m = audio.muted or false
+    if m or p == 0 then
         icon_name = "audio-volume-muted"
+    elseif p < 67 then
+        icon_name = "audio-volume-medium"
     else
-        if audio_percent < 67 then
-            icon_name = "audio-volume-medium"
-        else
-            icon_name = "audio-volume-high"
-        end
+        icon_name = "audio-volume-high"
     end
-end
+    audio_label = string.format("%d%%", p)
+end)
+
+function onVolumeUp()   audio.volume_up()   end
+function onVolumeDown() audio.volume_down() end
 ```
 
-The template then binds `{icon_name}` — a reactive state variable, not a service field.
+The template binds `{icon_name}` — a reactive global, not a service field.
 
 **If you find core injecting computed display fields (icon names, formatted labels, derived booleans) into service payloads, that is a bug.**
 
 ### Reactive state
 
-Scripts declare reactive state via `mesh.state.set(key, value)`. This:
-1. Sets a Lua global with that name (so handlers can read and write it directly)
-2. Registers the key for syncing back to `ScriptState` after each handler call
-
-Templates bind to `{key}` which reads from `ScriptState`.
-
-### Service bindings
-
-`mesh.service.bind("service.field", "local_name")` registers a runtime binding:
-- Sets a Lua global named `local_name` to nil initially
-- When the service emits, core updates that Lua global and `ScriptState`
-
-`mesh.service.on("service", "handler_name")` registers the update handler explicitly.
+Any bare global assignment in the `<script>` block is automatically reactive — no registration needed. Globals are synced to `ScriptState` after each handler call and exposed to templates via `{key}`. `local` variables are private to the script.
 
 ```lua
-mesh.service.bind("audio.muted", "audio_muted")
-mesh.service.bind("audio.percent", "audio_percent")
-mesh.service.on("audio", "sync_audio_state")
-
-function sync_audio_state()
-    if audio_muted then ...   -- reads explicit Lua global 'audio_muted'
+icon_name = "audio-volume-muted"  -- reactive, visible in template as {icon_name}
+local helper = function() end     -- private, not synced
 ```
-
-**Two-way binding** (planned): writing to a bound variable will publish the change back to the backend service via an event channel.
 
 ### Interface proxies
 
-`require("@mesh/audio")` returns a proxy object (optional version suffix like `@mesh/audio@>=1.0`). Use the proxy as a Lua local — it is NOT reactive state and should not be passed to `mesh.state.set`:
+`require("@mesh/audio@>=1.0")` returns a proxy for the named backend service. Use it as a Lua local:
 
 ```lua
-local audio = require("@mesh/audio@>=1.0")  -- chunk-local, used as upvalue
-local power  = require("@mesh/power@>=1.0")
+local audio = require("@mesh/audio@>=1.0")
+
+-- Read state fields (populated when backend emits)
+local p = audio.percent   -- number
+local m = audio.muted     -- boolean
+
+-- Register a change handler (called on every backend update)
+audio.on_change(function()
+    icon_name = audio.muted and "audio-volume-muted" or "audio-volume-high"
+end)
+
+-- Call commands (published as events to the backend)
+audio.volume_up()
+audio.toggle_mute()
 ```
+
+LSP completions for `audio.` derive state fields and commands by analyzing the backend `main.luau` — no separate type declarations required.
 
 ---
 
 - **Everything is a plugin.** The shell core must not hardcode plugin IDs or behavior. Layout defaults, size policies, and content sizing are declared in `plugin.json`, not in Rust match arms.
 - **`mesh-core-shell/src/shell.rs` is large** (~4000 lines). When reading it, use `Grep` to find specific functions rather than reading the whole file.
 - **Frontend plugins are compiled at startup**, not interpreted at runtime. Hot-reload is supported via file watching (`reload_plugin_settings`, `source_path()` watching).
-- **Luau state is the bridge** between services and UI. Backend plugins emit string updates; `apply_service_update()` parses them into `ScriptState`; templates bind to `{state.field}`.
+- **Globals are reactive state.** Any global assigned in `<script>` is synced to `ScriptState` after each call. Templates bind to `{variable_name}`. `local` variables are private.
 - **Surface layout is user-configurable.** Any surface can have its anchor, layer, size, keyboard mode overridden via `config/settings.json` inside the plugin directory.
 - **`SurfaceSizePolicy::ContentMeasured`** means the surface resizes itself to fit its content. Declared in `plugin.json` as `surface_layout.size_policy = "content_measured"`. Only the launcher uses this currently.
 - **Test location:** unit tests live in `#[cfg(test)]` modules at the bottom of each source file.

@@ -8,6 +8,8 @@ use crate::{
     plugin_registry::PluginRegistry,
     util::ScriptContext,
 };
+
+use InsertTextFormat as Fmt;
 use mesh_core_elements::{
     BASE_ELEMENT_FIELDS, ELEMENT_TYPE_DEFS, ElementFieldDef, ElementFieldType, element_type_for_tag,
 };
@@ -25,6 +27,9 @@ pub fn complete(
         }
         ScriptContext::EventCurrentTarget { prefix } => complete_event_current_target(&prefix),
         ScriptContext::ServiceName => complete_service_names(registry),
+        ScriptContext::InterfaceProxy { var_name, prefix } => {
+            complete_interface_proxy(&var_name, &prefix, doc, registry)
+        }
         ScriptContext::General => complete_state_vars(doc),
     }
 }
@@ -104,6 +109,82 @@ fn call_snippet(path: &str, remaining: &str) -> (String, InsertTextFormat) {
     } else {
         (remaining.to_string(), InsertTextFormat::PLAIN_TEXT)
     }
+}
+
+fn complete_interface_proxy(
+    var_name: &str,
+    prefix: &str,
+    doc: &Document,
+    registry: &PluginRegistry,
+) -> Vec<CompletionItem> {
+    let Some(iface_name) = doc.interface_proxies.get(var_name) else {
+        return vec![];
+    };
+
+    let shape = registry.interface_shapes.get(iface_name);
+    let mut items: Vec<CompletionItem> = Vec::new();
+
+    // State fields from backend script analysis
+    if let Some(shape) = shape {
+        for field in &shape.state_fields {
+            if !field.starts_with(prefix) {
+                continue;
+            }
+            items.push(CompletionItem {
+                label: field.clone(),
+                kind: Some(CompletionItemKind::FIELD),
+                detail: Some(format!("{iface_name} state")),
+                documentation: Some(Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: format!(
+                        "State field emitted by the `{iface_name}` backend service.\n\nRead as `{var_name}.{field}`."
+                    ),
+                })),
+                ..Default::default()
+            });
+        }
+
+        // Commands from backend script analysis
+        for cmd in &shape.commands {
+            if !cmd.starts_with(prefix) {
+                continue;
+            }
+            items.push(CompletionItem {
+                label: cmd.clone(),
+                kind: Some(CompletionItemKind::METHOD),
+                detail: Some(format!("{iface_name} command")),
+                insert_text: Some(format!("{cmd}()")),
+                insert_text_format: Some(Fmt::PLAIN_TEXT),
+                documentation: Some(Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: format!(
+                        "Sends the `{cmd}` command to the `{iface_name}` backend service.\n\nCall as `{var_name}.{cmd}()`."
+                    ),
+                })),
+                ..Default::default()
+            });
+        }
+    }
+
+    // Always include on_change
+    if "on_change".starts_with(prefix) {
+        items.push(CompletionItem {
+            label: "on_change".to_string(),
+            kind: Some(CompletionItemKind::METHOD),
+            detail: Some("register change handler".to_string()),
+            insert_text: Some("on_change(function()\n\t$0\nend)".to_string()),
+            insert_text_format: Some(Fmt::SNIPPET),
+            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!(
+                    "Register a handler called whenever the `{iface_name}` service emits an update.\n\n```lua\n{var_name}.on_change(function()\n    -- read {var_name}.percent, {var_name}.muted, etc.\nend)\n```"
+                ),
+            })),
+            ..Default::default()
+        });
+    }
+
+    items
 }
 
 fn complete_service_names(registry: &PluginRegistry) -> Vec<CompletionItem> {

@@ -8,9 +8,9 @@
 </template>
 
 <script lang="luau">
-mesh.state.set("device_id", "")
-mesh.state.set("device_name", "")
-mesh.state.set("device_state", "")
+device_id = ""
+device_name = ""
+device_state = ""
 
 function onConnectBluetooth(event)
     if not device_id or device_id == "" then

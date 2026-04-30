@@ -23,65 +23,42 @@
 </template>
 
 <script lang="luau">
-mesh.state.set("icon_name", "audio-volume-muted")
-mesh.state.set("audio_label", "0%")
-mesh.state.set("audio_tooltip", "Volume unavailable")
-mesh.state.set("audio_backend", "Unavailable")
-mesh.service.bind("audio.muted", "audio_muted")
-mesh.service.bind("audio.percent", "audio_percent")
-mesh.service.bind("audio.source_plugin", "audio_source_plugin")
-mesh.service.on("audio", "sync_audio_state")
+local audio = require("@mesh/audio@>=1.0")
 
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
-if not audio_ok then
-    audio = nil
-end
+icon_name = "audio-volume-muted"
+audio_label = "0%"
+audio_tooltip = "Volume unavailable"
+audio_backend = "Unavailable"
 
-function sync_audio_state()
-    if audio_muted then
+audio.on_change(function()
+    local p = audio.percent or 0
+    local m = audio.muted or false
+    if m or p == 0 then
         icon_name = "audio-volume-muted"
+    elseif p < 34 then
+        icon_name = "audio-volume-low"
+    elseif p < 67 then
+        icon_name = "audio-volume-medium"
     else
-        if audio_percent == 0 then
-            icon_name = "audio-volume-muted"
-        else
-            if audio_percent < 34 then
-                icon_name = "audio-volume-low"
-            else
-                if audio_percent < 67 then
-                    icon_name = "audio-volume-medium"
-                else
-                    icon_name = "audio-volume-high"
-                end
-            end
-        end
+        icon_name = "audio-volume-high"
     end
-
-    local safe_percent = audio_percent or 0
-    audio_label = string.format("%d%%", safe_percent)
-    audio_backend = audio_source_plugin or "Unavailable"
-    if audio_muted then
-        audio_tooltip = string.format("Volume muted at %d%%", safe_percent)
-    else
-        audio_tooltip = string.format("Volume %d%%", safe_percent)
-    end
-end
+    audio_label = string.format("%d%%", p)
+    audio_backend = audio.source_plugin or "Unavailable"
+    audio_tooltip = m
+        and string.format("Volume muted at %d%%", p)
+        or string.format("Volume %d%%", p)
+end)
 
 function onVolumeDown()
-    if audio then
-        audio:volume_down()
-    end
+    audio.volume_down()
 end
 
 function onVolumeUp()
-    if audio then
-        audio:volume_up()
-    end
+    audio.volume_up()
 end
 
 function onToggleMute()
-    if audio then
-        audio:toggle_mute()
-    end
+    audio.toggle_mute()
 end
 
 function onClose()

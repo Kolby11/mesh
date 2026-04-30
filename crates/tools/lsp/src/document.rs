@@ -5,6 +5,7 @@ use mesh_core_component::{
     template::{AttributeValue, TemplateNode},
 };
 use mesh_core_elements::element_type_for_tag;
+use std::collections::HashMap;
 use tower_lsp::lsp_types::Url;
 
 #[derive(Debug, Clone)]
@@ -36,6 +37,9 @@ pub struct Document {
     pub script_functions: Vec<String>,
     /// Template element bindings exposed to Luau through `refs.<name>`.
     pub element_refs: Vec<ElementRef>,
+    /// Local variables bound to interface proxies via `require("@mesh/...")`.
+    /// Maps variable name → canonical interface name (e.g. "audio" → "mesh.audio").
+    pub interface_proxies: HashMap<String, String>,
 }
 
 impl Document {
@@ -45,7 +49,8 @@ impl Document {
             Err(err) => (None, Some(err)),
         };
 
-        let (state_vars, service_bindings, script_functions) = extract_script_info(&source);
+        let (state_vars, service_bindings, script_functions, interface_proxies) =
+            extract_script_info(&source);
 
         let element_refs = parsed
             .as_ref()
@@ -66,6 +71,7 @@ impl Document {
             imports,
             script_functions,
             element_refs,
+            interface_proxies,
         }
     }
 }
@@ -147,12 +153,20 @@ fn push_element_ref(refs: &mut Vec<ElementRef>, name: String, tag: &str, source:
     });
 }
 
-/// Extract state vars, service bindings, and function names from the script block via
-/// line-by-line pattern matching (no Luau AST required).
-fn extract_script_info(source: &str) -> (Vec<String>, Vec<(String, String)>, Vec<String>) {
+/// Extract state vars, service bindings, function names, and interface proxy
+/// bindings from the script block via line-by-line pattern matching.
+fn extract_script_info(
+    source: &str,
+) -> (
+    Vec<String>,
+    Vec<(String, String)>,
+    Vec<String>,
+    HashMap<String, String>,
+) {
     let mut state_vars: Vec<String> = Vec::new();
     let mut service_bindings: Vec<(String, String)> = Vec::new();
     let mut functions: Vec<String> = Vec::new();
+    let mut interface_proxies: HashMap<String, String> = HashMap::new();
 
     let script = extract_block_text(source, "script");
 
@@ -191,10 +205,43 @@ fn extract_script_info(source: &str) -> (Vec<String>, Vec<(String, String)>, Vec
                     }
                 }
             }
+
+            // Detect: local <var> = require("@mesh/...")
+            if let Some(req_pos) = rest.find("= require(") {
+                let var_name = rest[..req_pos].trim().to_string();
+                let after_req = &rest[req_pos + "= require(".len()..];
+                // Strip opening quote
+                let after_quote = after_req.trim_start_matches(|c| c == '"' || c == '\'');
+                // Extract the module string up to closing quote
+                let module = after_quote
+                    .split(|c| c == '"' || c == '\'')
+                    .next()
+                    .unwrap_or("");
+                let iface = canonicalize_interface_name(module);
+                if !var_name.is_empty() && !iface.is_empty() {
+                    interface_proxies.insert(var_name, iface);
+                }
+            }
         }
     }
 
-    (state_vars, service_bindings, functions)
+    (state_vars, service_bindings, functions, interface_proxies)
+}
+
+/// Convert a require module string to a canonical interface name.
+/// "@mesh/audio@>=1.0" → "mesh.audio", "@mesh/audio" → "mesh.audio"
+fn canonicalize_interface_name(module: &str) -> String {
+    // Strip version suffix
+    let module = module.split('@').next().unwrap_or(module);
+    if let Some(rest) = module.strip_prefix("@mesh/") {
+        format!("mesh.{}", rest.replace('/', "."))
+    } else if let Some(rest) = module.strip_prefix("@mesh.") {
+        format!("mesh.{rest}")
+    } else if module.starts_with("mesh.") {
+        module.to_string()
+    } else {
+        String::new()
+    }
 }
 
 /// Extract the raw text content inside `<block_name>...</block_name>`.

@@ -26,12 +26,12 @@ if not audio_ok then audio = nil end
 if not power_ok then power = nil end
 if not network_ok then network = nil end
 
-mesh.state.set("time", "")
-mesh.state.set("batteryText", "")
-mesh.state.set("volumeLevel", "0")
-mesh.state.set("volumeIcon", "audio-volume-muted")
-mesh.state.set("networkStatus", "disconnected")
-mesh.state.set("activeWorkspace", "1")
+time = ""
+batteryText = ""
+volumeLevel = "0"
+volumeIcon = "audio-volume-muted"
+networkStatus = "disconnected"
+activeWorkspace = "1"
 
 function init()
     updateClock()

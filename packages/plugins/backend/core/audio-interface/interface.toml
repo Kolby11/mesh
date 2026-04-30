@@ -30,6 +30,15 @@ args = [
 ]
 returns = "Result"
 
+[[methods]]
+name = "volume_up"
+
+[[methods]]
+name = "volume_down"
+
+[[methods]]
+name = "toggle_mute"
+
 [[events]]
 name = "VolumeChanged"
 payload = "{ device_id: string, level: float }"
