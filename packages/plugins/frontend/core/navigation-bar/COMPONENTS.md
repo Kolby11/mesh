@@ -8,5 +8,5 @@ This plugin has been split into smaller presentational components inside `src/co
 The main `src/main.mesh` now uses PascalCase custom component tags such as `<BatteryButton />` in place of inline button markup. Built-in template primitives stay lowercase, for example `<button>`, `<icon>`, and `<text>`.
 
 Notes:
-- Components rely on the parent's global reactive state. They don't declare or set those globals.
-- If you prefer local encapsulation, move the state-accessing logic into the component scripts and expose events instead.
+- Each imported component is standalone: it owns its own script state, handlers, and service bindings.
+- Parent-to-child data flow must be explicit through component props; imported components do not read parent scope implicitly.

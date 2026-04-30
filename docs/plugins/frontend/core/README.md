@@ -39,9 +39,10 @@ Common frontend pattern:
 
 ```luau
 mesh.state.set("volume_icon_name", "audio-volume-muted")
-mesh.service.bind("audio.muted", "audio_muted")
-mesh.service.bind("audio.percent", "audio_percent")
-mesh.service.on("audio", "sync_audio_state")
+local audio = mesh.service.use("audio")
+audio:bind("muted", "audio_muted")
+audio:bind("percent", "audio_percent")
+audio:on_change("sync_audio_state")
 
 function sync_audio_state()
     if audio_muted or audio_percent == 0 then
@@ -89,7 +90,7 @@ these blocks:
 | Block                  | Purpose                                                                                                                                                                                                          |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `<template>`           | XHTML-like markup describing the UI tree. Dynamic attributes use `{}` and event handlers use `onclick={handler}`-style attributes.                                                                               |
-| `<script lang="luau">` | Luau code implementing state, explicit `mesh.service.bind(...)` and `mesh.service.on(...)` subscriptions, and event handlers.                                                                                    |
+| `<script lang="luau">` | Luau code implementing state, service proxies such as `mesh.service.use("audio")`, reactive `:bind(...)` / `:on_change(...)` subscriptions, and event handlers.                                                 |
 | `<style>`              | CSS-like styling. Token references use `token(group.name)` and inherit the active theme. Supports `overflow`, `overflow-x`, `overflow-y`, and container breakpoints via `@container (min-width: 640px) { ... }`. |
 | `<i18n>`               | Translations scoped to the component (optional).                                                                                                                                                                 |
 

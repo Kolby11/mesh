@@ -10,6 +10,7 @@
 /// mesh.theme.token(name)      → value          (requires theme.read)
 /// mesh.theme.tokens(group)    → table          (requires theme.read)
 /// mesh.theme.on_change(cb)    → subscription   (requires theme.read)
+/// mesh.service.use(name)      → service proxy  (frontend helper)
 /// mesh.locale.current()       → string         (requires locale.read)
 /// mesh.locale.translate(key)  → string         (requires locale.read)
 /// mesh.config.get(key)        → value

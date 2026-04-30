@@ -135,7 +135,9 @@ pub(super) fn find_click_handler(tree: &WidgetNode, key: &str) -> Option<String>
 
 pub(super) fn namespace_event_handlers(node: &mut WidgetNode, instance_key: &str) {
     for handler in node.event_handlers.values_mut() {
-        *handler = format!("__mesh_embed__::{instance_key}::{handler}");
+        if !handler.starts_with("__mesh_embed__::") {
+            *handler = format!("__mesh_embed__::{instance_key}::{handler}");
+        }
     }
 
     for child in &mut node.children {

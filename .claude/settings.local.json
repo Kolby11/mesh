@@ -31,7 +31,8 @@
       "Bash(cargo run *)",
       "Bash(echo \"Exit: $?\")",
       "Bash(timeout 3 /home/kolby/projects/mesh/target/debug/mesh-lsp)",
-      "Bash(perl *)"
+      "Bash(perl *)",
+      "Bash(xargs -I{} sh -c 'echo \"=== {} ===\"; cat {}')"
     ]
   }
 }

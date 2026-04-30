@@ -10,6 +10,108 @@
   </button>
 </template>
 
+<script lang="luau">
+battery_icon_name = "battery-empty"
+battery_label = "--%"
+battery_tooltip = "Battery status unavailable"
+battery_aria_label = "Battery status unavailable"
+
+mesh.service.bind("power.available", "power_available")
+mesh.service.bind("power.level", "power_level")
+mesh.service.bind("power.charging", "power_charging")
+mesh.service.bind("power.time_remaining_minutes", "power_time_remaining_minutes")
+mesh.service.bind("power.time_to_full_minutes", "power_time_to_full_minutes")
+mesh.service.bind("power.power_draw_watts", "power_power_draw_watts")
+mesh.service.bind("power.energy_now_watt_hours", "power_energy_now_watt_hours")
+mesh.service.bind("power.energy_full_watt_hours", "power_energy_full_watt_hours")
+mesh.service.on("power", "sync_power_state")
+
+function onBatteryClick(event)
+    mesh.events.publish("shell.position-surface", {
+        surface_id = "@mesh/quick-settings",
+        margin_top = event.current_target.position.margin_top,
+        margin_left = event.current_target.position.margin_left,
+    })
+    mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/quick-settings" })
+    mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/volume-bar" })
+end
+
+function round_percent(level_value)
+    local safe = level_value or 0
+    if safe < 0 then safe = 0 end
+    if safe > 1 then safe = 1 end
+    return math.floor((safe * 100) + 0.5)
+end
+
+function format_minutes(total_minutes)
+    if total_minutes == nil or total_minutes <= 0 then
+        return "Unavailable"
+    end
+    local hours = math.floor(total_minutes / 60)
+    local minutes = total_minutes % 60
+    if hours > 0 and minutes > 0 then
+        return string.format("%dh %dm", hours, minutes)
+    end
+    if hours > 0 then
+        return string.format("%dh", hours)
+    end
+    return string.format("%dm", minutes)
+end
+
+function format_watts(watts)
+    if watts == nil or watts <= 0 then
+        return "Unavailable"
+    end
+    return string.format("%.1f W", watts)
+end
+
+function format_capacity(energy_now, energy_full)
+    if energy_now == nil or energy_full == nil or energy_full <= 0 then
+        return "Unavailable"
+    end
+    return string.format("%.1f / %.1f Wh", energy_now, energy_full)
+end
+
+function battery_icon_for(percent_value)
+    if percent_value >= 95 then return "battery-full" end
+    if percent_value >= 70 then return "battery-good" end
+    if percent_value >= 45 then return "battery-low" end
+    if percent_value >= 20 then return "battery-caution" end
+    return "battery-empty"
+end
+
+function sync_power_state()
+    if not power_available then
+        battery_icon_name = "battery-empty"
+        battery_label = "N/A"
+        battery_tooltip = "Battery status unavailable"
+        battery_aria_label = "Battery status unavailable"
+        return
+    end
+
+    local percent_value = round_percent(power_level)
+    local charging = power_charging or false
+    local remaining_label = charging
+        and format_minutes(power_time_to_full_minutes)
+        or format_minutes(power_time_remaining_minutes)
+    local remaining_prefix = charging and "Time to full" or "Estimated remaining"
+    local status_label = charging and "Charging" or "On battery"
+
+    battery_icon_name = battery_icon_for(percent_value)
+    battery_label = string.format("%d%%", percent_value)
+    battery_tooltip = string.format(
+        "%s at %d%%. %s: %s. Power draw: %s. Charge: %s.",
+        status_label,
+        percent_value,
+        remaining_prefix,
+        remaining_label,
+        format_watts(power_power_draw_watts),
+        format_capacity(power_energy_now_watt_hours, power_energy_full_watt_hours)
+    )
+    battery_aria_label = string.format("Battery %d percent, %s", percent_value, status_label)
+end
+</script>
+
 <style>
 .battery-widget {
     height: 40px;

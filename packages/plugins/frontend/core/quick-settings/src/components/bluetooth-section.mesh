@@ -17,6 +17,35 @@
 
 <script lang="luau">
 import BluetoothItem from "./bluetooth-item.mesh"
+
+bluetooth_devices = {}
+
+local network_ok, network_iface = pcall(require, "@mesh/network@>=1.0")
+if network_ok and network_iface then
+    mesh.service.on("network", "sync_bluetooth_state")
+end
+
+function sync_bluetooth_state()
+    if not network_ok or not network_iface then
+        bluetooth_devices = {}
+        return
+    end
+
+    local devices = network_iface.devices()
+    local bluetooth = {}
+    if devices then
+        for _, device in ipairs(devices) do
+            if device.kind == "bluetooth" then
+                table.insert(bluetooth, device)
+            end
+        end
+    end
+    bluetooth_devices = bluetooth
+end
+
+if network_ok and network_iface then
+    sync_bluetooth_state()
+end
 </script>
 
 <style>

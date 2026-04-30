@@ -25,7 +25,24 @@ fn try_upgrade_to_proxy_ctx(
     // Find the last dot-separated token: everything from the last whitespace/delimiter to cursor
     let token_start = before
         .rfind(|c: char| {
-            c.is_whitespace() || matches!(c, '(' | ')' | ',' | ';' | '{' | '}' | '[' | ']' | '"' | '\'' | '=' | '+' | '-' | '*' | '/')
+            c.is_whitespace()
+                || matches!(
+                    c,
+                    '(' | ')'
+                        | ','
+                        | ';'
+                        | '{'
+                        | '}'
+                        | '['
+                        | ']'
+                        | '"'
+                        | '\''
+                        | '='
+                        | '+'
+                        | '-'
+                        | '*'
+                        | '/'
+                )
         })
         .map(|i| i + 1)
         .unwrap_or(0);

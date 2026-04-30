@@ -9,6 +9,45 @@
   </button>
 </template>
 
+<script lang="luau">
+icon_name = "audio-volume-muted"
+audio_tooltip = "Volume unavailable"
+
+mesh.service.bind("audio.muted", "audio_muted")
+mesh.service.bind("audio.percent", "audio_percent")
+mesh.service.on("audio", "sync_audio_state")
+
+function sync_audio_state()
+    local percent = audio_percent or 0
+    local muted = audio_muted or false
+    if muted or percent == 0 then
+        icon_name = "audio-volume-muted"
+    elseif percent < 34 then
+        icon_name = "audio-volume-low"
+    elseif percent < 67 then
+        icon_name = "audio-volume-medium"
+    else
+        icon_name = "audio-volume-high"
+    end
+
+    if muted then
+        audio_tooltip = string.format("Volume muted at %d%%", percent)
+    else
+        audio_tooltip = string.format("Volume %d%%", percent)
+    end
+end
+
+function onVolumeClick(event)
+    mesh.events.publish("shell.position-surface", {
+        surface_id = "@mesh/volume-bar",
+        margin_top = event.current_target.position.margin_top,
+        margin_left = event.current_target.position.margin_left,
+    })
+    mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/volume-bar" })
+    mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/quick-settings" })
+end
+</script>
+
 <style>
 .volume-widget {
     width: 44px;

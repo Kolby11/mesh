@@ -87,6 +87,14 @@ resolves from the plugin's `src/` directory, plugin component imports resolve
 through declared plugin dependencies, and `mesh.*` imports expose the same
 interface proxy returned by `require("@mesh/<service>")`.
 
+Imported components are standalone. Inside an imported component template,
+expressions and event handlers may resolve only:
+- that component's own script-defined globals/functions
+- explicit props passed at the call site
+- built-in runtime bindings such as `t(...)`, `refs`, and `settings`
+
+Imported components do not read parent template/script scope implicitly.
+
 Conceptually, every built-in tag inherits the common `MeshElement` surface:
 shared attributes like `class`, `id`, `ref`, `style`, accessibility metadata,
 and runtime ref metrics such as `width`, `height`, and
@@ -141,6 +149,18 @@ state.
 
 The runtime reads the initial value from script state and writes back on
 change. The variable should be initialized in `<script>`.
+
+### Component props
+
+Pass data into an imported component explicitly with attributes on the
+component tag:
+
+```xml
+<WifiItem network_id="{network.id}" network_name="{network.name}" />
+```
+
+Those prop names are available only inside the imported component instance.
+They are the supported boundary for parent-to-child data flow.
 
 ### Event handlers
 
@@ -245,9 +265,10 @@ mesh.state.set("volume_icon_name", "audio-volume-muted")
 mesh.state.set("volume_label", "0%")
 mesh.state.set("volume_tooltip", "Volume unavailable")
 
-mesh.service.bind("audio.muted", "audio_muted")
-mesh.service.bind("audio.percent", "audio_percent")
-mesh.service.on("audio", "sync_audio_state")
+local audio = mesh.service.use("audio")
+audio:bind("muted", "audio_muted")
+audio:bind("percent", "audio_percent")
+audio:on_change("sync_audio_state")
 
 function sync_audio_state()
   if audio_muted or audio_percent == 0 then
@@ -268,8 +289,8 @@ end
 
 The template can read the raw service object as `{audio.*}` after updates
 arrive. The script can opt into explicit local names like `audio_muted` and
-`audio_percent` through `mesh.service.bind("audio.field", "local_name")`, and
-it subscribes to updates explicitly with `mesh.service.on("audio", "handler")`.
+`audio_percent` through `audio:bind("field", "local_name")`, and it
+subscribes to updates explicitly with `audio:on_change("handler")`.
 
 For pointer-driven handlers like `onclick`, the callback also receives an
 event table with:
@@ -352,9 +373,10 @@ mesh.state.set("volume_icon_name", "audio-volume-muted")
 mesh.state.set("volume_label", "0%")
 mesh.state.set("volume_tooltip", "Volume unavailable")
 
-mesh.service.bind("audio.muted", "audio_muted")
-mesh.service.bind("audio.percent", "audio_percent")
-mesh.service.on("audio", "sync_audio_state")
+local audio = mesh.service.use("audio")
+audio:bind("muted", "audio_muted")
+audio:bind("percent", "audio_percent")
+audio:on_change("sync_audio_state")
 
 function sync_audio_state()
     if audio_muted or audio_percent == 0 then

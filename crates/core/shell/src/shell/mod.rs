@@ -17,6 +17,7 @@ use mesh_core_theme::ThemeEngine;
 use mesh_core_wayland::{Layer, StubSurface};
 
 use std::collections::{HashMap, VecDeque};
+use std::env;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -71,6 +72,7 @@ pub struct Shell {
     debug: DebugOverlayState,
     debug_overlay: DebugOverlay,
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
+    latest_service_events: HashMap<String, ServiceEvent>,
 }
 
 pub fn default_ipc_socket_path() -> PathBuf {
@@ -135,6 +137,7 @@ impl Shell {
             debug: DebugOverlayState::default(),
             debug_overlay: DebugOverlay::new(),
             service_handlers: HashMap::new(),
+            latest_service_events: HashMap::new(),
         }
     }
 
@@ -327,6 +330,7 @@ impl Shell {
 
         let mut pending = VecDeque::new();
         pending.extend(self.mount_components()?);
+        pending.extend(self.replay_cached_service_events()?);
         self.mark_components_locale_changed()?;
         pending.extend(self.broadcast_core_event(CoreEvent::Started)?);
         play_shell_sound(
@@ -678,6 +682,9 @@ impl Shell {
         &mut self,
         event: ServiceEvent,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let ServiceEvent::Updated { service, .. } = &event;
+        self.latest_service_events
+            .insert(service.clone(), event.clone());
         let mut requests = VecDeque::new();
         for runtime in &mut self.components {
             requests.extend(
@@ -686,6 +693,19 @@ impl Shell {
                     .handle_service_event(&event)
                     .map_err(ShellRunError::Component)?,
             );
+        }
+        Ok(requests)
+    }
+
+    fn replay_cached_service_events(&mut self) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let mut requests = VecDeque::new();
+        let events = self
+            .latest_service_events
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for event in events {
+            requests.extend(self.broadcast_service_event(event)?);
         }
         Ok(requests)
     }
@@ -1043,6 +1063,22 @@ impl Shell {
                 continue;
             };
 
+            let missing_binary = plugin
+                .manifest
+                .dependencies
+                .binaries
+                .iter()
+                .find(|binary| !binary_exists(&binary.name));
+            if let Some(binary) = missing_binary {
+                tracing::info!(
+                    "skipping backend '{}' for service '{}' because binary '{}' is unavailable",
+                    plugin.manifest.package.id,
+                    service.provides,
+                    binary.name
+                );
+                continue;
+            }
+
             let service_name = service_name_from_interface(&service.provides);
             services
                 .entry(service_name.clone())
@@ -1132,6 +1168,18 @@ impl Shell {
             }
         }
     }
+}
+
+fn binary_exists(name: &str) -> bool {
+    if name.contains(std::path::MAIN_SEPARATOR) {
+        return Path::new(name).is_file();
+    }
+
+    let Some(paths) = env::var_os("PATH") else {
+        return false;
+    };
+
+    env::split_paths(&paths).any(|dir| dir.join(name).is_file())
 }
 
 impl Default for Shell {

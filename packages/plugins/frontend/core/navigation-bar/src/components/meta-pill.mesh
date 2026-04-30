@@ -5,7 +5,7 @@
 </template>
 
 <script lang="luau">
--- Presentational. Translates could be localized by parent if needed.
+-- Standalone presentational pill using the built-in translation helper.
 </script>
 
 <style>

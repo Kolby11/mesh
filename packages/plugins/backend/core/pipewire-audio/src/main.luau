@@ -7,8 +7,46 @@ function init()
     mesh.service.set_poll_interval(500)
 end
 
+local function resolve_sink_id()
+    local result = mesh.exec_shell([=[wpctl status | awk '
+BEGIN {
+    in_sinks = 0
+    first = ""
+}
+/^[[:space:]]*[|`\\-]*[[:space:]]*├─ Sinks:/ {
+    in_sinks = 1
+    next
+}
+/^[[:space:]]*[|`\\-]*[[:space:]]*├─ Sources:/ {
+    in_sinks = 0
+}
+in_sinks {
+    if (match($0, /\*[[:space:]]*([0-9]+)\./)) {
+        print substr($0, RSTART, RLENGTH)
+        exit
+    }
+    if (first == "" && match($0, /([0-9]+)\./)) {
+        first = substr($0, RSTART, RLENGTH)
+    }
+}
+END {
+    if (first != "") print first
+}
+']=])
+    if not result.success then
+        return nil
+    end
+
+    return (result.stdout or ""):match("(%d+)")
+end
+
 local function read_state()
-    local result = mesh.exec_shell("wpctl get-volume @DEFAULT_AUDIO_SINK@")
+    local sink_id = resolve_sink_id()
+    if sink_id == nil then
+        return nil
+    end
+
+    local result = mesh.exec_shell(("wpctl get-volume %s"):format(sink_id))
     if not result.success then
         return nil
     end
@@ -37,24 +75,36 @@ function on_poll()
 end
 
 function on_command_volume_up()
-    mesh.exec_shell("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+ && wpctl set-mute @DEFAULT_AUDIO_SINK@ 0")
+    local sink_id = resolve_sink_id()
+    if sink_id then
+        mesh.exec_shell(("wpctl set-volume %s 5%%+ && wpctl set-mute %s 0"):format(sink_id, sink_id))
+    end
     emit_state()
 end
 
 function on_command_volume_down()
-    mesh.exec_shell("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-")
+    local sink_id = resolve_sink_id()
+    if sink_id then
+        mesh.exec_shell(("wpctl set-volume %s 5%%-"):format(sink_id))
+    end
     emit_state()
 end
 
 function on_command_set_volume()
     local payload = mesh.service.payload()
     local percent = payload.percent or 0
-    mesh.exec_shell(("wpctl set-volume @DEFAULT_AUDIO_SINK@ %s%%"):format(percent))
+    local sink_id = resolve_sink_id()
+    if sink_id then
+        mesh.exec_shell(("wpctl set-volume %s %s%%"):format(sink_id, percent))
+    end
     emit_state()
 end
 
 function on_command_toggle_mute()
-    mesh.exec_shell("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle")
+    local sink_id = resolve_sink_id()
+    if sink_id then
+        mesh.exec_shell(("wpctl set-mute %s toggle"):format(sink_id))
+    end
     emit_state()
 end
 

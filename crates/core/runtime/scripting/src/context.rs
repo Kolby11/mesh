@@ -4,7 +4,7 @@ use mesh_core_capability::CapabilitySet;
 use mesh_core_elements::VariableStore;
 use mesh_core_locale::LocaleEngine;
 use mesh_core_service::contract::InterfaceTypeDef;
-use mesh_core_service::{InterfaceCatalog, InterfaceResolution};
+use mesh_core_service::{InterfaceCatalog, InterfaceContract, InterfaceResolution};
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -411,6 +411,11 @@ impl ScriptContext {
         let mesh_core_events = self.lua.create_table().map_err(lua_err)?;
         let mesh_ui_api = self.lua.create_table().map_err(lua_err)?;
         let mesh_log = self.lua.create_table().map_err(lua_err)?;
+        let interface_catalog = self.interface_catalog.clone();
+        let manifest = HostApiManifest::from_capabilities(&self.capabilities);
+        let allowed_interfaces = manifest.interface_capabilities.clone();
+        let has_theme_read = manifest.has_theme_read;
+        let has_locale_read = manifest.has_locale_read;
 
         let service_bindings = Arc::clone(&self.runtime_service_bindings);
         mesh_core_service
@@ -448,6 +453,42 @@ impl ScriptContext {
                                 handler_name,
                             });
                         Ok(LuaValue::Nil)
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
+
+        let service_bindings = Arc::clone(&self.runtime_service_bindings);
+        let service_subscriptions = Arc::clone(&self.runtime_service_subscriptions);
+        let published_events = Arc::clone(&self.shared_published_events);
+        let interface_catalog_for_service = interface_catalog.clone();
+        let allowed_interfaces_for_service = allowed_interfaces.clone();
+        mesh_core_service
+            .set(
+                "use",
+                self.lua
+                    .create_function(move |lua, service: String| {
+                        let canonical = InterfaceProxy::canonical_name(&service);
+                        let readable = canonical == "mesh.theme" && has_theme_read
+                            || canonical == "mesh.locale" && has_locale_read
+                            || allowed_interfaces_for_service.contains(&canonical)
+                            || !canonical.starts_with("mesh.");
+                        if canonical.starts_with("mesh.") && !readable {
+                            return Err(mlua::Error::external(ScriptError::CapabilityDenied(
+                                canonical,
+                            )));
+                        }
+
+                        let resolution = interface_catalog_for_service.resolve(&canonical, None);
+                        create_service_proxy(
+                            lua,
+                            service_name_from_interface(&canonical),
+                            resolution.contract.clone(),
+                            canonical,
+                            Arc::clone(&service_bindings),
+                            Arc::clone(&service_subscriptions),
+                            Arc::clone(&published_events),
+                        )
                     })
                     .map_err(lua_err)?,
             )
@@ -531,11 +572,6 @@ impl ScriptContext {
             .set("__mesh_request_redraw", false)
             .map_err(lua_err)?;
 
-        let interface_catalog = self.interface_catalog.clone();
-        let manifest = HostApiManifest::from_capabilities(&self.capabilities);
-        let allowed_interfaces = manifest.interface_capabilities.clone();
-        let has_theme_read = manifest.has_theme_read;
-        let has_locale_read = manifest.has_locale_read;
         let service_bindings = Arc::clone(&self.runtime_service_bindings);
         let service_subscriptions = Arc::clone(&self.runtime_service_subscriptions);
         let published_events = Arc::clone(&self.shared_published_events);
@@ -728,14 +764,42 @@ fn create_interface_proxy(
     service_subscriptions: Arc<Mutex<Vec<ServiceSubscription>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
 ) -> mlua::Result<Table> {
+    create_service_proxy(
+        lua,
+        service_name_from_interface(&resolution.requested),
+        resolution.contract,
+        resolution.requested,
+        service_bindings,
+        service_subscriptions,
+        published_events,
+    )
+}
+
+fn create_service_proxy(
+    lua: &Lua,
+    service_name: String,
+    contract: Option<InterfaceContract>,
+    interface_name: String,
+    service_bindings: Arc<Mutex<Vec<ServiceBinding>>>,
+    service_subscriptions: Arc<Mutex<Vec<ServiceSubscription>>>,
+    published_events: Arc<Mutex<Vec<PublishedEvent>>>,
+) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
     let meta = lua.create_table()?;
 
-    let service_name = service_name_from_interface(&resolution.requested);
-    let contract = resolution.contract.clone();
-    let methods = contract.as_ref().map(|c| c.methods.clone()).unwrap_or_default();
-    let types = contract.as_ref().map(|c| c.types.clone()).unwrap_or_default();
-    let interface_name = contract.as_ref().map(|c| c.interface.clone()).unwrap_or_default();
+    let methods = contract
+        .as_ref()
+        .map(|c| c.methods.clone())
+        .unwrap_or_default();
+    let types = contract
+        .as_ref()
+        .map(|c| c.types.clone())
+        .unwrap_or_default();
+    let interface_name = contract
+        .as_ref()
+        .map(|c| c.interface.clone())
+        .filter(|name| !name.is_empty())
+        .unwrap_or(interface_name);
     let handler_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     meta.set(
@@ -748,9 +812,8 @@ fn create_interface_proxy(
                 return Ok(LuaValue::Function(lua.create_function(
                     move |lua, args: mlua::Variadic<LuaValue>| {
                         let offset = consume_self_arg(&args);
-                        let field = lua_value_to_string(
-                            args.get(offset).cloned().unwrap_or(LuaValue::Nil),
-                        );
+                        let field =
+                            lua_value_to_string(args.get(offset).cloned().unwrap_or(LuaValue::Nil));
                         if field.is_empty() {
                             return Ok(LuaValue::Nil);
                         }
@@ -781,12 +844,9 @@ fn create_interface_proxy(
                         let arg = args.get(offset).cloned().unwrap_or(LuaValue::Nil);
                         match arg {
                             LuaValue::Function(f) => {
-                                let idx = counter.fetch_add(
-                                    1,
-                                    std::sync::atomic::Ordering::Relaxed,
-                                );
-                                let name =
-                                    format!("__mesh_svc_handler_{}_{}", svc, idx);
+                                let idx =
+                                    counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                let name = format!("__mesh_svc_handler_{}_{}", svc, idx);
                                 lua.globals().set(name.clone(), f)?;
                                 subs.lock().unwrap().push(ServiceSubscription {
                                     service: svc.clone(),
@@ -1295,6 +1355,42 @@ end
         assert_eq!(
             ctx.state.get("icon_name"),
             Some(Value::String("audio-volume-high".into()))
+        );
+    }
+
+    #[test]
+    fn service_use_can_bind_reactive_fields_without_require() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("theme.read"));
+        let mut ctx = ScriptContext::new("@test/theme-widget", caps).unwrap();
+        ctx.load_script(
+            r#"
+theme_icon = "weather-clear"
+
+function init()
+    local theme = mesh.service.use("theme")
+    theme:bind("is_dark", "theme_is_dark")
+    theme:on_change("sync_theme_state")
+end
+
+function sync_theme_state()
+    if theme_is_dark then
+        theme_icon = "weather-clear-night"
+    else
+        theme_icon = "weather-clear"
+    end
+end
+"#,
+        )
+        .unwrap();
+        ctx.call_init().unwrap();
+
+        let payload = serde_json::json!({ "is_dark": true });
+        ctx.apply_service_bindings("theme", &payload);
+        ctx.call_service_handlers("theme").unwrap();
+        assert_eq!(
+            ctx.state.get("theme_icon"),
+            Some(Value::String("weather-clear-night".into()))
         );
     }
 

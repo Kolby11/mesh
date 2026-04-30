@@ -34,6 +34,12 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
         description: "Register a Lua function to call whenever a service emits an update.",
         backend_only: false,
     },
+    MeshApiEntry {
+        path: "service.use",
+        signature: "mesh.service.use(service_name: string) -> ServiceProxy",
+        description: "Create a Lua-friendly service proxy supporting `:bind(...)`, `:on_change(...)`, field reads, and interface methods when a contract exists.",
+        backend_only: false,
+    },
     // Service (backend)
     MeshApiEntry {
         path: "service.emit",

@@ -19,6 +19,27 @@
 
 <script lang="luau">
 import WifiItem from "./wifi-item.mesh"
+
+wifi_networks = {}
+
+local network_ok, network_iface = pcall(require, "@mesh/network@>=1.0")
+if network_ok and network_iface then
+    mesh.service.on("network", "sync_network_state")
+end
+
+function sync_network_state()
+    if not network_ok or not network_iface then
+        wifi_networks = {}
+        return
+    end
+
+    local networks = network_iface.wifi_scan()
+    wifi_networks = networks or {}
+end
+
+if network_ok and network_iface then
+    sync_network_state()
+end
 </script>
 
 <style>

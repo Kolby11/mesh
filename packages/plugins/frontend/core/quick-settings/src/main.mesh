@@ -26,7 +26,7 @@
       </box>
       <box class="drawer">
         {#if active_section == "wifi"}
-          <WifiSection />
+          <WifiSection wifi_enabled="{wifi_enabled}" />
         {/if}
         {#if active_section == "bluetooth"}
           <BluetoothSection />
@@ -51,25 +51,11 @@ import AudioSection from "./components/audio-section.mesh"
 active_section = "wifi"
 
 icon_name = "audio-volume-muted"
-audio_label = "0%"
-audio_tooltip = "Volume unavailable"
-audio_backend = "Unavailable"
-audio_percent = 0
 wifi_enabled = false
-wifi_networks = {}
-bluetooth_devices = {}
 
 mesh.service.bind("audio.muted", "audio_muted")
 mesh.service.bind("audio.percent", "audio_percent")
-mesh.service.bind("audio.source_plugin", "audio_source_plugin")
 mesh.service.on("audio", "sync_audio_state")
-
--- Guard network registration: require throws if the interface is unavailable,
--- so wrap in pcall to avoid aborting the entire script init.
-local _net_ok, _net_iface = pcall(require, "@mesh/network@>=1.0")
-if _net_ok and _net_iface then
-    mesh.service.on("network", "sync_network_state")
-end
 
 function sync_audio_state()
     -- audio_percent may be nil until the first service update arrives because
@@ -87,32 +73,6 @@ function sync_audio_state()
     else
         icon_name = "audio-volume-high"
     end
-
-    audio_label = string.format("%d%%", pct)
-    audio_backend = audio_source_plugin or "Unavailable"
-    if audio_muted then
-        audio_tooltip = string.format("Volume muted at %d%%", pct)
-    else
-        audio_tooltip = string.format("Volume %d%%", pct)
-    end
-end
-
-function sync_network_state()
-    local ok, network_iface = pcall(require, "@mesh/network@>=1.0")
-    if not ok or not network_iface then return end
-    local networks = network_iface.wifi_scan()
-    wifi_networks = networks or {}
-
-    local devices = network_iface.devices()
-    local bt_devices = {}
-    if devices then
-        for _, device in ipairs(devices) do
-            if device.kind == "bluetooth" then
-                table.insert(bt_devices, device)
-            end
-        end
-    end
-    bluetooth_devices = bt_devices
 end
 
 function sync_nav_classes()
@@ -157,24 +117,13 @@ function onToggleWiFi()
 end
 
 function onToggleBluetooth()
-    mesh.log.debug("Bluetooth toggle clicked")
+    mesh.log.info("Bluetooth toggle clicked")
 end
 
 function onClose()
     mesh.events.publish("shell.close-quick-settings", {})
 end
 
-function onVolumeDown()
-    mesh.events.publish("mesh.audio.volume-down", {})
-end
-
-function onVolumeUp()
-    mesh.events.publish("mesh.audio.volume-up", {})
-end
-
-function onToggleMute()
-    mesh.events.publish("mesh.audio.toggle-mute", {})
-end
 </script>
 
 <style>

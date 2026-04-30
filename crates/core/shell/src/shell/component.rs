@@ -36,40 +36,9 @@ use std::time::{Duration, Instant};
 use crate::shell::ShellRunError;
 use mesh_core_render::{PixelBuffer, SharedTextMeasurer, paint_frontend_tree_at};
 
-/// Overlays resolved prop values on top of a local component's host state so
-/// that template expressions like `{network_name}` resolve to the prop value
-/// passed at the call site rather than falling back to the host variable.
-struct LocalComponentStore<'a> {
-    base: &'a dyn VariableStore,
-    props: &'a HashMap<String, String>,
-}
-
 const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
 const TOOLTIP_OVERLAY_WIDTH: u32 = 260;
 const TOOLTIP_OVERLAY_HEIGHT: u32 = 96;
-
-impl VariableStore for LocalComponentStore<'_> {
-    fn get(&self, name: &str) -> Option<serde_json::Value> {
-        if let Some(v) = self.props.get(name) {
-            return Some(serde_json::Value::String(v.clone()));
-        }
-        self.base.get(name)
-    }
-
-    fn keys(&self) -> Vec<String> {
-        let mut keys = self.base.keys();
-        for k in self.props.keys() {
-            if !keys.iter().any(|existing| existing == k) {
-                keys.push(k.clone());
-            }
-        }
-        keys
-    }
-
-    fn translate(&self, key: &str) -> Option<String> {
-        self.base.translate(key)
-    }
-}
 
 #[derive(Debug, Clone)]
 pub(super) struct BackendServiceCandidate {
@@ -604,48 +573,6 @@ impl FrontendSurfaceComponent {
         );
     }
 
-    // Update host/root runtime with snapshots from imported embedded instances
-    // when necessary. This is an internal helper called from tick() to
-    // propagate reactive state changes from imported components.
-    fn propagate_imported_state(&mut self) {
-        // Collect any child runtimes that are import instances and are dirty.
-        let mut updates: Vec<(String, serde_json::Value)> = Vec::new();
-        {
-            let runtimes_ref = self.runtimes.lock().unwrap();
-            for (key, runtime) in runtimes_ref.iter() {
-                // instance_key pattern: "{host}/import:{alias}"
-                if let Some(rest) = key.strip_prefix(&format!("{}/import:", self.id())) {
-                    let alias = rest.to_string();
-                    let child_state = runtime.script_ctx.state();
-                    if child_state.is_dirty() {
-                        let mut obj = serde_json::Map::new();
-                        for k in child_state.keys() {
-                            if let Some(v) = child_state.get(&k) {
-                                obj.insert(k.clone(), v);
-                            }
-                        }
-                        let plugin_id = runtime.plugin_id.clone();
-                        let alias_obj = serde_json::json!({
-                            "plugin_id": plugin_id,
-                            "state": serde_json::Value::Object(obj),
-                        });
-                        updates.push((alias, alias_obj));
-                    }
-                }
-            }
-        }
-
-        if !updates.is_empty() {
-            if let Some(root_runtime) = self.runtimes.lock().unwrap().get_mut(self.id()) {
-                for (alias, value) in updates {
-                    root_runtime.script_ctx.state_mut().set(alias, value);
-                }
-            }
-            // Mark surface dirty so it will rebuild and reflect new state.
-            self.dirty = true;
-        }
-    }
-
     fn build_tree(&mut self, theme: &Theme, width: u32, height: u32) -> WidgetNode {
         self.active_theme.replace(theme.clone());
         let root_state = self.runtime_state(self.id()).unwrap_or_default();
@@ -775,7 +702,7 @@ impl FrontendSurfaceComponent {
                 .get("audio")
                 .unwrap_or_else(|| serde_json::json!({}));
             if let Some(obj) = audio.as_object_mut() {
-                obj.insert("percent".into(), percent.into());
+                obj.insert("percent".into(), serde_json::Value::from(percent));
             }
             runtime.script_ctx.state_mut().set("audio", audio);
         }
@@ -875,15 +802,16 @@ impl FrontendSurfaceComponent {
         }
     }
 
-    fn create_runtime(
+    fn create_runtime_for_component(
         &self,
-        compiled: &CompiledFrontendPlugin,
+        component_id: String,
+        manifest: &mesh_core_plugin::Manifest,
+        component: &mesh_core_component::ComponentFile,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<EmbeddedFrontendRuntime, ComponentError> {
-        let component_id = compiled.manifest.package.id.clone();
         let mut script_ctx = ScriptContext::new(
             component_id.clone(),
-            grant_capabilities_from_manifest(&compiled.manifest),
+            grant_capabilities_from_manifest(manifest),
         )
         .map_err(|source| ComponentError::Script {
             component_id: component_id.clone(),
@@ -896,9 +824,8 @@ impl FrontendSurfaceComponent {
             script_ctx.state_mut().set(key.clone(), value.clone());
         }
 
-        if let Some(script) = &compiled.component.script {
-            let interface_imports = compiled
-                .component
+        if let Some(script) = &component.script {
+            let interface_imports = component
                 .imports
                 .iter()
                 .filter_map(|import| match &import.target {
@@ -933,6 +860,19 @@ impl FrontendSurfaceComponent {
         })
     }
 
+    fn create_runtime(
+        &self,
+        compiled: &CompiledFrontendPlugin,
+        props: &HashMap<String, serde_json::Value>,
+    ) -> Result<EmbeddedFrontendRuntime, ComponentError> {
+        self.create_runtime_for_component(
+            compiled.manifest.package.id.clone(),
+            &compiled.manifest,
+            &compiled.component,
+            props,
+        )
+    }
+
     fn init_root_runtime(&self) -> Result<(), ComponentError> {
         let mut props = HashMap::new();
         props.insert("settings".into(), self.settings_json.clone());
@@ -962,10 +902,6 @@ impl FrontendSurfaceComponent {
                 .lock()
                 .unwrap()
                 .insert(instance_key.to_string(), runtime);
-            // Register proxies for this imported instance so its variables are
-            // available to the host runtime immediately (not only on the next
-            // build_tree()). This mirrors the logic used in build_tree.
-            self.register_import_proxies(instance_key, plugin_id);
         }
 
         if let Some(runtime) = self.runtimes.lock().unwrap().get_mut(instance_key) {
@@ -980,108 +916,6 @@ impl FrontendSurfaceComponent {
         Ok(())
     }
 
-    /// Register proxies on the host/root runtime for an imported instance.
-    ///
-    /// This creates an alias proxy (alias -> { plugin_id, state }) and per-
-    /// variable proxies that forward reads/writes into the child runtime's
-    /// ScriptContext so imported variables appear in the same namespace.
-    fn register_import_proxies(&self, instance_key: &str, plugin_id: &str) {
-        let host_prefix = format!("{}/import:", self.id());
-        let Some(alias) = instance_key.strip_prefix(&host_prefix) else {
-            // Not an import instance; nothing to do.
-            return;
-        };
-
-        let runtimes_rc = self.runtimes.clone();
-        if let Some(root_runtime) = self.runtimes.lock().unwrap().get_mut(self.id()) {
-            let alias = alias.to_string();
-            let instance_key_owned = instance_key.to_string();
-            let instance_key_for_alias_getter = instance_key_owned.clone();
-            let instance_key_for_runtimes_ref = instance_key_owned.clone();
-            let plugin_id_clone = plugin_id.to_string();
-
-            // Alias getter returns { plugin_id, state: { ... } } when the
-            // child exists, otherwise just { plugin_id }.
-            let runtimes_for_alias = runtimes_rc.clone();
-            let alias_getter = Box::new(move || {
-                let runtimes_ref = runtimes_for_alias.lock().unwrap();
-                if let Some(child_runtime) = runtimes_ref.get(&instance_key_for_alias_getter) {
-                    let mut obj = serde_json::Map::new();
-                    let child_state = child_runtime.script_ctx.state();
-                    for k in child_state.keys() {
-                        if let Some(v) = child_state.get(&k) {
-                            obj.insert(k.clone(), v);
-                        }
-                    }
-                    return serde_json::json!({
-                        "plugin_id": plugin_id_clone,
-                        "state": serde_json::Value::Object(obj),
-                    });
-                }
-                serde_json::json!({ "plugin_id": plugin_id_clone })
-            });
-
-            if !root_runtime.script_ctx.state().has_proxy(&alias) {
-                root_runtime.script_ctx.state_mut().register_proxy(
-                    alias.clone(),
-                    alias_getter,
-                    None,
-                );
-            }
-
-            // If the child runtime exists, register per-variable proxies so
-            // child variables appear directly in the host namespace. If a
-            // variable name collides with an existing host variable, register
-            // it under "{alias}.{name}" instead.
-            let existing_keys: Vec<String> = root_runtime.script_ctx.state().keys();
-            let runtimes_ref = self.runtimes.lock().unwrap();
-            if let Some(child_runtime) = runtimes_ref.get(&instance_key_for_runtimes_ref) {
-                let child_state = child_runtime.script_ctx.state().clone();
-                for key in child_state.keys() {
-                    let target_name = if existing_keys.contains(&key) {
-                        format!("{}.{}", alias, key)
-                    } else {
-                        key.clone()
-                    };
-
-                    let runtimes_for_get = self.runtimes.clone();
-                    let instance_key_get = instance_key_owned.clone();
-                    let key_clone = key.clone();
-                    let getter = Box::new(move || {
-                        let runtimes_ref = runtimes_for_get.lock().unwrap();
-                        if let Some(child) = runtimes_ref.get(&instance_key_get) {
-                            return child
-                                .script_ctx
-                                .state()
-                                .get(&key_clone)
-                                .unwrap_or(serde_json::Value::Null);
-                        }
-                        serde_json::Value::Null
-                    });
-
-                    let runtimes_for_set = self.runtimes.clone();
-                    let instance_key_set = instance_key_owned.clone();
-                    let key_set = key.clone();
-                    let setter = Box::new(move |v: serde_json::Value| {
-                        if let Some(child) =
-                            runtimes_for_set.lock().unwrap().get_mut(&instance_key_set)
-                        {
-                            child.script_ctx.state_mut().set(key_set.clone(), v);
-                        }
-                    });
-
-                    if !root_runtime.script_ctx.state().has_proxy(&target_name) {
-                        root_runtime.script_ctx.state_mut().register_proxy(
-                            target_name,
-                            getter,
-                            Some(setter),
-                        );
-                    }
-                }
-            }
-        }
-    }
-
     fn build_error_widget(&self, message: impl Into<String>) -> WidgetNode {
         let message = message.into();
         let mut node = WidgetNode::new("box");
@@ -1089,6 +923,97 @@ impl FrontendSurfaceComponent {
         text.attributes.insert("content".into(), message.clone());
         node.attributes.insert("content".into(), message);
         node.children.push(text);
+        node
+    }
+
+    fn ensure_local_component_runtime(
+        &self,
+        instance_key: &str,
+        host_plugin_id: &str,
+        alias: &str,
+        props: &HashMap<String, serde_json::Value>,
+    ) -> Result<(), ComponentError> {
+        if !self.runtimes.lock().unwrap().contains_key(instance_key) {
+            let Some(entry) = self.frontend_catalog.plugins.get(host_plugin_id) else {
+                return Err(ComponentError::Failed {
+                    component_id: self.id().to_string(),
+                    message: format!("missing host plugin '{host_plugin_id}'"),
+                });
+            };
+            let Some(component) = entry.compiled.local_components.get(alias) else {
+                return Err(ComponentError::Failed {
+                    component_id: self.id().to_string(),
+                    message: format!("missing local component import '{alias}'"),
+                });
+            };
+            let runtime = self.create_runtime_for_component(
+                format!("{host_plugin_id}::{alias}"),
+                &entry.compiled.manifest,
+                component,
+                props,
+            )?;
+            self.runtimes
+                .lock()
+                .unwrap()
+                .insert(instance_key.to_string(), runtime);
+        }
+
+        if let Some(runtime) = self.runtimes.lock().unwrap().get_mut(instance_key) {
+            for (key, value) in props {
+                runtime
+                    .script_ctx
+                    .state_mut()
+                    .set(key.clone(), value.clone());
+            }
+        }
+
+        Ok(())
+    }
+
+    fn render_local_component(
+        &self,
+        host: &mesh_core_plugin::Manifest,
+        alias: &str,
+        instance_key: &str,
+        props: &HashMap<String, serde_json::Value>,
+        container_width: f32,
+        container_height: f32,
+    ) -> WidgetNode {
+        if let Err(err) =
+            self.ensure_local_component_runtime(instance_key, &host.package.id, alias, props)
+        {
+            return self.build_error_widget(err.to_string());
+        }
+
+        let Some(entry) = self.frontend_catalog.plugins.get(&host.package.id) else {
+            return self.build_error_widget(format!("missing host plugin '{}'", host.package.id));
+        };
+        let Some(component) = entry.compiled.local_components.get(alias) else {
+            return self.build_error_widget(format!("missing local component import '{alias}'"));
+        };
+
+        let theme = self.active_theme.borrow().clone();
+        let state = self.runtime_state(instance_key).unwrap_or_default();
+        let bound = LocaleBoundState::new(&state, &self.locale);
+        let host_rules = entry
+            .compiled
+            .component
+            .style
+            .as_ref()
+            .map(|style| style.rules.as_slice())
+            .unwrap_or(&[]);
+        let mut node = mesh_core_render::build_widget_tree_from_component(
+            component,
+            host,
+            &theme,
+            container_width,
+            container_height,
+            Some(self),
+            instance_key,
+            Some(&bound),
+            host_rules,
+        );
+        namespace_event_handlers(&mut node, instance_key);
         node
     }
 
@@ -1255,33 +1180,20 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         container_height: f32,
     ) -> Option<WidgetNode> {
         if let Some(entry) = self.frontend_catalog.plugins.get(&host.package.id) {
-            if let Some(local) = entry.compiled.local_components.get(alias) {
-                let theme = self.active_theme.borrow().clone();
-                let host_state = self.runtime_state(host_instance_key).unwrap_or_default();
-                let bound = LocaleBoundState::new(&host_state, &self.locale);
-                let store = LocalComponentStore {
-                    base: &bound,
-                    props,
-                };
-                let host_rules = entry
-                    .compiled
-                    .component
-                    .style
-                    .as_ref()
-                    .map(|s| s.rules.as_slice())
-                    .unwrap_or(&[]);
-                let node = mesh_core_render::build_widget_tree_from_component(
-                    local,
+            if entry.compiled.local_components.contains_key(alias) {
+                let props_json: HashMap<String, serde_json::Value> = props
+                    .iter()
+                    .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
+                    .collect();
+                let instance_key = format!("{host_instance_key}/local:{alias}");
+                return Some(self.render_local_component(
                     host,
-                    &theme,
+                    alias,
+                    &instance_key,
+                    &props_json,
                     container_width,
                     container_height,
-                    Some(self),
-                    host_instance_key,
-                    Some(&store),
-                    host_rules,
-                );
-                return Some(node);
+                ));
             }
         }
 
@@ -1489,9 +1401,6 @@ impl ShellComponent for FrontendSurfaceComponent {
                 }
             }
         }
-        // Propagate any imported child state updates into the host runtime.
-        self.propagate_imported_state();
-
         Ok(requests)
     }
 

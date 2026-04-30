@@ -187,6 +187,10 @@ fn extract_script_info(
             }
         }
 
+        if let Some((svc, local)) = parse_proxy_bind_args(t, &interface_proxies) {
+            service_bindings.push((svc, local));
+        }
+
         if let Some(rest) = t.strip_prefix("function ") {
             if let Some(name) = rest.split('(').next() {
                 let name = name.trim().to_string();
@@ -222,6 +226,17 @@ fn extract_script_info(
                     interface_proxies.insert(var_name, iface);
                 }
             }
+
+            if let Some(use_pos) = rest.find("= mesh.service.use(") {
+                let var_name = rest[..use_pos].trim().to_string();
+                let after_use = &rest[use_pos + "= mesh.service.use(".len()..];
+                if let Some(service) = parse_first_string_arg(after_use) {
+                    let iface = canonicalize_interface_name(&service);
+                    if !var_name.is_empty() && !iface.is_empty() {
+                        interface_proxies.insert(var_name, iface);
+                    }
+                }
+            }
         }
     }
 
@@ -239,6 +254,8 @@ fn canonicalize_interface_name(module: &str) -> String {
         format!("mesh.{rest}")
     } else if module.starts_with("mesh.") {
         module.to_string()
+    } else if !module.is_empty() {
+        format!("mesh.{module}")
     } else {
         String::new()
     }
@@ -300,6 +317,21 @@ fn parse_two_string_args(s: &str) -> Option<(String, String)> {
     Some((first, second))
 }
 
+fn parse_proxy_bind_args(
+    line: &str,
+    interface_proxies: &HashMap<String, String>,
+) -> Option<(String, String)> {
+    let bind_pos = line.find(":bind(").or_else(|| line.find(".bind("))?;
+    let proxy_expr = line[..bind_pos].trim();
+    let proxy_name = proxy_expr
+        .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .find(|segment| !segment.is_empty())?;
+    let iface = interface_proxies.get(proxy_name)?;
+    let service = iface.strip_prefix("mesh.").unwrap_or(iface).to_string();
+    let (_, local) = parse_two_string_args(&line[bind_pos + 6..])?;
+    Some((service, local))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,5 +355,28 @@ mod tests {
         assert_eq!(doc.element_refs[0].element_type, "ButtonElement");
         assert_eq!(doc.element_refs[1].name, "batteryIcon");
         assert_eq!(doc.element_refs[1].element_type, "IconElement");
+    }
+
+    #[test]
+    fn extracts_service_bindings_from_service_use_proxy() {
+        let source = r#"
+<script lang="luau">
+local theme = mesh.service.use("theme")
+theme:bind("is_dark", "theme_is_dark")
+</script>
+"#;
+        let doc = Document::new(
+            Url::parse("file:///tmp/theme-button.mesh").unwrap(),
+            source.to_string(),
+        );
+
+        assert!(
+            doc.service_bindings
+                .contains(&("theme".to_string(), "theme_is_dark".to_string()))
+        );
+        assert_eq!(
+            doc.interface_proxies.get("theme").map(String::as_str),
+            Some("mesh.theme")
+        );
     }
 }

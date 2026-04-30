@@ -3,7 +3,7 @@
 </template>
 
 <script lang="luau">
--- Presentational label that reads the translation function from the parent scope.
+-- Standalone presentational label using the built-in translation helper.
 </script>
 
 <style>

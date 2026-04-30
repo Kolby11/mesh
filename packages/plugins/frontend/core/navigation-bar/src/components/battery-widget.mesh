@@ -10,8 +10,7 @@
 </template>
 
 <script lang="luau">
--- Stateless presentational component. It reads reactive globals defined by the
--- parent (for example `battery_icon_name`, `battery_label`, etc.).
+-- Deprecated example component retained for reference.
 </script>
 
 <style>

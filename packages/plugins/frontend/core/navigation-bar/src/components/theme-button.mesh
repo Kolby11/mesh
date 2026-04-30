@@ -9,6 +9,36 @@
   </button>
 </template>
 
+<script lang="luau">
+local theme = mesh.service.use("theme")
+
+theme_icon = "weather-clear-night"
+theme_tooltip = "Switch to light theme"
+
+theme:bind("is_dark", "theme_is_dark")
+theme:on_change("sync_theme_state")
+
+function sync_theme_state()
+    if theme_is_dark then
+        theme_icon = "weather-clear-night"
+        theme_tooltip = "Switch to light theme"
+    else
+        theme_icon = "weather-clear"
+        theme_tooltip = "Switch to dark theme"
+    end
+end
+
+function onThemeToggle()
+    local next_theme
+    if theme_is_dark then
+        next_theme = "mesh-default-light"
+    else
+        next_theme = "mesh-default-dark"
+    end
+    mesh.events.publish("shell.set-theme", { theme_id = next_theme })
+end
+</script>
+
 <style>
 .theme-button {
     width: 44px;

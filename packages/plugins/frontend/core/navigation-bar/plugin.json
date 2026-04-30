@@ -18,6 +18,7 @@
     "required": [
       "shell.surface",
       "service.audio.read",
+      "service.audio.control",
       "service.power.read",
       "service.theme.read",
       "theme.read",
