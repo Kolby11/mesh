@@ -53,6 +53,8 @@ Each task was committed atomically:
 2. **Task 2: Add backend settings and mesh.config()** - `ca2ae2a` (feat)
 3. **Task 3: Add mesh.log(level, msg), aliases, and emit failure coverage** - `2348a19` (feat)
 
+**Plan metadata:** `4100827` (docs)
+
 ## Files Created/Modified
 - `crates/core/runtime/scripting/src/backend.rs` - Backend Luau host API implementation and unit coverage for exec, config, logging, and emit failure behavior.
 - `crates/core/runtime/scripting/src/host_api.rs` - Host API comment updates for backend `mesh.config()` and `mesh.log(level, msg)`.
@@ -101,7 +103,10 @@ None - no external service configuration required.
 - `rg -n "mesh\\.config\\(\\)|mesh\\.log\\(level" crates/core/runtime/scripting/src/host_api.rs crates/core/runtime/scripting/src/backend.rs` — matched documented API entries
 - `rg -n "mesh\\.exec_shell|mesh\\.service\\.emit|mesh\\.config|mesh\\.log" packages/plugins/backend/core/pipewire-audio/src/main.luau packages/plugins/backend/core/pulseaudio-audio/src/main.luau` — confirmed bundled scripts still reference supported API names
 
-## Self-Check: PENDING
+## Self-Check: PASSED
+
+- Summary file exists: `.planning/phases/01-backend-host-api-contract/01-01-SUMMARY.md`
+- Verified commits: `16d9c7e`, `ca2ae2a`, `2348a19`, `4100827`
 
 ---
 *Phase: 01-backend-host-api-contract*
