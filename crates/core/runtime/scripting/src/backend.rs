@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 /// - `mesh.service.emit_unavailable()` — emit unavailable state
 /// - `mesh.service.payload()` — get the current command payload as a Lua table
 /// - `mesh.service.has_capability(name)` — check whether the plugin was granted a capability
-/// - `mesh.log.info(msg)` / `mesh.log.warn(msg)`
+/// - `mesh.log(level, msg)` / `mesh.log.info(msg)` / `mesh.log.warn(msg)` / `mesh.log.error(msg)`
 pub struct BackendScriptContext {
     plugin_id: String,
     capabilities: HashSet<String>,
@@ -246,22 +246,33 @@ impl BackendScriptContext {
         )?;
 
         let plugin_id = self.plugin_id.clone();
-        log.set(
-            "info",
-            self.lua.create_function(move |_lua, message: String| {
-                tracing::info!("{}: {}", plugin_id, message);
+        let call_log = self
+            .lua
+            .create_function(move |_lua, (_self, level, message): (mlua::Table, String, String)| {
+                log_message(&plugin_id, &level, &message);
                 Ok(())
-            })?,
-        )?;
+            })?;
+        let log_mt = self.lua.create_table()?;
+        log_mt.set("__call", call_log)?;
+        log.set_metatable(Some(log_mt))?;
 
         let plugin_id = self.plugin_id.clone();
-        log.set(
-            "warn",
-            self.lua.create_function(move |_lua, message: String| {
-                tracing::warn!("{}: {}", plugin_id, message);
-                Ok(())
-            })?,
-        )?;
+        for (name, level) in [
+            ("info", "info"),
+            ("warn", "warn"),
+            ("warning", "warning"),
+            ("error", "error"),
+            ("debug", "debug"),
+        ] {
+            let plugin_id = plugin_id.clone();
+            log.set(
+                name,
+                self.lua.create_function(move |_lua, message: String| {
+                    log_message(&plugin_id, level, &message);
+                    Ok(())
+                })?,
+            )?;
+        }
 
         mesh.set("service", service)?;
         mesh.set("log", log)?;
@@ -340,6 +351,16 @@ fn exec_outcome_to_lua(lua: &Lua, outcome: ExecOutcome) -> mlua::Result<LuaValue
     table.set("stderr", outcome.stderr)?;
     table.set("code", outcome.code)?;
     Ok(LuaValue::Table(table))
+}
+
+fn log_message(plugin_id: &str, level: &str, message: &str) {
+    match level.to_ascii_lowercase().as_str() {
+        "info" => tracing::info!(plugin_id = plugin_id, "{message}"),
+        "warn" | "warning" => tracing::warn!(plugin_id = plugin_id, "{message}"),
+        "error" => tracing::error!(plugin_id = plugin_id, "{message}"),
+        "debug" => tracing::debug!(plugin_id = plugin_id, "{message}"),
+        _ => tracing::warn!(plugin_id = plugin_id, "unknown log level `{level}`: {message}"),
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -554,6 +575,31 @@ mod tests {
         let payload = ctx.run_poll().unwrap();
         assert_eq!(payload.get("enabled").and_then(|v| v.as_bool()), Some(true));
         assert_eq!(payload.get("name").and_then(|v| v.as_str()), Some("demo"));
+    }
+
+    #[test]
+    fn log_level_function_and_aliases_are_callable() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nmesh.log(\"info\", \"polling\")\nmesh.log.info(\"polling\")\nmesh.log.warn(\"polling\")\nmesh.log.error(\"polling\")\nmesh.log(\"warning\", \"polling\")\nmesh.log(\"debug\", \"polling\")\nmesh.service.emit({ ok = true })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_poll().unwrap();
+        assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn bad_emit_payload_does_not_emit_stale_state() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nmesh.service.emit({ ok = true })\nend\nfunction on_command_bad_emit()\nmesh.service.emit(function() end)\nend",
+        )
+        .unwrap();
+        let first_payload = ctx.run_poll().unwrap();
+        assert_eq!(first_payload.get("ok").and_then(|v| v.as_bool()), Some(true));
+
+        let bad_payload = ctx.run_command("bad-emit", &serde_json::json!({}));
+        assert!(bad_payload.is_none());
     }
 
     #[test]

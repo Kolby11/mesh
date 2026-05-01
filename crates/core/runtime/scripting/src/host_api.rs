@@ -19,6 +19,7 @@
 /// mesh.events.subscribe(ch, cb) → subscription
 /// mesh.events.publish(ch, payload)
 /// mesh.ui.request_redraw()
+/// mesh.log(level, msg)
 /// mesh.log.info(msg)
 /// mesh.log.warn(msg)
 /// mesh.log.error(msg)
