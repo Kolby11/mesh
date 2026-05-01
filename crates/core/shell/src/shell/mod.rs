@@ -1127,6 +1127,7 @@ impl Shell {
                         .map(|entry| plugin.path.join(entry))
                 })
                 .and_then(|path| std::fs::read_to_string(&path).ok());
+            let plugin_settings = backend_plugin_settings_json(&self.config, &candidate.plugin_id);
 
             let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
             self.service_handlers.insert(interface.clone(), cmd_tx);
@@ -1154,6 +1155,7 @@ impl Shell {
                         candidate.plugin_id,
                         service_name,
                         capabilities,
+                        plugin_settings,
                         source,
                         backend_tx,
                         cmd_rx,
@@ -1180,6 +1182,24 @@ fn binary_exists(name: &str) -> bool {
     };
 
     env::split_paths(&paths).any(|dir| dir.join(name).is_file())
+}
+
+fn backend_plugin_settings_json(config: &ShellConfig, plugin_id: &str) -> serde_json::Value {
+    config
+        .plugins
+        .get(plugin_id)
+        .map(|plugin| match serde_json::to_value(&plugin.values) {
+            Ok(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
+            Ok(_) => serde_json::json!({}),
+            Err(err) => {
+                tracing::warn!(
+                    plugin_id = plugin_id,
+                    "failed to serialize backend plugin settings: {err}"
+                );
+                serde_json::json!({})
+            }
+        })
+        .unwrap_or_else(|| serde_json::json!({}))
 }
 
 impl Default for Shell {
