@@ -201,4 +201,59 @@ mod tests {
             .expect("backend task should exit after command channel closes")
             .expect("backend task should not panic");
     }
+
+    #[tokio::test]
+    async fn shell_theme_backend_runs_through_runtime_loop() {
+        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../packages/plugins/backend/core/shell-theme/src/main.luau");
+        let script = std::fs::read_to_string(script_path).unwrap();
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@mesh/shell-theme".to_string(),
+            "theme".to_string(),
+            vec!["service.theme.read".to_string()],
+            serde_json::json!({}),
+            script,
+            update_tx,
+            cmd_rx,
+        ));
+
+        let initial = tokio::time::timeout(Duration::from_secs(1), update_rx.recv())
+            .await
+            .expect("shell-theme backend should emit its initial state")
+            .expect("update channel should stay open");
+        assert_eq!(
+            initial.payload.get("current").and_then(|v| v.as_str()),
+            Some("mesh-default-dark")
+        );
+
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "set-current".to_string(),
+                payload: serde_json::json!({ "theme_id": "mesh-default-light" }),
+            })
+            .unwrap();
+
+        let updated = tokio::time::timeout(Duration::from_secs(1), update_rx.recv())
+            .await
+            .expect("shell-theme command should emit an updated payload")
+            .expect("update channel should stay open");
+        assert_eq!(
+            updated.payload.get("current").and_then(|v| v.as_str()),
+            Some("mesh-default-light")
+        );
+        assert_eq!(
+            updated.payload.get("is_dark").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+
+        drop(cmd_tx);
+        drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
 }

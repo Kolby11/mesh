@@ -224,10 +224,11 @@ impl BackendScriptContext {
 
         mesh.set(
             "exec",
-            self.lua
-                .create_function(move |lua, (program, args): (String, Option<Vec<String>>)| {
+            self.lua.create_function(
+                move |lua, (program, args): (String, Option<Vec<String>>)| {
                     run_exec(&lua, &program, args.as_deref())
-                })?,
+                },
+            )?,
         )?;
 
         let runtime = Arc::clone(&self.runtime);
@@ -246,12 +247,12 @@ impl BackendScriptContext {
         )?;
 
         let plugin_id = self.plugin_id.clone();
-        let call_log = self
-            .lua
-            .create_function(move |_lua, (_self, level, message): (mlua::Table, String, String)| {
+        let call_log = self.lua.create_function(
+            move |_lua, (_self, level, message): (mlua::Table, String, String)| {
                 log_message(&plugin_id, &level, &message);
                 Ok(())
-            })?;
+            },
+        )?;
         let log_mt = self.lua.create_table()?;
         log_mt.set("__call", call_log)?;
         log.set_metatable(Some(log_mt))?;
@@ -359,7 +360,10 @@ fn log_message(plugin_id: &str, level: &str, message: &str) {
         "warn" | "warning" => tracing::warn!(plugin_id = plugin_id, "{message}"),
         "error" => tracing::error!(plugin_id = plugin_id, "{message}"),
         "debug" => tracing::debug!(plugin_id = plugin_id, "{message}"),
-        _ => tracing::warn!(plugin_id = plugin_id, "unknown log level `{level}`: {message}"),
+        _ => tracing::warn!(
+            plugin_id = plugin_id,
+            "unknown log level `{level}`: {message}"
+        ),
     }
 }
 
@@ -375,6 +379,12 @@ pub enum BackendScriptError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mlua::Table;
+
+    fn bundled_backend_script(path: &str) -> String {
+        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+        std::fs::read_to_string(script_path).unwrap()
+    }
 
     #[test]
     fn loads_poll_interval_from_script() {
@@ -450,9 +460,9 @@ mod tests {
 
     #[test]
     fn shell_theme_backend_accepts_current_payload() {
-        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../packages/plugins/backend/core/shell-theme/src/main.luau");
-        let script = std::fs::read_to_string(script_path).unwrap();
+        let script = bundled_backend_script(
+            "../../../../packages/plugins/backend/core/shell-theme/src/main.luau",
+        );
         let mut ctx = BackendScriptContext::new("@mesh/shell-theme");
         ctx.load_script(&script).unwrap();
         ctx.call_init().unwrap();
@@ -471,6 +481,77 @@ mod tests {
             payload.get("is_dark").and_then(|v| v.as_bool()),
             Some(false)
         );
+    }
+
+    #[test]
+    fn bundled_backend_scripts_expose_required_host_api_surface() {
+        for (plugin_id, path) in [
+            (
+                "@mesh/networkmanager",
+                "../../../../packages/plugins/backend/core/networkmanager-network/src/main.luau",
+            ),
+            (
+                "@mesh/upower",
+                "../../../../packages/plugins/backend/core/upower-power/src/main.luau",
+            ),
+            (
+                "@mesh/shell-theme",
+                "../../../../packages/plugins/backend/core/shell-theme/src/main.luau",
+            ),
+        ] {
+            let script = bundled_backend_script(path);
+            let mut ctx = BackendScriptContext::new_with_settings(
+                plugin_id,
+                serde_json::json!({ "demo": true }),
+            );
+            ctx.load_script(&script).unwrap();
+            ctx.call_init().unwrap();
+
+            let mesh = ctx.lua.globals().get::<Table>("mesh").unwrap();
+            let service = mesh.get::<Table>("service").unwrap();
+            let log = mesh.get::<Table>("log").unwrap();
+
+            assert!(
+                mesh.get::<Function>("exec").is_ok(),
+                "{plugin_id} missing mesh.exec"
+            );
+            assert!(
+                mesh.get::<Function>("exec_shell").is_ok(),
+                "{plugin_id} missing mesh.exec_shell"
+            );
+            assert!(
+                mesh.get::<Function>("config").is_ok(),
+                "{plugin_id} missing mesh.config"
+            );
+            assert!(
+                service.get::<Function>("emit").is_ok(),
+                "{plugin_id} missing mesh.service.emit"
+            );
+            assert!(
+                service.get::<Function>("emit_unavailable").is_ok(),
+                "{plugin_id} missing mesh.service.emit_unavailable"
+            );
+            assert!(
+                service.get::<Function>("set_poll_interval").is_ok(),
+                "{plugin_id} missing mesh.service.set_poll_interval"
+            );
+            assert!(
+                service.get::<Function>("payload").is_ok(),
+                "{plugin_id} missing mesh.service.payload"
+            );
+            assert!(
+                log.get::<Function>("info").is_ok(),
+                "{plugin_id} missing mesh.log.info"
+            );
+            assert!(
+                log.get::<Function>("warn").is_ok(),
+                "{plugin_id} missing mesh.log.warn"
+            );
+            assert!(
+                log.get::<Function>("error").is_ok(),
+                "{plugin_id} missing mesh.log.error"
+            );
+        }
     }
 
     #[test]
@@ -596,7 +677,10 @@ mod tests {
         )
         .unwrap();
         let first_payload = ctx.run_poll().unwrap();
-        assert_eq!(first_payload.get("ok").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            first_payload.get("ok").and_then(|v| v.as_bool()),
+            Some(true)
+        );
 
         let bad_payload = ctx.run_command("bad-emit", &serde_json::json!({}));
         assert!(bad_payload.is_none());
