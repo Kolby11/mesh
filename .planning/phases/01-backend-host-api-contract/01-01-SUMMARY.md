@@ -53,7 +53,7 @@ Each task was committed atomically:
 2. **Task 2: Add backend settings and mesh.config()** - `ca2ae2a` (feat)
 3. **Task 3: Add mesh.log(level, msg), aliases, and emit failure coverage** - `2348a19` (feat)
 
-**Plan metadata:** `4100827` (docs)
+Plan metadata was captured in follow-up `docs(01-01)` commits for the summary file.
 
 ## Files Created/Modified
 - `crates/core/runtime/scripting/src/backend.rs` - Backend Luau host API implementation and unit coverage for exec, config, logging, and emit failure behavior.
@@ -106,7 +106,7 @@ None - no external service configuration required.
 ## Self-Check: PASSED
 
 - Summary file exists: `.planning/phases/01-backend-host-api-contract/01-01-SUMMARY.md`
-- Verified commits: `16d9c7e`, `ca2ae2a`, `2348a19`, `4100827`
+- Verified task commits: `16d9c7e`, `ca2ae2a`, `2348a19`
 
 ---
 *Phase: 01-backend-host-api-contract*
