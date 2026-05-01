@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 /// - `mesh.exec("program", {"arg1", "arg2"})` — run a system command
 /// - `mesh.exec("program arg1 arg2 {payload_key}")` — compatibility system command form
 /// - `mesh.exec_shell("shell pipeline {payload_key}")` — run a shell command via `sh -lc`
+/// - `mesh.config()` — return plugin settings as a Lua table
 /// - `mesh.service.emit(table)` — emit service state
 /// - `mesh.service.emit_json(value?)` — parse JSON text or emit a Lua table directly
 /// - `mesh.service.emit_unavailable()` — emit unavailable state
@@ -35,6 +36,7 @@ struct BackendRuntime {
     poll_interval_ms: u64,
     pending_emit: Option<JsonValue>,
     current_payload: JsonValue,
+    settings: JsonValue,
 }
 
 #[derive(Debug, Clone)]
@@ -47,11 +49,27 @@ struct ExecOutcome {
 
 impl BackendScriptContext {
     pub fn new(plugin_id: impl Into<String>) -> Self {
-        Self::new_with_capabilities(plugin_id, Vec::<String>::new())
+        Self::new_with_settings_and_capabilities(
+            plugin_id,
+            serde_json::json!({}),
+            Vec::<String>::new(),
+        )
+    }
+
+    pub fn new_with_settings(plugin_id: impl Into<String>, settings: JsonValue) -> Self {
+        Self::new_with_settings_and_capabilities(plugin_id, settings, Vec::<String>::new())
     }
 
     pub fn new_with_capabilities(
         plugin_id: impl Into<String>,
+        capabilities: impl IntoIterator<Item = String>,
+    ) -> Self {
+        Self::new_with_settings_and_capabilities(plugin_id, serde_json::json!({}), capabilities)
+    }
+
+    pub fn new_with_settings_and_capabilities(
+        plugin_id: impl Into<String>,
+        settings: JsonValue,
         capabilities: impl IntoIterator<Item = String>,
     ) -> Self {
         let plugin_id = plugin_id.into();
@@ -60,6 +78,7 @@ impl BackendScriptContext {
             poll_interval_ms: 1000,
             pending_emit: None,
             current_payload: JsonValue::Null,
+            settings,
         }));
 
         let mut ctx = Self {
@@ -209,6 +228,15 @@ impl BackendScriptContext {
                 .create_function(move |lua, (program, args): (String, Option<Vec<String>>)| {
                     run_exec(&lua, &program, args.as_deref())
                 })?,
+        )?;
+
+        let runtime = Arc::clone(&self.runtime);
+        mesh.set(
+            "config",
+            self.lua.create_function(move |lua, ()| {
+                let settings = runtime.lock().unwrap().settings.clone();
+                lua.to_value(&settings)
+            })?,
         )?;
 
         mesh.set(
@@ -508,6 +536,24 @@ mod tests {
             Some("hello")
         );
         assert_eq!(payload.get("code").and_then(|v| v.as_i64()), Some(0));
+    }
+
+    #[test]
+    fn config_returns_backend_settings() {
+        let mut ctx = BackendScriptContext::new_with_settings(
+            "@test/backend",
+            serde_json::json!({
+                "enabled": true,
+                "nested": { "name": "demo" },
+            }),
+        );
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nlocal cfg = mesh.config()\nmesh.service.emit({ enabled = cfg.enabled, name = cfg.nested.name })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_poll().unwrap();
+        assert_eq!(payload.get("enabled").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(payload.get("name").and_then(|v| v.as_str()), Some("demo"));
     }
 
     #[test]

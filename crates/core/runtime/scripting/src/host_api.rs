@@ -15,6 +15,7 @@
 /// mesh.locale.translate(key)  → string         (requires locale.read)
 /// mesh.config.get(key)        → value
 /// mesh.config.get_all()       → table
+/// mesh.config()               → table          (backend helper)
 /// mesh.events.subscribe(ch, cb) → subscription
 /// mesh.events.publish(ch, payload)
 /// mesh.ui.request_redraw()
