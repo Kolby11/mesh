@@ -2,14 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Scripting API Stabilization
-status: Ready for planning
-last_updated: "2026-05-01T14:57:27.905Z"
-last_activity: 2026-05-01 — Milestone v1.0 started
+status: executing
+last_updated: "2026-05-01T15:03:07.489Z"
+last_activity: 2026-05-01 -- Phase 01 planning complete
 progress:
   total_phases: 6
   completed_phases: 0
-  total_plans: 0
+  total_plans: 2
   completed_plans: 0
+  percent: 0
 ---
 
 # State: MESH v1.0
@@ -25,8 +26,8 @@ See: `.planning/PROJECT.md` (updated 2026-05-01)
 
 Phase: 1 of 6 — Backend Host API Contract
 Plan: —
-Status: Phase context gathered; ready to plan
-Last activity: 2026-05-01 — Phase 1 context gathered
+Status: Ready to execute
+Last activity: 2026-05-01 -- Phase 01 planning complete
 
 ## Decisions
 
@@ -41,7 +42,7 @@ Last activity: 2026-05-01 — Phase 1 context gathered
 
 ## Pending Todos
 
-- Run `$gsd-plan-phase 1` to create the executable plan for Phase 1.
+- Run `$gsd-execute-phase 1` to execute the two Phase 1 plans.
 
 ## Artifact Index
 
