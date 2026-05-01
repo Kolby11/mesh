@@ -43,14 +43,16 @@ pub async fn spawn_backend_service(
         return;
     }
 
-    let interval_ms = ctx.poll_interval_ms().max(50);
-    let mut tick = tokio::time::interval(Duration::from_millis(interval_ms));
+    let mut interval_ms = bounded_poll_interval_ms(&ctx);
+    let mut tick = make_interval(interval_ms, true);
     let mut last_payload: Option<serde_json::Value> = None;
 
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                let Some(payload) = ctx.run_poll() else { continue };
+                let payload = ctx.run_poll();
+                refresh_interval(&ctx, &mut interval_ms, &mut tick);
+                let Some(payload) = payload else { continue };
                 if Some(&payload) == last_payload.as_ref() {
                     continue;
                 }
@@ -66,6 +68,7 @@ pub async fn spawn_backend_service(
             cmd = cmd_rx.recv() => {
                 let Some(msg) = cmd else { break };
                 if let Some(payload) = ctx.run_command(&msg.command, &msg.payload) {
+                    refresh_interval(&ctx, &mut interval_ms, &mut tick);
                     last_payload = Some(payload.clone());
                     if tx.send(BackendServiceUpdate {
                         service: service_name.clone(),
@@ -74,9 +77,38 @@ pub async fn spawn_backend_service(
                     }).is_err() {
                         break;
                     }
+                } else {
+                    refresh_interval(&ctx, &mut interval_ms, &mut tick);
                 }
             }
         }
+    }
+}
+
+fn bounded_poll_interval_ms(ctx: &BackendScriptContext) -> u64 {
+    ctx.poll_interval_ms().max(50)
+}
+
+fn make_interval(interval_ms: u64, immediate: bool) -> tokio::time::Interval {
+    let duration = Duration::from_millis(interval_ms);
+    let mut interval = if immediate {
+        tokio::time::interval(duration)
+    } else {
+        tokio::time::interval_at(tokio::time::Instant::now() + duration, duration)
+    };
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval
+}
+
+fn refresh_interval(
+    ctx: &BackendScriptContext,
+    active_interval_ms: &mut u64,
+    tick: &mut tokio::time::Interval,
+) {
+    let next_interval_ms = bounded_poll_interval_ms(ctx);
+    if next_interval_ms != *active_interval_ms {
+        *active_interval_ms = next_interval_ms;
+        *tick = make_interval(next_interval_ms, false);
     }
 }
 
@@ -126,4 +158,47 @@ mod tests {
             .expect("backend task should not panic");
     }
 
+    #[tokio::test]
+    async fn spawn_backend_service_applies_runtime_poll_interval_changes() {
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/polling".to_string(),
+            "polling".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "local tick = 0\n\
+             function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function on_poll()\n\
+               tick = tick + 1\n\
+               if tick == 1 then\n\
+                 mesh.service.set_poll_interval(60)\n\
+               end\n\
+               mesh.service.emit({ tick = tick })\n\
+             end"
+            .to_string(),
+            update_tx,
+            cmd_rx,
+        ));
+
+        let first = tokio::time::timeout(Duration::from_secs(1), update_rx.recv())
+            .await
+            .expect("backend should emit the first poll")
+            .expect("update channel should stay open");
+        assert_eq!(first.payload.get("tick").and_then(|v| v.as_u64()), Some(1));
+
+        let second = tokio::time::timeout(Duration::from_millis(250), update_rx.recv())
+            .await
+            .expect("poll interval update should take effect without restarting")
+            .expect("update channel should stay open");
+        assert_eq!(second.payload.get("tick").and_then(|v| v.as_u64()), Some(2));
+
+        drop(cmd_tx);
+        drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
 }
