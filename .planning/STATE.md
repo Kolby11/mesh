@@ -1,15 +1,15 @@
 ---
+gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Scripting API Stabilization
-status: planning
-current_phase: 1
-current_phase_name: Backend Host API Contract
+status: Ready for planning
+last_updated: "2026-05-01T14:57:27.905Z"
+last_activity: 2026-05-01 — Milestone v1.0 started
 progress:
-  phases_total: 6
-  phases_complete: 0
-  plans_total: 0
-  plans_complete: 0
-updated: 2026-05-01
+  total_phases: 6
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # State: MESH v1.0
@@ -25,8 +25,8 @@ See: `.planning/PROJECT.md` (updated 2026-05-01)
 
 Phase: 1 of 6 — Backend Host API Contract
 Plan: —
-Status: Defining phase plan
-Last activity: 2026-05-01 — Milestone v1.0 started
+Status: Phase context gathered; ready to plan
+Last activity: 2026-05-01 — Phase 1 context gathered
 
 ## Decisions
 
@@ -37,7 +37,7 @@ Last activity: 2026-05-01 — Milestone v1.0 started
 
 ## Blockers
 
-- `gsd-sdk` is not currently available on `PATH`, so this milestone was initialized inline instead of through SDK helper commands.
+(None)
 
 ## Pending Todos
 
