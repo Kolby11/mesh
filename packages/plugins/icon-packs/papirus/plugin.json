@@ -1,0 +1,13 @@
+{
+  "id": "@mesh-icons/papirus",
+  "name": "Papirus Icon Pack",
+  "version": "0.1.0",
+  "type": "icon-pack",
+  "api_version": "0.1",
+  "description": "Papirus icon pack bridge for MESH. Place Papirus SVGs under assets/icons/ mirroring the standard Freedesktop category layout, or install Papirus system-wide and rely on XDG resolution.",
+  "authors": ["Papirus Development Team"],
+  "license": "GPL-3.0",
+  "assets": {
+    "icons": "assets/icons"
+  }
+}
