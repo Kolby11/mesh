@@ -49,8 +49,8 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
     },
     MeshApiEntry {
         path: "service.emit_json",
-        signature: "mesh.service.emit_json(json_string: string?)",
-        description: "Parse a JSON string and emit it as service state. If nil, emits the last received command payload.",
+        signature: "mesh.service.emit_json(value?)",
+        description: "Emit service state from JSON text or a Lua table. If nil, emits the current command payload.",
         backend_only: true,
     },
     MeshApiEntry {

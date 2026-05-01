@@ -185,10 +185,16 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         service.set(
             "emit_json",
-            self.lua.create_function(move |_lua, text: String| {
-                if let Ok(payload) = serde_json::from_str::<JsonValue>(text.trim()) {
-                    runtime.lock().unwrap().pending_emit = Some(payload);
-                }
+            self.lua.create_function(move |lua, value: Option<LuaValue>| {
+                let payload = match value {
+                    None | Some(LuaValue::Nil) => runtime.lock().unwrap().current_payload.clone(),
+                    Some(LuaValue::String(text)) => {
+                        serde_json::from_str::<JsonValue>(text.to_str()?.trim())
+                            .map_err(mlua::Error::external)?
+                    }
+                    Some(other) => lua.from_value::<JsonValue>(other)?,
+                };
+                runtime.lock().unwrap().pending_emit = Some(payload);
                 Ok(())
             })?,
         )?;
@@ -567,6 +573,68 @@ mod tests {
             Some(true)
         );
         assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(65));
+    }
+
+    #[test]
+    fn emit_json_accepts_lua_table() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nmesh.service.emit_json({ available = true, percent = 65 })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_poll().unwrap();
+        assert_eq!(
+            payload.get("available").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(65));
+    }
+
+    #[test]
+    fn emit_json_nil_uses_current_command_payload() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_command_echo_current()\nmesh.service.emit_json(nil)\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_command(
+            "echo-current",
+            &serde_json::json!({ "percent": 55, "muted": false }),
+        );
+        let payload = payload.unwrap();
+        assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(55));
+        assert_eq!(payload.get("muted").and_then(|v| v.as_bool()), Some(false));
+    }
+
+    #[test]
+    fn emit_json_rejects_invalid_json_string() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script("function init()\nend").unwrap();
+
+        let globals = ctx.lua.globals();
+        let mesh = globals.get::<mlua::Table>("mesh").unwrap();
+        let service = mesh.get::<mlua::Table>("service").unwrap();
+        let emit_json = service.get::<Function>("emit_json").unwrap();
+
+        let err = emit_json.call::<()>("{not-json}").unwrap_err();
+        assert!(err.to_string().contains("key must be a string"));
+    }
+
+    #[test]
+    fn bad_emit_json_does_not_emit_stale_state() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nmesh.service.emit({ ok = true })\nend\nfunction on_command_bad_emit_json()\nmesh.service.emit_json('{not-json}')\nend",
+        )
+        .unwrap();
+        let first_payload = ctx.run_poll().unwrap();
+        assert_eq!(
+            first_payload.get("ok").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+
+        let bad_payload = ctx.run_command("bad-emit-json", &serde_json::json!({}));
+        assert!(bad_payload.is_none());
     }
 
     #[test]

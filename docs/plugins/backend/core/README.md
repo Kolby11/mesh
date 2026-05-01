@@ -51,7 +51,8 @@ closer to the interface contract and much less dependent on magic globals:
   table
 - `mesh.service.has_capability("service.network.control")` checks a granted
   capability directly from the manifest-derived runtime grants
-- `mesh.service.emit_json(value?)` accepts either JSON text or a Lua table
+- `mesh.service.emit_json(value?)` accepts JSON text, a Lua table, or `nil`
+  to re-emit the current command payload
 - backend commands can be declared as either `on_command_set_volume()` or the
   more direct `set_volume()`
 
