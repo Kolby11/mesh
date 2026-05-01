@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 /// Exposes these host APIs to scripts:
 /// - `init()` — required backend entrypoint called once after script load
 /// - `mesh.service.set_poll_interval(ms)` — set polling interval
-/// - `mesh.exec("program arg1 arg2 {payload_key}")` — run a system command
+/// - `mesh.exec("program", {"arg1", "arg2"})` — run a system command
+/// - `mesh.exec("program arg1 arg2 {payload_key}")` — compatibility system command form
 /// - `mesh.exec_shell("shell pipeline {payload_key}")` — run a shell command via `sh -lc`
 /// - `mesh.service.emit(table)` — emit service state
 /// - `mesh.service.emit_json(value?)` — parse JSON text or emit a Lua table directly
@@ -202,19 +203,18 @@ impl BackendScriptContext {
             })?,
         )?;
 
-        let runtime = Arc::clone(&self.runtime);
         mesh.set(
             "exec",
-            self.lua.create_function(move |lua, cmd: String| {
-                run_command(&lua, &runtime, &cmd, false)
-            })?,
+            self.lua
+                .create_function(move |lua, (program, args): (String, Option<Vec<String>>)| {
+                    run_exec(&lua, &program, args.as_deref())
+                })?,
         )?;
 
-        let runtime = Arc::clone(&self.runtime);
         mesh.set(
             "exec_shell",
             self.lua
-                .create_function(move |lua, cmd: String| run_command(&lua, &runtime, &cmd, true))?,
+                .create_function(move |lua, cmd: String| run_exec_shell(&lua, &cmd))?,
         )?;
 
         let plugin_id = self.plugin_id.clone();
@@ -252,16 +252,11 @@ impl BackendScriptContext {
     }
 }
 
-fn run_command(
-    lua: &Lua,
-    _runtime: &Arc<Mutex<BackendRuntime>>,
-    cmd: &str,
-    shell: bool,
-) -> mlua::Result<LuaValue> {
-    let result = if shell {
-        StdCommand::new("sh").arg("-lc").arg(cmd).output()
+fn run_exec(lua: &Lua, program: &str, args: Option<&[String]>) -> mlua::Result<LuaValue> {
+    let result = if let Some(args) = args {
+        StdCommand::new(program).args(args).output()
     } else {
-        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        let parts: Vec<&str> = program.split_whitespace().collect();
         if let Some((prog, rest)) = parts.split_first() {
             StdCommand::new(prog).args(rest).output()
         } else {
@@ -277,6 +272,18 @@ fn run_command(
         }
     };
 
+    exec_result_to_lua(lua, result)
+}
+
+fn run_exec_shell(lua: &Lua, cmd: &str) -> mlua::Result<LuaValue> {
+    let result = StdCommand::new("sh").arg("-lc").arg(cmd).output();
+    exec_result_to_lua(lua, result)
+}
+
+fn exec_result_to_lua(
+    lua: &Lua,
+    result: std::io::Result<std::process::Output>,
+) -> mlua::Result<LuaValue> {
     let outcome = match result {
         Ok(out) => ExecOutcome {
             success: out.status.success(),
@@ -485,6 +492,22 @@ mod tests {
             payload.get("stdout").and_then(|v| v.as_str()),
             Some("hello")
         );
+    }
+
+    #[test]
+    fn exec_accepts_program_and_args() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, code = result.code })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_poll().unwrap();
+        assert_eq!(payload.get("success").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            payload.get("stdout").and_then(|v| v.as_str()),
+            Some("hello")
+        );
+        assert_eq!(payload.get("code").and_then(|v| v.as_i64()), Some(0));
     }
 
     #[test]
