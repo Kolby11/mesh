@@ -25,8 +25,8 @@ See: `.planning/PROJECT.md` (updated 2026-05-01)
 ## Current Position
 
 Phase: 01 (backend-host-api-contract) — EXECUTING
-Plan: 1 of 2
-Status: Ready to execute
+Plan: 3 of 3
+Status: Ready to execute gap closure
 Last activity: 2026-05-01 -- Phase 01 planning complete
 
 ## Decisions
@@ -42,7 +42,7 @@ Last activity: 2026-05-01 -- Phase 01 planning complete
 
 ## Pending Todos
 
-- Run `$gsd-execute-phase 1` to execute the two Phase 1 plans.
+- Run `$gsd-execute-phase 1 --gaps-only` to execute the Phase 01 gap-closure plan.
 
 ## Artifact Index
 
