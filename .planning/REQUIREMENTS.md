@@ -25,8 +25,8 @@
 
 ### Frontend Reactivity
 
-- [ ] **FRONT-01**: Assigning a reactive global inside a frontend `<script>` marks the component dirty.
-- [ ] **FRONT-02**: Dirty frontend script state triggers a widget tree rebuild on the next paint.
+- [x] **FRONT-01**: Assigning a reactive global inside a frontend `<script>` marks the component dirty.
+- [x] **FRONT-02**: Dirty frontend script state triggers a widget tree rebuild on the next paint.
 - [x] **FRONT-03**: Element `on_click` handlers run reliably with the current script state.
 - [x] **FRONT-04**: Element `on_change` handlers run reliably for interactive controls such as sliders and toggles.
 - [x] **FRONT-05**: Handler failures are reported through diagnostics instead of silently failing.
@@ -98,8 +98,8 @@
 | PROXY-04 | Phase 2 | Complete |
 | PROXY-05 | Phase 2 | Complete |
 | PROXY-06 | Phase 2 | Complete |
-| FRONT-01 | Phase 3 | Pending |
-| FRONT-02 | Phase 3 | Pending |
+| FRONT-01 | Phase 3 | Complete |
+| FRONT-02 | Phase 3 | Complete |
 | FRONT-03 | Phase 3 | Complete |
 | FRONT-04 | Phase 3 | Complete |
 | FRONT-05 | Phase 3 | Complete |
