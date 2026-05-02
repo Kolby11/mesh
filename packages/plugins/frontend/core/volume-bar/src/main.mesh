@@ -5,7 +5,7 @@
       orient="vertical"
       min="0"
       max="100"
-      value="{audio.percent}"
+      value="{audio_percent}"
       mesh-action="audio-volume"
       title="{audio_tooltip}"
       aria-label="Volume"
@@ -15,24 +15,36 @@
 </template>
 
 <script lang="luau">
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+
 icon_name = "audio-volume-muted"
 audio_label = "0%"
 audio_tooltip = "Volume unavailable"
-mesh.service.bind("audio.muted", "audio_muted")
-mesh.service.bind("audio.percent", "audio_percent")
-mesh.service.on("audio", "sync_audio_state")
+audio_percent = 0
 
-function sync_audio_state()
-    if audio_muted then
+function onRender()
+    if not audio_ok or not audio then
+        icon_name = "audio-volume-muted"
+        audio_label = "0%"
+        audio_tooltip = "Audio service unavailable"
+        audio_percent = 0
+        return
+    end
+
+    local percent = audio.percent or 0
+    local muted = audio.muted or false
+
+    if muted then
         icon_name = "audio-volume-muted"
     else
-        if audio_percent == 0 then
+        if percent == 0 then
             icon_name = "audio-volume-muted"
         else
-            if audio_percent < 34 then
+            if percent < 34 then
                 icon_name = "audio-volume-low"
             else
-                if audio_percent < 67 then
+                if percent < 67 then
                     icon_name = "audio-volume-medium"
                 else
                     icon_name = "audio-volume-high"
@@ -41,17 +53,19 @@ function sync_audio_state()
         end
     end
 
-    local safe_percent = audio_percent or 0
-    audio_label = string.format("%d%%", safe_percent)
-    if audio_muted then
-        audio_tooltip = string.format("Volume muted at %d%%", safe_percent)
+    audio_percent = percent
+    audio_label = string.format("%d%%", percent)
+    if muted then
+        audio_tooltip = string.format("Volume muted at %d%%", percent)
     else
-        audio_tooltip = string.format("Volume %d%%", safe_percent)
+        audio_tooltip = string.format("Volume %d%%", percent)
     end
 end
 
 function onToggleMute()
-    mesh.events.publish("mesh.audio.toggle-mute", {})
+    if audio_ok and audio then
+        audio.toggle_mute()
+    end
 end
 </script>
 
