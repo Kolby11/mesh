@@ -424,7 +424,12 @@ fn find_focusable_at_with_offset(
         }
     }
 
-    if inside_self && matches!(node.tag.as_str(), "input" | "button" | "slider") {
+    if inside_self
+        && matches!(
+            node.tag.as_str(),
+            "input" | "button" | "slider" | "switch" | "checkbox"
+        )
+    {
         return node.attributes.get("_mesh_key").cloned();
     }
 

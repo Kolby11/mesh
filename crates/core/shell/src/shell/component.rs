@@ -1,8 +1,8 @@
 use super::layout::{
-    annotate_overflow_tree, find_click_handler, find_focusable_at, find_node_bounds_by_key,
-    find_node_by_key, find_node_path_at, find_scrollable_at, find_tooltip_text_by_key,
-    is_input_key, is_slider_key, measure_content_size, namespace_event_handlers, node_tooltip_text,
-    parse_namespaced_handler, scroll_limits,
+    annotate_overflow_tree, find_click_handler, find_event_handler, find_focusable_at,
+    find_node_bounds_by_key, find_node_by_key, find_node_path_at, find_scrollable_at,
+    find_tooltip_text_by_key, is_input_key, is_slider_key, measure_content_size,
+    namespace_event_handlers, node_tooltip_text, parse_namespaced_handler, scroll_limits,
 };
 use super::service::{apply_service_update, script_events_to_requests, seed_service_state};
 use super::surface_layout::{
@@ -62,6 +62,7 @@ pub(super) struct FrontendSurfaceComponent {
     last_audio_slider_percent: Option<u32>,
     input_values: HashMap<String, String>,
     slider_values: HashMap<String, f32>,
+    checked_values: HashMap<String, bool>,
     pub(super) scroll_offsets: HashMap<String, ScrollOffsetState>,
     // Hover tracking for CSS :hover and tooltip system.
     hovered_key: Option<String>,
@@ -404,6 +405,7 @@ impl FrontendSurfaceComponent {
             last_audio_slider_percent: None,
             input_values: HashMap::new(),
             slider_values: HashMap::new(),
+            checked_values: HashMap::new(),
             scroll_offsets: HashMap::new(),
             hovered_key: None,
             hovered_path: Vec::new(),
@@ -602,6 +604,7 @@ impl FrontendSurfaceComponent {
             &self.pointer_down_key,
             &self.input_values,
             &self.slider_values,
+            &self.checked_values,
             &self.scroll_offsets,
         );
         annotate_overflow_tree(&mut tree, "root", &mut self.scroll_offsets);
@@ -684,6 +687,53 @@ impl FrontendSurfaceComponent {
             }
         }
         None
+    }
+
+    fn slider_value(&self, tree: &WidgetNode, slider_key: &str) -> Option<f32> {
+        self.slider_values.get(slider_key).copied().or_else(|| {
+            find_node_by_key(tree, slider_key).and_then(|node| {
+                node.attributes
+                    .get("value")
+                    .and_then(|value| value.parse::<f32>().ok())
+            })
+        })
+    }
+
+    fn current_checked_value(&self, tree: &WidgetNode, key: &str) -> bool {
+        self.checked_values.get(key).copied().unwrap_or_else(|| {
+            find_node_by_key(tree, key)
+                .and_then(|node| node.attributes.get("checked"))
+                .is_some_and(|value| matches!(value.as_str(), "true" | "1" | "checked"))
+        })
+    }
+
+    fn toggle_checked_value(&mut self, tree: &WidgetNode, key: &str) -> bool {
+        let next = !self.current_checked_value(tree, key);
+        self.checked_values.insert(key.to_string(), next);
+        next
+    }
+
+    fn call_node_handler(
+        &mut self,
+        tree: &WidgetNode,
+        node_key: &str,
+        event_name: &str,
+        args: &[serde_json::Value],
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(handler) = find_event_handler(tree, node_key, event_name) else {
+            return Ok(Vec::new());
+        };
+        self.call_namespaced_handler(&handler, args)
+    }
+
+    fn pointer_event_target_key(&self, tree: &WidgetNode, x: f32, y: f32) -> Option<String> {
+        find_focusable_at(tree, x, y).or_else(|| {
+            find_node_path_at(tree, x, y).and_then(|path| {
+                path.into_iter()
+                    .rev()
+                    .find(|key| find_event_handler(tree, key, "click").is_some())
+            })
+        })
     }
 
     fn update_local_audio_percent(&self, percent: u32) {
@@ -1620,9 +1670,25 @@ impl ShellComponent for FrontendSurfaceComponent {
         match input {
             ComponentInput::PointerButton { x, y, pressed } => {
                 if pressed {
-                    if let Some(node_key) = find_focusable_at(&tree, x, y) {
-                        self.focused_key = Some(node_key.clone());
+                    if let Some(node_key) = self.pointer_event_target_key(&tree, x, y) {
                         self.pointer_down_key = Some(node_key.clone());
+                        let mut requests = Vec::new();
+
+                        if let Some(focused_key) = find_focusable_at(&tree, x, y) {
+                            let focus_changed =
+                                self.focused_key.as_deref() != Some(focused_key.as_str());
+                            self.focused_key = Some(focused_key.clone());
+                            if focus_changed {
+                                requests.extend(self.call_node_handler(
+                                    &tree,
+                                    &focused_key,
+                                    "focus",
+                                    &[],
+                                )?);
+                            }
+                        } else {
+                            self.focused_key = None;
+                        }
 
                         if is_slider_key(&tree, &node_key) {
                             self.active_slider_key = Some(node_key.clone());
@@ -1630,15 +1696,36 @@ impl ShellComponent for FrontendSurfaceComponent {
                             if let Some(request) =
                                 self.update_slider_from_position(&tree, &node_key, x, y)
                             {
-                                self.dirty = true;
-                                return Ok(vec![request]);
+                                requests.push(request);
+                            }
+                            if let Some(value) = self.slider_value(&tree, &node_key) {
+                                requests.extend(self.call_node_handler(
+                                    &tree,
+                                    &node_key,
+                                    "change",
+                                    &[serde_json::json!(value)],
+                                )?);
                             }
                         } else {
                             self.active_slider_key = None;
                             self.last_audio_slider_percent = None;
+                            if find_node_by_key(&tree, &node_key).is_some_and(|node| {
+                                matches!(node.tag.as_str(), "switch" | "checkbox")
+                            }) {
+                                let value = self.toggle_checked_value(&tree, &node_key);
+                                requests.extend(self.call_node_handler(
+                                    &tree,
+                                    &node_key,
+                                    "change",
+                                    &[serde_json::json!(value)],
+                                )?);
+                            }
                         }
 
                         self.dirty = true;
+                        if !requests.is_empty() {
+                            return Ok(requests);
+                        }
                     } else {
                         self.focused_key = None;
                         self.pointer_down_key = None;
@@ -1647,15 +1734,30 @@ impl ShellComponent for FrontendSurfaceComponent {
                         self.dirty = true;
                     }
                 } else {
+                    let mut requests = Vec::new();
                     let slider_request = self
                         .active_slider_key
                         .as_ref()
                         .and_then(|slider_key| self.slider_release_request(&tree, slider_key));
-                    if let Some(node_key) = find_focusable_at(&tree, x, y) {
+
+                    if let Some(slider_key) = self.active_slider_key.clone()
+                        && let Some(value) = self.slider_value(&tree, &slider_key)
+                    {
+                        requests.extend(self.call_node_handler(
+                            &tree,
+                            &slider_key,
+                            "release",
+                            &[serde_json::json!(value)],
+                        )?);
+                    }
+
+                    if let Some(node_key) = self.pointer_event_target_key(&tree, x, y) {
                         if self.pointer_down_key.as_deref() == Some(node_key.as_str()) {
                             if let Some(handler) = find_click_handler(&tree, &node_key) {
                                 let click_event = self.build_click_event(&tree, &node_key, x, y);
-                                return Ok(self.call_namespaced_handler(&handler, &[click_event])?);
+                                requests.extend(
+                                    self.call_namespaced_handler(&handler, &[click_event])?,
+                                );
                             }
                         }
                     }
@@ -1663,17 +1765,32 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.active_slider_key = None;
                     self.last_audio_slider_percent = None;
                     if let Some(request) = slider_request {
+                        requests.push(request);
+                    }
+                    if !requests.is_empty() {
                         self.dirty = true;
-                        return Ok(vec![request]);
+                        return Ok(requests);
                     }
                 }
             }
             ComponentInput::PointerMove { x, y } => {
                 if let Some(slider_key) = self.active_slider_key.clone() {
                     let request = self.update_slider_from_position(&tree, &slider_key, x, y);
-                    self.dirty = true;
+                    let mut requests = Vec::new();
                     if let Some(request) = request {
-                        return Ok(vec![request]);
+                        requests.push(request);
+                    }
+                    if let Some(value) = self.slider_value(&tree, &slider_key) {
+                        requests.extend(self.call_node_handler(
+                            &tree,
+                            &slider_key,
+                            "change",
+                            &[serde_json::json!(value)],
+                        )?);
+                    }
+                    self.dirty = true;
+                    if !requests.is_empty() {
+                        return Ok(requests);
                     }
                 }
 
@@ -1721,22 +1838,49 @@ impl ShellComponent for FrontendSurfaceComponent {
                     let accepts_char = find_node_by_key(&tree, &focused_key)
                         .is_some_and(|node| input_accepts_char(node, ch));
                     if is_input_key(&tree, &focused_key) && accepts_char {
-                        self.input_values.entry(focused_key).or_default().push(ch);
+                        let value = self.input_values.entry(focused_key.clone()).or_default();
+                        value.push(ch);
+                        let current = value.clone();
                         self.dirty = true;
+                        return self.call_node_handler(
+                            &tree,
+                            &focused_key,
+                            "change",
+                            &[serde_json::json!(current)],
+                        );
                     }
                 }
             }
             ComponentInput::KeyPressed { key } => {
                 if let Some(focused_key) = self.focused_key.clone() {
                     if is_input_key(&tree, &focused_key) {
-                        let value = self.input_values.entry(focused_key).or_default();
+                        let value = self.input_values.entry(focused_key.clone()).or_default();
                         match key.as_str() {
                             "Backspace" => {
                                 value.pop();
+                                let current = value.clone();
                                 self.dirty = true;
+                                return self.call_node_handler(
+                                    &tree,
+                                    &focused_key,
+                                    "change",
+                                    &[serde_json::json!(current)],
+                                );
                             }
                             _ => {}
                         }
+                    } else if matches!(key.as_str(), "Enter" | " " | "Space")
+                        && find_node_by_key(&tree, &focused_key)
+                            .is_some_and(|node| matches!(node.tag.as_str(), "switch" | "checkbox"))
+                    {
+                        let value = self.toggle_checked_value(&tree, &focused_key);
+                        self.dirty = true;
+                        return self.call_node_handler(
+                            &tree,
+                            &focused_key,
+                            "change",
+                            &[serde_json::json!(value)],
+                        );
                     }
                 }
             }
@@ -1910,11 +2054,22 @@ pub(super) fn annotate_runtime_tree(
     active_key: &Option<String>,
     input_values: &HashMap<String, String>,
     slider_values: &HashMap<String, f32>,
+    checked_values: &HashMap<String, bool>,
     scroll_offsets: &HashMap<String, ScrollOffsetState>,
 ) {
     node.attributes.insert("_mesh_key".into(), key.clone());
 
     let key_str = key.as_str();
+    let checked = checked_values
+        .get(&key)
+        .copied()
+        .or_else(|| {
+            node.attributes
+                .get("checked")
+                .map(|value| matches!(value.as_str(), "true" | "1" | "checked"))
+        })
+        .unwrap_or(false);
+
     node.state = ElementState {
         focused: focused_key.as_deref() == Some(key_str),
         hovered: hovered_path
@@ -1922,7 +2077,7 @@ pub(super) fn annotate_runtime_tree(
             .any(|hovered_key| hovered_key == key_str),
         active: active_key.as_deref() == Some(key_str),
         disabled: false,
-        checked: false,
+        checked,
     };
     if node.state.hovered {
         tracing::trace!(
@@ -1958,6 +2113,12 @@ pub(super) fn annotate_runtime_tree(
             node.attributes
                 .insert("value".into(), format!("{value:.2}"));
         }
+        "switch" | "checkbox" => {
+            node.attributes.insert(
+                "checked".into(),
+                if checked { "true" } else { "false" }.into(),
+            );
+        }
         _ => {}
     }
 
@@ -1976,6 +2137,7 @@ pub(super) fn annotate_runtime_tree(
             active_key,
             input_values,
             slider_values,
+            checked_values,
             scroll_offsets,
         );
     }
@@ -2188,7 +2350,371 @@ mod tests {
                 surface_id: "@test/reactive-surface".into(),
             })
             .unwrap();
+        component.visible = true;
         component
+    }
+
+    fn runtime_value(
+        component: &FrontendSurfaceComponent,
+        name: &str,
+    ) -> Option<serde_json::Value> {
+        component
+            .runtimes
+            .lock()
+            .unwrap()
+            .get(component.id())
+            .and_then(|runtime| runtime.script_ctx.state().get(name))
+    }
+
+    fn runtime_number(component: &FrontendSurfaceComponent, name: &str) -> f64 {
+        runtime_value(component, name)
+            .and_then(|value| value.as_f64())
+            .unwrap_or_else(|| panic!("expected numeric runtime value for {name}"))
+    }
+
+    fn event_node(
+        tag: &str,
+        key: &str,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        handlers: &[(&str, &str)],
+    ) -> WidgetNode {
+        let mut node = WidgetNode::new(tag);
+        node.attributes.insert("_mesh_key".into(), key.into());
+        node.layout.x = x;
+        node.layout.y = y;
+        node.layout.width = width;
+        node.layout.height = height;
+        node.event_handlers = handlers
+            .iter()
+            .map(|(event, handler)| ((*event).into(), (*handler).into()))
+            .collect();
+        node
+    }
+
+    fn root_with(children: Vec<WidgetNode>) -> WidgetNode {
+        let mut root = WidgetNode::new("box");
+        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.layout.width = 240.0;
+        root.layout.height = 160.0;
+        root.children = children;
+        root
+    }
+
+    #[test]
+    fn slider_change_handler_receives_number_on_pointer_move() {
+        let mut component = test_frontend_component(
+            r#"
+<template><box /></template>
+<script lang="luau">
+slider_seen = -1
+function onSliderChange(value)
+    slider_seen = value
+end
+</script>
+"#,
+        );
+        let mut slider = event_node(
+            "slider",
+            "root/0",
+            0.0,
+            0.0,
+            100.0,
+            20.0,
+            &[("change", "onSliderChange")],
+        );
+        slider.attributes.insert("min".into(), "0".into());
+        slider.attributes.insert("max".into(), "1".into());
+        slider.attributes.insert("value".into(), "0".into());
+        component.last_tree = Some(root_with(vec![slider]));
+
+        let theme = default_theme();
+        component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::PointerButton {
+                    x: 0.0,
+                    y: 10.0,
+                    pressed: true,
+                },
+            )
+            .unwrap();
+        component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::PointerMove { x: 75.0, y: 10.0 },
+            )
+            .unwrap();
+
+        assert!((runtime_number(&component, "slider_seen") - 0.75).abs() < 0.001);
+    }
+
+    #[test]
+    fn text_input_change_handler_receives_current_string() {
+        let mut component = test_frontend_component(
+            r#"
+<template><box /></template>
+<script lang="luau">
+text_seen = ""
+function onTextChange(value)
+    text_seen = value
+end
+</script>
+"#,
+        );
+        component.last_tree = Some(root_with(vec![event_node(
+            "input",
+            "root/0",
+            0.0,
+            0.0,
+            100.0,
+            24.0,
+            &[("change", "onTextChange")],
+        )]));
+
+        let theme = default_theme();
+        component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::PointerButton {
+                    x: 4.0,
+                    y: 4.0,
+                    pressed: true,
+                },
+            )
+            .unwrap();
+        component
+            .handle_input(&theme, 240, 160, ComponentInput::Char { ch: 'A' })
+            .unwrap();
+
+        assert_eq!(
+            runtime_value(&component, "text_seen"),
+            Some(serde_json::json!("A"))
+        );
+    }
+
+    #[test]
+    fn switch_change_handler_receives_boolean_on_click() {
+        let mut component = test_frontend_component(
+            r#"
+<template><box /></template>
+<script lang="luau">
+switch_seen = false
+function onSwitchChange(value)
+    switch_seen = value
+end
+</script>
+"#,
+        );
+        component.last_tree = Some(root_with(vec![event_node(
+            "switch",
+            "root/0",
+            0.0,
+            0.0,
+            48.0,
+            24.0,
+            &[("change", "onSwitchChange")],
+        )]));
+
+        let theme = default_theme();
+        component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::PointerButton {
+                    x: 8.0,
+                    y: 8.0,
+                    pressed: true,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            runtime_value(&component, "switch_seen"),
+            Some(serde_json::json!(true))
+        );
+    }
+
+    #[test]
+    fn slider_release_handler_fires_once_with_current_number() {
+        let mut component = test_frontend_component(
+            r#"
+<template><box /></template>
+<script lang="luau">
+release_count = 0
+released_value = -1
+function onSliderRelease(value)
+    release_count = release_count + 1
+    released_value = value
+end
+</script>
+"#,
+        );
+        let mut slider = event_node(
+            "slider",
+            "root/0",
+            0.0,
+            0.0,
+            100.0,
+            20.0,
+            &[("release", "onSliderRelease")],
+        );
+        slider.attributes.insert("min".into(), "0".into());
+        slider.attributes.insert("max".into(), "1".into());
+        slider.attributes.insert("value".into(), "0".into());
+        component.last_tree = Some(root_with(vec![slider]));
+
+        let theme = default_theme();
+        component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::PointerButton {
+                    x: 10.0,
+                    y: 10.0,
+                    pressed: true,
+                },
+            )
+            .unwrap();
+        component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::PointerMove { x: 60.0, y: 10.0 },
+            )
+            .unwrap();
+        component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::PointerButton {
+                    x: 60.0,
+                    y: 10.0,
+                    pressed: false,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(runtime_number(&component, "release_count"), 1.0);
+        assert!((runtime_number(&component, "released_value") - 0.6).abs() < 0.001);
+    }
+
+    #[test]
+    fn click_handler_keeps_current_target_position_payload() {
+        let mut component = test_frontend_component(
+            r#"
+<template><box /></template>
+<script lang="luau">
+click_left = -1
+function onButtonClick(event)
+    click_left = event.current_target.position.margin_left
+end
+</script>
+"#,
+        );
+        component.last_tree = Some(root_with(vec![event_node(
+            "button",
+            "root/0",
+            32.0,
+            4.0,
+            80.0,
+            24.0,
+            &[("click", "onButtonClick")],
+        )]));
+
+        let theme = default_theme();
+        component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::PointerButton {
+                    x: 40.0,
+                    y: 10.0,
+                    pressed: true,
+                },
+            )
+            .unwrap();
+        component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::PointerButton {
+                    x: 40.0,
+                    y: 10.0,
+                    pressed: false,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(runtime_number(&component, "click_left"), 32.0);
+    }
+
+    #[test]
+    fn focus_handler_fires_when_node_becomes_focused() {
+        let mut component = test_frontend_component(
+            r#"
+<template><box /></template>
+<script lang="luau">
+focus_count = 0
+function onInputFocus()
+    focus_count = focus_count + 1
+end
+</script>
+"#,
+        );
+        component.last_tree = Some(root_with(vec![event_node(
+            "input",
+            "root/0",
+            0.0,
+            0.0,
+            100.0,
+            24.0,
+            &[("focus", "onInputFocus")],
+        )]));
+
+        let theme = default_theme();
+        for _ in 0..2 {
+            component
+                .handle_input(
+                    &theme,
+                    240,
+                    160,
+                    ComponentInput::PointerButton {
+                        x: 8.0,
+                        y: 8.0,
+                        pressed: true,
+                    },
+                )
+                .unwrap();
+            component
+                .handle_input(
+                    &theme,
+                    240,
+                    160,
+                    ComponentInput::PointerButton {
+                        x: 8.0,
+                        y: 8.0,
+                        pressed: false,
+                    },
+                )
+                .unwrap();
+        }
+
+        assert_eq!(runtime_number(&component, "focus_count"), 1.0);
     }
 
     #[test]
@@ -2244,15 +2770,17 @@ end
         component.paint(&theme, 96, 32, &mut buffer).unwrap();
         component.dirty = false;
 
-        assert!(!component
-            .runtimes
-            .lock()
-            .unwrap()
-            .get(component.id())
-            .unwrap()
-            .script_ctx
-            .state()
-            .is_dirty());
+        assert!(
+            !component
+                .runtimes
+                .lock()
+                .unwrap()
+                .get(component.id())
+                .unwrap()
+                .script_ctx
+                .state()
+                .is_dirty()
+        );
         assert!(!component.wants_render());
     }
 
@@ -2368,7 +2896,10 @@ end
                 command,
                 payload,
             } => {
-                assert_eq!(interface, "mesh.network", "interface should be mesh.network");
+                assert_eq!(
+                    interface, "mesh.network",
+                    "interface should be mesh.network"
+                );
                 assert_eq!(
                     command, "set_wifi_enabled",
                     "command should be set_wifi_enabled"
@@ -2379,9 +2910,7 @@ end
                     "enabled should be true (toggled from false)"
                 );
             }
-            other => panic!(
-                "expected ServiceCommand for network.set_wifi_enabled, got {other:?}"
-            ),
+            other => panic!("expected ServiceCommand for network.set_wifi_enabled, got {other:?}"),
         }
     }
 
