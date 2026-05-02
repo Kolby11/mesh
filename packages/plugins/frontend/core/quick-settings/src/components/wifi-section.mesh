@@ -20,25 +20,25 @@
 <script lang="luau">
 import WifiItem from "./wifi-item.mesh"
 
+local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+if not network_ok then network = nil end
+
 wifi_networks = {}
+wifi_enabled = false
 
-local network_ok, network_iface = pcall(require, "@mesh/network@>=1.0")
-if network_ok and network_iface then
-    mesh.service.on("network", "sync_network_state")
-end
-
-function sync_network_state()
-    if not network_ok or not network_iface then
+-- Derive wifi_networks and wifi_enabled directly from live proxy fields on
+-- every rerender. network.networks is emitted by the networkmanager backend
+-- as a runtime-defined extra alongside the base contract fields.
+-- network.wifi_enabled is a base-contract state field.
+function onRender()
+    if not network_ok or not network then
         wifi_networks = {}
+        wifi_enabled = false
         return
     end
-
-    local networks = network_iface.wifi_scan()
-    wifi_networks = networks or {}
-end
-
-if network_ok and network_iface then
-    sync_network_state()
+    wifi_enabled = network.wifi_enabled or false
+    local nets = network.networks
+    wifi_networks = (type(nets) == "table") and nets or {}
 end
 </script>
 

@@ -48,31 +48,49 @@
 import WifiSection from "./components/wifi-section.mesh"
 import BluetoothSection from "./components/bluetooth-section.mesh"
 import AudioSection from "./components/audio-section.mesh"
-active_section = "wifi"
 
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+
+if not audio_ok then audio = nil end
+if not network_ok then network = nil end
+
+active_section = "wifi"
 icon_name = "audio-volume-muted"
 wifi_enabled = false
 
-mesh.service.bind("audio.muted", "audio_muted")
-mesh.service.bind("audio.percent", "audio_percent")
-mesh.service.on("audio", "sync_audio_state")
-
-function sync_audio_state()
-    -- audio_percent may be nil until the first service update arrives because
-    -- mesh.service.bind() initialises the global to nil, overriding the
-    -- Guard every numeric comparison with `or 0`.
-    local pct = audio_percent or 0
-    if audio_muted then
-        icon_name = "audio-volume-muted"
-    elseif pct == 0 then
-        icon_name = "audio-volume-muted"
-    elseif pct < 34 then
-        icon_name = "audio-volume-low"
-    elseif pct < 67 then
-        icon_name = "audio-volume-medium"
-    else
-        icon_name = "audio-volume-high"
+-- Derive audio nav icon directly from proxy fields on every rerender.
+-- No callbacks — the template reads icon_name which is updated by onRender.
+function audioIconFor()
+    if not audio_ok or not audio then
+        return "audio-volume-muted"
     end
+    local muted = audio.muted
+    local pct = audio.percent or 0
+    if muted or pct == 0 then
+        return "audio-volume-muted"
+    elseif pct < 34 then
+        return "audio-volume-low"
+    elseif pct < 67 then
+        return "audio-volume-medium"
+    else
+        return "audio-volume-high"
+    end
+end
+
+-- Derive wifi_enabled state directly from proxy fields on every rerender.
+-- network.wifi_enabled is emitted by the networkmanager backend.
+function wifiEnabledFor()
+    if not network_ok or not network then
+        return false
+    end
+    return network.wifi_enabled or false
+end
+
+-- Called on rerender to sync reactive globals from live proxy fields.
+function onRender()
+    icon_name = audioIconFor()
+    wifi_enabled = wifiEnabledFor()
 end
 
 function sync_nav_classes()
@@ -109,10 +127,10 @@ function onSelectAudio()
 end
 
 function onToggleWiFi()
-    local ok, network_iface = pcall(require, "@mesh/network@>=1.0")
-    if ok and network_iface then
-        wifi_enabled = not wifi_enabled
-        network_iface.set_wifi_enabled(wifi_enabled)
+    if network_ok and network then
+        -- Read current state directly from the proxy field, then send the command.
+        local enabled = network.wifi_enabled or false
+        network.set_wifi_enabled(not enabled)
     end
 end
 

@@ -35,9 +35,6 @@ activeWorkspace = "1"
 
 function init()
     updateClock()
-    updateBattery()
-    updateVolume()
-    updateNetwork()
 end
 
 function updateClock()
@@ -45,40 +42,58 @@ function updateClock()
     mesh.ui.request_redraw()
 end
 
-function updateBattery()
-    if power then
-        local info = power.battery()
-        batteryText = string.format("%d%%", info.level * 100)
+-- Derive battery label directly from proxy fields on rerender.
+-- power.level is a 0..100 integer; power.available indicates whether
+-- battery data is currently published by the backend.
+function batteryLabel()
+    if not power_ok or not power then
+        return "N/A"
+    end
+    local lvl = power.level
+    if lvl == nil then
+        return "N/A"
+    end
+    return string.format("%d%%", lvl)
+end
+
+-- Derive volume icon directly from proxy fields on rerender.
+function volumeIconFor()
+    if not audio_ok or not audio then
+        return "audio-volume-muted"
+    end
+    local muted = audio.muted
+    local pct = audio.percent or 0
+    if muted or pct == 0 then
+        return "audio-volume-muted"
+    elseif pct < 34 then
+        return "audio-volume-low"
+    elseif pct < 67 then
+        return "audio-volume-medium"
     else
-        batteryText = "N/A"
+        return "audio-volume-high"
     end
 end
 
-function updateVolume()
-    if audio then
-        local dev = audio.default_output()
-        if dev then
-            volumeLevel = tostring(math.floor(dev.volume * 100))
-            if dev.muted or dev.volume <= 0 then
-                volumeIcon = "audio-volume-muted"
-            elseif dev.volume < 0.34 then
-                volumeIcon = "audio-volume-low"
-            elseif dev.volume < 0.67 then
-                volumeIcon = "audio-volume-medium"
-            else
-                volumeIcon = "audio-volume-high"
-            end
-        end
+-- Derive network status label directly from proxy fields on rerender.
+-- network.connections is a list; if non-empty the panel shows "connected".
+function networkStatusFor()
+    if not network_ok or not network then
+        return "disconnected"
     end
+    local conns = network.connections
+    if type(conns) == "table" and #conns > 0 then
+        return "connected"
+    end
+    return "disconnected"
 end
 
-function updateNetwork()
-    if network then
-        local conn = network.active_connection()
-        if conn then
-            networkStatus = "connected"
-        end
-    end
+-- The template reads these reactive globals on every rerender.
+-- Each helper reads live proxy fields directly — no callbacks required.
+function onRender()
+    batteryText = batteryLabel()
+    volumeLevel = tostring(audio_ok and audio and math.floor(audio.percent or 0) or 0)
+    volumeIcon = volumeIconFor()
+    networkStatus = networkStatusFor()
 end
 
 function onVolumeClick()

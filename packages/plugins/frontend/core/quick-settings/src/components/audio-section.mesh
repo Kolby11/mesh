@@ -21,7 +21,8 @@
 </template>
 
 <script lang="luau">
-local audio = require("@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
 
 icon_name = "audio-volume-muted"
 audio_label = "0%"
@@ -29,9 +30,22 @@ audio_tooltip = "Volume unavailable"
 audio_backend = "Unavailable"
 audio_percent = 0
 
-audio.on_change(function()
+-- Derive all display state from live proxy fields on every rerender.
+-- No callbacks — audio.percent, audio.muted, and audio.source_plugin are
+-- read directly; the runtime tracks each field for invalidation.
+function onRender()
+    if not audio_ok or not audio then
+        icon_name = "audio-volume-muted"
+        audio_label = "0%"
+        audio_tooltip = "Audio service unavailable"
+        audio_backend = "Unavailable"
+        audio_percent = 0
+        return
+    end
+
     local percent = audio.percent or 0
     local muted = audio.muted or false
+
     if muted or percent == 0 then
         icon_name = "audio-volume-muted"
     elseif percent < 34 then
@@ -50,18 +64,24 @@ audio.on_change(function()
     else
         audio_tooltip = string.format("Volume %d%%", percent)
     end
-end)
+end
 
 function onVolumeDown()
-    audio.volume_down()
+    if audio_ok and audio then
+        audio.volume_down()
+    end
 end
 
 function onVolumeUp()
-    audio.volume_up()
+    if audio_ok and audio then
+        audio.volume_up()
+    end
 end
 
 function onToggleMute()
-    audio.toggle_mute()
+    if audio_ok and audio then
+        audio.toggle_mute()
+    end
 end
 </script>
 

@@ -18,22 +18,23 @@
 <script lang="luau">
 import BluetoothItem from "./bluetooth-item.mesh"
 
+local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+if not network_ok then network = nil end
+
 bluetooth_devices = {}
 
-local network_ok, network_iface = pcall(require, "@mesh/network@>=1.0")
-if network_ok and network_iface then
-    mesh.service.on("network", "sync_bluetooth_state")
-end
-
-function sync_bluetooth_state()
-    if not network_ok or not network_iface then
+-- Derive bluetooth_devices directly from live proxy fields on every rerender.
+-- network.devices is a runtime-defined extra emitted by the networkmanager
+-- backend alongside base contract fields. We filter to kind == "bluetooth"
+-- locally, consistent with the "frontend owns display logic" principle.
+function onRender()
+    if not network_ok or not network then
         bluetooth_devices = {}
         return
     end
-
-    local devices = network_iface.devices()
+    local devices = network.devices
     local bluetooth = {}
-    if devices then
+    if type(devices) == "table" then
         for _, device in ipairs(devices) do
             if device.kind == "bluetooth" then
                 table.insert(bluetooth, device)
@@ -41,10 +42,6 @@ function sync_bluetooth_state()
         end
     end
     bluetooth_devices = bluetooth
-end
-
-if network_ok and network_iface then
-    sync_bluetooth_state()
 end
 </script>
 
