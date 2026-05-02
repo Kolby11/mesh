@@ -59,6 +59,7 @@ impl Manifest {
                 vec![ProvidedInterface {
                     interface: service.provides.clone(),
                     version: None,
+                    base_plugin: None,
                     backend_name: Some(service.backend_name.clone()),
                     priority: service.priority,
                     optional_capabilities: Vec::new(),
@@ -178,6 +179,8 @@ pub struct ProvidedInterface {
     pub interface: String,
     #[serde(default)]
     pub version: Option<String>,
+    #[serde(default)]
+    pub base_plugin: Option<String>,
     #[serde(default)]
     pub backend_name: Option<String>,
     #[serde(default)]
@@ -359,6 +362,8 @@ pub struct InterfaceSection {
     pub name: String,
     pub version: String,
     pub file: String,
+    #[serde(default)]
+    pub extends: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -957,6 +962,7 @@ main = "src/main.mesh"
     {
       "interface": "mesh.audio",
       "version": "1.0",
+      "base_plugin": "@mesh/audio-interface",
       "backend_name": "PipeWire",
       "priority": 100
     }
@@ -974,6 +980,10 @@ main = "src/main.mesh"
             DependencySpec::Simple(">=1.0.0".to_string())
         );
         assert_eq!(manifest.declared_provides()[0].interface, "mesh.audio");
+        assert_eq!(
+            manifest.declared_provides()[0].base_plugin.as_deref(),
+            Some("@mesh/audio-interface")
+        );
     }
 
     fn manifest_with_dependencies(

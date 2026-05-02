@@ -36,6 +36,7 @@
     {
       "interface": "mesh.network",
       "version": "1.0",
+      "base_plugin": "@mesh/network-interface",
       "backend_name": "NetworkManager",
       "priority": 100
     }

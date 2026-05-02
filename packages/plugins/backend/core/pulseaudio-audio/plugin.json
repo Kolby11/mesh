@@ -48,6 +48,7 @@
     {
       "interface": "mesh.audio",
       "version": "1.0",
+      "base_plugin": "@mesh/audio-interface",
       "backend_name": "PulseAudio",
       "priority": 50
     }

@@ -42,6 +42,7 @@
     {
       "interface": "mesh.power",
       "version": "1.0",
+      "base_plugin": "@mesh/power-interface",
       "backend_name": "UPower",
       "priority": 100
     }

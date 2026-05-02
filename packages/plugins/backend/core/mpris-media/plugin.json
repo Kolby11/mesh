@@ -25,6 +25,7 @@
     {
       "interface": "mesh.media",
       "version": "1.0",
+      "base_plugin": "@mesh/media-interface",
       "backend_name": "MPRIS",
       "priority": 100
     }

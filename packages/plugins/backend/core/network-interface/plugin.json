@@ -12,6 +12,7 @@
   "interface": {
     "name": "mesh.network",
     "version": "1.0",
+    "extends": null,
     "file": "interface.toml"
   }
 }

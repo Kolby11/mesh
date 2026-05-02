@@ -12,6 +12,7 @@
   "interface": {
     "name": "mesh.power",
     "version": "1.0",
+    "extends": null,
     "file": "interface.toml"
   }
 }

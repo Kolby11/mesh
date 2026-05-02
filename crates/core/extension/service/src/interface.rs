@@ -14,6 +14,7 @@ pub struct InterfaceCatalog {
 pub struct InterfaceProvider {
     pub interface: String,
     pub version: Option<String>,
+    pub base_plugin: Option<String>,
     pub provider_plugin: String,
     pub backend_name: String,
     pub priority: u32,
@@ -251,6 +252,7 @@ mod tests {
         registry.register(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
+            base_plugin: Some("@mesh/audio-interface".into()),
             provider_plugin: "@mesh/pulseaudio-audio".into(),
             backend_name: "PulseAudio".into(),
             priority: 50,
@@ -258,6 +260,7 @@ mod tests {
         registry.register(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
+            base_plugin: Some("@mesh/audio-interface".into()),
             provider_plugin: "@mesh/pipewire-audio".into(),
             backend_name: "PipeWire".into(),
             priority: 100,
@@ -268,6 +271,25 @@ mod tests {
         assert_eq!(
             resolved.provider.unwrap().provider_plugin,
             "@mesh/pipewire-audio"
+        );
+    }
+
+    #[test]
+    fn preserves_provider_base_interface_metadata_in_catalog() {
+        let mut catalog = InterfaceCatalog::default();
+        catalog.register_provider(InterfaceProvider {
+            interface: "mesh.network".into(),
+            version: Some("1.0".into()),
+            base_plugin: Some("@mesh/network-interface".into()),
+            provider_plugin: "@mesh/networkmanager".into(),
+            backend_name: "NetworkManager".into(),
+            priority: 100,
+        });
+
+        let resolved = catalog.resolve("network", Some(">=1.0"));
+        assert_eq!(
+            resolved.provider.unwrap().base_plugin.as_deref(),
+            Some("@mesh/network-interface")
         );
     }
 
@@ -286,6 +308,7 @@ mod tests {
         registry.register(InterfaceProvider {
             interface: "alice.thermal".into(),
             version: None,
+            base_plugin: None,
             provider_plugin: "@alice/lmsensors".into(),
             backend_name: "lm-sensors".into(),
             priority: 100,

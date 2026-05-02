@@ -780,7 +780,9 @@ fn lookup_failure_reason(catalog: &InterfaceCatalog, resolution: &InterfaceResol
         has_providers,
     ) {
         (false, false, Some(version), true, _) | (false, false, Some(version), _, true) => {
-            format!("requested version {version} did not match available interface contracts or providers")
+            format!(
+                "requested version {version} did not match available interface contracts or providers"
+            )
         }
         (false, true, _, _, _) => "missing contract".to_string(),
         (true, false, _, _, _) => "missing provider".to_string(),
@@ -1010,8 +1012,8 @@ mod tests {
     use super::*;
     use mesh_core_capability::{Capability, CapabilitySet};
     use mesh_core_service::{
-        parse_contract_version, ContractCapabilities, InterfaceArgument, InterfaceCatalog,
-        InterfaceContract, InterfaceMethod, InterfaceProvider,
+        ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract,
+        InterfaceMethod, InterfaceProvider, parse_contract_version,
     };
     use std::path::PathBuf;
 
@@ -1049,6 +1051,7 @@ mod tests {
         catalog.register_provider(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
+            base_plugin: Some("@mesh/audio-interface".into()),
             provider_plugin: "@mesh/pipewire-audio".into(),
             backend_name: "PipeWire".into(),
             priority: 100,

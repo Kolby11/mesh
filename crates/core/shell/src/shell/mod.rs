@@ -178,6 +178,7 @@ impl Shell {
                         self.interfaces.register(InterfaceProvider {
                             interface: canonical_interface_name(&provided.interface),
                             version: provided.version.clone(),
+                            base_plugin: provided.base_plugin.clone(),
                             provider_plugin: id.clone(),
                             backend_name: provided
                                 .backend_name
