@@ -1102,7 +1102,9 @@ impl FrontendSurfaceComponent {
                 component_id,
                 source,
             })?;
-        self.dirty = true;
+        if runtime.script_ctx.state().is_dirty() {
+            self.dirty = true;
+        }
 
         Ok(script_events_to_requests(
             runtime.script_ctx.drain_published_events(),
@@ -1498,6 +1500,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
         );
         self.last_tree = Some(tree);
+        self.clear_runtime_dirty_states();
 
         Ok(())
     }
@@ -1756,6 +1759,12 @@ impl ShellComponent for FrontendSurfaceComponent {
 }
 
 impl FrontendSurfaceComponent {
+    fn clear_runtime_dirty_states(&self) {
+        for runtime in self.runtimes.lock().unwrap().values_mut() {
+            runtime.script_ctx.state_mut().clear_dirty();
+        }
+    }
+
     fn publish_element_metrics(&self, tree: &WidgetNode) {
         let mut elements = serde_json::Map::new();
         let mut refs = serde_json::Map::new();
@@ -1992,7 +2001,12 @@ pub(super) fn grant_capabilities_from_manifest(
 mod tests {
     use super::*;
     use mesh_core_capability::Capability;
-    use mesh_core_scripting::{PublishedEvent, ScriptContext};
+    use mesh_core_component::parse_component;
+    use mesh_core_plugin::manifest::{
+        CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
+        ExportsSection, Manifest, PackageSection, PluginType,
+    };
+    use mesh_core_scripting::ScriptContext;
     use mesh_core_service::{
         ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract,
         InterfaceMethod, InterfaceProvider, parse_contract_version,
@@ -2110,6 +2124,136 @@ mod tests {
         let mut ctx = ScriptContext::new("@mesh/quick-settings", caps).unwrap();
         ctx.set_interface_catalog(audio_network_catalog());
         ctx
+    }
+
+    fn minimal_test_manifest(id: &str) -> Manifest {
+        Manifest {
+            package: PackageSection {
+                id: id.to_string(),
+                name: None,
+                version: "0.1.0".into(),
+                plugin_type: PluginType::Surface,
+                api_version: "0.1".into(),
+                license: None,
+                description: None,
+                authors: Vec::new(),
+                repository: None,
+            },
+            compatibility: CompatibilitySection::default(),
+            dependencies: DependenciesSection::default(),
+            capabilities: CapabilitiesSection::default(),
+            entrypoints: EntrypointsSection {
+                main: Some("src/main.mesh".into()),
+                settings_ui: None,
+            },
+            accessibility: None,
+            settings: None,
+            i18n: None,
+            theme: None,
+            service: None,
+            provides: Vec::new(),
+            interface: None,
+            extensions: Vec::new(),
+            exports: ExportsSection::default(),
+            provides_slots: HashMap::new(),
+            slot_contributions: HashMap::new(),
+            assets: None,
+            translations: HashMap::new(),
+            surface_layout: None,
+        }
+    }
+
+    fn test_frontend_component(source: &str) -> FrontendSurfaceComponent {
+        let manifest = minimal_test_manifest("@test/reactive-surface");
+        let compiled = CompiledFrontendPlugin {
+            manifest,
+            source_path: PathBuf::from("src/main.mesh"),
+            component: parse_component(source).unwrap(),
+            local_components: HashMap::new(),
+            plugin_component_imports: HashMap::new(),
+        };
+        let catalog = FrontendCatalog {
+            plugins: HashMap::new(),
+            slot_contributions: HashMap::new(),
+        };
+        let mut component = FrontendSurfaceComponent::new(
+            compiled,
+            PathBuf::from("."),
+            catalog,
+            InterfaceCatalog::default(),
+        );
+        component
+            .mount(ComponentContext {
+                component_id: "@test/reactive-surface".into(),
+                surface_id: "@test/reactive-surface".into(),
+            })
+            .unwrap();
+        component
+    }
+
+    #[test]
+    fn handler_without_state_change_does_not_force_rebuild() {
+        let mut component = test_frontend_component(
+            r#"
+<template>
+  <button onclick={onClick}>{label}</button>
+</template>
+
+<script lang="luau">
+label = "Ready"
+
+function onClick()
+    label = "Ready"
+end
+</script>
+"#,
+        );
+        component.clear_runtime_dirty_states();
+        component.dirty = false;
+
+        component.call_namespaced_handler("onClick", &[]).unwrap();
+
+        assert!(!component.wants_render());
+    }
+
+    #[test]
+    fn handler_state_change_rebuilds_next_paint() {
+        let mut component = test_frontend_component(
+            r#"
+<template>
+  <button onclick={onClick}>{label}</button>
+</template>
+
+<script lang="luau">
+label = "Ready"
+
+function onClick()
+    label = "Clicked"
+end
+</script>
+"#,
+        );
+        component.clear_runtime_dirty_states();
+        component.dirty = false;
+
+        component.call_namespaced_handler("onClick", &[]).unwrap();
+        assert!(component.wants_render());
+
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(96, 32);
+        component.paint(&theme, 96, 32, &mut buffer).unwrap();
+        component.dirty = false;
+
+        assert!(!component
+            .runtimes
+            .lock()
+            .unwrap()
+            .get(component.id())
+            .unwrap()
+            .script_ctx
+            .state()
+            .is_dirty());
+        assert!(!component.wants_render());
     }
 
     // ---------- integration test 1: proxy field reads reach render state ----
