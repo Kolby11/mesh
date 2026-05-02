@@ -1,18 +1,25 @@
 ---
 phase: 01-backend-host-api-contract
-verified: 2026-05-01T17:51:41Z
+verified: 2026-05-01T17:50:41Z
 status: passed
 score: 8/8 must-haves verified
 overrides_applied: 0
-gaps: []
+re_verification:
+  previous_status: gaps_found
+  previous_score: 6/8 must-haves verified
+  gaps_closed:
+    - "Backend API failures are surfaced as diagnostics or explicit Luau errors, not silent failures."
+    - "Existing `emit_json` and `emit_unavailable` behavior remains compatible."
+  gaps_remaining: []
+  regressions: []
 ---
 
 # Phase 1: Backend Host API Contract Verification Report
 
 **Phase Goal:** Implement and stabilize the backend Luau host APIs that service plugins need for command execution, config access, logging, service emission, and poll interval control.
-**Verified:** 2026-05-01T17:51:41Z
+**Verified:** 2026-05-01T17:50:41Z
 **Status:** passed
-**Re-verification:** Yes - after gap closure plan 01-03
+**Re-verification:** Yes - after gap closure
 
 ## Goal Achievement
 
@@ -20,14 +27,14 @@ gaps: []
 
 | # | Truth | Status | Evidence |
 | --- | --- | --- | --- |
-| 1 | Backend plugins can execute structured commands and shell commands and inspect stdout, stderr, and status. | ✓ VERIFIED | `mesh.exec` still uses `StdCommand::new(program).args(args)` and `mesh.exec_shell` still uses `sh -lc` in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:231); `exec_accepts_program_and_args` and `exec_returns_structured_result` remain in the passing backend test suite. |
-| 2 | Backend plugins can read configured settings through `mesh.config()`. | ✓ VERIFIED | `mesh.config` still returns stored JSON settings in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:241); Phase 01 Plan 02 previously wired shell settings into the runtime and no gap-closure changes touched that path. |
-| 3 | Backend plugins can produce plugin-scoped structured logs. | ✓ VERIFIED | Callable `mesh.log(level, msg)` and aliases remain installed, and `log_message` still tags output with `plugin_id` in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:253). |
-| 4 | Backend plugins can emit service state and adjust polling behavior without shell restart. | ✓ VERIFIED | `mesh.service.emit` and poll-interval plumbing remain intact in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:176) and [lib.rs](/home/kolby/projects/mesh/crates/core/runtime/backend/src/lib.rs:53); the gap-closure work only narrowed to `emit_json` compatibility. |
-| 5 | Backend API failures are surfaced as diagnostics or explicit Luau errors, not silent failures. | ✓ VERIFIED | `mesh.service.emit_json` now parses JSON with `serde_json::from_str::<JsonValue>(...).map_err(mlua::Error::external)` in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:187), and the new test `emit_json_rejects_invalid_json_string` passes in `cargo test -p mesh-core-scripting backend`. |
-| 6 | Existing backend public API names remain compatible while structured forms are added. | ✓ VERIFIED | Bundled fixture usage such as `mesh.service.emit_json(result.stdout)` remains unchanged in [upower-power main.luau](/home/kolby/projects/mesh/packages/plugins/backend/core/upower-power/src/main.luau:73), and backend compatibility tests still pass. |
-| 7 | Service-specific logic remains in Luau plugins while Rust only wires runtime, settings, and channels. | ✓ VERIFIED | The gap-closure patch only changed host API translation, tests, and contract text; no service-specific Rust logic was introduced. |
-| 8 | Existing `emit_json` and `emit_unavailable` behavior remains compatible. | ✓ VERIFIED | `mesh.service.emit_json` now accepts `Option<LuaValue>` with string, Lua-table, and nil/current-payload branches in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:187), while docs and LSP now describe the same `value?` contract in [mesh_api.rs](/home/kolby/projects/mesh/crates/tools/lsp/src/knowledge/mesh_api.rs:50) and [backend README](/home/kolby/projects/mesh/docs/plugins/backend/core/README.md:54). |
+| 1 | Backend plugins can execute structured commands and shell commands and inspect stdout, stderr, and status. | ✓ VERIFIED | `mesh.exec` and `mesh.exec_shell` remain installed in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:231); `cargo test -p mesh-core-scripting backend -- --nocapture` passed, including `exec_accepts_program_and_args` and `exec_returns_structured_result`. |
+| 2 | Backend plugins can read configured settings through `mesh.config()`. | ✓ VERIFIED | `mesh.config()` still returns runtime settings in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:240), and runtime wiring still passes settings into `BackendScriptContext` in [lib.rs](/home/kolby/projects/mesh/crates/core/runtime/backend/src/lib.rs:23); `cargo test -p mesh-core-backend -- --nocapture` passed `spawn_backend_service_passes_settings_into_backend_context`. |
+| 3 | Backend plugins can produce plugin-scoped structured logs. | ✓ VERIFIED | Callable `mesh.log(level, msg)` plus aliases remain installed in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:256), and `cargo test -p mesh-core-scripting backend -- --nocapture` passed `log_level_function_and_aliases_are_callable`. |
+| 4 | Backend plugins can emit service state and adjust polling behavior without shell restart. | ✓ VERIFIED | `mesh.service.emit`, `mesh.service.emit_json`, and `mesh.service.set_poll_interval` are present in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:176), and runtime still refreshes intervals in [lib.rs](/home/kolby/projects/mesh/crates/core/runtime/backend/src/lib.rs:50); `cargo test -p mesh-core-backend -- --nocapture` passed `spawn_backend_service_applies_runtime_poll_interval_changes`. |
+| 5 | Backend API failures are surfaced as diagnostics or explicit Luau errors, not silent failures. | ✓ VERIFIED | `mesh.service.emit_json` now maps JSON parse failure to `mlua::Error::external` instead of swallowing it in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:187); `emit_json_rejects_invalid_json_string` and `bad_emit_json_does_not_emit_stale_state` passed at [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:610). |
+| 6 | Existing backend public API names remain compatible while structured forms are added. | ✓ VERIFIED | The bundled compatibility fixture test `bundled_backend_scripts_expose_required_host_api_surface` passed at [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:468), and the real runtime integration `shell_theme_backend_runs_through_runtime_loop` still passed in `cargo test -p mesh-core-backend -- --nocapture`. |
+| 7 | Service-specific logic remains in Luau plugins while Rust only wires runtime, settings, and channels. | ✓ VERIFIED | Runtime still loads script source and delegates `init`, `on_poll`, and `on_command_*` through `BackendScriptContext` in [lib.rs](/home/kolby/projects/mesh/crates/core/runtime/backend/src/lib.rs:23); no service-specific Rust logic was introduced by the gap-closure change. |
+| 8 | Existing `emit_json` and `emit_unavailable` behavior remains compatible. | ✓ VERIFIED | `emit_json` now accepts `Option<LuaValue>` and supports string, table, and nil/current-payload forms in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:187); regression tests for all three forms passed at [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:564), and the bundled UPower backend still uses the preserved string form in [main.luau](/home/kolby/projects/mesh/packages/plugins/backend/core/upower-power/src/main.luau:73). |
 
 **Score:** 8/8 truths verified
 
@@ -35,49 +42,60 @@ gaps: []
 
 | Artifact | Expected | Status | Details |
 | --- | --- | --- | --- |
-| `crates/core/runtime/scripting/src/backend.rs` | Backend Luau host APIs and tests | ✓ VERIFIED | Restored `emit_json(value?)` compatibility, added explicit invalid-JSON error handling, and added regression tests for string, table, nil/current-payload, and failure cases. |
-| `crates/core/runtime/scripting/src/host_api.rs` | Host API docs/comments aligned with runtime API | ✓ VERIFIED | Remains wired and relevant to the backend host API surface. Existing runtime-specific wording ambiguity is a documentation warning, not a blocker to Phase 1 success criteria. |
-| `crates/core/runtime/backend/src/lib.rs` | Runtime polling, command dispatch, update channel integration | ✓ VERIFIED | No regressions introduced by the gap-closure patch; Plan 02 summary and unchanged code continue to satisfy the runtime integration truths. |
-| `crates/core/shell/src/shell/mod.rs` | Shell spawn plumbing that passes backend settings | ✓ VERIFIED | No regressions introduced by the gap-closure patch; the settings pass-through path remains unchanged from Plan 02. |
+| `crates/core/runtime/scripting/src/backend.rs` | Backend Luau host APIs and regression tests | ✓ VERIFIED | Substantive host API implementation plus direct coverage for string/table/nil `emit_json`, explicit invalid-JSON failure, and stale-state protection at [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:187) and [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:564). |
+| `crates/core/runtime/backend/src/lib.rs` | Runtime polling, command dispatch, update channel integration | ✓ VERIFIED | Still wired through `spawn_backend_service(...)`, dynamic interval refresh, and backend integration tests at [lib.rs](/home/kolby/projects/mesh/crates/core/runtime/backend/src/lib.rs:23). |
+| `crates/tools/lsp/src/knowledge/mesh_api.rs` | Editor-facing backend API contract text | ✓ VERIFIED | `mesh.service.emit_json(value?)` is documented with nil/current-payload behavior at [mesh_api.rs](/home/kolby/projects/mesh/crates/tools/lsp/src/knowledge/mesh_api.rs:50). |
+| `docs/plugins/backend/core/README.md` | Plugin-author backend API documentation | ✓ VERIFIED | Backend docs describe JSON text, Lua table, and nil/current-payload `emit_json` compatibility at [README.md](/home/kolby/projects/mesh/docs/plugins/backend/core/README.md:54). |
+
+### Key Link Verification
+
+| From | To | Via | Status | Details |
+| --- | --- | --- | --- | --- |
+| `crates/core/runtime/scripting/src/backend.rs` | backend Luau scripts | `mesh` global host injection | ✓ WIRED | `emit_json`, `emit_unavailable`, `payload`, and logging APIs are installed directly into the `mesh.service` and `mesh.log` tables at [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:159). |
+| `crates/core/runtime/backend/src/lib.rs` | `crates/core/runtime/scripting/src/backend.rs` | `BackendScriptContext::new_with_settings_and_capabilities(...)` | ✓ WIRED | Runtime still constructs the scripting context and drives `run_poll()` / `run_command()` in [lib.rs](/home/kolby/projects/mesh/crates/core/runtime/backend/src/lib.rs:32). |
+| `crates/tools/lsp/src/knowledge/mesh_api.rs` | runtime `emit_json` contract | shared `emit_json(value?)` signature and nil/current-payload description | ✓ WIRED | LSP entry matches the runtime signature and semantics at [mesh_api.rs](/home/kolby/projects/mesh/crates/tools/lsp/src/knowledge/mesh_api.rs:50) and [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:187). |
+| `docs/plugins/backend/core/README.md` | runtime `emit_json` contract | backend plugin ergonomics docs | ✓ WIRED | Plugin docs match the runtime behavior and bundled UPower usage at [README.md](/home/kolby/projects/mesh/docs/plugins/backend/core/README.md:54) and [main.luau](/home/kolby/projects/mesh/packages/plugins/backend/core/upower-power/src/main.luau:73). |
+
+### Data-Flow Trace (Level 4)
+
+| Artifact | Data Variable | Source | Produces Real Data | Status |
+| --- | --- | --- | --- | --- |
+| `crates/core/runtime/scripting/src/backend.rs` | `payload` emitted by `mesh.service.emit_json(...)` | Current command payload, parsed JSON text, or Lua table conversion in `emit_json` | Yes | ✓ FLOWING |
+| `crates/core/runtime/backend/src/lib.rs` | `payload` in `BackendServiceUpdate` | `ctx.run_poll()` / `ctx.run_command()` | Yes | ✓ FLOWING |
+| `crates/core/runtime/backend/src/lib.rs` | `settings` exposed through `mesh.config()` | `spawn_backend_service(..., settings, ...)` constructor argument | Yes | ✓ FLOWING |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 | --- | --- | --- | --- |
-| `emit_json` compatibility and failure visibility | `cargo test -p mesh-core-scripting emit_json` | 5 tests passed | ✓ PASS |
-| Backend host API regression suite | `cargo test -p mesh-core-scripting backend` | 22 tests passed | ✓ PASS |
-| Contract text alignment across runtime, docs, and LSP | `rg -n "emit_json\\(value\\?\\)|current command payload|from_str::<JsonValue>|current_payload" crates/core/runtime/scripting/src/backend.rs crates/tools/lsp/src/knowledge/mesh_api.rs docs/plugins/backend/core/README.md` | Matches found in all three surfaces | ✓ PASS |
-| Bundled compatibility fixture preserved | `rg -n "mesh\\.service\\.emit_json\\(result\\.stdout\\)" packages/plugins/backend/core/upower-power/src/main.luau` | Match found | ✓ PASS |
+| `emit_json` compatibility forms work | `cargo test -p mesh-core-scripting emit_json -- --nocapture` | 5 tests passed: explicit string, Lua table, nil/current-payload, invalid JSON rejection, stale-state protection | ✓ PASS |
+| Backend scripting surface still holds together | `cargo test -p mesh-core-scripting backend -- --nocapture` | 22 backend tests passed | ✓ PASS |
+| Runtime wiring still works | `cargo test -p mesh-core-backend -- --nocapture` | 3 runtime tests passed | ✓ PASS |
+| Runtime/docs/LSP contract alignment | `rg -n "emit_json\\(" . --glob '!target/**'` | Runtime comment, LSP entry, backend docs, tests, and bundled UPower plugin all reference the restored `emit_json(value?)` contract | ✓ PASS |
 
 ### Requirements Coverage
 
-| Requirement | Description | Status | Evidence |
-| --- | --- | --- | --- |
-| `HOST-01` | Structured `mesh.exec(cmd, args)` returns stdout/stderr/status | ✓ SATISFIED | Verified by unchanged implementation and passing backend scripting tests. |
-| `HOST-02` | `mesh.exec_shell(cmd)` returns stdout/stderr/status | ✓ SATISFIED | Verified by unchanged implementation and passing backend scripting tests. |
-| `HOST-03` | `mesh.config()` returns plugin settings as a Luau table | ✓ SATISFIED | Verified by existing runtime path plus passing `config_returns_backend_settings`. |
-| `HOST-04` | `mesh.log(level, msg)` produces plugin-associated logs | ✓ SATISFIED | Verified by existing callable log table and passing logging test. |
-| `HOST-05` | `mesh.service.emit(payload)` publishes JSON-compatible state payloads to the shell | ✓ SATISFIED | Verified by existing emit path plus the restored `emit_json` compatibility and failure behavior. |
-| `HOST-06` | `mesh.service.set_poll_interval(ms)` affects the backend poll loop without restart | ✓ SATISFIED | Verified by unchanged Plan 02 runtime integration and its passing summary evidence. |
+| Requirement | Source Plan | Description | Status | Evidence |
+| --- | --- | --- | --- | --- |
+| `HOST-01` | `01-01`, `01-02` | Structured `mesh.exec(cmd, args)` returns stdout/stderr/status | ✓ SATISFIED | `mesh.exec` wiring at [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:231) plus passing backend scripting tests. |
+| `HOST-02` | `01-01`, `01-02` | `mesh.exec_shell(cmd)` returns stdout/stderr/status | ✓ SATISFIED | `mesh.exec_shell` wiring at [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:250) plus passing backend scripting tests. |
+| `HOST-03` | `01-01`, `01-02` | `mesh.config()` returns plugin settings as a Luau table | ✓ SATISFIED | Settings are injected at [lib.rs](/home/kolby/projects/mesh/crates/core/runtime/backend/src/lib.rs:23) and exposed at [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:240). |
+| `HOST-04` | `01-01`, `01-02` | `mesh.log(level, msg)` produces plugin-associated logs | ✓ SATISFIED | Callable log table installed at [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:256). |
+| `HOST-05` | `01-01`, `01-02`, `01-03` | `mesh.service.emit(payload)` publishes JSON-compatible state payloads to the shell | ✓ SATISFIED | `emit` and `emit_json` both feed `pending_emit` in [backend.rs](/home/kolby/projects/mesh/crates/core/runtime/scripting/src/backend.rs:176), and runtime forwards updates in [lib.rs](/home/kolby/projects/mesh/crates/core/runtime/backend/src/lib.rs:60). |
+| `HOST-06` | `01-02` | `mesh.service.set_poll_interval(ms)` affects the backend poll loop without restart | ✓ SATISFIED | Runtime refreshes the active interval in [lib.rs](/home/kolby/projects/mesh/crates/core/runtime/backend/src/lib.rs:103), with passing runtime test coverage. |
 
-### Residual Warnings
+### Anti-Patterns Found
 
-These do not block Phase 01 completion but remain useful follow-up quality items:
+| File | Line | Pattern | Severity | Impact |
+| --- | --- | --- | --- | --- |
+| `crates/core/runtime/backend/src/lib.rs` | 70 | Command-triggered updates still bypass duplicate-payload suppression | ⚠️ Warning | Can emit redundant updates after commands, but does not block the Phase 1 host API contract or the closed `emit_json` gaps. |
+| `crates/core/runtime/scripting/src/host_api.rs` | 16 | Frontend `mesh.config.get*` and backend `mesh.config()` remain documented together without runtime scoping | ⚠️ Warning | Leaves a documentation ambiguity outside the specific `emit_json` contract verified here. |
 
-- `crates/core/runtime/backend/src/lib.rs` command-triggered updates still bypass duplicate-payload suppression from the poll path.
-- `crates/core/runtime/scripting/src/host_api.rs` still documents frontend and backend `mesh.config` shapes close together, which may remain mildly ambiguous for plugin authors.
+### Gaps Summary
 
-### Human Verification Required
-
-None. The previously failing gaps are directly observable in code and covered by automated backend tests.
-
-### Verification Summary
-
-Phase 01 now satisfies its original stabilization goal. The gap-closure plan restored the public `mesh.service.emit_json(value?)` compatibility contract, made malformed JSON fail visibly through `mlua::Error`, and aligned the runtime, documentation, and LSP API knowledge so plugin authors and editor hints no longer disagree with the implementation.
-
-The remaining concerns from review are warnings rather than blockers. They do not invalidate the phase’s must-haves or success criteria, so Phase 01 can be marked complete.
+The two prior blockers are closed. `mesh.service.emit_json(...)` now accepts the documented compatibility forms, malformed JSON is surfaced as an explicit Luau error instead of being silently discarded, and the runtime comment, backend docs, and LSP knowledge all advertise the same `emit_json(value?)` contract. Phase 01 now meets its roadmap success criteria.
 
 ---
 
-_Verified: 2026-05-01T17:51:41Z_
-_Verifier: Codex inline verification after execute-phase gap closure_
+_Verified: 2026-05-01T17:50:41Z_
+_Verifier: the agent (gsd-verifier)_

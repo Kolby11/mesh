@@ -33,7 +33,11 @@
       "Bash(timeout 3 /home/kolby/projects/mesh/target/debug/mesh-lsp)",
       "Bash(perl *)",
       "Bash(xargs -I{} sh -c 'echo \"=== {} ===\"; cat {}')",
-      "Bash(xargs -I{} sh -c 'echo \"=== {} ===\" && cat {}')"
+      "Bash(xargs -I{} sh -c 'echo \"=== {} ===\" && cat {}')",
+      "Skill(gsd-code-review)",
+      "Bash(git -C /home/kolby/projects/mesh status)",
+      "Bash(git -C /home/kolby/projects/mesh log --oneline -5)",
+      "Bash(git *)"
     ]
   }
 }

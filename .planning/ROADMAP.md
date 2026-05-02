@@ -155,5 +155,15 @@ Stabilize the Luau scripting runtime and plugin authoring surface so external de
 
 No backlog items yet.
 
+### Phase 7: Plugin Download and Hot-Install Pipeline
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 6
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 7 to break down)
+
 ---
 *Roadmap created: 2026-05-01 after milestone v1.0 start*
