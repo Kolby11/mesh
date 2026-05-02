@@ -31,6 +31,8 @@ Stabilize the Luau scripting runtime and plugin authoring surface so external de
 
 **Goal:** Make `require('@mesh/<service>')` the reliable frontend/backend bridge, including state field exposure, command methods, automatic reactive invalidation on service updates, and service contract diagnostics.
 
+**Progress:** 1/3 plans complete — Plan 01 delivered proxy diagnostics, live state reads, field-level invalidation, and command-routing regressions.
+
 **Requirements:** PROXY-01, PROXY-02, PROXY-03, PROXY-04, PROXY-05, PROXY-06, SURF-06
 
 **Success Criteria:**

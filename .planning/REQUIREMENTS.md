@@ -16,12 +16,12 @@
 
 ### Service Proxy
 
-- [ ] **PROXY-01**: Frontend `.mesh` scripts can call `require('@mesh/<service>')` and receive a proxy table for the active provider.
-- [ ] **PROXY-02**: Service proxy tables expose the latest backend-emitted state fields as Luau values.
+- [x] **PROXY-01**: Frontend `.mesh` scripts can call `require('@mesh/<service>')` and receive a proxy table for the active provider.
+- [x] **PROXY-02**: Service proxy tables expose the latest backend-emitted state fields as Luau values.
 - [ ] **PROXY-03**: Service proxy tables expose command methods declared by the service contract.
-- [ ] **PROXY-04**: `proxy.on_change(fn)` fires after every backend state emission for that service.
-- [ ] **PROXY-05**: `on_<service>_update()` handlers fire in frontend scripts after every backend state emission for that service.
-- [ ] **PROXY-06**: Frontend scripts fail visibly, with diagnostics, when requiring a missing or invalid service contract.
+- [x] **PROXY-04**: Backend state emissions invalidate frontend components that consume that service state, so rerender sees the latest proxy values without requiring proxy-scoped callback APIs.
+- [x] **PROXY-05**: Service updates stay separate from element events; frontend scripts can observe the latest proxy state on rerender without `on_<service>_update()` handlers.
+- [x] **PROXY-06**: Frontend scripts fail visibly, with diagnostics, when requiring a missing or invalid service contract.
 
 ### Frontend Reactivity
 
@@ -92,12 +92,12 @@
 | HOST-04 | Phase 1 | Pending |
 | HOST-05 | Phase 1 | Pending |
 | HOST-06 | Phase 1 | Pending |
-| PROXY-01 | Phase 2 | Pending |
-| PROXY-02 | Phase 2 | Pending |
+| PROXY-01 | Phase 2 | Complete |
+| PROXY-02 | Phase 2 | Complete |
 | PROXY-03 | Phase 2 | Pending |
-| PROXY-04 | Phase 2 | Pending |
-| PROXY-05 | Phase 2 | Pending |
-| PROXY-06 | Phase 2 | Pending |
+| PROXY-04 | Phase 2 | Complete |
+| PROXY-05 | Phase 2 | Complete |
+| PROXY-06 | Phase 2 | Complete |
 | FRONT-01 | Phase 3 | Pending |
 | FRONT-02 | Phase 3 | Pending |
 | FRONT-03 | Phase 3 | Pending |
