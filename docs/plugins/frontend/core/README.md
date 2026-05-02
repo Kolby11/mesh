@@ -91,6 +91,41 @@ The command lifecycle is:
 Do **not** mutate proxy fields directly — proxy reads are always sourced from
 the backend-emitted payload and are immutable on the frontend side.
 
+## Element events and reactive globals
+
+Element handlers update top-level reactive globals, and changed globals drive
+the next render. `onchange` handlers receive a typed value directly: sliders
+receive a number, switches and checkboxes receive a boolean, and text inputs
+receive a string.
+
+```xml
+<template>
+  <slider min="0" max="1" value="{slider_value}" onchange={onVolumeChange} />
+</template>
+
+<script lang="luau">
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+
+slider_value = 0.0
+audio_tooltip = "Volume unavailable"
+
+function onVolumeChange(value)
+    local normalized = math.max(0.0, math.min(1.0, value))
+    slider_value = normalized
+    audio_tooltip = string.format("Volume %d%%", math.floor(normalized * 100))
+
+    if audio_ok and audio then
+        audio:set_volume("default", normalized)
+    end
+end
+</script>
+```
+
+Handler failures are recorded in diagnostics and logged by the shell. They do
+not crash rendering or clear the last successfully rendered tree, so surfaces
+remain visible while operators inspect the diagnostic entry.
+
 ## Degraded-state pattern
 
 Always guard `require` calls with `pcall`. When a service is unavailable, show
