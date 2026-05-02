@@ -2231,6 +2231,20 @@ mod tests {
             state_fields: Vec::new(),
             methods: vec![
                 InterfaceMethod {
+                    name: "set_volume".into(),
+                    args: vec![
+                        InterfaceArgument {
+                            name: "device_id".into(),
+                            arg_type: "string".into(),
+                        },
+                        InterfaceArgument {
+                            name: "volume".into(),
+                            arg_type: "float".into(),
+                        },
+                    ],
+                    returns: None,
+                },
+                InterfaceMethod {
                     name: "volume_up".into(),
                     args: Vec::new(),
                     returns: None,
@@ -2340,7 +2354,20 @@ mod tests {
     }
 
     fn test_frontend_component(source: &str) -> FrontendSurfaceComponent {
+        test_frontend_component_with_catalog(source, InterfaceCatalog::default(), &[])
+    }
+
+    fn test_frontend_component_with_catalog(
+        source: &str,
+        interface_catalog: InterfaceCatalog,
+        required_capabilities: &[&str],
+    ) -> FrontendSurfaceComponent {
         let manifest = minimal_test_manifest("@test/reactive-surface");
+        let mut manifest = manifest;
+        manifest.capabilities.required = required_capabilities
+            .iter()
+            .map(|capability| (*capability).to_string())
+            .collect();
         let compiled = CompiledFrontendPlugin {
             manifest,
             source_path: PathBuf::from("src/main.mesh"),
@@ -2352,12 +2379,8 @@ mod tests {
             plugins: HashMap::new(),
             slot_contributions: HashMap::new(),
         };
-        let mut component = FrontendSurfaceComponent::new(
-            compiled,
-            PathBuf::from("."),
-            catalog,
-            InterfaceCatalog::default(),
-        );
+        let mut component =
+            FrontendSurfaceComponent::new(compiled, PathBuf::from("."), catalog, interface_catalog);
         component
             .mount(ComponentContext {
                 component_id: "@test/reactive-surface".into(),
@@ -2418,6 +2441,15 @@ mod tests {
         root
     }
 
+    fn first_node_by_tag<'a>(node: &'a WidgetNode, tag: &str) -> Option<&'a WidgetNode> {
+        if node.tag == tag {
+            return Some(node);
+        }
+        node.children
+            .iter()
+            .find_map(|child| first_node_by_tag(child, tag))
+    }
+
     #[test]
     fn slider_change_handler_receives_number_on_pointer_move() {
         let mut component = test_frontend_component(
@@ -2468,6 +2500,195 @@ end
             .unwrap();
 
         assert!((runtime_number(&component, "slider_seen") - 0.75).abs() < 0.001);
+    }
+
+    #[test]
+    fn navigation_volume_slider_proves_event_state_render_flow() {
+        let mut component = test_frontend_component_with_catalog(
+            r#"
+<template>
+  <slider min="0" max="1" value="{slider_value}" onchange={onVolumeChange} />
+</template>
+<script lang="luau">
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+
+audio_percent = 0
+slider_value = 0.0
+icon_name = "audio-volume-muted"
+audio_tooltip = "Volume unavailable"
+handler_value_type = "unset"
+
+local function clamp_volume(value)
+    local numeric = tonumber(value) or 0
+    if numeric < 0 then return 0.0 end
+    if numeric > 1 then return 1.0 end
+    return numeric
+end
+
+local function update_audio_copy(percent, muted)
+    audio_percent = percent
+    slider_value = clamp_volume(percent / 100)
+    if muted or percent == 0 then
+        icon_name = "audio-volume-muted"
+    elseif percent < 34 then
+        icon_name = "audio-volume-low"
+    elseif percent < 67 then
+        icon_name = "audio-volume-medium"
+    else
+        icon_name = "audio-volume-high"
+    end
+    if muted then
+        audio_tooltip = string.format("Volume muted at %d%%", percent)
+    else
+        audio_tooltip = string.format("Volume %d%%", percent)
+    end
+end
+
+function onRender()
+    if not audio_ok or not audio then
+        icon_name = "audio-volume-muted"
+        audio_tooltip = "Audio service unavailable"
+        audio_percent = 0
+        slider_value = 0.0
+        return
+    end
+    local percent = math.floor(tonumber(audio.percent) or 0)
+    local muted = audio.muted or false
+    update_audio_copy(percent, muted)
+end
+
+function onVolumeChange(value)
+    handler_value_type = type(value)
+    local normalized = clamp_volume(value)
+    local percent = math.floor((normalized * 100) + 0.5)
+    slider_value = normalized
+    update_audio_copy(percent, false)
+    if audio_ok and audio then
+        audio:set_volume("default", normalized)
+    end
+end
+</script>
+"#,
+            audio_network_catalog(),
+            &["service.audio.read"],
+        );
+        {
+            let mut runtimes = component.runtimes.lock().unwrap();
+            let runtime = runtimes.get_mut(component.id()).unwrap();
+            runtime.script_ctx.apply_service_payload(
+                "audio",
+                &serde_json::json!({ "percent": 20, "muted": false }),
+            );
+            runtime.script_ctx.call_handler("onRender", &[]).unwrap();
+        }
+
+        let mut slider = event_node(
+            "slider",
+            "root/0",
+            0.0,
+            0.0,
+            100.0,
+            20.0,
+            &[("change", "onVolumeChange")],
+        );
+        slider.attributes.insert("min".into(), "0".into());
+        slider.attributes.insert("max".into(), "1".into());
+        slider.attributes.insert("value".into(), "0.2".into());
+        component.last_tree = Some(root_with(vec![slider]));
+        component.clear_runtime_dirty_states();
+        component.dirty = false;
+
+        let theme = default_theme();
+        component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::PointerButton {
+                    x: 80.0,
+                    y: 10.0,
+                    pressed: true,
+                },
+            )
+            .unwrap();
+        let requests = component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::PointerMove { x: 50.0, y: 10.0 },
+            )
+            .unwrap();
+
+        assert_eq!(
+            runtime_value(&component, "handler_value_type"),
+            Some(serde_json::json!("number"))
+        );
+        assert_eq!(
+            runtime_value(&component, "audio_percent"),
+            Some(serde_json::json!(50))
+        );
+        assert!((runtime_number(&component, "slider_value") - 0.5).abs() < 0.001);
+        assert_eq!(
+            runtime_value(&component, "icon_name"),
+            Some(serde_json::json!("audio-volume-medium"))
+        );
+        assert_eq!(
+            runtime_value(&component, "audio_tooltip"),
+            Some(serde_json::json!("Volume 50%"))
+        );
+        assert!(
+            component.wants_render(),
+            "changed reactive globals should mark dirty"
+        );
+
+        match requests.as_slice() {
+            [
+                CoreRequest::ServiceCommand {
+                    interface,
+                    command,
+                    payload,
+                },
+            ] => {
+                assert_eq!(interface, "mesh.audio");
+                assert_eq!(command, "set_volume");
+                assert_eq!(
+                    payload,
+                    &serde_json::json!({ "device_id": "default", "volume": 0.5 })
+                );
+            }
+            other => panic!("expected one mesh.audio.set_volume request, got {other:?}"),
+        }
+
+        let mut buffer = PixelBuffer::new(240, 40);
+        component.paint(&theme, 240, 40, &mut buffer).unwrap();
+        let tree = component
+            .last_tree
+            .as_ref()
+            .expect("paint should cache tree");
+        let slider = first_node_by_tag(tree, "slider").expect("painted tree should contain slider");
+        let rendered_value = slider
+            .attributes
+            .get("value")
+            .and_then(|value| value.parse::<f64>().ok())
+            .expect("painted slider value should be numeric");
+        assert!(
+            (rendered_value - 0.5).abs() < 0.001,
+            "next paint should rebuild from the updated reactive slider state"
+        );
+        assert!(
+            !component
+                .runtimes
+                .lock()
+                .unwrap()
+                .get(component.id())
+                .unwrap()
+                .script_ctx
+                .state()
+                .is_dirty(),
+            "paint should consume runtime dirty state after rebuilding"
+        );
     }
 
     #[test]
@@ -2767,6 +2988,52 @@ end
         let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
         assert_eq!(diagnostics.error_count(), 1);
         assert!(!component.wants_render());
+    }
+
+    #[test]
+    fn navigation_volume_slider_handler_error_records_diagnostic_and_keeps_last_tree() {
+        let mut component = test_frontend_component(
+            r#"
+<template><box /></template>
+<script lang="luau">
+function onVolumeChange(value)
+    error("slider handler error")
+end
+</script>
+"#,
+        );
+        component.last_tree = Some(root_with(vec![event_node(
+            "slider",
+            "root/0",
+            0.0,
+            0.0,
+            100.0,
+            20.0,
+            &[("change", "onVolumeChange")],
+        )]));
+        component.dirty = false;
+
+        let theme = default_theme();
+        let requests = component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::PointerButton {
+                    x: 50.0,
+                    y: 10.0,
+                    pressed: true,
+                },
+            )
+            .unwrap();
+
+        assert!(requests.is_empty());
+        assert!(
+            component.last_tree.is_some(),
+            "last successfully rendered tree should remain available after slider handler error"
+        );
+        let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
+        assert_eq!(diagnostics.error_count(), 1);
     }
 
     #[test]
