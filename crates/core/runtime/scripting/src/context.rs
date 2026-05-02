@@ -18,6 +18,14 @@ pub struct PublishedEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptDiagnostic {
+    pub plugin_id: String,
+    pub interface: String,
+    pub requested_version: Option<String>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptInterfaceImport {
     pub alias: String,
     pub interface: String,
@@ -231,6 +239,8 @@ pub struct ScriptContext {
     runtime_service_subscriptions: Arc<Mutex<Vec<ServiceSubscription>>>,
     published_events: Vec<PublishedEvent>,
     shared_published_events: Arc<Mutex<Vec<PublishedEvent>>>,
+    diagnostics: Vec<ScriptDiagnostic>,
+    shared_diagnostics: Arc<Mutex<Vec<ScriptDiagnostic>>>,
 }
 
 impl ScriptContext {
@@ -252,6 +262,8 @@ impl ScriptContext {
             runtime_service_subscriptions: Arc::new(Mutex::new(Vec::new())),
             published_events: Vec::new(),
             shared_published_events: Arc::new(Mutex::new(Vec::new())),
+            diagnostics: Vec::new(),
+            shared_diagnostics: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -274,6 +286,7 @@ impl ScriptContext {
         self.interface_bindings.clear();
         self.shared_interface_bindings.lock().unwrap().clear();
         self.shared_published_events.lock().unwrap().clear();
+        self.shared_diagnostics.lock().unwrap().clear();
         self.runtime_service_bindings.lock().unwrap().clear();
         self.runtime_service_subscriptions.lock().unwrap().clear();
         self.install_host_api()?;
@@ -399,6 +412,11 @@ impl ScriptContext {
         std::mem::take(&mut self.published_events)
     }
 
+    pub fn drain_diagnostics(&mut self) -> Vec<ScriptDiagnostic> {
+        self.sync_side_channels();
+        std::mem::take(&mut self.diagnostics)
+    }
+
     /// Check if a handler exists.
     pub fn has_handler(&self, name: &str) -> bool {
         self.lua.globals().get::<Function>(name).is_ok()
@@ -463,6 +481,8 @@ impl ScriptContext {
         let published_events = Arc::clone(&self.shared_published_events);
         let interface_catalog_for_service = interface_catalog.clone();
         let allowed_interfaces_for_service = allowed_interfaces.clone();
+        let plugin_id_for_service = self.plugin_id.clone();
+        let diagnostics_for_service = Arc::clone(&self.shared_diagnostics);
         mesh_core_service
             .set(
                 "use",
@@ -474,12 +494,29 @@ impl ScriptContext {
                             || allowed_interfaces_for_service.contains(&canonical)
                             || !canonical.starts_with("mesh.");
                         if canonical.starts_with("mesh.") && !readable {
-                            return Err(mlua::Error::external(ScriptError::CapabilityDenied(
-                                canonical,
-                            )));
+                            return Err(record_lookup_diagnostic_lua(
+                                &diagnostics_for_service,
+                                &plugin_id_for_service,
+                                &canonical,
+                                None,
+                                "capability denied",
+                                ScriptError::CapabilityDenied(canonical.clone()),
+                            ));
                         }
 
                         let resolution = interface_catalog_for_service.resolve(&canonical, None);
+                        if resolution.contract.is_none() || resolution.provider.is_none() {
+                            let reason =
+                                lookup_failure_reason(&interface_catalog_for_service, &resolution);
+                            return Err(record_lookup_diagnostic_lua(
+                                &diagnostics_for_service,
+                                &plugin_id_for_service,
+                                &canonical,
+                                None,
+                                &reason,
+                                ScriptError::InterfaceUnavailable(canonical.clone()),
+                            ));
+                        }
                         create_service_proxy(
                             lua,
                             service_name_from_interface(&canonical),
@@ -575,6 +612,8 @@ impl ScriptContext {
         let service_bindings = Arc::clone(&self.runtime_service_bindings);
         let service_subscriptions = Arc::clone(&self.runtime_service_subscriptions);
         let published_events = Arc::clone(&self.shared_published_events);
+        let plugin_id_for_require = self.plugin_id.clone();
+        let diagnostics_for_require = Arc::clone(&self.shared_diagnostics);
         let require = self
             .lua
             .create_function(move |lua, module: String| {
@@ -620,23 +659,30 @@ impl ScriptContext {
                     || allowed_interfaces.contains(&canonical)
                     || !canonical.starts_with("mesh.");
                 if canonical.starts_with("mesh.") && !readable {
-                    return Err(mlua::Error::external(ScriptError::CapabilityDenied(
-                        canonical,
-                    )));
+                    return Err(record_lookup_diagnostic_lua(
+                        &diagnostics_for_require,
+                        &plugin_id_for_require,
+                        &canonical,
+                        version.as_deref(),
+                        "capability denied",
+                        ScriptError::CapabilityDenied(canonical.clone()),
+                    ));
                 }
 
                 let resolution = interface_catalog.resolve(&canonical, version.as_deref());
                 if resolution.contract.is_none() || resolution.provider.is_none() {
-                    return Err(mlua::Error::external(ScriptError::InterfaceUnavailable(
-                        format!(
-                            "{}{}",
-                            canonical,
-                            version
-                                .as_deref()
-                                .map(|value| format!(" ({value})"))
-                                .unwrap_or_default()
-                        ),
-                    )));
+                    let reason = lookup_failure_reason(&interface_catalog, &resolution);
+                    return Err(record_lookup_diagnostic_lua(
+                        &diagnostics_for_require,
+                        &plugin_id_for_require,
+                        &canonical,
+                        version.as_deref(),
+                        &reason,
+                        ScriptError::InterfaceUnavailable(interface_error_message(
+                            &canonical,
+                            version.as_deref(),
+                        )),
+                    ));
                 }
 
                 let proxy = create_interface_proxy(
@@ -670,6 +716,13 @@ impl ScriptContext {
                 || manifest.interface_capabilities.contains(&canonical)
                 || !canonical.starts_with("mesh.");
             if canonical.starts_with("mesh.") && !readable {
+                record_lookup_diagnostic(
+                    &self.shared_diagnostics,
+                    &self.plugin_id,
+                    &canonical,
+                    import.version.as_deref(),
+                    "capability denied",
+                );
                 return Err(ScriptError::CapabilityDenied(canonical));
             }
 
@@ -677,14 +730,17 @@ impl ScriptContext {
                 .interface_catalog
                 .resolve(&canonical, import.version.as_deref());
             if resolution.contract.is_none() || resolution.provider.is_none() {
-                return Err(ScriptError::InterfaceUnavailable(format!(
-                    "{}{}",
-                    canonical,
-                    import
-                        .version
-                        .as_deref()
-                        .map(|value| format!(" ({value})"))
-                        .unwrap_or_default()
+                let reason = lookup_failure_reason(&self.interface_catalog, &resolution);
+                record_lookup_diagnostic(
+                    &self.shared_diagnostics,
+                    &self.plugin_id,
+                    &canonical,
+                    import.version.as_deref(),
+                    &reason,
+                );
+                return Err(ScriptError::InterfaceUnavailable(interface_error_message(
+                    &canonical,
+                    import.version.as_deref(),
                 )));
             }
 
@@ -753,8 +809,87 @@ impl ScriptContext {
                 self.published_events.extend(published.drain(..));
             }
         }
+        {
+            let mut diagnostics = self.shared_diagnostics.lock().unwrap();
+            if !diagnostics.is_empty() {
+                self.diagnostics.extend(diagnostics.drain(..));
+            }
+        }
         self.interface_bindings = self.shared_interface_bindings.lock().unwrap().clone();
     }
+}
+
+fn record_lookup_diagnostic_lua(
+    diagnostics: &Arc<Mutex<Vec<ScriptDiagnostic>>>,
+    plugin_id: &str,
+    interface: &str,
+    requested_version: Option<&str>,
+    reason: &str,
+    err: ScriptError,
+) -> mlua::Error {
+    record_lookup_diagnostic(diagnostics, plugin_id, interface, requested_version, reason);
+    mlua::Error::external(err)
+}
+
+fn record_lookup_diagnostic(
+    diagnostics: &Arc<Mutex<Vec<ScriptDiagnostic>>>,
+    plugin_id: &str,
+    interface: &str,
+    requested_version: Option<&str>,
+    reason: &str,
+) {
+    tracing::error!(
+        plugin_id,
+        interface,
+        requested_version = requested_version.unwrap_or(""),
+        reason,
+        "service interface lookup failed"
+    );
+    diagnostics.lock().unwrap().push(ScriptDiagnostic {
+        plugin_id: plugin_id.to_string(),
+        interface: interface.to_string(),
+        requested_version: requested_version.map(ToOwned::to_owned),
+        reason: reason.to_string(),
+    });
+}
+
+fn lookup_failure_reason(catalog: &InterfaceCatalog, resolution: &InterfaceResolution) -> String {
+    let has_contracts = catalog
+        .contracts
+        .get(&resolution.requested)
+        .is_some_and(|contracts| !contracts.is_empty());
+    let has_providers = catalog
+        .providers
+        .get(&resolution.requested)
+        .is_some_and(|providers| !providers.is_empty());
+
+    match (
+        resolution.contract.is_some(),
+        resolution.provider.is_some(),
+        resolution.requested_version.as_deref(),
+        has_contracts,
+        has_providers,
+    ) {
+        (false, false, Some(version), true, _) | (false, false, Some(version), _, true) => {
+            format!("requested version {version} did not match available interface contracts or providers")
+        }
+        (false, true, _, _, _) => "missing contract".to_string(),
+        (true, false, _, _, _) => "missing provider".to_string(),
+        (false, false, _, false, false) => "missing contract and provider".to_string(),
+        (false, false, _, false, true) => "missing contract".to_string(),
+        (false, false, _, true, false) => "missing provider".to_string(),
+        _ => "interface lookup failed".to_string(),
+    }
+}
+
+fn interface_error_message(interface: &str, requested_version: Option<&str>) -> String {
+    format!(
+        "{}{}",
+        interface,
+        requested_version
+            .map(|value| format!(" ({value})"))
+            .unwrap_or_default()
+    )
 }
 
 fn create_interface_proxy(
@@ -1035,8 +1170,8 @@ mod tests {
     use super::*;
     use mesh_core_capability::{Capability, CapabilitySet};
     use mesh_core_service::{
-        ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract,
-        InterfaceMethod, InterfaceProvider, parse_contract_version,
+        parse_contract_version, ContractCapabilities, InterfaceArgument, InterfaceCatalog,
+        InterfaceContract, InterfaceMethod, InterfaceProvider,
     };
     use std::path::PathBuf;
 
@@ -1173,6 +1308,54 @@ end
 
         let err = ctx.call_init().unwrap_err();
         assert!(matches!(err, ScriptError::InterfaceUnavailable(_)));
+    }
+
+    #[test]
+    fn require_missing_interface_emits_visible_diagnostic() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@mesh/diagnostic-test", caps).unwrap();
+        ctx.load_script(
+            r#"
+function init()
+    require("@mesh/audio@>=1.0")
+end
+"#,
+        )
+        .unwrap();
+
+        let err = ctx.call_init().unwrap_err();
+        assert!(matches!(err, ScriptError::InterfaceUnavailable(_)));
+        let diagnostics = ctx.drain_diagnostics();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].plugin_id, "@mesh/diagnostic-test");
+        assert_eq!(diagnostics[0].interface, "mesh.audio");
+        assert_eq!(diagnostics[0].requested_version.as_deref(), Some(">=1.0"));
+        assert!(diagnostics[0].reason.contains("missing contract"));
+    }
+
+    #[test]
+    fn pcall_require_still_emits_interface_diagnostic() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@mesh/pcall-test", caps).unwrap();
+        ctx.load_script(
+            r#"
+ok = true
+
+function init()
+    ok = pcall(require, "@mesh/audio")
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.call_init().unwrap();
+        assert_eq!(ctx.state.get("ok"), Some(Value::Bool(false)));
+        let diagnostics = ctx.drain_diagnostics();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].plugin_id, "@mesh/pcall-test");
+        assert_eq!(diagnostics[0].interface, "mesh.audio");
     }
 
     #[test]
@@ -1361,23 +1544,24 @@ end
     #[test]
     fn service_use_can_bind_reactive_fields_without_require() {
         let mut caps = CapabilitySet::new();
-        caps.grant(Capability::new("theme.read"));
-        let mut ctx = ScriptContext::new("@test/theme-widget", caps).unwrap();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
         ctx.load_script(
             r#"
-theme_icon = "weather-clear"
+audio_icon = "audio-volume-muted"
 
 function init()
-    local theme = mesh.service.use("theme")
-    theme:bind("is_dark", "theme_is_dark")
-    theme:on_change("sync_theme_state")
+    local audio = mesh.service.use("audio")
+    audio:bind("muted", "audio_muted")
+    audio:on_change("sync_audio_state")
 end
 
-function sync_theme_state()
-    if theme_is_dark then
-        theme_icon = "weather-clear-night"
+function sync_audio_state()
+    if audio_muted then
+        audio_icon = "audio-volume-muted"
     else
-        theme_icon = "weather-clear"
+        audio_icon = "audio-volume-high"
     end
 end
 "#,
@@ -1385,12 +1569,12 @@ end
         .unwrap();
         ctx.call_init().unwrap();
 
-        let payload = serde_json::json!({ "is_dark": true });
-        ctx.apply_service_bindings("theme", &payload);
-        ctx.call_service_handlers("theme").unwrap();
+        let payload = serde_json::json!({ "muted": false });
+        ctx.apply_service_bindings("audio", &payload);
+        ctx.call_service_handlers("audio").unwrap();
         assert_eq!(
-            ctx.state.get("theme_icon"),
-            Some(Value::String("weather-clear-night".into()))
+            ctx.state.get("audio_icon"),
+            Some(Value::String("audio-volume-high".into()))
         );
     }
 
