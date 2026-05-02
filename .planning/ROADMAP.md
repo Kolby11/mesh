@@ -29,14 +29,14 @@ Stabilize the Luau scripting runtime and plugin authoring surface so external de
 
 ### Phase 2: Service Proxy Delivery
 
-**Goal:** Make `require('@mesh/<service>')` the reliable frontend/backend bridge, including state field exposure, command methods, `on_change`, update handlers, and service contract diagnostics.
+**Goal:** Make `require('@mesh/<service>')` the reliable frontend/backend bridge, including state field exposure, command methods, automatic reactive invalidation on service updates, and service contract diagnostics.
 
 **Requirements:** PROXY-01, PROXY-02, PROXY-03, PROXY-04, PROXY-05, PROXY-06, SURF-06
 
 **Success Criteria:**
 1. A frontend `.mesh` script receives live state from a backend service proxy.
-2. `proxy.on_change(fn)` fires after every backend emission.
-3. `on_<service>_update()` fires after every backend emission.
+2. Backend service emissions mark consuming frontend components dirty so rerender sees the latest proxy state without requiring service-specific callback APIs.
+3. Service proxies stay a read-and-command surface; element event handlers such as `onclick` and `onchange` remain attached to template elements rather than service proxies.
 4. Service command methods declared by contracts are callable through the proxy.
 5. Missing or invalid service contracts produce visible diagnostics.
 
