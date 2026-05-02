@@ -97,3 +97,48 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn script_events_to_requests_maps_named_proxy_commands() {
+        let requests = script_events_to_requests(vec![
+            PublishedEvent {
+                channel: "mesh.audio.set_volume".into(),
+                payload: serde_json::json!({ "percent": 55 }),
+            },
+            PublishedEvent {
+                channel: "mesh.network.set_wifi_enabled".into(),
+                payload: serde_json::json!({ "enabled": true }),
+            },
+        ]);
+
+        assert_eq!(requests.len(), 2);
+        match &requests[0] {
+            CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+            } => {
+                assert_eq!(interface, "mesh.audio");
+                assert_eq!(command, "set_volume");
+                assert_eq!(payload, &serde_json::json!({ "percent": 55 }));
+            }
+            other => panic!("expected audio ServiceCommand, got {other:?}"),
+        }
+        match &requests[1] {
+            CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+            } => {
+                assert_eq!(interface, "mesh.network");
+                assert_eq!(command, "set_wifi_enabled");
+                assert_eq!(payload, &serde_json::json!({ "enabled": true }));
+            }
+            other => panic!("expected network ServiceCommand, got {other:?}"),
+        }
+    }
+}

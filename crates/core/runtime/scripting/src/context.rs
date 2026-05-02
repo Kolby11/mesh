@@ -1347,6 +1347,61 @@ end
     }
 
     #[test]
+    fn interface_proxy_reads_latest_emitted_fields_after_repeated_updates() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script(
+            r#"
+audio_percent = 0
+audio_muted = false
+audio_source = ""
+
+function sync_audio_state()
+    local audio = require("@mesh/audio@>=1.0")
+    audio_percent = audio.percent or 0
+    audio_muted = audio.muted or false
+    audio_source = audio.source_plugin or ""
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.apply_service_payload(
+            "audio",
+            &serde_json::json!({
+                "percent": 25,
+                "muted": false,
+                "source_plugin": "@mesh/pulse"
+            }),
+        );
+        ctx.call_handler("sync_audio_state", &[]).unwrap();
+        assert_eq!(ctx.state.get("audio_percent"), Some(serde_json::json!(25)));
+        assert_eq!(ctx.state.get("audio_muted"), Some(serde_json::json!(false)));
+        assert_eq!(
+            ctx.state.get("audio_source"),
+            Some(serde_json::json!("@mesh/pulse"))
+        );
+
+        ctx.apply_service_payload(
+            "audio",
+            &serde_json::json!({
+                "percent": 82,
+                "muted": true,
+                "source_plugin": "@mesh/pipewire"
+            }),
+        );
+        ctx.call_handler("sync_audio_state", &[]).unwrap();
+        assert_eq!(ctx.state.get("audio_percent"), Some(serde_json::json!(82)));
+        assert_eq!(ctx.state.get("audio_muted"), Some(serde_json::json!(true)));
+        assert_eq!(
+            ctx.state.get("audio_source"),
+            Some(serde_json::json!("@mesh/pipewire"))
+        );
+    }
+
+    #[test]
     fn service_use_reads_state_fields_without_callbacks() {
         let mut caps = CapabilitySet::new();
         caps.grant(Capability::new("service.audio.read"));
