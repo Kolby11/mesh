@@ -1,3 +1,4 @@
+use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::WidgetNode;
 use mesh_core_locale::LocaleEngine;
 use mesh_core_render::PixelBuffer;
@@ -69,6 +70,7 @@ pub enum ServiceEvent {
 pub struct ComponentContext {
     pub component_id: String,
     pub surface_id: SurfaceId,
+    pub diagnostics: Diagnostics,
 }
 
 #[derive(Debug, Clone)]

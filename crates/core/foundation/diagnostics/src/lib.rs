@@ -1,4 +1,5 @@
 /// Logging, health reporting, and performance monitoring for MESH plugins.
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -43,6 +44,7 @@ pub struct Diagnostics {
 struct DiagnosticsState {
     health: HealthStatus,
     error_count: u64,
+    handler_errors: HashSet<(String, String, String)>,
 }
 
 impl Diagnostics {
@@ -52,6 +54,7 @@ impl Diagnostics {
             state: Arc::new(Mutex::new(DiagnosticsState {
                 health: HealthStatus::Healthy,
                 error_count: 0,
+                handler_errors: HashSet::new(),
             })),
         }
     }
@@ -74,6 +77,30 @@ impl Diagnostics {
         let mut state = self.state.lock().unwrap();
         state.health = HealthStatus::Error(message.into());
         state.error_count += 1;
+    }
+
+    pub fn record_handler_error(
+        &self,
+        component_id: impl Into<String>,
+        handler_name: impl Into<String>,
+        message: impl Into<String>,
+    ) -> bool {
+        let component_id = component_id.into();
+        let handler_name = handler_name.into();
+        let message = message.into();
+        let mut state = self.state.lock().unwrap();
+        let inserted = state.handler_errors.insert((
+            component_id.clone(),
+            handler_name.clone(),
+            message.clone(),
+        ));
+        if inserted {
+            state.health = HealthStatus::Error(format!(
+                "handler '{handler_name}' failed in component '{component_id}': {message}"
+            ));
+            state.error_count += 1;
+        }
+        inserted
     }
 
     pub fn health(&self) -> HealthStatus {
@@ -109,5 +136,22 @@ impl DiagnosticsCollector {
             .iter()
             .map(|d| (d.plugin_id().to_string(), d.health()))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn handler_errors_are_deduplicated_by_component_handler_and_message() {
+        let diagnostics = Diagnostics::new("@test/frontend");
+
+        assert!(diagnostics.record_handler_error("@test/frontend", "onChange", "boom"));
+        assert!(!diagnostics.record_handler_error("@test/frontend", "onChange", "boom"));
+        assert!(diagnostics.record_handler_error("@test/frontend", "onRelease", "boom"));
+
+        assert_eq!(diagnostics.error_count(), 2);
+        assert!(matches!(diagnostics.health(), HealthStatus::Error(_)));
     }
 }

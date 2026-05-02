@@ -13,6 +13,7 @@ use super::types::{
     ShellComponent,
 };
 use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::{
     Corners, ElementState, StyleContext, StyleResolver, TransitionEasing, TransitionStyle,
     VariableStore, WidgetNode, element_snapshot_json, style::Color,
@@ -76,6 +77,7 @@ pub(super) struct FrontendSurfaceComponent {
     locale: LocaleEngine,
     interface_catalog: mesh_core_service::InterfaceCatalog,
     last_tree: Option<WidgetNode>,
+    diagnostics: Option<Diagnostics>,
     /// Desired visibility for surface portals (`<ImportedSurface hidden={...} />`).
     /// Updated during build_tree; compared to last_surface_states in tick().
     pending_surface_states: RefCell<HashMap<String, bool>>,
@@ -418,6 +420,7 @@ impl FrontendSurfaceComponent {
             locale: LocaleEngine::new("en"),
             interface_catalog,
             last_tree: None,
+            diagnostics: None,
             pending_surface_states: RefCell::new(HashMap::new()),
             last_surface_states: HashMap::new(),
             style_animations: HashMap::new(),
@@ -1145,13 +1148,23 @@ impl FrontendSurfaceComponent {
         let Some(runtime) = runtimes.get_mut(&instance_key) else {
             return Ok(Vec::new());
         };
-        runtime
-            .script_ctx
-            .call_handler(&handler_name, args)
-            .map_err(|source| ComponentError::Script {
-                component_id,
-                source,
-            })?;
+        if let Err(source) = runtime.script_ctx.call_handler(&handler_name, args) {
+            let error_message = source.to_string();
+            tracing::warn!(
+                component_id = %component_id,
+                handler = %handler_name,
+                error = %error_message,
+                "frontend event handler failed"
+            );
+            if let Some(diagnostics) = &self.diagnostics {
+                diagnostics.record_handler_error(
+                    component_id.clone(),
+                    handler_name.clone(),
+                    error_message,
+                );
+            }
+            return Ok(Vec::new());
+        }
         if runtime.script_ctx.state().is_dirty() {
             self.dirty = true;
         }
@@ -1368,7 +1381,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         Some(self.surface_layout.visible_on_start)
     }
 
-    fn mount(&mut self, _ctx: ComponentContext) -> Result<Vec<CoreRequest>, ComponentError> {
+    fn mount(&mut self, ctx: ComponentContext) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.diagnostics = Some(ctx.diagnostics);
         self.load_plugin_i18n();
         self.load_catalog_i18n();
         self.init_root_runtime()?;
@@ -2348,6 +2362,7 @@ mod tests {
             .mount(ComponentContext {
                 component_id: "@test/reactive-surface".into(),
                 surface_id: "@test/reactive-surface".into(),
+                diagnostics: Diagnostics::new("@test/reactive-surface"),
             })
             .unwrap();
         component.visible = true;
@@ -2715,6 +2730,43 @@ end
         }
 
         assert_eq!(runtime_number(&component, "focus_count"), 1.0);
+    }
+
+    #[test]
+    fn failing_handler_is_reported_once_and_does_not_clear_render_state() {
+        let mut component = test_frontend_component(
+            r#"
+<template><box /></template>
+<script lang="luau">
+function onExplode()
+    error("boom")
+end
+</script>
+"#,
+        );
+        component.last_tree = Some(root_with(vec![event_node(
+            "button",
+            "root/0",
+            0.0,
+            0.0,
+            80.0,
+            24.0,
+            &[("click", "onExplode")],
+        )]));
+        component.dirty = false;
+
+        let first = component.call_namespaced_handler("onExplode", &[]);
+        let second = component.call_namespaced_handler("onExplode", &[]);
+
+        assert!(first.unwrap().is_empty());
+        assert!(second.unwrap().is_empty());
+        assert!(
+            component.last_tree.is_some(),
+            "last successfully rendered tree should remain available"
+        );
+        let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
+        assert_eq!(diagnostics.error_count(), 1);
+        assert!(!component.wants_render());
     }
 
     #[test]

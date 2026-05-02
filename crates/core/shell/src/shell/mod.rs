@@ -641,9 +641,13 @@ impl Shell {
     fn mount_components(&mut self) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
         for runtime in &mut self.components {
+            let diagnostics = self
+                .diagnostics
+                .register(runtime.component.id().to_string());
             let ctx = ComponentContext {
                 component_id: runtime.component.id().to_string(),
                 surface_id: runtime.surface_id.clone(),
+                diagnostics,
             };
             requests.extend(
                 runtime
