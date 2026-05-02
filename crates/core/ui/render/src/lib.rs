@@ -226,15 +226,44 @@ mod tests {
 
     #[test]
     fn normalizes_on_prefixed_event_handler_names() {
-        let attrs = vec![Attribute {
-            name: "onclick".into(),
-            value: AttributeValue::EventHandler("openPanel".into()),
-        }];
+        let attrs = vec![
+            Attribute {
+                name: "onclick".into(),
+                value: AttributeValue::EventHandler("openPanel".into()),
+            },
+            Attribute {
+                name: "onchange".into(),
+                value: AttributeValue::EventHandler("updateValue".into()),
+            },
+            Attribute {
+                name: "onrelease".into(),
+                value: AttributeValue::EventHandler("finishDrag".into()),
+            },
+            Attribute {
+                name: "onfocus".into(),
+                value: AttributeValue::EventHandler("focusControl".into()),
+            },
+        ];
 
         let (_, _, _, handlers) = render::parse_attributes(&attrs, None);
 
         assert_eq!(handlers.get("click").map(String::as_str), Some("openPanel"));
+        assert_eq!(
+            handlers.get("change").map(String::as_str),
+            Some("updateValue")
+        );
+        assert_eq!(
+            handlers.get("release").map(String::as_str),
+            Some("finishDrag")
+        );
+        assert_eq!(
+            handlers.get("focus").map(String::as_str),
+            Some("focusControl")
+        );
         assert!(!handlers.contains_key("onclick"));
+        assert!(!handlers.contains_key("onchange"));
+        assert!(!handlers.contains_key("onrelease"));
+        assert!(!handlers.contains_key("onfocus"));
     }
 
     #[test]
