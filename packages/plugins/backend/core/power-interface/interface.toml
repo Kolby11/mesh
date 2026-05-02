@@ -1,31 +1,49 @@
-[[methods]]
-name = "battery"
-returns = "BatteryInfo"
+# Core state fields that every power provider must emit.
+# These are readable through the service proxy as plain field access
+# (e.g. `power.available`, `power.level`). They are never callable methods.
 
-[[methods]]
-name = "profile"
-returns = "PowerProfile"
+[[state_fields]]
+name = "available"
+type = "boolean"
+description = "Whether the power/battery service is reachable"
+
+[[state_fields]]
+name = "level"
+type = "float"
+description = "Battery charge level as a percentage (0.0–100.0)"
+
+[[state_fields]]
+name = "charging"
+type = "boolean"
+description = "Whether the battery is currently charging"
+
+[[state_fields]]
+name = "time_remaining_minutes"
+type = "integer"
+description = "Estimated minutes of battery life remaining (0 when charging or unavailable)"
+
+[[state_fields]]
+name = "time_to_full_minutes"
+type = "integer"
+description = "Estimated minutes until fully charged (0 when discharging or unavailable)"
+
+[[state_fields]]
+name = "source_plugin"
+type = "string"
+description = "Backend plugin ID that emitted this state (runtime-additive)"
+
+# Mutating command methods — the only proxy-callable surface.
+# Read-style accessors (battery, profile) are no longer command methods;
+# read from state fields or provider-emitted runtime extras instead.
 
 [[methods]]
 name = "set_profile"
-args = [{ name = "profile", type = "PowerProfile" }]
+args = [{ name = "profile", type = "string" }]
 returns = "Result"
 
 [[events]]
 name = "BatteryChanged"
-payload = "{ battery: BatteryInfo }"
-
-[types.BatteryInfo]
-fields = [
-  { name = "available", type = "boolean" },
-  { name = "level", type = "float" },
-  { name = "charging", type = "boolean" },
-  { name = "time_remaining_minutes", type = "integer" },
-  { name = "time_to_full_minutes", type = "integer" },
-  { name = "power_draw_watts", type = "float" },
-  { name = "energy_now_watt_hours", type = "float" },
-  { name = "energy_full_watt_hours", type = "float" }
-]
+payload = "{ level: float, charging: boolean }"
 
 [types.PowerProfile]
 fields = [

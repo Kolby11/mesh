@@ -1,14 +1,40 @@
-[[methods]]
+# Core state fields that every network provider must emit.
+# These are readable through the service proxy as plain field access
+# (e.g. `network.available`, `network.wifi_enabled`). They are never callable methods.
+
+[[state_fields]]
+name = "available"
+type = "boolean"
+description = "Whether the network service is reachable"
+
+[[state_fields]]
+name = "wifi_enabled"
+type = "boolean"
+description = "Whether Wi-Fi radio is enabled"
+
+[[state_fields]]
 name = "connections"
-returns = "[Connection]"
+type = "[Connection]"
+description = "Known network connections (active and inactive)"
 
-[[methods]]
+[[state_fields]]
 name = "devices"
-returns = "[Device]"
+type = "[Device]"
+description = "Network devices including Wi-Fi, Ethernet, and Bluetooth"
 
-[[methods]]
-name = "active_connection"
-returns = "Connection?"
+[[state_fields]]
+name = "networks"
+type = "[Connection]"
+description = "Available Wi-Fi networks from the last scan (runtime-additive)"
+
+[[state_fields]]
+name = "source_plugin"
+type = "string"
+description = "Backend plugin ID that emitted this state (runtime-additive)"
+
+# Mutating command methods — the only proxy-callable surface.
+# Read-style accessors (connections, devices, active_connection, wifi_scan) are
+# no longer command methods; read from state fields or provider-emitted extras.
 
 [[methods]]
 name = "connect"
@@ -19,10 +45,6 @@ returns = "Result"
 name = "disconnect"
 args = [{ name = "connection_id", type = "string" }]
 returns = "Result"
-
-[[methods]]
-name = "wifi_scan"
-returns = "[Connection]"
 
 [[methods]]
 name = "set_wifi_enabled"

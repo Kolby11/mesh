@@ -8,10 +8,25 @@ pub struct InterfaceContract {
     pub interface: String,
     pub version: Version,
     pub file_path: PathBuf,
+    /// Documented core state fields that providers must emit. These are read
+    /// through the service proxy as plain field access (e.g. `audio.percent`)
+    /// and are never callable methods.
+    pub state_fields: Vec<ContractStateField>,
+    /// Mutating command methods callable from frontend scripts. Read-style
+    /// accessors are NOT included here — they must use `state_fields` instead.
     pub methods: Vec<InterfaceMethod>,
     pub events: Vec<InterfaceEvent>,
     pub types: HashMap<String, InterfaceTypeDef>,
     pub capabilities: ContractCapabilities,
+}
+
+/// A documented core state field that providers must include in emitted payloads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractStateField {
+    pub name: String,
+    pub field_type: String,
+    #[allow(dead_code)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +103,15 @@ pub fn load_interface_contract(
             }
         })?,
         file_path: path,
+        state_fields: parsed
+            .state_fields
+            .into_iter()
+            .map(|field| ContractStateField {
+                name: field.name,
+                field_type: field.field_type,
+                description: field.description,
+            })
+            .collect(),
         methods: parsed
             .methods
             .into_iter()
@@ -164,6 +188,8 @@ pub fn parse_version_req(value: &str) -> Option<VersionReq> {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 struct ContractToml {
+    #[serde(default, rename = "state_fields")]
+    state_fields: Vec<ContractStateFieldToml>,
     #[serde(default)]
     methods: Vec<ContractMethodToml>,
     #[serde(default)]
@@ -172,6 +198,15 @@ struct ContractToml {
     types: HashMap<String, ContractTypeToml>,
     #[serde(default)]
     capabilities: ContractCapabilitiesToml,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ContractStateFieldToml {
+    name: String,
+    #[serde(rename = "type")]
+    field_type: String,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -272,5 +307,49 @@ required = ["service.thermal.read"]
             vec!["service.thermal.read".to_string()]
         );
         assert!(contract.types.contains_key("Sensor"));
+    }
+
+    #[test]
+    fn loads_state_fields_from_contract_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("interface.toml");
+        std::fs::write(
+            &file,
+            r#"
+[[state_fields]]
+name = "available"
+type = "boolean"
+description = "Whether the service is reachable"
+
+[[state_fields]]
+name = "percent"
+type = "float"
+
+[[methods]]
+name = "set_volume"
+args = [{ name = "value", type = "float" }]
+returns = "Result"
+
+[capabilities]
+required = ["service.audio.read"]
+"#,
+        )
+        .unwrap();
+
+        let contract =
+            load_interface_contract(dir.path(), "mesh.audio", "1.0", "interface.toml").unwrap();
+
+        assert_eq!(contract.state_fields.len(), 2);
+        assert_eq!(contract.state_fields[0].name, "available");
+        assert_eq!(contract.state_fields[0].field_type, "boolean");
+        assert_eq!(
+            contract.state_fields[0].description.as_deref(),
+            Some("Whether the service is reachable")
+        );
+        assert_eq!(contract.state_fields[1].name, "percent");
+        assert_eq!(contract.state_fields[1].description, None);
+        // Mutating command method remains
+        assert_eq!(contract.methods.len(), 1);
+        assert_eq!(contract.methods[0].name, "set_volume");
     }
 }

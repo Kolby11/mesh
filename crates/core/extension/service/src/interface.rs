@@ -237,10 +237,11 @@ mod tests {
             interface: "mesh.audio".into(),
             version: Version::parse("1.0.0").unwrap(),
             file_path: PathBuf::from("interface.toml"),
+            state_fields: vec![],
             methods: vec![InterfaceMethod {
-                name: "default_output".into(),
+                name: "volume_up".into(),
                 args: Vec::new(),
-                returns: Some("Device?".into()),
+                returns: None,
             }],
             events: vec![InterfaceEvent {
                 name: "VolumeChanged".into(),
@@ -300,6 +301,7 @@ mod tests {
             interface: "alice.thermal".into(),
             version: Version::parse("1.0.0").unwrap(),
             file_path: PathBuf::from("interface.toml"),
+            state_fields: Vec::new(),
             methods: Vec::new(),
             events: Vec::new(),
             types: HashMap::new(),

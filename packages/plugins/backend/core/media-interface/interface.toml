@@ -1,10 +1,40 @@
-[[methods]]
-name = "players"
-returns = "[MediaInfo]"
+# Core state fields that every media provider must emit.
+# These are readable through the service proxy as plain field access
+# (e.g. `media.available`, `media.title`). They are never callable methods.
 
-[[methods]]
-name = "active_player"
-returns = "MediaInfo?"
+[[state_fields]]
+name = "available"
+type = "boolean"
+description = "Whether a media player is active"
+
+[[state_fields]]
+name = "title"
+type = "string"
+description = "Title of the currently playing track"
+
+[[state_fields]]
+name = "artist"
+type = "string"
+description = "Artist of the currently playing track"
+
+[[state_fields]]
+name = "album"
+type = "string"
+description = "Album of the currently playing track"
+
+[[state_fields]]
+name = "state"
+type = "string"
+description = "Playback state: 'playing', 'paused', or 'stopped'"
+
+[[state_fields]]
+name = "source_plugin"
+type = "string"
+description = "Backend plugin ID that emitted this state (runtime-additive)"
+
+# Mutating command methods — the only proxy-callable surface.
+# Read-style accessors (players, active_player) are no longer command methods;
+# read from state fields or provider-emitted runtime extras instead.
 
 [[methods]]
 name = "play"
@@ -28,7 +58,7 @@ returns = "Result"
 
 [[events]]
 name = "PlaybackChanged"
-payload = "{ player: MediaInfo }"
+payload = "{ title: string, artist: string, state: string }"
 
 [types.MediaInfo]
 fields = [

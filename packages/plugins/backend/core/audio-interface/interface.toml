@@ -1,18 +1,30 @@
-[[methods]]
-name = "output_devices"
-returns = "[Device]"
+# Core state fields that every audio provider must emit.
+# These are readable through the service proxy as plain field access
+# (e.g. `audio.percent`, `audio.muted`). They are never callable methods.
 
-[[methods]]
-name = "input_devices"
-returns = "[Device]"
+[[state_fields]]
+name = "available"
+type = "boolean"
+description = "Whether the audio service is reachable"
 
-[[methods]]
-name = "streams"
-returns = "[Stream]"
+[[state_fields]]
+name = "percent"
+type = "float"
+description = "Current default output volume as a percentage (0.0–100.0)"
 
-[[methods]]
-name = "default_output"
-returns = "Device?"
+[[state_fields]]
+name = "muted"
+type = "boolean"
+description = "Whether the default output is muted"
+
+[[state_fields]]
+name = "source_plugin"
+type = "string"
+description = "Backend plugin ID that emitted this state (runtime-additive)"
+
+# Mutating command methods — the only proxy-callable surface.
+# Read-style accessors (default_output, output_devices, etc.) are no longer
+# command methods; use state field reads or provider-emitted runtime extras.
 
 [[methods]]
 name = "set_volume"
