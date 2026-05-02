@@ -1,12 +1,23 @@
 <template>
-  <button
-    class="volume-widget"
-    onclick={onVolumeClick}
-    title="{audio_tooltip}"
-    aria-label="{t('nav.open_audio')}"
-  >
-    <icon class="volume-glyph" name="{icon_name}" size="18" />
-  </button>
+  <row class="volume-widget" title="{audio_tooltip}">
+    <button
+      class="volume-button"
+      onclick={onVolumeClick}
+      title="{audio_tooltip}"
+      aria-label="{t('nav.open_audio')}"
+    >
+      <icon class="volume-glyph" name="{icon_name}" size="18" />
+    </button>
+    <slider
+      class="volume-inline-slider"
+      min="0"
+      max="1"
+      value="{slider_value}"
+      onchange={onVolumeChange}
+      title="{audio_tooltip}"
+      aria-label="Volume"
+    />
+  </row>
 </template>
 
 <script lang="luau">
@@ -15,16 +26,20 @@ if not audio_ok then audio = nil end
 
 icon_name = "audio-volume-muted"
 audio_tooltip = "Volume unavailable"
+audio_percent = 0
+slider_value = 0.0
 
-function onRender()
-    if not audio_ok or not audio then
-        icon_name = "audio-volume-muted"
-        audio_tooltip = "Audio service unavailable"
-        return
-    end
+local function clamp_volume(value)
+    local numeric = tonumber(value) or 0
+    if numeric < 0 then return 0.0 end
+    if numeric > 1 then return 1.0 end
+    return numeric
+end
 
-    local percent = audio.percent or 0
-    local muted = audio.muted or false
+local function update_audio_copy(percent, muted)
+    audio_percent = percent
+    slider_value = clamp_volume(percent / 100)
+
     if muted or percent == 0 then
         icon_name = "audio-volume-muted"
     elseif percent < 34 then
@@ -42,6 +57,33 @@ function onRender()
     end
 end
 
+function onRender()
+    if not audio_ok or not audio then
+        icon_name = "audio-volume-muted"
+        audio_tooltip = "Audio service unavailable"
+        audio_percent = 0
+        slider_value = 0.0
+        return
+    end
+
+    local percent = math.floor(tonumber(audio.percent) or 0)
+    if percent < 0 then percent = 0 end
+    if percent > 100 then percent = 100 end
+    local muted = audio.muted or false
+    update_audio_copy(percent, muted)
+end
+
+function onVolumeChange(value)
+    local normalized = clamp_volume(value)
+    local percent = math.floor((normalized * 100) + 0.5)
+    slider_value = normalized
+    update_audio_copy(percent, false)
+
+    if audio_ok and audio then
+        audio:set_volume("default", normalized)
+    end
+end
+
 function onVolumeClick(event)
     mesh.events.publish("shell.position-surface", {
         surface_id = "@mesh/volume-bar",
@@ -55,13 +97,14 @@ end
 
 <style>
 .volume-widget {
-    width: 44px;
+    width: 120px;
     height: 40px;
     flex-shrink: 0;
-    justify-content: center;
+    justify-content: start;
     align-items: center;
     padding-block: token(spacing.xs);
     padding-inline: token(spacing.xs);
+    gap: token(spacing.xs);
     border-radius: token(radius.sm);
     background: token(color.surface-container);
     color: token(color.on-surface);
@@ -72,11 +115,30 @@ end
     border-radius: token(radius.full);
 }
 
+.volume-button {
+    width: 34px;
+    height: 32px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    padding-block: token(spacing.xs);
+    padding-inline: token(spacing.xs);
+    border-radius: token(radius.sm);
+    background: transparent;
+    color: token(color.on-surface);
+}
+
 .volume-glyph {
     width: 30px;
     height: 28px;
     justify-content: center;
     align-items: center;
     color: token(color.on-secondary-container);
+}
+
+.volume-inline-slider {
+    width: 68px;
+    height: 24px;
+    flex-shrink: 0;
 }
 </style>
