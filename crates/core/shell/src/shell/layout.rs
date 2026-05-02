@@ -131,11 +131,7 @@ pub(super) fn find_click_handler(tree: &WidgetNode, key: &str) -> Option<String>
     find_event_handler(tree, key, "click")
 }
 
-pub(super) fn find_event_handler(
-    tree: &WidgetNode,
-    key: &str,
-    event_name: &str,
-) -> Option<String> {
+pub(super) fn find_event_handler(tree: &WidgetNode, key: &str, event_name: &str) -> Option<String> {
     find_node_by_key(tree, key)
         .and_then(|node| node.event_handlers.get(event_name))
         .cloned()

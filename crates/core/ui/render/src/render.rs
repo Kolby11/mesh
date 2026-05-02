@@ -502,3 +502,98 @@ fn accessibility_for_tag(tag: &str) -> AccessibilityInfo {
     info.focusable = matches!(tag, "button" | "input" | "slider");
     info
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_manifest() -> Manifest {
+        Manifest {
+            package: mesh_core_plugin::PackageSection {
+                id: "test".into(),
+                version: "0.1.0".into(),
+                plugin_type: mesh_core_plugin::PluginType::Widget,
+                api_version: "0.1.0".into(),
+                name: None,
+                license: None,
+                description: None,
+                authors: vec![],
+                repository: None,
+            },
+            compatibility: Default::default(),
+            dependencies: Default::default(),
+            capabilities: Default::default(),
+            entrypoints: Default::default(),
+            accessibility: None,
+            settings: None,
+            i18n: None,
+            theme: None,
+            service: None,
+            provides: vec![],
+            interface: None,
+            extensions: vec![],
+            exports: Default::default(),
+            provides_slots: Default::default(),
+            slot_contributions: Default::default(),
+            surface_layout: None,
+            assets: None,
+            translations: Default::default(),
+        }
+    }
+
+    fn find_tag<'a>(node: &'a WidgetNode, tag: &str) -> Option<&'a WidgetNode> {
+        if node.tag == tag {
+            return Some(node);
+        }
+        node.children.iter().find_map(|child| find_tag(child, tag))
+    }
+
+    #[test]
+    fn event_handler_attributes_normalize_to_widget_event_keys() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<template>
+  <box>
+    <button onclick={onTap}>Tap</button>
+    <input onchange={onInputChange} onfocus={onInputFocus} />
+    <slider onrelease={onSliderRelease} />
+  </box>
+</template>
+"#,
+        )
+        .unwrap();
+        let manifest = test_manifest();
+        let theme = mesh_core_theme::default_theme();
+
+        let tree = build_widget_tree_from_component(
+            &component,
+            &manifest,
+            &theme,
+            200.0,
+            80.0,
+            None,
+            "root",
+            None,
+            &[],
+        );
+
+        let button = find_tag(&tree, "button").expect("button node");
+        assert_eq!(button.event_handlers.get("click"), Some(&"onTap".into()));
+
+        let input = find_tag(&tree, "input").expect("input node");
+        assert_eq!(
+            input.event_handlers.get("change"),
+            Some(&"onInputChange".into())
+        );
+        assert_eq!(
+            input.event_handlers.get("focus"),
+            Some(&"onInputFocus".into())
+        );
+
+        let slider = find_tag(&tree, "slider").expect("slider node");
+        assert_eq!(
+            slider.event_handlers.get("release"),
+            Some(&"onSliderRelease".into())
+        );
+    }
+}
