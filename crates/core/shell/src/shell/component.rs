@@ -758,12 +758,29 @@ impl FrontendSurfaceComponent {
                         error_message,
                     );
                 }
+                Self::drain_script_diagnostics(&self.diagnostics, runtime);
                 continue;
             }
+            Self::drain_script_diagnostics(&self.diagnostics, runtime);
 
             if runtime.script_ctx.state().is_dirty() {
                 self.dirty = true;
             }
+        }
+    }
+
+    fn drain_script_diagnostics(
+        diagnostics: &Option<Diagnostics>,
+        runtime: &mut EmbeddedFrontendRuntime,
+    ) {
+        let Some(diagnostics) = diagnostics else {
+            return;
+        };
+        for diagnostic in runtime.script_ctx.drain_diagnostics() {
+            diagnostics.error(format!(
+                "interface '{}' unavailable for '{}': {}",
+                diagnostic.interface, diagnostic.plugin_id, diagnostic.reason
+            ));
         }
     }
 
@@ -1201,8 +1218,10 @@ impl FrontendSurfaceComponent {
                     error_message,
                 );
             }
+            Self::drain_script_diagnostics(&self.diagnostics, runtime);
             return Ok(Vec::new());
         }
+        Self::drain_script_diagnostics(&self.diagnostics, runtime);
         if runtime.script_ctx.state().is_dirty() {
             self.dirty = true;
         }
@@ -1475,14 +1494,17 @@ impl ShellComponent for FrontendSurfaceComponent {
                 source_plugin,
                 payload.clone(),
             );
+            let state_changed = runtime.script_ctx.state().is_dirty();
             if has_read {
                 runtime
                     .script_ctx
                     .apply_service_payload(&service_name, payload);
-                if tracked_service_fields_changed(previous.as_ref(), payload, &tracked_fields) {
-                    self.render_hooks_pending = true;
-                    self.dirty = true;
-                }
+            }
+            let tracked_fields_changed = has_read
+                && tracked_service_fields_changed(previous.as_ref(), payload, &tracked_fields);
+            if state_changed || tracked_fields_changed {
+                self.render_hooks_pending = true;
+                self.dirty = true;
             }
         }
         Ok(Vec::new())
@@ -1696,6 +1718,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         self.runtimes.lock().unwrap().clear();
         self.init_root_runtime()?;
+        self.render_hooks_pending = true;
         self.dirty = true;
         Ok(true)
     }
@@ -3082,6 +3105,66 @@ end
                 .or_else(|| node.children.iter().find_map(first_title))
         }
         assert_eq!(first_title(tree), Some("Volume 64%"));
+    }
+
+    #[test]
+    fn raw_service_state_update_schedules_repaint_without_proxy_tracking() {
+        let mut component = test_frontend_component(
+            r#"
+<template>
+  <box title="{last_service_update.name}" />
+</template>
+<script lang="luau">
+</script>
+"#,
+        );
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(240, 40);
+        component.paint(&theme, 240, 40, &mut buffer).unwrap();
+        component.dirty = false;
+
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.audio".into(),
+                source_plugin: "@mesh/pipewire-audio".into(),
+                payload: serde_json::json!({ "percent": 64, "muted": false }),
+            })
+            .unwrap();
+
+        assert!(
+            component.wants_render(),
+            "raw ScriptState changes should schedule repaint even without proxy tracking"
+        );
+        component.paint(&theme, 240, 40, &mut buffer).unwrap();
+        let tree = component.last_tree.as_ref().unwrap();
+        fn first_title(node: &WidgetNode) -> Option<&str> {
+            node.attributes
+                .get("title")
+                .map(String::as_str)
+                .or_else(|| node.children.iter().find_map(first_title))
+        }
+        assert_eq!(first_title(tree), Some("audio"));
+    }
+
+    #[test]
+    fn pcall_service_lookup_diagnostic_reaches_component_diagnostics() {
+        let mut component = test_frontend_component(
+            r#"
+<template><box /></template>
+<script lang="luau">
+function onRender()
+    pcall(require, "@mesh/missing@>=1.0")
+end
+</script>
+"#,
+        );
+
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(240, 40);
+        component.paint(&theme, 240, 40, &mut buffer).unwrap();
+
+        let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
+        assert_eq!(diagnostics.error_count(), 1);
     }
 
     #[test]
