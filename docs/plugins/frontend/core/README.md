@@ -116,7 +116,9 @@ function onVolumeChange(value)
     audio_tooltip = string.format("Volume %d%%", math.floor(normalized * 100))
 
     if audio_ok and audio then
-        audio:set_volume("default", normalized)
+        mesh.events.publish("mesh.audio.set-volume", {
+            percent = math.floor((normalized * 100) + 0.5),
+        })
     end
 end
 </script>

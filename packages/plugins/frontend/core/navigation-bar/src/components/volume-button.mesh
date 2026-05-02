@@ -80,7 +80,7 @@ function onVolumeChange(value)
     update_audio_copy(percent, false)
 
     if audio_ok and audio then
-        audio:set_volume("default", normalized)
+        mesh.events.publish("mesh.audio.set-volume", { percent = percent })
     end
 end
 

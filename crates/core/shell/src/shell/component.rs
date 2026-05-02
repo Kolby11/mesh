@@ -64,6 +64,7 @@ pub(super) struct FrontendSurfaceComponent {
     input_values: HashMap<String, String>,
     slider_values: HashMap<String, f32>,
     checked_values: HashMap<String, bool>,
+    render_hooks_pending: bool,
     pub(super) scroll_offsets: HashMap<String, ScrollOffsetState>,
     // Hover tracking for CSS :hover and tooltip system.
     hovered_key: Option<String>,
@@ -408,6 +409,7 @@ impl FrontendSurfaceComponent {
             input_values: HashMap::new(),
             slider_values: HashMap::new(),
             checked_values: HashMap::new(),
+            render_hooks_pending: true,
             scroll_offsets: HashMap::new(),
             hovered_key: None,
             hovered_path: Vec::new(),
@@ -579,6 +581,10 @@ impl FrontendSurfaceComponent {
     }
 
     fn build_tree(&mut self, theme: &Theme, width: u32, height: u32) -> WidgetNode {
+        if self.render_hooks_pending {
+            self.call_render_hooks();
+            self.render_hooks_pending = false;
+        }
         self.active_theme.replace(theme.clone());
         let root_state = self.runtime_state(self.id()).unwrap_or_default();
         let bound = LocaleBoundState::new(&root_state, &self.locale);
@@ -727,6 +733,38 @@ impl FrontendSurfaceComponent {
             return Ok(Vec::new());
         };
         self.call_namespaced_handler(&handler, args)
+    }
+
+    fn call_render_hooks(&mut self) {
+        let mut runtimes = self.runtimes.lock().unwrap();
+        for runtime in runtimes.values_mut() {
+            if !runtime.script_ctx.has_handler("onRender") {
+                continue;
+            }
+
+            if let Err(source) = runtime.script_ctx.call_handler("onRender", &[]) {
+                let component_id = runtime.plugin_id.clone();
+                let error_message = source.to_string();
+                tracing::warn!(
+                    component_id = %component_id,
+                    handler = "onRender",
+                    error = %error_message,
+                    "frontend render hook failed"
+                );
+                if let Some(diagnostics) = &self.diagnostics {
+                    diagnostics.record_handler_error(
+                        component_id,
+                        "onRender".to_string(),
+                        error_message,
+                    );
+                }
+                continue;
+            }
+
+            if runtime.script_ctx.state().is_dirty() {
+                self.dirty = true;
+            }
+        }
     }
 
     fn pointer_event_target_key(&self, tree: &WidgetNode, x: f32, y: f32) -> Option<String> {
@@ -1195,8 +1233,8 @@ impl FrontendSurfaceComponent {
             "height": height,
         });
         let position = serde_json::json!({
-            "margin_left": left as i32,
-            "margin_top": (bottom - tree.layout.height).max(0.0) as i32,
+            "margin_left": left.round() as i32,
+            "margin_top": bottom.round() as i32,
         });
         let tag = target.map(|node| node.tag.clone()).unwrap_or_default();
         let mut current_target = target
@@ -1386,6 +1424,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.load_plugin_i18n();
         self.load_catalog_i18n();
         self.init_root_runtime()?;
+        self.render_hooks_pending = true;
         self.dirty = true;
         Ok(vec![CoreRequest::PublishDiagnostics {
             message: format!(
@@ -1441,6 +1480,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                     .script_ctx
                     .apply_service_payload(&service_name, payload);
                 if tracked_service_fields_changed(previous.as_ref(), payload, &tracked_fields) {
+                    self.render_hooks_pending = true;
                     self.dirty = true;
                 }
             }
@@ -1578,6 +1618,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.locale.set_locale(locale.current());
         self.runtimes.lock().unwrap().clear();
         self.init_root_runtime()?;
+        self.render_hooks_pending = true;
         self.dirty = true;
         Ok(())
     }
@@ -2565,7 +2606,7 @@ function onVolumeChange(value)
     slider_value = normalized
     update_audio_copy(percent, false)
     if audio_ok and audio then
-        audio:set_volume("default", normalized)
+        mesh.events.publish("mesh.audio.set-volume", { percent = percent })
     end
 end
 </script>
@@ -2582,6 +2623,7 @@ end
             );
             runtime.script_ctx.call_handler("onRender", &[]).unwrap();
         }
+        component.render_hooks_pending = false;
 
         let mut slider = event_node(
             "slider",
@@ -2652,13 +2694,10 @@ end
                 },
             ] => {
                 assert_eq!(interface, "mesh.audio");
-                assert_eq!(command, "set_volume");
-                assert_eq!(
-                    payload,
-                    &serde_json::json!({ "device_id": "default", "volume": 0.5 })
-                );
+                assert_eq!(command, "set-volume");
+                assert_eq!(payload, &serde_json::json!({ "percent": 50 }));
             }
-            other => panic!("expected one mesh.audio.set_volume request, got {other:?}"),
+            other => panic!("expected one mesh.audio.set-volume request, got {other:?}"),
         }
 
         let mut buffer = PixelBuffer::new(240, 40);
@@ -2854,8 +2893,10 @@ end
 <template><box /></template>
 <script lang="luau">
 click_left = -1
+click_top = -1
 function onButtonClick(event)
     click_left = event.current_target.position.margin_left
+    click_top = event.current_target.position.margin_top
 end
 </script>
 "#,
@@ -2897,6 +2938,7 @@ end
             .unwrap();
 
         assert_eq!(runtime_number(&component, "click_left"), 32.0);
+        assert_eq!(runtime_number(&component, "click_top"), 28.0);
     }
 
     #[test]
@@ -2988,6 +3030,58 @@ end
         let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
         assert_eq!(diagnostics.error_count(), 1);
         assert!(!component.wants_render());
+    }
+
+    #[test]
+    fn service_update_runs_on_render_before_rebuilding_tree() {
+        let mut component = test_frontend_component_with_catalog(
+            r#"
+<template>
+  <box title="{audio_tooltip}" />
+</template>
+<script lang="luau">
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+
+audio_tooltip = "Volume unavailable"
+
+function onRender()
+    if not audio_ok or not audio then
+        audio_tooltip = "Audio service unavailable"
+        return
+    end
+    audio_tooltip = string.format("Volume %d%%", math.floor(tonumber(audio.percent) or 0))
+end
+</script>
+"#,
+            audio_network_catalog(),
+            &["service.audio.read"],
+        );
+
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.audio".into(),
+                source_plugin: "@mesh/pipewire-audio".into(),
+                payload: serde_json::json!({ "percent": 64, "muted": false }),
+            })
+            .unwrap();
+
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(240, 40);
+        component.paint(&theme, 240, 40, &mut buffer).unwrap();
+
+        assert_eq!(
+            runtime_value(&component, "audio_tooltip"),
+            Some(serde_json::json!("Volume 64%"))
+        );
+        let tree = component.last_tree.as_ref().unwrap();
+        fn first_title(node: &WidgetNode) -> Option<&str> {
+            node.attributes
+                .get("title")
+                .map(String::as_str)
+                .or_else(|| node.children.iter().find_map(first_title))
+        }
+        assert_eq!(first_title(tree), Some("Volume 64%"));
     }
 
     #[test]
