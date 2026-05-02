@@ -5,82 +5,167 @@ Frontend plugins render the shell UI. They are declared with
 `.mesh` component as their entrypoint.
 
 Frontends look up services **by interface name only** — never by backend plugin
-ID. If no implementation is registered, the lookup returns `nil` and the
-frontend is expected to degrade gracefully.
+ID. If no implementation is registered, `pcall(require, ...)` returns false and
+the frontend is expected to degrade gracefully with visible explanatory copy.
 
 The core's job here is generic: compile the `.mesh` file, host the Luau
 runtime, forward raw service payloads into script state, and route emitted
 events back into shell requests or backend commands. Frontend-specific display
 logic still lives in the plugin.
 
-Frontend composition now happens in two ways:
+## Reading service state
+
+Service proxies are a **state view and command surface**. Read state fields
+directly from the proxy on rerender; call named command methods for backend
+mutations. Do not use callback-style subscriptions — there are none.
+
+```luau
+-- Acquire the proxy with a version constraint.
+-- pcall catches failures so the surface degrades gracefully.
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+
+-- Reactive globals are the template's source of truth.
+volumeIcon = "audio-volume-muted"
+volumeLevel = "0%"
+
+-- onRender() is called by the shell on each rerender.
+-- Read proxy fields directly here — no callbacks needed.
+function onRender()
+    if not audio_ok or not audio then
+        -- Explicit user-visible copy for the degraded path.
+        volumeIcon = "audio-volume-muted"
+        volumeLevel = "0%"
+        return
+    end
+    local pct = audio.percent or 0
+    local muted = audio.muted or false
+    volumeLevel = string.format("%d%%", pct)
+    if muted or pct == 0 then
+        volumeIcon = "audio-volume-muted"
+    elseif pct < 34 then
+        volumeIcon = "audio-volume-low"
+    elseif pct < 67 then
+        volumeIcon = "audio-volume-medium"
+    else
+        volumeIcon = "audio-volume-high"
+    end
+end
+```
+
+The runtime tracks every top-level field read from the proxy (`audio.percent`,
+`audio.muted`, etc.) and rerenders the component only when those specific field
+values change in the next backend emission — not on every emission.
+
+## Issuing backend commands
+
+Write to a backend by calling a named command method on the proxy. The method
+publishes a `ServiceCommand` event to the backend's command channel. The backend
+handles it, emits updated state, and the frontend rerenders if any tracked field
+changed.
+
+```luau
+function onVolumeUp()
+    if audio_ok and audio then
+        audio.volume_up()
+    end
+end
+
+function onToggleWiFi()
+    local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+    if network_ok and network then
+        -- Read current state directly from the proxy, then send the command.
+        local enabled = network.wifi_enabled or false
+        network.set_wifi_enabled(not enabled)
+    end
+end
+```
+
+The command lifecycle is:
+1. Frontend calls a proxy command method (`audio.volume_up()`).
+2. Shell routes it as a `CoreRequest::ServiceCommand` to the backend.
+3. Backend handles it, emits updated state.
+4. Shell applies the updated payload; tracked fields are compared.
+5. Component is rerendered if any tracked field value changed.
+
+Do **not** mutate proxy fields directly — proxy reads are always sourced from
+the backend-emitted payload and are immutable on the frontend side.
+
+## Degraded-state pattern
+
+Always guard `require` calls with `pcall`. When a service is unavailable, show
+explicit user-readable fallback copy — not blank UI. The diagnostic system
+records the failed lookup even when `pcall` catches the Lua error, so operators
+can see which interfaces are missing.
+
+```luau
+-- Guard every service require.
+local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+if not network_ok then network = nil end
+
+wifi_networks = {}
+
+function onRender()
+    if not network_ok or not network then
+        -- Fallback copy that is user-visible in the Quick Settings drawer.
+        wifi_networks = {}
+        return
+    end
+    -- Read live state fields directly.
+    local nets = network.networks
+    wifi_networks = (type(nets) == "table") and nets or {}
+end
+```
+
+For text-based indicators, produce a non-empty string:
+
+```luau
+batteryText = "N/A"  -- shown in the panel when power service is absent
+```
+
+## Shell surface events
+
+Built-in shell surfaces route **surface toggle requests** through
+`mesh.events.publish(...)`. This is distinct from backend commands — do not
+confuse the two:
+
+```luau
+function onVolumeClick()
+    -- Shell event: asks the shell to toggle a named surface.
+    mesh.events.publish("shell.toggle-quick-settings", {})
+end
+
+function onClose()
+    mesh.events.publish("shell.close-quick-settings", {})
+end
+```
+
+Service mutations always go through proxy command methods. Shell UI transitions
+always go through `mesh.events.publish`.
+
+## Component imports
+
+Frontend composition happens in two ways:
 
 - Dependency-backed component imports: add a frontend plugin to
   `dependencies.plugins`, then import the plugin ID in the `<script>` block
-  and use the imported PascalCase alias in `<template>` markup
-- Slot hosting via `provides_slots` and `slot_contributions`
+  and use the imported PascalCase alias in `<template>` markup.
+- Slot hosting via `provides_slots` and `slot_contributions`.
 
 Built-in template primitives are lowercase (`<row>`, `<button>`, `<text>`).
-Custom component tags are PascalCase (`<CalendarCard />`) so component
+Custom component tags are PascalCase (`<AudioSection />`) so component
 boundaries are visually distinct from MESH primitives. They must be imported
-explicitly:
+explicitly in the `<script>` block:
 
 ```luau
+import AudioSection from "./components/audio-section.mesh"
+import WifiSection from "./components/wifi-section.mesh"
 import CalendarCard from "@mesh/calendar-card"
-import DetailsPanel from "./components/details-panel.mesh"
-import audio from "mesh.audio@>=1.0"
 ```
 
 If you create a reusable frontend component, export its custom tag explicitly in
 `plugin.json.exports.component.tag` so other plugins can consume it as a normal
 template tag.
-
-Common frontend pattern:
-
-```luau
-mesh.state.set("volume_icon_name", "audio-volume-muted")
-local audio = mesh.service.use("audio")
-audio:bind("muted", "audio_muted")
-audio:bind("percent", "audio_percent")
-audio:on_change("sync_audio_state")
-
-function sync_audio_state()
-    if audio_muted or audio_percent == 0 then
-        volume_icon_name = "audio-volume-muted"
-    elseif audio_percent < 67 then
-        volume_icon_name = "audio-volume-medium"
-    else
-        volume_icon_name = "audio-volume-high"
-    end
-end
-```
-
-`require("@mesh/<service>")` is available for request/response style
-lookups, but most reactive UI should treat service payloads as plugin-owned
-data and derive its own labels, icons, and tooltips locally.
-
-For interface-centric code, the proxy can now drive both sides of the flow:
-
-```luau
-function init()
-    local audio = require("@mesh/audio@>=1.0")
-    audio:bind("muted", "audio_muted")
-    audio:bind("percent", "audio_percent")
-    audio:on_change("sync_audio_state")
-end
-
-function set_volume(percent)
-    local audio = require("@mesh/audio@>=1.0")
-    audio:set_volume("default", percent / 100)
-end
-```
-
-That keeps the call site pure Lua while preserving a clean ownership model:
-reactive reads come from service state, while writes go through explicit
-interface methods.
-
-For a larger copyable composition example, see
-[`docs/plugins/frontend/examples/README.md`](../examples/README.md).
 
 ## The `.mesh` component format
 
@@ -90,7 +175,7 @@ these blocks:
 | Block                  | Purpose                                                                                                                                                                                                          |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `<template>`           | XHTML-like markup describing the UI tree. Dynamic attributes use `{}` and event handlers use `onclick={handler}`-style attributes.                                                                               |
-| `<script lang="luau">` | Luau code implementing state, service proxies such as `mesh.service.use("audio")`, reactive `:bind(...)` / `:on_change(...)` subscriptions, and event handlers.                                                 |
+| `<script lang="luau">` | Luau code implementing state, service proxy reads via `require("@mesh/<service>")`, display-state derivation in `onRender()`, and element event handlers.                                                       |
 | `<style>`              | CSS-like styling. Token references use `token(group.name)` and inherit the active theme. Supports `overflow`, `overflow-x`, `overflow-y`, and container breakpoints via `@container (min-width: 640px) { ... }`. |
 | `<i18n>`               | Translations scoped to the component (optional).                                                                                                                                                                 |
 
