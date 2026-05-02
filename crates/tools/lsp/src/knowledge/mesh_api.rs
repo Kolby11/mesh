@@ -21,30 +21,41 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
         description: "Read the current value of a state variable.",
         backend_only: false,
     },
-    // Service (frontend)
-    MeshApiEntry {
-        path: "service.bind",
-        signature: "mesh.service.bind(service_field: string, local_name: string)",
-        description: "Bind a service field (e.g. \"audio.volume\") to a Lua global. The global is updated whenever the service emits.",
-        backend_only: false,
-    },
-    MeshApiEntry {
-        path: "service.on",
-        signature: "mesh.service.on(service_name: string, handler: string)",
-        description: "Register a Lua function to call whenever a service emits an update.",
-        backend_only: false,
-    },
+    // Service proxy (frontend) — base interface + runtime-defined extras model
+    //
+    // Service proxies follow the base-interface-plus-runtime-extras model:
+    //
+    //   Guaranteed core state fields — documented in each interface's
+    //   [[state_fields]] contract table. Read as plain field access:
+    //     local audio = require("@mesh/audio@>=1.0")
+    //     local p = audio.percent   -- number (0.0–100.0)
+    //     local m = audio.muted     -- boolean
+    //
+    //   Runtime-defined extras — additive fields emitted by richer providers
+    //   (e.g. the NetworkManager provider emits `networks` and `source_plugin`
+    //   in addition to the base contract fields). These are also read as plain
+    //   field access but are not guaranteed by the portable base contract.
+    //
+    //   Mutating command methods — declared in [[methods]] of the interface
+    //   contract and callable from frontend scripts:
+    //     audio.volume_up()
+    //     audio.set_volume("sink-1", 0.75)
+    //     network.set_wifi_enabled(true)
+    //
+    //   There are no read-style helper methods (no default_output(), no
+    //   connections(), no active_player()). State discovery always comes
+    //   from emitted fields, never from callable read helpers.
     MeshApiEntry {
         path: "service.use",
         signature: "mesh.service.use(service_name: string) -> ServiceProxy",
-        description: "Create a Lua-friendly service proxy supporting `:bind(...)`, `:on_change(...)`, field reads, and interface methods when a contract exists.",
+        description: "Create a service proxy for the named interface. The proxy exposes guaranteed core state fields as plain field access (e.g. `proxy.percent`, `proxy.available`) and mutating command methods as callable functions (e.g. `proxy.volume_up()`). Richer provider-only runtime extras are also readable as plain fields. There are no read-style helper methods — all state comes from emitted fields.",
         backend_only: false,
     },
     // Service (backend)
     MeshApiEntry {
         path: "service.emit",
         signature: "mesh.service.emit(data: table)",
-        description: "Emit service state to all listening frontend plugins.",
+        description: "Emit service state to all listening frontend plugins. The table should include all guaranteed core state fields declared in [[state_fields]] of the interface contract, plus any additive runtime extras this provider exposes.",
         backend_only: true,
     },
     MeshApiEntry {

@@ -1,5 +1,8 @@
 -- NetworkManager backend.
--- Polls nmcli for connections and devices; handles connect/disconnect/scan commands.
+-- Dominant provider for mesh.network. Implements the base interface contract
+-- (available, wifi_enabled, connections, devices) and emits additive runtime
+-- extras (networks from the last scan, source_plugin identifier) on every poll.
+-- Handles connect/disconnect/set_wifi_enabled/wifi_scan commands.
 
 function init()
     mesh.service.set_poll_interval(15000)
@@ -76,9 +79,21 @@ local function fetch_bluetooth_devices()
     return devices
 end
 
+-- Determine whether the Wi-Fi radio is currently enabled via nmcli.
+local function fetch_wifi_enabled()
+    local result = mesh.exec_shell('nmcli radio wifi')
+    if not result.success then return false end
+    local out = result.stdout:match('^%s*(.-)%s*$') or ''
+    return out == 'enabled'
+end
+
 local function has_control()
     return mesh.service.has_capability('service.network.control')
 end
+
+-- Cache the last successful wifi scan so the networks list is available
+-- even between explicit scan commands.
+local last_networks = {}
 
 local warned = false
 function on_poll()
@@ -91,15 +106,23 @@ function on_poll()
         mesh.service.emit_unavailable()
         return
     end
+    warned = false
     local net_devices = fetch_net_devices() or {}
     local bt_devices = fetch_bluetooth_devices()
     for _, d in ipairs(bt_devices) do
         table.insert(net_devices, d)
     end
+    local wifi_on = fetch_wifi_enabled()
+
+    -- Emit base interface state fields plus runtime-defined extras.
+    -- Networks and source_plugin are additive surface that richer UIs can use.
     mesh.service.emit({
-        available = true,
-        connections = conns,
-        devices = net_devices,
+        available    = true,
+        wifi_enabled = wifi_on,
+        connections  = conns,
+        devices      = net_devices,
+        networks     = last_networks,
+        source_plugin = '@mesh/networkmanager',
     })
 end
 
@@ -152,7 +175,16 @@ function on_command_wifi_scan()
         local strength = math.floor(signal + 0.5)
         table.insert(networks, { id = bssid, name = ssid, kind = 'wifi', strength = strength, active = false })
     end
-    mesh.service.emit({ available = true, networks = networks })
+    -- Update the cached networks list so the next poll re-emits it.
+    last_networks = networks
+    mesh.service.emit({
+        available    = true,
+        wifi_enabled = fetch_wifi_enabled(),
+        connections  = fetch_connections() or {},
+        devices      = {},
+        networks     = networks,
+        source_plugin = '@mesh/networkmanager',
+    })
 end
 
 function on_command_set_wifi_enabled()

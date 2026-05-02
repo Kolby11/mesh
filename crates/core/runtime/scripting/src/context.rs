@@ -1023,12 +1023,10 @@ mod tests {
             interface: "mesh.audio".into(),
             version: parse_contract_version("1.0").unwrap(),
             file_path: PathBuf::from("<test>"),
+            // State fields are documented core reads — not callable methods.
+            state_fields: Vec::new(),
+            // Only mutating command methods belong here.
             methods: vec![
-                InterfaceMethod {
-                    name: "default_output".into(),
-                    args: Vec::new(),
-                    returns: Some("Device?".into()),
-                },
                 InterfaceMethod {
                     name: "set_volume".into(),
                     args: vec![
@@ -1042,6 +1040,21 @@ mod tests {
                         },
                     ],
                     returns: Some("Result".into()),
+                },
+                InterfaceMethod {
+                    name: "volume_up".into(),
+                    args: Vec::new(),
+                    returns: None,
+                },
+                InterfaceMethod {
+                    name: "volume_down".into(),
+                    args: Vec::new(),
+                    returns: None,
+                },
+                InterfaceMethod {
+                    name: "toggle_mute".into(),
+                    args: Vec::new(),
+                    returns: None,
                 },
             ],
             events: Vec::new(),
