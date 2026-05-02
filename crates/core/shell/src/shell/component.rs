@@ -6,7 +6,7 @@ use super::layout::{
 };
 use super::service::{apply_service_update, script_events_to_requests, seed_service_state};
 use super::surface_layout::{
-    SurfaceLayoutSettings, SurfaceSizePolicy, load_frontend_plugin_settings,
+    load_frontend_plugin_settings, SurfaceLayoutSettings, SurfaceSizePolicy,
 };
 use super::types::{
     ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, ServiceEvent,
@@ -14,18 +14,18 @@ use super::types::{
 };
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_elements::{
-    Corners, ElementState, StyleContext, StyleResolver, TransitionEasing, TransitionStyle,
-    VariableStore, WidgetNode, element_snapshot_json, style::Color,
+    element_snapshot_json, style::Color, Corners, ElementState, StyleContext, StyleResolver,
+    TransitionEasing, TransitionStyle, VariableStore, WidgetNode,
 };
 use mesh_core_locale::LocaleEngine;
-use mesh_core_plugin::PluginType;
 use mesh_core_plugin::lifecycle::PluginInstance;
+use mesh_core_plugin::PluginType;
 use mesh_core_render::{
-    CompiledFrontendPlugin, FrontendCompositionResolver, FrontendRenderMode,
-    compile_frontend_plugin, root_accessibility_role,
+    compile_frontend_plugin, root_accessibility_role, CompiledFrontendPlugin,
+    FrontendCompositionResolver, FrontendRenderMode,
 };
 use mesh_core_scripting::{LocaleBoundState, ScriptContext, ScriptInterfaceImport};
-use mesh_core_theme::{Theme, default_theme};
+use mesh_core_theme::{default_theme, Theme};
 use mesh_core_wayland::{Edge, ShellSurface};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::shell::ShellRunError;
-use mesh_core_render::{PixelBuffer, SharedTextMeasurer, paint_frontend_tree_at};
+use mesh_core_render::{paint_frontend_tree_at, PixelBuffer, SharedTextMeasurer};
 
 const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
 const TOOLTIP_OVERLAY_WIDTH: u32 = 260;
@@ -1361,6 +1361,8 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .script_ctx
                 .capabilities
                 .is_granted(&Capability::new(&required));
+            let previous = runtime.script_ctx.state().get(&service_name);
+            let tracked_fields = runtime.script_ctx.tracked_fields_for_service(&service_name);
             apply_service_update(
                 runtime.script_ctx.state_mut(),
                 has_read,
@@ -1371,11 +1373,12 @@ impl ShellComponent for FrontendSurfaceComponent {
             if has_read {
                 runtime
                     .script_ctx
-                    .apply_service_bindings(&service_name, &payload);
-                let _ = runtime.script_ctx.call_service_handlers(&service_name);
+                    .apply_service_payload(&service_name, payload);
+                if tracked_service_fields_changed(previous.as_ref(), payload, &tracked_fields) {
+                    self.dirty = true;
+                }
             }
         }
-        self.dirty = true;
         Ok(Vec::new())
     }
 
@@ -1772,6 +1775,18 @@ fn collect_visual_styles(root: &WidgetNode) -> HashMap<String, AnimatedVisualSty
     styles
 }
 
+fn tracked_service_fields_changed(
+    previous: Option<&serde_json::Value>,
+    next: &serde_json::Value,
+    tracked_fields: &HashSet<String>,
+) -> bool {
+    tracked_fields.iter().any(|field| {
+        let previous_value = previous.and_then(|value| value.get(field));
+        let next_value = next.get(field);
+        previous_value != next_value
+    })
+}
+
 fn collect_visual_styles_into(
     node: &WidgetNode,
     styles: &mut HashMap<String, AnimatedVisualStyle>,
@@ -1971,4 +1986,40 @@ pub(super) fn grant_capabilities_from_manifest(
     }
 
     granted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn service_update_marks_component_dirty_only_when_tracked_fields_change() {
+        let previous = serde_json::json!({
+            "percent": 65,
+            "muted": false,
+            "source_plugin": "@mesh/pipewire-audio"
+        });
+        let unchanged_tracked = serde_json::json!({
+            "percent": 65,
+            "muted": false,
+            "source_plugin": "@mesh/alternate-audio"
+        });
+        let changed_tracked = serde_json::json!({
+            "percent": 66,
+            "muted": false,
+            "source_plugin": "@mesh/alternate-audio"
+        });
+        let tracked_fields = HashSet::from(["percent".to_string(), "muted".to_string()]);
+
+        assert!(!tracked_service_fields_changed(
+            Some(&previous),
+            &unchanged_tracked,
+            &tracked_fields
+        ));
+        assert!(tracked_service_fields_changed(
+            Some(&previous),
+            &changed_tracked,
+            &tracked_fields
+        ));
+    }
 }

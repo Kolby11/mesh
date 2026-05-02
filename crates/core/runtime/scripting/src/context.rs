@@ -198,23 +198,6 @@ impl ScriptState {
     }
 }
 
-/// A reactive binding from a service field to a Lua global variable.
-/// Registered at runtime when scripts call
-/// `mesh.service.bind("service.field", "local_name")`.
-#[derive(Debug, Clone)]
-struct ServiceBinding {
-    var_name: String,
-    service: String,
-    field: String,
-}
-
-/// An explicit service subscription registered by `mesh.service.on`.
-#[derive(Debug, Clone)]
-struct ServiceSubscription {
-    service: String,
-    handler_name: String,
-}
-
 /// A script execution context for one component instance.
 ///
 /// Owns frontend script state, capability metadata, and the mlua runtime.
@@ -233,10 +216,7 @@ pub struct ScriptContext {
     /// Global names present before user script execution (stdlib + host API).
     /// Sync skips these so only user-defined globals become reactive state.
     builtin_globals: HashSet<String>,
-    /// Service bindings registered by `mesh.service.bind` at script load time.
-    runtime_service_bindings: Arc<Mutex<Vec<ServiceBinding>>>,
-    /// Service update handlers registered explicitly via `mesh.service.on`.
-    runtime_service_subscriptions: Arc<Mutex<Vec<ServiceSubscription>>>,
+    tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     published_events: Vec<PublishedEvent>,
     shared_published_events: Arc<Mutex<Vec<PublishedEvent>>>,
     diagnostics: Vec<ScriptDiagnostic>,
@@ -258,8 +238,7 @@ impl ScriptContext {
             interface_bindings: HashMap::new(),
             shared_interface_bindings: Arc::new(Mutex::new(HashMap::new())),
             builtin_globals: HashSet::new(),
-            runtime_service_bindings: Arc::new(Mutex::new(Vec::new())),
-            runtime_service_subscriptions: Arc::new(Mutex::new(Vec::new())),
+            tracked_service_fields: Arc::new(Mutex::new(HashMap::new())),
             published_events: Vec::new(),
             shared_published_events: Arc::new(Mutex::new(Vec::new())),
             diagnostics: Vec::new(),
@@ -287,8 +266,7 @@ impl ScriptContext {
         self.shared_interface_bindings.lock().unwrap().clear();
         self.shared_published_events.lock().unwrap().clear();
         self.shared_diagnostics.lock().unwrap().clear();
-        self.runtime_service_bindings.lock().unwrap().clear();
-        self.runtime_service_subscriptions.lock().unwrap().clear();
+        self.clear_tracked_service_fields();
         self.install_host_api()?;
         self.install_interface_imports(imports)?;
         // Snapshot all pre-script globals so auto-sync excludes them.
@@ -308,49 +286,32 @@ impl ScriptContext {
         Ok(())
     }
 
-    /// Copy service payload fields into bound Lua globals and script state.
+    /// Copy the latest service payload into the Lua runtime for proxy reads.
     ///
-    /// Called by core after each service update, before any subscribed handlers.
-    /// Bindings are registered at runtime via `mesh.service.bind(...)`.
-    pub fn apply_service_bindings(&mut self, service: &str, payload: &Value) {
-        let bindings = self.runtime_service_bindings.lock().unwrap().clone();
-        let updates: Vec<(String, Value)> = bindings
-            .iter()
-            .filter(|b| b.service == service)
-            .filter_map(|b| {
-                payload
-                    .get(&b.field)
-                    .map(|v| (b.var_name.clone(), v.clone()))
-            })
-            .collect();
-        for (var, val) in updates {
-            self.state.set(var.clone(), val.clone());
-            self.set_lua_global(&var, &val);
-        }
-        // Expose the full payload as __mesh_svc_{service} so interface proxies
-        // can read state fields directly without explicit bind() calls.
+    /// Called by core after each service update so interface proxies can read
+    /// state fields directly without explicit callback or binding APIs.
+    pub fn apply_service_payload(&mut self, service: &str, payload: &Value) {
         let svc_key = format!("__mesh_svc_{service}");
         if let Ok(lua_value) = self.lua.to_value(payload) {
             let _ = self.lua.globals().set(svc_key, lua_value);
         }
     }
 
-    /// Call all handlers registered for a specific service.
-    pub fn call_service_handlers(&mut self, service: &str) -> Result<(), ScriptError> {
-        let handlers: Vec<String> = self
-            .runtime_service_subscriptions
+    pub fn tracked_service_fields(&self) -> HashMap<String, HashSet<String>> {
+        self.tracked_service_fields.lock().unwrap().clone()
+    }
+
+    pub fn tracked_fields_for_service(&self, service: &str) -> HashSet<String> {
+        self.tracked_service_fields
             .lock()
             .unwrap()
-            .iter()
-            .filter(|subscription| subscription.service == service)
-            .map(|subscription| subscription.handler_name.clone())
-            .collect();
+            .get(service)
+            .cloned()
+            .unwrap_or_default()
+    }
 
-        for handler_name in handlers {
-            self.call_handler(&handler_name, &[])?;
-        }
-
-        Ok(())
+    pub fn clear_tracked_service_fields(&self) {
+        self.tracked_service_fields.lock().unwrap().clear();
     }
 
     /// Call the script's `init()` function if it exists.
@@ -435,50 +396,8 @@ impl ScriptContext {
         let has_theme_read = manifest.has_theme_read;
         let has_locale_read = manifest.has_locale_read;
 
-        let service_bindings = Arc::clone(&self.runtime_service_bindings);
-        mesh_core_service
-            .set(
-                "bind",
-                self.lua
-                    .create_function(move |lua, (path, alias): (String, Option<String>)| {
-                        let Some((service, field)) = path.split_once('.') else {
-                            return Ok(LuaValue::Nil);
-                        };
-                        let var_name = alias.unwrap_or_else(|| field.to_string());
-                        lua.globals().set(var_name.clone(), LuaValue::Nil)?;
-                        service_bindings.lock().unwrap().push(ServiceBinding {
-                            var_name,
-                            service: service.to_string(),
-                            field: field.to_string(),
-                        });
-                        Ok(LuaValue::Nil)
-                    })
-                    .map_err(lua_err)?,
-            )
-            .map_err(lua_err)?;
-
-        let service_subscriptions = Arc::clone(&self.runtime_service_subscriptions);
-        mesh_core_service
-            .set(
-                "on",
-                self.lua
-                    .create_function(move |_lua, (service, handler_name): (String, String)| {
-                        service_subscriptions
-                            .lock()
-                            .unwrap()
-                            .push(ServiceSubscription {
-                                service,
-                                handler_name,
-                            });
-                        Ok(LuaValue::Nil)
-                    })
-                    .map_err(lua_err)?,
-            )
-            .map_err(lua_err)?;
-
-        let service_bindings = Arc::clone(&self.runtime_service_bindings);
-        let service_subscriptions = Arc::clone(&self.runtime_service_subscriptions);
         let published_events = Arc::clone(&self.shared_published_events);
+        let tracked_service_fields = Arc::clone(&self.tracked_service_fields);
         let interface_catalog_for_service = interface_catalog.clone();
         let allowed_interfaces_for_service = allowed_interfaces.clone();
         let plugin_id_for_service = self.plugin_id.clone();
@@ -522,8 +441,7 @@ impl ScriptContext {
                             service_name_from_interface(&canonical),
                             resolution.contract.clone(),
                             canonical,
-                            Arc::clone(&service_bindings),
-                            Arc::clone(&service_subscriptions),
+                            Arc::clone(&tracked_service_fields),
                             Arc::clone(&published_events),
                         )
                     })
@@ -609,9 +527,8 @@ impl ScriptContext {
             .set("__mesh_request_redraw", false)
             .map_err(lua_err)?;
 
-        let service_bindings = Arc::clone(&self.runtime_service_bindings);
-        let service_subscriptions = Arc::clone(&self.runtime_service_subscriptions);
         let published_events = Arc::clone(&self.shared_published_events);
+        let tracked_service_fields = Arc::clone(&self.tracked_service_fields);
         let plugin_id_for_require = self.plugin_id.clone();
         let diagnostics_for_require = Arc::clone(&self.shared_diagnostics);
         let require = self
@@ -688,8 +605,7 @@ impl ScriptContext {
                 let proxy = create_interface_proxy(
                     lua,
                     resolution,
-                    Arc::clone(&service_bindings),
-                    Arc::clone(&service_subscriptions),
+                    Arc::clone(&tracked_service_fields),
                     Arc::clone(&published_events),
                 )?;
                 Ok(proxy)
@@ -751,8 +667,7 @@ impl ScriptContext {
             let proxy = create_interface_proxy(
                 &self.lua,
                 resolution,
-                Arc::clone(&self.runtime_service_bindings),
-                Arc::clone(&self.runtime_service_subscriptions),
+                Arc::clone(&self.tracked_service_fields),
                 Arc::clone(&self.shared_published_events),
             )
             .map_err(lua_err)?;
@@ -760,12 +675,6 @@ impl ScriptContext {
         }
 
         Ok(())
-    }
-
-    fn set_lua_global(&self, name: &str, value: &Value) {
-        if let Ok(lua_value) = self.lua.to_value(value) {
-            let _ = self.lua.globals().set(name, lua_value);
-        }
     }
 
     /// Sync Lua globals back into ScriptState.
@@ -895,8 +804,7 @@ fn interface_error_message(interface: &str, requested_version: Option<&str>) -> 
 fn create_interface_proxy(
     lua: &Lua,
     resolution: InterfaceResolution,
-    service_bindings: Arc<Mutex<Vec<ServiceBinding>>>,
-    service_subscriptions: Arc<Mutex<Vec<ServiceSubscription>>>,
+    tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
 ) -> mlua::Result<Table> {
     create_service_proxy(
@@ -904,8 +812,7 @@ fn create_interface_proxy(
         service_name_from_interface(&resolution.requested),
         resolution.contract,
         resolution.requested,
-        service_bindings,
-        service_subscriptions,
+        tracked_service_fields,
         published_events,
     )
 }
@@ -915,8 +822,7 @@ fn create_service_proxy(
     service_name: String,
     contract: Option<InterfaceContract>,
     interface_name: String,
-    service_bindings: Arc<Mutex<Vec<ServiceBinding>>>,
-    service_subscriptions: Arc<Mutex<Vec<ServiceSubscription>>>,
+    tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
 ) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
@@ -935,75 +841,11 @@ fn create_service_proxy(
         .map(|c| c.interface.clone())
         .filter(|name| !name.is_empty())
         .unwrap_or(interface_name);
-    let handler_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     meta.set(
         "__index",
         lua.create_function(move |lua, (_table, key): (Table, String)| {
-            // Case A: bind — backward-compat explicit field binding.
-            if key == "bind" {
-                let svc = service_name.clone();
-                let bindings = Arc::clone(&service_bindings);
-                return Ok(LuaValue::Function(lua.create_function(
-                    move |lua, args: mlua::Variadic<LuaValue>| {
-                        let offset = consume_self_arg(&args);
-                        let field =
-                            lua_value_to_string(args.get(offset).cloned().unwrap_or(LuaValue::Nil));
-                        if field.is_empty() {
-                            return Ok(LuaValue::Nil);
-                        }
-                        let alias = args
-                            .get(offset + 1)
-                            .cloned()
-                            .and_then(lua_string_arg)
-                            .unwrap_or_else(|| field.clone());
-                        lua.globals().set(alias.clone(), LuaValue::Nil)?;
-                        bindings.lock().unwrap().push(ServiceBinding {
-                            var_name: alias,
-                            service: svc.clone(),
-                            field,
-                        });
-                        Ok(LuaValue::Nil)
-                    },
-                )?));
-            }
-
-            // Case B: on_change — accepts a Lua function or a string handler name.
-            if key == "on_change" {
-                let svc = service_name.clone();
-                let subs = Arc::clone(&service_subscriptions);
-                let counter = Arc::clone(&handler_counter);
-                return Ok(LuaValue::Function(lua.create_function(
-                    move |lua, args: mlua::Variadic<LuaValue>| {
-                        let offset = consume_self_arg(&args);
-                        let arg = args.get(offset).cloned().unwrap_or(LuaValue::Nil);
-                        match arg {
-                            LuaValue::Function(f) => {
-                                let idx =
-                                    counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                let name = format!("__mesh_svc_handler_{}_{}", svc, idx);
-                                lua.globals().set(name.clone(), f)?;
-                                subs.lock().unwrap().push(ServiceSubscription {
-                                    service: svc.clone(),
-                                    handler_name: name,
-                                });
-                            }
-                            other => {
-                                let handler_name = lua_value_to_string(other);
-                                if !handler_name.is_empty() && handler_name != "nil" {
-                                    subs.lock().unwrap().push(ServiceSubscription {
-                                        service: svc.clone(),
-                                        handler_name,
-                                    });
-                                }
-                            }
-                        }
-                        Ok(LuaValue::Nil)
-                    },
-                )?));
-            }
-
-            // Case C: known contract method — dispatch as a service command.
+            // Case A: known contract method — dispatch as a service command.
             if let Some(method) = methods.iter().find(|m| m.name == key) {
                 let method = method.clone();
                 let iface = interface_name.clone();
@@ -1032,7 +874,13 @@ fn create_service_proxy(
                 )?));
             }
 
-            // Case D: state field read from the live service payload table.
+            // Case B: state field read from the live service payload table.
+            tracked_service_fields
+                .lock()
+                .unwrap()
+                .entry(service_name.clone())
+                .or_default()
+                .insert(key.clone());
             let svc_key = format!("__mesh_svc_{}", service_name);
             let tbl = match lua.globals().get::<LuaValue>(svc_key.as_str()) {
                 Ok(LuaValue::Table(t)) => Some(t),
@@ -1051,14 +899,6 @@ fn consume_self_arg(args: &mlua::Variadic<LuaValue>) -> usize {
     match args.get(0) {
         Some(LuaValue::Table(_)) => 1,
         _ => 0,
-    }
-}
-
-fn lua_string_arg(value: LuaValue) -> Option<String> {
-    match value {
-        LuaValue::String(value) => Some(value.to_string_lossy()),
-        LuaValue::Nil => None,
-        other => Some(lua_value_to_string(other)),
     }
 }
 
@@ -1241,12 +1081,10 @@ end
         ctx.set_interface_catalog(audio_catalog());
         ctx.load_script_with_interface_imports(
             r#"
-function init()
-    audio:bind("percent", "audio_percent")
-    audio:on_change("sync_audio_state")
-end
+audio_percent = 0
 
-function sync_audio_state()
+function init()
+    audio_percent = audio.percent or 0
 end
 "#,
             &[ScriptInterfaceImport {
@@ -1256,6 +1094,7 @@ end
             }],
         )
         .unwrap();
+        ctx.apply_service_payload("audio", &serde_json::json!({ "percent": 72 }));
         ctx.call_init().unwrap();
 
         assert_eq!(
@@ -1264,14 +1103,8 @@ end
                 .map(|resolution| resolution.requested.as_str()),
             Some("mesh.audio")
         );
-        assert_eq!(
-            ctx.runtime_service_bindings.lock().unwrap()[0].service,
-            "audio"
-        );
-        assert_eq!(
-            ctx.runtime_service_subscriptions.lock().unwrap()[0].service,
-            "audio"
-        );
+        assert_eq!(ctx.state.get("audio_percent"), Some(serde_json::json!(72)));
+        assert!(ctx.tracked_fields_for_service("audio").contains("percent"));
     }
 
     #[test]
@@ -1438,24 +1271,25 @@ end
     }
 
     #[test]
-    fn service_bindings_update_globals_and_trigger_handler() {
-        let caps = CapabilitySet::new();
+    fn interface_proxy_tracks_top_level_field_reads() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
         let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
         ctx.load_script(
             r#"
 icon_name = "audio-volume-muted"
-mesh.service.bind("audio.muted", "audio_muted")
-mesh.service.bind("audio.percent", "audio_percent")
-mesh.service.on("audio", "sync_audio_state")
 
 function sync_audio_state()
-    if audio_muted then
+    local audio = require("@mesh/audio@>=1.0")
+    local percent = audio.percent or 0
+    if audio.muted then
         icon_name = "audio-volume-muted"
     else
-        if audio_percent < 34 then
+        if percent < 34 then
             icon_name = "audio-volume-low"
         else
-            if audio_percent < 67 then
+            if percent < 67 then
                 icon_name = "audio-volume-medium"
             else
                 icon_name = "audio-volume-high"
@@ -1467,42 +1301,21 @@ end
         )
         .unwrap();
 
-        // Initial default
-        assert_eq!(
-            ctx.state.get("icon_name"),
-            Some(Value::String("audio-volume-muted".into()))
-        );
-
-        // Simulate 65% volume, not muted
         let payload = serde_json::json!({ "percent": 65, "muted": false });
-        ctx.apply_service_bindings("audio", &payload);
-        ctx.call_service_handlers("audio").unwrap();
+        ctx.apply_service_payload("audio", &payload);
+        ctx.call_handler("sync_audio_state", &[]).unwrap();
         assert_eq!(
             ctx.state.get("icon_name"),
             Some(Value::String("audio-volume-medium".into()))
         );
 
-        // High volume
-        let payload = serde_json::json!({ "percent": 90, "muted": false });
-        ctx.apply_service_bindings("audio", &payload);
-        ctx.call_service_handlers("audio").unwrap();
-        assert_eq!(
-            ctx.state.get("icon_name"),
-            Some(Value::String("audio-volume-high".into()))
-        );
-
-        // Muted
-        let payload = serde_json::json!({ "percent": 90, "muted": true });
-        ctx.apply_service_bindings("audio", &payload);
-        ctx.call_service_handlers("audio").unwrap();
-        assert_eq!(
-            ctx.state.get("icon_name"),
-            Some(Value::String("audio-volume-muted".into()))
-        );
+        let tracked = ctx.tracked_fields_for_service("audio");
+        assert!(tracked.contains("percent"));
+        assert!(tracked.contains("muted"));
     }
 
     #[test]
-    fn interface_proxy_can_bind_reactive_fields() {
+    fn interface_proxy_reads_state_fields_without_callbacks() {
         let mut caps = CapabilitySet::new();
         caps.grant(Capability::new("service.audio.read"));
         let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
@@ -1513,15 +1326,9 @@ icon_name = "audio-volume-muted"
 
 function init()
     local audio = require("@mesh/audio@>=1.0")
-    audio:bind("muted", "audio_muted")
-    audio:bind("percent", "audio_percent")
-    audio:on_change("sync_audio_state")
-end
-
-function sync_audio_state()
-    if audio_muted then
+    if audio.muted then
         icon_name = "audio-volume-muted"
-    elseif audio_percent < 50 then
+    elseif audio.percent < 50 then
         icon_name = "audio-volume-low"
     else
         icon_name = "audio-volume-high"
@@ -1530,11 +1337,9 @@ end
 "#,
         )
         .unwrap();
-        ctx.call_init().unwrap();
-
         let payload = serde_json::json!({ "percent": 80, "muted": false });
-        ctx.apply_service_bindings("audio", &payload);
-        ctx.call_service_handlers("audio").unwrap();
+        ctx.apply_service_payload("audio", &payload);
+        ctx.call_init().unwrap();
         assert_eq!(
             ctx.state.get("icon_name"),
             Some(Value::String("audio-volume-high".into()))
@@ -1542,7 +1347,7 @@ end
     }
 
     #[test]
-    fn service_use_can_bind_reactive_fields_without_require() {
+    fn service_use_reads_state_fields_without_callbacks() {
         let mut caps = CapabilitySet::new();
         caps.grant(Capability::new("service.audio.read"));
         let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
@@ -1553,12 +1358,7 @@ audio_icon = "audio-volume-muted"
 
 function init()
     local audio = mesh.service.use("audio")
-    audio:bind("muted", "audio_muted")
-    audio:on_change("sync_audio_state")
-end
-
-function sync_audio_state()
-    if audio_muted then
+    if audio.muted then
         audio_icon = "audio-volume-muted"
     else
         audio_icon = "audio-volume-high"
@@ -1567,11 +1367,10 @@ end
 "#,
         )
         .unwrap();
-        ctx.call_init().unwrap();
 
         let payload = serde_json::json!({ "muted": false });
-        ctx.apply_service_bindings("audio", &payload);
-        ctx.call_service_handlers("audio").unwrap();
+        ctx.apply_service_payload("audio", &payload);
+        ctx.call_init().unwrap();
         assert_eq!(
             ctx.state.get("audio_icon"),
             Some(Value::String("audio-volume-high".into()))
