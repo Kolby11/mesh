@@ -1373,6 +1373,28 @@ end
     }
 
     #[test]
+    fn mesh_request_redraw_marks_dirty_without_global_change() {
+        let caps = CapabilitySet::new();
+        let mut ctx = ScriptContext::new("@test/redraw", caps).unwrap();
+        ctx.load_script(
+            r#"
+function request()
+    __mesh_request_redraw = true
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.state.clear_dirty();
+        ctx.call_handler("request", &[]).unwrap();
+        assert!(ctx.state.is_dirty());
+
+        ctx.state.clear_dirty();
+        ctx.sync_state_from_lua();
+        assert!(!ctx.state.is_dirty());
+    }
+
+    #[test]
     fn if_then_end_executes_conditionally() {
         let caps = CapabilitySet::new();
         let mut ctx = ScriptContext::new("@test/if", caps).unwrap();
