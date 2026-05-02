@@ -10,16 +10,21 @@
 </template>
 
 <script lang="luau">
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+
 icon_name = "audio-volume-muted"
 audio_tooltip = "Volume unavailable"
 
-mesh.service.bind("audio.muted", "audio_muted")
-mesh.service.bind("audio.percent", "audio_percent")
-mesh.service.on("audio", "sync_audio_state")
+function onRender()
+    if not audio_ok or not audio then
+        icon_name = "audio-volume-muted"
+        audio_tooltip = "Audio service unavailable"
+        return
+    end
 
-function sync_audio_state()
-    local percent = audio_percent or 0
-    local muted = audio_muted or false
+    local percent = audio.percent or 0
+    local muted = audio.muted or false
     if muted or percent == 0 then
         icon_name = "audio-volume-muted"
     elseif percent < 34 then

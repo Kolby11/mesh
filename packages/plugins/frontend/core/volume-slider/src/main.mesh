@@ -10,7 +10,7 @@
     </box>
     <box class="volume-row">
       <button class="volume-step" onclick={onVolumeDown} title="Volume down" aria-label="Volume down">-</button>
-      <slider class="slider" min="0" max="100" value="{audio.percent}" mesh-action="audio-volume" title="{audio_tooltip}" aria-label="Volume" />
+      <slider class="slider" min="0" max="100" value="{audio_percent}" mesh-action="audio-volume" title="{audio_tooltip}" aria-label="Volume" />
       <button class="volume-step" onclick={onVolumeUp} title="Volume up" aria-label="Volume up">+</button>
     </box>
     <box class="actions">
@@ -23,14 +23,25 @@
 </template>
 
 <script lang="luau">
-local audio = require("@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
 
 icon_name = "audio-volume-muted"
 audio_label = "0%"
 audio_tooltip = "Volume unavailable"
 audio_backend = "Unavailable"
+audio_percent = 0
 
-audio.on_change(function()
+function onRender()
+    if not audio_ok or not audio then
+        icon_name = "audio-volume-muted"
+        audio_label = "0%"
+        audio_tooltip = "Audio service unavailable"
+        audio_backend = "Unavailable"
+        audio_percent = 0
+        return
+    end
+
     local p = audio.percent or 0
     local m = audio.muted or false
     if m or p == 0 then
@@ -42,23 +53,30 @@ audio.on_change(function()
     else
         icon_name = "audio-volume-high"
     end
+    audio_percent = p
     audio_label = string.format("%d%%", p)
     audio_backend = audio.source_plugin or "Unavailable"
     audio_tooltip = m
         and string.format("Volume muted at %d%%", p)
         or string.format("Volume %d%%", p)
-end)
+end
 
 function onVolumeDown()
-    audio.volume_down()
+    if audio_ok and audio then
+        audio.volume_down()
+    end
 end
 
 function onVolumeUp()
-    audio.volume_up()
+    if audio_ok and audio then
+        audio.volume_up()
+    end
 end
 
 function onToggleMute()
-    audio.toggle_mute()
+    if audio_ok and audio then
+        audio.toggle_mute()
+    end
 end
 
 function onClose()

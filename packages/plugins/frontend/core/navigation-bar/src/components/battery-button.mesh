@@ -11,20 +11,13 @@
 </template>
 
 <script lang="luau">
+local power_ok, power = pcall(require, "@mesh/power@>=1.0")
+if not power_ok then power = nil end
+
 battery_icon_name = "battery-empty"
 battery_label = "--%"
 battery_tooltip = "Battery status unavailable"
 battery_aria_label = "Battery status unavailable"
-
-mesh.service.bind("power.available", "power_available")
-mesh.service.bind("power.level", "power_level")
-mesh.service.bind("power.charging", "power_charging")
-mesh.service.bind("power.time_remaining_minutes", "power_time_remaining_minutes")
-mesh.service.bind("power.time_to_full_minutes", "power_time_to_full_minutes")
-mesh.service.bind("power.power_draw_watts", "power_power_draw_watts")
-mesh.service.bind("power.energy_now_watt_hours", "power_energy_now_watt_hours")
-mesh.service.bind("power.energy_full_watt_hours", "power_energy_full_watt_hours")
-mesh.service.on("power", "sync_power_state")
 
 function onBatteryClick(event)
     mesh.events.publish("shell.position-surface", {
@@ -80,8 +73,8 @@ function battery_icon_for(percent_value)
     return "battery-empty"
 end
 
-function sync_power_state()
-    if not power_available then
+function onRender()
+    if not power_ok or not power or not power.available then
         battery_icon_name = "battery-empty"
         battery_label = "N/A"
         battery_tooltip = "Battery status unavailable"
@@ -89,11 +82,11 @@ function sync_power_state()
         return
     end
 
-    local percent_value = round_percent(power_level)
-    local charging = power_charging or false
+    local percent_value = round_percent(power.level)
+    local charging = power.charging or false
     local remaining_label = charging
-        and format_minutes(power_time_to_full_minutes)
-        or format_minutes(power_time_remaining_minutes)
+        and format_minutes(power.time_to_full_minutes)
+        or format_minutes(power.time_remaining_minutes)
     local remaining_prefix = charging and "Time to full" or "Estimated remaining"
     local status_label = charging and "Charging" or "On battery"
 
@@ -105,8 +98,8 @@ function sync_power_state()
         percent_value,
         remaining_prefix,
         remaining_label,
-        format_watts(power_power_draw_watts),
-        format_capacity(power_energy_now_watt_hours, power_energy_full_watt_hours)
+        format_watts(power.power_draw_watts),
+        format_capacity(power.energy_now_watt_hours, power.energy_full_watt_hours)
     )
     battery_aria_label = string.format("Battery %d percent, %s", percent_value, status_label)
 end

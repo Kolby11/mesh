@@ -424,7 +424,7 @@ impl ScriptContext {
                         }
 
                         let resolution = interface_catalog_for_service.resolve(&canonical, None);
-                        if resolution.contract.is_none() || resolution.provider.is_none() {
+                        if resolution.provider.is_none() {
                             let reason =
                                 lookup_failure_reason(&interface_catalog_for_service, &resolution);
                             return Err(record_lookup_diagnostic_lua(
@@ -587,7 +587,7 @@ impl ScriptContext {
                 }
 
                 let resolution = interface_catalog.resolve(&canonical, version.as_deref());
-                if resolution.contract.is_none() || resolution.provider.is_none() {
+                if resolution.provider.is_none() {
                     let reason = lookup_failure_reason(&interface_catalog, &resolution);
                     return Err(record_lookup_diagnostic_lua(
                         &diagnostics_for_require,
@@ -645,7 +645,7 @@ impl ScriptContext {
             let resolution = self
                 .interface_catalog
                 .resolve(&canonical, import.version.as_deref());
-            if resolution.contract.is_none() || resolution.provider.is_none() {
+            if resolution.provider.is_none() {
                 let reason = lookup_failure_reason(&self.interface_catalog, &resolution);
                 record_lookup_diagnostic(
                     &self.shared_diagnostics,
@@ -1072,6 +1072,19 @@ mod tests {
         catalog
     }
 
+    fn theme_provider_only_catalog() -> InterfaceCatalog {
+        let mut catalog = InterfaceCatalog::default();
+        catalog.register_provider(InterfaceProvider {
+            interface: "mesh.theme".into(),
+            version: Some("1.0".into()),
+            base_plugin: None,
+            provider_plugin: "@mesh/shell-theme".into(),
+            backend_name: "Shell Theme".into(),
+            priority: 100,
+        });
+        catalog
+    }
+
     #[test]
     fn require_import_installs_proxy() {
         let mut caps = CapabilitySet::new();
@@ -1446,6 +1459,37 @@ end
             ctx.state.get("audio_icon"),
             Some(Value::String("audio-volume-high".into()))
         );
+    }
+
+    #[test]
+    fn provider_only_service_use_creates_read_only_proxy() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.theme.read"));
+        let mut ctx = ScriptContext::new("@test/theme-widget", caps).unwrap();
+        ctx.set_interface_catalog(theme_provider_only_catalog());
+        ctx.load_script(
+            r#"
+theme_icon = "weather-clear-night"
+
+function sync_theme_state()
+    local theme = mesh.service.use("theme")
+    if theme.is_dark then
+        theme_icon = "weather-clear-night"
+    else
+        theme_icon = "weather-clear"
+    end
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.apply_service_payload("theme", &serde_json::json!({ "is_dark": false }));
+        ctx.call_handler("sync_theme_state", &[]).unwrap();
+        assert_eq!(
+            ctx.state.get("theme_icon"),
+            Some(Value::String("weather-clear".into()))
+        );
+        assert!(ctx.drain_diagnostics().is_empty());
     }
 
     #[test]

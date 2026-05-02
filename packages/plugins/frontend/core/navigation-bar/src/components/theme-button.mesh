@@ -10,15 +10,21 @@
 </template>
 
 <script lang="luau">
-local theme = mesh.service.use("theme")
+local theme_ok, theme = pcall(mesh.service.use, "theme")
+if not theme_ok then theme = nil end
 
 theme_icon = "weather-clear-night"
 theme_tooltip = "Switch to light theme"
+theme_is_dark = true
 
-theme:bind("is_dark", "theme_is_dark")
-theme:on_change("sync_theme_state")
+function onRender()
+    if theme_ok and theme then
+        theme_is_dark = theme.is_dark
+        if theme_is_dark == nil then
+            theme_is_dark = true
+        end
+    end
 
-function sync_theme_state()
     if theme_is_dark then
         theme_icon = "weather-clear-night"
         theme_tooltip = "Switch to light theme"
