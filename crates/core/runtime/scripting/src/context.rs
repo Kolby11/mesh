@@ -93,7 +93,11 @@ impl ScriptState {
             }
         }
 
-        if self.variables.get(&name) == Some(&value) {
+        if self
+            .variables
+            .get(&name)
+            .is_some_and(|previous| reactive_values_equal(previous, &value))
+        {
             return;
         }
         self.variables.insert(name, value);
@@ -116,6 +120,36 @@ impl ScriptState {
     /// Reset the dirty flag after tree rebuild.
     pub fn clear_dirty(&mut self) {
         self.dirty = false;
+    }
+}
+
+fn reactive_values_equal(previous: &Value, next: &Value) -> bool {
+    match (previous, next) {
+        (Value::Object(previous), Value::Object(next)) => {
+            previous.len() == next.len()
+                && previous.iter().all(|(key, previous_value)| {
+                    next.get(key)
+                        .is_some_and(|next_value| shallow_table_entry_equal(previous_value, next_value))
+                })
+        }
+        (Value::Array(previous), Value::Array(next)) => {
+            previous.len() == next.len()
+                && previous
+                    .iter()
+                    .zip(next)
+                    .all(|(previous_value, next_value)| {
+                        shallow_table_entry_equal(previous_value, next_value)
+                    })
+        }
+        _ => previous == next,
+    }
+}
+
+fn shallow_table_entry_equal(previous: &Value, next: &Value) -> bool {
+    match (previous, next) {
+        (Value::Object(_), Value::Object(_)) => true,
+        (Value::Array(_), Value::Array(_)) => true,
+        _ => previous == next,
     }
 }
 
@@ -1268,6 +1302,74 @@ end
 
         ctx.call_handler("toggle", &[]).unwrap();
         assert_eq!(ctx.state.get("volumeHidden"), Some(Value::Bool(true)));
+    }
+
+    #[test]
+    fn reactive_global_marks_dirty_only_when_value_changes() {
+        let mut state = ScriptState::new();
+        state.set("count", serde_json::json!(1));
+        assert!(state.is_dirty());
+
+        state.clear_dirty();
+        state.set("count", serde_json::json!(1));
+        assert!(!state.is_dirty());
+
+        state.set("count", serde_json::json!(2));
+        assert!(state.is_dirty());
+    }
+
+    #[test]
+    fn reactive_table_uses_shallow_top_level_comparison() {
+        let mut state = ScriptState::new();
+        state.set(
+            "settings",
+            serde_json::json!({
+                "enabled": true,
+                "label": "primary",
+                "nested": { "value": 1 }
+            }),
+        );
+        assert!(state.is_dirty());
+
+        state.clear_dirty();
+        state.set(
+            "settings",
+            serde_json::json!({
+                "enabled": true,
+                "label": "primary",
+                "nested": { "value": 2 }
+            }),
+        );
+        assert!(!state.is_dirty());
+
+        state.set(
+            "settings",
+            serde_json::json!({
+                "enabled": false,
+                "label": "primary",
+                "nested": { "value": 2 }
+            }),
+        );
+        assert!(state.is_dirty());
+
+        state.clear_dirty();
+        state.set(
+            "settings",
+            serde_json::json!({
+                "enabled": false,
+                "label": "primary",
+                "extra": 1,
+                "nested": { "value": 2 }
+            }),
+        );
+        assert!(state.is_dirty());
+    }
+
+    #[test]
+    fn host_value_update_does_not_mark_dirty() {
+        let mut state = ScriptState::new();
+        state.set_host_value("elements", serde_json::json!({ "root": true }));
+        assert!(!state.is_dirty());
     }
 
     #[test]
