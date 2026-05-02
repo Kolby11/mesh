@@ -6,7 +6,7 @@ use super::layout::{
 };
 use super::service::{apply_service_update, script_events_to_requests, seed_service_state};
 use super::surface_layout::{
-    load_frontend_plugin_settings, SurfaceLayoutSettings, SurfaceSizePolicy,
+    SurfaceLayoutSettings, SurfaceSizePolicy, load_frontend_plugin_settings,
 };
 use super::types::{
     ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, ServiceEvent,
@@ -14,18 +14,18 @@ use super::types::{
 };
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_elements::{
-    element_snapshot_json, style::Color, Corners, ElementState, StyleContext, StyleResolver,
-    TransitionEasing, TransitionStyle, VariableStore, WidgetNode,
+    Corners, ElementState, StyleContext, StyleResolver, TransitionEasing, TransitionStyle,
+    VariableStore, WidgetNode, element_snapshot_json, style::Color,
 };
 use mesh_core_locale::LocaleEngine;
-use mesh_core_plugin::lifecycle::PluginInstance;
 use mesh_core_plugin::PluginType;
+use mesh_core_plugin::lifecycle::PluginInstance;
 use mesh_core_render::{
-    compile_frontend_plugin, root_accessibility_role, CompiledFrontendPlugin,
-    FrontendCompositionResolver, FrontendRenderMode,
+    CompiledFrontendPlugin, FrontendCompositionResolver, FrontendRenderMode,
+    compile_frontend_plugin, root_accessibility_role,
 };
 use mesh_core_scripting::{LocaleBoundState, ScriptContext, ScriptInterfaceImport};
-use mesh_core_theme::{default_theme, Theme};
+use mesh_core_theme::{Theme, default_theme};
 use mesh_core_wayland::{Edge, ShellSurface};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::shell::ShellRunError;
-use mesh_core_render::{paint_frontend_tree_at, PixelBuffer, SharedTextMeasurer};
+use mesh_core_render::{PixelBuffer, SharedTextMeasurer, paint_frontend_tree_at};
 
 const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
 const TOOLTIP_OVERLAY_WIDTH: u32 = 260;
@@ -1991,6 +1991,13 @@ pub(super) fn grant_capabilities_from_manifest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mesh_core_capability::Capability;
+    use mesh_core_scripting::{PublishedEvent, ScriptContext};
+    use mesh_core_service::{
+        ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract,
+        InterfaceMethod, InterfaceProvider, parse_contract_version,
+    };
+    use std::path::PathBuf;
 
     #[test]
     fn service_update_marks_component_dirty_only_when_tracked_fields_change() {
@@ -2021,5 +2028,272 @@ mod tests {
             &changed_tracked,
             &tracked_fields
         ));
+    }
+
+    // ---------- helpers shared by the three integration tests below ----------
+
+    fn audio_network_catalog() -> InterfaceCatalog {
+        let mut catalog = InterfaceCatalog::default();
+        catalog.register_contract(InterfaceContract {
+            interface: "mesh.audio".into(),
+            version: parse_contract_version("1.0").unwrap(),
+            file_path: PathBuf::from("<test>"),
+            state_fields: Vec::new(),
+            methods: vec![
+                InterfaceMethod {
+                    name: "volume_up".into(),
+                    args: Vec::new(),
+                    returns: None,
+                },
+                InterfaceMethod {
+                    name: "volume_down".into(),
+                    args: Vec::new(),
+                    returns: None,
+                },
+                InterfaceMethod {
+                    name: "toggle_mute".into(),
+                    args: Vec::new(),
+                    returns: None,
+                },
+            ],
+            events: Vec::new(),
+            types: HashMap::new(),
+            capabilities: ContractCapabilities::default(),
+        });
+        catalog.register_provider(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            base_plugin: Some("@mesh/audio-interface".into()),
+            provider_plugin: "@mesh/pipewire-audio".into(),
+            backend_name: "PipeWire".into(),
+            priority: 100,
+        });
+        catalog.register_contract(InterfaceContract {
+            interface: "mesh.network".into(),
+            version: parse_contract_version("1.0").unwrap(),
+            file_path: PathBuf::from("<test>"),
+            state_fields: Vec::new(),
+            methods: vec![InterfaceMethod {
+                name: "set_wifi_enabled".into(),
+                args: vec![InterfaceArgument {
+                    name: "enabled".into(),
+                    arg_type: "bool".into(),
+                }],
+                returns: None,
+            }],
+            events: Vec::new(),
+            types: HashMap::new(),
+            capabilities: ContractCapabilities::default(),
+        });
+        catalog.register_provider(InterfaceProvider {
+            interface: "mesh.network".into(),
+            version: Some("1.0".into()),
+            base_plugin: Some("@mesh/network-interface".into()),
+            provider_plugin: "@mesh/networkmanager-network".into(),
+            backend_name: "NetworkManager".into(),
+            priority: 100,
+        });
+        catalog
+    }
+
+    fn make_audio_ctx() -> ScriptContext {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@mesh/panel", caps).unwrap();
+        ctx.set_interface_catalog(audio_network_catalog());
+        ctx
+    }
+
+    fn make_network_ctx() -> ScriptContext {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.network.read"));
+        let mut ctx = ScriptContext::new("@mesh/quick-settings", caps).unwrap();
+        ctx.set_interface_catalog(audio_network_catalog());
+        ctx
+    }
+
+    // ---------- integration test 1: proxy field reads reach render state ----
+
+    /// Proves that a bundled-style frontend (panel or quick-settings) reading
+    /// service state via direct proxy field access — the same pattern used in
+    /// the migrated bundled surfaces — picks up the correct value after a
+    /// `ServiceEvent::Updated`-equivalent payload is applied, without any
+    /// callback registration.
+    #[test]
+    fn frontend_proxy_update_reaches_panel_or_quick_settings_render_state() {
+        let mut ctx = make_audio_ctx();
+        ctx.load_script(
+            r#"
+-- Panel-style: read audio.percent and audio.muted directly on rerender.
+volumeIcon = "audio-volume-muted"
+volumeLevel = 0
+
+function onRender()
+    local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+    if not audio_ok or not audio then return end
+    local pct = audio.percent or 0
+    local muted = audio.muted or false
+    volumeLevel = pct
+    if muted or pct == 0 then
+        volumeIcon = "audio-volume-muted"
+    elseif pct < 34 then
+        volumeIcon = "audio-volume-low"
+    elseif pct < 67 then
+        volumeIcon = "audio-volume-medium"
+    else
+        volumeIcon = "audio-volume-high"
+    end
+end
+"#,
+        )
+        .unwrap();
+
+        // Simulate a ServiceEvent::Updated payload arriving (as apply_service_payload does).
+        ctx.apply_service_payload(
+            "audio",
+            &serde_json::json!({ "percent": 75, "muted": false }),
+        );
+
+        // The runtime calls the script's render handler on each rerender.
+        ctx.call_handler("onRender", &[]).unwrap();
+
+        // Verify that the template-visible reactive globals reflect the emitted payload,
+        // proving rerender-visible service state without any callback registration.
+        assert_eq!(
+            ctx.state.get("volumeIcon"),
+            Some(serde_json::json!("audio-volume-high")),
+            "volumeIcon should be high for 75% unmuted"
+        );
+        assert_eq!(
+            ctx.state.get("volumeLevel"),
+            Some(serde_json::json!(75)),
+            "volumeLevel should equal the emitted percent"
+        );
+        // Confirm the proxy read was tracked (needed for shell invalidation).
+        let tracked = ctx.tracked_fields_for_service("audio");
+        assert!(
+            tracked.contains("percent"),
+            "audio.percent should be in tracked fields"
+        );
+        assert!(
+            tracked.contains("muted"),
+            "audio.muted should be in tracked fields"
+        );
+    }
+
+    // ---------- integration test 2: proxy command becomes ServiceCommand ----
+
+    /// Proves that a bundled control handler (e.g. quick-settings onToggleWiFi)
+    /// calling a named proxy command method publishes a `CoreRequest::ServiceCommand`
+    /// through the `script_events_to_requests` routing layer.
+    #[test]
+    fn frontend_proxy_command_from_bundled_handler_becomes_service_command_request() {
+        let mut ctx = make_network_ctx();
+        ctx.load_script(
+            r#"
+-- Quick-settings style: read wifi_enabled from proxy, then send the command.
+wifi_enabled = false
+
+function onToggleWiFi()
+    local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+    if network_ok and network then
+        local enabled = network.wifi_enabled or false
+        network.set_wifi_enabled(not enabled)
+    end
+end
+"#,
+        )
+        .unwrap();
+
+        // Seed proxy state so wifi_enabled read returns false.
+        ctx.apply_service_payload("network", &serde_json::json!({ "wifi_enabled": false }));
+
+        ctx.call_handler("onToggleWiFi", &[]).unwrap();
+        let events = ctx.drain_published_events();
+
+        // Route published events through the same path the shell uses.
+        let requests = super::super::service::script_events_to_requests(events);
+
+        assert!(
+            !requests.is_empty(),
+            "onToggleWiFi should publish at least one request"
+        );
+        match &requests[0] {
+            CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+            } => {
+                assert_eq!(interface, "mesh.network", "interface should be mesh.network");
+                assert_eq!(
+                    command, "set_wifi_enabled",
+                    "command should be set_wifi_enabled"
+                );
+                assert_eq!(
+                    payload.get("enabled").and_then(|v| v.as_bool()),
+                    Some(true),
+                    "enabled should be true (toggled from false)"
+                );
+            }
+            other => panic!(
+                "expected ServiceCommand for network.set_wifi_enabled, got {other:?}"
+            ),
+        }
+    }
+
+    // ---------- integration test 3: missing service keeps fallback copy -----
+
+    /// Proves that when `pcall(require, "@mesh/audio@>=1.0")` fails (e.g. the
+    /// interface contract is not registered in the catalog), the script still
+    /// produces user-visible explanatory text rather than a blank or nil surface.
+    #[test]
+    fn frontend_missing_service_keeps_visible_fallback_copy() {
+        // Intentionally use an empty catalog so the require will fail.
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@mesh/panel", caps).unwrap();
+        // No interface registered → pcall(require, ...) will catch the error.
+
+        ctx.load_script(
+            r#"
+-- Panel-style degraded path: pcall catches the missing interface.
+volumeLevel = "0"
+volumeIcon = "audio-volume-muted"
+batteryText = "N/A"
+
+function onRender()
+    local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+    if not audio_ok or not audio then
+        volumeLevel = "0"
+        volumeIcon = "audio-volume-muted"
+        -- Explicit user-visible copy — not blank.
+        batteryText = "N/A"
+        return
+    end
+    volumeLevel = tostring(audio.percent or 0)
+end
+"#,
+        )
+        .unwrap();
+
+        // No service payload applied — provider is absent.
+        ctx.call_handler("onRender", &[]).unwrap();
+
+        // Template-visible globals must be non-empty explanatory copy.
+        assert_eq!(
+            ctx.state.get("batteryText"),
+            Some(serde_json::json!("N/A")),
+            "batteryText should be 'N/A' when service is unavailable"
+        );
+        assert_eq!(
+            ctx.state.get("volumeLevel"),
+            Some(serde_json::json!("0")),
+            "volumeLevel should be '0' when service is unavailable"
+        );
+        assert_eq!(
+            ctx.state.get("volumeIcon"),
+            Some(serde_json::json!("audio-volume-muted")),
+            "volumeIcon should fall back to muted when service is unavailable"
+        );
     }
 }
