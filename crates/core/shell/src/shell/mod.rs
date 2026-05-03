@@ -451,7 +451,7 @@ impl Shell {
         );
 
         while !self.core.shutting_down {
-            self.reload_theme_if_changed()?;
+            pending.extend(self.reload_theme_if_changed()?);
             pending.extend(self.reload_locale_if_settings_changed()?);
             self.reload_plugin_settings_if_changed()?;
             self.reload_frontend_components_if_changed()?;
@@ -497,18 +497,19 @@ impl Shell {
         Ok(())
     }
 
-    fn reload_theme_if_changed(&mut self) -> Result<(), ShellRunError> {
+    fn reload_theme_if_changed(&mut self) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let Ok(metadata) = std::fs::metadata(&self.theme_watch.path) else {
-            return Ok(());
+            return Ok(VecDeque::new());
         };
         let Ok(modified_at) = metadata.modified() else {
-            return Ok(());
+            return Ok(VecDeque::new());
         };
 
         if self.theme_watch.modified_at == Some(modified_at) {
-            return Ok(());
+            return Ok(VecDeque::new());
         }
 
+        let old_theme_id = self.theme.active().id.clone();
         let theme = mesh_core_theme::load_theme_from_path(&self.theme_watch.path)
             .map_err(ShellRunError::Theme)?;
         tracing::info!(
@@ -519,7 +520,11 @@ impl Shell {
         self.theme.replace_active(theme);
         self.theme_watch.modified_at = Some(modified_at);
         self.mark_components_theme_changed()?;
-        Ok(())
+        let new_theme_id = self.theme.active().id.clone();
+        if new_theme_id != old_theme_id {
+            return self.sync_theme_service_state(&new_theme_id);
+        }
+        Ok(VecDeque::new())
     }
 
     fn reload_frontend_components_if_changed(&mut self) -> Result<(), ShellRunError> {
