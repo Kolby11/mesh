@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 /// - `init()` — required backend entrypoint called once after script load
 /// - `mesh.service.set_poll_interval(ms)` — set polling interval
 /// - `mesh.exec("program", {"arg1", "arg2"})` — run a system command
-/// - `mesh.config()` — return plugin settings as a Lua table
+/// - `mesh.config()` — return the full plugin settings Lua table
 /// - `mesh.service.emit(table)` — emit service state
 /// - `mesh.service.emit_json(value?)` — parse JSON text or emit a Lua table directly
 /// - `mesh.service.emit_unavailable()` — emit unavailable state
@@ -763,16 +763,23 @@ mod tests {
             "@test/backend",
             serde_json::json!({
                 "enabled": true,
-                "nested": { "name": "demo" },
+                "nested": {
+                    "name": "demo",
+                    "features": ["audio", "network"],
+                },
             }),
         );
         ctx.load_script(
-            "function init()\nend\nfunction on_poll()\nlocal cfg = mesh.config()\nmesh.service.emit({ enabled = cfg.enabled, name = cfg.nested.name })\nend",
+            "function init()\nend\nfunction on_poll()\nlocal cfg = mesh.config()\nmesh.service.emit({ enabled = cfg.enabled, name = cfg.nested.name, first_feature = cfg.nested.features[1] })\nend",
         )
         .unwrap();
         let payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(payload.get("enabled").and_then(|v| v.as_bool()), Some(true));
         assert_eq!(payload.get("name").and_then(|v| v.as_str()), Some("demo"));
+        assert_eq!(
+            payload.get("first_feature").and_then(|v| v.as_str()),
+            Some("audio")
+        );
     }
 
     #[test]

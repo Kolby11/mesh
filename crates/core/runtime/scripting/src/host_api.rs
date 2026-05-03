@@ -13,9 +13,7 @@
 /// mesh.service.use(name)      → service proxy  (frontend helper)
 /// mesh.locale.current()       → string         (requires locale.read)
 /// mesh.locale.translate(key)  → string         (requires locale.read)
-/// mesh.config.get(key)        → value
-/// mesh.config.get_all()       → table
-/// mesh.config()               → table          (backend helper)
+/// mesh.config()               → table          (backend helper; full plugin settings)
 /// mesh.exec(program, args)    → table          (backend helper)
 /// mesh.service.set_poll_interval(ms)           (backend helper)
 /// mesh.events.subscribe(ch, cb) → subscription
