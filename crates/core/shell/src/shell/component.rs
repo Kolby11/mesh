@@ -2695,7 +2695,7 @@ end
 </script>
 "#,
             audio_network_catalog(),
-            &["service.audio.read"],
+            &["service.audio.read", "service.audio.control"],
         );
         {
             let mut runtimes = component.runtimes.lock().unwrap();
