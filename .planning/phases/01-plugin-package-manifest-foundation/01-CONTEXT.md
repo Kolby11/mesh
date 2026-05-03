@@ -21,7 +21,6 @@ This phase delivers the shell-owned `~/.mesh/package.json` installed-module mani
 - **D-05:** The package graph should be normalized from two inputs: the shell-owned `~/.mesh/package.json` installed-state manifest and each referenced module's existing normalized `Manifest`.
 - **D-06:** The manifest should be designed so the shell can find an entrypoint that defines the base shell layout from installed frontend modules. The exact key name and entrypoint representation are planner/researcher decisions, but the concept is locked.
 
-### Plugin Dependency Model
 ### Module Naming Convention
 - **D-07:** User-facing naming should change from "plugins" to "modules" because modules better describes the extensibility model. Downstream work should research and plan the migration impact rather than continuing to expand product-facing "plugin" terminology.
 - **D-08:** Existing Rust/code internals may still use `Plugin*` names during a compatibility transition if a full rename is too broad for Phase 1, but new user-visible config structure, docs, and schema concepts should point toward modules.
