@@ -750,6 +750,65 @@ mod tests {
         assert_backend_command_handler_error_becomes_failed_result().await;
     }
 
+    async fn assert_bundled_command_handler_returns_result_table() {
+        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../packages/plugins/backend/core/pipewire-audio/src/main.luau");
+        let script = std::fs::read_to_string(script_path).unwrap();
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@mesh/pipewire-audio".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            script,
+            event_tx,
+            cmd_rx,
+        ));
+
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "play-sound".to_string(),
+                payload: serde_json::json!({ "path": "../blocked.wav" }),
+            })
+            .unwrap();
+
+        let result = next_command_result(
+            &mut event_rx,
+            "bundled provider command should return a result table",
+        )
+        .await;
+        assert_eq!(result.service, "audio");
+        assert_eq!(result.source_plugin, "@mesh/pipewire-audio");
+        assert_eq!(result.command, "play-sound");
+        assert_eq!(
+            result.result.get("ok").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            result.result.get("error").and_then(|v| v.as_str()),
+            Some("invalid sound path")
+        );
+
+        drop(cmd_tx);
+        drop(event_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn bundled_command_handler_returns_result_table() {
+        assert_bundled_command_handler_returns_result_table().await;
+    }
+
+    #[tokio::test]
+    async fn bundled_command_result_handler_returns_result_table() {
+        assert_bundled_command_handler_returns_result_table().await;
+    }
+
     #[tokio::test]
     async fn spawn_backend_service_emits_init_failed_and_does_not_poll_or_dispatch_commands() {
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();

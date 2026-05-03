@@ -534,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn emit_stores_pending_payload() {
+    fn mesh_service_emit_remains_compatibility_state_setter() {
         let mut ctx = BackendScriptContext::new("@test/backend");
         ctx.load_script(
             "function init()\nend\nfunction on_poll()\nmesh.service.emit({ available = true, percent = 65 })\nend",
@@ -657,6 +657,56 @@ mod tests {
         assert_eq!(
             payload.get("is_dark").and_then(|v| v.as_bool()),
             Some(false)
+        );
+    }
+
+    #[test]
+    fn bundled_audio_provider_exports_state() {
+        let script = bundled_backend_script(
+            "../../../../packages/plugins/backend/core/pipewire-audio/src/main.luau",
+        );
+        let mut ctx = BackendScriptContext::new("@mesh/pipewire-audio");
+        ctx.load_script(&script).unwrap();
+
+        let payload = ctx.call_init().unwrap().unwrap();
+
+        assert_eq!(
+            payload.get("available").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(0));
+        assert_eq!(payload.get("muted").and_then(|v| v.as_bool()), Some(false));
+        assert!(
+            payload.get("source_plugin").is_none(),
+            "provider-authored source identity must not be public state"
+        );
+    }
+
+    #[test]
+    fn bundled_network_provider_exports_state() {
+        let script = bundled_backend_script(
+            "../../../../packages/plugins/backend/core/networkmanager-network/src/main.luau",
+        );
+        let mut ctx = BackendScriptContext::new("@mesh/networkmanager");
+        ctx.load_script(&script).unwrap();
+
+        let payload = ctx.call_init().unwrap().unwrap();
+
+        assert_eq!(
+            payload.get("available").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            payload.get("wifi_enabled").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        let exported_state = ctx.lua.globals().get::<Table>("state").unwrap();
+        assert!(exported_state.get::<Table>("connections").is_ok());
+        assert!(exported_state.get::<Table>("devices").is_ok());
+        assert!(exported_state.get::<Table>("networks").is_ok());
+        assert!(
+            payload.get("source_plugin").is_none(),
+            "provider-authored source identity must not be public state"
         );
     }
 
