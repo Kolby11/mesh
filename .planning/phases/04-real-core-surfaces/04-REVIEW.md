@@ -1,6 +1,6 @@
 ---
 phase: 04-real-core-surfaces
-reviewed: 2026-05-03T07:32:00Z
+reviewed: 2026-05-03T12:22:30Z
 depth: quick
 files_reviewed: 12
 files_reviewed_list:
@@ -24,31 +24,23 @@ findings:
 status: clean
 ---
 
-# Phase 04: Post-Gap Code Review
+# Phase 04: Code Review Report
 
-**Reviewed:** 2026-05-03T07:32:00Z  
-**Depth:** quick  
+**Reviewed:** 2026-05-03T12:22:30Z
+**Depth:** quick
+**Files Reviewed:** 12
 **Status:** clean
 
-## Findings
+## Summary
 
-No blocking issues found in the Phase 4 gap-closure changes.
+Quick-depth regex scanning was run across the explicit Phase 04 file list for hardcoded secrets, dangerous execution APIs, debug artifacts, empty catch blocks, and commented-out code patterns.
 
-## Review Notes
+No hardcoded secrets, debug artifacts, or empty catch blocks were found. The dangerous-function pattern matched expected runtime/provider execution APIs (`mlua` script execution and `mesh.exec` provider calls), but the current provider command sites use structured argv execution with UUID, Bluetooth MAC, or sounds-directory validation instead of payload interpolation into shell commands. Comment-pattern matches were Rust attributes/doc comments, not actionable commented-out code.
 
-- The stale network-list blocker is closed by full `serde_json::Value` equality for reactive state.
-- Read-only service proxies now deny contract command methods before publishing events.
-- Script-published events and `CoreRequest::ServiceCommand` carry source plugin and capabilities, and shell dispatch re-checks `service.<name>.control`.
-- NetworkManager connect/disconnect now consume `connection_id` and reject empty IDs.
-- Audio `set_muted` exists in both bundled providers.
-- Audio `play_sound` validates path and uses structured `mesh.exec("aplay", { path })`.
-- Panel and quick-settings route through `shell.toggle-surface` and `shell.hide-surface` with `surface_id = "@mesh/quick-settings"`.
-- Public frontend docs now teach the supported shell surface events.
+All reviewed files meet the quick-review quality gate. No BLOCKER or WARNING findings were found.
 
-## Verification Reviewed
+---
 
-- `cargo test -p mesh-core-scripting -- --nocapture` passed.
-- `cargo test -p mesh-core-service -- --nocapture` passed.
-- `cargo test -p mesh-core-backend -- --nocapture` passed.
-- Shell crate tests remain blocked by missing `xkbcommon.pc` for `smithay-client-toolkit`; static routing and authorization checks passed.
-
+_Reviewed: 2026-05-03T12:22:30Z_
+_Reviewer: the agent (gsd-code-reviewer)_
+_Depth: quick_
