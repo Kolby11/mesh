@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Scripting API Stabilization
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-05-03T06:32:27.185Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-05-03T06:42:07.921Z"
 last_activity: 2026-05-03
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 12
-  completed_plans: 10
-  percent: 83
+  completed_plans: 11
+  percent: 92
 ---
 
 # State: MESH v1.0
@@ -26,7 +26,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-01)
 ## Current Position
 
 Phase: 04 (real-core-surfaces) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-05-03
 
@@ -44,6 +44,9 @@ Last activity: 2026-05-03
 - [Phase 03]: Plan 03 proof lives in the shipped navigation-bar volume widget with a typed onchange slider and audio:set_volume command path.
 - [Phase 04]: Audio set_volume payload normalization remains in Luau providers; Rust core only verifies generic proxy publication and backend dispatch. — Preserves the Phase 4 architectural rule that service-specific command behavior stays out of Rust core.
 - [Phase 04]: Bundled audio providers preserve legacy percent payload compatibility while accepting normalized volume payloads. — Keeps existing command callers working while quick settings moves to the finalized proxy payload shape.
+- [Phase 04]: Quick settings audio uses the finalized direct proxy call `audio.set_volume("default", normalized)` for slider changes.
+- [Phase 04]: Quick settings Wi-Fi rows remain guarded and display-only when provider data lacks a non-empty network id.
+- [Phase 04]: Unavailable and permission-denied states are visible in quick settings while technical details stay in logs and diagnostics.
 
 ## Performance Metrics
 
@@ -53,11 +56,12 @@ Last activity: 2026-05-03
 | Phase 03 P02 | 9min | 3 tasks | 7 files |
 | Phase 03 P03 | 5min | 3 tasks | 4 files |
 | Phase 04 P01 | 3min | 3 tasks | 5 files |
+| Phase 04 P02 | 6min | 3 tasks | 5 files |
 
 ## Session
 
-Last session: 2026-05-03T06:32:26.900Z
-Stopped At: Completed 04-01-PLAN.md
+Last session: 2026-05-03T06:42:07.907Z
+Stopped At: Completed 04-02-PLAN.md
 Resume File: None
 
 ## Accumulated Context

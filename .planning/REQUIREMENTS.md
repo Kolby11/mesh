@@ -34,10 +34,10 @@
 ### Core Services and Surfaces
 
 - [ ] **SURF-01**: The top panel renders live data from at least one real backend service.
-- [ ] **SURF-02**: The quick settings surface renders live audio state from a real backend provider.
+- [x] **SURF-02**: The quick settings surface renders live audio state from a real backend provider.
 - [x] **SURF-03**: The quick settings surface can change audio volume and mute state through service commands.
-- [ ] **SURF-04**: The quick settings surface renders live network state from a real backend provider.
-- [ ] **SURF-05**: The quick settings surface can toggle or command network state through the service proxy contract where supported.
+- [x] **SURF-04**: The quick settings surface renders live network state from a real backend provider.
+- [x] **SURF-05**: The quick settings surface can toggle or command network state through the service proxy contract where supported.
 - [ ] **SURF-06**: Audio, network, power, and media service contracts document their state fields, callbacks, and commands.
 
 ### Icon Rendering
@@ -104,10 +104,10 @@
 | FRONT-04 | Phase 3 | Complete |
 | FRONT-05 | Phase 3 | Complete |
 | SURF-01 | Phase 4 | Pending |
-| SURF-02 | Phase 4 | Pending |
+| SURF-02 | Phase 4 | Complete |
 | SURF-03 | Phase 4 | Complete |
-| SURF-04 | Phase 4 | Pending |
-| SURF-05 | Phase 4 | Pending |
+| SURF-04 | Phase 4 | Complete |
+| SURF-05 | Phase 4 | Complete |
 | SURF-06 | Phase 2 | Pending |
 | ICON-01 | Phase 5 | Pending |
 | ICON-02 | Phase 5 | Pending |
