@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Scripting API Stabilization
-status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-05-03T07:16:25.683Z"
-last_activity: 2026-05-03 -- Phase 04 planning complete
+status: ready_for_verification
+stopped_at: Completed Phase 04 gap-closure plans
+last_updated: "2026-05-03T07:26:33.646Z"
+last_activity: 2026-05-03 -- Phase 04 gap-closure plans complete
 progress:
   total_phases: 7
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 15
-  completed_plans: 12
-  percent: 80
+  completed_plans: 15
+  percent: 100
 ---
 
 # State: MESH v1.0
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-01)
 
 **Core value:** A developer with zero MESH knowledge can write a working top panel plugin and backend service in one sitting, guided only by the API documentation.
-**Current focus:** Phase 04 — real-core-surfaces
+**Current focus:** Phase 04 — real-core-surfaces verification
 
 ## Current Position
 
-Phase: 04 (real-core-surfaces) — EXECUTING
-Plan: 3 of 3
-Status: Ready to execute
-Last activity: 2026-05-03 -- Phase 04 planning complete
+Phase: 04 (real-core-surfaces) — READY FOR VERIFICATION
+Plan: 6 of 6
+Status: Gap-closure plans complete
+Last activity: 2026-05-03 -- Phase 04 gap-closure plans complete
 
 ## Decisions
 
@@ -50,6 +50,8 @@ Last activity: 2026-05-03 -- Phase 04 planning complete
 - [Phase 04]: The top panel remains a compact status and entry surface; direct service controls stay in quick settings.
 - [Phase 04]: Final surface regressions use shipped panel source plus focused command snippets to prove callback-free proxy behavior.
 - [Phase 04]: Frontend docs show service mutations through named proxy methods instead of legacy service event channels.
+- [Phase 04]: Service proxy command methods require `service.<name>.control`; read capability remains state-only.
+- [Phase 04]: Shell surface transitions use `shell.toggle-surface` and `shell.hide-surface` with `surface_id`, not quick-settings-specific shell event names.
 
 ## Performance Metrics
 
@@ -61,11 +63,14 @@ Last activity: 2026-05-03 -- Phase 04 planning complete
 | Phase 04 P01 | 3min | 3 tasks | 5 files |
 | Phase 04 P02 | 6min | 3 tasks | 5 files |
 | Phase 04 P03 | 4min | 3 tasks | 2 files |
+| Phase 04 P04 | 12min | 3 tasks | 6 files |
+| Phase 04 P05 | 4min | 3 tasks | 3 files |
+| Phase 04 P06 | 4min | 3 tasks | 4 files |
 
 ## Session
 
-Last session: 2026-05-03T06:50:54.080Z
-Stopped At: Completed 04-03-PLAN.md
+Last session: 2026-05-03T07:26:33.626Z
+Stopped At: Completed Phase 04 gap-closure plans
 Resume File: None
 
 ## Accumulated Context
