@@ -77,15 +77,18 @@ pub async fn spawn_backend_service(
         });
         return;
     }
-    if let Err(e) = ctx.call_init() {
-        tracing::error!("{plugin_id} failed to initialize backend script: {e}");
-        let _ = tx.send(BackendServiceEvent::InitFailed {
-            service: service_name,
-            source_plugin: plugin_id,
-            message: e.to_string(),
-        });
-        return;
-    }
+    let init_payload = match ctx.call_init() {
+        Ok(payload) => payload,
+        Err(e) => {
+            tracing::error!("{plugin_id} failed to initialize backend script: {e}");
+            let _ = tx.send(BackendServiceEvent::InitFailed {
+                service: service_name,
+                source_plugin: plugin_id,
+                message: e.to_string(),
+            });
+            return;
+        }
+    };
 
     let _ = tx.send(BackendServiceEvent::Started {
         service: service_name.clone(),
@@ -96,6 +99,12 @@ pub async fn spawn_backend_service(
     let mut tick = make_interval(interval_ms, true);
     let mut last_payload: Option<serde_json::Value> = None;
     let mut consecutive_poll_failures = 0;
+
+    if let Some(payload) = init_payload {
+        if !publish_changed_update(&tx, &service_name, &plugin_id, &mut last_payload, payload) {
+            return;
+        }
+    }
 
     loop {
         tokio::select! {
@@ -129,15 +138,13 @@ pub async fn spawn_backend_service(
                 };
                 refresh_interval(&ctx, &mut interval_ms, &mut tick);
                 let Some(payload) = payload else { continue };
-                if Some(&payload) == last_payload.as_ref() {
-                    continue;
-                }
-                last_payload = Some(payload.clone());
-                if tx.send(BackendServiceEvent::Update(BackendServiceUpdate {
-                    service: service_name.clone(),
-                    source_plugin: plugin_id.clone(),
+                if !publish_changed_update(
+                    &tx,
+                    &service_name,
+                    &plugin_id,
+                    &mut last_payload,
                     payload,
-                })).is_err() {
+                ) {
                     break;
                 }
             }
@@ -146,12 +153,13 @@ pub async fn spawn_backend_service(
                 match ctx.run_command(&msg.command, &msg.payload) {
                     Ok(Some(payload)) => {
                         refresh_interval(&ctx, &mut interval_ms, &mut tick);
-                        last_payload = Some(payload.clone());
-                        if tx.send(BackendServiceEvent::Update(BackendServiceUpdate {
-                            service: service_name.clone(),
-                            source_plugin: plugin_id.clone(),
+                        if !publish_changed_update(
+                            &tx,
+                            &service_name,
+                            &plugin_id,
+                            &mut last_payload,
                             payload,
-                        })).is_err() {
+                        ) {
                             break;
                         }
                     }
@@ -176,6 +184,25 @@ pub async fn spawn_backend_service(
         service: service_name,
         source_plugin: plugin_id,
     });
+}
+
+fn publish_changed_update(
+    tx: &mpsc::UnboundedSender<BackendServiceEvent>,
+    service_name: &str,
+    plugin_id: &str,
+    last_payload: &mut Option<serde_json::Value>,
+    payload: serde_json::Value,
+) -> bool {
+    if Some(&payload) == last_payload.as_ref() {
+        return true;
+    }
+    last_payload.replace(payload.clone());
+    tx.send(BackendServiceEvent::Update(BackendServiceUpdate {
+        service: service_name.to_string(),
+        source_plugin: plugin_id.to_string(),
+        payload,
+    }))
+    .is_ok()
 }
 
 fn bounded_poll_interval_ms(ctx: &BackendScriptContext) -> u64 {
@@ -253,6 +280,129 @@ mod tests {
         assert_eq!(
             update.payload.get("enabled").and_then(|v| v.as_bool()),
             Some(true)
+        );
+
+        drop(cmd_tx);
+        drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn spawn_backend_service_emits_initial_exported_state() {
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/exported-init".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "state = { available = false }\n\
+             function init()\n\
+               mesh.service.set_poll_interval(1000)\n\
+               state = { available = true, percent = 65 }\n\
+             end"
+            .to_string(),
+            update_tx,
+            cmd_rx,
+        ));
+
+        let update = next_update(&mut update_rx, "init should publish exported state").await;
+        assert_eq!(update.service, "audio");
+        assert_eq!(update.source_plugin, "@test/exported-init");
+        assert_eq!(
+            update.payload.get("available").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            update.payload.get("percent").and_then(|v| v.as_u64()),
+            Some(65)
+        );
+
+        drop(cmd_tx);
+        drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn spawn_backend_service_emits_changed_exported_state_after_poll() {
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/exported-poll".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "state = { tick = 0 }\n\
+             function init()\nmesh.service.set_poll_interval(50)\nend\n\
+             function on_poll()\nstate = { tick = state.tick + 1 }\nend"
+                .to_string(),
+            update_tx,
+            cmd_rx,
+        ));
+
+        let initial = next_update(&mut update_rx, "init should publish exported state").await;
+        assert_eq!(
+            initial.payload.get("tick").and_then(|v| v.as_u64()),
+            Some(0)
+        );
+
+        let polled = next_update(&mut update_rx, "poll should publish changed state").await;
+        assert_eq!(polled.payload.get("tick").and_then(|v| v.as_u64()), Some(1));
+
+        drop(cmd_tx);
+        drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn spawn_backend_service_emits_changed_exported_state_after_command() {
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/exported-command".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "state = { percent = 0 }\n\
+             function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function on_command_set_volume()\n\
+               local payload = mesh.service.payload()\n\
+               state = { percent = payload.percent }\n\
+             end"
+            .to_string(),
+            update_tx,
+            cmd_rx,
+        ));
+
+        let initial = next_update(&mut update_rx, "init should publish exported state").await;
+        assert_eq!(
+            initial.payload.get("percent").and_then(|v| v.as_u64()),
+            Some(0)
+        );
+
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "set-volume".to_string(),
+                payload: serde_json::json!({ "percent": 77 }),
+            })
+            .unwrap();
+
+        let updated = next_update(&mut update_rx, "command should publish changed state").await;
+        assert_eq!(
+            updated.payload.get("percent").and_then(|v| v.as_u64()),
+            Some(77)
         );
 
         drop(cmd_tx);
