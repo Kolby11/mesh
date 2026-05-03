@@ -452,7 +452,7 @@ impl Shell {
 
         while !self.core.shutting_down {
             self.reload_theme_if_changed()?;
-            self.reload_locale_if_settings_changed()?;
+            pending.extend(self.reload_locale_if_settings_changed()?);
             self.reload_plugin_settings_if_changed()?;
             self.reload_frontend_components_if_changed()?;
             self.dispatch_wayland()?;
@@ -591,10 +591,16 @@ impl Shell {
             .and_then(|metadata| metadata.modified().ok());
         self.theme_watch = ThemeWatchState { path, modified_at };
         self.mark_components_theme_changed()?;
+        self.sync_theme_service_state(theme_id)
+    }
+
+    fn sync_theme_service_state(
+        &mut self,
+        theme_id: &str,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let is_dark = theme_id.contains("dark");
         let payload =
             serde_json::json!({ "current": theme_id, "theme_id": theme_id, "is_dark": is_dark });
-        // Notify the theme backend so it stays in sync.
         if let Some(tx) = self.service_handlers.get("mesh.theme") {
             let _ = tx.send(ServiceCommandMsg {
                 command: "set-current".to_string(),
@@ -608,16 +614,19 @@ impl Shell {
         })
     }
 
-    fn reload_locale_if_settings_changed(&mut self) -> Result<(), ShellRunError> {
+    fn reload_locale_if_settings_changed(
+        &mut self,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let mut requests = VecDeque::new();
         let Ok(metadata) = std::fs::metadata(&self.settings_watch.path) else {
-            return Ok(());
+            return Ok(requests);
         };
         let Ok(modified_at) = metadata.modified() else {
-            return Ok(());
+            return Ok(requests);
         };
 
         if self.settings_watch.modified_at == Some(modified_at) {
-            return Ok(());
+            return Ok(requests);
         }
 
         self.settings_watch.modified_at = Some(modified_at);
@@ -626,7 +635,7 @@ impl Shell {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("failed to reload shell settings: {e}");
-                return Ok(());
+                return Ok(requests);
             }
         };
 
@@ -647,6 +656,7 @@ impl Shell {
             self.theme = theme;
             self.theme_watch = theme_watch;
             self.mark_components_theme_changed()?;
+            requests.extend(self.sync_theme_service_state(&new_settings.theme.active)?);
         }
 
         if locale_changed {
@@ -666,7 +676,7 @@ impl Shell {
 
         self.settings = new_settings;
 
-        Ok(())
+        Ok(requests)
     }
 
     fn reload_plugin_settings_if_changed(&mut self) -> Result<(), ShellRunError> {
@@ -2142,6 +2152,34 @@ mod tests {
     use tokio::runtime::Runtime;
     use tokio::sync::mpsc;
 
+    static SETTINGS_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &std::path::Path) -> Self {
+            let old = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.old {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     fn node(tag: &str, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
         let mut node = WidgetNode::new(tag);
         node.layout = LayoutRect {
@@ -2661,6 +2699,54 @@ mod tests {
                 .get("current_theme")
                 .and_then(|value| value.as_str()),
             Some("mesh-default-light")
+        );
+    }
+
+    #[test]
+    fn settings_theme_reload_syncs_theme_service_state() {
+        let _env_lock = SETTINGS_ENV_LOCK.lock().unwrap();
+        let runtime = Runtime::new().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("shell-settings.json");
+        fs::write(
+            &settings_path,
+            r#"{"theme":{"active":"mesh-default-dark"}}"#,
+        )
+        .unwrap();
+        let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+        let mut shell = Shell::new();
+        let seen_events = Arc::new(Mutex::new(Vec::new()));
+        shell
+            .components
+            .push(super::types::ComponentRuntime::new(Box::new(
+                RecordingComponent::new(seen_events.clone()),
+            )));
+        let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.theme", "@mesh/shell-theme");
+        shell.replace_backend_runtime("mesh.theme".to_string(), slot);
+
+        fs::write(
+            &settings_path,
+            r#"{"theme":{"active":"mesh-default-light"}}"#,
+        )
+        .unwrap();
+        shell.settings_watch.modified_at = None;
+        shell.reload_locale_if_settings_changed().unwrap();
+
+        assert_eq!(shell.settings.theme.active, "mesh-default-light");
+        assert_eq!(seen_events.lock().unwrap().len(), 1);
+        assert_eq!(
+            shell
+                .latest_service_state
+                .get("mesh.theme")
+                .and_then(|state| state.state.get("current")),
+            Some(&serde_json::json!("mesh-default-light"))
+        );
+        assert_eq!(
+            shell
+                .latest_service_state
+                .get("mesh.theme")
+                .and_then(|state| state.state.get("is_dark")),
+            Some(&serde_json::json!(false))
         );
     }
 
