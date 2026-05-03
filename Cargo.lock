@@ -1282,7 +1282,9 @@ dependencies = [
  "anyhow",
  "dirs",
  "icon",
+ "serde",
  "tempfile",
+ "toml",
 ]
 
 [[package]]
@@ -1326,6 +1328,7 @@ dependencies = [
  "rustix 0.38.44",
  "serde_json",
  "smithay-client-toolkit",
+ "tempfile",
  "thiserror 2.0.18",
  "tracing",
  "wayland-client 0.31.14",
@@ -1385,6 +1388,7 @@ dependencies = [
  "mesh-core-diagnostics",
  "mesh-core-elements",
  "mesh-core-events",
+ "mesh-core-icon",
  "mesh-core-locale",
  "mesh-core-plugin",
  "mesh-core-render",
@@ -1394,6 +1398,7 @@ dependencies = [
  "mesh-core-theme",
  "mesh-core-wayland",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
