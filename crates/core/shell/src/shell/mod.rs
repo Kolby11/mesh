@@ -2714,6 +2714,67 @@ mod tests {
     }
 
     #[test]
+    fn shell_theme_fallback_backend_restart_keeps_latest_state_on_resolved_theme() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        shell.settings.theme.active = "missing-theme".to_string();
+        let (theme, theme_watch) = load_active_theme(&shell.settings);
+        shell.theme = theme;
+        shell.theme_watch = theme_watch;
+
+        let mut candidate = BackendLaunchCandidate {
+            module_id: "@mesh/shell-theme".to_string(),
+            interface: "mesh.theme".to_string(),
+            service_name: "theme".to_string(),
+            entrypoint_path: PathBuf::from("src/main.luau"),
+            script_source: String::new(),
+            capabilities: Vec::new(),
+            settings: serde_json::json!({}),
+        };
+        shell.apply_shell_runtime_settings(&mut candidate);
+        let current_theme = candidate
+            .settings
+            .get("current_theme")
+            .and_then(|value| value.as_str())
+            .unwrap()
+            .to_string();
+
+        let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.theme", "@mesh/shell-theme");
+        shell.replace_backend_runtime("mesh.theme".to_string(), slot);
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.theme",
+                "@mesh/shell-theme",
+                serde_json::json!({
+                    "current": current_theme,
+                    "is_dark": true,
+                    "available": ["mesh-default-dark", "mesh-default-light"],
+                }),
+            ))
+            .unwrap();
+
+        let (replacement_slot, _replacement_rx) =
+            backend_runtime_slot(&runtime, "mesh.theme", "@mesh/shell-theme");
+        shell.replace_backend_runtime("mesh.theme".to_string(), replacement_slot);
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.theme",
+                "@mesh/shell-theme",
+                serde_json::json!({
+                    "current": "mesh-default-dark",
+                    "is_dark": true,
+                    "available": ["mesh-default-dark", "mesh-default-light"],
+                }),
+            ))
+            .unwrap();
+
+        let latest = shell.latest_service_state.get("mesh.theme").unwrap();
+        assert_eq!(shell.theme.active().id, "mesh-default-dark");
+        assert_eq!(latest.state["current"], serde_json::json!("mesh-default-dark"));
+        assert_eq!(latest.state["is_dark"], serde_json::json!(true));
+    }
+
+    #[test]
     fn settings_theme_reload_syncs_theme_service_state() {
         let _env_lock = SETTINGS_ENV_LOCK.lock().unwrap();
         let runtime = Runtime::new().unwrap();
@@ -2797,6 +2858,83 @@ mod tests {
                 .and_then(|state| state.state.get("current")),
             Some(&serde_json::json!("mesh-default-dark"))
         );
+    }
+
+    #[test]
+    fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
+        let _env_lock = SETTINGS_ENV_LOCK.lock().unwrap();
+        let runtime = Runtime::new().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let theme_dir = dir.path().join("themes");
+        fs::create_dir_all(&theme_dir).unwrap();
+        let settings_path = dir.path().join("shell-settings.json");
+        fs::write(
+            &settings_path,
+            r#"{"theme":{"active":"mesh-recovered-light"}}"#,
+        )
+        .unwrap();
+        let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+        let _theme_dir = EnvGuard::set("MESH_THEME_DIR", &theme_dir);
+        let mut shell = Shell::new();
+        let seen_events = Arc::new(Mutex::new(Vec::new()));
+        shell
+            .components
+            .push(super::types::ComponentRuntime::new(Box::new(
+                RecordingComponent::new(seen_events.clone()),
+            )));
+        let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.theme", "@mesh/shell-theme");
+        shell.replace_backend_runtime("mesh.theme".to_string(), slot);
+
+        assert_eq!(shell.settings.theme.active, "mesh-recovered-light");
+        assert_eq!(shell.theme.active().id, "mesh-default-dark");
+        let fallback_theme_id = shell.theme.active().id.clone();
+        shell
+            .sync_theme_service_state(&fallback_theme_id)
+            .unwrap();
+        assert_eq!(
+            shell
+                .latest_service_state
+                .get("mesh.theme")
+                .and_then(|state| state.state.get("current")),
+            Some(&serde_json::json!("mesh-default-dark"))
+        );
+        assert_eq!(
+            shell
+                .latest_service_state
+                .get("mesh.theme")
+                .and_then(|state| state.state.get("is_dark")),
+            Some(&serde_json::json!(true))
+        );
+
+        fs::write(
+            theme_dir.join("mesh-recovered-light.json"),
+            r#"{"id":"mesh-recovered-light","name":"Recovered Light","tokens":{}}"#,
+        )
+        .unwrap();
+        let requests = shell.reload_theme_if_changed().unwrap();
+
+        assert!(requests.is_empty());
+        assert_eq!(shell.theme.active().id, "mesh-recovered-light");
+        assert_eq!(
+            shell
+                .latest_service_state
+                .get("mesh.theme")
+                .and_then(|state| state.state.get("current")),
+            Some(&serde_json::json!("mesh-recovered-light"))
+        );
+        assert_eq!(
+            shell
+                .latest_service_state
+                .get("mesh.theme")
+                .and_then(|state| state.state.get("is_dark")),
+            Some(&serde_json::json!(false))
+        );
+
+        let events = seen_events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        let ServiceEvent::Updated { payload, .. } = events.last().unwrap();
+        assert_eq!(payload["current"], serde_json::json!("mesh-recovered-light"));
+        assert_eq!(payload["is_dark"], serde_json::json!(false));
     }
 
     #[test]
