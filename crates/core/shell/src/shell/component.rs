@@ -3268,7 +3268,7 @@ end
 
     #[test]
     fn raw_service_state_update_schedules_repaint_without_proxy_tracking() {
-        let mut component = test_frontend_component(
+        let mut component = test_frontend_component_with_catalog(
             r#"
 <template>
   <box title="{last_service_update.name}" />
@@ -3276,6 +3276,8 @@ end
 <script lang="luau">
 </script>
 "#,
+            InterfaceCatalog::default(),
+            &["service.audio.read"],
         );
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(240, 40);
