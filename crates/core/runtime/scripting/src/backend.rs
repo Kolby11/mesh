@@ -9,6 +9,8 @@ use std::collections::HashSet;
 use std::process::Command as StdCommand;
 use std::sync::{Arc, Mutex};
 
+pub const MIN_POLL_INTERVAL_MS: u64 = 50;
+
 /// Executes a backend plugin's Luau script.
 ///
 /// Exposes these host APIs to scripts:
@@ -176,11 +178,21 @@ impl BackendScriptContext {
         let service = self.lua.create_table()?;
         let log = self.lua.create_table()?;
 
+        let plugin_id = self.plugin_id.clone();
         let runtime = Arc::clone(&self.runtime);
         service.set(
             "set_poll_interval",
             self.lua.create_function(move |_lua, ms: u64| {
-                runtime.lock().unwrap().poll_interval_ms = ms;
+                let poll_interval_ms = ms.max(MIN_POLL_INTERVAL_MS);
+                if poll_interval_ms != ms {
+                    tracing::warn!(
+                        plugin_id = plugin_id,
+                        requested_interval_ms = ms,
+                        clamped_interval_ms = poll_interval_ms,
+                        "backend poll interval below minimum; clamping"
+                    );
+                }
+                runtime.lock().unwrap().poll_interval_ms = poll_interval_ms;
                 Ok(())
             })?,
         )?;
@@ -386,6 +398,24 @@ mod tests {
             .unwrap();
         ctx.call_init().unwrap();
         assert_eq!(ctx.poll_interval_ms(), 250);
+    }
+
+    #[test]
+    fn poll_interval_below_minimum_is_clamped() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script("function init()\nmesh.service.set_poll_interval(10)\nend")
+            .unwrap();
+        ctx.call_init().unwrap();
+        assert_eq!(ctx.poll_interval_ms(), 50);
+    }
+
+    #[test]
+    fn poll_interval_at_minimum_is_accepted() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script("function init()\nmesh.service.set_poll_interval(50)\nend")
+            .unwrap();
+        ctx.call_init().unwrap();
+        assert_eq!(ctx.poll_interval_ms(), 50);
     }
 
     #[test]
