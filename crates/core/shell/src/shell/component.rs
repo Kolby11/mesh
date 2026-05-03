@@ -41,12 +41,6 @@ const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
 const TOOLTIP_OVERLAY_WIDTH: u32 = 260;
 const TOOLTIP_OVERLAY_HEIGHT: u32 = 96;
 
-#[derive(Debug, Clone)]
-pub(super) struct BackendServiceCandidate {
-    pub(super) plugin_id: String,
-    pub(super) priority: u32,
-}
-
 pub(super) struct FrontendSurfaceComponent {
     pub(super) compiled: CompiledFrontendPlugin,
     pub(super) plugin_dir: PathBuf,

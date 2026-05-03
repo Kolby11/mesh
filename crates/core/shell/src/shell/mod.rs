@@ -8,6 +8,7 @@ use mesh_core_diagnostics::DiagnosticsCollector;
 use mesh_core_events::EventBus;
 use mesh_core_locale::LocaleEngine;
 use mesh_core_plugin::lifecycle::{PluginInstance, PluginState};
+use mesh_core_plugin::package::{InstalledModuleGraph, ModuleKind, load_installed_module_graph};
 use mesh_core_plugin::{DependencyGraphError, PluginType, validate_plugin_dependency_graph};
 use mesh_core_service::{
     InterfaceProvider, InterfaceRegistry, ServiceRegistry, canonical_interface_name,
@@ -32,9 +33,9 @@ mod sounds;
 mod surface_layout;
 mod types;
 
-use component::{BackendServiceCandidate, FrontendCatalog, FrontendSurfaceComponent};
+use component::{FrontendCatalog, FrontendSurfaceComponent};
 use ipc::spawn_ipc_server;
-use mesh_core_backend::{BackendServiceUpdate, spawn_backend_service};
+use mesh_core_backend::{BackendServiceEvent, spawn_backend_service};
 use mesh_core_render::{
     DebugOverlay, LayerSurfaceConfig, PixelBuffer, RenderEngine, WindowEvent, WindowKeyEvent,
     coalesce_pointer_moves, event_surface_id,
@@ -73,6 +74,25 @@ pub struct Shell {
     debug_overlay: DebugOverlay,
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
     latest_service_events: HashMap<String, ServiceEvent>,
+}
+
+#[derive(Debug, Clone)]
+struct BackendLaunchCandidate {
+    module_id: String,
+    interface: String,
+    service_name: String,
+    entrypoint_path: PathBuf,
+    script_source: String,
+    capabilities: Vec<String>,
+    settings: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BackendLifecycleStatusRecord {
+    interface: String,
+    provider_id: Option<String>,
+    status: &'static str,
+    message: String,
 }
 
 pub fn default_ipc_socket_path() -> PathBuf {
@@ -1073,130 +1093,395 @@ impl Shell {
         runtime: &Runtime,
         tx: mpsc::UnboundedSender<ShellMessage>,
     ) {
-        let mut plugin_ids: Vec<String> = self.plugins.keys().cloned().collect();
-        plugin_ids.sort();
-        let mut services: HashMap<String, Vec<BackendServiceCandidate>> = HashMap::new();
-
-        for plugin_id in plugin_ids {
-            let Some(plugin) = self.plugins.get(&plugin_id) else {
-                continue;
-            };
-
-            if plugin.manifest.package.plugin_type != PluginType::Backend {
-                continue;
-            }
-
-            let Some(service) = plugin.manifest.primary_service() else {
-                continue;
-            };
-
-            let missing_binary = plugin
-                .manifest
-                .dependencies
-                .binaries
-                .iter()
-                .find(|binary| !binary_exists(&binary.name));
-            if let Some(binary) = missing_binary {
-                tracing::info!(
-                    "skipping backend '{}' for service '{}' because binary '{}' is unavailable",
-                    plugin.manifest.package.id,
-                    service.provides,
-                    binary.name
-                );
-                continue;
-            }
-
-            let service_name = service_name_from_interface(&service.provides);
-            services
-                .entry(service_name.clone())
-                .or_default()
-                .push(BackendServiceCandidate {
-                    plugin_id: plugin.manifest.package.id.clone(),
-                    priority: service.priority,
-                });
-        }
-
-        for (service_name, mut candidates) in services {
-            candidates.sort_by(|a, b| {
-                b.priority
-                    .cmp(&a.priority)
-                    .then_with(|| a.plugin_id.cmp(&b.plugin_id))
-            });
-
-            let Some(candidate) = candidates.into_iter().next() else {
-                continue;
-            };
-
-            let interface = format!("mesh.{service_name}");
-            let capabilities = self
-                .plugins
-                .get(&candidate.plugin_id)
-                .map(|plugin| {
-                    plugin
-                        .manifest
-                        .capabilities
-                        .required
-                        .iter()
-                        .chain(plugin.manifest.capabilities.optional.iter())
-                        .cloned()
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let script_source = self
-                .plugins
-                .get(&candidate.plugin_id)
-                .and_then(|plugin| {
-                    plugin
-                        .manifest
-                        .entrypoints
-                        .main
-                        .as_deref()
-                        .map(|entry| plugin.path.join(entry))
-                })
-                .and_then(|path| std::fs::read_to_string(&path).ok());
-            let plugin_settings = backend_plugin_settings_json(&self.config, &candidate.plugin_id);
-
-            let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-            self.service_handlers.insert(interface.clone(), cmd_tx);
-
-            match script_source {
-                Some(source) => {
-                    let shell_tx = tx.clone();
-                    let (backend_tx, mut backend_rx) =
-                        mpsc::unbounded_channel::<BackendServiceUpdate>();
-                    runtime.spawn(async move {
-                        while let Some(update) = backend_rx.recv().await {
-                            if shell_tx
-                                .send(ShellMessage::Service(ServiceEvent::Updated {
-                                    service: update.service,
-                                    source_plugin: update.source_plugin,
-                                    payload: update.payload,
-                                }))
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                    });
-                    runtime.spawn(spawn_backend_service(
-                        candidate.plugin_id,
-                        service_name,
-                        capabilities,
-                        plugin_settings,
-                        source,
-                        backend_tx,
-                        cmd_rx,
-                    ));
-                }
-                None => {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let graph_path = workspace_root.join("config/package.json");
+        match load_installed_module_graph(&graph_path) {
+            Ok(graph) => {
+                let (candidates, statuses) =
+                    backend_launch_candidates_from_graph(&graph, &self.plugins, &self.config);
+                for status in statuses {
                     tracing::warn!(
-                        "backend plugin {} has no readable script",
-                        candidate.plugin_id
+                        interface = status.interface,
+                        provider_id = status.provider_id.as_deref().unwrap_or("<none>"),
+                        status = status.status,
+                        "{}",
+                        status.message
                     );
+                }
+                for candidate in candidates {
+                    self.spawn_backend_candidate(runtime, tx.clone(), candidate);
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "failed to load installed module graph from {}; using legacy backend discovery: {err}",
+                    graph_path.display()
+                );
+                for candidate in
+                    legacy_backend_candidates_from_discovery(&self.plugins, &self.config)
+                {
+                    self.spawn_backend_candidate(runtime, tx.clone(), candidate);
                 }
             }
         }
     }
+
+    fn spawn_backend_candidate(
+        &mut self,
+        runtime: &Runtime,
+        tx: mpsc::UnboundedSender<ShellMessage>,
+        candidate: BackendLaunchCandidate,
+    ) {
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        self.service_handlers
+            .insert(candidate.interface.clone(), cmd_tx);
+
+        let shell_tx = tx.clone();
+        let interface = candidate.interface.clone();
+        let provider_id = candidate.module_id.clone();
+        let (backend_tx, mut backend_rx) = mpsc::unbounded_channel::<BackendServiceEvent>();
+        runtime.spawn(async move {
+            while let Some(event) = backend_rx.recv().await {
+                match event {
+                    BackendServiceEvent::Update(update) => {
+                        if shell_tx
+                            .send(ShellMessage::Service(ServiceEvent::Updated {
+                                service: update.service,
+                                source_plugin: update.source_plugin,
+                                payload: update.payload,
+                            }))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    BackendServiceEvent::Started { .. } => {
+                        tracing::info!(
+                            interface = interface,
+                            provider_id = provider_id,
+                            "backend runtime started"
+                        );
+                    }
+                    BackendServiceEvent::InitFailed { message, .. }
+                    | BackendServiceEvent::Failed { message, .. }
+                    | BackendServiceEvent::PollFailed { message, .. } => {
+                        tracing::warn!(
+                            interface = interface,
+                            provider_id = provider_id,
+                            "{message}"
+                        );
+                    }
+                    BackendServiceEvent::Stopped { .. } => {
+                        tracing::info!(
+                            interface = interface,
+                            provider_id = provider_id,
+                            "backend runtime stopped"
+                        );
+                    }
+                }
+            }
+        });
+        runtime.spawn(spawn_backend_service(
+            candidate.module_id,
+            candidate.service_name,
+            candidate.capabilities,
+            candidate.settings,
+            candidate.script_source,
+            backend_tx,
+            cmd_rx,
+        ));
+    }
+}
+
+fn backend_launch_candidates_from_graph(
+    graph: &InstalledModuleGraph,
+    plugins: &HashMap<String, PluginInstance>,
+    config: &ShellConfig,
+) -> (
+    Vec<BackendLaunchCandidate>,
+    Vec<BackendLifecycleStatusRecord>,
+) {
+    let mut statuses = backend_requirement_statuses(graph);
+    let mut interfaces: Vec<String> = graph
+        .backend_modules()
+        .into_iter()
+        .flat_map(|module| {
+            module
+                .manifest
+                .mesh
+                .provides
+                .iter()
+                .map(|provided| provided.interface.clone())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    interfaces.sort();
+    interfaces.dedup();
+
+    let mut candidates = Vec::new();
+    for interface in interfaces {
+        let Some(active_provider) = graph.active_provider(&interface) else {
+            statuses.push(BackendLifecycleStatusRecord {
+                interface,
+                provider_id: None,
+                status: "no_active_provider",
+                message: "no active provider selected".to_string(),
+            });
+            continue;
+        };
+
+        let Some(module) = graph.module(&active_provider.module_id) else {
+            statuses.push(BackendLifecycleStatusRecord {
+                interface: interface.clone(),
+                provider_id: Some(active_provider.module_id.clone()),
+                status: "invalid_manifest",
+                message: format!(
+                    "active provider {} is not installed",
+                    active_provider.module_id
+                ),
+            });
+            continue;
+        };
+
+        if !module.enabled || module.kind != ModuleKind::Backend {
+            statuses.push(BackendLifecycleStatusRecord {
+                interface: interface.clone(),
+                provider_id: Some(active_provider.module_id.clone()),
+                status: "invalid_manifest",
+                message: format!(
+                    "active provider {} is not an enabled backend module",
+                    active_provider.module_id
+                ),
+            });
+            continue;
+        }
+
+        if !module
+            .manifest
+            .mesh
+            .provides
+            .iter()
+            .any(|provided| provided.interface == interface)
+        {
+            statuses.push(BackendLifecycleStatusRecord {
+                interface: interface.clone(),
+                provider_id: Some(active_provider.module_id.clone()),
+                status: "invalid_manifest",
+                message: format!(
+                    "active provider {} does not declare interface {interface}",
+                    active_provider.module_id
+                ),
+            });
+            continue;
+        }
+
+        let Some(plugin) = plugins.get(&active_provider.module_id) else {
+            statuses.push(BackendLifecycleStatusRecord {
+                interface: interface.clone(),
+                provider_id: Some(active_provider.module_id.clone()),
+                status: "invalid_manifest",
+                message: format!(
+                    "active provider {} has no discovered runtime manifest",
+                    active_provider.module_id
+                ),
+            });
+            continue;
+        };
+
+        if let Some(binary) = plugin
+            .manifest
+            .dependencies
+            .binaries
+            .iter()
+            .find(|binary| !binary_exists(&binary.name))
+        {
+            statuses.push(BackendLifecycleStatusRecord {
+                interface: interface.clone(),
+                provider_id: Some(active_provider.module_id.clone()),
+                status: "missing_binary",
+                message: format!(
+                    "backend provider {} requires unavailable binary {}",
+                    active_provider.module_id, binary.name
+                ),
+            });
+            continue;
+        }
+
+        let entrypoint = module.manifest.mesh.entrypoints.main.as_deref().or(plugin
+            .manifest
+            .entrypoints
+            .main
+            .as_deref());
+        let Some(entrypoint) = entrypoint else {
+            statuses.push(BackendLifecycleStatusRecord {
+                interface: interface.clone(),
+                provider_id: Some(active_provider.module_id.clone()),
+                status: "missing_entrypoint",
+                message: format!(
+                    "backend provider {} has no service entrypoint",
+                    active_provider.module_id
+                ),
+            });
+            continue;
+        };
+
+        let entrypoint_path = plugin.path.join(entrypoint);
+        let Ok(script_source) = std::fs::read_to_string(&entrypoint_path) else {
+            statuses.push(BackendLifecycleStatusRecord {
+                interface: interface.clone(),
+                provider_id: Some(active_provider.module_id.clone()),
+                status: "missing_entrypoint",
+                message: format!(
+                    "backend provider {} entrypoint is unreadable: {}",
+                    active_provider.module_id,
+                    entrypoint_path.display()
+                ),
+            });
+            continue;
+        };
+
+        let capabilities = plugin
+            .manifest
+            .capabilities
+            .required
+            .iter()
+            .chain(plugin.manifest.capabilities.optional.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        let settings = backend_plugin_settings_json(config, &active_provider.module_id);
+        candidates.push(BackendLaunchCandidate {
+            module_id: active_provider.module_id.clone(),
+            interface: interface.clone(),
+            service_name: service_name_from_interface(&interface),
+            entrypoint_path,
+            script_source,
+            capabilities,
+            settings,
+        });
+    }
+
+    (candidates, statuses)
+}
+
+fn backend_requirement_statuses(graph: &InstalledModuleGraph) -> Vec<BackendLifecycleStatusRecord> {
+    let mut statuses = Vec::new();
+    for frontend in graph.frontend_modules() {
+        let Some(requirements) = graph.requirements_for_frontend(&frontend.id) else {
+            continue;
+        };
+        for interface in requirements.backend.keys() {
+            if graph.backend_providers_for_interface(interface).is_empty() {
+                statuses.push(BackendLifecycleStatusRecord {
+                    interface: interface.clone(),
+                    provider_id: Some(frontend.id.clone()),
+                    status: "unmet_backend_requirement",
+                    message: format!(
+                        "frontend module {} requires {interface}, but no enabled backend provider is installed",
+                        frontend.id
+                    ),
+                });
+            } else if graph.active_provider(interface).is_none() {
+                statuses.push(BackendLifecycleStatusRecord {
+                    interface: interface.clone(),
+                    provider_id: Some(frontend.id.clone()),
+                    status: "no_active_provider",
+                    message: format!(
+                        "frontend module {} requires {interface}, but no active provider is selected",
+                        frontend.id
+                    ),
+                });
+            }
+        }
+    }
+    statuses
+}
+
+fn legacy_backend_candidates_from_discovery(
+    plugins: &HashMap<String, PluginInstance>,
+    config: &ShellConfig,
+) -> Vec<BackendLaunchCandidate> {
+    let mut plugin_ids: Vec<String> = plugins.keys().cloned().collect();
+    plugin_ids.sort();
+    let mut services: HashMap<String, Vec<(&PluginInstance, u32)>> = HashMap::new();
+
+    for plugin_id in plugin_ids {
+        let Some(plugin) = plugins.get(&plugin_id) else {
+            continue;
+        };
+        if plugin.manifest.package.plugin_type != PluginType::Backend {
+            continue;
+        }
+        let Some(service) = plugin.manifest.primary_service() else {
+            continue;
+        };
+        let service_name = service_name_from_interface(&service.provides);
+        services
+            .entry(service_name)
+            .or_default()
+            .push((plugin, service.priority));
+    }
+
+    let mut candidates = Vec::new();
+    for (service_name, mut service_candidates) in services {
+        service_candidates.sort_by(|(a, a_priority), (b, b_priority)| {
+            b_priority
+                .cmp(a_priority)
+                .then_with(|| a.manifest.package.id.cmp(&b.manifest.package.id))
+        });
+        let Some((plugin, _)) = service_candidates.into_iter().next() else {
+            continue;
+        };
+        let missing_binary = plugin
+            .manifest
+            .dependencies
+            .binaries
+            .iter()
+            .find(|binary| !binary_exists(&binary.name));
+        if let Some(binary) = missing_binary {
+            tracing::info!(
+                "skipping legacy backend '{}' for service '{}' because binary '{}' is unavailable",
+                plugin.manifest.package.id,
+                service_name,
+                binary.name
+            );
+            continue;
+        }
+        let Some(entrypoint) = plugin.manifest.entrypoints.main.as_deref() else {
+            tracing::warn!(
+                "legacy backend plugin {} has no service entrypoint",
+                plugin.manifest.package.id
+            );
+            continue;
+        };
+        let entrypoint_path = plugin.path.join(entrypoint);
+        let Ok(script_source) = std::fs::read_to_string(&entrypoint_path) else {
+            tracing::warn!(
+                "legacy backend plugin {} has no readable script at {}",
+                plugin.manifest.package.id,
+                entrypoint_path.display()
+            );
+            continue;
+        };
+        let capabilities = plugin
+            .manifest
+            .capabilities
+            .required
+            .iter()
+            .chain(plugin.manifest.capabilities.optional.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        candidates.push(BackendLaunchCandidate {
+            module_id: plugin.manifest.package.id.clone(),
+            interface: format!("mesh.{service_name}"),
+            service_name,
+            entrypoint_path,
+            script_source,
+            capabilities,
+            settings: backend_plugin_settings_json(config, &plugin.manifest.package.id),
+        });
+    }
+
+    candidates
 }
 
 fn binary_exists(name: &str) -> bool {
@@ -1286,14 +1571,22 @@ fn default_plugin_dirs() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
+        backend_launch_candidates_from_graph,
         layout::measure_content_size,
         service::{apply_service_update, seed_service_state, service_name_from_interface},
         surface_layout::{SurfaceSizePolicy, load_frontend_plugin_settings},
     };
+    use mesh_core_config::ShellConfig;
     use mesh_core_elements::{LayoutRect, VariableStore, WidgetNode};
+    use mesh_core_plugin::PluginInstance;
     use mesh_core_plugin::manifest::{
         CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
-        ExportsSection, Manifest, PackageSection, PluginType, SurfaceLayoutSection,
+        ExportsSection, Manifest, ManifestSource, PackageSection, PluginType, ProvidedInterface,
+        SurfaceLayoutSection,
+    };
+    use mesh_core_plugin::package::{
+        InstalledModuleGraph, LoadedModuleManifest, ModuleManifestSource, ModulePackageManifest,
+        RootPackageManifest,
     };
     use mesh_core_scripting::ScriptState;
     use std::collections::HashMap;
@@ -1345,6 +1638,61 @@ mod tests {
             translations: HashMap::new(),
             surface_layout: None,
         }
+    }
+
+    fn minimal_backend_manifest(id: &str, entrypoint: Option<&str>) -> Manifest {
+        let mut manifest = minimal_manifest(id);
+        manifest.package.plugin_type = PluginType::Backend;
+        manifest.entrypoints.main = entrypoint.map(str::to_string);
+        manifest.provides = vec![ProvidedInterface {
+            interface: "mesh.audio".to_string(),
+            version: Some("1.0".to_string()),
+            base_plugin: None,
+            backend_name: Some(id.to_string()),
+            priority: 100,
+            optional_capabilities: Vec::new(),
+        }];
+        manifest
+    }
+
+    fn plugin_instance(id: &str, entrypoint: Option<&str>) -> (tempfile::TempDir, PluginInstance) {
+        let dir = tempfile::tempdir().unwrap();
+        if let Some(entrypoint) = entrypoint {
+            let path = dir.path().join(entrypoint);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "function init()\nend\nfunction on_poll()\nend").unwrap();
+        }
+        let manifest = minimal_backend_manifest(id, entrypoint);
+        let instance = PluginInstance::new(
+            manifest,
+            dir.path().to_path_buf(),
+            dir.path().join("plugin.json"),
+            ManifestSource::PluginJson,
+        );
+        (dir, instance)
+    }
+
+    fn test_config() -> ShellConfig {
+        ShellConfig {
+            shell: Default::default(),
+            plugins: HashMap::new(),
+        }
+    }
+
+    fn loaded_module(json: &str) -> LoadedModuleManifest {
+        LoadedModuleManifest {
+            manifest: ModulePackageManifest::from_json_str(json).unwrap(),
+            path: PathBuf::from("<test>/package.json"),
+            source: ModuleManifestSource::PackageJson,
+        }
+    }
+
+    fn graph_from_json(root: &str, modules: Vec<&str>) -> InstalledModuleGraph {
+        InstalledModuleGraph::from_parts(
+            RootPackageManifest::from_json_str(root).unwrap(),
+            modules.into_iter().map(loaded_module).collect(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -1411,6 +1759,202 @@ mod tests {
         let layout = graph.layout_entrypoint().unwrap();
         assert_eq!(layout.module_id, "@mesh/panel");
         assert_eq!(layout.entrypoint_id, "main");
+    }
+
+    #[test]
+    fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let graph = mesh_core_plugin::package::load_installed_module_graph(
+            &workspace_root.join("config/package.json"),
+        )
+        .unwrap();
+        let (_pipewire_dir, pipewire) =
+            plugin_instance("@mesh/pipewire-audio", Some("src/main.luau"));
+        let (_pulse_dir, pulse) = plugin_instance("@mesh/pulseaudio-audio", Some("src/main.luau"));
+        let plugins = HashMap::from([
+            ("@mesh/pipewire-audio".to_string(), pipewire),
+            ("@mesh/pulseaudio-audio".to_string(), pulse),
+        ]);
+
+        let (candidates, statuses) =
+            backend_launch_candidates_from_graph(&graph, &plugins, &test_config());
+
+        assert!(
+            statuses
+                .iter()
+                .all(|status| status.status != "invalid_manifest")
+        );
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].interface, "mesh.audio");
+        assert_eq!(candidates[0].module_id, "@mesh/pipewire-audio");
+        assert_eq!(candidates[0].service_name, "audio");
+        assert!(candidates[0].entrypoint_path.ends_with("src/main.luau"));
+        assert!(
+            !candidates
+                .iter()
+                .any(|candidate| candidate.module_id == "@mesh/pulseaudio-audio")
+        );
+    }
+
+    #[test]
+    fn backend_lifecycle_rejects_missing_backend_entrypoint_before_launch() {
+        let graph = graph_from_json(
+            r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/backend": { "kind": "backend", "path": "@mesh/backend", "enabled": true }
+              },
+              "providers": { "mesh.audio": "@mesh/backend" }
+            }"#,
+            vec![
+                r#"{
+                  "name": "@mesh/backend",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "provides": [{ "interface": "mesh.audio", "provider": "test" }]
+                  }
+                }"#,
+            ],
+        );
+        let (_dir, plugin) = plugin_instance("@mesh/backend", None);
+        let plugins = HashMap::from([("@mesh/backend".to_string(), plugin)]);
+
+        let (candidates, statuses) =
+            backend_launch_candidates_from_graph(&graph, &plugins, &test_config());
+
+        assert!(candidates.is_empty());
+        assert!(statuses.iter().any(|status| {
+            status.status == "missing_entrypoint"
+                && status.provider_id.as_deref() == Some("@mesh/backend")
+        }));
+    }
+
+    #[test]
+    fn backend_lifecycle_excludes_disabled_backend_modules() {
+        let graph = graph_from_json(
+            r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/frontend": { "kind": "frontend", "path": "@mesh/frontend", "enabled": true },
+                "@mesh/backend": { "kind": "backend", "path": "@mesh/backend", "enabled": false }
+              },
+              "providers": {}
+            }"#,
+            vec![
+                r#"{
+                  "name": "@mesh/frontend",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "frontend",
+                    "dependencies": { "backend": { "mesh.audio": ">=1.0.0" } }
+                  }
+                }"#,
+                r#"{
+                  "name": "@mesh/backend",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": { "main": "src/main.luau" },
+                    "provides": [{ "interface": "mesh.audio", "provider": "test" }]
+                  }
+                }"#,
+            ],
+        );
+        let (_dir, plugin) = plugin_instance("@mesh/backend", Some("src/main.luau"));
+        let plugins = HashMap::from([("@mesh/backend".to_string(), plugin)]);
+
+        let (candidates, statuses) =
+            backend_launch_candidates_from_graph(&graph, &plugins, &test_config());
+
+        assert!(candidates.is_empty());
+        assert!(statuses.iter().any(|status| {
+            status.status == "unmet_backend_requirement" && status.interface == "mesh.audio"
+        }));
+    }
+
+    #[test]
+    fn backend_lifecycle_reports_frontend_requirement_without_active_provider() {
+        let graph = graph_from_json(
+            r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/frontend": { "kind": "frontend", "path": "@mesh/frontend", "enabled": true },
+                "@mesh/backend": { "kind": "backend", "path": "@mesh/backend", "enabled": true }
+              },
+              "providers": {}
+            }"#,
+            vec![
+                r#"{
+                  "name": "@mesh/frontend",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "frontend",
+                    "dependencies": { "backend": { "mesh.audio": ">=1.0.0" } }
+                  }
+                }"#,
+                r#"{
+                  "name": "@mesh/backend",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": { "main": "src/main.luau" },
+                    "provides": [{ "interface": "mesh.audio", "provider": "test" }]
+                  }
+                }"#,
+            ],
+        );
+        let (_dir, plugin) = plugin_instance("@mesh/backend", Some("src/main.luau"));
+        let plugins = HashMap::from([("@mesh/backend".to_string(), plugin)]);
+
+        let (candidates, statuses) =
+            backend_launch_candidates_from_graph(&graph, &plugins, &test_config());
+
+        assert!(candidates.is_empty());
+        assert!(statuses.iter().any(|status| {
+            status.status == "no_active_provider" && status.interface == "mesh.audio"
+        }));
+    }
+
+    #[test]
+    fn backend_lifecycle_reports_frontend_requirement_without_installed_provider() {
+        let graph = graph_from_json(
+            r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/frontend": { "kind": "frontend", "path": "@mesh/frontend", "enabled": true }
+              },
+              "providers": {}
+            }"#,
+            vec![
+                r#"{
+                  "name": "@mesh/frontend",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "frontend",
+                    "dependencies": { "backend": { "mesh.network": ">=1.0.0" } }
+                  }
+                }"#,
+            ],
+        );
+
+        let (candidates, statuses) =
+            backend_launch_candidates_from_graph(&graph, &HashMap::new(), &test_config());
+
+        assert!(candidates.is_empty());
+        assert!(statuses.iter().any(|status| {
+            status.status == "unmet_backend_requirement" && status.interface == "mesh.network"
+        }));
     }
 
     #[test]
