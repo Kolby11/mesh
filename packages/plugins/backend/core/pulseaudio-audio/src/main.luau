@@ -2,6 +2,7 @@
 -- Polls volume via pactl and responds to audio service commands.
 
 local PLUGIN_ID = "@mesh/pulseaudio-audio"
+local SOUNDS_ROOT = "/usr/share/mesh/sounds/"
 
 function init()
     mesh.service.set_poll_interval(500)
@@ -46,6 +47,19 @@ local function command_percent_from_payload(payload)
     return clamp_percent(math.floor(((tonumber(payload.volume) or 0) * 100) + 0.5))
 end
 
+local function resolve_sound_path(path)
+    if type(path) ~= "string" or path == "" then
+        return nil
+    end
+    if path:find("..", 1, true) then
+        return nil
+    end
+    if path:sub(1, #SOUNDS_ROOT) ~= SOUNDS_ROOT then
+        return nil
+    end
+    return path
+end
+
 function on_poll()
     emit_state()
 end
@@ -81,8 +95,9 @@ end
 
 function on_command_play_sound()
     local payload = mesh.service.payload()
-    local path = payload.path
-    if type(path) ~= "string" or path == "" then
+    local path = resolve_sound_path(payload.path)
+    if not path then
+        mesh.service.emit({ ok = false, error = "invalid sound path" })
         return
     end
     mesh.exec("aplay", { path })

@@ -91,6 +91,22 @@ local function has_control()
     return mesh.service.has_capability('service.network.control')
 end
 
+local function is_bluetooth_mac(id)
+    return type(id) == 'string'
+        and id:match('^%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$') ~= nil
+end
+
+local function is_uuid(id)
+    if type(id) ~= 'string' or #id ~= 36 then
+        return false
+    end
+    if id:sub(9, 9) ~= '-' or id:sub(14, 14) ~= '-' or id:sub(19, 19) ~= '-' or id:sub(24, 24) ~= '-' then
+        return false
+    end
+    local compact = id:gsub('-', '')
+    return #compact == 32 and compact:match('^%x+$') ~= nil
+end
+
 -- Cache the last successful wifi scan so the networks list is available
 -- even between explicit scan commands.
 local last_networks = {}
@@ -137,12 +153,14 @@ function on_command_connect()
         mesh.service.emit({ ok = false, error = 'missing connection_id' })
         return
     end
-    if id:match('^[%x:]+$') and #id == 17 then
-        local result = mesh.exec_shell('bluetoothctl connect ' .. id)
+    if is_bluetooth_mac(id) then
+        local result = mesh.exec('bluetoothctl', { 'connect', id })
+        mesh.service.emit({ ok = result.success, error = result.stderr })
+    elseif is_uuid(id) then
+        local result = mesh.exec('nmcli', { 'connection', 'up', 'uuid', id })
         mesh.service.emit({ ok = result.success, error = result.stderr })
     else
-        local result = mesh.exec_shell('nmcli connection up uuid ' .. id)
-        mesh.service.emit({ ok = result.success, error = result.stderr })
+        mesh.service.emit({ ok = false, error = 'invalid connection_id' })
     end
 end
 
@@ -157,12 +175,14 @@ function on_command_disconnect()
         mesh.service.emit({ ok = false, error = 'missing connection_id' })
         return
     end
-    if id:match('^[%x:]+$') and #id == 17 then
-        local result = mesh.exec_shell('bluetoothctl disconnect ' .. id)
+    if is_bluetooth_mac(id) then
+        local result = mesh.exec('bluetoothctl', { 'disconnect', id })
+        mesh.service.emit({ ok = result.success, error = result.stderr })
+    elseif is_uuid(id) then
+        local result = mesh.exec('nmcli', { 'connection', 'down', 'uuid', id })
         mesh.service.emit({ ok = result.success, error = result.stderr })
     else
-        local result = mesh.exec_shell('nmcli connection down uuid ' .. id)
-        mesh.service.emit({ ok = result.success, error = result.stderr })
+        mesh.service.emit({ ok = false, error = 'invalid connection_id' })
     end
 end
 
