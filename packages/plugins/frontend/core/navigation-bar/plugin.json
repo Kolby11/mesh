@@ -30,7 +30,26 @@
       "@mesh/audio-interface": ">=1.0.0, <2.0.0",
       "@mesh/power-interface": ">=1.0.0, <2.0.0",
       "@mesh/shell-theme": ">=0.1.0, <1.0.0"
+    },
+    "icon_packs": {
+      "required": ["material"]
     }
+  },
+  "icon_requirements": {
+    "required": [
+      "settings",
+      "weather-clear-night",
+      "weather-clear",
+      "battery-empty",
+      "battery-caution",
+      "battery-low",
+      "battery-good",
+      "battery-full",
+      "audio-volume-muted",
+      "audio-volume-low",
+      "audio-volume-medium",
+      "audio-volume-high"
+    ]
   },
   "entrypoints": {
     "main": "src/main.mesh"

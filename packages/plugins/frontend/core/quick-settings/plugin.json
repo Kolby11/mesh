@@ -31,7 +31,20 @@
       "@mesh/audio-interface": ">=1.0.0, <2.0.0",
       "@mesh/network-interface": ">=1.0.0, <2.0.0",
       "@mesh/power-interface": ">=1.0.0, <2.0.0"
+    },
+    "icon_packs": {
+      "required": ["material"]
     }
+  },
+  "icon_requirements": {
+    "required": [
+      "network-wireless",
+      "bluetooth",
+      "audio-volume-muted",
+      "audio-volume-low",
+      "audio-volume-medium",
+      "audio-volume-high"
+    ]
   },
   "entrypoints": {
     "main": "src/main.mesh"

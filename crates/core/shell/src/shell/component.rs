@@ -2262,6 +2262,7 @@ mod tests {
     use super::*;
     use mesh_core_capability::Capability;
     use mesh_core_component::parse_component;
+    use mesh_core_elements::LayoutRect;
     use mesh_core_plugin::manifest::{
         CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
         ExportsSection, Manifest, PackageSection, PluginType,
@@ -2271,6 +2272,7 @@ mod tests {
         ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract,
         InterfaceMethod, InterfaceProvider, parse_contract_version,
     };
+    use std::fs;
     use std::path::PathBuf;
 
     #[test]
@@ -3274,6 +3276,175 @@ end
                 if message.contains("missing-proof")
         ));
         assert!(component.visible);
+    }
+
+    #[test]
+    fn icon_reliability_core_surfaces_proof() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .canonicalize()
+            .unwrap();
+        let icon_config_path = root.join("config/icons.toml");
+        let icon_config = fs::read_to_string(&icon_config_path).unwrap();
+        let config = mesh_core_icon::IconConfig::from_toml_str(&icon_config).unwrap();
+
+        let inventory = [
+            "audio-volume-muted",
+            "audio-volume-low",
+            "audio-volume-medium",
+            "audio-volume-high",
+            "network-wireless",
+            "bluetooth",
+            "settings",
+            "weather-clear-night",
+            "weather-clear",
+            "battery-empty",
+            "battery-caution",
+            "battery-low",
+            "battery-good",
+            "battery-full",
+        ];
+        for semantic_name in inventory {
+            assert!(
+                config.active_profile().icons.contains_key(semantic_name),
+                "{semantic_name} must be mapped in config/icons.toml"
+            );
+        }
+        assert!(config.active_profile().icons.contains_key("missing-proof"));
+
+        let surface_manifests = [
+            root.join("packages/plugins/frontend/core/panel"),
+            root.join("packages/plugins/frontend/core/quick-settings"),
+            root.join("packages/plugins/frontend/core/navigation-bar"),
+        ];
+        for plugin_dir in surface_manifests {
+            let loaded = mesh_core_plugin::manifest::load_manifest(&plugin_dir).unwrap();
+            assert!(
+                loaded
+                    .manifest
+                    .dependencies
+                    .icon_packs
+                    .required
+                    .contains(&"material".to_string()),
+                "{} must declare the material icon pack",
+                loaded.manifest.package.id
+            );
+            for semantic_name in &loaded.manifest.icon_requirements.required {
+                assert!(
+                    config.active_profile().icons.contains_key(semantic_name),
+                    "{} declares unmapped icon {}",
+                    loaded.manifest.package.id,
+                    semantic_name
+                );
+            }
+        }
+
+        for path in [
+            "packages/plugins/frontend/core/panel/src/main.mesh",
+            "packages/plugins/frontend/core/quick-settings/src/main.mesh",
+            "packages/plugins/frontend/core/quick-settings/src/components/audio-section.mesh",
+            "packages/plugins/frontend/core/navigation-bar/src/components/volume-button.mesh",
+            "packages/plugins/frontend/core/navigation-bar/src/components/settings-button.mesh",
+            "packages/plugins/frontend/core/navigation-bar/src/components/theme-button.mesh",
+            "packages/plugins/frontend/core/navigation-bar/src/components/battery-widget.mesh",
+            "packages/plugins/frontend/core/navigation-bar/src/components/battery-button.mesh",
+        ] {
+            let source = fs::read_to_string(root.join(path)).unwrap();
+            for line in source.lines().filter(|line| line.contains("<icon")) {
+                assert!(!line.contains("material:"), "{path} contains pack-specific icon: {line}");
+                assert!(!line.contains("lucide:"), "{path} contains pack-specific icon: {line}");
+                assert!(!line.contains(".svg"), "{path} contains SVG path icon: {line}");
+                assert!(!line.contains(".png"), "{path} contains PNG path icon: {line}");
+            }
+        }
+
+        let mut svg_node = WidgetNode::new("icon");
+        svg_node.attributes.insert("name".into(), "settings".into());
+        svg_node.attributes.insert("size".into(), "18".into());
+        svg_node.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 18.0,
+            height: 18.0,
+        };
+        let mut svg_buffer = mesh_core_render::PixelBuffer::new(24, 24);
+        mesh_core_render::paint_frontend_tree(&svg_node, &mut svg_buffer, 1.0, None);
+        assert!(svg_buffer.data.chunks_exact(4).any(|px| px[3] > 0));
+
+        let td = tempfile::tempdir().unwrap();
+        let raster_path = td.path().join("raster.bmp");
+        fs::write(&raster_path, two_by_two_bmp()).unwrap();
+        let mut raster_node = WidgetNode::new("icon");
+        raster_node
+            .attributes
+            .insert("src".into(), raster_path.to_string_lossy().to_string());
+        raster_node.layout = LayoutRect {
+            x: 1.0,
+            y: 1.0,
+            width: 12.0,
+            height: 10.0,
+        };
+        let mut raster_buffer = mesh_core_render::PixelBuffer::new(20, 20);
+        mesh_core_render::paint_frontend_tree(&raster_node, &mut raster_buffer, 1.0, None);
+        assert!(raster_buffer.data.chunks_exact(4).any(|px| px[3] > 0));
+
+        let mut missing_node = WidgetNode::new("icon");
+        missing_node
+            .attributes
+            .insert("name".into(), "missing-proof".into());
+        missing_node.attributes.insert("size".into(), "18".into());
+        missing_node.layout = LayoutRect {
+            x: 2.0,
+            y: 2.0,
+            width: 18.0,
+            height: 18.0,
+        };
+        let mut missing_buffer = mesh_core_render::PixelBuffer::new(24, 24);
+        mesh_core_render::paint_frontend_tree(&missing_node, &mut missing_buffer, 1.0, None);
+        assert!(missing_buffer.data.chunks_exact(4).any(|px| px[3] > 0));
+
+        let component = test_frontend_component(
+            r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+        );
+        assert!(component.record_missing_icon_diagnostic(
+            "missing-proof",
+            vec!["material:no-such-icon".into()]
+        ));
+        assert!(!component.record_missing_icon_diagnostic(
+            "missing-proof",
+            vec!["material:no-such-icon".into()]
+        ));
+        let diagnostics = component.diagnostics.as_ref().unwrap();
+        assert_eq!(diagnostics.error_count(), 0);
+        assert!(matches!(
+            diagnostics.health(),
+            mesh_core_diagnostics::HealthStatus::Degraded(message)
+                if message.contains("missing-proof")
+        ));
+    }
+
+    fn two_by_two_bmp() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"BM");
+        bytes.extend_from_slice(&70u32.to_le_bytes());
+        bytes.extend_from_slice(&[0, 0, 0, 0]);
+        bytes.extend_from_slice(&54u32.to_le_bytes());
+        bytes.extend_from_slice(&40u32.to_le_bytes());
+        bytes.extend_from_slice(&2i32.to_le_bytes());
+        bytes.extend_from_slice(&(-2i32).to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&32u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&[0; 16]);
+        bytes.extend_from_slice(&[0, 0, 255, 255]);
+        bytes.extend_from_slice(&[0, 255, 0, 255]);
+        bytes.extend_from_slice(&[255, 0, 0, 255]);
+        bytes.extend_from_slice(&[0, 255, 255, 255]);
+        bytes
     }
 
     #[test]

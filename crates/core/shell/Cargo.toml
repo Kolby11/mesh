@@ -22,8 +22,12 @@ mesh-core-backend = { workspace = true }
 mesh-core-debug = { workspace = true }
 mesh-core-elements = { workspace = true }
 mesh-core-scripting = { workspace = true }
+mesh-core-icon = { workspace = true }
 
 tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
