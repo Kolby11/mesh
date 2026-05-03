@@ -310,6 +310,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn spawn_backend_service_applies_command_interval_change_after_handler() {
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/command-polling".to_string(),
+            "polling".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "local tick = 0\n\
+             function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function on_poll()\n\
+               tick = tick + 1\n\
+               mesh.service.emit({ event = \"poll\", tick = tick })\n\
+             end\n\
+             function on_command_fast()\n\
+               mesh.service.set_poll_interval(60)\n\
+               mesh.service.emit({ event = \"command\" })\n\
+             end"
+            .to_string(),
+            update_tx,
+            cmd_rx,
+        ));
+
+        let first = next_update(&mut update_rx, "backend should emit the first poll").await;
+        assert_eq!(
+            first.payload.get("event").and_then(|v| v.as_str()),
+            Some("poll")
+        );
+        assert_eq!(first.payload.get("tick").and_then(|v| v.as_u64()), Some(1));
+
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "fast".to_string(),
+                payload: serde_json::json!({}),
+            })
+            .unwrap();
+
+        let command = next_update(&mut update_rx, "command handler should emit a payload").await;
+        assert_eq!(
+            command.payload.get("event").and_then(|v| v.as_str()),
+            Some("command")
+        );
+
+        let second = loop {
+            let event = tokio::time::timeout(Duration::from_millis(250), update_rx.recv())
+                .await
+                .expect("command interval update should affect the following poll")
+                .expect("update channel should stay open");
+            if let BackendServiceEvent::Update(update) = event {
+                break update;
+            }
+        };
+        assert_eq!(
+            second.payload.get("event").and_then(|v| v.as_str()),
+            Some("poll")
+        );
+        assert_eq!(second.payload.get("tick").and_then(|v| v.as_u64()), Some(2));
+
+        drop(cmd_tx);
+        drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
     async fn shell_theme_backend_runs_through_runtime_loop() {
         let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../packages/plugins/backend/core/shell-theme/src/main.luau");
