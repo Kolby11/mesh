@@ -34,7 +34,7 @@
 
 - [ ] **BSVC-01**: Backend plugins declare provided service interfaces and provider IDs in manifest/interface metadata.
 - [ ] **BSVC-02**: `mesh.service.emit(payload)` publishes JSON-compatible state associated with the correct service provider.
-- [ ] **BSVC-03**: The shell stores the latest emitted backend state for delivery to service consumers.
+- [x] **BSVC-03**: The shell stores the latest emitted backend state for delivery to service consumers.
 - [ ] **BSVC-04**: Service command requests route to backend Luau command handlers without service-specific Rust branches.
 - [ ] **BSVC-05**: Service command responses or failures are visible to the caller and diagnostics pipeline.
 
@@ -100,7 +100,7 @@
 | BHOST-05 | Phase 3 | Complete |
 | BSVC-01 | Phase 4 | Pending |
 | BSVC-02 | Phase 4 | Pending |
-| BSVC-03 | Phase 4 | Pending |
+| BSVC-03 | Phase 4 | Complete |
 | BSVC-04 | Phase 4 | Pending |
 | BSVC-05 | Phase 4 | Pending |
 | BDIAG-01 | Phase 5 | Pending |
