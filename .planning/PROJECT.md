@@ -1,149 +1,125 @@
-# MESH — Scripting API Stabilization
+# MESH - Backend Plugin MVP
 
 ## What This Is
 
-MESH is a Rust-based, Wayland-native shell framework. This milestone stabilizes the Luau scripting runtime to MVP quality so that **external developers** can build complete shell plugins from scratch using a documented, reliable API.
+MESH is a Rust-based, Wayland-native shell framework whose service behavior is intended to live in Luau backend plugins. This milestone resets the active roadmap around one practical objective: make backend plugins work as an MVP foundation before expanding more frontend, documentation, or package-distribution work.
 
-The core value: **a plugin developer can write a `.mesh` frontend component and a `main.luau` backend service, connect them via `require('@mesh/...')`, and have everything work end-to-end** — without guessing, reading source code, or hitting silent failures.
+The core value: **a backend plugin author can write a Luau service plugin, configure it, run it under the shell, emit state, handle commands, and understand failures without reading Rust source or relying on fragile special cases.**
 
 ## The Problem
 
-The scripting layer is partially implemented but not production-solid:
+The previous milestone stabilized several frontend and surface paths, but backend plugin behavior is still the critical foundation. MESH needs a stable backend runtime before higher-level shell features can be trusted.
 
-1. **Missing host APIs** — `mesh.exec()` / `exec_shell()`, `mesh.config()`, and `mesh.log()` are incomplete or absent, blocking backend plugin authors from doing basic work
-2. **Inconsistent behavior** — reactive globals, event handlers (`on_click`, `on_change`, `on_<service>_update`), and service proxy callbacks have edge cases and silent failures
-3. **No typed contracts** — `require('@mesh/audio')` returns a proxy, but what fields it exposes, which callbacks exist, and what commands are available is undocumented and inconsistent; plugin authors must guess
+The current risk is that backend plugins may appear to work in narrow cases while basic concepts remain underspecified:
 
-The specific known failure: frontend scripts run in the Luau VM but service data from backend plugins does not reliably reach the frontend — the `require('@mesh/...')` proxy system is not delivering state updates.
+1. Plugin lifecycle needs to be predictable: load, initialize, poll, command dispatch, shutdown, and restart.
+2. Luau host APIs need a stable MVP contract: command execution, config access, logging, service emission, and poll interval control.
+3. Service contracts need to connect backend providers to shell/frontend consumers without per-service Rust branches.
+4. Backend failures need clear diagnostics instead of silent drops or shell-level instability.
 
-## Core Value
+## Current Milestone: v1.1 Backend Plugin MVP
 
-> A developer with zero MESH knowledge can write a working top panel plugin + backend service in one sitting, guided only by the API documentation.
-
-## Current Milestone: v1.0 Scripting API Stabilization
-
-**Goal:** Stabilize the Luau frontend/backend scripting API so external developers can build documented, reliable MESH plugins end to end.
+**Goal:** Make backend plugins stable enough for MVP: core backend concepts work predictably, plugins can run service logic, emit state, receive config, log, execute host commands, expose service contracts, and surface failures clearly.
 
 **Target features:**
-- Backend host APIs for command execution, plugin configuration, structured logging, and service emission
-- Reliable service proxy delivery from backend Luau plugins to frontend `.mesh` components
-- Predictable frontend reactivity, service update handlers, and element event handlers
-- Real top panel and quick settings surfaces backed by audio and network services
-- API reference documentation validated against a fresh reference plugin
-- XDG icon rendering fixes needed for production-quality shell surfaces
+- Backend plugin lifecycle: discovery, load, init, poll, command handling, stop/restart.
+- Backend Luau host APIs: `mesh.exec`, `mesh.exec_shell`, `mesh.config`, `mesh.log`, `mesh.service.emit`, `mesh.service.set_poll_interval`.
+- Service provider contracts: backend plugins declare provided services, state shape, and command handlers.
+- Runtime diagnostics: init/poll/command failures degrade plugin health and remain visible.
+- MVP proof plugin: one fresh backend service plugin proves the documented backend contract.
 
 ## Goals
 
 ### Primary
-- Lock the Luau scripting API contract for both frontend and backend authoring
-- Fix the service connection layer so `require('@mesh/audio')` delivers live state and fires `on_change` reliably
-- Implement the critical host APIs: `mesh.exec()`, `mesh.config()`, `mesh.log()`
-- Make reactive state, event handlers, and service proxies work predictably and identically every time
+
+- Make backend plugin lifecycle behavior deterministic and testable.
+- Lock the MVP backend Luau API contract.
+- Route backend service emissions and commands through generic contracts, not service-specific Rust logic.
+- Ensure backend errors produce actionable diagnostics while keeping the shell alive where possible.
 
 ### Secondary
-- Connect top panel and quick settings surfaces to real backend services (audio, network, power, media)
-- Write the scripting API reference documentation
+
+- Provide a minimal reference backend plugin that exercises the MVP contract.
+- Leave frontend documentation, LSP support, and plugin distribution for later milestones unless needed for backend proof.
 
 ### Out of Scope
-- LSP completions/hover for `.mesh` files — follow-up milestone
-- Notification center surface — follow-up milestone
-- Launcher surface — follow-up milestone
-- Package manager / signed packages — later milestone
+
+- Frontend UI polish and new shell surfaces.
+- Package download, signing, sandboxing, or marketplace flows.
+- Full scripting API documentation beyond backend MVP notes/proofs.
+- LSP completions/hover.
 
 ## Success Criteria
 
-Done when a developer can:
-1. Write a `main.luau` backend service using `mesh.exec()`, `mesh.service.emit()`, and `mesh.log()` — and it works
-2. Write a `.mesh` frontend using reactive globals, `require('@mesh/audio')`, and `on_change` — and it re-renders when the backend emits
-3. Run the top panel and quick settings with real audio + network data from backend services
-4. Read API documentation that covers the full scripting surface without needing to read Rust source
+Done when:
 
-The concrete test: write a fresh reference plugin end-to-end and validate the documented API is accurate and complete.
+1. A fresh backend plugin can be discovered, loaded, initialized, and polled by the shell.
+2. The plugin can read config, log, execute allowed commands, emit service state, and change its poll interval.
+3. A service command can be routed to the backend plugin and return visible success/failure behavior.
+4. Invalid manifests, missing entrypoints, Luau init failures, poll failures, and command failures are reported through diagnostics.
+5. The backend MVP is proven by automated tests and a reference backend plugin.
 
 ## Scope
 
-**In scope — surfaces:**
-- Top panel (primary bar surface)
-- Quick settings drawer (connected to real backends with interactive controls: mute, volume, wifi toggle)
+**In scope - backend runtime:**
+- Manifest handling for backend service plugins.
+- Backend Luau VM setup and plugin-scoped host context.
+- Init/poll/command lifecycle.
+- Stop/restart behavior enough to avoid duplicate stale tasks.
 
-**In scope — backend services:**
-- Audio (PipeWire / PulseAudio)
-- Network (NetworkManager)
-- Power (UPower)
-- Media (MPRIS)
+**In scope - service contracts:**
+- Interface/provider declaration validation.
+- Latest emitted state association with the provider.
+- Command handler routing from service command requests to backend Luau functions.
 
-**In scope — scripting API:**
-- Frontend: reactive globals, event handlers, `require('@mesh/...')` service proxies
-- Backend: `mesh.exec()`, `mesh.exec_shell()`, `mesh.config()`, `mesh.log()`, `mesh.service.emit()`, `mesh.service.set_poll_interval()`
-- Service proxy contract: state fields, `on_change()`, command methods
+**In scope - observability:**
+- Plugin-scoped diagnostics.
+- Structured logs from backend scripts.
+- Clear test coverage around failure modes.
 
 ## Audience
 
-External developers. The API must be:
-- Learnable without reading Rust source
-- Predictable — same inputs always produce same outputs
-- Documented — API reference written as part of this milestone
+Backend plugin authors and core MESH maintainers. The MVP should be understandable from manifests, examples, and tests without spelunking through Rust wiring.
 
 ## Constraints
 
-- Build and test must work within the Nix dev shell (`nix develop`)
-- No constraints on API changes — if the current API shape is wrong, fix it
+- Build and test must work within the Nix dev shell (`nix develop`).
+- Rust core remains a wiring layer; service-specific behavior belongs in Luau backend plugins.
+- Existing frontend/surface work from the previous milestone remains archived, not discarded.
 
 ## Current State
 
-Phase 05 is verified in code: core surfaces use semantic icon names backed by `config/icons.toml`, SVG and raster icons paint through the render pipeline, missing icons produce non-fatal degraded diagnostics with fallback rendering, and one Phase 04 live-host UAT remains tracked in `.planning/phases/04-real-core-surfaces/04-HUMAN-UAT.md`.
+The previous v1.0 planning artifacts were archived on 2026-05-03 under `.planning/milestones/v1.0-reset-2026-05-03-*` before this roadmap reset. Active planning now starts fresh at Phase 1 for backend plugin MVP stabilization.
 
 ## Requirements
 
-### Active
-
-- [ ] `mesh.exec(cmd, args)` host API implemented and callable from backend Luau scripts
-- [ ] `mesh.exec_shell(cmd)` host API implemented and callable from backend Luau scripts
-- [ ] `mesh.config()` host API returns plugin settings as a Luau table
-- [ ] `mesh.log(level, msg)` host API writes structured log entries from Luau scripts
-- [ ] `mesh.service.emit(payload)` reliably delivers state to all connected frontend proxies
-- [ ] `require('@mesh/<service>')` proxy returns a table with correct state fields populated
-- [ ] `proxy.on_change(fn)` fires whenever the backend emits a new payload
-- [ ] Reactive globals in `<script>` always trigger a re-render when assigned
-- [ ] `on_<service>_update()` handler fires in frontend script after every backend emit
-- [ ] Event handlers (`on_click`, `on_change` on elements) fire reliably with correct state
-- [x] Top panel surface renders with live data from at least one backend service — Validated in Phase 04
-- [x] Quick settings surface renders with interactive audio + network controls backed by real services — Validated in Phase 04; live-host UAT remains tracked separately
-- [ ] Scripting API reference document written and validated against a working reference plugin
-- [x] Icon rendering works for XDG icon names (four bugs identified in llm-context.md) — Validated in Phase 05
-
-### Out of Scope
-
-- LSP support — not in this milestone
-- Notification center — not in this milestone
-- Launcher surface — not in this milestone
-- Signed/sandboxed packages — later milestone
+See `.planning/REQUIREMENTS.md` for the active v1.1 requirement set.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Backend plugins must use Luau (not Rust) for service logic | Architectural rule — core is wiring only; service logic in Luau keeps the shell extensible | Locked |
-| `require('@mesh/service')` is the only interface between backend and frontend | Typed proxy pattern; no shared Rust state between plugins | Locked |
-| Audience is external developers at MVP | API must be clean and discoverable, not just usable by the author | Decided this milestone |
-| LSP deferred | Runtime correctness is more valuable than editor tooling at MVP | Deferred |
+| Backend plugins use Luau for service logic | Keeps Rust core as wiring and makes services extensible | Locked |
+| Rust core must stay generic across services | Prevents audio/network/power special cases from becoming architecture | Locked |
+| Backend MVP comes before distribution and LSP | Runtime stability is prerequisite for tooling and package workflows | Decided this milestone |
+| Reset active roadmap numbering for v1.1 | User explicitly chose reset roadmap after archiving prior artifacts | Locked |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
-**After each phase transition** (via `/gsd-transition`):
-1. Requirements invalidated? → Move to Out of Scope with reason
-2. Requirements validated? → Move to Validated with phase reference
-3. New requirements emerged? → Add to Active
-4. Decisions to log? → Add to Key Decisions
-5. "What This Is" still accurate? → Update if drifted
+**After each phase transition**:
+1. Requirements invalidated? Move to Out of Scope with reason.
+2. Requirements validated? Move to validated with phase reference.
+3. New requirements emerged? Add to Active.
+4. Decisions to log? Add to Key Decisions.
+5. "What This Is" still accurate? Update if drifted.
 
-**After each milestone** (via `/gsd-complete-milestone`):
-1. Full review of all sections
-2. Core Value check — still the right priority?
-3. Audit Out of Scope — reasons still valid?
-4. Update Context with current state
+**After each milestone**:
+1. Full review of all sections.
+2. Core Value check: still the right priority?
+3. Audit Out of Scope: reasons still valid?
+4. Update Current State with validated outcomes.
 
 ---
-*Last updated: 2026-05-03 after Phase 05 verification*
+*Last updated: 2026-05-03 after v1.1 reset*

@@ -1,129 +1,105 @@
-# Requirements: MESH v1.0 Scripting API Stabilization
+# Requirements: MESH v1.1 Backend Plugin MVP
 
-**Defined:** 2026-05-01
-**Core Value:** A developer with zero MESH knowledge can write a working top panel plugin and backend service in one sitting, guided only by the API documentation.
+**Defined:** 2026-05-03
+**Core Value:** A backend plugin author can write a Luau service plugin, configure it, run it under the shell, emit state, handle commands, and understand failures without reading Rust source.
 
-## v1 Requirements
+## v1.1 Requirements
+
+### Backend Plugin Lifecycle
+
+- [ ] **BPLUG-01**: Backend plugin manifests declare service entrypoints and are validated before runtime launch.
+- [ ] **BPLUG-02**: Backend plugin discovery creates one runtime instance per enabled backend provider without duplicate stale tasks.
+- [ ] **BPLUG-03**: Backend Luau `init()` runs once with plugin-scoped context before polling or command dispatch.
+- [ ] **BPLUG-04**: Backend poll loops run predictably and respect plugin-controlled poll interval changes.
+- [ ] **BPLUG-05**: Backend runtimes can stop or restart without leaving old poll loops or command receivers active.
 
 ### Backend Host API
 
-- [ ] **HOST-01**: Backend Luau scripts can call `mesh.exec(cmd, args)` with structured arguments and receive stdout, stderr, and exit status.
-- [ ] **HOST-02**: Backend Luau scripts can call `mesh.exec_shell(cmd)` for shell-style commands and receive stdout, stderr, and exit status.
-- [ ] **HOST-03**: Backend Luau scripts can call `mesh.config()` and receive plugin settings as a Luau table.
-- [ ] **HOST-04**: Backend Luau scripts can call `mesh.log(level, msg)` and produce structured log entries associated with the plugin.
-- [ ] **HOST-05**: Backend Luau scripts can call `mesh.service.emit(payload)` and publish JSON-compatible state payloads to the shell.
-- [ ] **HOST-06**: Backend Luau scripts can call `mesh.service.set_poll_interval(ms)` and affect the backend poll loop without restarting the shell.
+- [ ] **BHOST-01**: Backend Luau scripts can call `mesh.exec(cmd, args)` with structured arguments and receive stdout, stderr, and exit status.
+- [ ] **BHOST-02**: Backend Luau scripts can call `mesh.exec_shell(cmd)` for shell-style commands and receive stdout, stderr, and exit status.
+- [ ] **BHOST-03**: Backend Luau scripts can call `mesh.config()` and receive plugin settings as a Luau table.
+- [ ] **BHOST-04**: Backend Luau scripts can call `mesh.log(level, msg)` and produce structured plugin-scoped log entries.
+- [ ] **BHOST-05**: Backend Luau scripts can call `mesh.service.set_poll_interval(ms)` and affect future poll cadence without shell restart.
 
-### Service Proxy
+### Service Provider Contract
 
-- [x] **PROXY-01**: Frontend `.mesh` scripts can call `require('@mesh/<service>')` and receive a proxy table for the active provider.
-- [x] **PROXY-02**: Service proxy tables expose the latest backend-emitted state fields as Luau values.
-- [ ] **PROXY-03**: Service proxy tables expose command methods declared by the service contract.
-- [x] **PROXY-04**: Backend state emissions invalidate frontend components that consume that service state, so rerender sees the latest proxy values without requiring proxy-scoped callback APIs.
-- [x] **PROXY-05**: Service updates stay separate from element events; frontend scripts can observe the latest proxy state on rerender without `on_<service>_update()` handlers.
-- [x] **PROXY-06**: Frontend scripts fail visibly, with diagnostics, when requiring a missing or invalid service contract.
+- [ ] **BSVC-01**: Backend plugins declare provided service interfaces and provider IDs in manifest/interface metadata.
+- [ ] **BSVC-02**: `mesh.service.emit(payload)` publishes JSON-compatible state associated with the correct service provider.
+- [ ] **BSVC-03**: The shell stores the latest emitted backend state for delivery to service consumers.
+- [ ] **BSVC-04**: Service command requests route to backend Luau command handlers without service-specific Rust branches.
+- [ ] **BSVC-05**: Service command responses or failures are visible to the caller and diagnostics pipeline.
 
-### Frontend Reactivity
+### Diagnostics and Failure Handling
 
-- [x] **FRONT-01**: Assigning a reactive global inside a frontend `<script>` marks the component dirty.
-- [x] **FRONT-02**: Dirty frontend script state triggers a widget tree rebuild on the next paint.
-- [x] **FRONT-03**: Element `on_click` handlers run reliably with the current script state.
-- [x] **FRONT-04**: Element `on_change` handlers run reliably for interactive controls such as sliders and toggles.
-- [x] **FRONT-05**: Handler failures are reported through diagnostics instead of silently failing.
+- [ ] **BDIAG-01**: Invalid backend manifests, missing entrypoints, and missing interface contracts produce clear diagnostics.
+- [ ] **BDIAG-02**: Backend Luau `init()`, poll, emit, and command handler failures degrade plugin health without crashing the shell.
+- [ ] **BDIAG-03**: Repeated backend failures are deduplicated or rate-limited enough to avoid diagnostic spam.
+- [ ] **BDIAG-04**: Backend plugin logs and diagnostics include plugin identity and enough context to debug the failing lifecycle stage.
 
-### Core Services and Surfaces
+### MVP Proof
 
-- [x] **SURF-01**: The top panel renders live data from at least one real backend service.
-- [x] **SURF-02**: The quick settings surface renders live audio state from a real backend provider.
-- [x] **SURF-03**: The quick settings surface can change audio volume and mute state through service commands.
-- [x] **SURF-04**: The quick settings surface renders live network state from a real backend provider.
-- [x] **SURF-05**: The quick settings surface can toggle or command network state through the service proxy contract where supported.
-- [ ] **SURF-06**: Audio, network, power, and media service contracts document their state fields, callbacks, and commands.
+- [ ] **BREF-01**: A fresh reference backend service plugin exercises config, logging, polling, service emission, and command handling.
+- [ ] **BREF-02**: Automated tests prove the reference backend plugin emits state and handles at least one command through the public backend MVP contract.
+- [ ] **BREF-03**: Backend MVP behavior is documented in a short reference note sufficient for plugin authors to follow the proven pattern.
 
-### Icon Rendering
-
-- [x] **ICON-01**: XDG icon names resolve through configured icon theme search paths.
-- [x] **ICON-02**: SVG icons rasterize correctly through the render pipeline.
-- [x] **ICON-03**: Raster icons decode and paint correctly at requested sizes.
-- [x] **ICON-04**: Missing icons produce diagnostics and non-crashing fallback behavior.
-
-### Documentation and Validation
-
-- [ ] **DOCS-01**: The scripting API reference documents frontend reactivity, event handlers, and service proxy usage.
-- [ ] **DOCS-02**: The scripting API reference documents backend host APIs and service emission patterns.
-- [ ] **DOCS-03**: A fresh reference backend service plugin validates the documented backend API.
-- [ ] **DOCS-04**: A fresh reference frontend `.mesh` component validates the documented frontend API.
-- [ ] **DOCS-05**: The reference plugin proves backend emissions update frontend UI without reading Rust source.
-
-## v2 Requirements
+## Future Requirements
 
 ### Developer Tooling
 
-- **LSP-01**: `.mesh` LSP completions cover service proxy fields and commands.
-- **LSP-02**: `.mesh` LSP hover documentation reflects the scripting API reference.
-
-### Additional Shell Surfaces
-
-- **NOTIF-01**: Notification center surface consumes a live notification service.
-- **LAUNCH-01**: Launcher surface is stabilized against the same scripting API contract.
+- **LSP-01**: `.mesh` and Luau plugin LSP completions cover service APIs and backend host APIs.
+- **LSP-02**: Hover documentation reflects the backend MVP reference.
 
 ### Distribution
 
-- **PKG-01**: Plugin package manager supports installing third-party plugins.
+- **PKG-01**: Plugin package manager supports installing third-party backend plugins.
 - **PKG-02**: Signed or sandboxed plugin packages protect users from untrusted plugin code.
+
+### Frontend and Surfaces
+
+- **FRONTDOC-01**: Full frontend scripting API documentation is validated against a reference frontend component.
+- **SURFACE-01**: Additional shell surfaces consume backend services through the stabilized MVP contract.
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| LSP completions and hover for `.mesh` service APIs | Runtime correctness and documentation are higher priority for v1. |
-| Notification center surface | Explicitly deferred from this milestone. |
-| Launcher surface stabilization | Explicitly deferred from this milestone. |
-| Plugin package manager or signed packages | Later distribution work, not required to stabilize the MVP scripting API. |
-| Rewriting core services in Rust | Project decision keeps service-specific logic in Luau backend plugins. |
+| Plugin package download and hot install | Backend runtime semantics must stabilize first. |
+| LSP completions and hover | Tooling should document stable APIs, not APIs still being locked. |
+| New frontend shell surfaces | This milestone focuses on backend plugin fundamentals. |
+| Sandboxing/signing untrusted plugins | Security distribution model is a later milestone. |
+| Service-specific Rust command behavior | Backend service behavior belongs in Luau plugins. |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| HOST-01 | Phase 1 | Pending |
-| HOST-02 | Phase 1 | Pending |
-| HOST-03 | Phase 1 | Pending |
-| HOST-04 | Phase 1 | Pending |
-| HOST-05 | Phase 1 | Pending |
-| HOST-06 | Phase 1 | Pending |
-| PROXY-01 | Phase 2 | Complete |
-| PROXY-02 | Phase 2 | Complete |
-| PROXY-03 | Phase 2 | Pending |
-| PROXY-04 | Phase 2 | Complete |
-| PROXY-05 | Phase 2 | Complete |
-| PROXY-06 | Phase 2 | Complete |
-| FRONT-01 | Phase 3 | Complete |
-| FRONT-02 | Phase 3 | Complete |
-| FRONT-03 | Phase 3 | Complete |
-| FRONT-04 | Phase 3 | Complete |
-| FRONT-05 | Phase 3 | Complete |
-| SURF-01 | Phase 4 | Complete |
-| SURF-02 | Phase 4 | Complete |
-| SURF-03 | Phase 4 | Complete |
-| SURF-04 | Phase 4 | Complete |
-| SURF-05 | Phase 4 | Complete |
-| SURF-06 | Phase 2 | Pending |
-| ICON-01 | Phase 5 | Complete |
-| ICON-02 | Phase 5 | Complete |
-| ICON-03 | Phase 5 | Complete |
-| ICON-04 | Phase 5 | Complete |
-| DOCS-01 | Phase 6 | Pending |
-| DOCS-02 | Phase 6 | Pending |
-| DOCS-03 | Phase 6 | Pending |
-| DOCS-04 | Phase 6 | Pending |
-| DOCS-05 | Phase 6 | Pending |
+| BPLUG-01 | Phase 1 | Pending |
+| BPLUG-02 | Phase 1 | Pending |
+| BPLUG-03 | Phase 1 | Pending |
+| BPLUG-04 | Phase 1 | Pending |
+| BPLUG-05 | Phase 1 | Pending |
+| BHOST-01 | Phase 2 | Pending |
+| BHOST-02 | Phase 2 | Pending |
+| BHOST-03 | Phase 2 | Pending |
+| BHOST-04 | Phase 2 | Pending |
+| BHOST-05 | Phase 2 | Pending |
+| BSVC-01 | Phase 3 | Pending |
+| BSVC-02 | Phase 3 | Pending |
+| BSVC-03 | Phase 3 | Pending |
+| BSVC-04 | Phase 3 | Pending |
+| BSVC-05 | Phase 3 | Pending |
+| BDIAG-01 | Phase 4 | Pending |
+| BDIAG-02 | Phase 4 | Pending |
+| BDIAG-03 | Phase 4 | Pending |
+| BDIAG-04 | Phase 4 | Pending |
+| BREF-01 | Phase 4 | Pending |
+| BREF-02 | Phase 4 | Pending |
+| BREF-03 | Phase 4 | Pending |
 
 **Coverage:**
-- v1 requirements: 32 total
-- Mapped to phases: 32
+- v1.1 requirements: 22 total
+- Mapped to phases: 22
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-05-01*
-*Last updated: 2026-05-01 after milestone v1.0 start*
+*Requirements defined: 2026-05-03 after v1.1 reset*
