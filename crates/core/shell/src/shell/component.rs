@@ -684,8 +684,11 @@ impl FrontendSurfaceComponent {
                 self.last_audio_slider_percent = Some(percent);
                 return Some(CoreRequest::ServiceCommand {
                     interface: "mesh.audio".to_string(),
-                    command: "set-volume".to_string(),
-                    payload: serde_json::json!({ "percent": percent }),
+                    command: "set_volume".to_string(),
+                    payload: serde_json::json!({
+                        "device_id": "default",
+                        "volume": percent as f64 / 100.0,
+                    }),
                     source_plugin_id: self.id().to_string(),
                     source_capabilities: self.source_capabilities(),
                 });
@@ -883,8 +886,11 @@ impl FrontendSurfaceComponent {
                 let percent = value.round().clamp(0.0, 100.0) as u32;
                 Some(CoreRequest::ServiceCommand {
                     interface: "mesh.audio".to_string(),
-                    command: "set-volume".to_string(),
-                    payload: serde_json::json!({ "percent": percent }),
+                    command: "set_volume".to_string(),
+                    payload: serde_json::json!({
+                        "device_id": "default",
+                        "volume": percent as f64 / 100.0,
+                    }),
                     source_plugin_id: self.id().to_string(),
                     source_capabilities: self.source_capabilities(),
                 })
@@ -2778,7 +2784,7 @@ function onVolumeChange(value)
     slider_value = normalized
     update_audio_copy(percent, false)
     if audio_ok and audio then
-        mesh.events.publish("mesh.audio.set-volume", { percent = percent })
+        audio.set_volume("default", normalized)
     end
 end
 </script>
@@ -2867,10 +2873,13 @@ end
                 },
             ] => {
                 assert_eq!(interface, "mesh.audio");
-                assert_eq!(command, "set-volume");
-                assert_eq!(payload, &serde_json::json!({ "percent": 50 }));
+                assert_eq!(command, "set_volume");
+                assert_eq!(
+                    payload,
+                    &serde_json::json!({ "device_id": "default", "volume": 0.5 })
+                );
             }
-            other => panic!("expected one mesh.audio.set-volume request, got {other:?}"),
+            other => panic!("expected one mesh.audio.set_volume request, got {other:?}"),
         }
 
         let mut buffer = PixelBuffer::new(240, 40);

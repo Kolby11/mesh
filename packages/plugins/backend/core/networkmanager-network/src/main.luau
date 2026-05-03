@@ -93,6 +93,32 @@ local function fetch_wifi_enabled()
     return out == 'enabled'
 end
 
+local function fetch_wifi_networks(rescan)
+    if rescan then
+        mesh.exec("nmcli", { "device", "wifi", "rescan" })
+    end
+    local result = mesh.exec("nmcli", { "-t", "-f", "SSID,SIGNAL,BSSID", "device", "wifi", "list" })
+    if not result.success then
+        return last_networks, result
+    end
+    local networks = {}
+    for line in result.stdout:gmatch('([^\n]+)') do
+        local ssid, signal, bssid = line:match('^(.-):(%d+):(.+)$')
+        if not ssid then
+            local cols = split_line(line, '|')
+            ssid = cols[1] or ''
+            signal = cols[2] or '0'
+            bssid = cols[3] or ''
+        end
+        bssid = (bssid or ''):gsub('\\:', ':')
+        local strength = math.floor((tonumber(signal) or 0) + 0.5)
+        local id = bssid ~= '' and ('wifi:' .. bssid) or ('wifi:' .. ssid)
+        table.insert(networks, { id = id, name = ssid or '', kind = 'wifi', strength = strength, active = false })
+    end
+    last_networks = networks
+    return networks, result
+end
+
 local function has_control()
     return mesh.service.has_capability('service.network.control')
 end
@@ -141,6 +167,7 @@ local function refresh_state()
         table.insert(net_devices, d)
     end
     local wifi_on = fetch_wifi_enabled()
+    local networks = fetch_wifi_networks(false)
 
     -- Emit base interface state fields plus runtime-defined extras.
     -- Networks are additive surface that richer UIs can use.
@@ -149,7 +176,7 @@ local function refresh_state()
         wifi_enabled = wifi_on,
         connections  = conns,
         devices      = net_devices,
-        networks     = last_networks,
+        networks     = networks,
     }
     return true
 end
@@ -168,7 +195,8 @@ function on_command_connect()
         return { ok = false, error = 'missing connection_id' }
     end
     local result = nil
-    if is_bluetooth_mac(id) then
+    local kind = payload.kind or payload.connection_kind or ''
+    if kind == 'bluetooth' and is_bluetooth_mac(id) then
         result = mesh.exec('bluetoothctl', { 'connect', id })
     elseif is_uuid(id) then
         result = mesh.exec('nmcli', { 'connection', 'up', 'uuid', id })
@@ -189,7 +217,8 @@ function on_command_disconnect()
         return { ok = false, error = 'missing connection_id' }
     end
     local result = nil
-    if is_bluetooth_mac(id) then
+    local kind = payload.kind or payload.connection_kind or ''
+    if kind == 'bluetooth' and is_bluetooth_mac(id) then
         result = mesh.exec('bluetoothctl', { 'disconnect', id })
     elseif is_uuid(id) then
         result = mesh.exec('nmcli', { 'connection', 'down', 'uuid', id })
@@ -201,24 +230,11 @@ function on_command_disconnect()
 end
 
 function on_command_wifi_scan()
-    mesh.exec("nmcli", { "device", "wifi", "rescan" })
-    local result = mesh.exec("nmcli", { "-t", "-f", "SSID,SIGNAL,BSSID", "device", "wifi", "list" })
+    local networks, result = fetch_wifi_networks(true)
     if not result.success then
         set_unavailable_state()
         return { ok = false, error = result.stderr }
     end
-    local networks = {}
-    for line in result.stdout:gmatch('([^\n]+)') do
-        local cols = split_line(line, ':')
-        if #cols < 3 then cols = split_line(line, '|') end
-        local ssid     = cols[1] or ''
-        local signal   = tonumber(cols[2]) or 0
-        local bssid    = cols[3] or ''
-        local strength = math.floor(signal + 0.5)
-        table.insert(networks, { id = bssid, name = ssid, kind = 'wifi', strength = strength, active = false })
-    end
-    -- Update the cached networks list so the next poll re-emits it.
-    last_networks = networks
     state = {
         available    = true,
         wifi_enabled = fetch_wifi_enabled(),
