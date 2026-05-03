@@ -798,6 +798,17 @@ mod tests {
     }
 
     #[test]
+    fn invalid_log_level_is_non_fatal() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nmesh.log(\"trace\", \"not public\")\nmesh.service.emit({ ok = true })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
+        assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
     fn bad_emit_payload_does_not_emit_stale_state() {
         let mut ctx = BackendScriptContext::new("@test/backend");
         ctx.load_script(
