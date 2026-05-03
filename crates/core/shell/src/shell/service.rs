@@ -191,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn script_events_to_requests_denies_read_only_service_commands() {
+    fn script_events_to_requests_denies_uncontrolled_service_command() {
         let mut caps = mesh_core_capability::CapabilitySet::new();
         caps.grant(Capability::new("service.audio.read"));
         let requests = script_events_to_requests(vec![PublishedEvent {

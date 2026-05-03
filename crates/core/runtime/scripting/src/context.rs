@@ -3,7 +3,6 @@ use crate::host_api::{HostApiManifest, InterfaceProxy};
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_elements::VariableStore;
 use mesh_core_locale::LocaleEngine;
-use mesh_core_service::contract::InterfaceTypeDef;
 use mesh_core_service::{InterfaceCatalog, InterfaceContract, InterfaceResolution};
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value;
@@ -861,10 +860,6 @@ fn create_service_proxy(
         .as_ref()
         .map(|c| c.methods.clone())
         .unwrap_or_default();
-    let types = contract
-        .as_ref()
-        .map(|c| c.types.clone())
-        .unwrap_or_default();
     let interface_name = contract
         .as_ref()
         .map(|c| c.interface.clone())
@@ -886,19 +881,22 @@ fn create_service_proxy(
             // Case A: known contract method — dispatch as a service command.
             if let Some(method) = methods.iter().find(|m| m.name == key) {
                 let required_capability = service_control_capability(&service_name);
-                if !source_capabilities.is_granted(&required_capability) {
-                    return Err(mlua::Error::external(ScriptError::CapabilityDenied(
-                        format!("{interface_name}.{key}"),
-                    )));
-                }
                 let method = method.clone();
                 let iface = interface_name.clone();
-                let types = types.clone();
                 let events = Arc::clone(&published_events);
                 let source_plugin_id = source_plugin_id.clone();
                 let source_capabilities = source_capabilities.clone();
                 return Ok(LuaValue::Function(lua.create_function(
                     move |lua, args: mlua::Variadic<LuaValue>| {
+                        if !source_capabilities.is_granted(&required_capability) {
+                            return command_result_table(
+                                lua,
+                                false,
+                                false,
+                                Some("capability denied"),
+                            )
+                            .map(LuaValue::Table);
+                        }
                         let offset = consume_self_arg(&args);
                         let payload = method
                             .args
@@ -917,7 +915,7 @@ fn create_service_proxy(
                             source_plugin_id: source_plugin_id.clone(),
                             source_capabilities: source_capabilities.clone(),
                         });
-                        default_lua_value_for_type(lua, &types, method.returns.as_deref())
+                        command_result_table(lua, true, true, None).map(LuaValue::Table)
                     },
                 )?));
             }
@@ -970,6 +968,23 @@ fn service_payload_field(lua: &Lua, service_name: &str, key: &str) -> mlua::Resu
         .unwrap_or(LuaValue::Nil))
 }
 
+fn command_result_table(
+    lua: &Lua,
+    ok: bool,
+    queued: bool,
+    error: Option<&str>,
+) -> mlua::Result<Table> {
+    let result = lua.create_table()?;
+    result.set("ok", ok)?;
+    if ok {
+        result.set("queued", queued)?;
+    }
+    if let Some(error) = error {
+        result.set("error", error)?;
+    }
+    Ok(result)
+}
+
 fn consume_self_arg(args: &mlua::Variadic<LuaValue>) -> usize {
     match args.get(0) {
         Some(LuaValue::Table(_)) => 1,
@@ -986,46 +1001,6 @@ fn service_name_from_interface(interface: &str) -> String {
 
 fn service_control_capability(service_name: &str) -> Capability {
     Capability::new(format!("service.{service_name}.control"))
-}
-
-fn default_lua_value_for_type(
-    lua: &Lua,
-    types: &HashMap<String, InterfaceTypeDef>,
-    ty: Option<&str>,
-) -> mlua::Result<LuaValue> {
-    let Some(ty) = ty.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Ok(LuaValue::Nil);
-    };
-
-    if ty.ends_with('?') {
-        return Ok(LuaValue::Nil);
-    }
-
-    if ty.starts_with('[') && ty.ends_with(']') {
-        return Ok(LuaValue::Table(lua.create_table()?));
-    }
-
-    let value = match ty {
-        "string" => LuaValue::String(lua.create_string("")?),
-        "boolean" => LuaValue::Boolean(false),
-        "float" | "number" | "integer" | "int" => LuaValue::Integer(0),
-        "Result" => LuaValue::Nil,
-        custom => {
-            if let Some(def) = types.get(custom) {
-                let table = lua.create_table()?;
-                for field in &def.fields {
-                    let field_value =
-                        default_lua_value_for_type(lua, types, Some(&field.arg_type))?;
-                    table.set(field.name.as_str(), field_value)?;
-                }
-                LuaValue::Table(table)
-            } else {
-                LuaValue::Nil
-            }
-        }
-    };
-
-    Ok(value)
 }
 
 fn map_lua_error(_catalog: &InterfaceCatalog, err: mlua::Error) -> ScriptError {
@@ -1833,7 +1808,38 @@ end
     }
 
     #[test]
-    fn read_only_interface_proxy_denies_command_methods() {
+    fn interface_proxy_method_returns_queued_result() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        caps.grant(Capability::new("service.audio.control"));
+        let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script(
+            r#"
+queued_ok = false
+queued = false
+
+function init()
+    local audio = require("@mesh/audio@>=1.0")
+    local result = audio.set_volume("default", 0.5)
+    queued_ok = result.ok
+    queued = result.queued
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.call_init().unwrap();
+
+        assert_eq!(ctx.state.get("queued_ok"), Some(serde_json::json!(true)));
+        assert_eq!(ctx.state.get("queued"), Some(serde_json::json!(true)));
+        let published = ctx.drain_published_events();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].channel, "mesh.audio.set_volume");
+    }
+
+    #[test]
+    fn read_only_interface_proxy_returns_capability_denied_result() {
         let mut caps = CapabilitySet::new();
         caps.grant(Capability::new("service.audio.read"));
         let mut ctx = ScriptContext::new("@test/read-only-audio", caps).unwrap();
@@ -1841,6 +1847,8 @@ end
         ctx.load_script(
             r#"
 audio_percent = 0
+denied_ok = true
+denied_error = ""
 
 function read_state()
     local audio = require("@mesh/audio@>=1.0")
@@ -1849,7 +1857,9 @@ end
 
 function change_volume()
     local audio = require("@mesh/audio@>=1.0")
-    audio.set_volume("default", 0.5)
+    local result = audio.set_volume("default", 0.5)
+    denied_ok = result.ok
+    denied_error = result.error or ""
 end
 "#,
         )
@@ -1859,9 +1869,11 @@ end
         ctx.call_handler("read_state", &[]).unwrap();
         assert_eq!(ctx.state.get("audio_percent"), Some(serde_json::json!(64)));
 
-        let err = ctx.call_handler("change_volume", &[]).unwrap_err();
-        assert!(
-            matches!(err, ScriptError::CapabilityDenied(target) if target == "mesh.audio.set_volume")
+        ctx.call_handler("change_volume", &[]).unwrap();
+        assert_eq!(ctx.state.get("denied_ok"), Some(serde_json::json!(false)));
+        assert_eq!(
+            ctx.state.get("denied_error"),
+            Some(serde_json::json!("capability denied"))
         );
         assert!(
             ctx.drain_published_events().is_empty(),
