@@ -9,36 +9,28 @@ function init()
 end
 
 local function resolve_sink_id()
-    local result = mesh.exec_shell([=[wpctl status | awk '
-BEGIN {
-    in_sinks = 0
-    first = ""
-}
-/^[[:space:]]*[|`\\-]*[[:space:]]*├─ Sinks:/ {
-    in_sinks = 1
-    next
-}
-/^[[:space:]]*[|`\\-]*[[:space:]]*├─ Sources:/ {
-    in_sinks = 0
-}
-in_sinks {
-    if (match($0, /\*[[:space:]]*([0-9]+)\./)) {
-        print substr($0, RSTART, RLENGTH)
-        exit
-    }
-    if (first == "" && match($0, /([0-9]+)\./)) {
-        first = substr($0, RSTART, RLENGTH)
-    }
-}
-END {
-    if (first != "") print first
-}
-']=])
+    local result = mesh.exec("wpctl", { "status" })
     if not result.success then
         return nil
     end
 
-    return (result.stdout or ""):match("(%d+)")
+    local first = nil
+    local in_sinks = false
+    for line in (result.stdout or ""):gmatch("([^\n]+)") do
+        if line:match("Sinks:") then
+            in_sinks = true
+        elseif in_sinks and line:match("Sources:") then
+            in_sinks = false
+        elseif in_sinks then
+            local selected = line:match("%*%s*(%d+)%.")
+            if selected then
+                return selected
+            end
+            first = first or line:match("(%d+)%.")
+        end
+    end
+
+    return first
 end
 
 local function read_state()
@@ -47,7 +39,7 @@ local function read_state()
         return nil
     end
 
-    local result = mesh.exec_shell(("wpctl get-volume %s"):format(sink_id))
+    local result = mesh.exec("wpctl", { "get-volume", sink_id })
     if not result.success then
         return nil
     end
@@ -104,7 +96,8 @@ end
 function on_command_volume_up()
     local sink_id = resolve_sink_id()
     if sink_id then
-        mesh.exec_shell(("wpctl set-volume %s 5%%+ && wpctl set-mute %s 0"):format(sink_id, sink_id))
+        mesh.exec("wpctl", { "set-volume", sink_id, "5%+" })
+        mesh.exec("wpctl", { "set-mute", sink_id, "0" })
     end
     emit_state()
 end
@@ -112,7 +105,7 @@ end
 function on_command_volume_down()
     local sink_id = resolve_sink_id()
     if sink_id then
-        mesh.exec_shell(("wpctl set-volume %s 5%%-"):format(sink_id))
+        mesh.exec("wpctl", { "set-volume", sink_id, "5%-" })
     end
     emit_state()
 end
@@ -122,7 +115,7 @@ function on_command_set_volume()
     local percent = command_percent_from_payload(payload)
     local sink_id = resolve_sink_id()
     if sink_id then
-        mesh.exec_shell(("wpctl set-volume %s %s%%"):format(sink_id, percent))
+        mesh.exec("wpctl", { "set-volume", sink_id, tostring(percent) .. "%" })
     end
     emit_state()
 end
@@ -130,7 +123,7 @@ end
 function on_command_toggle_mute()
     local sink_id = resolve_sink_id()
     if sink_id then
-        mesh.exec_shell(("wpctl set-mute %s toggle"):format(sink_id))
+        mesh.exec("wpctl", { "set-mute", sink_id, "toggle" })
     end
     emit_state()
 end
@@ -140,7 +133,7 @@ function on_command_set_muted()
     local muted = payload.muted == true
     local sink_id = resolve_sink_id()
     if sink_id then
-        mesh.exec_shell(("wpctl set-mute %s %s"):format(sink_id, muted and "1" or "0"))
+        mesh.exec("wpctl", { "set-mute", sink_id, muted and "1" or "0" })
     end
     emit_state()
 end
