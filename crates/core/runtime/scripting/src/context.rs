@@ -1627,18 +1627,21 @@ end
 function init()
     local audio = require("@mesh/audio@>=1.0")
     audio:set_volume("default", 0.5)
+    audio.set_volume("default", 0.5)
 end
 "#,
         )
         .unwrap();
         ctx.call_init().unwrap();
         let published = ctx.drain_published_events();
-        assert_eq!(published.len(), 1);
-        assert_eq!(published[0].channel, "mesh.audio.set_volume");
-        assert_eq!(
-            published[0].payload,
-            serde_json::json!({ "device_id": "default", "volume": 0.5 })
-        );
+        assert_eq!(published.len(), 2);
+        for event in published {
+            assert_eq!(event.channel, "mesh.audio.set_volume");
+            assert_eq!(
+                event.payload,
+                serde_json::json!({ "device_id": "default", "volume": 0.5 })
+            );
+        }
     }
 
     #[test]
