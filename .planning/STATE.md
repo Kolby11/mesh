@@ -37,6 +37,9 @@ Last activity: 2026-05-03
 - Runtime correctness is in scope before LSP, distribution, or new surfaces.
 - Phase numbering reset to 1 for v1.1 after archiving v1.0 planning artifacts.
 - [v1.1]: Backend plugin MVP starts with a central package.json-like installed-plugin manifest that drives frontend/backend plugin installation, backend category/provider selection, and later runtime lifecycle.
+- [v1.1 Phase 02]: Backend startup uses explicit installed-module graph active providers before runtime launch; legacy priority discovery is compatibility fallback only when the graph cannot load.
+- [v1.1 Phase 02]: Backend runtime failures emit visible lifecycle status and diagnostics, but do not automatically switch to a fallback provider.
+- [v1.1 Phase 02]: Shell owns backend runtime slots by interface and removes service command handlers before replacement or terminal cleanup.
 - [Phase 02]: Service proxies are state-and-command surfaces only; callback-style bind/on_change APIs were removed from the public proxy path.
 - [Phase 02]: Service update invalidation is based on tracked top-level field value changes, not whole-service emissions.
 - [Phase 02]: Lookup diagnostics are recorded before InterfaceUnavailable or CapabilityDenied errors are returned, so pcall changes control flow without hiding visibility.
