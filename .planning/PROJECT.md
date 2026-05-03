@@ -103,7 +103,9 @@ Backend plugin authors and core MESH maintainers. The MVP should be understandab
 
 The previous v1.0 planning artifacts were archived on 2026-05-03 under `.planning/milestones/v1.0-reset-2026-05-03-*` before this roadmap reset.
 
-Phase 1 is complete. MESH now has the package.json-like installed module manifest foundation, module package schema, package-first compatibility loader, normalized installed module graph, active backend provider selection proof, and repo-local fixtures that mirror the target `~/.mesh` layout. Phase 2 is ready to plan: backend lifecycle should consume that graph for deterministic provider runtime creation, init, polling, and stop/restart behavior.
+Phase 1 is complete. MESH now has the package.json-like installed module manifest foundation, module package schema, package-first compatibility loader, normalized installed module graph, active backend provider selection proof, and repo-local fixtures that mirror the target `~/.mesh` layout.
+
+Phase 2 is complete. Backend lifecycle now consumes the installed module graph for explicit active provider startup, validates providers before launch, emits typed runtime lifecycle events, gates polling and commands behind successful `init()`, stops after repeated poll failures, owns one runtime slot per interface, and exposes lifecycle status through diagnostics/debug snapshots. Phase 3 is ready to plan: backend host APIs should stabilize `mesh.exec`, `mesh.exec_shell`, `mesh.config`, `mesh.log`, and poll interval control as the author-facing Luau contract.
 
 ## Requirements
 
@@ -116,6 +118,7 @@ See `.planning/REQUIREMENTS.md` for the active v1.1 requirement set.
 | Backend plugins use Luau for service logic | Keeps Rust core as wiring and makes services extensible | Locked |
 | Rust core must stay generic across services | Prevents audio/network/power special cases from becoming architecture | Locked |
 | Package graph comes before backend lifecycle | A unified installed-plugin interface should drive which backend providers exist and which one is active | Decided this milestone |
+| Backend runtime failure does not auto-fallback | Deterministic cleanup and visible status are safer than hidden provider switching during Phase 2 | Decided in Phase 2 |
 | Backend MVP comes before remote distribution and LSP | Runtime stability and local package semantics are prerequisites for tooling and package workflows | Decided this milestone |
 | Reset active roadmap numbering for v1.1 | User explicitly chose reset roadmap after archiving prior artifacts | Locked |
 
@@ -137,4 +140,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Current State with validated outcomes.
 
 ---
-*Last updated: 2026-05-03 after Phase 1 completion*
+*Last updated: 2026-05-03 after Phase 2 completion*
