@@ -41,7 +41,7 @@ Declared values (must be multiples of 4):
 | 2xl | 48px | Major section breaks; maps to existing `spacing.3xl` |
 | 3xl | 64px | Page/surface-level spacing; maps to existing `spacing.4xl` |
 
-Exceptions: Existing micro gaps of 2px in dense metadata stacks may remain. Existing icon lookup hints of 16px and 18px may remain because `size` is a lookup hint, not the painted box contract. Existing painted icon boxes may remain at their current control-specific dimensions: panel 16x16, quick settings 18x18, battery 24x24, nav settings/theme 28x26, nav volume 30x28. Interactive icon buttons must preserve their current stable boxes: 34x32, 36x36, 44x40, or 44px-wide variants depending on the existing surface.
+Exceptions: Existing dense metadata stack micro gaps are not part of the Phase 05 spacing contract because this phase does not modify those implementation details. Existing icon lookup hints of 16px and 18px may remain because `size` is a lookup hint, not the painted box contract. Existing painted icon boxes may remain at their current control-specific dimensions: panel 16x16, quick settings 18x18, battery 24x24, nav settings/theme 28x26, nav volume 30x28. Interactive icon buttons must preserve their current stable boxes: 34x32, 36x36, 44x40, or 44px-wide variants depending on the existing surface.
 
 Source: default theme spacing tokens and current surface CSS. Defaults only apply to any new spacing introduced in this phase.
 
@@ -72,6 +72,8 @@ Source: existing default theme typography tokens. The two-weight limit is a phas
 | Destructive | `token(color.error)` / dark `#F2B8B5` / light `#B3261E` | Destructive actions only; no destructive actions are introduced by this phase |
 
 Accent reserved for: active quick-settings navigation, hover-promoted icon controls, selected/active controls, and slider emphasis. Missing-icon fallback must not use accent; it must inherit the surrounding text/icon color and render as a neutral degraded visual.
+
+Visual hierarchy: Primary visual anchor remains the existing active control state; icon fallback must stay visually subordinate and never become the focal point.
 
 Source: default dark/light theme tokens and existing core surface styles.
 
