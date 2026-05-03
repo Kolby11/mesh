@@ -27,3 +27,6 @@ smithay-client-toolkit = { version = "0.19", default-features = false, features 
 thiserror = { workspace = true }
 tracing = { workspace = true }
 wayland-client = "0.31"
+
+[dev-dependencies]
+tempfile = "3"
