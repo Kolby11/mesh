@@ -28,7 +28,7 @@
 - [x] **BHOST-02**: Backend Luau scripts can call `mesh.exec_shell(cmd)` for shell-style commands and receive stdout, stderr, and exit status.
 - [x] **BHOST-03**: Backend Luau scripts can call `mesh.config()` and receive plugin settings as a Luau table.
 - [x] **BHOST-04**: Backend Luau scripts can call `mesh.log(level, msg)` and produce structured plugin-scoped log entries.
-- [ ] **BHOST-05**: Backend Luau scripts can call `mesh.service.set_poll_interval(ms)` and affect future poll cadence without shell restart.
+- [x] **BHOST-05**: Backend Luau scripts can call `mesh.service.set_poll_interval(ms)` and affect future poll cadence without shell restart.
 
 ### Service Provider Contract
 
@@ -97,7 +97,7 @@
 | BHOST-02 | Phase 3 | Complete |
 | BHOST-03 | Phase 3 | Complete |
 | BHOST-04 | Phase 3 | Complete |
-| BHOST-05 | Phase 3 | Pending |
+| BHOST-05 | Phase 3 | Complete |
 | BSVC-01 | Phase 4 | Pending |
 | BSVC-02 | Phase 4 | Pending |
 | BSVC-03 | Phase 4 | Pending |
