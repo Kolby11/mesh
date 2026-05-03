@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Scripting API Stabilization
 status: verifying
-stopped_at: Phase 4 context gathered
-last_updated: "2026-05-03T06:14:00.050Z"
+stopped_at: Phase 4 UI-SPEC approved
+last_updated: "2026-05-03T06:18:25.907Z"
 last_activity: 2026-05-02
 progress:
   total_phases: 7
@@ -53,9 +53,9 @@ Last activity: 2026-05-02
 
 ## Session
 
-Last session: 2026-05-03T06:13:59.989Z
-Stopped At: Phase 4 context gathered
-Resume File: .planning/phases/04-real-core-surfaces/04-CONTEXT.md
+Last session: 2026-05-03T06:18:25.891Z
+Stopped At: Phase 4 UI-SPEC approved
+Resume File: .planning/phases/04-real-core-surfaces/04-UI-SPEC.md
 
 ## Accumulated Context
 
