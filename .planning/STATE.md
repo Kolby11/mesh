@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Scripting API Stabilization
-status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-05-03T06:42:07.921Z"
+status: verifying
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-05-03T06:50:54.089Z"
 last_activity: 2026-05-03
 progress:
   total_phases: 7
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 12
-  completed_plans: 11
-  percent: 92
+  completed_plans: 12
+  percent: 100
 ---
 
 # State: MESH v1.0
@@ -27,7 +27,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-01)
 
 Phase: 04 (real-core-surfaces) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-05-03
 
 ## Decisions
@@ -47,6 +47,9 @@ Last activity: 2026-05-03
 - [Phase 04]: Quick settings audio uses the finalized direct proxy call `audio.set_volume("default", normalized)` for slider changes.
 - [Phase 04]: Quick settings Wi-Fi rows remain guarded and display-only when provider data lacks a non-empty network id.
 - [Phase 04]: Unavailable and permission-denied states are visible in quick settings while technical details stay in logs and diagnostics.
+- [Phase 04]: The top panel remains a compact status and entry surface; direct service controls stay in quick settings.
+- [Phase 04]: Final surface regressions use shipped panel source plus focused command snippets to prove callback-free proxy behavior.
+- [Phase 04]: Frontend docs show service mutations through named proxy methods instead of legacy service event channels.
 
 ## Performance Metrics
 
@@ -57,11 +60,12 @@ Last activity: 2026-05-03
 | Phase 03 P03 | 5min | 3 tasks | 4 files |
 | Phase 04 P01 | 3min | 3 tasks | 5 files |
 | Phase 04 P02 | 6min | 3 tasks | 5 files |
+| Phase 04 P03 | 4min | 3 tasks | 2 files |
 
 ## Session
 
-Last session: 2026-05-03T06:42:07.907Z
-Stopped At: Completed 04-02-PLAN.md
+Last session: 2026-05-03T06:50:54.080Z
+Stopped At: Completed 04-03-PLAN.md
 Resume File: None
 
 ## Accumulated Context
