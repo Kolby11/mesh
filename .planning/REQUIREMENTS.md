@@ -16,11 +16,11 @@
 
 ### Backend Plugin Lifecycle
 
-- [ ] **BPLUG-01**: Backend plugin manifests declare service entrypoints and are validated before runtime launch.
-- [ ] **BPLUG-02**: Backend plugin discovery creates one runtime instance per enabled backend provider without duplicate stale tasks.
-- [ ] **BPLUG-03**: Backend Luau `init()` runs once with plugin-scoped context before polling or command dispatch.
-- [ ] **BPLUG-04**: Backend poll loops run predictably and respect plugin-controlled poll interval changes.
-- [ ] **BPLUG-05**: Backend runtimes can stop or restart without leaving old poll loops or command receivers active.
+- [x] **BPLUG-01**: Backend plugin manifests declare service entrypoints and are validated before runtime launch.
+- [x] **BPLUG-02**: Backend plugin discovery creates one runtime instance per enabled backend provider without duplicate stale tasks.
+- [x] **BPLUG-03**: Backend Luau `init()` runs once with plugin-scoped context before polling or command dispatch.
+- [x] **BPLUG-04**: Backend poll loops run predictably and respect plugin-controlled poll interval changes.
+- [x] **BPLUG-05**: Backend runtimes can stop or restart without leaving old poll loops or command receivers active.
 
 ### Backend Host API
 
@@ -88,11 +88,11 @@
 | PINST-04 | Phase 1 | Complete |
 | PINST-05 | Phase 1 | Complete |
 | PINST-06 | Phase 1 | Complete |
-| BPLUG-01 | Phase 2 | Pending |
-| BPLUG-02 | Phase 2 | Pending |
-| BPLUG-03 | Phase 2 | Pending |
-| BPLUG-04 | Phase 2 | Pending |
-| BPLUG-05 | Phase 2 | Pending |
+| BPLUG-01 | Phase 2 | Complete |
+| BPLUG-02 | Phase 2 | Complete |
+| BPLUG-03 | Phase 2 | Complete |
+| BPLUG-04 | Phase 2 | Complete |
+| BPLUG-05 | Phase 2 | Complete |
 | BHOST-01 | Phase 3 | Pending |
 | BHOST-02 | Phase 3 | Pending |
 | BHOST-03 | Phase 3 | Pending |
