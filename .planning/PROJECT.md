@@ -27,7 +27,7 @@ The current risk is that backend plugins may appear to work in narrow cases whil
 - Central plugin package manifest: package.json-like shell-owned list of user-installed frontend plugins, backend plugins, dependency relationships, categories, and active provider choices.
 - Plugin dependency model: frontend plugins declare required backend providers; backend plugins declare category/service such as `audio`, `network`, or `shortcuts`.
 - Backend plugin lifecycle: discovery from the package manifest, load, init, poll, command handling, stop/restart.
-- Backend Luau host APIs: `mesh.exec`, `mesh.exec_shell`, `mesh.config`, `mesh.log`, `mesh.service.emit`, `mesh.service.set_poll_interval`.
+- Backend Luau host APIs: strict structured `mesh.exec(program, args)`, `mesh.config`, `mesh.log`, `mesh.service.emit`, and `mesh.service.set_poll_interval`.
 - Service provider contracts: backend plugins declare provided services, state shape, and command handlers.
 - Runtime diagnostics: init/poll/command failures degrade plugin health and remain visible.
 - MVP proof plugin: one fresh backend service plugin proves the documented backend contract.
@@ -105,7 +105,9 @@ The previous v1.0 planning artifacts were archived on 2026-05-03 under `.plannin
 
 Phase 1 is complete. MESH now has the package.json-like installed module manifest foundation, module package schema, package-first compatibility loader, normalized installed module graph, active backend provider selection proof, and repo-local fixtures that mirror the target `~/.mesh` layout.
 
-Phase 2 is complete. Backend lifecycle now consumes the installed module graph for explicit active provider startup, validates providers before launch, emits typed runtime lifecycle events, gates polling and commands behind successful `init()`, stops after repeated poll failures, owns one runtime slot per interface, and exposes lifecycle status through diagnostics/debug snapshots. Phase 3 is ready to plan: backend host APIs should stabilize `mesh.exec`, `mesh.exec_shell`, `mesh.config`, `mesh.log`, and poll interval control as the author-facing Luau contract.
+Phase 2 is complete. Backend lifecycle now consumes the installed module graph for explicit active provider startup, validates providers before launch, emits typed runtime lifecycle events, gates polling and commands behind successful `init()`, stops after repeated poll failures, owns one runtime slot per interface, and exposes lifecycle status through diagnostics/debug snapshots.
+
+Phase 3 is complete. The backend MVP host API now exposes strict structured `mesh.exec(program, args)` result tables, removes public `mesh.exec_shell`, migrates bundled providers to structured execution, locks `mesh.config()` and `mesh.log` behavior, and bounds `mesh.service.set_poll_interval(ms)` to a 50ms minimum with post-callback runtime refresh. Phase 4 is ready to plan: service provider contracts should connect backend state emission and command dispatch generically without service-specific Rust branches.
 
 ## Requirements
 
@@ -119,6 +121,7 @@ See `.planning/REQUIREMENTS.md` for the active v1.1 requirement set.
 | Rust core must stay generic across services | Prevents audio/network/power special cases from becoming architecture | Locked |
 | Package graph comes before backend lifecycle | A unified installed-plugin interface should drive which backend providers exist and which one is active | Decided this milestone |
 | Backend runtime failure does not auto-fallback | Deterministic cleanup and visible status are safer than hidden provider switching during Phase 2 | Decided in Phase 2 |
+| `mesh.exec_shell` is outside the backend MVP host API | Structured argv execution avoids shell parsing ambiguity while providers can keep service-specific parsing in Luau | Decided in Phase 3 |
 | Backend MVP comes before remote distribution and LSP | Runtime stability and local package semantics are prerequisites for tooling and package workflows | Decided this milestone |
 | Reset active roadmap numbering for v1.1 | User explicitly chose reset roadmap after archiving prior artifacts | Locked |
 
@@ -140,4 +143,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Current State with validated outcomes.
 
 ---
-*Last updated: 2026-05-03 after Phase 2 completion*
+*Last updated: 2026-05-03 after Phase 3 completion*
