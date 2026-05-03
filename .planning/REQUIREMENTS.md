@@ -7,12 +7,12 @@
 
 ### Plugin Package Manifest
 
-- [ ] **PINST-01**: The shell has one package.json-like manifest that lists user-installed frontend plugins and backend plugins.
-- [ ] **PINST-02**: Frontend plugin entries can declare required backend plugin dependencies or backend service categories they need.
-- [ ] **PINST-03**: Backend plugin entries declare their category/service, such as `audio`, `network`, `power`, `media`, or `shortcuts`.
-- [ ] **PINST-04**: The package manifest supports multiple backend providers in the same category and records the user's active provider choice.
-- [ ] **PINST-05**: The shell can parse the package manifest into a normalized installed-plugin graph used by later lifecycle/provider selection work.
-- [ ] **PINST-06**: The package manifest design remains local-first and does not require remote download, signing, or marketplace behavior in this phase.
+- [x] **PINST-01**: The shell has one package.json-like manifest that lists user-installed frontend plugins and backend plugins.
+- [x] **PINST-02**: Frontend plugin entries can declare required backend plugin dependencies or backend service categories they need.
+- [x] **PINST-03**: Backend plugin entries declare their category/service, such as `audio`, `network`, `power`, `media`, or `shortcuts`.
+- [x] **PINST-04**: The package manifest supports multiple backend providers in the same category and records the user's active provider choice.
+- [x] **PINST-05**: The shell can parse the package manifest into a normalized installed-plugin graph used by later lifecycle/provider selection work.
+- [x] **PINST-06**: The package manifest design remains local-first and does not require remote download, signing, or marketplace behavior in this phase.
 
 ### Backend Plugin Lifecycle
 
@@ -82,12 +82,12 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PINST-01 | Phase 1 | Pending |
-| PINST-02 | Phase 1 | Pending |
-| PINST-03 | Phase 1 | Pending |
-| PINST-04 | Phase 1 | Pending |
-| PINST-05 | Phase 1 | Pending |
-| PINST-06 | Phase 1 | Pending |
+| PINST-01 | Phase 1 | Complete |
+| PINST-02 | Phase 1 | Complete |
+| PINST-03 | Phase 1 | Complete |
+| PINST-04 | Phase 1 | Complete |
+| PINST-05 | Phase 1 | Complete |
+| PINST-06 | Phase 1 | Complete |
 | BPLUG-01 | Phase 2 | Pending |
 | BPLUG-02 | Phase 2 | Pending |
 | BPLUG-03 | Phase 2 | Pending |
