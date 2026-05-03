@@ -65,6 +65,8 @@ Stabilize the Luau scripting runtime and plugin authoring surface so external de
 
 **Goal:** Connect top panel and quick settings to real backend service data, with interactive audio and network controls using the finalized scripting contract.
 
+**Progress:** 1/3 plans complete — Plan 01 delivered executable audio command contract compatibility for quick-settings volume control.
+
 **Requirements:** SURF-01, SURF-02, SURF-03, SURF-04, SURF-05
 
 **Success Criteria:**

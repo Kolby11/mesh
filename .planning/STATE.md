@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Scripting API Stabilization
 status: executing
-stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-05-03T06:25:30.687Z"
-last_activity: 2026-05-03 -- Phase 04 planning complete
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-05-03T06:32:27.185Z"
+last_activity: 2026-05-03
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 12
-  completed_plans: 9
-  percent: 75
+  completed_plans: 10
+  percent: 83
 ---
 
 # State: MESH v1.0
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-01)
 
 **Core value:** A developer with zero MESH knowledge can write a working top panel plugin and backend service in one sitting, guided only by the API documentation.
-**Current focus:** Phase 03 — frontend-reactivity-and-events
+**Current focus:** Phase 04 — real-core-surfaces
 
 ## Current Position
 
-Phase: 03 (frontend-reactivity-and-events) — EXECUTING
-Plan: 3 of 3
+Phase: 04 (real-core-surfaces) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-05-03 -- Phase 04 planning complete
+Last activity: 2026-05-03
 
 ## Decisions
 
@@ -42,6 +42,8 @@ Last activity: 2026-05-03 -- Phase 04 planning complete
 - [Phase 03]: Plan 02 handler failures are reported through component diagnostics handles and return non-fatal empty request lists.
 - [Phase 03]: Plan 02 switch and checkbox state is tracked in shell input state so on_change receives a typed boolean.
 - [Phase 03]: Plan 03 proof lives in the shipped navigation-bar volume widget with a typed onchange slider and audio:set_volume command path.
+- [Phase 04]: Audio set_volume payload normalization remains in Luau providers; Rust core only verifies generic proxy publication and backend dispatch. — Preserves the Phase 4 architectural rule that service-specific command behavior stays out of Rust core.
+- [Phase 04]: Bundled audio providers preserve legacy percent payload compatibility while accepting normalized volume payloads. — Keeps existing command callers working while quick settings moves to the finalized proxy payload shape.
 
 ## Performance Metrics
 
@@ -50,12 +52,13 @@ Last activity: 2026-05-03 -- Phase 04 planning complete
 | Phase 02 P01 | 7min | 3 tasks | 4 files |
 | Phase 03 P02 | 9min | 3 tasks | 7 files |
 | Phase 03 P03 | 5min | 3 tasks | 4 files |
+| Phase 04 P01 | 3min | 3 tasks | 5 files |
 
 ## Session
 
-Last session: 2026-05-03T06:18:25.891Z
-Stopped At: Phase 4 UI-SPEC approved
-Resume File: .planning/phases/04-real-core-surfaces/04-UI-SPEC.md
+Last session: 2026-05-03T06:32:26.900Z
+Stopped At: Completed 04-01-PLAN.md
+Resume File: None
 
 ## Accumulated Context
 
