@@ -190,6 +190,13 @@ impl ComponentRuntime {
 
 pub(super) type ServiceCommandMsg = mesh_core_backend::BackendServiceCommand;
 
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct LatestServiceState {
+    pub(super) interface: String,
+    pub(super) provider_id: String,
+    pub(super) state: serde_json::Value,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct ThemeWatchState {
     pub(super) path: PathBuf,

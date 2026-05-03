@@ -49,8 +49,8 @@ pub use types::{
     ShellComponent, SurfaceId,
 };
 use types::{
-    ComponentRuntime, ServiceCommandMsg, SettingsWatchState, ShellCoreState, ShellMessage,
-    SurfaceState, ThemeWatchState,
+    ComponentRuntime, LatestServiceState, ServiceCommandMsg, SettingsWatchState, ShellCoreState,
+    ShellMessage, SurfaceState, ThemeWatchState,
 };
 
 use service::{service_command_control_capability, service_name_from_interface};
@@ -77,7 +77,7 @@ pub struct Shell {
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,
     backend_runtime_statuses: HashMap<(String, String), BackendRuntimeStatusEntry>,
-    latest_service_events: HashMap<String, ServiceEvent>,
+    latest_service_state: HashMap<String, LatestServiceState>,
 }
 
 #[derive(Debug, Clone)]
@@ -225,7 +225,7 @@ impl Shell {
             service_handlers: HashMap::new(),
             backend_runtimes: HashMap::new(),
             backend_runtime_statuses: HashMap::new(),
-            latest_service_events: HashMap::new(),
+            latest_service_state: HashMap::new(),
         }
     }
 
@@ -805,9 +805,7 @@ impl Shell {
         &mut self,
         event: ServiceEvent,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let ServiceEvent::Updated { service, .. } = &event;
-        self.latest_service_events
-            .insert(service.clone(), event.clone());
+        self.record_latest_service_state(&event);
         let mut requests = VecDeque::new();
         for runtime in &mut self.components {
             requests.extend(
@@ -820,12 +818,33 @@ impl Shell {
         Ok(requests)
     }
 
+    fn record_latest_service_state(&mut self, event: &ServiceEvent) {
+        let ServiceEvent::Updated {
+            service,
+            source_plugin,
+            payload,
+        } = event;
+        let interface = canonical_interface_name(service);
+        self.latest_service_state.insert(
+            interface.clone(),
+            LatestServiceState {
+                interface,
+                provider_id: source_plugin.clone(),
+                state: payload.clone(),
+            },
+        );
+    }
+
     fn replay_cached_service_events(&mut self) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
         let events = self
-            .latest_service_events
+            .latest_service_state
             .values()
-            .cloned()
+            .map(|latest| ServiceEvent::Updated {
+                service: latest.interface.clone(),
+                source_plugin: latest.provider_id.clone(),
+                payload: latest.state.clone(),
+            })
             .collect::<Vec<_>>();
         for event in events {
             requests.extend(self.broadcast_service_event(event)?);
@@ -1835,7 +1854,7 @@ fn default_plugin_dirs() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendRuntimeSlot, BackendRuntimeStatus, ServiceCommandMsg, Shell,
+        BackendRuntimeSlot, BackendRuntimeStatus, ServiceCommandMsg, ServiceEvent, Shell,
         backend_launch_candidates_from_graph,
         layout::measure_content_size,
         service::{apply_service_update, seed_service_state, service_name_from_interface},
@@ -1983,6 +2002,55 @@ mod tests {
             },
             command_rx,
         )
+    }
+
+    fn service_update(
+        interface: &str,
+        provider_id: &str,
+        payload: serde_json::Value,
+    ) -> ServiceEvent {
+        ServiceEvent::Updated {
+            service: interface.to_string(),
+            source_plugin: provider_id.to_string(),
+            payload,
+        }
+    }
+
+    #[test]
+    fn latest_service_state_is_keyed_by_interface() {
+        let mut shell = Shell::new();
+
+        shell
+            .broadcast_service_event(service_update(
+                "audio",
+                "@mesh/pipewire-audio",
+                serde_json::json!({ "available": true, "percent": 42.0 }),
+            ))
+            .unwrap();
+
+        assert!(shell.latest_service_state.contains_key("mesh.audio"));
+        assert!(!shell.latest_service_state.contains_key("audio"));
+        let latest = shell.latest_service_state.get("mesh.audio").unwrap();
+        assert_eq!(latest.interface, "mesh.audio");
+        assert_eq!(latest.state["percent"], serde_json::json!(42.0));
+    }
+
+    #[test]
+    fn latest_service_state_tracks_provider_metadata_separately() {
+        let mut shell = Shell::new();
+
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pipewire-audio",
+                serde_json::json!({ "available": true, "percent": 65.0, "muted": false }),
+            ))
+            .unwrap();
+
+        let latest = shell.latest_service_state.get("mesh.audio").unwrap();
+        assert_eq!(latest.provider_id, "@mesh/pipewire-audio");
+        assert_eq!(latest.state["available"], serde_json::json!(true));
+        assert!(latest.state.get("source_plugin").is_none());
     }
 
     #[test]
