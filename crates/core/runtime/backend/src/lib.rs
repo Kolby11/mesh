@@ -256,4 +256,57 @@ mod tests {
             .expect("backend task should exit after command channel closes")
             .expect("backend task should not panic");
     }
+
+    #[tokio::test]
+    async fn backend_command_dispatches_set_volume_normalized_payload() {
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/audio".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function on_command_set_volume()\n\
+               local payload = mesh.service.payload()\n\
+               mesh.service.emit({ device_id = payload.device_id, volume = payload.volume })\n\
+             end"
+            .to_string(),
+            update_tx,
+            cmd_rx,
+        ));
+
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "set_volume".to_string(),
+                payload: serde_json::json!({
+                    "device_id": "default",
+                    "volume": 0.42
+                }),
+            })
+            .unwrap();
+
+        let update = tokio::time::timeout(Duration::from_secs(1), update_rx.recv())
+            .await
+            .expect("set_volume command should emit normalized payload")
+            .expect("update channel should stay open");
+        assert_eq!(update.service, "audio");
+        assert_eq!(update.source_plugin, "@test/audio");
+        assert_eq!(
+            update.payload.get("device_id").and_then(|v| v.as_str()),
+            Some("default")
+        );
+        assert_eq!(
+            update.payload.get("volume").and_then(|v| v.as_f64()),
+            Some(0.42)
+        );
+
+        drop(cmd_tx);
+        drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
 }
