@@ -5,7 +5,7 @@
       <button class="close-button" onclick={onClose} title="Close quick settings" aria-label="Close quick settings">Close</button>
     </box>
     <box class="chips">
-      <button class="chip" onclick={onToggleWiFi} title="Toggle WiFi" aria-label="Toggle WiFi">Wi-Fi</button>
+      <button class="chip" onclick={onToggleWiFi} title="Toggle Wi-Fi" aria-label="Toggle Wi-Fi">Wi-Fi</button>
       <button class="chip" onclick={onToggleBluetooth} title="Toggle Bluetooth" aria-label="Toggle Bluetooth">Bluetooth</button>
       <button class="chip wide">Do Not Disturb</button>
     </box>
@@ -58,6 +58,9 @@ if not network_ok then network = nil end
 active_section = "wifi"
 icon_name = "audio-volume-muted"
 wifi_enabled = false
+network_available = false
+network_controls_available = false
+network_status = "Network unavailable"
 
 -- Derive audio nav icon directly from proxy fields on every rerender.
 -- No callbacks — the template reads icon_name which is updated by onRender.
@@ -81,7 +84,7 @@ end
 -- Derive wifi_enabled state directly from proxy fields on every rerender.
 -- network.wifi_enabled is emitted by the networkmanager backend.
 function wifiEnabledFor()
-    if not network_ok or not network then
+    if not network_ok or not network or network.available == false then
         return false
     end
     return network.wifi_enabled or false
@@ -90,7 +93,16 @@ end
 -- Called on rerender to sync reactive globals from live proxy fields.
 function onRender()
     icon_name = audioIconFor()
+    network_available = network_ok and network and network.available ~= false
+    network_controls_available = network_available and network.controls_available ~= false and network.permission_denied ~= true
     wifi_enabled = wifiEnabledFor()
+    if not network_available then
+        network_status = "Network unavailable"
+    elseif not network_controls_available then
+        network_status = "Network controls unavailable"
+    else
+        network_status = ""
+    end
 end
 
 function sync_nav_classes()
@@ -127,11 +139,18 @@ function onSelectAudio()
 end
 
 function onToggleWiFi()
-    if network_ok and network then
-        -- Read current state directly from the proxy field, then send the command.
-        local enabled = network.wifi_enabled or false
-        network.set_wifi_enabled(not enabled)
+    if not network_ok or not network or network.available == false then
+        network_status = "Network unavailable"
+        return
     end
+    if network.controls_available == false or network.permission_denied == true then
+        network_status = "Network controls unavailable"
+        return
+    end
+
+    -- Read current state directly from the proxy field, then send the command.
+    local enabled = network.wifi_enabled or false
+    network.set_wifi_enabled(not enabled)
 end
 
 function onToggleBluetooth()

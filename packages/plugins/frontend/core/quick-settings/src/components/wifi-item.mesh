@@ -3,6 +3,7 @@
     <box class="network-info">
       <text class="network-name">{network_name}</text>
       <text class="network-strength">{network_strength}&#37;</text>
+      <text class="network-status">{connection_status}</text>
     </box>
   </button>
 </template>
@@ -11,24 +12,30 @@
 network_id = ""
 network_name = ""
 network_strength = "0"
+connection_status = ""
 
 function onConnectWiFi(event)
     if not network_id or network_id == "" then
+        connection_status = "Connection details unavailable"
+        mesh.log.warn("Connection details unavailable")
         return
     end
 
-    local ok, network_iface = pcall(require, "@mesh/network@>=1.0")
-    if not ok or not network_iface then
-        mesh.log.warn("Network interface unavailable for WiFi connection")
+    local ok, network = pcall(require, "@mesh/network@>=1.0")
+    if not ok or not network or network.available == false then
+        connection_status = "Network unavailable"
+        mesh.log.warn("Network unavailable for Wi-Fi connection")
         return
     end
 
-    local result = network_iface.connect(network_id)
-    if result.ok then
-        mesh.log.info("Connected to WiFi network: " .. network_id)
-    else
-        mesh.log.warn("Failed to connect: " .. (result.error or "unknown error"))
+    if network.controls_available == false or network.permission_denied == true then
+        connection_status = "Network controls unavailable"
+        mesh.log.warn("Network controls unavailable for Wi-Fi connection")
+        return
     end
+
+    connection_status = ""
+    network.connect(network_id)
 end
 </script>
 
@@ -67,5 +74,10 @@ end
 .network-strength {
     font-size: token(typography.size.xs);
     color: token(color.on-surface-variant);
+}
+
+.network-status {
+    font-size: token(typography.size.xs);
+    color: token(color.disabled);
 }
 </style>

@@ -2,14 +2,19 @@
   <box class="section">
     <box class="section-header">
       <text class="section-title">Wi-Fi Networks</text>
+      <text class="section-status">{network_status}</text>
     </box>
     <box class="section-list">
-      {#if wifi_enabled and wifi_networks and #wifi_networks > 0}
+      {#if not network_available}
+        <box class="section-message">Network unavailable</box>
+      {:else if not network_controls_available}
+        <box class="section-message">Network controls unavailable</box>
+      {:else if wifi_enabled and wifi_networks and #wifi_networks > 0}
         {#for network in wifi_networks}
           <WifiItem network_id="{network.id}" network_name="{network.name}" network_strength="{network.strength}" />
         {/for}
       {:else if wifi_enabled}
-        <box class="section-message">Scanning for networks…</box>
+        <box class="section-message">Scanning for networks</box>
       {:else}
         <box class="section-message">Wi-Fi is disabled</box>
       {/if}
@@ -25,18 +30,30 @@ if not network_ok then network = nil end
 
 wifi_networks = {}
 wifi_enabled = false
+network_available = false
+network_controls_available = false
+network_status = "Network unavailable"
 
 -- Derive wifi_networks and wifi_enabled directly from live proxy fields on
 -- every rerender. network.networks is emitted by the networkmanager backend
 -- as a runtime-defined extra alongside the base contract fields.
 -- network.wifi_enabled is a base-contract state field.
 function onRender()
-    if not network_ok or not network then
+    network_available = network_ok and network and network.available ~= false
+    network_controls_available = network_available and network.controls_available ~= false and network.permission_denied ~= true
+
+    if not network_available then
         wifi_networks = {}
         wifi_enabled = false
+        network_status = "Network unavailable"
         return
     end
     wifi_enabled = network.wifi_enabled or false
+    if not network_controls_available then
+        network_status = "Network controls unavailable"
+    else
+        network_status = ""
+    end
     local nets = network.networks
     wifi_networks = (type(nets) == "table") and nets or {}
 end
@@ -57,8 +74,12 @@ end
     font-size: token(typography.size.xs);
     font-weight: 700;
     color: token(color.on-surface-variant);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0;
+}
+
+.section-status {
+    color: token(color.disabled);
+    font-size: token(typography.size.xs);
 }
 
 .section-list {
