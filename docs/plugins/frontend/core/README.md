@@ -169,11 +169,11 @@ confuse the two:
 ```luau
 function onVolumeClick()
     -- Shell event: asks the shell to toggle a named surface.
-    mesh.events.publish("shell.toggle-quick-settings", {})
+    mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/quick-settings" })
 end
 
 function onClose()
-    mesh.events.publish("shell.close-quick-settings", {})
+    mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/quick-settings" })
 end
 ```
 

@@ -50,7 +50,7 @@ use types::{
     SurfaceState, ThemeWatchState,
 };
 
-use service::service_name_from_interface;
+use service::{service_command_control_capability, service_name_from_interface};
 
 pub struct Shell {
     pub config: ShellConfig,
@@ -768,8 +768,16 @@ impl Shell {
                 interface,
                 command,
                 payload,
+                source_plugin_id,
+                source_capabilities,
             } => {
-                self.dispatch_service_command(&interface, &command, &payload);
+                self.dispatch_service_command(
+                    &interface,
+                    &command,
+                    &payload,
+                    &source_plugin_id,
+                    &source_capabilities,
+                );
                 Ok(VecDeque::new())
             }
             CoreRequest::SetTheme { theme_id } => self.apply_set_theme(&theme_id),
@@ -797,7 +805,21 @@ impl Shell {
         interface: &str,
         command: &str,
         payload: &serde_json::Value,
+        source_plugin_id: &str,
+        source_capabilities: &mesh_core_capability::CapabilitySet,
     ) {
+        let required = service_command_control_capability(interface);
+        if !source_capabilities.is_granted(&required) {
+            tracing::warn!(
+                source_plugin_id,
+                interface,
+                command,
+                required_capability = %required,
+                "denied unauthorized service command dispatch"
+            );
+            return;
+        }
+
         if let Some(tx) = self.service_handlers.get(interface) {
             let _ = tx.send(ServiceCommandMsg {
                 command: command.to_string(),

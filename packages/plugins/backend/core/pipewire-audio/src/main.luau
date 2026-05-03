@@ -121,7 +121,21 @@ function on_command_toggle_mute()
     emit_state()
 end
 
+function on_command_set_muted()
+    local payload = mesh.service.payload()
+    local muted = payload.muted == true
+    local sink_id = resolve_sink_id()
+    if sink_id then
+        mesh.exec_shell(("wpctl set-mute %s %s"):format(sink_id, muted and "1" or "0"))
+    end
+    emit_state()
+end
+
 function on_command_play_sound()
     local payload = mesh.service.payload()
-    mesh.exec_shell("aplay " .. (payload.path or ""))
+    local path = payload.path
+    if type(path) ~= "string" or path == "" then
+        return
+    end
+    mesh.exec("aplay", { path })
 end

@@ -90,7 +90,7 @@ impl CapabilityHandle {
 }
 
 /// Manages capability grants for a plugin.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CapabilitySet {
     granted: HashSet<Capability>,
 }

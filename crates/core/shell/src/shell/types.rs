@@ -1,3 +1,4 @@
+use mesh_core_capability::CapabilitySet;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::WidgetNode;
 use mesh_core_locale::LocaleEngine;
@@ -36,6 +37,8 @@ pub enum CoreRequest {
         interface: String,
         command: String,
         payload: serde_json::Value,
+        source_plugin_id: String,
+        source_capabilities: CapabilitySet,
     },
     SetTheme {
         theme_id: String,

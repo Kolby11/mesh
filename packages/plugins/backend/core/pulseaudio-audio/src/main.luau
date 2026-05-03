@@ -72,7 +72,18 @@ function on_command_toggle_mute()
     emit_state()
 end
 
+function on_command_set_muted()
+    local payload = mesh.service.payload()
+    local muted = payload.muted == true
+    mesh.exec_shell(("pactl set-sink-mute @DEFAULT_SINK@ %s"):format(muted and "1" or "0"))
+    emit_state()
+end
+
 function on_command_play_sound()
     local payload = mesh.service.payload()
-    mesh.exec_shell("aplay " .. (payload.path or ""))
+    local path = payload.path
+    if type(path) ~= "string" or path == "" then
+        return
+    end
+    mesh.exec("aplay", { path })
 end

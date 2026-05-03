@@ -158,7 +158,7 @@ function onToggleBluetooth()
 end
 
 function onClose()
-    mesh.events.publish("shell.close-quick-settings", {})
+    mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/quick-settings" })
 end
 
 </script>

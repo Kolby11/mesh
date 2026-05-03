@@ -132,7 +132,11 @@ function on_command_connect()
         return
     end
     local payload = mesh.service.payload()
-    local id = payload.id or ''
+    local id = payload.connection_id or payload.id or ''
+    if id == '' then
+        mesh.service.emit({ ok = false, error = 'missing connection_id' })
+        return
+    end
     if id:match('^[%x:]+$') and #id == 17 then
         local result = mesh.exec_shell('bluetoothctl connect ' .. id)
         mesh.service.emit({ ok = result.success, error = result.stderr })
@@ -148,7 +152,11 @@ function on_command_disconnect()
         return
     end
     local payload = mesh.service.payload()
-    local id = payload.id or ''
+    local id = payload.connection_id or payload.id or ''
+    if id == '' then
+        mesh.service.emit({ ok = false, error = 'missing connection_id' })
+        return
+    end
     if id:match('^[%x:]+$') and #id == 17 then
         local result = mesh.exec_shell('bluetoothctl disconnect ' .. id)
         mesh.service.emit({ ok = result.success, error = result.stderr })

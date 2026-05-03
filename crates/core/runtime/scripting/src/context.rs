@@ -1,6 +1,6 @@
 use crate::host_api::{HostApiManifest, InterfaceProxy};
 /// Script execution context — one per plugin/component instance.
-use mesh_core_capability::CapabilitySet;
+use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_elements::VariableStore;
 use mesh_core_locale::LocaleEngine;
 use mesh_core_service::contract::InterfaceTypeDef;
@@ -15,6 +15,8 @@ use std::sync::{Arc, Mutex};
 pub struct PublishedEvent {
     pub channel: String,
     pub payload: Value,
+    pub source_plugin_id: String,
+    pub source_capabilities: CapabilitySet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,33 +126,7 @@ impl ScriptState {
 }
 
 fn reactive_values_equal(previous: &Value, next: &Value) -> bool {
-    match (previous, next) {
-        (Value::Object(previous), Value::Object(next)) => {
-            previous.len() == next.len()
-                && previous.iter().all(|(key, previous_value)| {
-                    next.get(key)
-                        .is_some_and(|next_value| shallow_table_entry_equal(previous_value, next_value))
-                })
-        }
-        (Value::Array(previous), Value::Array(next)) => {
-            previous.len() == next.len()
-                && previous
-                    .iter()
-                    .zip(next)
-                    .all(|(previous_value, next_value)| {
-                        shallow_table_entry_equal(previous_value, next_value)
-                    })
-        }
-        _ => previous == next,
-    }
-}
-
-fn shallow_table_entry_equal(previous: &Value, next: &Value) -> bool {
-    match (previous, next) {
-        (Value::Object(_), Value::Object(_)) => true,
-        (Value::Array(_), Value::Array(_)) => true,
-        _ => previous == next,
-    }
+    previous == next
 }
 
 impl Default for ScriptState {
@@ -435,6 +411,7 @@ impl ScriptContext {
         let interface_catalog_for_service = interface_catalog.clone();
         let allowed_interfaces_for_service = allowed_interfaces.clone();
         let plugin_id_for_service = self.plugin_id.clone();
+        let capabilities_for_service = self.capabilities.clone();
         let diagnostics_for_service = Arc::clone(&self.shared_diagnostics);
         mesh_core_service
             .set(
@@ -475,6 +452,8 @@ impl ScriptContext {
                             service_name_from_interface(&canonical),
                             resolution.contract.clone(),
                             canonical,
+                            plugin_id_for_service.clone(),
+                            capabilities_for_service.clone(),
                             Arc::clone(&tracked_service_fields),
                             Arc::clone(&published_events),
                         )
@@ -485,6 +464,7 @@ impl ScriptContext {
 
         let published_events = Arc::clone(&self.shared_published_events);
         let plugin_id = self.plugin_id.clone();
+        let capabilities = self.capabilities.clone();
         mesh_core_events
             .set(
                 "publish",
@@ -493,10 +473,12 @@ impl ScriptContext {
                         let payload = payload.unwrap_or(LuaValue::Nil);
                         let payload = lua.from_value::<Value>(payload)?;
                         tracing::info!("{} published event {}", plugin_id, channel);
-                        published_events
-                            .lock()
-                            .unwrap()
-                            .push(PublishedEvent { channel, payload });
+                        published_events.lock().unwrap().push(PublishedEvent {
+                            channel,
+                            payload,
+                            source_plugin_id: plugin_id.clone(),
+                            source_capabilities: capabilities.clone(),
+                        });
                         Ok(())
                     })
                     .map_err(lua_err)?,
@@ -564,6 +546,7 @@ impl ScriptContext {
         let published_events = Arc::clone(&self.shared_published_events);
         let tracked_service_fields = Arc::clone(&self.tracked_service_fields);
         let plugin_id_for_require = self.plugin_id.clone();
+        let capabilities_for_require = self.capabilities.clone();
         let diagnostics_for_require = Arc::clone(&self.shared_diagnostics);
         let require = self
             .lua
@@ -639,6 +622,8 @@ impl ScriptContext {
                 let proxy = create_interface_proxy(
                     lua,
                     resolution,
+                    plugin_id_for_require.clone(),
+                    capabilities_for_require.clone(),
                     Arc::clone(&tracked_service_fields),
                     Arc::clone(&published_events),
                 )?;
@@ -701,6 +686,8 @@ impl ScriptContext {
             let proxy = create_interface_proxy(
                 &self.lua,
                 resolution,
+                self.plugin_id.clone(),
+                self.capabilities.clone(),
                 Arc::clone(&self.tracked_service_fields),
                 Arc::clone(&self.shared_published_events),
             )
@@ -840,6 +827,8 @@ fn interface_error_message(interface: &str, requested_version: Option<&str>) -> 
 fn create_interface_proxy(
     lua: &Lua,
     resolution: InterfaceResolution,
+    source_plugin_id: String,
+    source_capabilities: CapabilitySet,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
 ) -> mlua::Result<Table> {
@@ -848,6 +837,8 @@ fn create_interface_proxy(
         service_name_from_interface(&resolution.requested),
         resolution.contract,
         resolution.requested,
+        source_plugin_id,
+        source_capabilities,
         tracked_service_fields,
         published_events,
     )
@@ -858,6 +849,8 @@ fn create_service_proxy(
     service_name: String,
     contract: Option<InterfaceContract>,
     interface_name: String,
+    source_plugin_id: String,
+    source_capabilities: CapabilitySet,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
 ) -> mlua::Result<Table> {
@@ -883,10 +876,18 @@ fn create_service_proxy(
         lua.create_function(move |lua, (_table, key): (Table, String)| {
             // Case A: known contract method — dispatch as a service command.
             if let Some(method) = methods.iter().find(|m| m.name == key) {
+                let required_capability = service_control_capability(&service_name);
+                if !source_capabilities.is_granted(&required_capability) {
+                    return Err(mlua::Error::external(ScriptError::CapabilityDenied(
+                        format!("{interface_name}.{key}"),
+                    )));
+                }
                 let method = method.clone();
                 let iface = interface_name.clone();
                 let types = types.clone();
                 let events = Arc::clone(&published_events);
+                let source_plugin_id = source_plugin_id.clone();
+                let source_capabilities = source_capabilities.clone();
                 return Ok(LuaValue::Function(lua.create_function(
                     move |lua, args: mlua::Variadic<LuaValue>| {
                         let offset = consume_self_arg(&args);
@@ -904,6 +905,8 @@ fn create_service_proxy(
                         events.lock().unwrap().push(PublishedEvent {
                             channel: format!("{}.{}", iface, method.name),
                             payload: Value::Object(payload),
+                            source_plugin_id: source_plugin_id.clone(),
+                            source_capabilities: source_capabilities.clone(),
                         });
                         default_lua_value_for_type(lua, &types, method.returns.as_deref())
                     },
@@ -943,6 +946,10 @@ fn service_name_from_interface(interface: &str) -> String {
         .strip_prefix("mesh.")
         .unwrap_or(interface)
         .to_string()
+}
+
+fn service_control_capability(service_name: &str) -> Capability {
+    Capability::new(format!("service.{service_name}.control"))
 }
 
 fn default_lua_value_for_type(
@@ -1089,6 +1096,20 @@ mod tests {
                     name: "toggle_mute".into(),
                     args: Vec::new(),
                     returns: None,
+                },
+                InterfaceMethod {
+                    name: "set_muted".into(),
+                    args: vec![
+                        InterfaceArgument {
+                            name: "device_id".into(),
+                            arg_type: "string".into(),
+                        },
+                        InterfaceArgument {
+                            name: "muted".into(),
+                            arg_type: "boolean".into(),
+                        },
+                    ],
+                    returns: Some("Result".into()),
                 },
             ],
             events: Vec::new(),
@@ -1319,7 +1340,7 @@ end
     }
 
     #[test]
-    fn reactive_table_uses_shallow_top_level_comparison() {
+    fn reactive_table_compares_nested_values() {
         let mut state = ScriptState::new();
         state.set(
             "settings",
@@ -1337,11 +1358,22 @@ end
             serde_json::json!({
                 "enabled": true,
                 "label": "primary",
-                "nested": { "value": 2 }
+                "nested": { "value": 1 }
             }),
         );
         assert!(!state.is_dirty());
 
+        state.set(
+            "settings",
+            serde_json::json!({
+                "enabled": false,
+                "label": "primary",
+                "nested": { "value": 1 }
+            }),
+        );
+        assert!(state.is_dirty());
+
+        state.clear_dirty();
         state.set(
             "settings",
             serde_json::json!({
@@ -1358,9 +1390,41 @@ end
             serde_json::json!({
                 "enabled": false,
                 "label": "primary",
-                "extra": 1,
-                "nested": { "value": 2 }
+                "nested": { "value": 2 },
+                "levels": [1, 2, 3]
             }),
+        );
+        assert!(state.is_dirty());
+
+        state.clear_dirty();
+        state.set(
+            "settings",
+            serde_json::json!({
+                "enabled": false,
+                "label": "primary",
+                "nested": { "value": 2 },
+                "levels": [1, 3, 3]
+            }),
+        );
+        assert!(state.is_dirty());
+
+        state.clear_dirty();
+        state.set(
+            "wifi_networks",
+            serde_json::json!([
+                { "connection_id": "home", "ssid": "Home", "strength": 70, "active": false },
+                { "connection_id": "office", "ssid": "Office", "strength": 60, "active": true }
+            ]),
+        );
+        assert!(state.is_dirty());
+
+        state.clear_dirty();
+        state.set(
+            "wifi_networks",
+            serde_json::json!([
+                { "connection_id": "home", "ssid": "Home", "strength": 71, "active": true },
+                { "connection_id": "office", "ssid": "Office", "strength": 60, "active": false }
+            ]),
         );
         assert!(state.is_dirty());
     }
@@ -1620,6 +1684,7 @@ end
     fn interface_proxy_method_publishes_service_command() {
         let mut caps = CapabilitySet::new();
         caps.grant(Capability::new("service.audio.read"));
+        caps.grant(Capability::new("service.audio.control"));
         let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
         ctx.set_interface_catalog(audio_catalog());
         ctx.load_script(
@@ -1637,11 +1702,54 @@ end
         assert_eq!(published.len(), 2);
         for event in published {
             assert_eq!(event.channel, "mesh.audio.set_volume");
+            assert_eq!(event.source_plugin_id, "@test/audio-widget");
+            assert!(
+                event
+                    .source_capabilities
+                    .is_granted(&Capability::new("service.audio.control"))
+            );
             assert_eq!(
                 event.payload,
                 serde_json::json!({ "device_id": "default", "volume": 0.5 })
             );
         }
+    }
+
+    #[test]
+    fn read_only_interface_proxy_denies_command_methods() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@test/read-only-audio", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script(
+            r#"
+audio_percent = 0
+
+function read_state()
+    local audio = require("@mesh/audio@>=1.0")
+    audio_percent = audio.percent or 0
+end
+
+function change_volume()
+    local audio = require("@mesh/audio@>=1.0")
+    audio.set_volume("default", 0.5)
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.apply_service_payload("audio", &serde_json::json!({ "percent": 64 }));
+        ctx.call_handler("read_state", &[]).unwrap();
+        assert_eq!(ctx.state.get("audio_percent"), Some(serde_json::json!(64)));
+
+        let err = ctx.call_handler("change_volume", &[]).unwrap_err();
+        assert!(
+            matches!(err, ScriptError::CapabilityDenied(target) if target == "mesh.audio.set_volume")
+        );
+        assert!(
+            ctx.drain_published_events().is_empty(),
+            "read-only audio proxy must not publish mesh.audio.set_volume"
+        );
     }
 
     #[test]

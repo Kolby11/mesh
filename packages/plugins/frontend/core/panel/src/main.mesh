@@ -97,7 +97,7 @@ function onRender()
 end
 
 function onVolumeClick()
-    mesh.events.publish("shell.toggle-quick-settings", {})
+    mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/quick-settings" })
 end
 </script>
 

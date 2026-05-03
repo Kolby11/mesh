@@ -692,6 +692,8 @@ impl FrontendSurfaceComponent {
                     interface: "mesh.audio".to_string(),
                     command: "set-volume".to_string(),
                     payload: serde_json::json!({ "percent": percent }),
+                    source_plugin_id: self.id().to_string(),
+                    source_capabilities: self.source_capabilities(),
                 });
             }
         }
@@ -835,10 +837,16 @@ impl FrontendSurfaceComponent {
                     interface: "mesh.audio".to_string(),
                     command: "set-volume".to_string(),
                     payload: serde_json::json!({ "percent": percent }),
+                    source_plugin_id: self.id().to_string(),
+                    source_capabilities: self.source_capabilities(),
                 })
             }
             _ => None,
         }
+    }
+
+    fn source_capabilities(&self) -> CapabilitySet {
+        grant_capabilities_from_manifest(&self.compiled.manifest)
     }
 
     fn runtime_state(&self, instance_key: &str) -> Option<mesh_core_scripting::ScriptState> {
@@ -2390,6 +2398,7 @@ mod tests {
     fn make_audio_ctx() -> ScriptContext {
         let mut caps = CapabilitySet::new();
         caps.grant(Capability::new("service.audio.read"));
+        caps.grant(Capability::new("service.audio.control"));
         let mut ctx = ScriptContext::new("@mesh/panel", caps).unwrap();
         ctx.set_interface_catalog(audio_network_catalog());
         ctx
@@ -2398,6 +2407,7 @@ mod tests {
     fn make_network_ctx() -> ScriptContext {
         let mut caps = CapabilitySet::new();
         caps.grant(Capability::new("service.network.read"));
+        caps.grant(Capability::new("service.network.control"));
         let mut ctx = ScriptContext::new("@mesh/quick-settings", caps).unwrap();
         ctx.set_interface_catalog(audio_network_catalog());
         ctx
@@ -2764,6 +2774,7 @@ end
                     interface,
                     command,
                     payload,
+                    ..
                 },
             ] => {
                 assert_eq!(interface, "mesh.audio");
@@ -3441,6 +3452,7 @@ end
                 interface,
                 command,
                 payload,
+                ..
             } => {
                 assert_eq!(
                     interface, "mesh.network",
@@ -3632,6 +3644,7 @@ end
                     interface,
                     command,
                     payload,
+                    ..
                 },
             ] => {
                 assert_eq!(interface, "mesh.audio");
@@ -3684,6 +3697,7 @@ end
                     interface,
                     command,
                     payload,
+                    ..
                 },
             ] => {
                 assert_eq!(interface, "mesh.network");
@@ -3850,8 +3864,43 @@ end
         let events = ctx.drain_published_events();
 
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].channel, "shell.toggle-quick-settings");
-        assert_eq!(events[0].payload, serde_json::json!({}));
+        assert_eq!(events[0].channel, "shell.toggle-surface");
+        assert_eq!(
+            events[0].payload,
+            serde_json::json!({ "surface_id": "@mesh/quick-settings" })
+        );
+
+        let requests = super::super::service::script_events_to_requests(events);
+        match requests.as_slice() {
+            [CoreRequest::ToggleSurface { surface_id }] => {
+                assert_eq!(surface_id, "@mesh/quick-settings");
+            }
+            other => panic!("expected quick settings ToggleSurface request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn real_core_surfaces_quick_settings_close_publishes_hide_surface() {
+        let mut ctx = make_network_ctx();
+        ctx.load_script(
+            r#"
+function onClose()
+    mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/quick-settings" })
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.call_handler("onClose", &[]).unwrap();
+        let requests =
+            super::super::service::script_events_to_requests(ctx.drain_published_events());
+
+        match requests.as_slice() {
+            [CoreRequest::HideSurface { surface_id }] => {
+                assert_eq!(surface_id, "@mesh/quick-settings");
+            }
+            other => panic!("expected quick settings HideSurface request, got {other:?}"),
+        }
     }
 
     #[test]
@@ -3885,6 +3934,7 @@ end
                     interface,
                     command,
                     payload,
+                    ..
                 },
             ] => {
                 assert_eq!(interface, "mesh.audio");
@@ -3926,6 +3976,7 @@ end
                     interface,
                     command,
                     payload,
+                    ..
                 },
             ] => {
                 assert_eq!(interface, "mesh.network");
