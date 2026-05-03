@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Scripting API Stabilization
-status: ready_for_verification
-stopped_at: Completed Phase 04 gap-closure plans
-last_updated: "2026-05-03T07:26:33.646Z"
-last_activity: 2026-05-03 -- Phase 04 gap-closure plans complete
+status: ready_to_plan
+stopped_at: Phase 04 verified; ready to plan Phase 07
+last_updated: "2026-05-03T12:28:26Z"
+last_activity: 2026-05-03 -- Phase 04 verified; Phase 07 ready to plan
 progress:
   total_phases: 7
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 15
   completed_plans: 15
-  percent: 100
+  percent: 71
 ---
 
 # State: MESH v1.0
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-01)
 
 **Core value:** A developer with zero MESH knowledge can write a working top panel plugin and backend service in one sitting, guided only by the API documentation.
-**Current focus:** Phase 04 — real-core-surfaces verification
+**Current focus:** Phase 07 — plugin-download-and-hot-install-pipeline planning
 
 ## Current Position
 
-Phase: 04 (real-core-surfaces) — READY FOR VERIFICATION
-Plan: 6 of 6
-Status: Gap-closure plans complete
-Last activity: 2026-05-03 -- Phase 04 gap-closure plans complete
+Phase: 07
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-05-03
 
 ## Decisions
 
@@ -69,8 +69,8 @@ Last activity: 2026-05-03 -- Phase 04 gap-closure plans complete
 
 ## Session
 
-Last session: 2026-05-03T07:26:33.626Z
-Stopped At: Completed Phase 04 gap-closure plans
+Last session: 2026-05-03T12:28:26Z
+Stopped At: Phase 04 verified; ready to plan Phase 07
 Resume File: None
 
 ## Accumulated Context
@@ -86,6 +86,7 @@ Resume File: None
 ## Pending Todos
 
 - Run phase verification for Phase 03.
+- Run Phase 04 live host UAT from `.planning/phases/04-real-core-surfaces/04-HUMAN-UAT.md`.
 
 ## Artifact Index
 

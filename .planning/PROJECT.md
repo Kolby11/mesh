@@ -89,6 +89,10 @@ External developers. The API must be:
 - Build and test must work within the Nix dev shell (`nix develop`)
 - No constraints on API changes — if the current API shape is wrong, fix it
 
+## Current State
+
+Phase 04 is verified in code: top panel and quick settings are wired to real service proxies, audio/network controls use the finalized command surface, provider command handlers are hardened, and one live-host UAT remains tracked in `.planning/phases/04-real-core-surfaces/04-HUMAN-UAT.md`.
+
 ## Requirements
 
 ### Active
@@ -103,8 +107,8 @@ External developers. The API must be:
 - [ ] Reactive globals in `<script>` always trigger a re-render when assigned
 - [ ] `on_<service>_update()` handler fires in frontend script after every backend emit
 - [ ] Event handlers (`on_click`, `on_change` on elements) fire reliably with correct state
-- [ ] Top panel surface renders with live data from at least one backend service
-- [ ] Quick settings surface renders with interactive audio + network controls backed by real services
+- [x] Top panel surface renders with live data from at least one backend service — Validated in Phase 04
+- [x] Quick settings surface renders with interactive audio + network controls backed by real services — Validated in Phase 04; live-host UAT remains tracked separately
 - [ ] Scripting API reference document written and validated against a working reference plugin
 - [ ] Icon rendering works for XDG icon names (four bugs identified in llm-context.md)
 
@@ -142,4 +146,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-01 after milestone v1.0 start*
+*Last updated: 2026-05-03 after Phase 04 verification*
