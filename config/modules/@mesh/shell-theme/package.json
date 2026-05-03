@@ -1,0 +1,47 @@
+{
+  "name": "@mesh/shell-theme",
+  "version": "0.1.0",
+  "description": "Bundled shell theme module.",
+  "repository": {
+    "type": "git",
+    "url": "https://example.invalid/mesh/shell-theme.git"
+  },
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "contributes": {
+      "themes": [
+        {
+          "id": "@mesh/shell-theme",
+          "label": "MESH Default",
+          "modes": {
+            "dark": "themes/mesh-default-dark.json",
+            "light": "themes/mesh-default-light.json"
+          },
+          "default_mode": "dark"
+        }
+      ],
+      "icons": [
+        {
+          "id": "mesh-symbols",
+          "path": "icons",
+          "label": "MESH Symbols"
+        }
+      ],
+      "fonts": [
+        {
+          "id": "inter",
+          "path": "fonts",
+          "label": "Inter"
+        }
+      ],
+      "i18n": [
+        {
+          "id": "en",
+          "locale": "en",
+          "path": "i18n/en.json"
+        }
+      ]
+    }
+  }
+}

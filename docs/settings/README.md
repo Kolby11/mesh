@@ -22,29 +22,29 @@ ones, key by key:
  1. Contract default         (shipped with the interface contract package)
  2. Implementation default   (shipped with the backend/frontend plugin)
  3. System default            (/usr/share/mesh/settings-default.json or distro pkg)
- 4. User system override      (~/.config/mesh/settings.json)
- 5. User plugin override      (~/.config/mesh/plugins/<plugin-id>.json)
+ 4. User system override      (~/.mesh/settings.json)
+ 5. User module override      (~/.mesh/modules/<module-id>/settings.json)
  6. Runtime override          (set at runtime via IPC / CLI, not persisted unless flushed)
 ```
 
 Only layers 3–6 are user-writable. Layers 1–2 ship inside packages and are
 read-only. The core composes all six into an effective view on every read.
 
-### System-wide vs. plugin-wide
+### System-wide vs. module-wide
 
 - **System-wide settings** apply across the whole shell (active theme,
   locale, allow-unsigned plugins, plugin frame budgets, …). Keys live at the
-  root of `~/.config/mesh/settings.json`.
-- **Plugin-wide settings** belong to a single plugin. They live under a
-  plugin-scoped key in the system file *or* in a dedicated per-plugin file
+  root of `~/.mesh/settings.json`.
+- **Module-wide settings** belong to a single module. They live under a
+  module-scoped key in the system file *or* in a dedicated per-module file
   for users who prefer that split. Both forms are valid; the core merges them.
 
-The user override wins over the system default. A per-plugin file wins over
-the inline plugin section in the system file — that's the override direction.
+The user override wins over the system default. A per-module file wins over
+the inline module section in the system file - that's the override direction.
 
 ## File formats
 
-### System file — `~/.config/mesh/settings.json`
+### System file - `~/.mesh/settings.json`
 
 ```json
 {
@@ -77,14 +77,14 @@ Top-level keys that are *not* plugin IDs are reserved for the shell itself
 (`theme`, `i18n`, `plugins`, `interfaces`). Plugin-scoped overrides use the
 plugin's fully qualified ID as the key.
 
-### Per-plugin file — `~/.config/mesh/plugins/<plugin-id>.json`
+### Per-module file - `~/.mesh/modules/<module-id>/settings.json`
 
 ```
-~/.config/mesh/plugins/@mesh/panel.json
-~/.config/mesh/plugins/@community/weather-widget.json
+~/.mesh/modules/@mesh/panel/settings.json
+~/.mesh/modules/@community/weather-widget/settings.json
 ```
 
-Each file is a flat JSON object containing that plugin's keys only:
+Each file is a flat JSON object containing that module's keys only:
 
 ```json
 {
@@ -93,7 +93,7 @@ Each file is a flat JSON object containing that plugin's keys only:
 }
 ```
 
-Per-plugin files are the canonical target for the generated settings UI —
+Per-module files are the canonical target for the generated settings UI -
 writing one setting does not require the UI to rewrite the whole system
 file.
 
@@ -111,15 +111,15 @@ Every key has exactly one owner:
   the core. Schema lives in `mesh-core-config`.
 - **Contract keys** (`mesh.audio.*`, `mesh.network.*`, …) — owned by the
   interface contract. Every implementation inherits them.
-- **Plugin keys** (`@scope/name.*` or the plugin's scoped object) — owned by
-  the plugin itself.
+- **Module keys** (`@scope/name.*` or the module's scoped object) - owned by
+  the module itself.
 
 Each owner publishes a schema (see next section). The core validates every
 value on load and on write. Invalid values are rejected, logged, and fall
 through to the next layer.
 
-Plugins **cannot** write to their own settings. The user writes them through
-the UI or by editing JSON; the core validates and persists. Plugins read an
+Modules **cannot** write to their own settings. The user writes them through
+the UI or by editing JSON; the core validates and persists. Modules read an
 immutable view and subscribe to change events.
 
 ## Reusable schemas (shared contract settings)
@@ -195,19 +195,20 @@ Schemas are JSON. The keys supported today:
 | `scope`               | `"system"` or `"user"`. Restricts where this key may appear. Defaults to `"user"`.  |
 | `requires_capability` | Declares that editing this key requires a specific capability (e.g. `theme.write`). |
 
-## Frontend plugin schemas
+## Frontend module schemas
 
-Frontend plugins declare their settings in `plugin.json` or in a sibling
-`settings.schema.json` next to the manifest. The JSON file wins if both exist.
+Frontend modules declare their settings in `package.json` under
+`mesh.contributes.settings` or in a sibling `settings.schema.json` next to the
+manifest. The JSON file wins if both exist.
 
 ## Generated UI
 
-For any plugin with a schema, the core generates a settings page
-automatically. The page writes to the per-plugin file, not the system file,
+For any module with a schema, the core generates a settings page
+automatically. The page writes to the per-module file, not the system file,
 so changes are scoped and reversible.
 
-Plugins that need a custom layout may ship a `settings_ui` entrypoint
-(declared in `plugin.json`) that renders a `.mesh` component instead of the
+Modules that need a custom layout may ship a `settings_ui` entrypoint
+(declared in `package.json`) that renders a `.mesh` component instead of the
 generated form. The schema still governs validation.
 
 ## Reading settings from a plugin

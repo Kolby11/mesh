@@ -1,0 +1,38 @@
+{
+  "name": "@mesh/quick-settings",
+  "version": "0.1.0",
+  "description": "Default MESH quick settings module.",
+  "repository": {
+    "type": "git",
+    "url": "https://example.invalid/mesh/quick-settings.git"
+  },
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "entrypoints": {
+      "main": "src/main.mesh"
+    },
+    "dependencies": {
+      "modules": {
+        "@mesh/panel": ">=0.1.0"
+      },
+      "backend": {
+        "mesh.audio": ">=0.1.0"
+      },
+      "themes": {
+        "@mesh/shell-theme": ">=0.1.0"
+      }
+    },
+    "contributes": {
+      "settings": {
+        "namespace": "@mesh/quick-settings",
+        "schema": {
+          "show_audio": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "@mesh/panel",
+  "version": "0.1.0",
+  "description": "Default MESH shell panel layout module.",
+  "repository": {
+    "type": "git",
+    "url": "https://example.invalid/mesh/panel.git"
+  },
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "entrypoints": {
+      "main": "src/main.mesh"
+    },
+    "dependencies": {
+      "backend": {
+        "mesh.audio": ">=0.1.0"
+      },
+      "themes": {
+        "@mesh/shell-theme": ">=0.1.0"
+      }
+    },
+    "contributes": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Panel"
+        }
+      ],
+      "settings": {
+        "namespace": "@mesh/panel",
+        "schema": {
+          "clock_format": {
+            "type": "enum",
+            "values": ["12h", "24h"],
+            "default": "24h"
+          }
+        }
+      }
+    }
+  }
+}

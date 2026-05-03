@@ -2,7 +2,7 @@
 
 A theme is a **token set** — colour, typography, spacing, radius, elevation,
 motion, and icon-style values — that the whole shell inherits from. Themes
-are ordinary plugins: anyone can ship one, the user selects one, and the
+are ordinary modules: anyone can ship one, the user selects one, and the
 switch is hot.
 
 The theme system is extensible through the same contract-and-registry model
@@ -15,8 +15,8 @@ in the core assumes which themes exist.
    (`color.primary`, `spacing.md`); the active theme supplies the values.
 2. **One theme active at a time.** Unlike icon packs, themes are
    winner-takes-all — mixed token sets would produce incoherent UI.
-3. **Themes are plugins.** `type = "theme"`. They implement the `mesh.theme`
-   interface.
+3. **Themes are modules.** `mesh.kind = "theme"` in `package.json`, with
+   selectable token modes contributed through `mesh.contributes.themes`.
 4. **Inheritance.** A theme may `extends` another and override only the
    tokens it cares about.
 5. **Mode variants live inside a theme.** Dark / light / high-contrast are
@@ -47,8 +47,8 @@ implementation.
 ## Theme packages
 
 ```
-@mesh/default-theme/
-  mesh.toml
+~/.mesh/modules/@mesh/default-theme/
+  package.json
   tokens/
     base.json
     modes/
@@ -57,21 +57,29 @@ implementation.
       high-contrast.json
 ```
 
-```toml
-[package]
-id   = "@mesh/default-theme"
-type = "theme"
-
-[service]
-provides = "mesh.theme"
-priority = 100
-
-[theme]
-base   = "tokens/base.json"          # shared across modes
-modes  = { dark = "tokens/modes/dark.json",
-           light = "tokens/modes/light.json",
-           high-contrast = "tokens/modes/high-contrast.json" }
-default_mode = "dark"
+```json
+{
+  "name": "@mesh/default-theme",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "contributes": {
+      "themes": [
+        {
+          "id": "@mesh/default-theme",
+          "label": "MESH Default",
+          "modes": {
+            "dark": "tokens/modes/dark.json",
+            "light": "tokens/modes/light.json",
+            "high-contrast": "tokens/modes/high-contrast.json"
+          },
+          "default_mode": "dark"
+        }
+      ]
+    }
+  }
+}
 ```
 
 ### Token file format
@@ -118,7 +126,7 @@ it. The core reserves no group names — theme authors can extend freely.
 
 ## Extending an existing theme
 
-A theme plugin may extend another and override selectively:
+A theme module may extend another and override selectively:
 
 ```toml
 [theme]
@@ -144,7 +152,7 @@ load.
 changing the theme itself. Typical use: tying mode to a system dark/light
 preference, or scheduling dark mode at night.
 
-Mode is part of user settings (see [`../settings/README.md`](../settings/README.md)):
+Mode is part of `~/.mesh/settings.json` (see [`../settings/README.md`](../settings/README.md)):
 
 ```json
 {
@@ -155,13 +163,13 @@ Mode is part of user settings (see [`../settings/README.md`](../settings/README.
 }
 ```
 
-Switching theme is the same key — `"active"` points at a different plugin
+Switching theme is the same key — `"active"` points at a different module
 ID — and emits `ThemeChanged`. Switching mode emits `ThemeChanged` with the
 same ID and a new mode.
 
-## Per-plugin overrides
+## Per-module overrides
 
-A plugin may request component-scoped overrides in its `<style>` block
+A module may request component-scoped overrides in its `<style>` block
 without editing the global theme:
 
 ```css
@@ -174,6 +182,12 @@ without editing the global theme:
 Overrides cascade through the component tree like CSS variables. The
 registry-level `token(name)` call still returns the theme's value; only the
 style scope is affected.
+
+## User Theme Directory
+
+User-installed theme JSON lives under `~/.mesh/themes/`. The repo fallback
+for development remains `config/themes/`, and theme modules can point at their
+own files through `mesh.contributes.themes`.
 
 ## Hot-swap
 

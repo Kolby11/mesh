@@ -1395,6 +1395,25 @@ mod tests {
     }
 
     #[test]
+    fn installed_module_graph_exposes_shell_package_choices() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let graph = mesh_core_plugin::package::load_installed_module_graph(
+            &workspace_root.join("config/package.json"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            graph.active_provider("mesh.audio").unwrap().module_id,
+            "@mesh/pipewire-audio"
+        );
+        assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
+
+        let layout = graph.layout_entrypoint().unwrap();
+        assert_eq!(layout.module_id, "@mesh/panel");
+        assert_eq!(layout.entrypoint_id, "main");
+    }
+
+    #[test]
     fn frontend_settings_override_surface_layout_defaults() {
         let path = unique_test_file("surface-layout");
         fs::write(

@@ -1051,6 +1051,26 @@ pub struct ContributedSettingsSchema {
     pub schema: serde_json::Value,
 }
 
+pub fn load_installed_module_graph(
+    root_package_path: &Path,
+) -> Result<InstalledModuleGraph, PackageManifestError> {
+    let root = RootPackageManifest::from_path(root_package_path)?;
+    let root_dir = root_package_path.parent().ok_or_else(|| {
+        PackageManifestError::Validation(format!(
+            "root package path must have a parent directory: {}",
+            root_package_path.display()
+        ))
+    })?;
+    let modules_dir = root_dir.join(&root.modules_dir);
+    let mut modules = Vec::new();
+
+    for entry in root.modules.values() {
+        modules.push(load_module_manifest(&modules_dir.join(&entry.path))?);
+    }
+
+    InstalledModuleGraph::from_parts(root, modules)
+}
+
 pub fn load_module_manifest(
     module_dir: &Path,
 ) -> Result<LoadedModuleManifest, PackageManifestError> {
@@ -1303,6 +1323,23 @@ mod tests {
             loaded.manifest.mesh.entrypoints.main.as_deref(),
             Some("src/main.mesh")
         );
+    }
+
+    #[test]
+    fn installed_module_graph_loads_repo_package_fixture() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        let graph =
+            load_installed_module_graph(&workspace_root.join("config/package.json")).unwrap();
+
+        assert_eq!(graph.frontend_modules().len(), 2);
+        assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
+        assert_eq!(
+            graph.active_provider("mesh.audio").unwrap().module_id,
+            "@mesh/pipewire-audio"
+        );
+        let layout = graph.layout_entrypoint().unwrap();
+        assert_eq!(layout.module_id, "@mesh/panel");
+        assert_eq!(layout.entrypoint_id, "main");
     }
 
     fn loaded_module(

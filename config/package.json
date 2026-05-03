@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "modulesDir": "modules",
+  "modules": {
+    "@mesh/panel": {
+      "kind": "frontend",
+      "path": "@mesh/panel",
+      "enabled": true
+    },
+    "@mesh/quick-settings": {
+      "kind": "frontend",
+      "path": "@mesh/quick-settings",
+      "enabled": true
+    },
+    "@mesh/pipewire-audio": {
+      "kind": "backend",
+      "path": "@mesh/pipewire-audio",
+      "enabled": true
+    },
+    "@mesh/pulseaudio-audio": {
+      "kind": "backend",
+      "path": "@mesh/pulseaudio-audio",
+      "enabled": true
+    },
+    "@mesh/shell-theme": {
+      "kind": "theme",
+      "path": "@mesh/shell-theme",
+      "enabled": true
+    }
+  },
+  "providers": {
+    "mesh.audio": "@mesh/pipewire-audio"
+  },
+  "layout": {
+    "entrypoint": "@mesh/panel:main"
+  },
+  "theme": {
+    "active": "@mesh/shell-theme",
+    "mode": "dark"
+  }
+}

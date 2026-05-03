@@ -192,7 +192,7 @@ pub fn default_settings_path() -> PathBuf {
         return repo_path;
     }
 
-    dirs_path("config").join("mesh/shell-settings.json")
+    mesh_home_path().join("settings.json")
 }
 
 /// Bundled default settings file path.
@@ -437,6 +437,17 @@ fn dirs_path(kind: &str) -> PathBuf {
             }),
         _ => PathBuf::from("/tmp"),
     }
+}
+
+fn mesh_home_path() -> PathBuf {
+    if let Ok(path) = std::env::var("MESH_HOME") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".mesh")
 }
 
 #[cfg(test)]

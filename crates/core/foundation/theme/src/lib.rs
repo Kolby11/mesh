@@ -133,9 +133,14 @@ pub fn theme_dir_path() -> PathBuf {
         }
     }
 
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../..")
-        .join("config/themes")
+        .join("config/themes");
+    if repo_path.exists() {
+        return repo_path;
+    }
+
+    mesh_home_path().join("themes")
 }
 
 pub fn theme_path_for_id(theme_id: &str) -> PathBuf {
@@ -173,4 +178,15 @@ fn embedded_default_theme() -> Theme {
         "../../../../../config/themes/mesh-default-dark.json"
     ))
     .expect("embedded default theme json must be valid")
+}
+
+fn mesh_home_path() -> PathBuf {
+    if let Ok(path) = std::env::var("MESH_HOME") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".mesh")
 }

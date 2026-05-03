@@ -1,0 +1,32 @@
+{
+  "name": "@mesh/pipewire-audio",
+  "version": "0.1.0",
+  "description": "PipeWire audio provider module.",
+  "repository": {
+    "type": "git",
+    "url": "https://example.invalid/mesh/pipewire-audio.git"
+  },
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "provides": [
+      {
+        "interface": "mesh.audio",
+        "provider": "pipewire",
+        "label": "PipeWire",
+        "priority": 100
+      }
+    ],
+    "contributes": {
+      "settings": {
+        "namespace": "@mesh/pipewire-audio",
+        "schema": {
+          "low_latency_mode": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    }
+  }
+}

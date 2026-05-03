@@ -1,0 +1,21 @@
+{
+  "name": "@mesh/pulseaudio-audio",
+  "version": "0.1.0",
+  "description": "PulseAudio audio provider module.",
+  "repository": {
+    "type": "git",
+    "url": "https://example.invalid/mesh/pulseaudio-audio.git"
+  },
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "provides": [
+      {
+        "interface": "mesh.audio",
+        "provider": "pulseaudio",
+        "label": "PulseAudio",
+        "priority": 50
+      }
+    ]
+  }
+}
