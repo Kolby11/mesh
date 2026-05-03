@@ -8,6 +8,7 @@
 pub struct DebugSnapshot {
     pub plugins: Vec<PluginEntry>,
     pub interfaces: Vec<InterfaceEntry>,
+    pub backend_runtimes: Vec<BackendRuntimeEntry>,
     pub health: Vec<HealthEntry>,
     pub active_surfaces: Vec<String>,
 }
@@ -31,6 +32,14 @@ pub struct InterfaceEntry {
 pub struct ProviderEntry {
     pub backend_name: String,
     pub priority: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackendRuntimeEntry {
+    pub interface: String,
+    pub provider_id: String,
+    pub status: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone)]

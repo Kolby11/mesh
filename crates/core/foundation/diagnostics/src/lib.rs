@@ -45,6 +45,7 @@ struct DiagnosticsState {
     health: HealthStatus,
     error_count: u64,
     handler_errors: HashSet<(String, String, String)>,
+    lifecycle_errors: HashSet<(String, String, String)>,
     missing_icons: HashSet<(String, String)>,
 }
 
@@ -56,6 +57,7 @@ impl Diagnostics {
                 health: HealthStatus::Healthy,
                 error_count: 0,
                 handler_errors: HashSet::new(),
+                lifecycle_errors: HashSet::new(),
                 missing_icons: HashSet::new(),
             })),
         }
@@ -129,6 +131,29 @@ impl Diagnostics {
         inserted
     }
 
+    pub fn record_lifecycle_error(
+        &self,
+        provider_id: impl Into<String>,
+        stage: impl Into<String>,
+        message: impl Into<String>,
+    ) -> bool {
+        let provider_id = provider_id.into();
+        let stage = stage.into();
+        let message = message.into();
+        let mut state = self.state.lock().unwrap();
+        let inserted =
+            state
+                .lifecycle_errors
+                .insert((provider_id.clone(), stage.clone(), message.clone()));
+        if inserted {
+            state.health = HealthStatus::Error(format!(
+                "backend lifecycle '{stage}' failed for provider '{provider_id}': {message}"
+            ));
+            state.error_count += 1;
+        }
+        inserted
+    }
+
     pub fn health(&self) -> HealthStatus {
         self.state.lock().unwrap().health.clone()
     }
@@ -154,6 +179,22 @@ impl DiagnosticsCollector {
         let diag = Diagnostics::new(plugin_id);
         self.plugins.push(diag.clone());
         diag
+    }
+
+    pub fn record_lifecycle_error(
+        &mut self,
+        provider_id: impl Into<String>,
+        stage: impl Into<String>,
+        message: impl Into<String>,
+    ) -> bool {
+        let provider_id = provider_id.into();
+        let diagnostics = self
+            .plugins
+            .iter()
+            .find(|diagnostics| diagnostics.plugin_id() == provider_id)
+            .cloned()
+            .unwrap_or_else(|| self.register(provider_id.clone()));
+        diagnostics.record_lifecycle_error(provider_id, stage, message)
     }
 
     /// Snapshot the health of all registered plugins.
@@ -200,6 +241,24 @@ mod tests {
                 assert!(message.contains("material:nope"));
             }
             other => panic!("expected degraded health, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lifecycle_errors_are_deduplicated_by_provider_stage_and_message() {
+        let diagnostics = Diagnostics::new("@mesh/pipewire-audio");
+
+        assert!(diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll_failed", "boom"));
+        assert!(!diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll_failed", "boom"));
+        assert!(diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "init_failed", "boom"));
+
+        assert_eq!(diagnostics.error_count(), 2);
+        match diagnostics.health() {
+            HealthStatus::Error(message) => {
+                assert!(message.contains("@mesh/pipewire-audio"));
+                assert!(message.contains("init_failed"));
+            }
+            other => panic!("expected error health, got {other:?}"),
         }
     }
 }

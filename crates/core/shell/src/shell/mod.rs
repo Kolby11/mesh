@@ -2,7 +2,8 @@ use mesh_core_config::{
     ShellConfig, ShellSettings, default_settings_path, load_config, load_shell_settings,
 };
 use mesh_core_debug::{
-    DebugOverlayState, DebugSnapshot, HealthEntry, InterfaceEntry, PluginEntry, ProviderEntry,
+    BackendRuntimeEntry, DebugOverlayState, DebugSnapshot, HealthEntry, InterfaceEntry,
+    PluginEntry, ProviderEntry,
 };
 use mesh_core_diagnostics::DiagnosticsCollector;
 use mesh_core_events::EventBus;
@@ -24,6 +25,7 @@ use std::time::Duration;
 
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
+use tokio::task::AbortHandle;
 
 mod component;
 mod ipc;
@@ -73,7 +75,71 @@ pub struct Shell {
     debug: DebugOverlayState,
     debug_overlay: DebugOverlay,
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
+    backend_runtimes: HashMap<String, BackendRuntimeSlot>,
+    backend_runtime_statuses: HashMap<(String, String), BackendRuntimeStatusEntry>,
     latest_service_events: HashMap<String, ServiceEvent>,
+}
+
+#[derive(Debug, Clone)]
+struct BackendRuntimeSlot {
+    interface: String,
+    provider_id: String,
+    command_tx: mpsc::UnboundedSender<ServiceCommandMsg>,
+    task: AbortHandle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackendRuntimeStatus {
+    NoActiveProvider,
+    UnmetBackendRequirement,
+    InvalidManifest,
+    MissingEntrypoint,
+    MissingBinary,
+    InitFailed,
+    Running,
+    PollFailed,
+    Failed,
+    Stopped,
+}
+
+impl BackendRuntimeStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::NoActiveProvider => "no_active_provider",
+            Self::UnmetBackendRequirement => "unmet_backend_requirement",
+            Self::InvalidManifest => "invalid_manifest",
+            Self::MissingEntrypoint => "missing_entrypoint",
+            Self::MissingBinary => "missing_binary",
+            Self::InitFailed => "init_failed",
+            Self::Running => "running",
+            Self::PollFailed => "poll_failed",
+            Self::Failed => "failed",
+            Self::Stopped => "stopped",
+        }
+    }
+
+    fn from_str(status: &str) -> Self {
+        match status {
+            "no_active_provider" => Self::NoActiveProvider,
+            "unmet_backend_requirement" => Self::UnmetBackendRequirement,
+            "invalid_manifest" => Self::InvalidManifest,
+            "missing_entrypoint" => Self::MissingEntrypoint,
+            "missing_binary" => Self::MissingBinary,
+            "init_failed" => Self::InitFailed,
+            "running" => Self::Running,
+            "poll_failed" => Self::PollFailed,
+            "stopped" => Self::Stopped,
+            _ => Self::Failed,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BackendRuntimeStatusEntry {
+    interface: String,
+    provider_id: String,
+    status: BackendRuntimeStatus,
+    message: String,
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +223,8 @@ impl Shell {
             debug: DebugOverlayState::default(),
             debug_overlay: DebugOverlay::new(),
             service_handlers: HashMap::new(),
+            backend_runtimes: HashMap::new(),
+            backend_runtime_statuses: HashMap::new(),
             latest_service_events: HashMap::new(),
         }
     }
@@ -307,6 +375,22 @@ impl Shell {
             })
             .collect();
 
+        let mut backend_runtimes: Vec<BackendRuntimeEntry> = self
+            .backend_runtime_statuses
+            .values()
+            .map(|entry| BackendRuntimeEntry {
+                interface: entry.interface.clone(),
+                provider_id: entry.provider_id.clone(),
+                status: entry.status.as_str().to_string(),
+                message: entry.message.clone(),
+            })
+            .collect();
+        backend_runtimes.sort_by(|a, b| {
+            a.interface
+                .cmp(&b.interface)
+                .then_with(|| a.provider_id.cmp(&b.provider_id))
+        });
+
         let active_surfaces = self
             .core
             .surfaces
@@ -318,6 +402,7 @@ impl Shell {
         DebugSnapshot {
             plugins,
             interfaces,
+            backend_runtimes,
             health,
             active_surfaces,
         }
@@ -377,6 +462,19 @@ impl Shell {
                     ShellMessage::Service(event) => {
                         pending.extend(self.broadcast_service_event(event)?);
                     }
+                    ShellMessage::BackendLifecycle {
+                        interface,
+                        provider_id,
+                        stage,
+                        status,
+                        message,
+                    } => self.handle_backend_lifecycle(
+                        interface,
+                        provider_id,
+                        stage,
+                        status,
+                        message,
+                    ),
                     ShellMessage::Ipc(request) => {
                         pending.push_back(request);
                     }
@@ -1088,6 +1186,99 @@ impl Shell {
         Ok(())
     }
 
+    fn record_backend_runtime_status(
+        &mut self,
+        interface: String,
+        provider_id: String,
+        status: BackendRuntimeStatus,
+        message: String,
+    ) {
+        if matches!(
+            status,
+            BackendRuntimeStatus::InvalidManifest
+                | BackendRuntimeStatus::MissingEntrypoint
+                | BackendRuntimeStatus::MissingBinary
+                | BackendRuntimeStatus::InitFailed
+                | BackendRuntimeStatus::PollFailed
+                | BackendRuntimeStatus::Failed
+        ) {
+            self.diagnostics.record_lifecycle_error(
+                provider_id.clone(),
+                status.as_str(),
+                message.clone(),
+            );
+        }
+        self.backend_runtime_statuses.insert(
+            (interface.clone(), provider_id.clone()),
+            BackendRuntimeStatusEntry {
+                interface,
+                provider_id,
+                status,
+                message,
+            },
+        );
+    }
+
+    fn stop_backend_runtime(&mut self, interface: &str) {
+        self.service_handlers.remove(interface);
+        if let Some(slot) = self.backend_runtimes.remove(interface) {
+            slot.task.abort();
+            let key = (slot.interface.clone(), slot.provider_id.clone());
+            let terminal_failure_already_recorded = self
+                .backend_runtime_statuses
+                .get(&key)
+                .map(|entry| {
+                    matches!(
+                        entry.status,
+                        BackendRuntimeStatus::InitFailed
+                            | BackendRuntimeStatus::PollFailed
+                            | BackendRuntimeStatus::Failed
+                    )
+                })
+                .unwrap_or(false);
+            if !terminal_failure_already_recorded {
+                self.record_backend_runtime_status(
+                    slot.interface,
+                    slot.provider_id,
+                    BackendRuntimeStatus::Stopped,
+                    "runtime stopped".to_string(),
+                );
+            }
+        }
+    }
+
+    fn replace_backend_runtime(&mut self, interface: String, slot: BackendRuntimeSlot) {
+        self.stop_backend_runtime(&interface);
+        self.service_handlers
+            .insert(interface.clone(), slot.command_tx.clone());
+        self.backend_runtimes.insert(interface, slot);
+    }
+
+    fn handle_backend_lifecycle(
+        &mut self,
+        interface: String,
+        provider_id: String,
+        stage: String,
+        status: String,
+        message: String,
+    ) {
+        let runtime_status = BackendRuntimeStatus::from_str(&status);
+        self.record_backend_runtime_status(interface.clone(), provider_id, runtime_status, message);
+        if matches!(
+            runtime_status,
+            BackendRuntimeStatus::InitFailed
+                | BackendRuntimeStatus::Failed
+                | BackendRuntimeStatus::Stopped
+        ) {
+            tracing::debug!(
+                interface = interface,
+                stage = stage,
+                "cleaning backend runtime slot"
+            );
+            self.stop_backend_runtime(&interface);
+        }
+    }
+
     fn spawn_backend_plugins(
         &mut self,
         runtime: &Runtime,
@@ -1100,6 +1291,15 @@ impl Shell {
                 let (candidates, statuses) =
                     backend_launch_candidates_from_graph(&graph, &self.plugins, &self.config);
                 for status in statuses {
+                    self.record_backend_runtime_status(
+                        status.interface.clone(),
+                        status
+                            .provider_id
+                            .clone()
+                            .unwrap_or_else(|| "<none>".to_string()),
+                        BackendRuntimeStatus::from_str(status.status),
+                        status.message.clone(),
+                    );
                     tracing::warn!(
                         interface = status.interface,
                         provider_id = status.provider_id.as_deref().unwrap_or("<none>"),
@@ -1132,14 +1332,15 @@ impl Shell {
         tx: mpsc::UnboundedSender<ShellMessage>,
         candidate: BackendLaunchCandidate,
     ) {
+        self.stop_backend_runtime(&candidate.interface);
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-        self.service_handlers
-            .insert(candidate.interface.clone(), cmd_tx);
 
         let shell_tx = tx.clone();
         let interface = candidate.interface.clone();
         let provider_id = candidate.module_id.clone();
         let (backend_tx, mut backend_rx) = mpsc::unbounded_channel::<BackendServiceEvent>();
+        let bridge_interface = interface.clone();
+        let bridge_provider_id = provider_id.clone();
         runtime.spawn(async move {
             while let Some(event) = backend_rx.recv().await {
                 match event {
@@ -1156,32 +1357,79 @@ impl Shell {
                         }
                     }
                     BackendServiceEvent::Started { .. } => {
+                        let _ = shell_tx.send(ShellMessage::BackendLifecycle {
+                            interface: bridge_interface.clone(),
+                            provider_id: bridge_provider_id.clone(),
+                            stage: "runtime".to_string(),
+                            status: "running".to_string(),
+                            message: "backend runtime started".to_string(),
+                        });
                         tracing::info!(
-                            interface = interface,
-                            provider_id = provider_id,
+                            interface = bridge_interface.as_str(),
+                            provider_id = bridge_provider_id.as_str(),
                             "backend runtime started"
                         );
                     }
-                    BackendServiceEvent::InitFailed { message, .. }
-                    | BackendServiceEvent::Failed { message, .. }
-                    | BackendServiceEvent::PollFailed { message, .. } => {
+                    BackendServiceEvent::InitFailed { message, .. } => {
+                        let _ = shell_tx.send(ShellMessage::BackendLifecycle {
+                            interface: bridge_interface.clone(),
+                            provider_id: bridge_provider_id.clone(),
+                            stage: "init".to_string(),
+                            status: "init_failed".to_string(),
+                            message: message.clone(),
+                        });
                         tracing::warn!(
-                            interface = interface,
-                            provider_id = provider_id,
+                            interface = bridge_interface.as_str(),
+                            provider_id = bridge_provider_id.as_str(),
+                            "{message}"
+                        );
+                    }
+                    BackendServiceEvent::PollFailed { message, .. } => {
+                        let _ = shell_tx.send(ShellMessage::BackendLifecycle {
+                            interface: bridge_interface.clone(),
+                            provider_id: bridge_provider_id.clone(),
+                            stage: "poll".to_string(),
+                            status: "poll_failed".to_string(),
+                            message: message.clone(),
+                        });
+                        tracing::warn!(
+                            interface = bridge_interface.as_str(),
+                            provider_id = bridge_provider_id.as_str(),
+                            "{message}"
+                        );
+                    }
+                    BackendServiceEvent::Failed { stage, message, .. } => {
+                        let _ = shell_tx.send(ShellMessage::BackendLifecycle {
+                            interface: bridge_interface.clone(),
+                            provider_id: bridge_provider_id.clone(),
+                            stage,
+                            status: "failed".to_string(),
+                            message: message.clone(),
+                        });
+                        tracing::warn!(
+                            interface = bridge_interface.as_str(),
+                            provider_id = bridge_provider_id.as_str(),
                             "{message}"
                         );
                     }
                     BackendServiceEvent::Stopped { .. } => {
+                        let _ = shell_tx.send(ShellMessage::BackendLifecycle {
+                            interface: bridge_interface.clone(),
+                            provider_id: bridge_provider_id.clone(),
+                            stage: "runtime".to_string(),
+                            status: "stopped".to_string(),
+                            message: "backend runtime stopped".to_string(),
+                        });
                         tracing::info!(
-                            interface = interface,
-                            provider_id = provider_id,
+                            interface = bridge_interface.as_str(),
+                            provider_id = bridge_provider_id.as_str(),
                             "backend runtime stopped"
                         );
                     }
                 }
             }
         });
-        runtime.spawn(spawn_backend_service(
+        let task = runtime.spawn(spawn_backend_service(
             candidate.module_id,
             candidate.service_name,
             candidate.capabilities,
@@ -1190,6 +1438,15 @@ impl Shell {
             backend_tx,
             cmd_rx,
         ));
+        self.replace_backend_runtime(
+            interface.clone(),
+            BackendRuntimeSlot {
+                interface,
+                provider_id,
+                command_tx: cmd_tx,
+                task: task.abort_handle(),
+            },
+        );
     }
 }
 
@@ -1571,6 +1828,7 @@ fn default_plugin_dirs() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
+        BackendRuntimeSlot, BackendRuntimeStatus, ServiceCommandMsg, Shell,
         backend_launch_candidates_from_graph,
         layout::measure_content_size,
         service::{apply_service_update, seed_service_state, service_name_from_interface},
@@ -1593,6 +1851,8 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::runtime::Runtime;
+    use tokio::sync::mpsc;
 
     fn node(tag: &str, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
         let mut node = WidgetNode::new(tag);
@@ -1693,6 +1953,29 @@ mod tests {
             modules.into_iter().map(loaded_module).collect(),
         )
         .unwrap()
+    }
+
+    fn backend_runtime_slot(
+        runtime: &Runtime,
+        interface: &str,
+        provider_id: &str,
+    ) -> (
+        BackendRuntimeSlot,
+        mpsc::UnboundedReceiver<ServiceCommandMsg>,
+    ) {
+        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        let task = runtime.spawn(async {
+            std::future::pending::<()>().await;
+        });
+        (
+            BackendRuntimeSlot {
+                interface: interface.to_string(),
+                provider_id: provider_id.to_string(),
+                command_tx,
+                task: task.abort_handle(),
+            },
+            command_rx,
+        )
     }
 
     #[test]
@@ -1954,6 +2237,138 @@ mod tests {
         assert!(candidates.is_empty());
         assert!(statuses.iter().any(|status| {
             status.status == "unmet_backend_requirement" && status.interface == "mesh.network"
+        }));
+    }
+
+    #[test]
+    fn backend_lifecycle_status_names_match_phase_contract() {
+        let statuses = [
+            BackendRuntimeStatus::NoActiveProvider,
+            BackendRuntimeStatus::UnmetBackendRequirement,
+            BackendRuntimeStatus::InvalidManifest,
+            BackendRuntimeStatus::MissingEntrypoint,
+            BackendRuntimeStatus::MissingBinary,
+            BackendRuntimeStatus::InitFailed,
+            BackendRuntimeStatus::Running,
+            BackendRuntimeStatus::PollFailed,
+            BackendRuntimeStatus::Failed,
+            BackendRuntimeStatus::Stopped,
+        ]
+        .map(BackendRuntimeStatus::as_str);
+
+        assert_eq!(
+            statuses,
+            [
+                "no_active_provider",
+                "unmet_backend_requirement",
+                "invalid_manifest",
+                "missing_entrypoint",
+                "missing_binary",
+                "init_failed",
+                "running",
+                "poll_failed",
+                "failed",
+                "stopped",
+            ]
+        );
+    }
+
+    #[test]
+    fn backend_lifecycle_replacement_removes_old_command_sender_before_insert() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/old-audio");
+        let old_sender = old_slot.command_tx.clone();
+        shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+
+        let (new_slot, _new_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/new-audio");
+        let new_sender = new_slot.command_tx.clone();
+        shell.replace_backend_runtime("mesh.audio".to_string(), new_slot);
+
+        assert!(!old_sender.is_closed());
+        assert!(!new_sender.is_closed());
+        assert_eq!(
+            shell
+                .backend_runtimes
+                .get("mesh.audio")
+                .map(|slot| slot.provider_id.as_str()),
+            Some("@mesh/new-audio")
+        );
+        assert!(shell.service_handlers.contains_key("mesh.audio"));
+    }
+
+    #[test]
+    fn backend_lifecycle_init_failure_removes_command_handler() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+
+        shell.handle_backend_lifecycle(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            "init".to_string(),
+            "init_failed".to_string(),
+            "init boom".to_string(),
+        );
+
+        assert!(!shell.service_handlers.contains_key("mesh.audio"));
+        assert!(!shell.backend_runtimes.contains_key("mesh.audio"));
+        assert_eq!(
+            shell
+                .backend_runtime_statuses
+                .get(&("mesh.audio".to_string(), "@mesh/pipewire-audio".to_string()))
+                .map(|entry| entry.status.as_str()),
+            Some("init_failed")
+        );
+    }
+
+    #[test]
+    fn backend_lifecycle_failed_runtime_does_not_start_fallback_provider() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+
+        shell.handle_backend_lifecycle(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            "poll".to_string(),
+            "failed".to_string(),
+            "poll boom".to_string(),
+        );
+
+        assert!(!shell.service_handlers.contains_key("mesh.audio"));
+        assert!(
+            !shell
+                .backend_runtimes
+                .values()
+                .any(|slot| slot.provider_id == "@mesh/pulseaudio-audio")
+        );
+        assert_eq!(
+            shell
+                .backend_runtime_statuses
+                .get(&("mesh.audio".to_string(), "@mesh/pipewire-audio".to_string()))
+                .map(|entry| entry.status.as_str()),
+            Some("failed")
+        );
+    }
+
+    #[test]
+    fn debug_snapshot_includes_backend_lifecycle_status() {
+        let mut shell = Shell::new();
+        shell.record_backend_runtime_status(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            BackendRuntimeStatus::Running,
+            "backend runtime started".to_string(),
+        );
+
+        let snapshot = shell.build_debug_snapshot();
+        assert!(snapshot.backend_runtimes.iter().any(|entry| {
+            entry.interface == "mesh.audio"
+                && entry.provider_id == "@mesh/pipewire-audio"
+                && entry.status == "running"
         }));
     }
 

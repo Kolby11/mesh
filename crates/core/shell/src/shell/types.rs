@@ -205,6 +205,13 @@ pub(super) struct SettingsWatchState {
 #[derive(Debug)]
 pub(super) enum ShellMessage {
     Service(ServiceEvent),
+    BackendLifecycle {
+        interface: String,
+        provider_id: String,
+        stage: String,
+        status: String,
+        message: String,
+    },
     Ipc(CoreRequest),
 }
 
