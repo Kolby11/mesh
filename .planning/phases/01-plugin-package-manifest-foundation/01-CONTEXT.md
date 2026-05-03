@@ -17,25 +17,30 @@ This phase delivers the shell-owned package.json-like installed-plugin manifest 
 - **D-01:** The user pivoted Phase 1 away from backend lifecycle internals and toward plugin installation/package structure. The central package manifest is the first capability to implement because it gives the rest of backend MVP work one unified interface to work from.
 - **D-02:** The manifest should be package.json-like: a single shell-owned file that lists user-selected frontend plugins and backend plugins.
 - **D-03:** The exact filename is not locked. Planner should choose a name that fits existing config conventions, but it must be conceptually central and package-manifest-like rather than scattered per-plugin state.
+- **D-04:** The shell-owned package manifest is installed state, not a replacement for each plugin's own `plugin.json`. It should reference installed plugin IDs and selected/enabled state while reusing the existing manifest model for package metadata, dependencies, capabilities, entrypoints, and provider declarations.
+- **D-05:** The package graph should be normalized from two inputs: the shell-owned installed package manifest and each referenced plugin's existing normalized `Manifest`.
 
 ### Plugin Dependency Model
-- **D-04:** Frontend plugins should declare which underlying backend plugins or backend service categories they require.
-- **D-05:** Installing or enabling a frontend plugin should make its backend dependencies visible to the shell package graph.
-- **D-06:** Backend plugins are not expected to be manually installed by users as often as frontend plugins, but users must still be able to install backend-only plugins such as a shortcuts provider.
+- **D-06:** Frontend plugins should declare which underlying backend plugins or backend service categories they require.
+- **D-07:** Installing or enabling a frontend plugin should make its backend dependencies visible to the shell package graph.
+- **D-08:** Backend plugins are not expected to be manually installed by users as often as frontend plugins, but users must still be able to install backend-only plugins such as a shortcuts provider.
+- **D-09:** Existing dependency declarations such as `dependencies.plugins` on interface packages and `provides` on backend plugins should be treated as source material for dependency/provider resolution rather than inventing an unrelated dependency vocabulary in Phase 1.
 
 ### Backend Categories and Provider Selection
-- **D-07:** Backend plugins declare their own category/service, such as `audio`, `network`, `power`, `media`, or `shortcuts`.
-- **D-08:** If the user has multiple backend plugins in the same category, the shell should be able to present or record which provider is active.
-- **D-09:** Provider activation should remain compatible with the earlier hybrid decision: highest-priority/default provider can be used automatically, while an explicit user choice overrides it.
-- **D-10:** The package graph should feed shell core settings/provider organization so the shell can reorganize installed plugins into active category choices.
+- **D-10:** Backend plugins declare their own category/service, such as `audio`, `network`, `power`, `media`, or `shortcuts`.
+- **D-11:** If the user has multiple backend plugins in the same category, the shell should be able to present or record which provider is active.
+- **D-12:** Provider activation should remain compatible with the earlier hybrid decision: highest-priority/default provider can be used automatically, while an explicit user choice overrides it.
+- **D-13:** The package graph should feed shell core settings/provider organization so the shell can reorganize installed plugins into active category choices.
+- **D-14:** The current priority-based provider fallback in shell startup is a compatibility behavior to preserve, but Phase 1 should make the selected provider visible in the normalized package graph for later lifecycle work.
 
 ### Scope Boundary
-- **D-11:** Phase 1 should build the local installed-plugin/package graph foundation only. Remote download, dependency fetching from registries, package signing, sandboxing, and marketplace UX belong to later phases.
-- **D-12:** Phase 2 backend lifecycle should consume the graph created here rather than continuing to rely only on implicit directory scanning and provider priority.
+- **D-15:** Phase 1 should build the local installed-plugin/package graph foundation only. Remote download, dependency fetching from registries, package signing, sandboxing, and marketplace UX belong to later phases.
+- **D-16:** Phase 2 backend lifecycle should consume the graph created here rather than continuing to rely only on implicit directory scanning and provider priority.
 
 ### the agent's Discretion
 - Planner may choose the concrete manifest filename and Rust module boundaries after reading existing config/manifest patterns.
-- Planner may choose the minimal schema shape, but it must represent frontend plugins, backend plugins, backend categories, dependencies, and active provider choices.
+- Planner may choose the minimal schema shape, but it must represent frontend plugins, backend plugins, backend categories, dependencies, active provider choices, and explicit backend-only installs.
+- Planner may choose the exact error type and validation layering, but invalid installed package entries should become typed package-graph errors suitable for later diagnostics rather than silent skips.
 
 </decisions>
 
@@ -73,17 +78,21 @@ This phase delivers the shell-owned package.json-like installed-plugin manifest 
 - `Manifest` / `ProvidedInterface` / `DependenciesSection` in `crates/core/extension/plugin/src/manifest.rs`: use as source material for package graph schema and normalized plugin metadata.
 - Existing `plugin.json` files under `packages/plugins/frontend/**` and `packages/plugins/backend/**`: use as fixtures for package graph parsing tests.
 - Existing shell settings config loader patterns: use for locating and parsing the central shell-owned package manifest.
+- Existing `dependencies.plugins` entries in frontend manifests such as `packages/plugins/frontend/core/quick-settings/plugin.json`: reuse as examples of frontend-to-interface dependency declarations.
+- Existing `provides` entries in backend manifests such as `packages/plugins/backend/core/pipewire-audio/plugin.json` and `packages/plugins/backend/core/pulseaudio-audio/plugin.json`: reuse as examples of multiple providers for the same backend category.
 
 ### Established Patterns
 - Plugin manifests are JSON/TOML normalized into typed Rust structs before shell use.
 - Backend providers currently declare interfaces through `provides` or legacy `service` sections.
 - Shell currently scans plugin directories and selects highest-priority backend provider per service.
 - Rust core should remain generic across services; service-specific behavior belongs in Luau backend plugins.
+- Missing native binaries are currently skipped during backend spawn; package graph validation should stay generic and leave runtime availability handling to later lifecycle/diagnostics phases unless a manifest entry itself is invalid.
 
 ### Integration Points
 - Package graph parsing likely belongs near `mesh-core-plugin` or shell config code, depending on whether it is treated as extension metadata or shell-owned installed state.
 - Shell startup should eventually consume the package graph before backend lifecycle spawning.
 - Later provider selection should connect package graph category choices to `spawn_backend_plugins()`.
+- Current `spawn_backend_plugins()` grouping by normalized service name is the immediate consumer that Phase 2 should replace or feed from the installed package graph.
 
 </code_context>
 

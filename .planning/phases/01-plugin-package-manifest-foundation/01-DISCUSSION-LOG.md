@@ -5,7 +5,7 @@
 
 **Date:** 2026-05-03
 **Phase:** 1-Plugin Package Manifest Foundation
-**Areas discussed:** Provider activation policy, package installation pivot
+**Areas discussed:** Provider activation policy, package installation pivot, existing-manifest relationship
 
 ---
 
@@ -33,10 +33,24 @@
 **User's choice:** Make package installation the first implementation focus.
 **Notes:** The user wants a shell-owned package.json-like manifest that records user-specified frontend plugins, backend plugins, frontend-to-backend dependencies, backend categories, and active provider choices. Backend plugins should be installable directly for backend-only categories such as shortcuts, though most backend plugins will arrive as frontend dependencies.
 
+---
+
+## Existing-Manifest Relationship
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Installed state references plugin manifests | The shell-owned package manifest records installed/enabled selections and provider choices while existing `plugin.json` files remain the source for metadata, dependencies, capabilities, entrypoints, and `provides`. | ✓ |
+| Installed state duplicates full plugin metadata | The package manifest copies every plugin's metadata into one central file. Simpler to inspect, but risks drift from plugin-owned manifests. | |
+| Replace plugin manifests with package manifest | Move package metadata into the installed package file. Centralized, but breaks the existing plugin model and plugin-owned distribution shape. | |
+
+**User's choice:** No new interactive answer was available in this rerun; this preserves the prior package-manifest decision and applies codebase scout findings.
+**Notes:** Existing code already normalizes `plugin.json`/`mesh.toml` into `Manifest`, with `DependenciesSection` and `ProvidedInterface` covering the concepts this phase needs. The context now tells downstream agents to build the installed package graph from shell-owned installed state plus each referenced plugin's normalized manifest.
+
 ## the agent's Discretion
 
 - Choose exact manifest filename and Rust module boundaries during planning.
 - Keep schema minimal while preserving the package graph concepts the user locked.
+- Choose exact validation layering, but invalid installed package entries should become typed package-graph errors suitable for later diagnostics rather than silent skips.
 
 ## Deferred Ideas
 
