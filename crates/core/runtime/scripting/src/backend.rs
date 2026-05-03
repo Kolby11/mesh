@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 /// - `mesh.service.emit_unavailable()` — emit unavailable state
 /// - `mesh.service.payload()` — get the current command payload as a Lua table
 /// - `mesh.service.has_capability(name)` — check whether the plugin was granted a capability
-/// - `mesh.log(level, msg)` / `mesh.log.info(msg)` / `mesh.log.warn(msg)` / `mesh.log.error(msg)`
+/// - `mesh.log(level, msg)` / `mesh.log.debug(msg)` / `mesh.log.info(msg)` / `mesh.log.warn(msg)` / `mesh.log.error(msg)`
 pub struct BackendScriptContext {
     plugin_id: String,
     capabilities: HashSet<String>,
@@ -534,6 +534,10 @@ mod tests {
                 "{plugin_id} missing mesh.service.payload"
             );
             assert!(
+                log.get::<Function>("debug").is_ok(),
+                "{plugin_id} missing mesh.log.debug"
+            );
+            assert!(
                 log.get::<Function>("info").is_ok(),
                 "{plugin_id} missing mesh.log.info"
             );
@@ -786,7 +790,7 @@ mod tests {
     fn log_level_function_and_aliases_are_callable() {
         let mut ctx = BackendScriptContext::new("@test/backend");
         ctx.load_script(
-            "function init()\nend\nfunction on_poll()\nmesh.log(\"info\", \"polling\")\nmesh.log.info(\"polling\")\nmesh.log.warn(\"polling\")\nmesh.log.error(\"polling\")\nmesh.log(\"warning\", \"polling\")\nmesh.log(\"debug\", \"polling\")\nmesh.service.emit({ ok = true })\nend",
+            "function init()\nend\nfunction on_poll()\nmesh.log(\"debug\", \"polling\")\nmesh.log.debug(\"polling\")\nmesh.log(\"info\", \"polling\")\nmesh.log.info(\"polling\")\nmesh.log(\"warn\", \"polling\")\nmesh.log.warn(\"polling\")\nmesh.log(\"error\", \"polling\")\nmesh.log.error(\"polling\")\nmesh.log(\"warning\", \"polling\")\nmesh.service.emit({ ok = true })\nend",
         )
         .unwrap();
         let payload = ctx.run_poll().unwrap().unwrap();
