@@ -4305,6 +4305,42 @@ end
     }
 
     #[test]
+    fn real_core_surfaces_volume_bar_slider_publishes_service_command() {
+        let mut ctx = make_audio_ctx();
+        ctx.load_script(&shipped_component_script(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../packages/plugins/frontend/core/volume-bar/src/main.mesh"
+        ))))
+        .unwrap();
+        ctx.apply_service_payload("audio", &serde_json::json!({ "available": true }));
+
+        ctx.call_handler("onVolumeChange", &[serde_json::json!(73)])
+            .unwrap();
+        let requests =
+            super::super::service::script_events_to_requests(ctx.drain_published_events());
+
+        assert_eq!(ctx.state.get("audio_label"), Some(serde_json::json!("73%")));
+        match requests.as_slice() {
+            [
+                CoreRequest::ServiceCommand {
+                    interface,
+                    command,
+                    payload,
+                    ..
+                },
+            ] => {
+                assert_eq!(interface, "mesh.audio");
+                assert_eq!(command, "set_volume");
+                assert_eq!(
+                    payload,
+                    &serde_json::json!({ "device_id": "default", "volume": 0.73 })
+                );
+            }
+            other => panic!("expected one mesh.audio set_volume command, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn real_core_surfaces_reject_legacy_service_callback_api_in_shipped_surfaces() {
         let sources = [
             (

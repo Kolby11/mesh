@@ -6,7 +6,7 @@
       min="0"
       max="100"
       value="{audio_percent}"
-      mesh-action="audio-volume"
+      onchange={onVolumeChange}
       title="{audio_tooltip}"
       aria-label="Volume"
     />
@@ -23,8 +23,26 @@ audio_label = "0%"
 audio_tooltip = "Volume unavailable"
 audio_percent = 0
 
+local function clamp_percent(value)
+    local numeric = tonumber(value) or 0
+    if numeric < 0 then return 0 end
+    if numeric > 100 then return 100 end
+    return math.floor(numeric + 0.5)
+end
+
+local function update_audio_copy(percent, muted)
+    audio_percent = percent
+    audio_label = string.format("%d%%", percent)
+
+    if muted then
+        audio_tooltip = string.format("Volume muted at %d%%", percent)
+    else
+        audio_tooltip = string.format("Volume %d%%", percent)
+    end
+end
+
 function onRender()
-    if not audio_ok or not audio then
+    if not audio_ok or not audio or audio.available == false then
         icon_name = "audio-volume-muted"
         audio_label = "0%"
         audio_tooltip = "Audio service unavailable"
@@ -32,7 +50,7 @@ function onRender()
         return
     end
 
-    local percent = audio.percent or 0
+    local percent = clamp_percent(audio.percent)
     local muted = audio.muted or false
 
     if muted then
@@ -53,17 +71,23 @@ function onRender()
         end
     end
 
-    audio_percent = percent
-    audio_label = string.format("%d%%", percent)
-    if muted then
-        audio_tooltip = string.format("Volume muted at %d%%", percent)
+    update_audio_copy(percent, muted)
+end
+
+function onVolumeChange(value)
+    local percent = clamp_percent(value)
+    local normalized = percent / 100
+    update_audio_copy(percent, false)
+
+    if audio_ok and audio and audio.available ~= false then
+        audio.set_volume("default", normalized)
     else
-        audio_tooltip = string.format("Volume %d%%", percent)
+        audio_tooltip = "Audio controls unavailable"
     end
 end
 
 function onToggleMute()
-    if audio_ok and audio then
+    if audio_ok and audio and audio.available ~= false then
         audio.toggle_mute()
     end
 end

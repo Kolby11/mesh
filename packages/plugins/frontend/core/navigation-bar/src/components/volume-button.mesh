@@ -8,15 +8,6 @@
     >
       <icon class="volume-glyph" name="{icon_name}" size="18" />
     </button>
-    <slider
-      class="volume-inline-slider"
-      min="0"
-      max="100"
-      value="{audio_percent}"
-      onchange={onVolumeChange}
-      title="{audio_tooltip}"
-      aria-label="Volume"
-    />
   </row>
 </template>
 
@@ -27,18 +18,9 @@ if not audio_ok then audio = nil end
 icon_name = "audio-volume-muted"
 audio_tooltip = "Volume unavailable"
 audio_percent = 0
-slider_value = 0.0
-
-local function clamp_volume(value)
-    local numeric = tonumber(value) or 0
-    if numeric < 0 then return 0.0 end
-    if numeric > 1 then return 1.0 end
-    return numeric
-end
 
 local function update_audio_copy(percent, muted)
     audio_percent = percent
-    slider_value = clamp_volume(percent / 100)
 
     if muted or percent == 0 then
         icon_name = "audio-volume-muted"
@@ -62,7 +44,6 @@ function onRender()
         icon_name = "audio-volume-muted"
         audio_tooltip = "Audio service unavailable"
         audio_percent = 0
-        slider_value = 0.0
         return
     end
 
@@ -71,20 +52,6 @@ function onRender()
     if percent > 100 then percent = 100 end
     local muted = audio.muted or false
     update_audio_copy(percent, muted)
-end
-
-function onVolumeChange(value)
-    local percent = math.floor((tonumber(value) or 0) + 0.5)
-    if percent < 0 then percent = 0 end
-    if percent > 100 then percent = 100 end
-    local normalized = clamp_volume(percent / 100)
-    update_audio_copy(percent, false)
-
-    if audio_ok and audio and audio.available ~= false then
-        audio.set_volume("default", normalized)
-    else
-        audio_tooltip = "Audio controls unavailable"
-    end
 end
 
 function onVolumeClick(event)
@@ -100,10 +67,10 @@ end
 
 <style>
 .volume-widget {
-    width: 120px;
+    width: 44px;
     height: 40px;
     flex-shrink: 0;
-    justify-content: start;
+    justify-content: center;
     align-items: center;
     padding-block: token(spacing.xs);
     padding-inline: token(spacing.xs);
@@ -119,7 +86,7 @@ end
 }
 
 .volume-button {
-    width: 34px;
+    width: 100%;
     height: 32px;
     flex-shrink: 0;
     justify-content: center;
@@ -139,9 +106,4 @@ end
     color: token(color.on-secondary-container);
 }
 
-.volume-inline-slider {
-    width: 68px;
-    height: 24px;
-    flex-shrink: 0;
-}
 </style>
