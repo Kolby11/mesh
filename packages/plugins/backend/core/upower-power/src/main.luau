@@ -65,7 +65,7 @@ local function parse_display_device(stdout)
         elseif key == "state" then
             state.charging = value == "charging" or value == "pending-charge" or value == "fully-charged"
         elseif key == "percentage" then
-            state.level = parse_decimal(value) / 100.0
+            state.level = parse_decimal(value)
         elseif key == "time to empty" then
             state.time_remaining_minutes = parse_duration_minutes(value)
         elseif key == "time to full" then

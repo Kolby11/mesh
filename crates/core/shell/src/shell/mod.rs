@@ -1013,11 +1013,17 @@ impl Shell {
         }
 
         if let Some(tx) = self.service_handlers.get(interface) {
-            let _ = tx.send(ServiceCommandMsg {
+            match tx.send(ServiceCommandMsg {
                 command: command.to_string(),
                 payload: payload.clone(),
-            });
-            serde_json::json!({ "ok": true, "queued": true })
+            }) {
+                Ok(()) => serde_json::json!({ "ok": true, "queued": true }),
+                Err(_) => serde_json::json!({
+                    "ok": false,
+                    "error": "service_unavailable",
+                    "status": "service_unavailable",
+                }),
+            }
         } else {
             tracing::debug!("no handler registered for service: {interface}");
             serde_json::json!({
@@ -1349,13 +1355,23 @@ impl Shell {
         message: String,
     ) {
         let runtime_status = BackendRuntimeStatus::from_str(&status);
-        self.record_backend_runtime_status(interface.clone(), provider_id, runtime_status, message);
+        self.record_backend_runtime_status(
+            interface.clone(),
+            provider_id.clone(),
+            runtime_status,
+            message,
+        );
+        let event_provider_is_current = self
+            .backend_runtimes
+            .get(&interface)
+            .is_some_and(|slot| slot.provider_id == provider_id);
         if matches!(
             runtime_status,
             BackendRuntimeStatus::InitFailed
                 | BackendRuntimeStatus::Failed
                 | BackendRuntimeStatus::Stopped
-        ) {
+        ) && event_provider_is_current
+        {
             tracing::debug!(
                 interface = interface,
                 stage = stage,
@@ -2446,6 +2462,34 @@ mod tests {
     }
 
     #[test]
+    fn closed_service_command_channel_returns_unavailable_result() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        shell
+            .interfaces
+            .register_contract(test_contract("mesh.audio"));
+        register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+        let (slot, rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+        drop(rx);
+        shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+        let mut capabilities = mesh_core_capability::CapabilitySet::new();
+        capabilities.grant(mesh_core_capability::Capability::new(
+            "service.audio.control",
+        ));
+
+        let result = shell.dispatch_service_command(
+            "mesh.audio",
+            "set_volume",
+            &serde_json::json!({ "volume": 0.4 }),
+            "@mesh/panel",
+            &capabilities,
+        );
+
+        assert_eq!(result["ok"], serde_json::json!(false));
+        assert_eq!(result["status"], serde_json::json!("service_unavailable"));
+    }
+
+    #[test]
     fn launcher_content_size_ignores_root_surface_bounds() {
         let mut root = node("root", 0.0, 0.0, 640.0, 360.0);
         root.children.push(node("column", 12.0, 12.0, 336.0, 332.0));
@@ -2832,6 +2876,41 @@ mod tests {
                 .get(&("mesh.audio".to_string(), "@mesh/pipewire-audio".to_string()))
                 .map(|entry| entry.status.as_str()),
             Some("init_failed")
+        );
+    }
+
+    #[test]
+    fn stale_backend_lifecycle_event_does_not_stop_current_provider() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/old-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+
+        let (new_slot, _new_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/new-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), new_slot);
+
+        shell.handle_backend_lifecycle(
+            "mesh.audio".to_string(),
+            "@mesh/old-audio".to_string(),
+            "poll".to_string(),
+            "failed".to_string(),
+            "old provider failed after replacement".to_string(),
+        );
+
+        assert!(shell.service_handlers.contains_key("mesh.audio"));
+        assert_eq!(
+            shell
+                .backend_runtimes
+                .get("mesh.audio")
+                .map(|slot| slot.provider_id.as_str()),
+            Some("@mesh/new-audio")
+        );
+        assert_eq!(
+            shell
+                .backend_runtime_statuses
+                .get(&("mesh.audio".to_string(), "@mesh/old-audio".to_string()))
+                .map(|entry| entry.status.as_str()),
+            Some("failed")
         );
     }
 
