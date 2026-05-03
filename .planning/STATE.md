@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Backend Plugin MVP
-status: planning
-last_updated: "2026-05-03T15:00:25.437Z"
-last_activity: 2026-05-03 -- Milestone v1.1 Backend Plugin MVP roadmap reset
+status: Ready to discuss
+stopped_at: Phase 1 package manifest context gathered
+last_updated: "2026-05-03T15:18:40.549Z"
+last_activity: 2026-05-03 — Milestone v1.1 Backend Plugin MVP roadmap reset
 progress:
-  total_phases: 4
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
-  percent: 0
 ---
 
 # State: MESH v1.1
@@ -20,7 +20,7 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-03)
 
 **Core value:** A backend plugin author can write a Luau service plugin, configure it, run it under the shell, emit state, handle commands, and understand failures without reading Rust source.
-**Current focus:** Phase 01 — backend-lifecycle-foundation
+**Current focus:** Phase 01 — plugin-package-manifest-foundation
 
 ## Current Position
 
@@ -35,7 +35,7 @@ Last activity: 2026-05-03 — Milestone v1.1 Backend Plugin MVP roadmap reset
 - `require('@mesh/service')` is the frontend/backend interface.
 - Runtime correctness is in scope before LSP, distribution, or new surfaces.
 - Phase numbering reset to 1 for v1.1 after archiving v1.0 planning artifacts.
-- [v1.1]: Backend plugin MVP is the foundation: lifecycle, host APIs, service contracts, diagnostics, and proof plugin.
+- [v1.1]: Backend plugin MVP starts with a central package.json-like installed-plugin manifest that drives frontend/backend plugin installation, backend category/provider selection, and later runtime lifecycle.
 - [Phase 02]: Service proxies are state-and-command surfaces only; callback-style bind/on_change APIs were removed from the public proxy path.
 - [Phase 02]: Service update invalidation is based on tracked top-level field value changes, not whole-service emissions.
 - [Phase 02]: Lookup diagnostics are recorded before InterfaceUnavailable or CapabilityDenied errors are returned, so pcall changes control flow without hiding visibility.
@@ -69,9 +69,9 @@ Last activity: 2026-05-03 — Milestone v1.1 Backend Plugin MVP roadmap reset
 
 ## Session
 
-Last session: 2026-05-03T15:00:25.437Z
-Stopped At: Milestone v1.1 Backend Plugin MVP initialized
-Resume File: None
+Last session: 2026-05-03T15:18:40.535Z
+Stopped At: Phase 1 package manifest context gathered
+Resume File: .planning/phases/01-plugin-package-manifest-foundation/01-CONTEXT.md
 
 ## Accumulated Context
 

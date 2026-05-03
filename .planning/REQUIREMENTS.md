@@ -1,9 +1,18 @@
 # Requirements: MESH v1.1 Backend Plugin MVP
 
 **Defined:** 2026-05-03
-**Core Value:** A backend plugin author can write a Luau service plugin, configure it, run it under the shell, emit state, handle commands, and understand failures without reading Rust source.
+**Core Value:** MESH has one shell-owned plugin package interface that declares installed frontend plugins, their backend dependencies, available backend providers by category, and active provider choices; backend plugin authors can then rely on a stable runtime contract.
 
 ## v1.1 Requirements
+
+### Plugin Package Manifest
+
+- [ ] **PINST-01**: The shell has one package.json-like manifest that lists user-installed frontend plugins and backend plugins.
+- [ ] **PINST-02**: Frontend plugin entries can declare required backend plugin dependencies or backend service categories they need.
+- [ ] **PINST-03**: Backend plugin entries declare their category/service, such as `audio`, `network`, `power`, `media`, or `shortcuts`.
+- [ ] **PINST-04**: The package manifest supports multiple backend providers in the same category and records the user's active provider choice.
+- [ ] **PINST-05**: The shell can parse the package manifest into a normalized installed-plugin graph used by later lifecycle/provider selection work.
+- [ ] **PINST-06**: The package manifest design remains local-first and does not require remote download, signing, or marketplace behavior in this phase.
 
 ### Backend Plugin Lifecycle
 
@@ -63,7 +72,7 @@
 
 | Feature | Reason |
 |---------|--------|
-| Plugin package download and hot install | Backend runtime semantics must stabilize first. |
+| Remote plugin download and hot install | Local package manifest and installed-plugin graph must stabilize first. |
 | LSP completions and hover | Tooling should document stable APIs, not APIs still being locked. |
 | New frontend shell surfaces | This milestone focuses on backend plugin fundamentals. |
 | Sandboxing/signing untrusted plugins | Security distribution model is a later milestone. |
@@ -73,33 +82,39 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BPLUG-01 | Phase 1 | Pending |
-| BPLUG-02 | Phase 1 | Pending |
-| BPLUG-03 | Phase 1 | Pending |
-| BPLUG-04 | Phase 1 | Pending |
-| BPLUG-05 | Phase 1 | Pending |
-| BHOST-01 | Phase 2 | Pending |
-| BHOST-02 | Phase 2 | Pending |
-| BHOST-03 | Phase 2 | Pending |
-| BHOST-04 | Phase 2 | Pending |
-| BHOST-05 | Phase 2 | Pending |
-| BSVC-01 | Phase 3 | Pending |
-| BSVC-02 | Phase 3 | Pending |
-| BSVC-03 | Phase 3 | Pending |
-| BSVC-04 | Phase 3 | Pending |
-| BSVC-05 | Phase 3 | Pending |
-| BDIAG-01 | Phase 4 | Pending |
-| BDIAG-02 | Phase 4 | Pending |
-| BDIAG-03 | Phase 4 | Pending |
-| BDIAG-04 | Phase 4 | Pending |
-| BREF-01 | Phase 4 | Pending |
-| BREF-02 | Phase 4 | Pending |
-| BREF-03 | Phase 4 | Pending |
+| PINST-01 | Phase 1 | Pending |
+| PINST-02 | Phase 1 | Pending |
+| PINST-03 | Phase 1 | Pending |
+| PINST-04 | Phase 1 | Pending |
+| PINST-05 | Phase 1 | Pending |
+| PINST-06 | Phase 1 | Pending |
+| BPLUG-01 | Phase 2 | Pending |
+| BPLUG-02 | Phase 2 | Pending |
+| BPLUG-03 | Phase 2 | Pending |
+| BPLUG-04 | Phase 2 | Pending |
+| BPLUG-05 | Phase 2 | Pending |
+| BHOST-01 | Phase 3 | Pending |
+| BHOST-02 | Phase 3 | Pending |
+| BHOST-03 | Phase 3 | Pending |
+| BHOST-04 | Phase 3 | Pending |
+| BHOST-05 | Phase 3 | Pending |
+| BSVC-01 | Phase 4 | Pending |
+| BSVC-02 | Phase 4 | Pending |
+| BSVC-03 | Phase 4 | Pending |
+| BSVC-04 | Phase 4 | Pending |
+| BSVC-05 | Phase 4 | Pending |
+| BDIAG-01 | Phase 5 | Pending |
+| BDIAG-02 | Phase 5 | Pending |
+| BDIAG-03 | Phase 5 | Pending |
+| BDIAG-04 | Phase 5 | Pending |
+| BREF-01 | Phase 5 | Pending |
+| BREF-02 | Phase 5 | Pending |
+| BREF-03 | Phase 5 | Pending |
 
 **Coverage:**
-- v1.1 requirements: 22 total
-- Mapped to phases: 22
+- v1.1 requirements: 28 total
+- Mapped to phases: 28
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-05-03 after v1.1 reset*
+*Requirements updated: 2026-05-03 after Phase 1 package manifest pivot*
