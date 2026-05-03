@@ -481,6 +481,14 @@ mod tests {
     fn bundled_backend_scripts_expose_required_host_api_surface() {
         for (plugin_id, path) in [
             (
+                "@mesh/pipewire-audio",
+                "../../../../packages/plugins/backend/core/pipewire-audio/src/main.luau",
+            ),
+            (
+                "@mesh/pulseaudio-audio",
+                "../../../../packages/plugins/backend/core/pulseaudio-audio/src/main.luau",
+            ),
+            (
                 "@mesh/networkmanager",
                 "../../../../packages/plugins/backend/core/networkmanager-network/src/main.luau",
             ),
