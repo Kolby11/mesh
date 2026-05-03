@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 const MAX_CONSECUTIVE_POLL_FAILURES: u32 = 3;
+const MIN_POLL_INTERVAL_MS: u64 = 50;
 
 #[derive(Debug, Clone)]
 pub struct BackendServiceCommand {
@@ -178,7 +179,7 @@ pub async fn spawn_backend_service(
 }
 
 fn bounded_poll_interval_ms(ctx: &BackendScriptContext) -> u64 {
-    ctx.poll_interval_ms().max(50)
+    ctx.poll_interval_ms().max(MIN_POLL_INTERVAL_MS)
 }
 
 fn make_interval(interval_ms: u64, immediate: bool) -> tokio::time::Interval {
