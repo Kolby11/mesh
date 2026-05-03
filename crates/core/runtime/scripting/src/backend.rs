@@ -129,31 +129,47 @@ impl BackendScriptContext {
     }
 
     /// Call `on_poll()` if it exists. Returns any emitted payload.
-    pub fn run_poll(&mut self) -> Option<JsonValue> {
+    pub fn run_poll(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
         self.reset_for_call(JsonValue::Null);
         let globals = self.lua.globals();
-        let handler = globals.get::<Function>("on_poll").ok()?;
-        if let Err(err) = handler.call::<()>(()) {
-            tracing::warn!("{} on_poll error: {err}", self.plugin_id);
-        }
-        self.take_pending_emit()
+        let handler = match globals.get::<Function>("on_poll") {
+            Ok(handler) => handler,
+            Err(_) => return Ok(None),
+        };
+        handler
+            .call::<()>(())
+            .map_err(|err| BackendScriptError::Runtime {
+                plugin_id: self.plugin_id.clone(),
+                message: err.to_string(),
+            })?;
+        Ok(self.take_pending_emit())
     }
 
     /// Call `on_command_<name>()` for the given command. Returns any emitted payload.
-    pub fn run_command(&mut self, command: &str, payload: &JsonValue) -> Option<JsonValue> {
+    pub fn run_command(
+        &mut self,
+        command: &str,
+        payload: &JsonValue,
+    ) -> Result<Option<JsonValue>, BackendScriptError> {
         self.reset_for_call(payload.clone());
         let normalized = command.replace('-', "_");
 
         let globals = self.lua.globals();
         let handler_name = format!("on_command_{normalized}");
-        let handler = globals
+        let handler = match globals
             .get::<Function>(handler_name.as_str())
             .or_else(|_| globals.get::<Function>(normalized.as_str()))
-            .ok()?;
-        if let Err(err) = handler.call::<()>(()) {
-            tracing::warn!("{} {} error: {err}", self.plugin_id, handler_name);
-        }
-        self.take_pending_emit()
+        {
+            Ok(handler) => handler,
+            Err(_) => return Ok(None),
+        };
+        handler
+            .call::<()>(())
+            .map_err(|err| BackendScriptError::Runtime {
+                plugin_id: self.plugin_id.clone(),
+                message: err.to_string(),
+            })?;
+        Ok(self.take_pending_emit())
     }
 
     fn install_host_api(&mut self) -> mlua::Result<()> {
@@ -429,7 +445,7 @@ mod tests {
             "function init()\nend\nfunction on_poll()\nmesh.service.emit({ available = true, percent = 65 })\nend",
         )
         .unwrap();
-        let payload = ctx.run_poll().unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(
             payload.get("available").and_then(|v| v.as_bool()),
             Some(true)
@@ -444,7 +460,7 @@ mod tests {
             "function init()\nend\nfunction on_poll()\nmesh.service.emit_unavailable()\nend",
         )
         .unwrap();
-        let payload = ctx.run_poll().unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(
             payload.get("available").and_then(|v| v.as_bool()),
             Some(false)
@@ -463,7 +479,7 @@ mod tests {
         )
         .unwrap();
         let result = ctx.run_command("set-volume", &serde_json::json!({ "percent": 50 }));
-        let payload = result.unwrap();
+        let payload = result.unwrap().unwrap();
         assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(50));
     }
 
@@ -481,6 +497,7 @@ mod tests {
                 "set-current",
                 &serde_json::json!({ "current": "mesh-default-light", "is_dark": false }),
             )
+            .unwrap()
             .unwrap();
         assert_eq!(
             payload.get("current").and_then(|v| v.as_str()),
@@ -570,7 +587,7 @@ mod tests {
             "function init()\nend\nfunction on_poll()\nlocal r = mesh.exec_shell(\"printf '{\\\"available\\\":true,\\\"percent\\\":65}'\")\nmesh.service.emit_json(r.stdout)\nend",
         )
         .unwrap();
-        let payload = ctx.run_poll().unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(
             payload.get("available").and_then(|v| v.as_bool()),
             Some(true)
@@ -585,7 +602,7 @@ mod tests {
             "function init()\nend\nfunction on_poll()\nmesh.service.emit_json({ available = true, percent = 65 })\nend",
         )
         .unwrap();
-        let payload = ctx.run_poll().unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(
             payload.get("available").and_then(|v| v.as_bool()),
             Some(true)
@@ -604,7 +621,7 @@ mod tests {
             "echo-current",
             &serde_json::json!({ "percent": 55, "muted": false }),
         );
-        let payload = payload.unwrap();
+        let payload = payload.unwrap().unwrap();
         assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(55));
         assert_eq!(payload.get("muted").and_then(|v| v.as_bool()), Some(false));
     }
@@ -630,14 +647,14 @@ mod tests {
             "function init()\nend\nfunction on_poll()\nmesh.service.emit({ ok = true })\nend\nfunction on_command_bad_emit_json()\nmesh.service.emit_json('{not-json}')\nend",
         )
         .unwrap();
-        let first_payload = ctx.run_poll().unwrap();
+        let first_payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(
             first_payload.get("ok").and_then(|v| v.as_bool()),
             Some(true)
         );
 
         let bad_payload = ctx.run_command("bad-emit-json", &serde_json::json!({}));
-        assert!(bad_payload.is_none());
+        assert!(bad_payload.is_err());
     }
 
     #[test]
@@ -647,7 +664,7 @@ mod tests {
             "function init()\nend\nfunction on_poll()\nmesh.service.emit({ percent = 42, muted = false })\nend",
         )
         .unwrap();
-        let payload = ctx.run_poll().unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(42));
         assert_eq!(payload.get("muted").and_then(|v| v.as_bool()), Some(false));
     }
@@ -661,7 +678,11 @@ mod tests {
         .unwrap();
         let payload = ctx.run_command("set-volume", &serde_json::json!({ "percent": 55 }));
         assert_eq!(
-            payload.unwrap().get("percent").and_then(|v| v.as_u64()),
+            payload
+                .unwrap()
+                .unwrap()
+                .get("percent")
+                .and_then(|v| v.as_u64()),
             Some(55)
         );
     }
@@ -675,7 +696,11 @@ mod tests {
         .unwrap();
         let payload = ctx.run_command("set-volume", &serde_json::json!({}));
         assert_eq!(
-            payload.unwrap().get("ok").and_then(|v| v.as_bool()),
+            payload
+                .unwrap()
+                .unwrap()
+                .get("ok")
+                .and_then(|v| v.as_bool()),
             Some(true)
         );
     }
@@ -687,7 +712,7 @@ mod tests {
             "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec_shell(\"printf 'hello'\")\nmesh.service.emit({ ok = result.success, stdout = result.stdout })\nend",
         )
         .unwrap();
-        let payload = ctx.run_poll().unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(true));
         assert_eq!(
             payload.get("stdout").and_then(|v| v.as_str()),
@@ -702,7 +727,7 @@ mod tests {
             "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, code = result.code })\nend",
         )
         .unwrap();
-        let payload = ctx.run_poll().unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(payload.get("success").and_then(|v| v.as_bool()), Some(true));
         assert_eq!(
             payload.get("stdout").and_then(|v| v.as_str()),
@@ -724,7 +749,7 @@ mod tests {
             "function init()\nend\nfunction on_poll()\nlocal cfg = mesh.config()\nmesh.service.emit({ enabled = cfg.enabled, name = cfg.nested.name })\nend",
         )
         .unwrap();
-        let payload = ctx.run_poll().unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(payload.get("enabled").and_then(|v| v.as_bool()), Some(true));
         assert_eq!(payload.get("name").and_then(|v| v.as_str()), Some("demo"));
     }
@@ -736,7 +761,7 @@ mod tests {
             "function init()\nend\nfunction on_poll()\nmesh.log(\"info\", \"polling\")\nmesh.log.info(\"polling\")\nmesh.log.warn(\"polling\")\nmesh.log.error(\"polling\")\nmesh.log(\"warning\", \"polling\")\nmesh.log(\"debug\", \"polling\")\nmesh.service.emit({ ok = true })\nend",
         )
         .unwrap();
-        let payload = ctx.run_poll().unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(true));
     }
 
@@ -747,14 +772,14 @@ mod tests {
             "function init()\nend\nfunction on_poll()\nmesh.service.emit({ ok = true })\nend\nfunction on_command_bad_emit()\nmesh.service.emit(function() end)\nend",
         )
         .unwrap();
-        let first_payload = ctx.run_poll().unwrap();
+        let first_payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(
             first_payload.get("ok").and_then(|v| v.as_bool()),
             Some(true)
         );
 
         let bad_payload = ctx.run_command("bad-emit", &serde_json::json!({}));
-        assert!(bad_payload.is_none());
+        assert!(bad_payload.is_err());
     }
 
     #[test]
@@ -767,7 +792,7 @@ mod tests {
             "function init()\nend\nfunction on_poll()\nmesh.service.emit({ allowed = mesh.service.has_capability(\"service.network.control\") })\nend",
         )
         .unwrap();
-        let payload = ctx.run_poll().unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(payload.get("allowed").and_then(|v| v.as_bool()), Some(true));
     }
 
@@ -777,5 +802,29 @@ mod tests {
         ctx.load_script("function on_poll()\nend").unwrap();
         let err = ctx.call_init().unwrap_err();
         assert!(matches!(err, BackendScriptError::MissingEntrypoint { .. }));
+    }
+
+    #[test]
+    fn backend_poll_handler_error_returns_runtime_error() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script("function init()\nend\nfunction on_poll()\nerror(\"boom\")\nend")
+            .unwrap();
+
+        let err = ctx.run_poll().unwrap_err();
+        assert!(matches!(err, BackendScriptError::Runtime { .. }));
+        assert!(err.to_string().contains("boom"));
+    }
+
+    #[test]
+    fn backend_command_handler_error_returns_runtime_error() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_command_fail()\nerror(\"command boom\")\nend",
+        )
+        .unwrap();
+
+        let err = ctx.run_command("fail", &serde_json::json!({})).unwrap_err();
+        assert!(matches!(err, BackendScriptError::Runtime { .. }));
+        assert!(err.to_string().contains("command boom"));
     }
 }
