@@ -826,6 +826,17 @@ impl Shell {
         } = event;
         let interface = canonical_interface_name(service);
         self.validate_service_state_shape(&interface, source_plugin, payload);
+        if let Some(slot) = self.backend_runtimes.get(&interface) {
+            if slot.provider_id != *source_plugin {
+                tracing::debug!(
+                    interface,
+                    source_plugin,
+                    active_provider = %slot.provider_id,
+                    "ignoring stale service update from inactive provider"
+                );
+                return;
+            }
+        }
         self.latest_service_state.insert(
             interface.clone(),
             LatestServiceState {
@@ -2342,6 +2353,44 @@ mod tests {
                 .values()
                 .any(|latest| latest.provider_id == "@mesh/pipewire-audio")
         );
+    }
+
+    #[test]
+    fn stale_provider_update_does_not_replace_current_latest_state() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let (pipewire_slot, _pipewire_rx) =
+            backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), pipewire_slot);
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pipewire-audio",
+                serde_json::json!({ "available": true, "percent": 40.0 }),
+            ))
+            .unwrap();
+
+        let (pulse_slot, _pulse_rx) =
+            backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pulseaudio-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), pulse_slot);
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pulseaudio-audio",
+                serde_json::json!({ "available": true, "percent": 55.0 }),
+            ))
+            .unwrap();
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pipewire-audio",
+                serde_json::json!({ "available": true, "percent": 5.0 }),
+            ))
+            .unwrap();
+
+        let latest = shell.latest_service_state.get("mesh.audio").unwrap();
+        assert_eq!(latest.provider_id, "@mesh/pulseaudio-audio");
+        assert_eq!(latest.state["percent"], serde_json::json!(55.0));
     }
 
     #[test]
