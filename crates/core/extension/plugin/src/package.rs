@@ -584,6 +584,473 @@ pub enum ModuleManifestSource {
     LegacyPluginJson,
 }
 
+#[derive(Debug, Clone)]
+pub struct InstalledModuleGraph {
+    modules: HashMap<String, InstalledModuleNode>,
+    backend_providers: HashMap<String, Vec<BackendProviderNode>>,
+    active_providers: HashMap<String, String>,
+    frontend_requirements: HashMap<String, FrontendRequirementSet>,
+    contributions: ModuleContributionIndex,
+    layout_entrypoint: Option<ResolvedLayoutEntrypoint>,
+}
+
+impl InstalledModuleGraph {
+    pub fn from_parts(
+        root: RootPackageManifest,
+        modules: Vec<LoadedModuleManifest>,
+    ) -> Result<Self, PackageManifestError> {
+        root.validate()?;
+        let mut loaded_by_id = HashMap::new();
+        for loaded in modules {
+            loaded.manifest.validate()?;
+            if loaded_by_id
+                .insert(loaded.manifest.name.clone(), loaded)
+                .is_some()
+            {
+                return Err(PackageManifestError::Validation(
+                    "duplicate loaded module package".into(),
+                ));
+            }
+        }
+
+        let mut graph_modules = HashMap::new();
+        let mut backend_providers: HashMap<String, Vec<BackendProviderNode>> = HashMap::new();
+        let mut frontend_requirements = HashMap::new();
+        let mut contributions = ModuleContributionIndex::default();
+
+        for (module_id, entry) in &root.modules {
+            let loaded = loaded_by_id.get(module_id).ok_or_else(|| {
+                PackageManifestError::Validation(format!(
+                    "root package references module {module_id} but no module package was loaded"
+                ))
+            })?;
+            if loaded.manifest.mesh.kind != entry.kind {
+                return Err(PackageManifestError::Validation(format!(
+                    "module {module_id} kind mismatch: root has {:?}, package has {:?}",
+                    entry.kind, loaded.manifest.mesh.kind
+                )));
+            }
+
+            let node = InstalledModuleNode {
+                id: module_id.clone(),
+                kind: entry.kind,
+                path: entry.path.clone(),
+                enabled: entry.enabled,
+                manifest: loaded.manifest.clone(),
+            };
+
+            if entry.enabled {
+                if entry.kind == ModuleKind::Frontend {
+                    frontend_requirements.insert(
+                        module_id.clone(),
+                        FrontendRequirementSet::from_dependencies(
+                            module_id,
+                            &node.manifest.mesh.dependencies,
+                        ),
+                    );
+                }
+
+                for provided in &node.manifest.mesh.provides {
+                    let provider = BackendProviderNode {
+                        module_id: module_id.clone(),
+                        interface: provided.interface.clone(),
+                        provider: provided.provider.clone(),
+                        label: provided.label.clone(),
+                        priority: provided.priority,
+                    };
+                    backend_providers
+                        .entry(provided.interface.clone())
+                        .or_default()
+                        .push(provider);
+                }
+
+                contributions.index_module(module_id, &node.manifest)?;
+            }
+
+            graph_modules.insert(module_id.clone(), node);
+        }
+
+        for providers in backend_providers.values_mut() {
+            providers.sort_by(|a, b| {
+                b.priority
+                    .cmp(&a.priority)
+                    .then_with(|| a.module_id.cmp(&b.module_id))
+            });
+        }
+
+        for (interface, module_id) in &root.providers {
+            let Some(node) = graph_modules.get(module_id) else {
+                return Err(PackageManifestError::Validation(format!(
+                    "active provider {module_id} for {interface} is not installed"
+                )));
+            };
+            if !node.enabled {
+                return Err(PackageManifestError::Validation(format!(
+                    "active provider {module_id} for {interface} is disabled"
+                )));
+            }
+            if node.kind != ModuleKind::Backend {
+                return Err(PackageManifestError::Validation(format!(
+                    "active provider {module_id} for {interface} is not a backend module"
+                )));
+            }
+            let provides_interface = backend_providers
+                .get(interface)
+                .map(|providers| {
+                    providers
+                        .iter()
+                        .any(|provider| provider.module_id == *module_id)
+                })
+                .unwrap_or(false);
+            if !provides_interface {
+                return Err(PackageManifestError::Validation(format!(
+                    "active provider {module_id} does not provide {interface}"
+                )));
+            }
+        }
+
+        let layout_entrypoint = match root.layout {
+            Some(layout) => {
+                let (module_id, entrypoint_id) = parse_module_entrypoint(&layout.entrypoint)
+                    .ok_or_else(|| {
+                        PackageManifestError::Validation(format!(
+                            "invalid layout entrypoint {}",
+                            layout.entrypoint
+                        ))
+                    })?;
+                let node = graph_modules.get(module_id).ok_or_else(|| {
+                    PackageManifestError::Validation(format!(
+                        "layout entrypoint module {module_id} is not installed"
+                    ))
+                })?;
+                if !node.enabled || node.kind != ModuleKind::Frontend {
+                    return Err(PackageManifestError::Validation(format!(
+                        "layout entrypoint module {module_id} must be an enabled frontend module"
+                    )));
+                }
+                let contribution = contributions
+                    .layout
+                    .iter()
+                    .find(|item| item.module_id == module_id && item.id == entrypoint_id)
+                    .ok_or_else(|| {
+                        PackageManifestError::Validation(format!(
+                            "layout contribution {} not found",
+                            layout.entrypoint
+                        ))
+                    })?;
+                Some(ResolvedLayoutEntrypoint {
+                    module_id: module_id.into(),
+                    entrypoint_id: entrypoint_id.into(),
+                    path: contribution.path.clone(),
+                })
+            }
+            None => None,
+        };
+
+        Ok(Self {
+            modules: graph_modules,
+            backend_providers,
+            active_providers: root.providers,
+            frontend_requirements,
+            contributions,
+            layout_entrypoint,
+        })
+    }
+
+    pub fn module(&self, id: &str) -> Option<&InstalledModuleNode> {
+        self.modules.get(id)
+    }
+
+    pub fn enabled_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules
+            .values()
+            .filter(|module| module.enabled)
+            .collect()
+    }
+
+    pub fn modules_by_kind(&self, kind: ModuleKind) -> Vec<&InstalledModuleNode> {
+        self.modules
+            .values()
+            .filter(|module| module.enabled && module.kind == kind)
+            .collect()
+    }
+
+    pub fn frontend_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::Frontend)
+    }
+
+    pub fn backend_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::Backend)
+    }
+
+    pub fn theme_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::Theme)
+    }
+
+    pub fn icon_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::IconPack)
+    }
+
+    pub fn font_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::FontPack)
+    }
+
+    pub fn language_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::LanguagePack)
+    }
+
+    pub fn requirements_for_frontend(&self, module_id: &str) -> Option<&FrontendRequirementSet> {
+        self.frontend_requirements.get(module_id)
+    }
+
+    pub fn backend_providers_for_interface(&self, interface: &str) -> &[BackendProviderNode] {
+        self.backend_providers
+            .get(interface)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    pub fn active_provider(&self, interface: &str) -> Option<&BackendProviderNode> {
+        let module_id = self.active_providers.get(interface)?;
+        self.backend_providers_for_interface(interface)
+            .iter()
+            .find(|provider| &provider.module_id == module_id)
+    }
+
+    pub fn fallback_provider(&self, interface: &str) -> Option<&BackendProviderNode> {
+        self.backend_providers_for_interface(interface).first()
+    }
+
+    pub fn unresolved_backend_requirements(&self) -> Vec<UnresolvedModuleRequirement> {
+        let mut unresolved = Vec::new();
+        for requirements in self.frontend_requirements.values() {
+            for interface in requirements.backend.keys() {
+                if self.backend_providers_for_interface(interface).is_empty() {
+                    unresolved.push(UnresolvedModuleRequirement {
+                        module_id: requirements.module_id.clone(),
+                        requirement: interface.clone(),
+                    });
+                }
+            }
+        }
+        unresolved.sort_by(|a, b| {
+            a.module_id
+                .cmp(&b.module_id)
+                .then_with(|| a.requirement.cmp(&b.requirement))
+        });
+        unresolved
+    }
+
+    pub fn layout_entrypoint(&self) -> Option<&ResolvedLayoutEntrypoint> {
+        self.layout_entrypoint.as_ref()
+    }
+
+    pub fn contributed_themes(&self) -> &[ContributedTheme] {
+        &self.contributions.themes
+    }
+
+    pub fn contributed_icons(&self) -> &[ContributedPathResource] {
+        &self.contributions.icons
+    }
+
+    pub fn contributed_fonts(&self) -> &[ContributedPathResource] {
+        &self.contributions.fonts
+    }
+
+    pub fn contributed_i18n(&self) -> &[ContributedI18n] {
+        &self.contributions.i18n
+    }
+
+    pub fn settings_schemas(&self) -> &[ContributedSettingsSchema] {
+        &self.contributions.settings
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InstalledModuleNode {
+    pub id: String,
+    pub kind: ModuleKind,
+    pub path: String,
+    pub enabled: bool,
+    pub manifest: ModulePackageManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendProviderNode {
+    pub module_id: String,
+    pub interface: String,
+    pub provider: Option<String>,
+    pub label: Option<String>,
+    pub priority: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontendRequirementSet {
+    pub module_id: String,
+    pub modules: HashMap<String, String>,
+    pub backend: HashMap<String, String>,
+    pub icons: HashMap<String, String>,
+    pub fonts: HashMap<String, String>,
+    pub i18n: HashMap<String, String>,
+    pub themes: HashMap<String, String>,
+}
+
+impl FrontendRequirementSet {
+    fn from_dependencies(module_id: &str, dependencies: &MeshDependencies) -> Self {
+        let modules = dependencies
+            .modules
+            .iter()
+            .map(|(id, spec)| (id.clone(), dependency_spec_to_string(spec)))
+            .collect();
+        Self {
+            module_id: module_id.into(),
+            modules,
+            backend: dependencies.backend.clone(),
+            icons: dependencies.icons.clone(),
+            fonts: dependencies.fonts.clone(),
+            i18n: dependencies.i18n.clone(),
+            themes: dependencies.themes.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ModuleContributionIndex {
+    layout: Vec<ContributedLayout>,
+    themes: Vec<ContributedTheme>,
+    icons: Vec<ContributedPathResource>,
+    fonts: Vec<ContributedPathResource>,
+    i18n: Vec<ContributedI18n>,
+    settings: Vec<ContributedSettingsSchema>,
+}
+
+impl ModuleContributionIndex {
+    fn index_module(
+        &mut self,
+        module_id: &str,
+        manifest: &ModulePackageManifest,
+    ) -> Result<(), PackageManifestError> {
+        for contribution in &manifest.mesh.contributes.layout {
+            validate_relative_path("layout entrypoint", &contribution.entrypoint)?;
+            self.layout.push(ContributedLayout {
+                module_id: module_id.into(),
+                id: contribution.id.clone(),
+                path: contribution.entrypoint.clone(),
+                label: contribution.label.clone(),
+            });
+        }
+        for contribution in &manifest.mesh.contributes.themes {
+            for path in contribution.modes.values() {
+                validate_relative_path("theme mode", path)?;
+            }
+            self.themes.push(ContributedTheme {
+                module_id: module_id.into(),
+                id: contribution.id.clone(),
+                label: contribution.label.clone(),
+                modes: contribution.modes.clone(),
+                default_mode: contribution.default_mode.clone(),
+            });
+        }
+        for contribution in &manifest.mesh.contributes.icons {
+            self.icons.push(ContributedPathResource::from_contribution(
+                module_id,
+                contribution,
+            )?);
+        }
+        for contribution in &manifest.mesh.contributes.fonts {
+            self.fonts.push(ContributedPathResource::from_contribution(
+                module_id,
+                contribution,
+            )?);
+        }
+        for contribution in &manifest.mesh.contributes.i18n {
+            validate_relative_path("i18n contribution", &contribution.path)?;
+            self.i18n.push(ContributedI18n {
+                module_id: module_id.into(),
+                id: contribution.id.clone(),
+                locale: contribution.locale.clone(),
+                path: contribution.path.clone(),
+            });
+        }
+        if let Some(settings) = &manifest.mesh.contributes.settings {
+            self.settings.push(ContributedSettingsSchema {
+                module_id: module_id.into(),
+                namespace: settings.namespace.clone(),
+                schema: settings.schema.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnresolvedModuleRequirement {
+    pub module_id: String,
+    pub requirement: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedLayoutEntrypoint {
+    pub module_id: String,
+    pub entrypoint_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedLayout {
+    pub module_id: String,
+    pub id: String,
+    pub path: String,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedTheme {
+    pub module_id: String,
+    pub id: String,
+    pub label: String,
+    pub modes: HashMap<String, String>,
+    pub default_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedPathResource {
+    pub module_id: String,
+    pub id: String,
+    pub path: String,
+    pub label: Option<String>,
+}
+
+impl ContributedPathResource {
+    fn from_contribution(
+        module_id: &str,
+        contribution: &PathContribution,
+    ) -> Result<Self, PackageManifestError> {
+        validate_relative_path("path contribution", &contribution.path)?;
+        Ok(Self {
+            module_id: module_id.into(),
+            id: contribution.id.clone(),
+            path: contribution.path.clone(),
+            label: contribution.label.clone(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedI18n {
+    pub module_id: String,
+    pub id: String,
+    pub locale: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContributedSettingsSchema {
+    pub module_id: String,
+    pub namespace: String,
+    pub schema: serde_json::Value,
+}
+
 pub fn load_module_manifest(
     module_dir: &Path,
 ) -> Result<LoadedModuleManifest, PackageManifestError> {
@@ -657,6 +1124,13 @@ fn parse_module_entrypoint(value: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((module_id, entrypoint_id))
+}
+
+fn dependency_spec_to_string(spec: &DependencySpec) -> String {
+    match spec {
+        DependencySpec::Simple(value) => value.clone(),
+        DependencySpec::Detailed { version, .. } => version.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -828,6 +1302,371 @@ mod tests {
         assert_eq!(
             loaded.manifest.mesh.entrypoints.main.as_deref(),
             Some("src/main.mesh")
+        );
+    }
+
+    fn loaded_module(
+        name: &str,
+        kind: ModuleKind,
+        dependencies: MeshDependencies,
+        provides: Vec<MeshProvidesDeclaration>,
+        contributes: MeshContributes,
+    ) -> LoadedModuleManifest {
+        LoadedModuleManifest {
+            manifest: ModulePackageManifest {
+                name: name.into(),
+                version: "0.1.0".into(),
+                description: None,
+                license: None,
+                repository: None,
+                mesh: MeshModuleSection {
+                    api_version: "0.1".into(),
+                    kind,
+                    entrypoints: MeshEntrypoints::default(),
+                    dependencies,
+                    provides,
+                    contributes,
+                    experimental: serde_json::Value::Null,
+                },
+            },
+            path: PathBuf::from(format!("{name}/package.json")),
+            source: ModuleManifestSource::PackageJson,
+        }
+    }
+
+    fn root_with_modules(
+        modules: &[(&str, ModuleKind)],
+        providers: &[(&str, &str)],
+        layout: Option<&str>,
+    ) -> RootPackageManifest {
+        RootPackageManifest {
+            schema_version: 1,
+            modules_dir: "modules".into(),
+            modules: modules
+                .iter()
+                .map(|(id, kind)| {
+                    (
+                        (*id).into(),
+                        InstalledModuleEntry {
+                            kind: *kind,
+                            path: format!("modules/{id}"),
+                            enabled: true,
+                        },
+                    )
+                })
+                .collect(),
+            providers: providers
+                .iter()
+                .map(|(interface, module_id)| ((*interface).into(), (*module_id).into()))
+                .collect(),
+            layout: layout.map(|entrypoint| RootLayoutSelection {
+                entrypoint: entrypoint.into(),
+            }),
+            theme: None,
+        }
+    }
+
+    #[test]
+    fn installed_module_graph_exposes_kind_views_from_single_modules_map() {
+        let root = root_with_modules(
+            &[
+                ("@mesh/front", ModuleKind::Frontend),
+                ("@mesh/back", ModuleKind::Backend),
+                ("@mesh/theme", ModuleKind::Theme),
+                ("@mesh/icons", ModuleKind::IconPack),
+                ("@mesh/fonts", ModuleKind::FontPack),
+                ("@mesh/lang-en", ModuleKind::LanguagePack),
+            ],
+            &[],
+            None,
+        );
+        let modules = vec![
+            loaded_module(
+                "@mesh/front",
+                ModuleKind::Frontend,
+                MeshDependencies::default(),
+                vec![],
+                MeshContributes::default(),
+            ),
+            loaded_module(
+                "@mesh/back",
+                ModuleKind::Backend,
+                MeshDependencies::default(),
+                vec![],
+                MeshContributes::default(),
+            ),
+            loaded_module(
+                "@mesh/theme",
+                ModuleKind::Theme,
+                MeshDependencies::default(),
+                vec![],
+                MeshContributes::default(),
+            ),
+            loaded_module(
+                "@mesh/icons",
+                ModuleKind::IconPack,
+                MeshDependencies::default(),
+                vec![],
+                MeshContributes::default(),
+            ),
+            loaded_module(
+                "@mesh/fonts",
+                ModuleKind::FontPack,
+                MeshDependencies::default(),
+                vec![],
+                MeshContributes::default(),
+            ),
+            loaded_module(
+                "@mesh/lang-en",
+                ModuleKind::LanguagePack,
+                MeshDependencies::default(),
+                vec![],
+                MeshContributes::default(),
+            ),
+        ];
+
+        let graph = InstalledModuleGraph::from_parts(root, modules).unwrap();
+        assert_eq!(graph.frontend_modules().len(), 1);
+        assert_eq!(graph.backend_modules().len(), 1);
+        assert_eq!(graph.theme_modules().len(), 1);
+        assert_eq!(graph.icon_modules().len(), 1);
+        assert_eq!(graph.font_modules().len(), 1);
+        assert_eq!(graph.language_modules().len(), 1);
+    }
+
+    #[test]
+    fn installed_module_graph_rejects_root_module_without_loaded_package() {
+        let root = root_with_modules(&[("@mesh/missing", ModuleKind::Frontend)], &[], None);
+        assert!(InstalledModuleGraph::from_parts(root, vec![]).is_err());
+    }
+
+    fn audio_modules() -> Vec<LoadedModuleManifest> {
+        vec![
+            loaded_module(
+                "@mesh/pipewire-audio",
+                ModuleKind::Backend,
+                MeshDependencies::default(),
+                vec![MeshProvidesDeclaration {
+                    interface: "mesh.audio".into(),
+                    provider: Some("pipewire".into()),
+                    label: Some("PipeWire".into()),
+                    priority: 100,
+                }],
+                MeshContributes::default(),
+            ),
+            loaded_module(
+                "@mesh/pulseaudio-audio",
+                ModuleKind::Backend,
+                MeshDependencies::default(),
+                vec![MeshProvidesDeclaration {
+                    interface: "mesh.audio".into(),
+                    provider: Some("pulseaudio".into()),
+                    label: Some("PulseAudio".into()),
+                    priority: 50,
+                }],
+                MeshContributes::default(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn installed_module_graph_exposes_frontend_backend_requirements() {
+        let mut deps = MeshDependencies::default();
+        deps.backend.insert("mesh.audio".into(), ">=1.0.0".into());
+        deps.backend.insert("mesh.network".into(), ">=1.0.0".into());
+        deps.backend.insert("mesh.power".into(), ">=1.0.0".into());
+        let mut modules = audio_modules();
+        modules.push(loaded_module(
+            "@mesh/quick-settings",
+            ModuleKind::Frontend,
+            deps,
+            vec![],
+            MeshContributes::default(),
+        ));
+        let root = root_with_modules(
+            &[
+                ("@mesh/quick-settings", ModuleKind::Frontend),
+                ("@mesh/pipewire-audio", ModuleKind::Backend),
+                ("@mesh/pulseaudio-audio", ModuleKind::Backend),
+            ],
+            &[("mesh.audio", "@mesh/pipewire-audio")],
+            None,
+        );
+
+        let graph = InstalledModuleGraph::from_parts(root, modules).unwrap();
+        let requirements = graph
+            .requirements_for_frontend("@mesh/quick-settings")
+            .unwrap();
+        assert!(requirements.backend.contains_key("mesh.audio"));
+        assert!(requirements.backend.contains_key("mesh.network"));
+        assert!(requirements.backend.contains_key("mesh.power"));
+    }
+
+    #[test]
+    fn installed_module_graph_keeps_multiple_audio_providers() {
+        let root = root_with_modules(
+            &[
+                ("@mesh/pipewire-audio", ModuleKind::Backend),
+                ("@mesh/pulseaudio-audio", ModuleKind::Backend),
+            ],
+            &[],
+            None,
+        );
+        let graph = InstalledModuleGraph::from_parts(root, audio_modules()).unwrap();
+        assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
+    }
+
+    #[test]
+    fn installed_module_graph_returns_explicit_active_provider() {
+        let root = root_with_modules(
+            &[
+                ("@mesh/pipewire-audio", ModuleKind::Backend),
+                ("@mesh/pulseaudio-audio", ModuleKind::Backend),
+            ],
+            &[("mesh.audio", "@mesh/pipewire-audio")],
+            None,
+        );
+        let graph = InstalledModuleGraph::from_parts(root, audio_modules()).unwrap();
+        assert_eq!(
+            graph.active_provider("mesh.audio").unwrap().module_id,
+            "@mesh/pipewire-audio"
+        );
+    }
+
+    #[test]
+    fn installed_module_graph_rejects_unknown_active_provider() {
+        let root = root_with_modules(
+            &[("@mesh/pipewire-audio", ModuleKind::Backend)],
+            &[("mesh.audio", "@mesh/missing")],
+            None,
+        );
+        let modules = vec![audio_modules().remove(0)];
+        assert!(InstalledModuleGraph::from_parts(root, modules).is_err());
+    }
+
+    #[test]
+    fn installed_module_graph_rejects_active_provider_interface_mismatch() {
+        let root = root_with_modules(
+            &[("@mesh/network", ModuleKind::Backend)],
+            &[("mesh.audio", "@mesh/network")],
+            None,
+        );
+        let network = loaded_module(
+            "@mesh/network",
+            ModuleKind::Backend,
+            MeshDependencies::default(),
+            vec![MeshProvidesDeclaration {
+                interface: "mesh.network".into(),
+                provider: Some("networkmanager".into()),
+                label: Some("NetworkManager".into()),
+                priority: 100,
+            }],
+            MeshContributes::default(),
+        );
+        assert!(InstalledModuleGraph::from_parts(root, vec![network]).is_err());
+    }
+
+    #[test]
+    fn installed_module_graph_resolves_layout_entrypoint() {
+        let contributes = MeshContributes {
+            layout: vec![LayoutContribution {
+                id: "main".into(),
+                entrypoint: "src/main.mesh".into(),
+                label: None,
+            }],
+            ..MeshContributes::default()
+        };
+        let root = root_with_modules(
+            &[("@mesh/panel", ModuleKind::Frontend)],
+            &[],
+            Some("@mesh/panel:main"),
+        );
+        let graph = InstalledModuleGraph::from_parts(
+            root,
+            vec![loaded_module(
+                "@mesh/panel",
+                ModuleKind::Frontend,
+                MeshDependencies::default(),
+                vec![],
+                contributes,
+            )],
+        )
+        .unwrap();
+        let entrypoint = graph.layout_entrypoint().unwrap();
+        assert_eq!(entrypoint.module_id, "@mesh/panel");
+        assert_eq!(entrypoint.entrypoint_id, "main");
+        assert_eq!(entrypoint.path, "src/main.mesh");
+    }
+
+    #[test]
+    fn installed_module_graph_indexes_theme_icon_font_i18n_contributions() {
+        let mut modes = HashMap::new();
+        modes.insert("dark".into(), "themes/dark.json".into());
+        let contributes = MeshContributes {
+            themes: vec![ThemeContribution {
+                id: "mesh-default".into(),
+                label: "MESH Default".into(),
+                modes,
+                default_mode: Some("dark".into()),
+            }],
+            icons: vec![PathContribution {
+                id: "material".into(),
+                path: "icons".into(),
+                label: None,
+            }],
+            fonts: vec![PathContribution {
+                id: "inter".into(),
+                path: "fonts".into(),
+                label: None,
+            }],
+            i18n: vec![I18nContribution {
+                id: "en".into(),
+                locale: "en".into(),
+                path: "i18n/en.json".into(),
+            }],
+            ..MeshContributes::default()
+        };
+        let root = root_with_modules(&[("@mesh/resources", ModuleKind::Theme)], &[], None);
+        let graph = InstalledModuleGraph::from_parts(
+            root,
+            vec![loaded_module(
+                "@mesh/resources",
+                ModuleKind::Theme,
+                MeshDependencies::default(),
+                vec![],
+                contributes,
+            )],
+        )
+        .unwrap();
+        assert_eq!(graph.contributed_themes().len(), 1);
+        assert_eq!(graph.contributed_icons().len(), 1);
+        assert_eq!(graph.contributed_fonts().len(), 1);
+        assert_eq!(graph.contributed_i18n().len(), 1);
+    }
+
+    #[test]
+    fn installed_module_graph_rejects_contribution_path_escape() {
+        let contributes = MeshContributes {
+            icons: vec![PathContribution {
+                id: "bad".into(),
+                path: "../outside.json".into(),
+                label: None,
+            }],
+            ..MeshContributes::default()
+        };
+        let root = root_with_modules(&[("@mesh/icons", ModuleKind::IconPack)], &[], None);
+        assert!(
+            InstalledModuleGraph::from_parts(
+                root,
+                vec![loaded_module(
+                    "@mesh/icons",
+                    ModuleKind::IconPack,
+                    MeshDependencies::default(),
+                    vec![],
+                    contributes,
+                )]
+            )
+            .is_err()
         );
     }
 }
