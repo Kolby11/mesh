@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Backend Plugin MVP
 status: executing
-stopped_at: Phase 3 context gathered
-last_updated: "2026-05-03T18:22:52.511Z"
-last_activity: 2026-05-03 -- Phase 03 planning complete
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-05-03T18:32:38.160Z"
+last_activity: 2026-05-03
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 11
-  completed_plans: 7
-  percent: 64
+  completed_plans: 8
+  percent: 73
 ---
 
 # State: MESH v1.1
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-03)
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
+Phase: 03 (backend-host-api-contract) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-05-03 -- Phase 03 planning complete
+Last activity: 2026-05-03
 
 ## Decisions
 
@@ -56,6 +56,8 @@ Last activity: 2026-05-03 -- Phase 03 planning complete
 - [Phase 04]: Frontend docs show service mutations through named proxy methods instead of legacy service event channels.
 - [Phase 04]: Service proxy command methods require `service.<name>.control`; read capability remains state-only.
 - [Phase 04]: Shell surface transitions use `shell.toggle-surface` and `shell.hide-surface` with `surface_id`, not quick-settings-specific shell event names.
+- [Phase 03]: Plan 01 addresses BHOST-02 by removing mesh.exec_shell from the public backend MVP host API surface. — Phase 03 context explicitly overrides shell execution as non-MVP and requires structured command execution only.
+- [Phase 03]: Plan 01 locks backend process execution to strict mesh.exec(program, args); legacy single-string splitting is removed. — Prevents unintended argv tokenization and matches Phase 03 D-01/D-02.
 
 ## Performance Metrics
 
@@ -73,12 +75,13 @@ Last activity: 2026-05-03 -- Phase 03 planning complete
 | Phase 01 P01 | 35min | 3 tasks | 2 files |
 | Phase 01 P02 | 30min | 3 tasks | 1 files |
 | Phase 01 P03 | 25min | 3 tasks | 12 files |
+| Phase 03 P01 | 4min | 3 tasks | 2 files |
 
 ## Session
 
-Last session: 2026-05-03T18:14:28.476Z
-Stopped At: Phase 3 context gathered
-Resume File: .planning/phases/03-backend-host-api-contract/03-CONTEXT.md
+Last session: 2026-05-03T18:32:37.955Z
+Stopped At: Completed 03-01-PLAN.md
+Resume File: None
 
 ## Accumulated Context
 

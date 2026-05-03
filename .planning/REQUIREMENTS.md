@@ -24,8 +24,8 @@
 
 ### Backend Host API
 
-- [ ] **BHOST-01**: Backend Luau scripts can call `mesh.exec(cmd, args)` with structured arguments and receive stdout, stderr, and exit status.
-- [ ] **BHOST-02**: Backend Luau scripts can call `mesh.exec_shell(cmd)` for shell-style commands and receive stdout, stderr, and exit status.
+- [x] **BHOST-01**: Backend Luau scripts can call `mesh.exec(cmd, args)` with structured arguments and receive stdout, stderr, and exit status.
+- [x] **BHOST-02**: Backend Luau scripts can call `mesh.exec_shell(cmd)` for shell-style commands and receive stdout, stderr, and exit status.
 - [ ] **BHOST-03**: Backend Luau scripts can call `mesh.config()` and receive plugin settings as a Luau table.
 - [ ] **BHOST-04**: Backend Luau scripts can call `mesh.log(level, msg)` and produce structured plugin-scoped log entries.
 - [ ] **BHOST-05**: Backend Luau scripts can call `mesh.service.set_poll_interval(ms)` and affect future poll cadence without shell restart.
@@ -93,8 +93,8 @@
 | BPLUG-03 | Phase 2 | Complete |
 | BPLUG-04 | Phase 2 | Complete |
 | BPLUG-05 | Phase 2 | Complete |
-| BHOST-01 | Phase 3 | Pending |
-| BHOST-02 | Phase 3 | Pending |
+| BHOST-01 | Phase 3 | Complete |
+| BHOST-02 | Phase 3 | Complete |
 | BHOST-03 | Phase 3 | Pending |
 | BHOST-04 | Phase 3 | Pending |
 | BHOST-05 | Phase 3 | Pending |
