@@ -3465,4 +3465,260 @@ end
             "volumeIcon should fall back to muted when service is unavailable"
         );
     }
+
+    #[test]
+    fn quick_settings_audio_render_state_uses_seeded_payload() {
+        let mut ctx = make_audio_ctx();
+        ctx.load_script(
+            r#"
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+
+audio_label = "0%"
+audio_backend = "Unavailable"
+audio_tooltip = "Volume unavailable"
+icon_name = "audio-volume-muted"
+
+function onRender()
+    if not audio_ok or not audio or audio.available == false then
+        audio_label = "Audio unavailable"
+        audio_backend = "Unavailable"
+        audio_tooltip = "Audio unavailable"
+        icon_name = "audio-volume-muted"
+        return
+    end
+
+    local percent = math.floor((tonumber(audio.percent) or 0) + 0.5)
+    local muted = audio.muted or false
+    audio_label = string.format("%d%%", percent)
+    audio_backend = audio.source_plugin or "Unavailable"
+    if muted then
+        audio_tooltip = string.format("Volume muted at %d%%", percent)
+    else
+        audio_tooltip = string.format("Volume %d%%", percent)
+    end
+
+    if muted or percent == 0 then
+        icon_name = "audio-volume-muted"
+    elseif percent < 34 then
+        icon_name = "audio-volume-low"
+    elseif percent < 67 then
+        icon_name = "audio-volume-medium"
+    else
+        icon_name = "audio-volume-high"
+    end
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.apply_service_payload(
+            "audio",
+            &serde_json::json!({
+                "available": true,
+                "percent": 42,
+                "muted": false,
+                "source_plugin": "@mesh/pipewire-audio"
+            }),
+        );
+
+        ctx.call_handler("onRender", &[]).unwrap();
+
+        assert_eq!(ctx.state.get("audio_label"), Some(serde_json::json!("42%")));
+        assert_eq!(
+            ctx.state.get("audio_backend"),
+            Some(serde_json::json!("@mesh/pipewire-audio"))
+        );
+        assert_eq!(
+            ctx.state.get("audio_tooltip"),
+            Some(serde_json::json!("Volume 42%"))
+        );
+        assert_eq!(
+            ctx.state.get("icon_name"),
+            Some(serde_json::json!("audio-volume-medium"))
+        );
+    }
+
+    #[test]
+    fn quick_settings_audio_slider_publishes_set_volume_service_command() {
+        let mut ctx = make_audio_ctx();
+        ctx.load_script(
+            r#"
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+
+audio_percent = 0
+audio_status = ""
+
+local function clamp_percent(value)
+    local numeric = tonumber(value) or 0
+    if numeric < 0 then return 0 end
+    if numeric > 100 then return 100 end
+    return math.floor(numeric + 0.5)
+end
+
+function onVolumeChange(value)
+    local percent = clamp_percent(value)
+    audio_percent = percent
+    if audio_ok and audio and audio.available ~= false then
+        audio.set_volume("default", percent / 100)
+    else
+        audio_status = "Audio controls unavailable"
+    end
+end
+"#,
+        )
+        .unwrap();
+        ctx.apply_service_payload("audio", &serde_json::json!({ "available": true }));
+
+        ctx.call_handler("onVolumeChange", &[serde_json::json!(42)])
+            .unwrap();
+        let requests =
+            super::super::service::script_events_to_requests(ctx.drain_published_events());
+
+        match requests.as_slice() {
+            [
+                CoreRequest::ServiceCommand {
+                    interface,
+                    command,
+                    payload,
+                },
+            ] => {
+                assert_eq!(interface, "mesh.audio");
+                assert_eq!(command, "set_volume");
+                assert_eq!(
+                    payload,
+                    &serde_json::json!({ "device_id": "default", "volume": 0.42 })
+                );
+            }
+            other => panic!("expected one mesh.audio set_volume command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quick_settings_network_toggle_publishes_set_wifi_enabled_service_command() {
+        let mut ctx = make_network_ctx();
+        ctx.load_script(
+            r#"
+local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+if not network_ok then network = nil end
+
+network_status = ""
+
+function onToggleWiFi()
+    if not network_ok or not network or network.available == false then
+        network_status = "Network unavailable"
+        return
+    end
+    if network.controls_available == false or network.permission_denied == true then
+        network_status = "Network controls unavailable"
+        return
+    end
+    network.set_wifi_enabled(not (network.wifi_enabled or false))
+end
+"#,
+        )
+        .unwrap();
+        ctx.apply_service_payload(
+            "network",
+            &serde_json::json!({ "available": true, "wifi_enabled": false }),
+        );
+
+        ctx.call_handler("onToggleWiFi", &[]).unwrap();
+        let requests =
+            super::super::service::script_events_to_requests(ctx.drain_published_events());
+
+        match requests.as_slice() {
+            [
+                CoreRequest::ServiceCommand {
+                    interface,
+                    command,
+                    payload,
+                },
+            ] => {
+                assert_eq!(interface, "mesh.network");
+                assert_eq!(command, "set_wifi_enabled");
+                assert_eq!(payload, &serde_json::json!({ "enabled": true }));
+            }
+            other => panic!("expected one mesh.network set_wifi_enabled command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quick_settings_missing_services_keep_visible_fallback_copy() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        caps.grant(Capability::new("service.network.read"));
+        let mut ctx = ScriptContext::new("@mesh/quick-settings", caps).unwrap();
+
+        ctx.load_script(
+            r#"
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+if not network_ok then network = nil end
+
+audio_status = ""
+network_status = ""
+
+function onRender()
+    if not audio_ok or not audio or audio.available == false then
+        audio_status = "Audio unavailable"
+    end
+    if not network_ok or not network or network.available == false then
+        network_status = "Network unavailable"
+    end
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.call_handler("onRender", &[]).unwrap();
+
+        assert_eq!(
+            ctx.state.get("audio_status"),
+            Some(serde_json::json!("Audio unavailable"))
+        );
+        assert_eq!(
+            ctx.state.get("network_status"),
+            Some(serde_json::json!("Network unavailable"))
+        );
+    }
+
+    #[test]
+    fn quick_settings_wifi_row_empty_id_is_display_only() {
+        let mut ctx = make_network_ctx();
+        ctx.load_script(
+            r#"
+network_id = ""
+connection_status = ""
+
+function onConnectWiFi()
+    if not network_id or network_id == "" then
+        connection_status = "Connection details unavailable"
+        return
+    end
+
+    local ok, network = pcall(require, "@mesh/network@>=1.0")
+    if ok and network and network.available ~= false then
+        network.connect(network_id)
+    end
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.call_handler("onConnectWiFi", &[]).unwrap();
+        let requests =
+            super::super::service::script_events_to_requests(ctx.drain_published_events());
+
+        assert!(
+            requests.is_empty(),
+            "empty network_id must not publish connect"
+        );
+        assert_eq!(
+            ctx.state.get("connection_status"),
+            Some(serde_json::json!("Connection details unavailable"))
+        );
+    }
 }
