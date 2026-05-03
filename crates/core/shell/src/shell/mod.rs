@@ -1230,9 +1230,7 @@ impl Shell {
                 .map(|entry| {
                     matches!(
                         entry.status,
-                        BackendRuntimeStatus::InitFailed
-                            | BackendRuntimeStatus::PollFailed
-                            | BackendRuntimeStatus::Failed
+                        BackendRuntimeStatus::InitFailed | BackendRuntimeStatus::Failed
                     )
                 })
                 .unwrap_or(false);
@@ -2295,6 +2293,31 @@ mod tests {
             Some("@mesh/new-audio")
         );
         assert!(shell.service_handlers.contains_key("mesh.audio"));
+    }
+
+    #[test]
+    fn backend_lifecycle_replacement_records_stopped_after_transient_poll_failure() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/old-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+        shell.record_backend_runtime_status(
+            "mesh.audio".to_string(),
+            "@mesh/old-audio".to_string(),
+            BackendRuntimeStatus::PollFailed,
+            "temporary poll failure".to_string(),
+        );
+
+        let (new_slot, _new_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/new-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), new_slot);
+
+        assert_eq!(
+            shell
+                .backend_runtime_statuses
+                .get(&("mesh.audio".to_string(), "@mesh/old-audio".to_string()))
+                .map(|entry| entry.status.as_str()),
+            Some("stopped")
+        );
     }
 
     #[test]
