@@ -827,8 +827,10 @@ impl Shell {
             payload,
         } = event;
         let interface = canonical_interface_name(service);
+        let shell_authoritative_theme_update =
+            interface == "mesh.theme" && source_plugin == "@mesh/shell";
         if let Some(slot) = self.backend_runtimes.get(&interface) {
-            if slot.provider_id != *source_plugin {
+            if slot.provider_id != *source_plugin && !shell_authoritative_theme_update {
                 tracing::debug!(
                     interface,
                     source_plugin,
@@ -837,6 +839,24 @@ impl Shell {
                 );
                 return false;
             }
+        } else if self
+            .backend_runtime_statuses
+            .get(&(interface.clone(), source_plugin.clone()))
+            .is_some_and(|entry| {
+                matches!(
+                    entry.status,
+                    BackendRuntimeStatus::InitFailed
+                        | BackendRuntimeStatus::Failed
+                        | BackendRuntimeStatus::Stopped
+                )
+            })
+        {
+            tracing::debug!(
+                interface,
+                source_plugin,
+                "ignoring service update from terminal backend provider"
+            );
+            return false;
         }
         self.validate_service_state_shape(&interface, source_plugin, payload);
         self.latest_service_state.insert(
@@ -1428,7 +1448,8 @@ impl Shell {
                         status.message
                     );
                 }
-                for candidate in candidates {
+                for mut candidate in candidates {
+                    self.apply_shell_runtime_settings(&mut candidate);
                     self.spawn_backend_candidate(runtime, tx.clone(), candidate);
                 }
             }
@@ -1437,12 +1458,30 @@ impl Shell {
                     "failed to load installed module graph from {}; using legacy backend discovery: {err}",
                     graph_path.display()
                 );
-                for candidate in
+                for mut candidate in
                     legacy_backend_candidates_from_discovery(&self.plugins, &self.config)
                 {
+                    self.apply_shell_runtime_settings(&mut candidate);
                     self.spawn_backend_candidate(runtime, tx.clone(), candidate);
                 }
             }
+        }
+    }
+
+    fn apply_shell_runtime_settings(&self, candidate: &mut BackendLaunchCandidate) {
+        if candidate.interface != "mesh.theme" {
+            return;
+        }
+
+        if let Some(settings) = candidate.settings.as_object_mut() {
+            settings.insert(
+                "current_theme".to_string(),
+                serde_json::Value::String(self.settings.theme.active.clone()),
+            );
+        } else {
+            candidate.settings = serde_json::json!({
+                "current_theme": self.settings.theme.active.clone(),
+            });
         }
     }
 
@@ -2071,8 +2110,9 @@ fn default_plugin_dirs() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendRuntimeSlot, BackendRuntimeStatus, InterfaceProvider, InterfaceRegistry,
-        ServiceCommandMsg, ServiceEvent, Shell, backend_launch_candidates_from_graph,
+        BackendLaunchCandidate, BackendRuntimeSlot, BackendRuntimeStatus, InterfaceProvider,
+        InterfaceRegistry, ServiceCommandMsg, ServiceEvent, Shell,
+        backend_launch_candidates_from_graph,
         layout::measure_content_size,
         service::{apply_service_update, seed_service_state, service_name_from_interface},
         surface_layout::{SurfaceSizePolicy, load_frontend_plugin_settings},
@@ -2523,6 +2563,105 @@ mod tests {
         } = events.last().unwrap();
         assert_eq!(source_plugin, "@mesh/pulseaudio-audio");
         assert_eq!(payload["percent"], serde_json::json!(55.0));
+    }
+
+    #[test]
+    fn terminal_provider_update_does_not_replace_latest_state_or_reach_components() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let seen_events = Arc::new(Mutex::new(Vec::new()));
+        shell
+            .components
+            .push(super::types::ComponentRuntime::new(Box::new(
+                RecordingComponent::new(seen_events.clone()),
+            )));
+        let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pipewire-audio",
+                serde_json::json!({ "available": true, "percent": 40.0 }),
+            ))
+            .unwrap();
+
+        shell.stop_backend_runtime("mesh.audio");
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pipewire-audio",
+                serde_json::json!({ "available": true, "percent": 5.0 }),
+            ))
+            .unwrap();
+
+        assert_eq!(seen_events.lock().unwrap().len(), 1);
+        assert_eq!(
+            shell
+                .latest_service_state
+                .get("mesh.audio")
+                .and_then(|state| state.state.get("percent")),
+            Some(&serde_json::json!(40.0))
+        );
+    }
+
+    #[test]
+    fn shell_theme_update_is_authoritative_when_theme_provider_is_active() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let seen_events = Arc::new(Mutex::new(Vec::new()));
+        shell
+            .components
+            .push(super::types::ComponentRuntime::new(Box::new(
+                RecordingComponent::new(seen_events.clone()),
+            )));
+        let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.theme", "@mesh/shell-theme");
+        shell.replace_backend_runtime("mesh.theme".to_string(), slot);
+
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.theme",
+                "@mesh/shell",
+                serde_json::json!({
+                    "current": "mesh-default-light",
+                    "theme_id": "mesh-default-light",
+                    "is_dark": false,
+                }),
+            ))
+            .unwrap();
+
+        assert_eq!(seen_events.lock().unwrap().len(), 1);
+        assert_eq!(
+            shell
+                .latest_service_state
+                .get("mesh.theme")
+                .and_then(|state| state.state.get("current")),
+            Some(&serde_json::json!("mesh-default-light"))
+        );
+    }
+
+    #[test]
+    fn shell_theme_backend_candidate_receives_active_theme_setting() {
+        let mut shell = Shell::new();
+        shell.settings.theme.active = "mesh-default-light".to_string();
+        let mut candidate = BackendLaunchCandidate {
+            module_id: "@mesh/shell-theme".to_string(),
+            interface: "mesh.theme".to_string(),
+            service_name: "theme".to_string(),
+            entrypoint_path: PathBuf::from("src/main.luau"),
+            script_source: String::new(),
+            capabilities: Vec::new(),
+            settings: serde_json::json!({}),
+        };
+
+        shell.apply_shell_runtime_settings(&mut candidate);
+
+        assert_eq!(
+            candidate
+                .settings
+                .get("current_theme")
+                .and_then(|value| value.as_str()),
+            Some("mesh-default-light")
+        );
     }
 
     #[test]

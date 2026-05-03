@@ -676,6 +676,29 @@ mod tests {
     }
 
     #[test]
+    fn shell_theme_backend_initializes_from_configured_current_theme() {
+        let script = bundled_backend_script(
+            "../../../../packages/plugins/backend/core/shell-theme/src/main.luau",
+        );
+        let mut ctx = BackendScriptContext::new_with_settings(
+            "@mesh/shell-theme",
+            serde_json::json!({ "current_theme": "mesh-default-light" }),
+        );
+        ctx.load_script(&script).unwrap();
+
+        let payload = ctx.call_init().unwrap().unwrap();
+
+        assert_eq!(
+            payload.get("current").and_then(|v| v.as_str()),
+            Some("mesh-default-light")
+        );
+        assert_eq!(
+            payload.get("is_dark").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
     fn bundled_audio_provider_exports_state() {
         let script = bundled_backend_script(
             "../../../../packages/plugins/backend/core/pipewire-audio/src/main.luau",

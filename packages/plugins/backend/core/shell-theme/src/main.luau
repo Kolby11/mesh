@@ -7,11 +7,19 @@ local DARK_THEME  = "mesh-default-dark"
 local LIGHT_THEME = "mesh-default-light"
 local AVAILABLE   = {DARK_THEME, LIGHT_THEME}
 
-local current_theme = DARK_THEME
+local function configured_theme()
+    local cfg = mesh.config()
+    if type(cfg.current_theme) == "string" and cfg.current_theme ~= "" then
+        return cfg.current_theme
+    end
+    return DARK_THEME
+end
+
+local current_theme = configured_theme()
 
 state = {
     current   = current_theme,
-    is_dark   = true,
+    is_dark   = (current_theme == DARK_THEME),
     available = AVAILABLE,
 }
 
