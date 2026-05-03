@@ -224,6 +224,10 @@ impl BackendScriptContext {
     }
 
     pub fn take_service_state_snapshot(&self) -> Result<Option<JsonValue>, BackendScriptError> {
+        if let Some(payload) = self.take_pending_emit() {
+            return Ok(Some(payload));
+        }
+
         let globals = self.lua.globals();
         let state =
             globals
@@ -234,7 +238,7 @@ impl BackendScriptContext {
                 })?;
 
         if matches!(state, LuaValue::Nil) {
-            return Ok(self.take_pending_emit());
+            return Ok(None);
         }
 
         self.lua
@@ -545,6 +549,17 @@ mod tests {
             payload.get("available").and_then(|v| v.as_bool()),
             Some(true)
         );
+        assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(65));
+    }
+
+    #[test]
+    fn mesh_service_emit_overrides_exported_state_for_current_callback() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "state = { percent = 10 }\nfunction init()\nend\nfunction on_poll()\nmesh.service.emit({ percent = 65 })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
         assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(65));
     }
 

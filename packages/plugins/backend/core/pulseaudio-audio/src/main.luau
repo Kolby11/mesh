@@ -65,38 +65,38 @@ function on_poll()
 end
 
 function on_command_volume_up()
-    mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", "+5%" })
-    mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", "0" })
+    local volume = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", "+5%" })
+    local mute = mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", "0" })
     refresh_state()
-    return { ok = true }
+    return { ok = volume.success and mute.success, error = volume.stderr ~= "" and volume.stderr or mute.stderr }
 end
 
 function on_command_volume_down()
-    mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", "-5%" })
+    local result = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", "-5%" })
     refresh_state()
-    return { ok = true }
+    return { ok = result.success, error = result.stderr }
 end
 
 function on_command_set_volume()
     local payload = mesh.service.payload()
     local percent = command_percent_from_payload(payload)
-    mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", tostring(percent) .. "%" })
+    local result = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", tostring(percent) .. "%" })
     refresh_state()
-    return { ok = true }
+    return { ok = result.success, error = result.stderr }
 end
 
 function on_command_toggle_mute()
-    mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", "toggle" })
+    local result = mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", "toggle" })
     refresh_state()
-    return { ok = true }
+    return { ok = result.success, error = result.stderr }
 end
 
 function on_command_set_muted()
     local payload = mesh.service.payload()
     local muted = payload.muted == true
-    mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", muted and "1" or "0" })
+    local result = mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", muted and "1" or "0" })
     refresh_state()
-    return { ok = true }
+    return { ok = result.success, error = result.stderr }
 end
 
 function on_command_play_sound()
@@ -105,6 +105,6 @@ function on_command_play_sound()
     if not path then
         return { ok = false, error = "invalid sound path" }
     end
-    mesh.exec("aplay", { path })
-    return { ok = true }
+    local result = mesh.exec("aplay", { path })
+    return { ok = result.success, error = result.stderr }
 end

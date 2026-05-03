@@ -96,3 +96,7 @@ function on_poll()
         }
     end
 end
+
+function on_command_set_profile()
+    return { ok = false, error = "power profile control is not supported by upower backend" }
+end

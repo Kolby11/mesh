@@ -95,52 +95,62 @@ end
 
 function on_command_volume_up()
     local sink_id = resolve_sink_id()
-    if sink_id then
-        mesh.exec("wpctl", { "set-volume", sink_id, "5%+" })
-        mesh.exec("wpctl", { "set-mute", sink_id, "0" })
+    if not sink_id then
+        refresh_state()
+        return { ok = false, error = "audio sink unavailable" }
     end
+    local volume = mesh.exec("wpctl", { "set-volume", sink_id, "5%+" })
+    local mute = mesh.exec("wpctl", { "set-mute", sink_id, "0" })
     refresh_state()
-    return { ok = true }
+    return { ok = volume.success and mute.success, error = volume.stderr ~= "" and volume.stderr or mute.stderr }
 end
 
 function on_command_volume_down()
     local sink_id = resolve_sink_id()
-    if sink_id then
-        mesh.exec("wpctl", { "set-volume", sink_id, "5%-" })
+    if not sink_id then
+        refresh_state()
+        return { ok = false, error = "audio sink unavailable" }
     end
+    local result = mesh.exec("wpctl", { "set-volume", sink_id, "5%-" })
     refresh_state()
-    return { ok = true }
+    return { ok = result.success, error = result.stderr }
 end
 
 function on_command_set_volume()
     local payload = mesh.service.payload()
     local percent = command_percent_from_payload(payload)
     local sink_id = resolve_sink_id()
-    if sink_id then
-        mesh.exec("wpctl", { "set-volume", sink_id, tostring(percent) .. "%" })
+    if not sink_id then
+        refresh_state()
+        return { ok = false, error = "audio sink unavailable" }
     end
+    local result = mesh.exec("wpctl", { "set-volume", sink_id, tostring(percent) .. "%" })
     refresh_state()
-    return { ok = true }
+    return { ok = result.success, error = result.stderr }
 end
 
 function on_command_toggle_mute()
     local sink_id = resolve_sink_id()
-    if sink_id then
-        mesh.exec("wpctl", { "set-mute", sink_id, "toggle" })
+    if not sink_id then
+        refresh_state()
+        return { ok = false, error = "audio sink unavailable" }
     end
+    local result = mesh.exec("wpctl", { "set-mute", sink_id, "toggle" })
     refresh_state()
-    return { ok = true }
+    return { ok = result.success, error = result.stderr }
 end
 
 function on_command_set_muted()
     local payload = mesh.service.payload()
     local muted = payload.muted == true
     local sink_id = resolve_sink_id()
-    if sink_id then
-        mesh.exec("wpctl", { "set-mute", sink_id, muted and "1" or "0" })
+    if not sink_id then
+        refresh_state()
+        return { ok = false, error = "audio sink unavailable" }
     end
+    local result = mesh.exec("wpctl", { "set-mute", sink_id, muted and "1" or "0" })
     refresh_state()
-    return { ok = true }
+    return { ok = result.success, error = result.stderr }
 end
 
 function on_command_play_sound()
@@ -149,6 +159,6 @@ function on_command_play_sound()
     if not path then
         return { ok = false, error = "invalid sound path" }
     end
-    mesh.exec("aplay", { path })
-    return { ok = true }
+    local result = mesh.exec("aplay", { path })
+    return { ok = result.success, error = result.stderr }
 end

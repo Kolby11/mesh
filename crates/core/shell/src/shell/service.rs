@@ -24,11 +24,11 @@ pub(super) fn apply_service_update(
     payload: serde_json::Value,
 ) {
     let service_name = service_name_from_interface(service);
-    state.set(
-        "last_service_update",
-        serde_json::json!({ "name": service_name, "source_plugin": source_plugin }),
-    );
     if has_read {
+        state.set(
+            "last_service_update",
+            serde_json::json!({ "name": service_name, "source_plugin": source_plugin }),
+        );
         state.set(service_name, payload);
     }
 }
@@ -131,6 +131,27 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mesh_core_elements::VariableStore;
+
+    #[test]
+    fn apply_service_update_does_not_leak_metadata_without_read_capability() {
+        let mut state = ScriptState::new();
+        seed_service_state(&mut state);
+
+        apply_service_update(
+            &mut state,
+            false,
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "percent": 42 }),
+        );
+
+        assert_eq!(
+            state.get("last_service_update"),
+            Some(serde_json::json!({ "name": "", "source_plugin": "" }))
+        );
+        assert_eq!(state.get("audio"), None);
+    }
 
     #[test]
     fn script_events_to_requests_maps_named_proxy_commands() {

@@ -196,7 +196,7 @@ function on_command_connect()
     end
     local result = nil
     local kind = payload.kind or payload.connection_kind or ''
-    if kind == 'bluetooth' and is_bluetooth_mac(id) then
+    if is_bluetooth_mac(id) and (kind == '' or kind == 'bluetooth') then
         result = mesh.exec('bluetoothctl', { 'connect', id })
     elseif is_uuid(id) then
         result = mesh.exec('nmcli', { 'connection', 'up', 'uuid', id })
@@ -218,7 +218,7 @@ function on_command_disconnect()
     end
     local result = nil
     local kind = payload.kind or payload.connection_kind or ''
-    if kind == 'bluetooth' and is_bluetooth_mac(id) then
+    if is_bluetooth_mac(id) and (kind == '' or kind == 'bluetooth') then
         result = mesh.exec('bluetoothctl', { 'disconnect', id })
     elseif is_uuid(id) then
         result = mesh.exec('nmcli', { 'connection', 'down', 'uuid', id })
