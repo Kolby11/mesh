@@ -805,7 +805,9 @@ impl Shell {
         &mut self,
         event: ServiceEvent,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        self.record_latest_service_state(&event);
+        if !self.record_latest_service_state(&event) {
+            return Ok(VecDeque::new());
+        }
         let mut requests = VecDeque::new();
         for runtime in &mut self.components {
             requests.extend(
@@ -818,14 +820,13 @@ impl Shell {
         Ok(requests)
     }
 
-    fn record_latest_service_state(&mut self, event: &ServiceEvent) {
+    fn record_latest_service_state(&mut self, event: &ServiceEvent) -> bool {
         let ServiceEvent::Updated {
             service,
             source_plugin,
             payload,
         } = event;
         let interface = canonical_interface_name(service);
-        self.validate_service_state_shape(&interface, source_plugin, payload);
         if let Some(slot) = self.backend_runtimes.get(&interface) {
             if slot.provider_id != *source_plugin {
                 tracing::debug!(
@@ -834,9 +835,10 @@ impl Shell {
                     active_provider = %slot.provider_id,
                     "ignoring stale service update from inactive provider"
                 );
-                return;
+                return false;
             }
         }
+        self.validate_service_state_shape(&interface, source_plugin, payload);
         self.latest_service_state.insert(
             interface.clone(),
             LatestServiceState {
@@ -845,6 +847,7 @@ impl Shell {
                 state: payload.clone(),
             },
         );
+        true
     }
 
     fn validate_service_state_shape(
@@ -2094,6 +2097,7 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::runtime::Runtime;
     use tokio::sync::mpsc;
@@ -2278,6 +2282,77 @@ mod tests {
         }
     }
 
+    struct RecordingComponent {
+        events: Arc<Mutex<Vec<ServiceEvent>>>,
+    }
+
+    impl RecordingComponent {
+        fn new(events: Arc<Mutex<Vec<ServiceEvent>>>) -> Self {
+            Self { events }
+        }
+    }
+
+    impl super::types::ShellComponent for RecordingComponent {
+        fn id(&self) -> &str {
+            "@test/recording"
+        }
+
+        fn surface_id(&self) -> &str {
+            "@test/recording"
+        }
+
+        fn mount(
+            &mut self,
+            _ctx: super::types::ComponentContext,
+        ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+            Ok(Vec::new())
+        }
+
+        fn handle_core_event(
+            &mut self,
+            _event: &super::types::CoreEvent,
+        ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+            Ok(Vec::new())
+        }
+
+        fn handle_service_event(
+            &mut self,
+            event: &ServiceEvent,
+        ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+            self.events.lock().unwrap().push(event.clone());
+            Ok(Vec::new())
+        }
+
+        fn tick(&mut self) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+            Ok(Vec::new())
+        }
+
+        fn wants_render(&self) -> bool {
+            false
+        }
+
+        fn render(
+            &mut self,
+            _surface: &mut dyn mesh_core_wayland::ShellSurface,
+        ) -> Result<(), super::types::ComponentError> {
+            Ok(())
+        }
+
+        fn paint(
+            &mut self,
+            _theme: &mesh_core_theme::Theme,
+            _width: u32,
+            _height: u32,
+            _buffer: &mut mesh_core_render::PixelBuffer,
+        ) -> Result<(), super::types::ComponentError> {
+            Ok(())
+        }
+
+        fn theme_changed(&mut self) -> Result<(), super::types::ComponentError> {
+            Ok(())
+        }
+    }
+
     #[test]
     fn latest_service_state_is_keyed_by_interface() {
         let mut shell = Shell::new();
@@ -2391,6 +2466,63 @@ mod tests {
         let latest = shell.latest_service_state.get("mesh.audio").unwrap();
         assert_eq!(latest.provider_id, "@mesh/pulseaudio-audio");
         assert_eq!(latest.state["percent"], serde_json::json!(55.0));
+    }
+
+    #[test]
+    fn stale_provider_update_does_not_reach_components() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let seen_events = Arc::new(Mutex::new(Vec::new()));
+        shell
+            .components
+            .push(super::types::ComponentRuntime::new(Box::new(
+                RecordingComponent::new(seen_events.clone()),
+            )));
+        let (old_slot, _old_rx) =
+            backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pipewire-audio",
+                serde_json::json!({ "available": true, "percent": 40.0 }),
+            ))
+            .unwrap();
+
+        let (new_slot, _new_rx) =
+            backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pulseaudio-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), new_slot);
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pulseaudio-audio",
+                serde_json::json!({ "available": true, "percent": 55.0 }),
+            ))
+            .unwrap();
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pipewire-audio",
+                serde_json::json!({ "available": true, "percent": 5.0 }),
+            ))
+            .unwrap();
+
+        let events = seen_events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        let ServiceEvent::Updated {
+            source_plugin,
+            payload,
+            ..
+        } = &events[0];
+        assert_eq!(source_plugin, "@mesh/pipewire-audio");
+        assert_eq!(payload["percent"], serde_json::json!(40.0));
+        let ServiceEvent::Updated {
+            source_plugin,
+            payload,
+            ..
+        } = events.last().unwrap();
+        assert_eq!(source_plugin, "@mesh/pulseaudio-audio");
+        assert_eq!(payload["percent"], serde_json::json!(55.0));
     }
 
     #[test]
