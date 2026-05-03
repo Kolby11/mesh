@@ -52,6 +52,7 @@ completed: 2026-05-03
 ## Task Commits
 
 1. **Tasks 1-3: Runtime slot ownership, replacement cleanup, and lifecycle cleanup routing** - `8d8f813` (feat)
+2. **Review fix: Preserve stopped status after transient poll failures during replacement** - `8e212eb` (fix)
 
 **Plan metadata:** this SUMMARY commit
 
@@ -73,6 +74,7 @@ None - plan executed as written.
 ## Issues Encountered
 
 - The replacement test originally asserted an external sender clone was closed after replacement. That was corrected because receiver/sender clone lifetimes outside shell ownership are not the shell's cleanup contract.
+- Code review found that a transient `poll_failed` status suppressed later replacement `stopped` status. Commit `8e212eb` narrowed the terminal-failure check to `init_failed` and `failed`.
 
 ## User Setup Required
 
