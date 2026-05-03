@@ -1,13 +1,12 @@
 <template>
-  <button
+  <box
     class="battery-widget"
-    onclick={onBatteryClick}
     title="{battery_tooltip}"
     aria-label="{battery_aria_label}"
   >
     <icon class="battery-glyph" name="{battery_icon_name}" size="18" />
     <text class="battery-value">{battery_label}</text>
-  </button>
+  </box>
 </template>
 
 <script lang="luau">
@@ -19,21 +18,14 @@ battery_label = "--%"
 battery_tooltip = "Battery status unavailable"
 battery_aria_label = "Battery status unavailable"
 
-function onBatteryClick(event)
-    mesh.events.publish("shell.position-surface", {
-        surface_id = "@mesh/quick-settings",
-        margin_top = event.current_target.position.margin_top,
-        margin_left = event.current_target.position.margin_left,
-    })
-    mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/quick-settings" })
-    mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/volume-bar" })
-end
-
 function round_percent(level_value)
     local safe = level_value or 0
     if safe < 0 then safe = 0 end
-    if safe > 1 then safe = 1 end
-    return math.floor((safe * 100) + 0.5)
+    if safe <= 1 then
+        safe = safe * 100
+    end
+    if safe > 100 then safe = 100 end
+    return math.floor(safe + 0.5)
 end
 
 function format_minutes(total_minutes)

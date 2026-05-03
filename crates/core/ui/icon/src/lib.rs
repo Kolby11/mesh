@@ -102,6 +102,21 @@ mod tests {
     }
 
     #[test]
+    fn resolves_builtin_semantic_aliases_used_by_core_surfaces() {
+        for name in [
+            "weather-clear-night",
+            "weather-clear",
+            "battery-empty",
+            "battery-caution",
+            "battery-low",
+            "battery-good",
+            "battery-full",
+        ] {
+            assert!(resolve_icon(name, 24).is_some(), "{name} should resolve");
+        }
+    }
+
+    #[test]
     fn icon_config_resolves_ordered_fallbacks() {
         let td = tempfile::tempdir().unwrap();
         let material = td.path().join("material");

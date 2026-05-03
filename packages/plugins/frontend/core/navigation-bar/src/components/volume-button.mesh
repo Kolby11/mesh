@@ -11,8 +11,8 @@
     <slider
       class="volume-inline-slider"
       min="0"
-      max="1"
-      value="{slider_value}"
+      max="100"
+      value="{audio_percent}"
       onchange={onVolumeChange}
       title="{audio_tooltip}"
       aria-label="Volume"
@@ -58,7 +58,7 @@ local function update_audio_copy(percent, muted)
 end
 
 function onRender()
-    if not audio_ok or not audio then
+    if not audio_ok or not audio or audio.available == false then
         icon_name = "audio-volume-muted"
         audio_tooltip = "Audio service unavailable"
         audio_percent = 0
@@ -74,13 +74,16 @@ function onRender()
 end
 
 function onVolumeChange(value)
-    local normalized = clamp_volume(value)
-    local percent = math.floor((normalized * 100) + 0.5)
-    slider_value = normalized
+    local percent = math.floor((tonumber(value) or 0) + 0.5)
+    if percent < 0 then percent = 0 end
+    if percent > 100 then percent = 100 end
+    local normalized = clamp_volume(percent / 100)
     update_audio_copy(percent, false)
 
-    if audio_ok and audio then
-        mesh.events.publish("mesh.audio.set-volume", { percent = percent })
+    if audio_ok and audio and audio.available ~= false then
+        audio.set_volume("default", normalized)
+    else
+        audio_tooltip = "Audio controls unavailable"
     end
 end
 

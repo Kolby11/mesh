@@ -46,30 +46,42 @@ impl IconConfig {
 
     pub fn builtin_material(root: PathBuf) -> Result<Self> {
         let mut profile = IconProfile::default();
-        for name in [
-            "audio-volume-high",
-            "audio-volume-medium",
-            "audio-volume-low",
-            "audio-volume-muted",
-            "network-wireless",
-            "bluetooth",
-            "settings",
-            "battery-full",
-            "battery-80",
-            "close",
-            "star",
-            "warning",
-            "wifi",
-            "volume",
-            "volume-off",
+        for (name, assets) in [
+            ("audio-volume-high", vec!["audio-volume-high", "volume"]),
+            ("audio-volume-medium", vec!["audio-volume-medium", "volume"]),
+            ("audio-volume-low", vec!["audio-volume-low", "volume"]),
+            (
+                "audio-volume-muted",
+                vec!["audio-volume-muted", "volume-off"],
+            ),
+            ("network-wireless", vec!["network-wireless", "wifi"]),
+            ("bluetooth", vec!["bluetooth"]),
+            ("settings", vec!["settings"]),
+            ("weather-clear-night", vec!["star", "warning"]),
+            ("weather-clear", vec!["star", "warning"]),
+            ("battery-empty", vec!["warning", "battery-80"]),
+            ("battery-caution", vec!["warning", "battery-80"]),
+            ("battery-low", vec!["battery-80", "warning"]),
+            ("battery-good", vec!["battery-80", "battery-full"]),
+            ("battery-full", vec!["battery-full"]),
+            ("battery-80", vec!["battery-80"]),
+            ("close", vec!["close"]),
+            ("star", vec!["star"]),
+            ("warning", vec!["warning"]),
+            ("wifi", vec!["wifi"]),
+            ("volume", vec!["volume"]),
+            ("volume-off", vec!["volume-off"]),
         ] {
             profile.icons.insert(
                 name.into(),
-                vec![IconCandidate {
-                    pack_id: "material".into(),
-                    asset_name: name.into(),
-                    multicolor: false,
-                }],
+                assets
+                    .into_iter()
+                    .map(|asset_name| IconCandidate {
+                        pack_id: "material".into(),
+                        asset_name: asset_name.into(),
+                        multicolor: false,
+                    })
+                    .collect(),
             );
         }
 
