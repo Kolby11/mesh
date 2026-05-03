@@ -1,162 +1,69 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-/// Cache for resolved icons: (name, size) -> Option<PathBuf>
-static ICON_CACHE: OnceLock<Mutex<HashMap<(String, u32), Option<PathBuf>>>> = OnceLock::new();
+mod config;
+mod fallback;
+mod registry;
+mod xdg;
 
-fn cache() -> &'static Mutex<HashMap<(String, u32), Option<PathBuf>>> {
-    ICON_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
+pub use config::{IconCandidate, IconConfig, IconPackRoot, IconProfile};
+pub use fallback::BuiltInIconFallback;
+pub use registry::{IconRegistry, IconResolution};
 
 fn bundled_icon_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/material")
 }
 
-fn bundled_icon_path(name: &str) -> Option<PathBuf> {
-    let candidate = bundled_icon_dir().join(format!("{name}.svg"));
-    candidate.is_file().then_some(candidate)
+fn default_icon_config() -> IconConfig {
+    IconConfig::builtin_material(bundled_icon_dir())
+        .expect("builtin material icon config should be valid")
 }
 
-/// Resolve an icon name to a file path using the XDG icon lookup heuristic.
-/// Returns `Some(path)` when found, or `None` when not found.
+static DEFAULT_REGISTRY: OnceLock<Mutex<IconRegistry>> = OnceLock::new();
+
+fn default_registry() -> &'static Mutex<IconRegistry> {
+    DEFAULT_REGISTRY
+        .get_or_init(|| Mutex::new(IconRegistry::from_config(default_icon_config()).unwrap()))
+}
+
+/// Resolve an icon name to a file path using the default configured icon registry.
+///
+/// Explicit file paths are still accepted for compatibility with older callers.
+/// Semantic names resolve through the built-in Material profile unless a caller
+/// uses [`IconRegistry`] directly with a different config.
 pub fn resolve_icon(name: &str, size: u32) -> Option<PathBuf> {
-    // If the input looks like an explicit path, return it directly.
     let p = Path::new(name);
     if p.is_file() {
         return Some(p.to_path_buf());
     }
 
-    let key = (name.to_string(), size);
-    {
-        let guard = cache().lock().unwrap();
-        if let Some(cached) = guard.get(&key) {
-            return cached.clone();
-        }
+    match default_registry().lock().unwrap().resolve(name, size) {
+        IconResolution::Found { path, .. } => Some(path),
+        IconResolution::Missing { .. } => None,
     }
+}
 
-    // Candidate base directories (user before system)
-    let mut bases: Vec<PathBuf> = Vec::new();
-    if let Some(home) = dirs::home_dir() {
-        bases.push(home.join(".local/share/icons"));
-        bases.push(home.join(".icons"));
-    }
-    bases.push(PathBuf::from("/usr/share/icons"));
-    bases.push(PathBuf::from("/usr/share/pixmaps"));
-
-    // Order of preferred themes: hicolor fallback last
-    let mut themes: Vec<String> = Vec::new();
-
-    for base in &bases {
-        if !base.exists() {
-            continue;
-        }
-        // collect theme dirs
-        if let Ok(entries) = std::fs::read_dir(base) {
-            for e in entries.flatten() {
-                if e.path().is_dir() {
-                    if let Some(name) = e.file_name().to_str() {
-                        themes.push(name.to_string());
-                    }
-                }
-            }
-        }
-    }
-    // ensure hicolor is present as fallback
-    if !themes.contains(&"hicolor".to_string()) {
-        themes.push("hicolor".to_string());
-    }
-
-    // categories to try inside theme dirs
-    let categories = [
-        "apps",
-        "devices",
-        "status",
-        "actions",
-        "places",
-        "mimetypes",
-    ];
-
-    let mut found: Option<PathBuf> = None;
-
-    'base_loop: for base in &bases {
-        if !base.exists() {
-            continue;
-        }
-
-        // First check theme directories
-        for theme in &themes {
-            let theme_dir = base.join(theme);
-            if !theme_dir.is_dir() {
-                continue;
-            }
-
-            // try size-specific png in categories
-            let size_dir = format!("{}x{}", size, size);
-            for cat in &categories {
-                let candidate = theme_dir
-                    .join(&size_dir)
-                    .join(cat)
-                    .join(format!("{}.png", name));
-                if candidate.is_file() {
-                    found = Some(candidate);
-                    break 'base_loop;
-                }
-            }
-
-            // try scalable svg in categories
-            for cat in &categories {
-                let candidate = theme_dir
-                    .join("scalable")
-                    .join(cat)
-                    .join(format!("{}.svg", name));
-                if candidate.is_file() {
-                    // prefer pngs that matched earlier; since none matched in this loop,
-                    // accept svg if found.
-                    found = Some(candidate);
-                    break 'base_loop;
-                }
-            }
-
-            // try direct files in theme root
-            let png = theme_dir.join(format!("{}.png", name));
-            if png.is_file() {
-                found = Some(png);
-                break 'base_loop;
-            }
-            let svg = theme_dir.join(format!("{}.svg", name));
-            if svg.is_file() {
-                found = Some(svg);
-                break 'base_loop;
-            }
-        }
-
-        // After themes, try base/<name> as pixmaps fallback
-        let png = base.join(format!("{}.png", name));
-        if png.is_file() {
-            found = Some(png);
-            break;
-        }
-        let svg = base.join(format!("{}.svg", name));
-        if svg.is_file() {
-            found = Some(svg);
-            break;
-        }
-    }
-
-    if found.is_none() {
-        found = bundled_icon_path(name);
-    }
-
-    let mut guard = cache().lock().unwrap();
-    guard.insert(key, found.clone());
-    found
+/// Resolve an icon using an explicit registry.
+pub fn resolve_icon_with_registry(
+    registry: &mut IconRegistry,
+    name: &str,
+    size: u32,
+) -> IconResolution {
+    registry.resolve(name, size)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    fn write_svg(path: &Path) {
+        fs::write(
+            path,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="black"/></svg>"#,
+        )
+        .unwrap();
+    }
 
     #[test]
     fn resolves_local_png() {
@@ -166,7 +73,6 @@ mod tests {
         let file = icons.join("testicon.png");
         fs::write(&file, b"PNGDATA").unwrap();
 
-        // create a file and call resolve_icon with the explicit path
         let user_icons = td.path().join(".icons");
         fs::create_dir_all(&user_icons).unwrap();
         let ui = user_icons.join("testicon.png");
@@ -182,5 +88,97 @@ mod tests {
         assert!(got.is_some());
         let got = got.unwrap();
         assert!(got.ends_with("assets/material/audio-volume-high.svg"));
+    }
+
+    #[test]
+    fn icon_config_resolves_ordered_fallbacks() {
+        let td = tempfile::tempdir().unwrap();
+        let material = td.path().join("material");
+        fs::create_dir_all(&material).unwrap();
+        write_svg(&material.join("audio-volume-muted.svg"));
+        write_svg(&material.join("volume-off.svg"));
+
+        let config = IconConfig::from_toml_str(&format!(
+            r#"
+active_profile = "rounded"
+
+[[packs]]
+id = "material"
+root = "{}"
+theme = "hicolor"
+
+[[packs]]
+id = "missing"
+root = "{}"
+theme = "hicolor"
+
+[profiles.rounded.icons]
+audio-volume-muted = ["missing:nope", "material:audio-volume-muted", "material:volume-off"]
+"#,
+            material.display(),
+            td.path().join("missing").display()
+        ))
+        .unwrap();
+
+        let mut registry = IconRegistry::from_config(config).unwrap();
+        let result = registry.resolve("audio-volume-muted", 18);
+
+        match result {
+            IconResolution::Found {
+                candidate, path, ..
+            } => {
+                assert_eq!(candidate, "material:audio-volume-muted");
+                assert!(path.ends_with("audio-volume-muted.svg"));
+            }
+            IconResolution::Missing { .. } => panic!("expected fallback candidate to resolve"),
+        }
+    }
+
+    #[test]
+    fn icon_profile_switch_invalidates_cache() {
+        let td = tempfile::tempdir().unwrap();
+        let rounded = td.path().join("rounded");
+        let filled = td.path().join("filled");
+        fs::create_dir_all(&rounded).unwrap();
+        fs::create_dir_all(&filled).unwrap();
+        write_svg(&rounded.join("audio.svg"));
+        write_svg(&filled.join("audio.svg"));
+
+        let config = IconConfig::from_toml_str(&format!(
+            r#"
+active_profile = "rounded"
+
+[[packs]]
+id = "rounded"
+root = "{}"
+theme = "hicolor"
+
+[[packs]]
+id = "filled"
+root = "{}"
+theme = "hicolor"
+
+[profiles.rounded.icons]
+audio-volume-muted = ["rounded:audio"]
+
+[profiles.filled.icons]
+audio-volume-muted = ["filled:audio"]
+"#,
+            rounded.display(),
+            filled.display()
+        ))
+        .unwrap();
+
+        let mut registry = IconRegistry::from_config(config.clone()).unwrap();
+        let first = registry.resolve("audio-volume-muted", 18).path().unwrap();
+
+        let mut switched = config;
+        switched.active_profile = "filled".into();
+        registry.set_config(switched).unwrap();
+        let second = registry.resolve("audio-volume-muted", 18).path().unwrap();
+
+        assert_ne!(first, second);
+        assert!(first.ends_with("rounded/audio.svg"));
+        assert!(second.ends_with("filled/audio.svg"));
     }
 }
