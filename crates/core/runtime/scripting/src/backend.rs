@@ -111,7 +111,8 @@ impl BackendScriptContext {
     }
 
     /// Call the backend script's required `init()` entrypoint once after load.
-    pub fn call_init(&mut self) -> Result<(), BackendScriptError> {
+    pub fn call_init(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
+        self.reset_for_call(JsonValue::Null);
         let globals = self.lua.globals();
         let init =
             globals
@@ -125,10 +126,10 @@ impl BackendScriptContext {
                 plugin_id: self.plugin_id.clone(),
                 message: err.to_string(),
             })?;
-        Ok(())
+        self.take_service_state_snapshot()
     }
 
-    /// Call `on_poll()` if it exists. Returns any emitted payload.
+    /// Call `on_poll()` if it exists. Returns any exported service state.
     pub fn run_poll(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
         self.reset_for_call(JsonValue::Null);
         let globals = self.lua.globals();
@@ -142,10 +143,10 @@ impl BackendScriptContext {
                 plugin_id: self.plugin_id.clone(),
                 message: err.to_string(),
             })?;
-        Ok(self.take_pending_emit())
+        self.take_service_state_snapshot()
     }
 
-    /// Call `on_command_<name>()` for the given command. Returns any emitted payload.
+    /// Call `on_command_<name>()` for the given command. Returns any exported service state.
     pub fn run_command(
         &mut self,
         command: &str,
@@ -169,7 +170,30 @@ impl BackendScriptContext {
                 plugin_id: self.plugin_id.clone(),
                 message: err.to_string(),
             })?;
-        Ok(self.take_pending_emit())
+        self.take_service_state_snapshot()
+    }
+
+    pub fn take_service_state_snapshot(&self) -> Result<Option<JsonValue>, BackendScriptError> {
+        let globals = self.lua.globals();
+        let state =
+            globals
+                .get::<LuaValue>("state")
+                .map_err(|err| BackendScriptError::Runtime {
+                    plugin_id: self.plugin_id.clone(),
+                    message: err.to_string(),
+                })?;
+
+        if matches!(state, LuaValue::Nil) {
+            return Ok(self.take_pending_emit());
+        }
+
+        self.lua
+            .from_value::<JsonValue>(state)
+            .map(Some)
+            .map_err(|err| BackendScriptError::Runtime {
+                plugin_id: self.plugin_id.clone(),
+                message: err.to_string(),
+            })
     }
 
     fn install_host_api(&mut self) -> mlua::Result<()> {
@@ -479,6 +503,62 @@ mod tests {
         let result = ctx.run_command("set-volume", &serde_json::json!({ "percent": 50 }));
         let payload = result.unwrap().unwrap();
         assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(50));
+    }
+
+    #[test]
+    fn backend_state_snapshot_reads_top_level_state() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "state = { available = false }\n\
+             function init()\nstate = { available = true, percent = 65 }\nend",
+        )
+        .unwrap();
+
+        let payload = ctx.call_init().unwrap().unwrap();
+
+        assert_eq!(
+            payload.get("available").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(65));
+    }
+
+    #[test]
+    fn backend_state_snapshot_updates_after_poll() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "state = { tick = 0 }\n\
+             function init()\nend\n\
+             function on_poll()\nstate = { tick = state.tick + 1 }\nend",
+        )
+        .unwrap();
+
+        ctx.call_init().unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
+
+        assert_eq!(payload.get("tick").and_then(|v| v.as_u64()), Some(1));
+    }
+
+    #[test]
+    fn backend_state_snapshot_updates_after_command() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "state = { percent = 0 }\n\
+             function init()\nend\n\
+             function on_command_set_volume()\n\
+               local payload = mesh.service.payload()\n\
+               state = { percent = payload.percent }\n\
+             end",
+        )
+        .unwrap();
+
+        ctx.call_init().unwrap();
+        let payload = ctx
+            .run_command("set-volume", &serde_json::json!({ "percent": 72 }))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(payload.get("percent").and_then(|v| v.as_u64()), Some(72));
     }
 
     #[test]
