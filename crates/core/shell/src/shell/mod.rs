@@ -2054,6 +2054,46 @@ mod tests {
     }
 
     #[test]
+    fn provider_swap_replaces_interface_latest_state() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let (pipewire_slot, _pipewire_rx) =
+            backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), pipewire_slot);
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pipewire-audio",
+                serde_json::json!({ "available": true, "percent": 40.0 }),
+            ))
+            .unwrap();
+
+        let (pulse_slot, _pulse_rx) =
+            backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pulseaudio-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), pulse_slot);
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pulseaudio-audio",
+                serde_json::json!({ "available": true, "percent": 55.0 }),
+            ))
+            .unwrap();
+
+        assert_eq!(shell.latest_service_state.len(), 1);
+        assert!(shell.latest_service_state.contains_key("mesh.audio"));
+        let latest = shell.latest_service_state.get("mesh.audio").unwrap();
+        assert_eq!(latest.interface, "mesh.audio");
+        assert_eq!(latest.provider_id, "@mesh/pulseaudio-audio");
+        assert_eq!(latest.state["percent"], serde_json::json!(55.0));
+        assert!(
+            !shell
+                .latest_service_state
+                .values()
+                .any(|latest| latest.provider_id == "@mesh/pipewire-audio")
+        );
+    }
+
+    #[test]
     fn launcher_content_size_ignores_root_surface_bounds() {
         let mut root = node("root", 0.0, 0.0, 640.0, 360.0);
         root.children.push(node("column", 12.0, 12.0, 336.0, 332.0));
