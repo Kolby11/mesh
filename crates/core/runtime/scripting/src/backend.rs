@@ -249,11 +249,10 @@ impl BackendScriptContext {
 
         mesh.set(
             "exec",
-            self.lua.create_function(
-                move |lua, (program, args): (String, Option<Vec<String>>)| {
-                    run_exec(&lua, &program, args.as_deref())
-                },
-            )?,
+            self.lua
+                .create_function(move |lua, (program, args): (String, Vec<String>)| {
+                    run_exec(&lua, &program, &args)
+                })?,
         )?;
 
         let runtime = Arc::clone(&self.runtime);
@@ -317,26 +316,8 @@ impl BackendScriptContext {
     }
 }
 
-fn run_exec(lua: &Lua, program: &str, args: Option<&[String]>) -> mlua::Result<LuaValue> {
-    let result = if let Some(args) = args {
-        StdCommand::new(program).args(args).output()
-    } else {
-        let parts: Vec<&str> = program.split_whitespace().collect();
-        if let Some((prog, rest)) = parts.split_first() {
-            StdCommand::new(prog).args(rest).output()
-        } else {
-            return exec_outcome_to_lua(
-                lua,
-                ExecOutcome {
-                    success: false,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    code: None,
-                },
-            );
-        }
-    };
-
+fn run_exec(lua: &Lua, program: &str, args: &[String]) -> mlua::Result<LuaValue> {
+    let result = StdCommand::new(program).args(args).output();
     exec_result_to_lua(lua, result)
 }
 
@@ -734,6 +715,20 @@ mod tests {
             Some("hello")
         );
         assert_eq!(payload.get("code").and_then(|v| v.as_i64()), Some(0));
+    }
+
+    #[test]
+    fn exec_rejects_single_string_command_form() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nlocal ok = pcall(function()\nmesh.exec(\"printf hello\")\nend)\nmesh.service.emit({ rejected = not ok })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
+        assert_eq!(
+            payload.get("rejected").and_then(|v| v.as_bool()),
+            Some(true)
+        );
     }
 
     #[test]
