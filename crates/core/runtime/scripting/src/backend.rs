@@ -15,8 +15,6 @@ use std::sync::{Arc, Mutex};
 /// - `init()` — required backend entrypoint called once after script load
 /// - `mesh.service.set_poll_interval(ms)` — set polling interval
 /// - `mesh.exec("program", {"arg1", "arg2"})` — run a system command
-/// - `mesh.exec("program arg1 arg2 {payload_key}")` — compatibility system command form
-/// - `mesh.exec_shell("shell pipeline {payload_key}")` — run a shell command via `sh -lc`
 /// - `mesh.config()` — return plugin settings as a Lua table
 /// - `mesh.service.emit(table)` — emit service state
 /// - `mesh.service.emit_json(value?)` — parse JSON text or emit a Lua table directly
@@ -264,12 +262,6 @@ impl BackendScriptContext {
             })?,
         )?;
 
-        mesh.set(
-            "exec_shell",
-            self.lua
-                .create_function(move |lua, cmd: String| run_exec_shell(&lua, &cmd))?,
-        )?;
-
         let plugin_id = self.plugin_id.clone();
         let call_log = self.lua.create_function(
             move |_lua, (_self, level, message): (mlua::Table, String, String)| {
@@ -318,11 +310,6 @@ impl BackendScriptContext {
 
 fn run_exec(lua: &Lua, program: &str, args: &[String]) -> mlua::Result<LuaValue> {
     let result = StdCommand::new(program).args(args).output();
-    exec_result_to_lua(lua, result)
-}
-
-fn run_exec_shell(lua: &Lua, cmd: &str) -> mlua::Result<LuaValue> {
-    let result = StdCommand::new("sh").arg("-lc").arg(cmd).output();
     exec_result_to_lua(lua, result)
 }
 
@@ -523,8 +510,8 @@ mod tests {
                 "{plugin_id} missing mesh.exec"
             );
             assert!(
-                mesh.get::<Function>("exec_shell").is_ok(),
-                "{plugin_id} missing mesh.exec_shell"
+                mesh.get::<Function>("exec_shell").is_err(),
+                "{plugin_id} unexpectedly exposes mesh.exec_shell"
             );
             assert!(
                 mesh.get::<Function>("config").is_ok(),
@@ -565,7 +552,7 @@ mod tests {
     fn emit_json_accepts_explicit_string() {
         let mut ctx = BackendScriptContext::new("@test/backend");
         ctx.load_script(
-            "function init()\nend\nfunction on_poll()\nlocal r = mesh.exec_shell(\"printf '{\\\"available\\\":true,\\\"percent\\\":65}'\")\nmesh.service.emit_json(r.stdout)\nend",
+            "function init()\nend\nfunction on_poll()\nlocal r = mesh.exec(\"printf\", {\"{\\\"available\\\":true,\\\"percent\\\":65}\"})\nmesh.service.emit_json(r.stdout)\nend",
         )
         .unwrap();
         let payload = ctx.run_poll().unwrap().unwrap();
@@ -690,7 +677,7 @@ mod tests {
     fn exec_returns_structured_result() {
         let mut ctx = BackendScriptContext::new("@test/backend");
         ctx.load_script(
-            "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec_shell(\"printf 'hello'\")\nmesh.service.emit({ ok = result.success, stdout = result.stdout })\nend",
+            "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ ok = result.success, stdout = result.stdout })\nend",
         )
         .unwrap();
         let payload = ctx.run_poll().unwrap().unwrap();

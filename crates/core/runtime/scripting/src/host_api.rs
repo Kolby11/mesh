@@ -16,10 +16,13 @@
 /// mesh.config.get(key)        → value
 /// mesh.config.get_all()       → table
 /// mesh.config()               → table          (backend helper)
+/// mesh.exec(program, args)    → table          (backend helper)
+/// mesh.service.set_poll_interval(ms)           (backend helper)
 /// mesh.events.subscribe(ch, cb) → subscription
 /// mesh.events.publish(ch, payload)
 /// mesh.ui.request_redraw()
 /// mesh.log(level, msg)
+/// mesh.log.debug(msg)
 /// mesh.log.info(msg)
 /// mesh.log.warn(msg)
 /// mesh.log.error(msg)
