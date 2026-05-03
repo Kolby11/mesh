@@ -42,10 +42,10 @@
 
 ### Icon Rendering
 
-- [ ] **ICON-01**: XDG icon names resolve through configured icon theme search paths.
-- [ ] **ICON-02**: SVG icons rasterize correctly through the render pipeline.
-- [ ] **ICON-03**: Raster icons decode and paint correctly at requested sizes.
-- [ ] **ICON-04**: Missing icons produce diagnostics and non-crashing fallback behavior.
+- [x] **ICON-01**: XDG icon names resolve through configured icon theme search paths.
+- [x] **ICON-02**: SVG icons rasterize correctly through the render pipeline.
+- [x] **ICON-03**: Raster icons decode and paint correctly at requested sizes.
+- [x] **ICON-04**: Missing icons produce diagnostics and non-crashing fallback behavior.
 
 ### Documentation and Validation
 
@@ -109,10 +109,10 @@
 | SURF-04 | Phase 4 | Complete |
 | SURF-05 | Phase 4 | Complete |
 | SURF-06 | Phase 2 | Pending |
-| ICON-01 | Phase 5 | Pending |
-| ICON-02 | Phase 5 | Pending |
-| ICON-03 | Phase 5 | Pending |
-| ICON-04 | Phase 5 | Pending |
+| ICON-01 | Phase 5 | Complete |
+| ICON-02 | Phase 5 | Complete |
+| ICON-03 | Phase 5 | Complete |
+| ICON-04 | Phase 5 | Complete |
 | DOCS-01 | Phase 6 | Pending |
 | DOCS-02 | Phase 6 | Pending |
 | DOCS-03 | Phase 6 | Pending |
