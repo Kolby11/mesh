@@ -32,15 +32,26 @@ fn default_registry() -> &'static Mutex<IconRegistry> {
 /// Semantic names resolve through the built-in Material profile unless a caller
 /// uses [`IconRegistry`] directly with a different config.
 pub fn resolve_icon(name: &str, size: u32) -> Option<PathBuf> {
-    let p = Path::new(name);
-    if p.is_file() {
-        return Some(p.to_path_buf());
-    }
-
-    match default_registry().lock().unwrap().resolve(name, size) {
+    match resolve_icon_result(name, size) {
         IconResolution::Found { path, .. } => Some(path),
         IconResolution::Missing { .. } => None,
     }
+}
+
+/// Resolve an icon name using the shared default registry and preserve
+/// diagnostic details for missing semantic icons.
+pub fn resolve_icon_result(name: &str, size: u32) -> IconResolution {
+    let p = Path::new(name);
+    if p.is_file() {
+        return IconResolution::Found {
+            semantic_name: name.into(),
+            candidate: p.display().to_string(),
+            path: p.to_path_buf(),
+            multicolor: false,
+        };
+    }
+
+    default_registry().lock().unwrap().resolve(name, size)
 }
 
 /// Resolve an icon using an explicit registry.

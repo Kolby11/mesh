@@ -185,18 +185,13 @@ mod tests {
     fn missing_icon_diagnostics_are_deduplicated_by_plugin_and_semantic_name() {
         let diagnostics = Diagnostics::new("@mesh/quick-settings");
 
-        assert!(diagnostics.record_missing_icon(
-            "audio-volume-muted",
-            vec!["material:nope".into()]
-        ));
-        assert!(!diagnostics.record_missing_icon(
-            "audio-volume-muted",
-            vec!["material:nope".into()]
-        ));
-        assert!(diagnostics.record_missing_icon(
-            "network-wireless",
-            vec!["material:nope".into()]
-        ));
+        assert!(
+            diagnostics.record_missing_icon("audio-volume-muted", vec!["material:nope".into()])
+        );
+        assert!(
+            !diagnostics.record_missing_icon("audio-volume-muted", vec!["material:nope".into()])
+        );
+        assert!(diagnostics.record_missing_icon("network-wireless", vec!["material:nope".into()]));
 
         assert_eq!(diagnostics.error_count(), 0);
         match diagnostics.health() {

@@ -1040,7 +1040,10 @@ main = "src/main.mesh"
             manifest.dependencies.icon_packs.required,
             vec!["material".to_string()]
         );
-        assert_eq!(manifest.assets.unwrap().icons.as_deref(), Some("assets/icons"));
+        assert_eq!(
+            manifest.assets.unwrap().icons.as_deref(),
+            Some("assets/icons")
+        );
     }
 
     fn manifest_with_dependencies(

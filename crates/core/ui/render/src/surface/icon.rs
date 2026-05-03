@@ -1,7 +1,7 @@
 use super::PixelBuffer;
 use image::imageops::FilterType;
 use mesh_core_elements::style::Color;
-use mesh_core_icon::{IconResolution, resolve_icon_with_registry};
+use mesh_core_icon::{IconResolution, resolve_icon_result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -187,18 +187,9 @@ pub fn draw_named_icon(
     dest_h: i32,
     tint: Color,
 ) {
-    let material_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../icon")
-        .join("assets/material");
-    let config = mesh_core_icon::IconConfig::builtin_material(material_root)
-        .expect("builtin icon config should be valid");
-    let mut registry = mesh_core_icon::IconRegistry::from_config(config)
-        .expect("builtin icon registry should be valid");
-    draw_named_icon_with_registry(
+    draw_icon_resolution(
         buffer,
-        &mut registry,
-        name,
-        size,
+        resolve_icon_result(name, size),
         dest_x,
         dest_y,
         dest_w,
@@ -207,7 +198,8 @@ pub fn draw_named_icon(
     );
 }
 
-pub fn draw_named_icon_with_registry(
+#[cfg(test)]
+fn draw_named_icon_with_registry(
     buffer: &mut PixelBuffer,
     registry: &mut mesh_core_icon::IconRegistry,
     name: &str,
@@ -218,7 +210,27 @@ pub fn draw_named_icon_with_registry(
     dest_h: i32,
     tint: Color,
 ) {
-    match resolve_icon_with_registry(registry, name, size) {
+    draw_icon_resolution(
+        buffer,
+        mesh_core_icon::resolve_icon_with_registry(registry, name, size),
+        dest_x,
+        dest_y,
+        dest_w,
+        dest_h,
+        tint,
+    );
+}
+
+fn draw_icon_resolution(
+    buffer: &mut PixelBuffer,
+    resolution: IconResolution,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+) {
+    match resolution {
         IconResolution::Found {
             path, multicolor, ..
         } => draw_icon_from_path_with_options(

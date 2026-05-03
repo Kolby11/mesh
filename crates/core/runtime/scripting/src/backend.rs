@@ -185,18 +185,21 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         service.set(
             "emit_json",
-            self.lua.create_function(move |lua, value: Option<LuaValue>| {
-                let payload = match value {
-                    None | Some(LuaValue::Nil) => runtime.lock().unwrap().current_payload.clone(),
-                    Some(LuaValue::String(text)) => {
-                        serde_json::from_str::<JsonValue>(text.to_str()?.trim())
-                            .map_err(mlua::Error::external)?
-                    }
-                    Some(other) => lua.from_value::<JsonValue>(other)?,
-                };
-                runtime.lock().unwrap().pending_emit = Some(payload);
-                Ok(())
-            })?,
+            self.lua
+                .create_function(move |lua, value: Option<LuaValue>| {
+                    let payload = match value {
+                        None | Some(LuaValue::Nil) => {
+                            runtime.lock().unwrap().current_payload.clone()
+                        }
+                        Some(LuaValue::String(text)) => {
+                            serde_json::from_str::<JsonValue>(text.to_str()?.trim())
+                                .map_err(mlua::Error::external)?
+                        }
+                        Some(other) => lua.from_value::<JsonValue>(other)?,
+                    };
+                    runtime.lock().unwrap().pending_emit = Some(payload);
+                    Ok(())
+                })?,
         )?;
 
         let runtime = Arc::clone(&self.runtime);

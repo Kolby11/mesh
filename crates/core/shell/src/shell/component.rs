@@ -786,12 +786,54 @@ impl FrontendSurfaceComponent {
         }
     }
 
-    #[cfg(test)]
-    fn record_missing_icon_diagnostic(
-        &self,
-        semantic_name: &str,
-        tried: Vec<String>,
-    ) -> bool {
+    fn record_declared_missing_icon_diagnostics(&self) {
+        let required = &self.compiled.manifest.icon_requirements.required;
+        if required.is_empty() {
+            return;
+        }
+
+        let Some(config) = self.load_icon_config_for_diagnostics() else {
+            return;
+        };
+        let Ok(mut registry) = mesh_core_icon::IconRegistry::from_config(config) else {
+            return;
+        };
+
+        for semantic_name in required {
+            match registry.resolve(semantic_name, 24) {
+                mesh_core_icon::IconResolution::Found { .. } => {}
+                mesh_core_icon::IconResolution::Missing { tried, .. } => {
+                    self.record_missing_icon_diagnostic(semantic_name, tried);
+                }
+            }
+        }
+    }
+
+    fn load_icon_config_for_diagnostics(&self) -> Option<mesh_core_icon::IconConfig> {
+        let shell_manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let workspace_root = shell_manifest_dir.join("../../..");
+        let config_path = workspace_root.join("config/icons.toml");
+
+        if let Ok(input) = std::fs::read_to_string(&config_path) {
+            if let Ok(mut config) = mesh_core_icon::IconConfig::from_toml_str(&input) {
+                for pack in &mut config.packs {
+                    if pack.root.is_relative() {
+                        pack.root = workspace_root.join(&pack.root);
+                    }
+                }
+                if config.validate().is_ok() {
+                    return Some(config);
+                }
+            }
+        }
+
+        mesh_core_icon::IconConfig::builtin_material(
+            shell_manifest_dir.join("../ui/icon/assets/material"),
+        )
+        .ok()
+    }
+
+    fn record_missing_icon_diagnostic(&self, semantic_name: &str, tried: Vec<String>) -> bool {
         let Some(diagnostics) = &self.diagnostics else {
             return false;
         };
@@ -1462,6 +1504,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.diagnostics = Some(ctx.diagnostics);
         self.load_plugin_i18n();
         self.load_catalog_i18n();
+        self.record_declared_missing_icon_diagnostics();
         self.init_root_runtime()?;
         self.render_hooks_pending = true;
         self.dirty = true;
@@ -2496,6 +2539,43 @@ mod tests {
         test_frontend_component_with_catalog(source, InterfaceCatalog::default(), &[])
     }
 
+    fn test_frontend_component_with_required_icons(
+        source: &str,
+        required_icons: &[&str],
+    ) -> FrontendSurfaceComponent {
+        let mut manifest = minimal_test_manifest("@test/reactive-surface");
+        manifest.icon_requirements.required = required_icons
+            .iter()
+            .map(|semantic_name| (*semantic_name).to_string())
+            .collect();
+        let compiled = CompiledFrontendPlugin {
+            manifest,
+            source_path: PathBuf::from("src/main.mesh"),
+            component: parse_component(source).unwrap(),
+            local_components: HashMap::new(),
+            plugin_component_imports: HashMap::new(),
+        };
+        let catalog = FrontendCatalog {
+            plugins: HashMap::new(),
+            slot_contributions: HashMap::new(),
+        };
+        let mut component = FrontendSurfaceComponent::new(
+            compiled,
+            PathBuf::from("."),
+            catalog,
+            InterfaceCatalog::default(),
+        );
+        component
+            .mount(ComponentContext {
+                component_id: "@test/reactive-surface".into(),
+                surface_id: "@test/reactive-surface".into(),
+                diagnostics: Diagnostics::new("@test/reactive-surface"),
+            })
+            .unwrap();
+        component.visible = true;
+        component
+    }
+
     fn test_frontend_component_with_catalog(
         source: &str,
         interface_catalog: InterfaceCatalog,
@@ -3245,28 +3325,30 @@ end
 
     #[test]
     fn missing_required_icon_degrades_plugin_without_unloading() {
-        let mut component = test_frontend_component(
-            r#"
+        let component_source = r#"
 <template>
   <box />
 </template>
 <script lang="luau">
 </script>
-"#,
-        );
-
-        component.compiled.manifest.icon_requirements.required = vec!["missing-proof".into()];
+"#;
+        let component =
+            test_frontend_component_with_required_icons(component_source, &["missing-proof"]);
         assert_eq!(component.id(), "@test/reactive-surface");
         assert!(component.visible);
 
-        assert!(component.record_missing_icon_diagnostic(
-            "missing-proof",
-            vec!["material:not-present".into()]
-        ));
-        assert!(!component.record_missing_icon_diagnostic(
-            "missing-proof",
-            vec!["material:not-present".into()]
-        ));
+        assert!(
+            !component.record_missing_icon_diagnostic(
+                "missing-proof",
+                vec!["material:no-such-icon".into()]
+            )
+        );
+        assert!(
+            !component.record_missing_icon_diagnostic(
+                "missing-proof",
+                vec!["material:not-present".into()]
+            )
+        );
 
         let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
         assert_eq!(diagnostics.error_count(), 0);
@@ -3351,10 +3433,22 @@ end
         ] {
             let source = fs::read_to_string(root.join(path)).unwrap();
             for line in source.lines().filter(|line| line.contains("<icon")) {
-                assert!(!line.contains("material:"), "{path} contains pack-specific icon: {line}");
-                assert!(!line.contains("lucide:"), "{path} contains pack-specific icon: {line}");
-                assert!(!line.contains(".svg"), "{path} contains SVG path icon: {line}");
-                assert!(!line.contains(".png"), "{path} contains PNG path icon: {line}");
+                assert!(
+                    !line.contains("material:"),
+                    "{path} contains pack-specific icon: {line}"
+                );
+                assert!(
+                    !line.contains("lucide:"),
+                    "{path} contains pack-specific icon: {line}"
+                );
+                assert!(
+                    !line.contains(".svg"),
+                    "{path} contains SVG path icon: {line}"
+                );
+                assert!(
+                    !line.contains(".png"),
+                    "{path} contains PNG path icon: {line}"
+                );
             }
         }
 
@@ -3409,14 +3503,18 @@ end
 <script lang="luau"></script>
 "#,
         );
-        assert!(component.record_missing_icon_diagnostic(
-            "missing-proof",
-            vec!["material:no-such-icon".into()]
-        ));
-        assert!(!component.record_missing_icon_diagnostic(
-            "missing-proof",
-            vec!["material:no-such-icon".into()]
-        ));
+        assert!(
+            component.record_missing_icon_diagnostic(
+                "missing-proof",
+                vec!["material:no-such-icon".into()]
+            )
+        );
+        assert!(
+            !component.record_missing_icon_diagnostic(
+                "missing-proof",
+                vec!["material:no-such-icon".into()]
+            )
+        );
         let diagnostics = component.diagnostics.as_ref().unwrap();
         assert_eq!(diagnostics.error_count(), 0);
         assert!(matches!(
