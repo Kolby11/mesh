@@ -1484,14 +1484,15 @@ impl Shell {
             return;
         }
 
+        let current_theme = self.theme.active().id.clone();
         if let Some(settings) = candidate.settings.as_object_mut() {
             settings.insert(
                 "current_theme".to_string(),
-                serde_json::Value::String(self.settings.theme.active.clone()),
+                serde_json::Value::String(current_theme),
             );
         } else {
             candidate.settings = serde_json::json!({
-                "current_theme": self.settings.theme.active.clone(),
+                "current_theme": current_theme,
             });
         }
     }
@@ -2126,7 +2127,7 @@ mod tests {
         backend_launch_candidates_from_graph,
         layout::measure_content_size,
         service::{apply_service_update, seed_service_state, service_name_from_interface},
-        surface_layout::{SurfaceSizePolicy, load_frontend_plugin_settings},
+        surface_layout::{SurfaceSizePolicy, load_active_theme, load_frontend_plugin_settings},
     };
     use mesh_core_config::ShellConfig;
     use mesh_core_elements::{LayoutRect, VariableStore, WidgetNode};
@@ -2679,9 +2680,12 @@ mod tests {
     }
 
     #[test]
-    fn shell_theme_backend_candidate_receives_active_theme_setting() {
+    fn shell_theme_backend_candidate_receives_resolved_active_theme_setting() {
         let mut shell = Shell::new();
-        shell.settings.theme.active = "mesh-default-light".to_string();
+        shell.settings.theme.active = "missing-theme".to_string();
+        let (theme, theme_watch) = load_active_theme(&shell.settings);
+        shell.theme = theme;
+        shell.theme_watch = theme_watch;
         let mut candidate = BackendLaunchCandidate {
             module_id: "@mesh/shell-theme".to_string(),
             interface: "mesh.theme".to_string(),
@@ -2694,12 +2698,13 @@ mod tests {
 
         shell.apply_shell_runtime_settings(&mut candidate);
 
+        assert_eq!(shell.theme.active().id, "mesh-default-dark");
         assert_eq!(
             candidate
                 .settings
                 .get("current_theme")
                 .and_then(|value| value.as_str()),
-            Some("mesh-default-light")
+            Some("mesh-default-dark")
         );
     }
 
