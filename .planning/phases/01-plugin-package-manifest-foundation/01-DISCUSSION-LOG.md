@@ -5,7 +5,7 @@
 
 **Date:** 2026-05-03
 **Phase:** 1-Plugin Package Manifest Foundation
-**Areas discussed:** Provider activation policy, package installation pivot, existing-manifest relationship
+**Areas discussed:** Provider activation policy, package installation pivot, existing-manifest relationship, ~/.mesh layout and module naming
 
 ---
 
@@ -46,12 +46,26 @@
 **User's choice:** No new interactive answer was available in this rerun; this preserves the prior package-manifest decision and applies codebase scout findings.
 **Notes:** Existing code already normalizes `plugin.json`/`mesh.toml` into `Manifest`, with `DependenciesSection` and `ProvidedInterface` covering the concepts this phase needs. The context now tells downstream agents to build the installed package graph from shell-owned installed state plus each referenced plugin's normalized manifest.
 
+---
+
+## ~/.mesh Layout and Module Naming
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Adopt `~/.mesh` + module terminology | User-owned shell files live in `~/.mesh`, installed extensions are called modules, central installed state is `~/.mesh/package.json`, installed modules live in `~/.mesh/modules/`, and each module has its own `package.json`. | ✓ |
+| Keep current plugin naming and paths | Continue with `plugin.json`, `packages/plugins`, and documented `~/.config/mesh` naming. Less migration work, but conflicts with the user's preferred mental model. | |
+| Hybrid only in docs | Use "module" in docs but keep package/config schema named around plugins. Lower immediate cost, but risks long-term terminology drift. | |
+
+**User's choice:** Adopt `~/.mesh` + module terminology.
+**Notes:** The user specified `~/.mesh/package.json` with fields such as `frontendDependencies`, `backendDependencies`, `icons`, `fonts`, and i18n support; `~/.mesh/modules/`; module-level `package.json`; `~/.mesh/settings.json`; a folder for switchable color themes; Git origin metadata on modules; and an entrypoint for defining the base shell layout from installed modules. Actual Git download/install remains deferred by Phase 1 scope, but origin metadata should be represented.
+
 ## the agent's Discretion
 
-- Choose exact manifest filename and Rust module boundaries during planning.
+- Choose Rust module boundaries during planning; the central shell manifest filename is locked as `~/.mesh/package.json`.
 - Keep schema minimal while preserving the package graph concepts the user locked.
 - Choose exact validation layering, but invalid installed package entries should become typed package-graph errors suitable for later diagnostics rather than silent skips.
+- Decide how to bridge existing `plugin.json`/`Plugin*` code to the new module/package naming without over-expanding Phase 1.
 
 ## Deferred Ideas
 
-- Remote package download, registry dependency fetching, signing, sandboxing, marketplace UX, and full hot-install flows.
+- Remote package download, Git clone/fetch/install behavior, registry dependency fetching, signing, sandboxing, marketplace UX, and full hot-install flows.
