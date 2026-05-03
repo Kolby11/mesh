@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Backend Plugin MVP
 status: executing
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-05-03T18:43:17.919Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-05-03T18:45:16.909Z"
 last_activity: 2026-05-03
 progress:
   total_phases: 5
@@ -61,6 +61,8 @@ Last activity: 2026-05-03
 - [Phase 03]: Plan 03 keeps mesh.config() as the only backend config API and returns full plugin settings. — Matches D-08/D-09 and avoids premature config lookup helpers.
 - [Phase 03]: Plan 03 locks backend log public levels to debug, info, warn, and error across both call styles. — The warning level remains only as an undocumented compatibility alias.
 - [Phase 03]: Plan 03 keeps invalid backend log levels non-fatal and visible through warnings. — Matches D-11 so plugin author mistakes do not crash backend scripts.
+- [Phase 03]: Bundled providers issue system commands only through structured mesh.exec(program, args). — Keeps the Phase 03 backend host API strict and removes provider dependency on exec_shell.
+- [Phase 03]: Shell pipeline parsing for PipeWire and UPower lives in Luau provider code, not Rust core. — Preserves the no service-specific Rust command behavior rule.
 
 ## Performance Metrics
 
@@ -80,11 +82,12 @@ Last activity: 2026-05-03
 | Phase 01 P03 | 25min | 3 tasks | 12 files |
 | Phase 03 P01 | 4min | 3 tasks | 2 files |
 | Phase 03 P03 | 4min | 3 tasks | 3 files |
+| Phase 03 P02 | 6min | 3 tasks | 5 files |
 
 ## Session
 
-Last session: 2026-05-03T18:42:46.901Z
-Stopped At: Completed 03-03-PLAN.md
+Last session: 2026-05-03T18:45:16.900Z
+Stopped At: Completed 03-02-PLAN.md
 Resume File: None
 
 ## Accumulated Context
