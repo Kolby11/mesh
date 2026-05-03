@@ -4,12 +4,13 @@
       <box class="audio-copy">
         <text class="section-title">Audio</text>
         <text class="audio-subtitle">{audio_backend}</text>
+        <text class="audio-status">{audio_status}</text>
       </box>
       <text class="audio-value">{audio_label}</text>
     </box>
     <box class="volume-row">
       <button class="volume-button" onclick={onVolumeDown} title="Volume down" aria-label="Volume down">-</button>
-      <slider class="volume-slider" min="0" max="100" value="{audio_percent}" title="{audio_tooltip}" aria-label="Volume" />
+      <slider class="volume-slider" min="0" max="100" value="{audio_percent}" onchange={onVolumeChange} title="{audio_tooltip}" aria-label="Volume" />
       <button class="volume-button" onclick={onVolumeUp} title="Volume up" aria-label="Volume up">+</button>
     </box>
     <box class="audio-actions">
@@ -29,22 +30,20 @@ audio_label = "0%"
 audio_tooltip = "Volume unavailable"
 audio_backend = "Unavailable"
 audio_percent = 0
+audio_available = false
+audio_controls_available = false
+audio_status = "Audio unavailable"
 
--- Derive all display state from live proxy fields on every rerender.
--- No callbacks — audio.percent, audio.muted, and audio.source_plugin are
--- read directly; the runtime tracks each field for invalidation.
-function onRender()
-    if not audio_ok or not audio then
-        icon_name = "audio-volume-muted"
-        audio_label = "0%"
-        audio_tooltip = "Audio service unavailable"
-        audio_backend = "Unavailable"
-        audio_percent = 0
-        return
-    end
+local function clamp_percent(value)
+    local numeric = tonumber(value) or 0
+    if numeric < 0 then return 0 end
+    if numeric > 100 then return 100 end
+    return math.floor(numeric + 0.5)
+end
 
-    local percent = audio.percent or 0
-    local muted = audio.muted or false
+local function update_audio_copy(percent, muted)
+    audio_percent = percent
+    audio_label = string.format("%d%%", percent)
 
     if muted or percent == 0 then
         icon_name = "audio-volume-muted"
@@ -56,9 +55,6 @@ function onRender()
         icon_name = "audio-volume-high"
     end
 
-    audio_percent = percent
-    audio_label = string.format("%d%%", percent)
-    audio_backend = audio.source_plugin or "Unavailable"
     if muted then
         audio_tooltip = string.format("Volume muted at %d%%", percent)
     else
@@ -66,21 +62,68 @@ function onRender()
     end
 end
 
+-- Derive all display state from live proxy fields on every rerender.
+-- No callbacks — audio.percent, audio.muted, and audio.source_plugin are
+-- read directly; the runtime tracks each field for invalidation.
+function onRender()
+    audio_available = audio_ok and audio and audio.available ~= false
+    audio_controls_available = audio_available
+
+    if not audio_available then
+        icon_name = "audio-volume-muted"
+        audio_label = "0%"
+        audio_tooltip = "Audio unavailable"
+        audio_backend = "Unavailable"
+        audio_percent = 0
+        audio_status = "Audio unavailable"
+        return
+    end
+
+    local percent = clamp_percent(audio.percent)
+    local muted = audio.muted or false
+
+    audio_backend = audio.source_plugin or "Unavailable"
+    audio_status = ""
+    update_audio_copy(percent, muted)
+end
+
+function onVolumeChange(value)
+    local percent = clamp_percent(value)
+    local normalized = percent / 100
+    update_audio_copy(percent, false)
+
+    if audio_ok and audio and audio.available ~= false and audio_controls_available then
+        audio.set_volume("default", normalized)
+    else
+        audio_status = "Audio controls unavailable"
+        audio_tooltip = "Audio controls unavailable"
+    end
+end
+
 function onVolumeDown()
-    if audio_ok and audio then
+    if audio_ok and audio and audio.available ~= false and audio_controls_available then
         audio.volume_down()
+    else
+        audio_status = "Audio controls unavailable"
+        audio_tooltip = "Audio controls unavailable"
     end
 end
 
 function onVolumeUp()
-    if audio_ok and audio then
+    if audio_ok and audio and audio.available ~= false and audio_controls_available then
         audio.volume_up()
+    else
+        audio_status = "Audio controls unavailable"
+        audio_tooltip = "Audio controls unavailable"
     end
 end
 
 function onToggleMute()
-    if audio_ok and audio then
+    if audio_ok and audio and audio.available ~= false and audio_controls_available then
         audio.toggle_mute()
+    else
+        audio_status = "Audio controls unavailable"
+        audio_tooltip = "Audio controls unavailable"
     end
 end
 </script>
@@ -106,12 +149,16 @@ end
     font-size: token(typography.size.xs);
     font-weight: 700;
     color: token(color.on-surface-variant);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0;
 }
 
 .audio-subtitle {
     color: token(color.on-surface-variant);
+    font-size: token(typography.size.xs);
+}
+
+.audio-status {
+    color: token(color.disabled);
     font-size: token(typography.size.xs);
 }
 
