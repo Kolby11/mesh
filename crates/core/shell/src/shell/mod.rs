@@ -12,8 +12,8 @@ use mesh_core_plugin::lifecycle::{PluginInstance, PluginState};
 use mesh_core_plugin::package::{InstalledModuleGraph, ModuleKind, load_installed_module_graph};
 use mesh_core_plugin::{DependencyGraphError, PluginType, validate_plugin_dependency_graph};
 use mesh_core_service::{
-    InterfaceProvider, InterfaceRegistry, ServiceRegistry, canonical_interface_name,
-    load_interface_contract,
+    InterfaceContract, InterfaceProvider, InterfaceRegistry, ServiceRegistry,
+    canonical_interface_name, load_interface_contract,
 };
 use mesh_core_theme::ThemeEngine;
 use mesh_core_wayland::{Layer, StubSurface};
@@ -825,6 +825,7 @@ impl Shell {
             payload,
         } = event;
         let interface = canonical_interface_name(service);
+        self.validate_service_state_shape(&interface, source_plugin, payload);
         self.latest_service_state.insert(
             interface.clone(),
             LatestServiceState {
@@ -832,6 +833,36 @@ impl Shell {
                 provider_id: source_plugin.clone(),
                 state: payload.clone(),
             },
+        );
+    }
+
+    fn validate_service_state_shape(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        payload: &serde_json::Value,
+    ) {
+        let resolution = self.interfaces.resolve(interface, None);
+        let Some(contract) = resolution.contract.as_ref() else {
+            return;
+        };
+        for warning in service_state_contract_warnings(contract, payload) {
+            self.record_service_contract_warning(interface, provider_id, warning);
+        }
+    }
+
+    fn record_service_contract_warning(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        message: String,
+    ) {
+        let message = format!("service_contract_warning: {interface}: {message}");
+        tracing::warn!(interface, provider_id, "{message}");
+        self.diagnostics.record_lifecycle_error(
+            provider_id.to_string(),
+            "service_contract_warning",
+            message,
         );
     }
 
@@ -908,7 +939,7 @@ impl Shell {
                 source_plugin_id,
                 source_capabilities,
             } => {
-                self.dispatch_service_command(
+                let _ = self.dispatch_service_command(
                     &interface,
                     &command,
                     &payload,
@@ -938,13 +969,13 @@ impl Shell {
     }
 
     fn dispatch_service_command(
-        &self,
+        &mut self,
         interface: &str,
         command: &str,
         payload: &serde_json::Value,
         source_plugin_id: &str,
         source_capabilities: &mesh_core_capability::CapabilitySet,
-    ) {
+    ) -> serde_json::Value {
         let required = service_command_control_capability(interface);
         if !source_capabilities.is_granted(&required) {
             tracing::warn!(
@@ -954,7 +985,31 @@ impl Shell {
                 required_capability = %required,
                 "denied unauthorized service command dispatch"
             );
-            return;
+            return serde_json::json!({
+                "ok": false,
+                "error": "capability_denied",
+                "status": "capability_denied",
+            });
+        }
+
+        if !self.service_command_is_supported(interface, command) {
+            let message = format!("unsupported_service_command: {interface}.{command}");
+            tracing::warn!(
+                source_plugin_id,
+                interface,
+                command,
+                "unsupported_service_command"
+            );
+            self.diagnostics.record_lifecycle_error(
+                source_plugin_id.to_string(),
+                "unsupported_service_command",
+                message.clone(),
+            );
+            return serde_json::json!({
+                "ok": false,
+                "error": message,
+                "status": "unsupported_service_command",
+            });
         }
 
         if let Some(tx) = self.service_handlers.get(interface) {
@@ -962,9 +1017,23 @@ impl Shell {
                 command: command.to_string(),
                 payload: payload.clone(),
             });
+            serde_json::json!({ "ok": true, "queued": true })
         } else {
             tracing::debug!("no handler registered for service: {interface}");
+            serde_json::json!({
+                "ok": false,
+                "error": "service_unavailable",
+                "status": "service_unavailable",
+            })
         }
+    }
+
+    fn service_command_is_supported(&self, interface: &str, command: &str) -> bool {
+        let resolution = self.interfaces.resolve(interface, None);
+        let Some(contract) = resolution.contract.as_ref() else {
+            return true;
+        };
+        contract.methods.iter().any(|method| method.name == command)
     }
 
     fn set_surface_visibility(
@@ -1305,8 +1374,12 @@ impl Shell {
         let graph_path = workspace_root.join("config/package.json");
         match load_installed_module_graph(&graph_path) {
             Ok(graph) => {
-                let (candidates, statuses) =
-                    backend_launch_candidates_from_graph(&graph, &self.plugins, &self.config);
+                let (candidates, statuses) = backend_launch_candidates_from_graph(
+                    &graph,
+                    &self.plugins,
+                    &self.config,
+                    &self.interfaces,
+                );
                 for status in statuses {
                     self.record_backend_runtime_status(
                         status.interface.clone(),
@@ -1480,12 +1553,13 @@ fn backend_launch_candidates_from_graph(
     graph: &InstalledModuleGraph,
     plugins: &HashMap<String, PluginInstance>,
     config: &ShellConfig,
+    interfaces: &InterfaceRegistry,
 ) -> (
     Vec<BackendLaunchCandidate>,
     Vec<BackendLifecycleStatusRecord>,
 ) {
     let mut statuses = backend_requirement_statuses(graph);
-    let mut interfaces: Vec<String> = graph
+    let mut interface_names: Vec<String> = graph
         .backend_modules()
         .into_iter()
         .flat_map(|module| {
@@ -1498,11 +1572,11 @@ fn backend_launch_candidates_from_graph(
                 .collect::<Vec<_>>()
         })
         .collect();
-    interfaces.sort();
-    interfaces.dedup();
+    interface_names.sort();
+    interface_names.dedup();
 
     let mut candidates = Vec::new();
-    for interface in interfaces {
+    for interface in interface_names {
         let Some(active_provider) = graph.active_provider(&interface) else {
             statuses.push(BackendLifecycleStatusRecord {
                 interface,
@@ -1555,6 +1629,13 @@ fn backend_launch_candidates_from_graph(
                     active_provider.module_id
                 ),
             });
+            continue;
+        }
+
+        if let Some(status) =
+            validate_backend_provider_contract(&interface, &active_provider.module_id, interfaces)
+        {
+            statuses.push(status);
             continue;
         }
 
@@ -1679,6 +1760,44 @@ fn backend_requirement_statuses(graph: &InstalledModuleGraph) -> Vec<BackendLife
     statuses
 }
 
+fn validate_backend_provider_contract(
+    interface: &str,
+    provider_id: &str,
+    interfaces: &InterfaceRegistry,
+) -> Option<BackendLifecycleStatusRecord> {
+    let resolution = interfaces.resolve(interface, None);
+    if resolution.contract.is_none() && resolution.provider.is_none() {
+        return None;
+    }
+
+    if resolution.contract.is_none() {
+        return Some(BackendLifecycleStatusRecord {
+            interface: canonical_interface_name(interface),
+            provider_id: Some(provider_id.to_string()),
+            status: "invalid_manifest",
+            message: format!("active provider {provider_id} has no interface contract"),
+        });
+    }
+
+    if !interfaces
+        .providers_for(interface)
+        .iter()
+        .any(|provider| provider.provider_plugin == provider_id)
+    {
+        return Some(BackendLifecycleStatusRecord {
+            interface: canonical_interface_name(interface),
+            provider_id: Some(provider_id.to_string()),
+            status: "invalid_manifest",
+            message: format!(
+                "active provider {provider_id} is not registered for interface {}",
+                canonical_interface_name(interface)
+            ),
+        });
+    }
+
+    None
+}
+
 fn legacy_backend_candidates_from_discovery(
     plugins: &HashMap<String, PluginInstance>,
     config: &ShellConfig,
@@ -1797,6 +1916,74 @@ fn backend_plugin_settings_json(config: &ShellConfig, plugin_id: &str) -> serde_
         .unwrap_or_else(|| serde_json::json!({}))
 }
 
+fn service_state_contract_warnings(
+    contract: &InterfaceContract,
+    payload: &serde_json::Value,
+) -> Vec<String> {
+    let Some(object) = payload.as_object() else {
+        return vec![format!(
+            "state for {} must be a JSON object, got {}",
+            contract.interface,
+            json_type_name(payload)
+        )];
+    };
+
+    let mut warnings = Vec::new();
+    for field in &contract.state_fields {
+        if is_runtime_metadata_state_field(&field.name) {
+            continue;
+        }
+        let Some(value) = object.get(&field.name) else {
+            warnings.push(format!(
+                "missing required state field '{}' for {}",
+                field.name, contract.interface
+            ));
+            continue;
+        };
+        if !json_value_matches_contract_type(value, &field.field_type) {
+            warnings.push(format!(
+                "state field '{}' for {} expected {}, got {}",
+                field.name,
+                contract.interface,
+                field.field_type,
+                json_type_name(value)
+            ));
+        }
+    }
+    warnings
+}
+
+fn is_runtime_metadata_state_field(name: &str) -> bool {
+    name == "source_plugin"
+}
+
+fn json_value_matches_contract_type(value: &serde_json::Value, field_type: &str) -> bool {
+    let normalized = field_type.trim().to_ascii_lowercase();
+    if normalized.starts_with('[') && normalized.ends_with(']') {
+        return value.is_array();
+    }
+
+    match normalized.as_str() {
+        "bool" | "boolean" => value.is_boolean(),
+        "float" | "double" | "number" => value.is_number(),
+        "int" | "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
+        "string" => value.is_string(),
+        "object" | "table" | "map" => value.is_object(),
+        _ => true,
+    }
+}
+
+fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
 impl Default for Shell {
     fn default() -> Self {
         Self::new()
@@ -1854,8 +2041,8 @@ fn default_plugin_dirs() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendRuntimeSlot, BackendRuntimeStatus, ServiceCommandMsg, ServiceEvent, Shell,
-        backend_launch_candidates_from_graph,
+        BackendRuntimeSlot, BackendRuntimeStatus, InterfaceProvider, InterfaceRegistry,
+        ServiceCommandMsg, ServiceEvent, Shell, backend_launch_candidates_from_graph,
         layout::measure_content_size,
         service::{apply_service_update, seed_service_state, service_name_from_interface},
         surface_layout::{SurfaceSizePolicy, load_frontend_plugin_settings},
@@ -1873,6 +2060,10 @@ mod tests {
         RootPackageManifest,
     };
     use mesh_core_scripting::ScriptState;
+    use mesh_core_service::{
+        ContractCapabilities, InterfaceContract, InterfaceMethod, contract::ContractStateField,
+        parse_contract_version,
+    };
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
@@ -1979,6 +2170,50 @@ mod tests {
             modules.into_iter().map(loaded_module).collect(),
         )
         .unwrap()
+    }
+
+    fn test_contract(interface: &str) -> InterfaceContract {
+        InterfaceContract {
+            interface: interface.to_string(),
+            version: parse_contract_version("1.0").unwrap(),
+            file_path: PathBuf::from("interface.toml"),
+            state_fields: vec![
+                ContractStateField {
+                    name: "available".to_string(),
+                    field_type: "boolean".to_string(),
+                    description: None,
+                },
+                ContractStateField {
+                    name: "percent".to_string(),
+                    field_type: "float".to_string(),
+                    description: None,
+                },
+                ContractStateField {
+                    name: "source_plugin".to_string(),
+                    field_type: "string".to_string(),
+                    description: None,
+                },
+            ],
+            methods: vec![InterfaceMethod {
+                name: "set_volume".to_string(),
+                args: Vec::new(),
+                returns: Some("Result".to_string()),
+            }],
+            events: Vec::new(),
+            types: HashMap::new(),
+            capabilities: ContractCapabilities::default(),
+        }
+    }
+
+    fn register_test_provider(interfaces: &InterfaceRegistry, interface: &str, provider_id: &str) {
+        interfaces.register(InterfaceProvider {
+            interface: interface.to_string(),
+            version: Some("1.0".to_string()),
+            base_plugin: Some("@mesh/test-interface".to_string()),
+            provider_plugin: provider_id.to_string(),
+            backend_name: provider_id.to_string(),
+            priority: 100,
+        });
     }
 
     fn backend_runtime_slot(
@@ -2094,6 +2329,123 @@ mod tests {
     }
 
     #[test]
+    fn service_contract_provider_declaration_requires_provider_pair() {
+        let graph = graph_from_json(
+            r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/backend": { "kind": "backend", "path": "@mesh/backend", "enabled": true }
+              },
+              "providers": { "mesh.audio": "@mesh/backend" }
+            }"#,
+            vec![
+                r#"{
+                  "name": "@mesh/backend",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": { "main": "src/main.luau" },
+                    "provides": [{ "interface": "mesh.audio", "provider": "test" }]
+                  }
+                }"#,
+            ],
+        );
+        let (_dir, plugin) = plugin_instance("@mesh/backend", Some("src/main.luau"));
+        let plugins = HashMap::from([("@mesh/backend".to_string(), plugin)]);
+        let interfaces = InterfaceRegistry::new();
+        interfaces.register_contract(test_contract("mesh.audio"));
+
+        let (candidates, statuses) =
+            backend_launch_candidates_from_graph(&graph, &plugins, &test_config(), &interfaces);
+
+        assert!(candidates.is_empty());
+        assert!(statuses.iter().any(|status| {
+            status.status == "invalid_manifest"
+                && status.provider_id.as_deref() == Some("@mesh/backend")
+                && status.message.contains("not registered")
+        }));
+
+        register_test_provider(&interfaces, "mesh.audio", "@mesh/backend");
+        let (candidates, statuses) =
+            backend_launch_candidates_from_graph(&graph, &plugins, &test_config(), &interfaces);
+
+        assert_eq!(candidates.len(), 1);
+        assert!(
+            statuses
+                .iter()
+                .all(|status| status.provider_id.as_deref() != Some("@mesh/backend"))
+        );
+    }
+
+    #[test]
+    fn state_shape_mismatch_records_service_contract_warning() {
+        let mut shell = Shell::new();
+        shell
+            .interfaces
+            .register_contract(test_contract("mesh.audio"));
+        register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pipewire-audio",
+                serde_json::json!({ "available": true, "percent": "loud" }),
+            ))
+            .unwrap();
+
+        let snapshot = shell.diagnostics.snapshot();
+        assert!(snapshot.iter().any(|(plugin_id, health)| {
+            plugin_id == "@mesh/pipewire-audio"
+                && health.to_string().contains("service_contract_warning")
+        }));
+        let latest = shell.latest_service_state.get("mesh.audio").unwrap();
+        assert!(latest.state.get("source_plugin").is_none());
+    }
+
+    #[test]
+    fn service_contract_unknown_service_command_returns_failure_result() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        shell
+            .interfaces
+            .register_contract(test_contract("mesh.audio"));
+        register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+        let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+        let mut capabilities = mesh_core_capability::CapabilitySet::new();
+        capabilities.grant(mesh_core_capability::Capability::new(
+            "service.audio.control",
+        ));
+
+        let result = shell.dispatch_service_command(
+            "mesh.audio",
+            "explode",
+            &serde_json::json!({}),
+            "@mesh/panel",
+            &capabilities,
+        );
+
+        assert_eq!(result["ok"], serde_json::json!(false));
+        assert_eq!(
+            result["status"],
+            serde_json::json!("unsupported_service_command")
+        );
+        assert!(rx.try_recv().is_err());
+        assert!(
+            shell
+                .diagnostics
+                .snapshot()
+                .iter()
+                .any(|(plugin_id, health)| {
+                    plugin_id == "@mesh/panel"
+                        && health.to_string().contains("unsupported_service_command")
+                })
+        );
+    }
+
+    #[test]
     fn launcher_content_size_ignores_root_surface_bounds() {
         let mut root = node("root", 0.0, 0.0, 640.0, 360.0);
         root.children.push(node("column", 12.0, 12.0, 336.0, 332.0));
@@ -2174,8 +2526,12 @@ mod tests {
             ("@mesh/pulseaudio-audio".to_string(), pulse),
         ]);
 
-        let (candidates, statuses) =
-            backend_launch_candidates_from_graph(&graph, &plugins, &test_config());
+        let (candidates, statuses) = backend_launch_candidates_from_graph(
+            &graph,
+            &plugins,
+            &test_config(),
+            &InterfaceRegistry::new(),
+        );
 
         assert!(
             statuses
@@ -2220,8 +2576,12 @@ mod tests {
         let (_dir, plugin) = plugin_instance("@mesh/backend", None);
         let plugins = HashMap::from([("@mesh/backend".to_string(), plugin)]);
 
-        let (candidates, statuses) =
-            backend_launch_candidates_from_graph(&graph, &plugins, &test_config());
+        let (candidates, statuses) = backend_launch_candidates_from_graph(
+            &graph,
+            &plugins,
+            &test_config(),
+            &InterfaceRegistry::new(),
+        );
 
         assert!(candidates.is_empty());
         assert!(statuses.iter().any(|status| {
@@ -2267,8 +2627,12 @@ mod tests {
         let (_dir, plugin) = plugin_instance("@mesh/backend", Some("src/main.luau"));
         let plugins = HashMap::from([("@mesh/backend".to_string(), plugin)]);
 
-        let (candidates, statuses) =
-            backend_launch_candidates_from_graph(&graph, &plugins, &test_config());
+        let (candidates, statuses) = backend_launch_candidates_from_graph(
+            &graph,
+            &plugins,
+            &test_config(),
+            &InterfaceRegistry::new(),
+        );
 
         assert!(candidates.is_empty());
         assert!(statuses.iter().any(|status| {
@@ -2313,8 +2677,12 @@ mod tests {
         let (_dir, plugin) = plugin_instance("@mesh/backend", Some("src/main.luau"));
         let plugins = HashMap::from([("@mesh/backend".to_string(), plugin)]);
 
-        let (candidates, statuses) =
-            backend_launch_candidates_from_graph(&graph, &plugins, &test_config());
+        let (candidates, statuses) = backend_launch_candidates_from_graph(
+            &graph,
+            &plugins,
+            &test_config(),
+            &InterfaceRegistry::new(),
+        );
 
         assert!(candidates.is_empty());
         assert!(statuses.iter().any(|status| {
@@ -2346,8 +2714,12 @@ mod tests {
             ],
         );
 
-        let (candidates, statuses) =
-            backend_launch_candidates_from_graph(&graph, &HashMap::new(), &test_config());
+        let (candidates, statuses) = backend_launch_candidates_from_graph(
+            &graph,
+            &HashMap::new(),
+            &test_config(),
+            &InterfaceRegistry::new(),
+        );
 
         assert!(candidates.is_empty());
         assert!(statuses.iter().any(|status| {
