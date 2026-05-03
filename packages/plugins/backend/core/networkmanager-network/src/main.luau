@@ -19,7 +19,7 @@ local function split_line(line, sep)
 end
 
 local function fetch_connections()
-    local result = mesh.exec_shell('nmcli -t -f UUID,NAME,TYPE,DEVICE,STATE,SSID,SIGNAL connection show')
+    local result = mesh.exec("nmcli", { "-t", "-f", "UUID,NAME,TYPE,DEVICE,STATE,SSID,SIGNAL", "connection", "show" })
     if not result.success then return nil end
     local conns = {}
     for line in result.stdout:gmatch('([^\n]+)') do
@@ -39,7 +39,7 @@ local function fetch_connections()
 end
 
 local function fetch_net_devices()
-    local result = mesh.exec_shell('nmcli -t -f DEVICE,TYPE,STATE device')
+    local result = mesh.exec("nmcli", { "-t", "-f", "DEVICE,TYPE,STATE", "device" })
     if not result.success then return nil end
     local devices = {}
     for line in result.stdout:gmatch('([^\n]+)') do
@@ -56,7 +56,7 @@ end
 local function fetch_bluetooth_devices()
     local devices = {}
     local seen = {}
-    local connected = mesh.exec_shell('bluetoothctl devices Connected')
+    local connected = mesh.exec("bluetoothctl", { "devices", "Connected" })
     if connected.success then
         for line in connected.stdout:gmatch('([^\n]+)') do
             local mac, name = line:match('Device%s+([%w:]+)%s+(.*)')
@@ -66,7 +66,7 @@ local function fetch_bluetooth_devices()
             end
         end
     end
-    local paired = mesh.exec_shell('bluetoothctl devices Paired')
+    local paired = mesh.exec("bluetoothctl", { "devices", "Paired" })
     if paired.success then
         for line in paired.stdout:gmatch('([^\n]+)') do
             local mac, name = line:match('Device%s+([%w:]+)%s+(.*)')
@@ -81,7 +81,7 @@ end
 
 -- Determine whether the Wi-Fi radio is currently enabled via nmcli.
 local function fetch_wifi_enabled()
-    local result = mesh.exec_shell('nmcli radio wifi')
+    local result = mesh.exec("nmcli", { "radio", "wifi" })
     if not result.success then return false end
     local out = result.stdout:match('^%s*(.-)%s*$') or ''
     return out == 'enabled'
@@ -187,8 +187,8 @@ function on_command_disconnect()
 end
 
 function on_command_wifi_scan()
-    mesh.exec_shell('nmcli device wifi rescan')
-    local result = mesh.exec_shell('nmcli -t -f SSID,SIGNAL,BSSID device wifi list')
+    mesh.exec("nmcli", { "device", "wifi", "rescan" })
+    local result = mesh.exec("nmcli", { "-t", "-f", "SSID,SIGNAL,BSSID", "device", "wifi", "list" })
     if not result.success then
         mesh.service.emit_unavailable()
         return
@@ -221,7 +221,7 @@ function on_command_set_wifi_enabled()
         return
     end
     local payload = mesh.service.payload()
-    local cmd = payload.enabled and 'nmcli radio wifi on' or 'nmcli radio wifi off'
-    local result = mesh.exec_shell(cmd)
+    local state = payload.enabled and "on" or "off"
+    local result = mesh.exec("nmcli", { "radio", "wifi", state })
     mesh.service.emit({ ok = result.success, error = result.stderr })
 end
