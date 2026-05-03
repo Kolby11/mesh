@@ -732,6 +732,45 @@ mod tests {
     }
 
     #[test]
+    fn exec_missing_program_returns_failure_table() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"__mesh_missing_command_for_test__\", {})\nmesh.service.emit({ success = result.success, stdout = result.stdout, stderr = result.stderr, code = result.code })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
+        assert_eq!(
+            payload.get("success").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(payload.get("stdout").and_then(|v| v.as_str()), Some(""));
+        assert!(
+            payload
+                .get("stderr")
+                .and_then(|v| v.as_str())
+                .is_some_and(|stderr| !stderr.is_empty())
+        );
+        assert!(payload.get("code").is_none());
+    }
+
+    #[test]
+    fn exec_nonzero_exit_returns_failure_table() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"sh\", {\"-c\", \"printf err >&2; exit 7\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, stderr = result.stderr, code = result.code })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
+        assert_eq!(
+            payload.get("success").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(payload.get("stdout").and_then(|v| v.as_str()), Some(""));
+        assert_eq!(payload.get("stderr").and_then(|v| v.as_str()), Some("err"));
+        assert_eq!(payload.get("code").and_then(|v| v.as_i64()), Some(7));
+    }
+
+    #[test]
     fn config_returns_backend_settings() {
         let mut ctx = BackendScriptContext::new_with_settings(
             "@test/backend",
