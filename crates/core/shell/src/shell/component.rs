@@ -3297,6 +3297,127 @@ end
     }
 
     #[test]
+    fn frontend_proxy_state_update_reaches_render_state() {
+        let mut component = test_frontend_component_with_catalog(
+            r#"
+<template>
+  <box title="{volumeLevel}" />
+</template>
+<script lang="luau">
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+
+volumeLevel = 0
+
+function onRender()
+    if not audio_ok or not audio then
+        volumeLevel = 0
+        return
+    end
+    volumeLevel = audio.state.percent or 0
+end
+</script>
+"#,
+            audio_network_catalog(),
+            &["service.audio.read"],
+        );
+
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.audio".into(),
+                source_plugin: "@mesh/pipewire-audio".into(),
+                payload: serde_json::json!({ "percent": 73, "muted": false }),
+            })
+            .unwrap();
+
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(240, 40);
+        component.paint(&theme, 240, 40, &mut buffer).unwrap();
+
+        assert_eq!(
+            runtime_value(&component, "volumeLevel"),
+            Some(serde_json::json!(73))
+        );
+        let tree = component.last_tree.as_ref().unwrap();
+        fn first_title(node: &WidgetNode) -> Option<&str> {
+            node.attributes
+                .get("title")
+                .map(String::as_str)
+                .or_else(|| node.children.iter().find_map(first_title))
+        }
+        assert_eq!(first_title(tree), Some("73"));
+    }
+
+    #[test]
+    fn frontend_proxy_state_read_tracks_repaint_invalidation() {
+        let mut component = test_frontend_component_with_catalog(
+            r#"
+<template>
+  <box title="{volumeLevel}" />
+</template>
+<script lang="luau">
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+
+volumeLevel = 0
+
+function onRender()
+    if audio_ok and audio then
+        volumeLevel = audio.state.percent or 0
+    end
+end
+</script>
+"#,
+            audio_network_catalog(),
+            &["service.audio.read"],
+        );
+
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(240, 40);
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.audio".into(),
+                source_plugin: "@mesh/pipewire-audio".into(),
+                payload: serde_json::json!({ "percent": 20, "muted": false }),
+            })
+            .unwrap();
+        component.paint(&theme, 240, 40, &mut buffer).unwrap();
+        component.clear_runtime_dirty_states();
+        component.dirty = false;
+        component.render_hooks_pending = false;
+
+        {
+            let runtimes = component.runtimes.lock().unwrap();
+            let runtime = runtimes.get(component.id()).unwrap();
+            assert!(
+                runtime
+                    .script_ctx
+                    .tracked_fields_for_service("audio")
+                    .contains("percent"),
+                "audio.state.percent should track percent for service invalidation"
+            );
+        }
+
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.audio".into(),
+                source_plugin: "@mesh/pipewire-audio".into(),
+                payload: serde_json::json!({ "percent": 35, "muted": false }),
+            })
+            .unwrap();
+
+        assert!(
+            component.wants_render(),
+            "changing audio.state.percent should schedule a repaint"
+        );
+        component.paint(&theme, 240, 40, &mut buffer).unwrap();
+        assert_eq!(
+            runtime_value(&component, "volumeLevel"),
+            Some(serde_json::json!(35))
+        );
+    }
+
+    #[test]
     fn pcall_service_lookup_diagnostic_reaches_component_diagnostics() {
         let mut component = test_frontend_component(
             r#"
