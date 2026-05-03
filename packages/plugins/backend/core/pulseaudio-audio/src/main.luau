@@ -1,8 +1,9 @@
 -- PulseAudio audio backend.
 -- Polls volume via pactl and responds to audio service commands.
 
-local PLUGIN_ID = "@mesh/pulseaudio-audio"
 local SOUNDS_ROOT = "/usr/share/mesh/sounds/"
+
+state = { available = false, percent = 0, muted = false }
 
 function init()
     mesh.service.set_poll_interval(500)
@@ -21,16 +22,15 @@ local function read_state()
         available = true,
         percent = percent,
         muted = muted,
-        source_plugin = PLUGIN_ID,
     }
 end
 
-local function emit_state()
-    local state = read_state()
-    if state then
-        mesh.service.emit(state)
+local function refresh_state()
+    local next_state = read_state()
+    if next_state then
+        state = next_state
     else
-        mesh.service.emit_unavailable()
+        state = { available = false, percent = 0, muted = false }
     end
 end
 
@@ -61,45 +61,50 @@ local function resolve_sound_path(path)
 end
 
 function on_poll()
-    emit_state()
+    refresh_state()
 end
 
 function on_command_volume_up()
     mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", "+5%" })
     mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", "0" })
-    emit_state()
+    refresh_state()
+    return { ok = true }
 end
 
 function on_command_volume_down()
     mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", "-5%" })
-    emit_state()
+    refresh_state()
+    return { ok = true }
 end
 
 function on_command_set_volume()
     local payload = mesh.service.payload()
     local percent = command_percent_from_payload(payload)
     mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", tostring(percent) .. "%" })
-    emit_state()
+    refresh_state()
+    return { ok = true }
 end
 
 function on_command_toggle_mute()
     mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", "toggle" })
-    emit_state()
+    refresh_state()
+    return { ok = true }
 end
 
 function on_command_set_muted()
     local payload = mesh.service.payload()
     local muted = payload.muted == true
     mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", muted and "1" or "0" })
-    emit_state()
+    refresh_state()
+    return { ok = true }
 end
 
 function on_command_play_sound()
     local payload = mesh.service.payload()
     local path = resolve_sound_path(payload.path)
     if not path then
-        mesh.service.emit({ ok = false, error = "invalid sound path" })
-        return
+        return { ok = false, error = "invalid sound path" }
     end
     mesh.exec("aplay", { path })
+    return { ok = true }
 end

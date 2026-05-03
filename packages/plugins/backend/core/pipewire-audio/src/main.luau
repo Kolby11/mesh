@@ -1,8 +1,9 @@
 -- PipeWire audio backend.
 -- Polls volume via wpctl and responds to audio service commands.
 
-local PLUGIN_ID = "@mesh/pipewire-audio"
 local SOUNDS_ROOT = "/usr/share/mesh/sounds/"
+
+state = { available = false, percent = 0, muted = false }
 
 function init()
     mesh.service.set_poll_interval(500)
@@ -50,16 +51,15 @@ local function read_state()
         available = true,
         percent = math.floor((level * 100) + 0.5),
         muted = raw:match("%[MUTED%]") ~= nil,
-        source_plugin = PLUGIN_ID,
     }
 end
 
-local function emit_state()
-    local state = read_state()
-    if state then
-        mesh.service.emit(state)
+local function refresh_state()
+    local next_state = read_state()
+    if next_state then
+        state = next_state
     else
-        mesh.service.emit_unavailable()
+        state = { available = false, percent = 0, muted = false }
     end
 end
 
@@ -90,7 +90,7 @@ local function resolve_sound_path(path)
 end
 
 function on_poll()
-    emit_state()
+    refresh_state()
 end
 
 function on_command_volume_up()
@@ -99,7 +99,8 @@ function on_command_volume_up()
         mesh.exec("wpctl", { "set-volume", sink_id, "5%+" })
         mesh.exec("wpctl", { "set-mute", sink_id, "0" })
     end
-    emit_state()
+    refresh_state()
+    return { ok = true }
 end
 
 function on_command_volume_down()
@@ -107,7 +108,8 @@ function on_command_volume_down()
     if sink_id then
         mesh.exec("wpctl", { "set-volume", sink_id, "5%-" })
     end
-    emit_state()
+    refresh_state()
+    return { ok = true }
 end
 
 function on_command_set_volume()
@@ -117,7 +119,8 @@ function on_command_set_volume()
     if sink_id then
         mesh.exec("wpctl", { "set-volume", sink_id, tostring(percent) .. "%" })
     end
-    emit_state()
+    refresh_state()
+    return { ok = true }
 end
 
 function on_command_toggle_mute()
@@ -125,7 +128,8 @@ function on_command_toggle_mute()
     if sink_id then
         mesh.exec("wpctl", { "set-mute", sink_id, "toggle" })
     end
-    emit_state()
+    refresh_state()
+    return { ok = true }
 end
 
 function on_command_set_muted()
@@ -135,15 +139,16 @@ function on_command_set_muted()
     if sink_id then
         mesh.exec("wpctl", { "set-mute", sink_id, muted and "1" or "0" })
     end
-    emit_state()
+    refresh_state()
+    return { ok = true }
 end
 
 function on_command_play_sound()
     local payload = mesh.service.payload()
     local path = resolve_sound_path(payload.path)
     if not path then
-        mesh.service.emit({ ok = false, error = "invalid sound path" })
-        return
+        return { ok = false, error = "invalid sound path" }
     end
     mesh.exec("aplay", { path })
+    return { ok = true }
 end
