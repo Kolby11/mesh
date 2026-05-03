@@ -108,7 +108,7 @@ local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
 if not audio_ok then audio = nil end
 
 slider_value = 0.0
-audio_tooltip = "Volume unavailable"
+audio_tooltip = "Audio unavailable"
 
 function onVolumeChange(value)
     local normalized = math.max(0.0, math.min(1.0, value))
@@ -116,9 +116,9 @@ function onVolumeChange(value)
     audio_tooltip = string.format("Volume %d%%", math.floor(normalized * 100))
 
     if audio_ok and audio then
-        mesh.events.publish("mesh.audio.set-volume", {
-            percent = math.floor((normalized * 100) + 0.5),
-        })
+        audio.set_volume("default", normalized)
+    else
+        audio_tooltip = "Audio unavailable"
     end
 end
 </script>
