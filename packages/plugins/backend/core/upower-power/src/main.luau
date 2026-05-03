@@ -1,6 +1,14 @@
 -- UPower battery backend.
 -- Polls UPower via its CLI and emits battery state as JSON.
 
+state = {
+    available = false,
+    level = 0,
+    charging = false,
+    time_remaining_minutes = 0,
+    time_to_full_minutes = 0,
+}
+
 function init()
     mesh.service.set_poll_interval(15000)
 end
@@ -48,7 +56,6 @@ local function parse_display_device(stdout)
         power_draw_watts = 0,
         energy_now_watt_hours = 0,
         energy_full_watt_hours = 0,
-        source_plugin = "@mesh/upower",
     }
 
     for line in (stdout or ""):gmatch("([^\n]+)") do
@@ -78,8 +85,14 @@ end
 function on_poll()
     local result = mesh.exec("upower", { "-i", "/org/freedesktop/UPower/devices/DisplayDevice" })
     if result.success then
-        mesh.service.emit(parse_display_device(result.stdout))
+        state = parse_display_device(result.stdout)
     else
-        mesh.service.emit_unavailable()
+        state = {
+            available = false,
+            level = 0,
+            charging = false,
+            time_remaining_minutes = 0,
+            time_to_full_minutes = 0,
+        }
     end
 end

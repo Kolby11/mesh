@@ -9,16 +9,22 @@ local AVAILABLE   = {DARK_THEME, LIGHT_THEME}
 
 local current_theme = DARK_THEME
 
+state = {
+    current   = current_theme,
+    is_dark   = true,
+    available = AVAILABLE,
+}
+
 function init()
     mesh.service.set_poll_interval(300000)
 end
 
 local function emit_state()
-    mesh.service.emit({
+    state = {
         current   = current_theme,
         is_dark   = (current_theme == DARK_THEME),
         available = AVAILABLE,
-    })
+    }
 end
 
 function on_poll()
@@ -34,4 +40,5 @@ function on_command_set_current()
         current_theme = new_id
     end
     emit_state()
+    return { ok = true }
 end

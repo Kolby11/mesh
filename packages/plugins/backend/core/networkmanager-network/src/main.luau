@@ -1,8 +1,14 @@
 -- NetworkManager backend.
 -- Dominant provider for mesh.network. Implements the base interface contract
 -- (available, wifi_enabled, connections, devices) and emits additive runtime
--- extras (networks from the last scan, source_plugin identifier) on every poll.
+-- extras (networks from the last scan) on every poll.
 -- Handles connect/disconnect/set_wifi_enabled/wifi_scan commands.
+
+state = { available = false, wifi_enabled = false, connections = {}, devices = {}, networks = {} }
+
+-- Cache the last successful wifi scan so the networks list is available
+-- even between explicit scan commands.
+local last_networks = {}
 
 function init()
     mesh.service.set_poll_interval(15000)
@@ -107,20 +113,26 @@ local function is_uuid(id)
     return #compact == 32 and compact:match('^%x+$') ~= nil
 end
 
--- Cache the last successful wifi scan so the networks list is available
--- even between explicit scan commands.
-local last_networks = {}
-
 local warned = false
-function on_poll()
+local function set_unavailable_state()
+    state = {
+        available    = false,
+        wifi_enabled = false,
+        connections  = {},
+        devices      = {},
+        networks     = last_networks,
+    }
+end
+
+local function refresh_state()
     local conns = fetch_connections()
     if not conns then
         if not warned then
             mesh.log.warn('NetworkManager backend: nmcli query failed')
             warned = true
         end
-        mesh.service.emit_unavailable()
-        return
+        set_unavailable_state()
+        return false
     end
     warned = false
     local net_devices = fetch_net_devices() or {}
@@ -131,67 +143,69 @@ function on_poll()
     local wifi_on = fetch_wifi_enabled()
 
     -- Emit base interface state fields plus runtime-defined extras.
-    -- Networks and source_plugin are additive surface that richer UIs can use.
-    mesh.service.emit({
+    -- Networks are additive surface that richer UIs can use.
+    state = {
         available    = true,
         wifi_enabled = wifi_on,
         connections  = conns,
         devices      = net_devices,
         networks     = last_networks,
-        source_plugin = '@mesh/networkmanager',
-    })
+    }
+    return true
+end
+
+function on_poll()
+    refresh_state()
 end
 
 function on_command_connect()
     if not has_control() then
-        mesh.service.emit({ ok = false, error = 'permission denied' })
-        return
+        return { ok = false, error = 'permission denied' }
     end
     local payload = mesh.service.payload()
     local id = payload.connection_id or payload.id or ''
     if id == '' then
-        mesh.service.emit({ ok = false, error = 'missing connection_id' })
-        return
+        return { ok = false, error = 'missing connection_id' }
     end
+    local result = nil
     if is_bluetooth_mac(id) then
-        local result = mesh.exec('bluetoothctl', { 'connect', id })
-        mesh.service.emit({ ok = result.success, error = result.stderr })
+        result = mesh.exec('bluetoothctl', { 'connect', id })
     elseif is_uuid(id) then
-        local result = mesh.exec('nmcli', { 'connection', 'up', 'uuid', id })
-        mesh.service.emit({ ok = result.success, error = result.stderr })
+        result = mesh.exec('nmcli', { 'connection', 'up', 'uuid', id })
     else
-        mesh.service.emit({ ok = false, error = 'invalid connection_id' })
+        return { ok = false, error = 'invalid connection_id' }
     end
+    refresh_state()
+    return { ok = result.success, error = result.stderr }
 end
 
 function on_command_disconnect()
     if not has_control() then
-        mesh.service.emit({ ok = false, error = 'permission denied' })
-        return
+        return { ok = false, error = 'permission denied' }
     end
     local payload = mesh.service.payload()
     local id = payload.connection_id or payload.id or ''
     if id == '' then
-        mesh.service.emit({ ok = false, error = 'missing connection_id' })
-        return
+        return { ok = false, error = 'missing connection_id' }
     end
+    local result = nil
     if is_bluetooth_mac(id) then
-        local result = mesh.exec('bluetoothctl', { 'disconnect', id })
-        mesh.service.emit({ ok = result.success, error = result.stderr })
+        result = mesh.exec('bluetoothctl', { 'disconnect', id })
     elseif is_uuid(id) then
-        local result = mesh.exec('nmcli', { 'connection', 'down', 'uuid', id })
-        mesh.service.emit({ ok = result.success, error = result.stderr })
+        result = mesh.exec('nmcli', { 'connection', 'down', 'uuid', id })
     else
-        mesh.service.emit({ ok = false, error = 'invalid connection_id' })
+        return { ok = false, error = 'invalid connection_id' }
     end
+    refresh_state()
+    return { ok = result.success, error = result.stderr }
 end
 
 function on_command_wifi_scan()
     mesh.exec("nmcli", { "device", "wifi", "rescan" })
     local result = mesh.exec("nmcli", { "-t", "-f", "SSID,SIGNAL,BSSID", "device", "wifi", "list" })
     if not result.success then
-        mesh.service.emit_unavailable()
-        return
+        set_unavailable_state()
+        return { ok = false, error = result.stderr }
     end
     local networks = {}
     for line in result.stdout:gmatch('([^\n]+)') do
@@ -205,23 +219,23 @@ function on_command_wifi_scan()
     end
     -- Update the cached networks list so the next poll re-emits it.
     last_networks = networks
-    mesh.service.emit({
+    state = {
         available    = true,
         wifi_enabled = fetch_wifi_enabled(),
         connections  = fetch_connections() or {},
         devices      = {},
         networks     = networks,
-        source_plugin = '@mesh/networkmanager',
-    })
+    }
+    return { ok = true }
 end
 
 function on_command_set_wifi_enabled()
     if not has_control() then
-        mesh.service.emit({ ok = false, error = 'permission denied' })
-        return
+        return { ok = false, error = 'permission denied' }
     end
     local payload = mesh.service.payload()
-    local state = payload.enabled and "on" or "off"
-    local result = mesh.exec("nmcli", { "radio", "wifi", state })
-    mesh.service.emit({ ok = result.success, error = result.stderr })
+    local wifi_state = payload.enabled and "on" or "off"
+    local result = mesh.exec("nmcli", { "radio", "wifi", wifi_state })
+    refresh_state()
+    return { ok = result.success, error = result.stderr }
 end
