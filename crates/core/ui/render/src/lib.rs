@@ -333,6 +333,7 @@ mod tests {
             slot_contributions: Default::default(),
             surface_layout: None,
             assets: None,
+            icon_requirements: Default::default(),
             translations: Default::default(),
         };
         let theme = mesh_core_theme::default_theme();

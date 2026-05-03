@@ -4,7 +4,8 @@ pub mod manifest;
 
 pub use lifecycle::{PluginInstance, PluginState};
 pub use manifest::{
-    AccessibilitySection, ComponentExport, DependencyGraphError, ExportsSection, LoadedManifest,
-    Manifest, ManifestSource, PackageSection, PluginType, ProvidedInterface, ServiceSection,
-    SlotContribution, SlotDefinition, validate_plugin_dependency_graph,
+    AccessibilitySection, ComponentExport, DependencyGraphError, ExportsSection,
+    IconRequirementsSection, LoadedManifest, Manifest, ManifestSource, PackageSection, PluginType,
+    ProvidedInterface, ServiceSection, SlotContribution, SlotDefinition,
+    validate_plugin_dependency_graph,
 };

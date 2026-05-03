@@ -786,6 +786,18 @@ impl FrontendSurfaceComponent {
         }
     }
 
+    #[cfg(test)]
+    fn record_missing_icon_diagnostic(
+        &self,
+        semantic_name: &str,
+        tried: Vec<String>,
+    ) -> bool {
+        let Some(diagnostics) = &self.diagnostics else {
+            return false;
+        };
+        diagnostics.record_missing_icon(semantic_name.to_string(), tried)
+    }
+
     fn pointer_event_target_key(&self, tree: &WidgetNode, x: f32, y: f32) -> Option<String> {
         find_focusable_at(tree, x, y).or_else(|| {
             find_node_path_at(tree, x, y).and_then(|path| {
@@ -2472,6 +2484,7 @@ mod tests {
             provides_slots: HashMap::new(),
             slot_contributions: HashMap::new(),
             assets: None,
+            icon_requirements: mesh_core_plugin::IconRequirementsSection::default(),
             translations: HashMap::new(),
             surface_layout: None,
         }
@@ -3226,6 +3239,41 @@ end
 
         let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
         assert_eq!(diagnostics.error_count(), 1);
+    }
+
+    #[test]
+    fn missing_required_icon_degrades_plugin_without_unloading() {
+        let mut component = test_frontend_component(
+            r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+</script>
+"#,
+        );
+
+        component.compiled.manifest.icon_requirements.required = vec!["missing-proof".into()];
+        assert_eq!(component.id(), "@test/reactive-surface");
+        assert!(component.visible);
+
+        assert!(component.record_missing_icon_diagnostic(
+            "missing-proof",
+            vec!["material:not-present".into()]
+        ));
+        assert!(!component.record_missing_icon_diagnostic(
+            "missing-proof",
+            vec!["material:not-present".into()]
+        ));
+
+        let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
+        assert_eq!(diagnostics.error_count(), 0);
+        assert!(matches!(
+            diagnostics.health(),
+            mesh_core_diagnostics::HealthStatus::Degraded(message)
+                if message.contains("missing-proof")
+        ));
+        assert!(component.visible);
     }
 
     #[test]

@@ -45,6 +45,7 @@ struct DiagnosticsState {
     health: HealthStatus,
     error_count: u64,
     handler_errors: HashSet<(String, String, String)>,
+    missing_icons: HashSet<(String, String)>,
 }
 
 impl Diagnostics {
@@ -55,6 +56,7 @@ impl Diagnostics {
                 health: HealthStatus::Healthy,
                 error_count: 0,
                 handler_errors: HashSet::new(),
+                missing_icons: HashSet::new(),
             })),
         }
     }
@@ -99,6 +101,30 @@ impl Diagnostics {
                 "handler '{handler_name}' failed in component '{component_id}': {message}"
             ));
             state.error_count += 1;
+        }
+        inserted
+    }
+
+    pub fn record_missing_icon(
+        &self,
+        semantic_name: impl Into<String>,
+        tried: Vec<String>,
+    ) -> bool {
+        let semantic_name = semantic_name.into();
+        let mut state = self.state.lock().unwrap();
+        let inserted = state
+            .missing_icons
+            .insert((self.plugin_id.clone(), semantic_name.clone()));
+        if inserted {
+            let tried = if tried.is_empty() {
+                "no configured candidates".to_string()
+            } else {
+                format!("tried {}", tried.join(", "))
+            };
+            state.health = HealthStatus::Degraded(format!(
+                "missing icon '{semantic_name}' for plugin '{}': {tried}",
+                self.plugin_id
+            ));
         }
         inserted
     }
@@ -153,5 +179,32 @@ mod tests {
 
         assert_eq!(diagnostics.error_count(), 2);
         assert!(matches!(diagnostics.health(), HealthStatus::Error(_)));
+    }
+
+    #[test]
+    fn missing_icon_diagnostics_are_deduplicated_by_plugin_and_semantic_name() {
+        let diagnostics = Diagnostics::new("@mesh/quick-settings");
+
+        assert!(diagnostics.record_missing_icon(
+            "audio-volume-muted",
+            vec!["material:nope".into()]
+        ));
+        assert!(!diagnostics.record_missing_icon(
+            "audio-volume-muted",
+            vec!["material:nope".into()]
+        ));
+        assert!(diagnostics.record_missing_icon(
+            "network-wireless",
+            vec!["material:nope".into()]
+        ));
+
+        assert_eq!(diagnostics.error_count(), 0);
+        match diagnostics.health() {
+            HealthStatus::Degraded(message) => {
+                assert!(message.contains("network-wireless"));
+                assert!(message.contains("material:nope"));
+            }
+            other => panic!("expected degraded health, got {other:?}"),
+        }
     }
 }

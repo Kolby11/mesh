@@ -41,6 +41,8 @@ pub struct Manifest {
     #[serde(default)]
     pub assets: Option<AssetsSection>,
     #[serde(default)]
+    pub icon_requirements: IconRequirementsSection,
+    #[serde(default)]
     pub translations: HashMap<String, HashMap<String, String>>,
     #[serde(default)]
     pub surface_layout: Option<SurfaceLayoutSection>,
@@ -435,6 +437,14 @@ pub struct AssetsSection {
     pub icons: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IconRequirementsSection {
+    #[serde(default)]
+    pub required: Vec<String>,
+    #[serde(default)]
+    pub optional: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManifestSource {
     MeshToml,
@@ -622,6 +632,8 @@ struct TomlManifest {
     #[serde(default)]
     assets: Option<AssetsSection>,
     #[serde(default)]
+    icon_requirements: IconRequirementsSection,
+    #[serde(default)]
     translations: HashMap<String, HashMap<String, String>>,
     #[serde(default, rename = "surface-layout")]
     surface_layout: Option<SurfaceLayoutSection>,
@@ -650,6 +662,7 @@ impl TomlManifest {
             provides_slots: self.provides_slots,
             slot_contributions: self.slot_contributions,
             assets: self.assets,
+            icon_requirements: self.icon_requirements,
             translations: self.translations,
             surface_layout: self.surface_layout,
         }
@@ -770,6 +783,8 @@ struct JsonManifest {
     #[serde(default)]
     assets: Option<AssetsSection>,
     #[serde(default)]
+    icon_requirements: IconRequirementsSection,
+    #[serde(default)]
     translations: HashMap<String, HashMap<String, String>>,
     #[serde(default, rename = "surface_layout")]
     surface_layout: Option<SurfaceLayoutSection>,
@@ -805,6 +820,7 @@ impl JsonManifest {
             provides_slots: self.provides_slots,
             slot_contributions: self.slot_contributions,
             assets: self.assets,
+            icon_requirements: self.icon_requirements,
             translations: self.translations,
             surface_layout: self.surface_layout,
         }
@@ -986,6 +1002,47 @@ main = "src/main.mesh"
         );
     }
 
+    #[test]
+    fn parses_plugin_json_icon_requirements() {
+        let content = r#"
+{
+  "id": "@mesh/panel",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "dependencies": {
+    "icon_packs": {
+      "required": ["material"]
+    }
+  },
+  "assets": {
+    "icons": "assets/icons"
+  },
+  "icon_requirements": {
+    "required": ["audio-volume-muted", "network-wireless"],
+    "optional": ["weather-clear"]
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  }
+}
+"#;
+
+        let parsed: JsonManifest = serde_json::from_str(content).unwrap();
+        let manifest = parsed.into_manifest();
+
+        assert_eq!(
+            manifest.icon_requirements.required,
+            vec!["audio-volume-muted", "network-wireless"]
+        );
+        assert_eq!(manifest.icon_requirements.optional, vec!["weather-clear"]);
+        assert_eq!(
+            manifest.dependencies.icon_packs.required,
+            vec!["material".to_string()]
+        );
+        assert_eq!(manifest.assets.unwrap().icons.as_deref(), Some("assets/icons"));
+    }
+
     fn manifest_with_dependencies(
         id: &str,
         dependencies: &[(&str, bool)],
@@ -1041,6 +1098,7 @@ main = "src/main.mesh"
                 .map(|slot_id| ((*slot_id).to_string(), vec![SlotContribution::default()]))
                 .collect(),
             assets: None,
+            icon_requirements: IconRequirementsSection::default(),
             translations: HashMap::new(),
             surface_layout: None,
         }

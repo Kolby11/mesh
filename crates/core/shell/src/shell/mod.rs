@@ -1341,6 +1341,7 @@ mod tests {
             provides_slots: HashMap::new(),
             slot_contributions: HashMap::new(),
             assets: None,
+            icon_requirements: mesh_core_plugin::IconRequirementsSection::default(),
             translations: HashMap::new(),
             surface_layout: None,
         }

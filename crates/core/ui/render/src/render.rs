@@ -537,6 +537,7 @@ mod tests {
             slot_contributions: Default::default(),
             surface_layout: None,
             assets: None,
+            icon_requirements: Default::default(),
             translations: Default::default(),
         }
     }
