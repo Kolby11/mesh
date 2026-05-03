@@ -2364,6 +2364,29 @@ mod tests {
         catalog
     }
 
+    fn audio_network_power_catalog() -> InterfaceCatalog {
+        let mut catalog = audio_network_catalog();
+        catalog.register_contract(InterfaceContract {
+            interface: "mesh.power".into(),
+            version: parse_contract_version("1.0").unwrap(),
+            file_path: PathBuf::from("<test>"),
+            state_fields: Vec::new(),
+            methods: Vec::new(),
+            events: Vec::new(),
+            types: HashMap::new(),
+            capabilities: ContractCapabilities::default(),
+        });
+        catalog.register_provider(InterfaceProvider {
+            interface: "mesh.power".into(),
+            version: Some("1.0".into()),
+            base_plugin: Some("@mesh/power-interface".into()),
+            provider_plugin: "@mesh/upower-power".into(),
+            backend_name: "UPower".into(),
+            priority: 100,
+        });
+        catalog
+    }
+
     fn make_audio_ctx() -> ScriptContext {
         let mut caps = CapabilitySet::new();
         caps.grant(Capability::new("service.audio.read"));
@@ -2378,6 +2401,33 @@ mod tests {
         let mut ctx = ScriptContext::new("@mesh/quick-settings", caps).unwrap();
         ctx.set_interface_catalog(audio_network_catalog());
         ctx
+    }
+
+    fn make_panel_ctx() -> ScriptContext {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        caps.grant(Capability::new("service.network.read"));
+        caps.grant(Capability::new("service.power.read"));
+        let mut ctx = ScriptContext::new("@mesh/panel", caps).unwrap();
+        ctx.set_interface_catalog(audio_network_power_catalog());
+        ctx
+    }
+
+    fn shipped_component_script(source: &str) -> String {
+        parse_component(source)
+            .unwrap()
+            .script
+            .expect("shipped component should contain a script block")
+            .source
+    }
+
+    fn assert_no_legacy_service_callbacks(source_name: &str, source: &str) {
+        for forbidden in ["mesh.service.bind", "mesh.service.on", ".on_change("] {
+            assert!(
+                !source.contains(forbidden),
+                "{source_name} must not teach or use legacy service callback API {forbidden}"
+            );
+        }
     }
 
     fn minimal_test_manifest(id: &str) -> Manifest {
@@ -3719,6 +3769,253 @@ end
         assert_eq!(
             ctx.state.get("connection_status"),
             Some(serde_json::json!("Connection details unavailable"))
+        );
+    }
+
+    #[test]
+    fn real_core_surfaces_panel_render_state_changes_with_seeded_service_payloads() {
+        let mut ctx = make_panel_ctx();
+        ctx.load_script(&shipped_component_script(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../packages/plugins/frontend/core/panel/src/main.mesh"
+        ))))
+        .unwrap();
+
+        ctx.apply_service_payload(
+            "audio",
+            &serde_json::json!({ "available": true, "percent": 12, "muted": false }),
+        );
+        ctx.apply_service_payload("network", &serde_json::json!({ "connections": [] }));
+        ctx.apply_service_payload(
+            "power",
+            &serde_json::json!({ "available": true, "level": 88 }),
+        );
+        ctx.call_handler("onRender", &[]).unwrap();
+
+        assert_eq!(ctx.state.get("volumeLevel"), Some(serde_json::json!("12")));
+        assert_eq!(
+            ctx.state.get("volumeIcon"),
+            Some(serde_json::json!("audio-volume-low"))
+        );
+        assert_eq!(
+            ctx.state.get("networkStatus"),
+            Some(serde_json::json!("disconnected"))
+        );
+        assert_eq!(ctx.state.get("batteryText"), Some(serde_json::json!("88%")));
+
+        ctx.apply_service_payload(
+            "audio",
+            &serde_json::json!({ "available": true, "percent": 76, "muted": true }),
+        );
+        ctx.apply_service_payload(
+            "network",
+            &serde_json::json!({ "connections": [{ "id": "wifi-home" }] }),
+        );
+        ctx.apply_service_payload(
+            "power",
+            &serde_json::json!({ "available": true, "level": 51 }),
+        );
+        ctx.call_handler("onRender", &[]).unwrap();
+
+        assert_eq!(ctx.state.get("volumeLevel"), Some(serde_json::json!("76")));
+        assert_eq!(
+            ctx.state.get("volumeIcon"),
+            Some(serde_json::json!("audio-volume-muted"))
+        );
+        assert_eq!(
+            ctx.state.get("networkStatus"),
+            Some(serde_json::json!("connected"))
+        );
+        assert_eq!(ctx.state.get("batteryText"), Some(serde_json::json!("51%")));
+
+        assert!(ctx.tracked_fields_for_service("audio").contains("percent"));
+        assert!(ctx.tracked_fields_for_service("audio").contains("muted"));
+        assert!(
+            ctx.tracked_fields_for_service("network")
+                .contains("connections")
+        );
+        assert!(ctx.tracked_fields_for_service("power").contains("level"));
+    }
+
+    #[test]
+    fn real_core_surfaces_panel_volume_click_publishes_quick_settings_toggle() {
+        let mut ctx = make_panel_ctx();
+        ctx.load_script(&shipped_component_script(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../packages/plugins/frontend/core/panel/src/main.mesh"
+        ))))
+        .unwrap();
+
+        ctx.call_handler("onVolumeClick", &[]).unwrap();
+        let events = ctx.drain_published_events();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].channel, "shell.toggle-quick-settings");
+        assert_eq!(events[0].payload, serde_json::json!({}));
+    }
+
+    #[test]
+    fn real_core_surfaces_quick_settings_commands_publish_service_requests() {
+        let mut audio_ctx = make_audio_ctx();
+        audio_ctx
+            .load_script(
+                r#"
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+
+function onVolumeChange(value)
+    local percent = math.floor((tonumber(value) or 0) + 0.5)
+    if audio_ok and audio and audio.available ~= false then
+        audio.set_volume("default", percent / 100)
+    end
+end
+"#,
+            )
+            .unwrap();
+        audio_ctx.apply_service_payload("audio", &serde_json::json!({ "available": true }));
+        audio_ctx
+            .call_handler("onVolumeChange", &[serde_json::json!(55)])
+            .unwrap();
+        let audio_requests =
+            super::super::service::script_events_to_requests(audio_ctx.drain_published_events());
+
+        match audio_requests.as_slice() {
+            [
+                CoreRequest::ServiceCommand {
+                    interface,
+                    command,
+                    payload,
+                },
+            ] => {
+                assert_eq!(interface, "mesh.audio");
+                assert_eq!(command, "set_volume");
+                assert_eq!(
+                    payload,
+                    &serde_json::json!({ "device_id": "default", "volume": 0.55 })
+                );
+            }
+            other => panic!("expected one mesh.audio set_volume command, got {other:?}"),
+        }
+
+        let mut network_ctx = make_network_ctx();
+        network_ctx
+            .load_script(
+                r#"
+local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+if not network_ok then network = nil end
+
+function onToggleWiFi()
+    if network_ok and network and network.available ~= false then
+        network.set_wifi_enabled(not (network.wifi_enabled or false))
+    end
+end
+"#,
+            )
+            .unwrap();
+        network_ctx.apply_service_payload(
+            "network",
+            &serde_json::json!({ "available": true, "wifi_enabled": false }),
+        );
+        network_ctx.call_handler("onToggleWiFi", &[]).unwrap();
+        let network_requests =
+            super::super::service::script_events_to_requests(network_ctx.drain_published_events());
+
+        match network_requests.as_slice() {
+            [
+                CoreRequest::ServiceCommand {
+                    interface,
+                    command,
+                    payload,
+                },
+            ] => {
+                assert_eq!(interface, "mesh.network");
+                assert_eq!(command, "set_wifi_enabled");
+                assert_eq!(payload, &serde_json::json!({ "enabled": true }));
+            }
+            other => panic!("expected one mesh.network set_wifi_enabled command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn real_core_surfaces_reject_legacy_service_callback_api_in_shipped_surfaces() {
+        let sources = [
+            (
+                "panel",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../packages/plugins/frontend/core/panel/src/main.mesh"
+                )),
+            ),
+            (
+                "quick-settings root",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../packages/plugins/frontend/core/quick-settings/src/main.mesh"
+                )),
+            ),
+            (
+                "quick-settings audio",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../packages/plugins/frontend/core/quick-settings/src/components/audio-section.mesh"
+                )),
+            ),
+            (
+                "quick-settings wifi",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../packages/plugins/frontend/core/quick-settings/src/components/wifi-section.mesh"
+                )),
+            ),
+            (
+                "quick-settings wifi item",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../packages/plugins/frontend/core/quick-settings/src/components/wifi-item.mesh"
+                )),
+            ),
+        ];
+
+        for (name, source) in sources {
+            assert_no_legacy_service_callbacks(name, source);
+        }
+    }
+
+    #[test]
+    fn real_core_surfaces_quick_settings_disabled_fallback_copy_stays_visible() {
+        let audio_source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../packages/plugins/frontend/core/quick-settings/src/components/audio-section.mesh"
+        ));
+        let wifi_source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../packages/plugins/frontend/core/quick-settings/src/components/wifi-section.mesh"
+        ));
+        let wifi_item_source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../packages/plugins/frontend/core/quick-settings/src/components/wifi-item.mesh"
+        ));
+
+        for copy in ["Audio unavailable", "Audio controls unavailable"] {
+            assert!(
+                audio_source.contains(copy),
+                "audio section should keep visible fallback copy {copy}"
+            );
+        }
+        for copy in [
+            "Network unavailable",
+            "Network controls unavailable",
+            "Scanning for networks",
+            "Wi-Fi is disabled",
+        ] {
+            assert!(
+                wifi_source.contains(copy),
+                "wifi section should keep visible fallback copy {copy}"
+            );
+        }
+        assert!(
+            wifi_item_source.contains("Connection details unavailable"),
+            "wifi rows should keep visible fallback copy for unsafe connect data"
         );
     }
 }
