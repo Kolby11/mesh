@@ -7,6 +7,10 @@ local DARK_THEME  = "mesh-default-dark"
 local LIGHT_THEME = "mesh-default-light"
 local AVAILABLE   = {DARK_THEME, LIGHT_THEME}
 
+local function is_dark_theme(theme_id)
+    return type(theme_id) == "string" and string.find(theme_id, "dark", 1, true) ~= nil
+end
+
 local function configured_theme()
     local cfg = mesh.config()
     if type(cfg.current_theme) == "string" and cfg.current_theme ~= "" then
@@ -16,10 +20,11 @@ local function configured_theme()
 end
 
 local current_theme = configured_theme()
+local current_is_dark = is_dark_theme(current_theme)
 
 state = {
     current   = current_theme,
-    is_dark   = (current_theme == DARK_THEME),
+    is_dark   = current_is_dark,
     available = AVAILABLE,
 }
 
@@ -30,7 +35,7 @@ end
 local function emit_state()
     state = {
         current   = current_theme,
-        is_dark   = (current_theme == DARK_THEME),
+        is_dark   = current_is_dark,
         available = AVAILABLE,
     }
 end
@@ -46,6 +51,11 @@ function on_command_set_current()
     local new_id = payload.theme_id or payload.current
     if type(new_id) == "string" and new_id ~= "" then
         current_theme = new_id
+    end
+    if type(payload.is_dark) == "boolean" then
+        current_is_dark = payload.is_dark
+    else
+        current_is_dark = is_dark_theme(current_theme)
     end
     emit_state()
     return { ok = true }

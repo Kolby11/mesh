@@ -648,15 +648,16 @@ impl Shell {
         let theme_changed = old_theme.active != new_settings.theme.active;
         if theme_changed {
             let (theme, theme_watch) = load_active_theme(&new_settings);
+            let active_theme_id = theme.active().id.clone();
             tracing::info!(
                 "active theme changed: {} -> {}",
                 old_theme.active,
-                new_settings.theme.active
+                active_theme_id
             );
             self.theme = theme;
             self.theme_watch = theme_watch;
             self.mark_components_theme_changed()?;
-            requests.extend(self.sync_theme_service_state(&new_settings.theme.active)?);
+            requests.extend(self.sync_theme_service_state(&active_theme_id)?);
         }
 
         if locale_changed {
@@ -2747,6 +2748,44 @@ mod tests {
                 .get("mesh.theme")
                 .and_then(|state| state.state.get("is_dark")),
             Some(&serde_json::json!(false))
+        );
+    }
+
+    #[test]
+    fn settings_theme_reload_publishes_resolved_fallback_theme_state() {
+        let _env_lock = SETTINGS_ENV_LOCK.lock().unwrap();
+        let runtime = Runtime::new().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("shell-settings.json");
+        fs::write(
+            &settings_path,
+            r#"{"theme":{"active":"mesh-default-dark"}}"#,
+        )
+        .unwrap();
+        let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+        let mut shell = Shell::new();
+        let seen_events = Arc::new(Mutex::new(Vec::new()));
+        shell
+            .components
+            .push(super::types::ComponentRuntime::new(Box::new(
+                RecordingComponent::new(seen_events.clone()),
+            )));
+        let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.theme", "@mesh/shell-theme");
+        shell.replace_backend_runtime("mesh.theme".to_string(), slot);
+
+        fs::write(&settings_path, r#"{"theme":{"active":"missing-theme"}}"#).unwrap();
+        shell.settings_watch.modified_at = None;
+        shell.reload_locale_if_settings_changed().unwrap();
+
+        assert_eq!(shell.settings.theme.active, "missing-theme");
+        assert_eq!(shell.theme.active().id, "mesh-default-dark");
+        assert_eq!(seen_events.lock().unwrap().len(), 1);
+        assert_eq!(
+            shell
+                .latest_service_state
+                .get("mesh.theme")
+                .and_then(|state| state.state.get("current")),
+            Some(&serde_json::json!("mesh-default-dark"))
         );
     }
 

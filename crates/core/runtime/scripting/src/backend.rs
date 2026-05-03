@@ -699,6 +699,34 @@ mod tests {
     }
 
     #[test]
+    fn shell_theme_backend_preserves_shell_authored_dark_state() {
+        let script = bundled_backend_script(
+            "../../../../packages/plugins/backend/core/shell-theme/src/main.luau",
+        );
+        let mut ctx = BackendScriptContext::new("@mesh/shell-theme");
+        ctx.load_script(&script).unwrap();
+        ctx.call_init().unwrap();
+
+        let payload = ctx
+            .run_command(
+                "set-current",
+                &serde_json::json!({
+                    "current": "custom-dark-theme",
+                    "theme_id": "custom-dark-theme",
+                    "is_dark": true,
+                }),
+            )
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            payload.get("current").and_then(|v| v.as_str()),
+            Some("custom-dark-theme")
+        );
+        assert_eq!(payload.get("is_dark").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
     fn bundled_audio_provider_exports_state() {
         let script = bundled_backend_script(
             "../../../../packages/plugins/backend/core/pipewire-audio/src/main.luau",
