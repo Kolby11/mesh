@@ -870,10 +870,19 @@ fn create_service_proxy(
         .map(|c| c.interface.clone())
         .filter(|name| !name.is_empty())
         .unwrap_or(interface_name);
+    let state_proxy = create_service_state_proxy(
+        lua,
+        service_name.clone(),
+        Arc::clone(&tracked_service_fields),
+    )?;
+    proxy.set("state", state_proxy)?;
 
     meta.set(
         "__index",
         lua.create_function(move |lua, (_table, key): (Table, String)| {
+            if key == "state" {
+                return _table.get::<LuaValue>("state");
+            }
             // Case A: known contract method — dispatch as a service command.
             if let Some(method) = methods.iter().find(|m| m.name == key) {
                 let required_capability = service_control_capability(&service_name);
@@ -920,18 +929,45 @@ fn create_service_proxy(
                 .entry(service_name.clone())
                 .or_default()
                 .insert(key.clone());
-            let svc_key = format!("__mesh_svc_{}", service_name);
-            let tbl = match lua.globals().get::<LuaValue>(svc_key.as_str()) {
-                Ok(LuaValue::Table(t)) => Some(t),
-                _ => None,
-            };
-            Ok(tbl
-                .and_then(|t| t.get::<LuaValue>(key.as_str()).ok())
-                .unwrap_or(LuaValue::Nil))
+            service_payload_field(lua, &service_name, &key)
         })?,
     )?;
     proxy.set_metatable(Some(meta))?;
     Ok(proxy)
+}
+
+fn create_service_state_proxy(
+    lua: &Lua,
+    service_name: String,
+    tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
+) -> mlua::Result<Table> {
+    let state = lua.create_table()?;
+    let meta = lua.create_table()?;
+    meta.set(
+        "__index",
+        lua.create_function(move |lua, (_table, key): (Table, String)| {
+            tracked_service_fields
+                .lock()
+                .unwrap()
+                .entry(service_name.clone())
+                .or_default()
+                .insert(key.clone());
+            service_payload_field(lua, &service_name, &key)
+        })?,
+    )?;
+    state.set_metatable(Some(meta))?;
+    Ok(state)
+}
+
+fn service_payload_field(lua: &Lua, service_name: &str, key: &str) -> mlua::Result<LuaValue> {
+    let svc_key = format!("__mesh_svc_{service_name}");
+    let tbl = match lua.globals().get::<LuaValue>(svc_key.as_str()) {
+        Ok(LuaValue::Table(t)) => Some(t),
+        _ => None,
+    };
+    Ok(tbl
+        .and_then(|t| t.get::<LuaValue>(key).ok())
+        .unwrap_or(LuaValue::Nil))
 }
 
 fn consume_self_arg(args: &mlua::Variadic<LuaValue>) -> usize {
@@ -1529,6 +1565,87 @@ end
         let tracked = ctx.tracked_fields_for_service("audio");
         assert!(tracked.contains("percent"));
         assert!(tracked.contains("muted"));
+    }
+
+    #[test]
+    fn interface_proxy_exposes_state_table() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script(
+            r#"
+audio_state_type = ""
+
+function init()
+    local audio = require("@mesh/audio@>=1.0")
+    audio_state_type = type(audio.state)
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.call_init().unwrap();
+
+        assert_eq!(
+            ctx.state.get("audio_state_type"),
+            Some(serde_json::json!("table"))
+        );
+    }
+
+    #[test]
+    fn interface_proxy_state_reads_latest_payload() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script(
+            r#"
+audio_percent = 0
+
+function sync_audio_state()
+    local audio = require("@mesh/audio@>=1.0")
+    audio_percent = audio.state.percent or 0
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.apply_service_payload("audio", &serde_json::json!({ "percent": 31 }));
+        ctx.call_handler("sync_audio_state", &[]).unwrap();
+        assert_eq!(ctx.state.get("audio_percent"), Some(serde_json::json!(31)));
+
+        ctx.apply_service_payload("audio", &serde_json::json!({ "percent": 88 }));
+        ctx.call_handler("sync_audio_state", &[]).unwrap();
+        assert_eq!(ctx.state.get("audio_percent"), Some(serde_json::json!(88)));
+        assert!(ctx.tracked_fields_for_service("audio").contains("percent"));
+    }
+
+    #[test]
+    fn interface_proxy_direct_field_read_remains_compatibility_alias() {
+        let mut caps = CapabilitySet::new();
+        caps.grant(Capability::new("service.audio.read"));
+        let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script(
+            r#"
+state_percent = 0
+direct_percent = 0
+
+function sync_audio_state()
+    local audio = require("@mesh/audio@>=1.0")
+    state_percent = audio.state.percent or 0
+    direct_percent = audio.percent or 0
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.apply_service_payload("audio", &serde_json::json!({ "percent": 57 }));
+        ctx.call_handler("sync_audio_state", &[]).unwrap();
+
+        assert_eq!(ctx.state.get("state_percent"), Some(serde_json::json!(57)));
+        assert_eq!(ctx.state.get("direct_percent"), Some(serde_json::json!(57)));
     }
 
     #[test]

@@ -7,6 +7,7 @@
 ///
 /// ```text
 /// require("@mesh/<service>") → interface proxy
+/// require("@mesh/<service>").state → active provider latest state table
 /// mesh.theme.token(name)      → value          (requires theme.read)
 /// mesh.theme.tokens(group)    → table          (requires theme.read)
 /// mesh.theme.on_change(cb)    → subscription   (requires theme.read)
