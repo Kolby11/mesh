@@ -33,6 +33,19 @@ local function emit_state()
     end
 end
 
+local function clamp_percent(percent)
+    percent = tonumber(percent) or 0
+    return math.max(0, math.min(100, percent))
+end
+
+local function command_percent_from_payload(payload)
+    if payload.percent ~= nil then
+        return clamp_percent(payload.percent)
+    end
+
+    return clamp_percent(math.floor(((tonumber(payload.volume) or 0) * 100) + 0.5))
+end
+
 function on_poll()
     emit_state()
 end
@@ -49,7 +62,7 @@ end
 
 function on_command_set_volume()
     local payload = mesh.service.payload()
-    local percent = payload.percent or 0
+    local percent = command_percent_from_payload(payload)
     mesh.exec_shell(("pactl set-sink-volume @DEFAULT_SINK@ %s%%"):format(percent))
     emit_state()
 end

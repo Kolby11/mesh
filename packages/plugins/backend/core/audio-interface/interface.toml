@@ -28,6 +28,8 @@ description = "Backend plugin ID that emitted this state (runtime-additive)"
 
 [[methods]]
 name = "set_volume"
+# `volume` is normalized in the 0.0..1.0 range; providers convert it to
+# their native command format.
 args = [
   { name = "device_id", type = "string" },
   { name = "volume", type = "float" }
