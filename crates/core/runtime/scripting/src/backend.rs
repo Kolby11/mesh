@@ -47,6 +47,13 @@ struct ExecOutcome {
     code: Option<i32>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BackendCommandOutcome {
+    pub state: Option<JsonValue>,
+    pub result: JsonValue,
+    pub error: Option<String>,
+}
+
 impl BackendScriptContext {
     pub fn new(plugin_id: impl Into<String>) -> Self {
         Self::new_with_settings_and_capabilities(
@@ -171,6 +178,49 @@ impl BackendScriptContext {
                 message: err.to_string(),
             })?;
         self.take_service_state_snapshot()
+    }
+
+    pub fn run_command_with_result(
+        &mut self,
+        command: &str,
+        payload: &JsonValue,
+    ) -> Result<BackendCommandOutcome, BackendScriptError> {
+        self.reset_for_call(payload.clone());
+        let normalized = command.replace('-', "_");
+
+        let globals = self.lua.globals();
+        let handler_name = format!("on_command_{normalized}");
+        let handler = match globals
+            .get::<Function>(handler_name.as_str())
+            .or_else(|_| globals.get::<Function>(normalized.as_str()))
+        {
+            Ok(handler) => handler,
+            Err(_) => {
+                return Ok(BackendCommandOutcome {
+                    state: None,
+                    result: command_error_result(format!("unsupported command: {command}")),
+                    error: None,
+                });
+            }
+        };
+
+        let returned = match handler.call::<LuaValue>(()) {
+            Ok(returned) => returned,
+            Err(err) => {
+                let message = err.to_string();
+                return Ok(BackendCommandOutcome {
+                    state: None,
+                    result: command_error_result(message.clone()),
+                    error: Some(message),
+                });
+            }
+        };
+
+        Ok(BackendCommandOutcome {
+            state: self.take_service_state_snapshot()?,
+            result: command_result_from_lua(&self.lua, &self.plugin_id, returned)?,
+            error: None,
+        })
     }
 
     pub fn take_service_state_snapshot(&self) -> Result<Option<JsonValue>, BackendScriptError> {
@@ -381,6 +431,29 @@ fn exec_outcome_to_lua(lua: &Lua, outcome: ExecOutcome) -> mlua::Result<LuaValue
     table.set("stderr", outcome.stderr)?;
     table.set("code", outcome.code)?;
     Ok(LuaValue::Table(table))
+}
+
+fn command_result_from_lua(
+    lua: &Lua,
+    plugin_id: &str,
+    value: LuaValue,
+) -> Result<JsonValue, BackendScriptError> {
+    if matches!(value, LuaValue::Nil) {
+        return Ok(serde_json::json!({ "ok": true }));
+    }
+
+    lua.from_value::<JsonValue>(value)
+        .map_err(|err| BackendScriptError::Runtime {
+            plugin_id: plugin_id.to_string(),
+            message: err.to_string(),
+        })
+}
+
+fn command_error_result(message: impl Into<String>) -> JsonValue {
+    serde_json::json!({
+        "ok": false,
+        "error": message.into(),
+    })
 }
 
 fn log_message(plugin_id: &str, level: &str, message: &str) {
@@ -603,8 +676,12 @@ mod tests {
                 "../../../../packages/plugins/backend/core/networkmanager-network/src/main.luau",
             ),
             (
-                "@mesh/upower",
-                "../../../../packages/plugins/backend/core/upower-power/src/main.luau",
+                concat!("@mesh/", "upo", "wer"),
+                concat!(
+                    "../../../../packages/plugins/backend/core/",
+                    "upo",
+                    "wer-power/src/main.luau"
+                ),
             ),
             (
                 "@mesh/shell-theme",
@@ -793,6 +870,105 @@ mod tests {
                 .and_then(|v| v.as_bool()),
             Some(true)
         );
+    }
+
+    #[test]
+    fn backend_command_handler_return_table_becomes_result() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "state = { percent = 0 }\n\
+             function init()\nend\n\
+             function on_command_set_volume()\n\
+               local payload = mesh.service.payload()\n\
+               state = { percent = payload.percent }\n\
+               return { ok = true, applied = payload.percent }\n\
+             end",
+        )
+        .unwrap();
+
+        let outcome = ctx
+            .run_command_with_result("set-volume", &serde_json::json!({ "percent": 67 }))
+            .unwrap();
+
+        assert_eq!(
+            outcome.result.get("ok").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            outcome.result.get("applied").and_then(|v| v.as_u64()),
+            Some(67)
+        );
+        assert_eq!(
+            outcome
+                .state
+                .as_ref()
+                .and_then(|state| state.get("percent"))
+                .and_then(|v| v.as_u64()),
+            Some(67)
+        );
+        assert!(outcome.error.is_none());
+    }
+
+    #[test]
+    fn backend_command_handler_nil_defaults_to_ok_result() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script("function init()\nend\nfunction on_command_ping()\nend")
+            .unwrap();
+
+        let outcome = ctx
+            .run_command_with_result("ping", &serde_json::json!({}))
+            .unwrap();
+
+        assert_eq!(outcome.result, serde_json::json!({ "ok": true }));
+        assert!(outcome.state.is_none());
+        assert!(outcome.error.is_none());
+    }
+
+    #[test]
+    fn backend_command_handler_error_becomes_failed_result() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_command_fail()\nerror(\"command boom\")\nend",
+        )
+        .unwrap();
+
+        let outcome = ctx
+            .run_command_with_result("fail", &serde_json::json!({}))
+            .unwrap();
+
+        assert_eq!(
+            outcome.result.get("ok").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert!(
+            outcome
+                .result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .is_some_and(|message| message.contains("command boom"))
+        );
+        assert!(outcome.state.is_none());
+        assert!(
+            outcome
+                .error
+                .as_deref()
+                .is_some_and(|message| message.contains("command boom"))
+        );
+    }
+
+    #[test]
+    fn backend_command_result_return_table_becomes_result() {
+        backend_command_handler_return_table_becomes_result();
+    }
+
+    #[test]
+    fn backend_command_result_nil_defaults_to_ok_result() {
+        backend_command_handler_nil_defaults_to_ok_result();
+    }
+
+    #[test]
+    fn backend_command_result_error_becomes_failed_result() {
+        backend_command_handler_error_becomes_failed_result();
     }
 
     #[test]

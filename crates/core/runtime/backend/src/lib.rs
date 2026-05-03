@@ -20,6 +20,14 @@ pub struct BackendServiceUpdate {
 }
 
 #[derive(Debug, Clone)]
+pub struct BackendCommandResult {
+    pub service: String,
+    pub source_plugin: String,
+    pub command: String,
+    pub result: serde_json::Value,
+}
+
+#[derive(Debug, Clone)]
 pub enum BackendServiceEvent {
     Started {
         service: String,
@@ -43,6 +51,7 @@ pub enum BackendServiceEvent {
         stage: String,
         message: String,
     },
+    CommandResult(BackendCommandResult),
     Stopped {
         service: String,
         source_plugin: String,
@@ -150,21 +159,36 @@ pub async fn spawn_backend_service(
             }
             cmd = cmd_rx.recv() => {
                 let Some(msg) = cmd else { break };
-                match ctx.run_command(&msg.command, &msg.payload) {
-                    Ok(Some(payload)) => {
+                match ctx.run_command_with_result(&msg.command, &msg.payload) {
+                    Ok(outcome) => {
                         refresh_interval(&ctx, &mut interval_ms, &mut tick);
-                        if !publish_changed_update(
-                            &tx,
-                            &service_name,
-                            &plugin_id,
-                            &mut last_payload,
-                            payload,
-                        ) {
+                        if tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
+                            service: service_name.clone(),
+                            source_plugin: plugin_id.clone(),
+                            command: msg.command.clone(),
+                            result: outcome.result,
+                        })).is_err() {
                             break;
                         }
-                    }
-                    Ok(None) => {
-                        refresh_interval(&ctx, &mut interval_ms, &mut tick);
+                        if let Some(message) = outcome.error {
+                            let _ = tx.send(BackendServiceEvent::Failed {
+                                service: service_name.clone(),
+                                source_plugin: plugin_id.clone(),
+                                stage: "command".to_string(),
+                                message,
+                            });
+                        }
+                        if let Some(payload) = outcome.state {
+                            if !publish_changed_update(
+                                &tx,
+                                &service_name,
+                                &plugin_id,
+                                &mut last_payload,
+                                payload,
+                            ) {
+                                break;
+                            }
+                        }
                     }
                     Err(err) => {
                         let _ = tx.send(BackendServiceEvent::Failed {
@@ -247,6 +271,21 @@ mod tests {
                 .expect("event channel should stay open");
             if let BackendServiceEvent::Update(update) = event {
                 return update;
+            }
+        }
+    }
+
+    async fn next_command_result(
+        rx: &mut mpsc::UnboundedReceiver<BackendServiceEvent>,
+        reason: &str,
+    ) -> BackendCommandResult {
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+                .await
+                .expect(reason)
+                .expect("event channel should stay open");
+            if let BackendServiceEvent::CommandResult(result) = event {
+                return result;
             }
         }
     }
@@ -636,6 +675,79 @@ mod tests {
             .await
             .expect("backend task should exit after command channel closes")
             .expect("backend task should not panic");
+    }
+
+    async fn assert_backend_command_handler_error_becomes_failed_result() {
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/command-error".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function on_command_fail()\nerror(\"command boom\")\nend"
+                .to_string(),
+            event_tx,
+            cmd_rx,
+        ));
+
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "fail".to_string(),
+                payload: serde_json::json!({}),
+            })
+            .unwrap();
+
+        let result = next_command_result(
+            &mut event_rx,
+            "command failure should emit a caller-visible result",
+        )
+        .await;
+        assert_eq!(result.service, "audio");
+        assert_eq!(result.source_plugin, "@test/command-error");
+        assert_eq!(result.command, "fail");
+        assert_eq!(
+            result.result.get("ok").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert!(
+            result
+                .result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .is_some_and(|message| message.contains("command boom"))
+        );
+
+        let failed = loop {
+            let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .expect("command failure should remain lifecycle-visible")
+                .expect("event channel should stay open");
+            if let BackendServiceEvent::Failed { stage, message, .. } = event {
+                break (stage, message);
+            }
+        };
+        assert_eq!(failed.0, "command");
+        assert!(failed.1.contains("command boom"));
+
+        drop(cmd_tx);
+        drop(event_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn backend_command_handler_error_becomes_failed_result() {
+        assert_backend_command_handler_error_becomes_failed_result().await;
+    }
+
+    #[tokio::test]
+    async fn backend_command_result_handler_error_becomes_failed_result() {
+        assert_backend_command_handler_error_becomes_failed_result().await;
     }
 
     #[tokio::test]
