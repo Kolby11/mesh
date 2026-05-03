@@ -91,7 +91,7 @@ External developers. The API must be:
 
 ## Current State
 
-Phase 04 is verified in code: top panel and quick settings are wired to real service proxies, audio/network controls use the finalized command surface, provider command handlers are hardened, and one live-host UAT remains tracked in `.planning/phases/04-real-core-surfaces/04-HUMAN-UAT.md`.
+Phase 05 is verified in code: core surfaces use semantic icon names backed by `config/icons.toml`, SVG and raster icons paint through the render pipeline, missing icons produce non-fatal degraded diagnostics with fallback rendering, and one Phase 04 live-host UAT remains tracked in `.planning/phases/04-real-core-surfaces/04-HUMAN-UAT.md`.
 
 ## Requirements
 
@@ -110,7 +110,7 @@ Phase 04 is verified in code: top panel and quick settings are wired to real ser
 - [x] Top panel surface renders with live data from at least one backend service — Validated in Phase 04
 - [x] Quick settings surface renders with interactive audio + network controls backed by real services — Validated in Phase 04; live-host UAT remains tracked separately
 - [ ] Scripting API reference document written and validated against a working reference plugin
-- [ ] Icon rendering works for XDG icon names (four bugs identified in llm-context.md)
+- [x] Icon rendering works for XDG icon names (four bugs identified in llm-context.md) — Validated in Phase 05
 
 ### Out of Scope
 
@@ -146,4 +146,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-03 after Phase 04 verification*
+*Last updated: 2026-05-03 after Phase 05 verification*
