@@ -21,7 +21,7 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-03)
 
 **Core value:** A backend plugin author can write a Luau service plugin, configure it, run it under the shell, emit state, handle commands, and understand failures without reading Rust source.
-**Current focus:** Phase 01 — plugin-package-manifest-foundation
+**Current focus:** Phase 02 — backend-lifecycle-foundation
 
 ## Current Position
 
