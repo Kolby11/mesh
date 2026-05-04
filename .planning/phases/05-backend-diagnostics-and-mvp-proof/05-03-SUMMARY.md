@@ -13,7 +13,7 @@ requires:
 
 provides:
   - Fresh @mesh/reference-media backend provider exercising the full MVP contract
-  - Automated proof tests for state emission, polling, command dispatch, and failure attribution
+  - Automated proof tests for exported-state snapshots, polling, command dispatch, and failure attribution
   - Plugin-scoped failure visibility attributable to @mesh/reference-media
 
 affects: [05-04, backend-author-docs, mvp-proof]
@@ -52,7 +52,7 @@ completed: 2026-05-04
 
 # Phase 5 Plan 03: Fresh Reference Media Backend Provider Summary
 
-**Fresh @mesh/reference-media backend proves config, logging, polling, state emission, and command handling deterministically without any external binaries or host services.**
+**Fresh @mesh/reference-media backend proves config, logging, polling, exported-state snapshots, and command handling deterministically without any external binaries or host services.**
 
 ## Performance
 
@@ -69,13 +69,13 @@ completed: 2026-05-04
 - Every command handler logs a provider-scoped message with player_id via `mesh.log.info`
 - Pause-when-not-playing returns `{ ok = false, error = "not currently playing" }` to provide a deterministic failure path
 - Added 2 new tests to `mesh-core-scripting` proving config seeding and command-state updates
-- Added 3 new tests to `mesh-core-backend` proving initial state emission, play+next command flow, and plugin-scoped failure attribution
+- Added 3 new tests to `mesh-core-backend` proving initial state snapshots, play+next command flow, and plugin-scoped failure attribution
 - All 5 new tests pass alongside the existing 88 tests (75 scripting + 20 backend) with no regressions
 
 ## Task Commits
 
 1. **Task 1: Scaffold the fresh reference media provider** - `52d8056` (feat)
-2. **Task 2: Add automated proof for state emission, polling, and commands** - `e79c5ea` (feat)
+2. **Task 2: Add automated proof for exported-state snapshots, polling, and commands** - `e79c5ea` (feat)
 3. **Task 3: Prove provider logs and failure visibility stay plugin-scoped** - satisfied by task 2 commit (acceptance criteria all met: mesh.log.info in command paths done in task 1; failure-attribution test added in task 2)
 
 ## Files Created/Modified

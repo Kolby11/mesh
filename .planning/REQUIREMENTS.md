@@ -47,8 +47,8 @@
 
 ### MVP Proof
 
-- [ ] **BREF-01**: A fresh reference backend service plugin exercises config, logging, polling, service emission, and command handling.
-- [ ] **BREF-02**: Automated tests prove the reference backend plugin emits state and handles at least one command through the public backend MVP contract.
+- [ ] **BREF-01**: A fresh reference backend service plugin exercises config, logging, polling, exported top-level state snapshots, and command handling.
+- [ ] **BREF-02**: Automated tests prove the reference backend plugin exports state snapshots and handles at least one command through the public backend MVP contract.
 - [ ] **BREF-03**: Backend MVP behavior is documented in a short reference note sufficient for plugin authors to follow the proven pattern.
 
 ## Future Requirements

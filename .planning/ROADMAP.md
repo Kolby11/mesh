@@ -86,7 +86,7 @@ Make backend plugins stable enough for MVP by first introducing a unified shell-
 1. Invalid manifests, missing entrypoints, missing contracts, init failures, poll failures, emit failures, and command failures produce clear diagnostics.
 2. Backend plugin failures degrade health without crashing the shell where recovery is possible.
 3. Repeated backend failures do not spam diagnostics every poll frame.
-4. A fresh reference backend plugin exercises config, logging, polling, emission, and command handling.
+4. A fresh reference backend plugin exercises config, logging, polling, exported top-level state snapshots, and command handling.
 5. Automated tests prove the reference backend plugin path and a short backend MVP reference note documents the pattern.
 
 **Dependencies:** Phase 4
