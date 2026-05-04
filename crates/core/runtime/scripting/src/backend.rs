@@ -232,9 +232,9 @@ impl BackendScriptContext {
         let state =
             globals
                 .get::<LuaValue>("state")
-                .map_err(|err| BackendScriptError::Runtime {
+                .map_err(|err| BackendScriptError::SnapshotFailed {
                     plugin_id: self.plugin_id.clone(),
-                    message: err.to_string(),
+                    message: format!("failed to read state global: {err}"),
                 })?;
 
         if matches!(state, LuaValue::Nil) {
@@ -244,9 +244,9 @@ impl BackendScriptContext {
         self.lua
             .from_value::<JsonValue>(state)
             .map(Some)
-            .map_err(|err| BackendScriptError::Runtime {
+            .map_err(|err| BackendScriptError::SnapshotFailed {
                 plugin_id: self.plugin_id.clone(),
-                message: err.to_string(),
+                message: format!("failed to convert state to JSON: {err}"),
             })
     }
 
@@ -447,7 +447,7 @@ fn command_result_from_lua(
     }
 
     lua.from_value::<JsonValue>(value)
-        .map_err(|err| BackendScriptError::Runtime {
+        .map_err(|err| BackendScriptError::CommandResultConversionFailed {
             plugin_id: plugin_id.to_string(),
             message: err.to_string(),
         })
@@ -480,6 +480,14 @@ pub enum BackendScriptError {
 
     #[error("backend script {plugin_id} is missing required entrypoint {name}()")]
     MissingEntrypoint { plugin_id: String, name: String },
+
+    /// State snapshot or emit serialization failed — exported state could not be converted to JSON.
+    #[error("backend script {plugin_id} failed to export state snapshot: {message}")]
+    SnapshotFailed { plugin_id: String, message: String },
+
+    /// Command result returned by the handler could not be converted to JSON.
+    #[error("backend script {plugin_id} failed to convert command result: {message}")]
+    CommandResultConversionFailed { plugin_id: String, message: String },
 }
 
 #[cfg(test)]
@@ -1279,5 +1287,102 @@ mod tests {
         let err = ctx.run_command("fail", &serde_json::json!({})).unwrap_err();
         assert!(matches!(err, BackendScriptError::Runtime { .. }));
         assert!(err.to_string().contains("command boom"));
+    }
+
+    #[test]
+    fn backend_state_snapshot_failure_is_reported() {
+        // A state global that cannot be serialized to JSON (a Lua function) triggers
+        // SnapshotFailed, not a generic Runtime error, so the shell can bucket it correctly.
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\n\
+               state = function() end\n\
+             end",
+        )
+        .unwrap();
+        ctx.call_init().unwrap_err(); // init sets state, snapshot taken after init call fails
+        // Directly set up the state as non-serializable after init loads
+        let mut ctx2 = BackendScriptContext::new("@test/backend");
+        ctx2.load_script("function init()\nend").unwrap();
+        ctx2.call_init().unwrap();
+        // Inject a non-serializable value into state
+        ctx2.lua
+            .globals()
+            .set("state", ctx2.lua.create_function(|_, ()| Ok(())).unwrap())
+            .unwrap();
+        let err = ctx2.take_service_state_snapshot().unwrap_err();
+        assert!(
+            matches!(err, BackendScriptError::SnapshotFailed { .. }),
+            "expected SnapshotFailed, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("failed to export state snapshot"),
+            "error message should identify snapshot stage: {err}"
+        );
+    }
+
+    #[test]
+    fn backend_command_result_conversion_failure_is_reported() {
+        // A handler that returns a non-serializable Lua value (a function) triggers
+        // CommandResultConversionFailed so the shell can distinguish it from handler errors.
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\n\
+             function on_command_bad_result()\n\
+               return function() end\n\
+             end",
+        )
+        .unwrap();
+        ctx.call_init().unwrap();
+        let err = ctx
+            .run_command_with_result("bad-result", &serde_json::json!({}))
+            .unwrap_err();
+        assert!(
+            matches!(err, BackendScriptError::CommandResultConversionFailed { .. }),
+            "expected CommandResultConversionFailed, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("failed to convert command result"),
+            "error message should identify command-result conversion stage: {err}"
+        );
+    }
+
+    #[test]
+    fn backend_command_runtime_error_becomes_failed_result() {
+        // A handler that calls error() at runtime produces a CommandOutcome with ok=false
+        // and a populated error field — it does NOT return Err from run_command_with_result.
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\n\
+             function on_command_fail()\n\
+               error(\"handler exploded\")\n\
+             end",
+        )
+        .unwrap();
+        ctx.call_init().unwrap();
+        let outcome = ctx
+            .run_command_with_result("fail", &serde_json::json!({}))
+            .unwrap();
+        assert_eq!(
+            outcome.result.get("ok").and_then(|v| v.as_bool()),
+            Some(false),
+            "runtime error should produce a failed result"
+        );
+        assert!(
+            outcome
+                .result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .is_some_and(|m| m.contains("handler exploded")),
+            "result error field should carry the handler error message"
+        );
+        assert!(
+            outcome
+                .error
+                .as_deref()
+                .is_some_and(|m| m.contains("handler exploded")),
+            "outcome.error should carry the message for lifecycle visibility"
+        );
+        assert!(outcome.state.is_none(), "no state should be published on handler error");
     }
 }
