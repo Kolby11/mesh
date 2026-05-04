@@ -1118,4 +1118,218 @@ mod tests {
             .expect("backend task should exit after poll failure threshold")
             .expect("backend task should not panic");
     }
+
+    #[tokio::test]
+    async fn reference_media_backend_emits_initial_state() {
+        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../packages/plugins/backend/core/reference-media/src/main.luau");
+        let script = std::fs::read_to_string(script_path).unwrap();
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@mesh/reference-media".to_string(),
+            "media".to_string(),
+            vec![
+                "service.media.read".to_string(),
+                "service.media.control".to_string(),
+            ],
+            serde_json::json!({
+                "seed_title": "Initial Track",
+                "seed_artist": "Initial Artist",
+                "seed_album": "Initial Album"
+            }),
+            script,
+            update_tx,
+            cmd_rx,
+        ));
+
+        let update = next_update(
+            &mut update_rx,
+            "reference-media backend should emit initial state on startup",
+        )
+        .await;
+
+        assert_eq!(update.service, "media");
+        assert_eq!(update.source_plugin, "@mesh/reference-media");
+        assert_eq!(
+            update.payload.get("available").and_then(|v| v.as_bool()),
+            Some(true),
+            "initial state must have available=true"
+        );
+        assert_eq!(
+            update.payload.get("title").and_then(|v| v.as_str()),
+            Some("Initial Track"),
+            "initial state must reflect config seed_title"
+        );
+        assert!(
+            update.payload.get("state").and_then(|v| v.as_str()).is_some(),
+            "initial state must include a playback state field"
+        );
+
+        drop(cmd_tx);
+        drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn reference_media_backend_command_returns_result_and_updated_state() {
+        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../packages/plugins/backend/core/reference-media/src/main.luau");
+        let script = std::fs::read_to_string(script_path).unwrap();
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@mesh/reference-media".to_string(),
+            "media".to_string(),
+            vec![
+                "service.media.read".to_string(),
+                "service.media.control".to_string(),
+            ],
+            serde_json::json!({}),
+            script,
+            event_tx,
+            cmd_rx,
+        ));
+
+        // Wait for initial state
+        let _initial = next_update(
+            &mut event_rx,
+            "reference-media backend should emit initial state",
+        )
+        .await;
+
+        // Issue a play command — must return ok=true and update state to "playing"
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "play".to_string(),
+                payload: serde_json::json!({ "player_id": "default" }),
+            })
+            .unwrap();
+
+        // Collect CommandResult
+        let result = next_command_result(
+            &mut event_rx,
+            "play command should emit a CommandResult",
+        )
+        .await;
+        assert_eq!(result.service, "media");
+        assert_eq!(result.source_plugin, "@mesh/reference-media");
+        assert_eq!(result.command, "play");
+        assert_eq!(
+            result.result.get("ok").and_then(|v| v.as_bool()),
+            Some(true),
+            "play command result must have ok=true"
+        );
+
+        // Collect updated state Update
+        let updated = next_update(
+            &mut event_rx,
+            "play command should trigger a state update with playback_state=playing",
+        )
+        .await;
+        assert_eq!(
+            updated.payload.get("state").and_then(|v| v.as_str()),
+            Some("playing"),
+            "playback state must change to 'playing' after play command"
+        );
+
+        // Issue next command — must advance the track
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "next".to_string(),
+                payload: serde_json::json!({ "player_id": "default" }),
+            })
+            .unwrap();
+
+        let next_result = next_command_result(
+            &mut event_rx,
+            "next command should emit a CommandResult",
+        )
+        .await;
+        assert_eq!(
+            next_result.result.get("ok").and_then(|v| v.as_bool()),
+            Some(true),
+            "next command result must have ok=true"
+        );
+
+        drop(cmd_tx);
+        drop(event_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn reference_media_invalid_command_returns_plugin_scoped_failure() {
+        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../packages/plugins/backend/core/reference-media/src/main.luau");
+        let script = std::fs::read_to_string(script_path).unwrap();
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@mesh/reference-media".to_string(),
+            "media".to_string(),
+            vec![
+                "service.media.read".to_string(),
+                "service.media.control".to_string(),
+            ],
+            serde_json::json!({}),
+            script,
+            event_tx,
+            cmd_rx,
+        ));
+
+        // Wait for initial state
+        let _initial = next_update(
+            &mut event_rx,
+            "reference-media backend should emit initial state",
+        )
+        .await;
+
+        // Issue pause when not playing — pause handler returns ok=false
+        // (reference-media returns {ok=false, error="not currently playing"} from on_command_pause when state != "playing")
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "pause".to_string(),
+                payload: serde_json::json!({ "player_id": "default" }),
+            })
+            .unwrap();
+
+        let result = next_command_result(
+            &mut event_rx,
+            "pause-when-not-playing should return a CommandResult",
+        )
+        .await;
+
+        // Provider id must be attributable in the result
+        assert_eq!(
+            result.source_plugin, "@mesh/reference-media",
+            "CommandResult source_plugin must identify the provider"
+        );
+        assert_eq!(result.service, "media");
+        // The pause command when not playing returns ok=false
+        assert_eq!(
+            result.result.get("ok").and_then(|v| v.as_bool()),
+            Some(false),
+            "pause-when-not-playing must return ok=false"
+        );
+        assert!(
+            result.result.get("error").and_then(|v| v.as_str()).is_some(),
+            "failed result must carry an error field attributable to @mesh/reference-media"
+        );
+
+        drop(cmd_tx);
+        drop(event_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
 }

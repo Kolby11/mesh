@@ -1402,4 +1402,92 @@ mod tests {
         );
         assert!(outcome.state.is_none(), "no state should be published on handler error");
     }
+
+    #[test]
+    fn reference_media_provider_reads_config_and_exports_state() {
+        let script = bundled_backend_script(
+            "../../../../packages/plugins/backend/core/reference-media/src/main.luau",
+        );
+        let mut ctx = BackendScriptContext::new_with_settings(
+            "@mesh/reference-media",
+            serde_json::json!({
+                "seed_title": "Config Track",
+                "seed_artist": "Config Artist",
+                "seed_album": "Config Album"
+            }),
+        );
+        ctx.load_script(&script).unwrap();
+
+        let payload = ctx.call_init().unwrap().unwrap();
+
+        // State must include all required media interface fields
+        assert_eq!(
+            payload.get("available").and_then(|v| v.as_bool()),
+            Some(true),
+            "reference-media must export available=true on init"
+        );
+        assert_eq!(
+            payload.get("title").and_then(|v| v.as_str()),
+            Some("Config Track"),
+            "reference-media must seed title from config"
+        );
+        assert_eq!(
+            payload.get("artist").and_then(|v| v.as_str()),
+            Some("Config Artist"),
+            "reference-media must seed artist from config"
+        );
+        assert_eq!(
+            payload.get("album").and_then(|v| v.as_str()),
+            Some("Config Album"),
+            "reference-media must seed album from config"
+        );
+        assert!(
+            payload.get("state").and_then(|v| v.as_str()).is_some(),
+            "reference-media must export a playback state field"
+        );
+    }
+
+    #[test]
+    fn reference_media_provider_command_updates_state() {
+        let script = bundled_backend_script(
+            "../../../../packages/plugins/backend/core/reference-media/src/main.luau",
+        );
+        let mut ctx = BackendScriptContext::new("@mesh/reference-media");
+        ctx.load_script(&script).unwrap();
+        ctx.call_init().unwrap();
+
+        // Issue play command — state should transition to playing
+        let outcome = ctx
+            .run_command_with_result("play", &serde_json::json!({ "player_id": "default" }))
+            .unwrap();
+        assert_eq!(
+            outcome.result.get("ok").and_then(|v| v.as_bool()),
+            Some(true),
+            "play command must return ok=true"
+        );
+        assert!(outcome.error.is_none(), "play command must not carry an error");
+        let state_after_play = outcome.state.as_ref().expect("play must update state");
+        assert_eq!(
+            state_after_play.get("state").and_then(|v| v.as_str()),
+            Some("playing"),
+            "playback state must change to 'playing' after play command"
+        );
+
+        // Issue next command — track index should advance
+        let next_outcome = ctx
+            .run_command_with_result("next", &serde_json::json!({ "player_id": "default" }))
+            .unwrap();
+        assert_eq!(
+            next_outcome.result.get("ok").and_then(|v| v.as_bool()),
+            Some(true),
+            "next command must return ok=true"
+        );
+        let state_after_next = next_outcome.state.as_ref().expect("next must update state");
+        // The second track has a different title than the default first track
+        assert_ne!(
+            state_after_next.get("title").and_then(|v| v.as_str()),
+            Some("Reference Track"),
+            "next command must advance to a different track"
+        );
+    }
 }
