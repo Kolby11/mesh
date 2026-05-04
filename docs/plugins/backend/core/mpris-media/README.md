@@ -1,11 +1,10 @@
 # `@mesh/mpris-media`
 
-Media playback backend using the **MPRIS** D-Bus protocol. Any MPRIS-compliant
-media player (Spotify, Firefox, mpv with a plugin, etc.) is visible through
-this backend.
+Placeholder media backend target for a future real **MPRIS** D-Bus integration.
+It is not the Phase 5 MVP authoring reference.
 
 - **Type:** `backend`
-- **Implements:** interface `mesh.media` (contract `@mesh/media-contract`)
+- **Implements:** interface `mesh.media` (base plugin `@mesh/media-interface`)
 - **Backend name:** `MPRIS`
 - **Priority:** `100`
 - **Entrypoint:** `src/main.luau`
@@ -18,9 +17,15 @@ Required:
 - `service.media.control` — play / pause / next / previous / seek
 - `dbus.session` — MPRIS is exposed on the user's session bus
 
-## Responsibilities
+## Status
 
-Implements the methods declared by `mesh.media`:
+- This package remains the future integration target for real MPRIS-backed media behavior.
+- Authors looking for the proven backend MVP pattern should start with [`@mesh/reference-media`](../reference-media/README.md) instead.
+- `@mesh/reference-media` is the documented reference for top-level `state`, `init()`, polling, config, and `on_command_*` handlers.
+
+## Intended responsibilities
+
+When implemented as a real provider, this backend should cover:
 
 - enumerate active MPRIS players on the session bus
 - expose metadata (title, artist, album art URL) and playback state per player
@@ -29,6 +34,7 @@ Implements the methods declared by `mesh.media`:
 
 ## Notes
 
-Because MPRIS is a protocol rather than a specific daemon, this backend works
-out of the box with essentially any Linux audio/video player that implements
-`org.mpris.MediaPlayer2`.
+Because MPRIS is a protocol rather than a specific daemon, this remains a good
+future real-provider target for Linux media players that implement
+`org.mpris.MediaPlayer2`. For the current MVP author path, use
+`reference-media`, not this placeholder.

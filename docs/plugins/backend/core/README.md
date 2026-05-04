@@ -86,6 +86,11 @@ and the `mesh.*` host API:
 - backend commands are implemented as `on_command_<name>()` functions
 - public provider state is exported through top-level `state = { ... }`
 
+For a concrete MVP example, start with
+[`reference-media`](./reference-media/README.md). It is the bundled proof
+plugin for `mesh.config()`, exported `state`, `init()`, polling, and
+command-result handlers.
+
 ## Provider selection rules
 
 Provider selection is explicit and visible:
@@ -116,5 +121,6 @@ is no hidden fallback path in the normal MVP contract.
 | [pulseaudio-audio](./pulseaudio-audio/README.md) | `@mesh/pulseaudio-audio` | `mesh.audio` | `@mesh/audio-interface` | PulseAudio | 50 | Real integration |
 | [networkmanager-network](./networkmanager-network/README.md) | `@mesh/networkmanager` | `mesh.network` | `@mesh/network-interface` | NetworkManager | 100 | Real integration |
 | [upower-power](./upower-power/README.md) | `@mesh/upower` | `mesh.power` | `@mesh/power-interface` | UPower | 100 | Real integration |
+| [reference-media](./reference-media/README.md) | `@mesh/reference-media` | `mesh.media` | `@mesh/media-interface` | Reference | 10 | Recommended MVP authoring reference |
 | [mpris-media](./mpris-media/README.md) | `@mesh/mpris-media` | `mesh.media` | `@mesh/media-interface` | MPRIS | 100 | Future media integration |
 | `mock-notifications` | `@mesh/mock-notifications` | `mesh.notifications` | `@mesh/notifications-interface` | Mock Notifications | 100 | Placeholder backend |
