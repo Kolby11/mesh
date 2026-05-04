@@ -1,4 +1,4 @@
-use mesh_core_scripting::BackendScriptContext;
+use mesh_core_scripting::{BackendScriptContext, BackendScriptError};
 use serde_json::Value as JsonValue;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -191,10 +191,17 @@ pub async fn spawn_backend_service(
                         }
                     }
                     Err(err) => {
+                        let stage = match &err {
+                            BackendScriptError::SnapshotFailed { .. } => "snapshot",
+                            BackendScriptError::CommandResultConversionFailed { .. } => {
+                                "command-result"
+                            }
+                            _ => "command",
+                        };
                         let _ = tx.send(BackendServiceEvent::Failed {
                             service: service_name.clone(),
                             source_plugin: plugin_id.clone(),
-                            stage: "command".to_string(),
+                            stage: stage.to_string(),
                             message: err.to_string(),
                         });
                         refresh_interval(&ctx, &mut interval_ms, &mut tick);
@@ -853,6 +860,204 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(1), task)
             .await
             .expect("backend task should exit after init failure")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn backend_unsupported_command_returns_error_result() {
+        // Sending a command name that no handler exists for must produce a CommandResult with
+        // ok=false and an "error" field. It must not crash the backend or emit a Failed event.
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/no-handler".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "function init()\nmesh.service.set_poll_interval(1000)\nend".to_string(),
+            event_tx,
+            cmd_rx,
+        ));
+
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "nonexistent-command".to_string(),
+                payload: serde_json::json!({}),
+            })
+            .unwrap();
+
+        let result = next_command_result(
+            &mut event_rx,
+            "unsupported command should emit a generic error CommandResult",
+        )
+        .await;
+        assert_eq!(result.service, "audio");
+        assert_eq!(result.source_plugin, "@test/no-handler");
+        assert_eq!(result.command, "nonexistent-command");
+        assert_eq!(
+            result.result.get("ok").and_then(|v| v.as_bool()),
+            Some(false),
+            "unsupported command result must have ok=false"
+        );
+        assert!(
+            result.result.get("error").and_then(|v| v.as_str()).is_some(),
+            "unsupported command result must carry an error field"
+        );
+
+        // Verify no Failed lifecycle event was emitted (unsupported commands are not failures)
+        let no_failure = tokio::time::timeout(Duration::from_millis(150), async {
+            loop {
+                match event_rx.recv().await {
+                    Some(BackendServiceEvent::Failed { .. }) => return true,
+                    Some(_) => continue,
+                    None => return false,
+                }
+            }
+        })
+        .await;
+        assert!(
+            no_failure.is_err() || !no_failure.unwrap(),
+            "unsupported command must not emit a Failed lifecycle event"
+        );
+
+        drop(cmd_tx);
+        drop(event_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn spawn_backend_service_reports_snapshot_failure_stage() {
+        // A command handler that sets state to a non-serializable Lua value (a function) causes
+        // take_service_state_snapshot() to return SnapshotFailed. The backend lifecycle must emit
+        // a Failed event with stage="snapshot" so the shell can bucket it separately.
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/snapshot-fail".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            // The handler sets state to a function, which cannot be serialized to JSON.
+            // run_command_with_result -> take_service_state_snapshot -> SnapshotFailed.
+            "function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function on_command_bad_state()\n\
+               state = function() end\n\
+             end"
+            .to_string(),
+            event_tx,
+            cmd_rx,
+        ));
+
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "bad-state".to_string(),
+                payload: serde_json::json!({}),
+            })
+            .unwrap();
+
+        let failed = loop {
+            let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .expect("snapshot failure should emit a Failed lifecycle event")
+                .expect("event channel should stay open");
+            if let BackendServiceEvent::Failed { stage, message, .. } = event {
+                break (stage, message);
+            }
+        };
+        assert_eq!(
+            failed.0, "snapshot",
+            "snapshot serialization failures must use stage='snapshot'"
+        );
+        assert!(
+            failed.1.contains("failed to export state snapshot"),
+            "Failed message should describe the snapshot stage: {}",
+            failed.1
+        );
+
+        drop(cmd_tx);
+        drop(event_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn spawn_backend_service_command_error_emits_result_and_failed_event() {
+        // A command handler that raises a Lua error must:
+        // 1. Emit a CommandResult with ok=false (caller-visible error result)
+        // 2. Emit a Failed event with stage="command" (lifecycle visibility)
+        // Both events must be present — the Failed event must not be silently dropped.
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/cmd-err".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function on_command_fail()\nerror(\"handler boom\")\nend"
+                .to_string(),
+            event_tx,
+            cmd_rx,
+        ));
+
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "fail".to_string(),
+                payload: serde_json::json!({}),
+            })
+            .unwrap();
+
+        let result = next_command_result(
+            &mut event_rx,
+            "command failure should emit a caller-visible CommandResult",
+        )
+        .await;
+        assert_eq!(
+            result.result.get("ok").and_then(|v| v.as_bool()),
+            Some(false),
+            "CommandResult should have ok=false for handler errors"
+        );
+        assert!(
+            result
+                .result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .is_some_and(|m| m.contains("handler boom")),
+            "CommandResult.error should carry the handler message"
+        );
+
+        let failed = loop {
+            let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .expect("command failure should also emit a Failed lifecycle event")
+                .expect("event channel should stay open");
+            if let BackendServiceEvent::Failed { stage, message, .. } = event {
+                break (stage, message);
+            }
+        };
+        assert_eq!(
+            failed.0, "command",
+            "handler runtime errors must use stage='command'"
+        );
+        assert!(
+            failed.1.contains("handler boom"),
+            "Failed message should carry the handler error: {}",
+            failed.1
+        );
+
+        drop(cmd_tx);
+        drop(event_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
             .expect("backend task should not panic");
     }
 
