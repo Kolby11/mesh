@@ -140,6 +140,8 @@ struct BackendRuntimeStatusEntry {
     provider_id: String,
     status: BackendRuntimeStatus,
     message: String,
+    /// Cumulative number of failure-category status updates recorded for this entry.
+    failure_count: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -383,6 +385,7 @@ impl Shell {
                 provider_id: entry.provider_id.clone(),
                 status: entry.status.as_str().to_string(),
                 message: entry.message.clone(),
+                failure_count: entry.failure_count,
             })
             .collect();
         backend_runtimes.sort_by(|a, b| {
@@ -1337,7 +1340,7 @@ impl Shell {
         status: BackendRuntimeStatus,
         message: String,
     ) {
-        if matches!(
+        let is_failure = matches!(
             status,
             BackendRuntimeStatus::InvalidManifest
                 | BackendRuntimeStatus::MissingEntrypoint
@@ -1345,20 +1348,33 @@ impl Shell {
                 | BackendRuntimeStatus::InitFailed
                 | BackendRuntimeStatus::PollFailed
                 | BackendRuntimeStatus::Failed
-        ) {
+        );
+        if is_failure {
             self.diagnostics.record_lifecycle_error(
                 provider_id.clone(),
                 status.as_str(),
                 message.clone(),
             );
         }
+        let key = (interface.clone(), provider_id.clone());
+        let prev_failure_count = self
+            .backend_runtime_statuses
+            .get(&key)
+            .map(|e| e.failure_count)
+            .unwrap_or(0);
+        let failure_count = if is_failure {
+            prev_failure_count + 1
+        } else {
+            prev_failure_count
+        };
         self.backend_runtime_statuses.insert(
-            (interface.clone(), provider_id.clone()),
+            key,
             BackendRuntimeStatusEntry {
                 interface,
                 provider_id,
                 status,
                 message,
+                failure_count,
             },
         );
     }
@@ -3591,6 +3607,79 @@ mod tests {
                 && entry.provider_id == "@mesh/pipewire-audio"
                 && entry.status == "running"
         }));
+    }
+
+    #[test]
+    fn backend_lifecycle_debug_snapshot_includes_failure_counts() {
+        let mut shell = Shell::new();
+        // Record three poll failures for the same provider.
+        shell.record_backend_runtime_status(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            BackendRuntimeStatus::PollFailed,
+            "poll failure 1".to_string(),
+        );
+        shell.record_backend_runtime_status(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            BackendRuntimeStatus::PollFailed,
+            "poll failure 2".to_string(),
+        );
+        shell.record_backend_runtime_status(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            BackendRuntimeStatus::PollFailed,
+            "poll failure 3".to_string(),
+        );
+
+        let snapshot = shell.build_debug_snapshot();
+        let entry = snapshot
+            .backend_runtimes
+            .iter()
+            .find(|e| e.interface == "mesh.audio" && e.provider_id == "@mesh/pipewire-audio")
+            .expect("backend runtime entry must be present in debug snapshot");
+
+        assert_eq!(entry.failure_count, 3,
+            "debug snapshot must include cumulative failure count for the provider");
+        assert_eq!(entry.status, "poll_failed");
+        assert!(!entry.provider_id.is_empty(), "debug snapshot must include provider identity");
+    }
+
+    #[test]
+    fn backend_runtime_status_records_provider_identity_for_failures() {
+        let mut shell = Shell::new();
+        shell.record_backend_runtime_status(
+            "mesh.network".to_string(),
+            "@mesh/networkmanager-network".to_string(),
+            BackendRuntimeStatus::InitFailed,
+            "dbus connection refused".to_string(),
+        );
+
+        // The runtime status map must record both provider identity and status.
+        let key = ("mesh.network".to_string(), "@mesh/networkmanager-network".to_string());
+        let entry = shell.backend_runtime_statuses.get(&key)
+            .expect("runtime status must be recorded for the failed provider");
+        assert_eq!(entry.provider_id, "@mesh/networkmanager-network",
+            "runtime status must identify the failed provider");
+        assert_eq!(entry.interface, "mesh.network",
+            "runtime status must identify the interface");
+        assert_eq!(entry.status.as_str(), "init_failed",
+            "runtime status must record the lifecycle stage");
+        assert_eq!(entry.failure_count, 1,
+            "first failure must set failure_count to 1");
+        assert!(entry.message.contains("dbus connection refused"),
+            "runtime status must preserve the failure message");
+
+        // Additional failure increments the count.
+        shell.record_backend_runtime_status(
+            "mesh.network".to_string(),
+            "@mesh/networkmanager-network".to_string(),
+            BackendRuntimeStatus::InitFailed,
+            "still failing".to_string(),
+        );
+        let entry = shell.backend_runtime_statuses.get(&key).unwrap();
+        assert_eq!(entry.failure_count, 2,
+            "repeated failure must increment failure_count");
     }
 
     #[test]
