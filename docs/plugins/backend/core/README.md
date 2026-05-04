@@ -53,9 +53,11 @@ if not result.ok then
 end
 ```
 
-There are no read-style helper methods in the MVP path. Read current service
-data from `require("@mesh/<interface>").state`; use interface methods only for
-commands.
+For the migrated MVP interfaces (`mesh.audio`, `mesh.network`, `mesh.power`,
+and `mesh.media`), read current service data from
+`require("@mesh/<interface>").state` and use interface methods only for
+commands. Some older bundled interfaces still retain read helpers until they
+move to the same state-first pattern.
 
 ## Runtime-defined extras
 

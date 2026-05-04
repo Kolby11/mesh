@@ -27,7 +27,8 @@ functionality.
 2. Any plugin can declare a new interface. Any plugin can implement it. Any
    plugin can consume it.
 3. Defaults ship as ordinary plugins with no special status — they can be
-   replaced, disabled, or overridden by priority.
+   replaced, disabled, or swapped by choosing a different active provider in
+   the installed module graph.
 4. Cross-language by construction: Luau, WASM, and Rust plugins must be able
    to publish and consume the same interface.
 5. Inspired by D-Bus: named interfaces, typed methods, typed events,
@@ -166,16 +167,19 @@ required = ["service.thermal.read"]
 
 **Backend** (`@alice/lmsensors`):
 
-```toml
-[package]
-type = "backend"
-
-[service]
-provides = "alice.thermal"   # matches the interface name
-priority = 100
-
-[dependencies]
-"@alice/thermal-contract" = ">=1.0.0, <2.0.0"
+```json
+{
+  "type": "backend",
+  "provides": [
+    {
+      "interface": "alice.thermal",
+      "version": "1.0",
+      "base_plugin": "@alice/thermal-contract",
+      "backend_name": "lm-sensors",
+      "priority": 100
+    }
+  ]
+}
 ```
 
 **Frontend** (`@alice/thermal-widget`):
@@ -186,9 +190,9 @@ priority = 100
 ```
 
 ```luau
-local thermal = require("@alice/thermal@>=1.0")
-for _, s in ipairs(thermal:sensors()) do
-    print(s.name, thermal:read(s.id))
+local thermal = require("@alice/thermal")
+for _, sensor in ipairs(thermal.state.sensors or {}) do
+    print(sensor.name, sensor.celsius)
 end
 ```
 
@@ -304,7 +308,7 @@ All default behavior ships as ordinary plugins in the `@mesh` scope:
 | `mesh.audio`   | `@mesh/pipewire-audio` (priority 100), `@mesh/pulseaudio-audio` (50) |
 | `mesh.network` | `@mesh/networkmanager` (100)                                         |
 | `mesh.power`   | `@mesh/upower` (100)                                                 |
-| `mesh.media`   | `@mesh/mpris-media` (100)                                            |
+| `mesh.media`   | `@mesh/reference-media` (10, MVP proof), `@mesh/mpris-media` (100, future real integration) |
 
 They hold no privileged status. A user who prefers `iwd` for network or a
 custom `pw-cli`-based audio daemon can install a provider for the same

@@ -30,7 +30,8 @@ When implemented as a real provider, this backend should cover:
 - enumerate active MPRIS players on the session bus
 - expose metadata (title, artist, album art URL) and playback state per player
 - issue control commands (play/pause/next/previous/seek)
-- emit the contract's events when players appear / disappear or state changes
+- refresh exported state for active player changes and emit `PlaybackChanged`
+  when playback metadata or state changes
 
 ## Notes
 
