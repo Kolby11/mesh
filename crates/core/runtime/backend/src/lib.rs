@@ -864,6 +864,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn backend_unsupported_command_returns_error_result() {
+        // Sending a command name that no handler exists for must produce a CommandResult with
+        // ok=false and an "error" field. It must not crash the backend or emit a Failed event.
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/no-handler".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "function init()\nmesh.service.set_poll_interval(1000)\nend".to_string(),
+            event_tx,
+            cmd_rx,
+        ));
+
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "nonexistent-command".to_string(),
+                payload: serde_json::json!({}),
+            })
+            .unwrap();
+
+        let result = next_command_result(
+            &mut event_rx,
+            "unsupported command should emit a generic error CommandResult",
+        )
+        .await;
+        assert_eq!(result.service, "audio");
+        assert_eq!(result.source_plugin, "@test/no-handler");
+        assert_eq!(result.command, "nonexistent-command");
+        assert_eq!(
+            result.result.get("ok").and_then(|v| v.as_bool()),
+            Some(false),
+            "unsupported command result must have ok=false"
+        );
+        assert!(
+            result.result.get("error").and_then(|v| v.as_str()).is_some(),
+            "unsupported command result must carry an error field"
+        );
+
+        // Verify no Failed lifecycle event was emitted (unsupported commands are not failures)
+        let no_failure = tokio::time::timeout(Duration::from_millis(150), async {
+            loop {
+                match event_rx.recv().await {
+                    Some(BackendServiceEvent::Failed { .. }) => return true,
+                    Some(_) => continue,
+                    None => return false,
+                }
+            }
+        })
+        .await;
+        assert!(
+            no_failure.is_err() || !no_failure.unwrap(),
+            "unsupported command must not emit a Failed lifecycle event"
+        );
+
+        drop(cmd_tx);
+        drop(event_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
     async fn spawn_backend_service_reports_snapshot_failure_stage() {
         // A command handler that sets state to a non-serializable Lua value (a function) causes
         // take_service_state_snapshot() to return SnapshotFailed. The backend lifecycle must emit

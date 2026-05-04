@@ -1290,6 +1290,23 @@ mod tests {
     }
 
     #[test]
+    fn backend_missing_init_entrypoint_is_reported() {
+        // A script without an init() function must produce MissingEntrypoint — not a generic
+        // Runtime error — so the shell can emit an InitFailed event with a clear message.
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script("function on_poll()\nend").unwrap();
+        let err = ctx.call_init().unwrap_err();
+        assert!(
+            matches!(err, BackendScriptError::MissingEntrypoint { .. }),
+            "expected MissingEntrypoint, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("init"),
+            "error message should name the missing entrypoint: {err}"
+        );
+    }
+
+    #[test]
     fn backend_state_snapshot_failure_is_reported() {
         // A state global that cannot be serialized to JSON (a Lua function) triggers
         // SnapshotFailed, not a generic Runtime error, so the shell can bucket it correctly.
