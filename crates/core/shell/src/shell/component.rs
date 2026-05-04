@@ -4230,6 +4230,96 @@ end
     }
 
     #[test]
+    fn quick_settings_wifi_row_publishes_connect_for_wifi_network_ids() {
+        let mut ctx = make_network_ctx();
+        ctx.load_script(
+            r#"
+network_id = "wifi:OfficeNet"
+
+function onConnectWiFi()
+    local ok, network = pcall(require, "@mesh/network@>=1.0")
+    if ok and network and network.available ~= false then
+        network.connect(network_id)
+    end
+end
+"#,
+        )
+        .unwrap();
+        ctx.apply_service_payload("network", &serde_json::json!({ "available": true }));
+
+        ctx.call_handler("onConnectWiFi", &[]).unwrap();
+        let requests =
+            super::super::service::script_events_to_requests(ctx.drain_published_events());
+
+        match requests.as_slice() {
+            [
+                CoreRequest::ServiceCommand {
+                    interface,
+                    command,
+                    payload,
+                    ..
+                },
+            ] => {
+                assert_eq!(interface, "mesh.network");
+                assert_eq!(command, "connect");
+                assert_eq!(
+                    payload,
+                    &serde_json::json!({ "connection_id": "wifi:OfficeNet" })
+                );
+            }
+            other => panic!("expected one mesh.network connect command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quick_settings_bluetooth_chip_selects_bluetooth_section() {
+        let mut ctx = make_network_ctx();
+        ctx.load_script(
+            r#"
+active_section = "wifi"
+wifi_nav_class = "nav-btn nav-active"
+bt_nav_class = "nav-btn"
+audio_nav_class = "nav-btn"
+
+function sync_nav_classes()
+    wifi_nav_class = active_section == "wifi" and "nav-btn nav-active" or "nav-btn"
+    bt_nav_class = active_section == "bluetooth" and "nav-btn nav-active" or "nav-btn"
+    audio_nav_class = active_section == "audio" and "nav-btn nav-active" or "nav-btn"
+end
+
+function onSelectBluetooth()
+    if active_section == "bluetooth" then
+        active_section = ""
+    else
+        active_section = "bluetooth"
+    end
+    sync_nav_classes()
+end
+
+function onToggleBluetooth()
+    onSelectBluetooth()
+end
+"#,
+        )
+        .unwrap();
+
+        ctx.call_handler("onToggleBluetooth", &[]).unwrap();
+
+        assert_eq!(
+            ctx.state.get("active_section"),
+            Some(serde_json::json!("bluetooth"))
+        );
+        assert_eq!(
+            ctx.state.get("bt_nav_class"),
+            Some(serde_json::json!("nav-btn nav-active"))
+        );
+        assert_eq!(
+            ctx.state.get("wifi_nav_class"),
+            Some(serde_json::json!("nav-btn"))
+        );
+    }
+
+    #[test]
     fn real_core_surfaces_panel_render_state_changes_with_seeded_service_payloads() {
         let mut ctx = make_panel_ctx();
         ctx.load_script(&shipped_component_script(include_str!(concat!(

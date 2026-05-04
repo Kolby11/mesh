@@ -139,6 +139,17 @@ local function is_uuid(id)
     return #compact == 32 and compact:match('^%x+$') ~= nil
 end
 
+local function wifi_target(id)
+    if type(id) ~= 'string' or id:sub(1, 5) ~= 'wifi:' then
+        return nil
+    end
+    local target = id:sub(6)
+    if target == '' then
+        return nil
+    end
+    return target
+end
+
 local warned = false
 local function set_unavailable_state()
     state = {
@@ -196,8 +207,11 @@ function on_command_connect()
     end
     local result = nil
     local kind = payload.kind or payload.connection_kind or ''
+    local wifi_id = wifi_target(id)
     if is_bluetooth_mac(id) and (kind == '' or kind == 'bluetooth') then
         result = mesh.exec('bluetoothctl', { 'connect', id })
+    elseif wifi_id and (kind == '' or kind == 'wifi') then
+        result = mesh.exec('nmcli', { 'device', 'wifi', 'connect', wifi_id })
     elseif is_uuid(id) then
         result = mesh.exec('nmcli', { 'connection', 'up', 'uuid', id })
     else

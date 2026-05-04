@@ -9,6 +9,11 @@
     "plan_check": true,
     "verifier": true,
     "nyquist_validation": true,
-    "auto_advance": false
+    "auto_advance": false,
+    "inline_plan_threshold": 3,
+    "use_worktrees": true
+  },
+  "git": {
+    "branching_strategy": "none"
   }
 }

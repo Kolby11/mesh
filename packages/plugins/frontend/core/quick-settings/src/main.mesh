@@ -6,7 +6,7 @@
     </box>
     <box class="chips">
       <button class="chip" onclick={onToggleWiFi} title="Toggle Wi-Fi" aria-label="Toggle Wi-Fi">Wi-Fi</button>
-      <button class="chip" onclick={onToggleBluetooth} title="Toggle Bluetooth" aria-label="Toggle Bluetooth">Bluetooth</button>
+      <button class="chip" onclick={onToggleBluetooth} title="Open Bluetooth devices" aria-label="Open Bluetooth devices">Bluetooth</button>
       <button class="chip wide">Do Not Disturb</button>
     </box>
     <box class="body">
@@ -105,19 +105,12 @@ function onRender()
     end
 end
 
-function sync_nav_classes()
-    wifi_nav_class = active_section == "wifi" and "nav-btn nav-active" or "nav-btn"
-    bt_nav_class = active_section == "bluetooth" and "nav-btn nav-active" or "nav-btn"
-    audio_nav_class = active_section == "audio" and "nav-btn nav-active" or "nav-btn"
-end
-
 function onSelectWifi()
     if active_section == "wifi" then
         active_section = ""
     else
         active_section = "wifi"
     end
-    sync_nav_classes()
 end
 
 function onSelectBluetooth()
@@ -126,7 +119,6 @@ function onSelectBluetooth()
     else
         active_section = "bluetooth"
     end
-    sync_nav_classes()
 end
 
 function onSelectAudio()
@@ -135,7 +127,6 @@ function onSelectAudio()
     else
         active_section = "audio"
     end
-    sync_nav_classes()
 end
 
 function onToggleWiFi()
@@ -154,7 +145,7 @@ function onToggleWiFi()
 end
 
 function onToggleBluetooth()
-    mesh.log.info("Bluetooth toggle clicked")
+    onSelectBluetooth()
 end
 
 function onClose()
