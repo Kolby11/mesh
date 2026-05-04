@@ -40,6 +40,9 @@ pub struct BackendRuntimeEntry {
     pub provider_id: String,
     pub status: String,
     pub message: String,
+    /// Number of times this (interface, provider_id) pair has recorded a failure.
+    /// Zero for non-failure entries.
+    pub failure_count: u64,
 }
 
 #[derive(Debug, Clone)]
