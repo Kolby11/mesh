@@ -1428,7 +1428,44 @@ impl Shell {
                 "cleaning backend runtime slot"
             );
             self.stop_backend_runtime(&interface);
+            // Replace stale public state immediately so consumers stop seeing
+            // last-known-good data from a provider that is now failing.
+            self.clear_active_provider_service_state(&interface, &provider_id);
         }
+    }
+
+    /// Replace `latest_service_state` for the given interface with an unavailable
+    /// payload when the active provider is known to be failing. Stays generic:
+    /// if the existing payload has an `available` field, it is set to false;
+    /// otherwise an empty error object is written. No service-specific branches.
+    fn clear_active_provider_service_state(&mut self, interface: &str, provider_id: &str) {
+        let unavailable_payload = if let Some(existing) = self.latest_service_state.get(interface) {
+            // Preserve the shape but mark as unavailable where the contract supports it.
+            let mut obj = if existing.state.is_object() {
+                existing.state.clone()
+            } else {
+                serde_json::json!({})
+            };
+            if let Some(map) = obj.as_object_mut() {
+                map.insert("available".to_string(), serde_json::Value::Bool(false));
+            }
+            obj
+        } else {
+            serde_json::json!({ "available": false })
+        };
+        self.latest_service_state.insert(
+            interface.to_string(),
+            LatestServiceState {
+                interface: interface.to_string(),
+                provider_id: provider_id.to_string(),
+                state: unavailable_payload,
+            },
+        );
+        tracing::debug!(
+            interface,
+            provider_id,
+            "cleared stale public service state after provider failure"
+        );
     }
 
     fn spawn_backend_plugins(
@@ -3554,6 +3591,74 @@ mod tests {
                 && entry.provider_id == "@mesh/pipewire-audio"
                 && entry.status == "running"
         }));
+    }
+
+    #[test]
+    fn active_provider_failure_clears_latest_service_state() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+
+        // Inject a healthy service state for the active provider.
+        let healthy_event = service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 75, "muted": false }),
+        );
+        shell.record_latest_service_state(&healthy_event);
+        {
+            let latest = shell.latest_service_state.get("mesh.audio").unwrap();
+            assert_eq!(latest.state["available"], true);
+        }
+
+        // Provider fails — should replace stale state with unavailable payload.
+        shell.handle_backend_lifecycle(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            "poll".to_string(),
+            "failed".to_string(),
+            "poll boom".to_string(),
+        );
+
+        let latest = shell.latest_service_state.get("mesh.audio").unwrap();
+        assert_eq!(latest.state["available"], false,
+            "active provider failure must set available=false in latest_service_state");
+        assert_eq!(latest.provider_id, "@mesh/pipewire-audio");
+    }
+
+    #[test]
+    fn stale_provider_failure_does_not_clear_new_provider_state() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/old-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+
+        let (new_slot, _new_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/new-audio");
+        shell.replace_backend_runtime("mesh.audio".to_string(), new_slot);
+
+        // New provider emits healthy state.
+        let healthy_event = service_update(
+            "mesh.audio",
+            "@mesh/new-audio",
+            serde_json::json!({ "available": true, "percent": 50 }),
+        );
+        shell.record_latest_service_state(&healthy_event);
+
+        // Old (stale) provider reports failure — must NOT clear new provider's state.
+        shell.handle_backend_lifecycle(
+            "mesh.audio".to_string(),
+            "@mesh/old-audio".to_string(),
+            "poll".to_string(),
+            "failed".to_string(),
+            "old provider late failure".to_string(),
+        );
+
+        // New provider's state must remain intact.
+        let latest = shell.latest_service_state.get("mesh.audio").unwrap();
+        assert_eq!(latest.provider_id, "@mesh/new-audio",
+            "stale provider failure must not replace new provider state");
+        assert_eq!(latest.state["available"], true);
     }
 
     #[test]
