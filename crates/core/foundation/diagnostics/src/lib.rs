@@ -1,8 +1,8 @@
 /// Logging, health reporting, and performance monitoring for MESH plugins.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 /// Health status of a plugin.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,12 +40,23 @@ pub struct Diagnostics {
     state: Arc<Mutex<DiagnosticsState>>,
 }
 
+/// A deduplicated record for a repeated backend lifecycle failure.
+/// Keyed by `(provider_id, stage)`; repeats update `count` and `last_seen`.
+#[derive(Debug, Clone)]
+pub struct LifecycleErrorRecord {
+    pub provider_id: String,
+    pub stage: String,
+    pub latest_message: String,
+    pub count: u64,
+    pub last_seen: SystemTime,
+}
+
 #[derive(Debug)]
 struct DiagnosticsState {
     health: HealthStatus,
     error_count: u64,
     handler_errors: HashSet<(String, String, String)>,
-    lifecycle_errors: HashSet<(String, String, String)>,
+    lifecycle_errors: HashMap<(String, String), LifecycleErrorRecord>,
     missing_icons: HashSet<(String, String)>,
 }
 
@@ -57,7 +68,7 @@ impl Diagnostics {
                 health: HealthStatus::Healthy,
                 error_count: 0,
                 handler_errors: HashSet::new(),
-                lifecycle_errors: HashSet::new(),
+                lifecycle_errors: HashMap::new(),
                 missing_icons: HashSet::new(),
             })),
         }
@@ -141,17 +152,42 @@ impl Diagnostics {
         let stage = stage.into();
         let message = message.into();
         let mut state = self.state.lock().unwrap();
-        let inserted =
-            state
-                .lifecycle_errors
-                .insert((provider_id.clone(), stage.clone(), message.clone()));
-        if inserted {
+        let key = (provider_id.clone(), stage.clone());
+        if let Some(record) = state.lifecycle_errors.get_mut(&key) {
+            // Repeat: update metadata only, do not increment unique error count.
+            record.latest_message = message;
+            record.count += 1;
+            record.last_seen = SystemTime::now();
+            false
+        } else {
+            // First occurrence: create bucket, set health, increment error count.
+            state.lifecycle_errors.insert(
+                key,
+                LifecycleErrorRecord {
+                    provider_id: provider_id.clone(),
+                    stage: stage.clone(),
+                    latest_message: message.clone(),
+                    count: 1,
+                    last_seen: SystemTime::now(),
+                },
+            );
             state.health = HealthStatus::Error(format!(
                 "backend lifecycle '{stage}' failed for provider '{provider_id}': {message}"
             ));
             state.error_count += 1;
+            true
         }
-        inserted
+    }
+
+    /// Return a snapshot of all lifecycle error records for this diagnostics handle.
+    pub fn lifecycle_error_records(&self) -> Vec<LifecycleErrorRecord> {
+        self.state
+            .lock()
+            .unwrap()
+            .lifecycle_errors
+            .values()
+            .cloned()
+            .collect()
     }
 
     pub fn health(&self) -> HealthStatus {
@@ -260,5 +296,64 @@ mod tests {
             }
             other => panic!("expected error health, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lifecycle_errors_are_deduplicated_by_provider_and_stage() {
+        let diagnostics = Diagnostics::new("@mesh/pipewire-audio");
+
+        // First occurrence returns true and sets health.
+        assert!(diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "msg A"));
+        assert_eq!(diagnostics.error_count(), 1);
+
+        // Different stage is a new bucket.
+        assert!(diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "init", "msg A"));
+        assert_eq!(diagnostics.error_count(), 2);
+
+        // Same (provider, stage) with different message is NOT a new bucket.
+        assert!(!diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "msg B"));
+        assert_eq!(diagnostics.error_count(), 2);
+
+        // Different provider, same stage is a new bucket.
+        assert!(diagnostics.record_lifecycle_error("@mesh/pulseaudio", "poll", "msg A"));
+        assert_eq!(diagnostics.error_count(), 3);
+    }
+
+    #[test]
+    fn repeated_lifecycle_failures_increment_count_without_new_error() {
+        let diagnostics = Diagnostics::new("@mesh/pipewire-audio");
+
+        // First occurrence.
+        assert!(diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "boom 1"));
+        assert_eq!(diagnostics.error_count(), 1);
+
+        // Second occurrence — different message, same (provider, stage) bucket.
+        assert!(!diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "boom 2"));
+        assert_eq!(diagnostics.error_count(), 1);
+
+        // Third occurrence.
+        assert!(!diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "boom 3"));
+        assert_eq!(diagnostics.error_count(), 1);
+
+        // Record count should be 3.
+        let records = diagnostics.lifecycle_error_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].count, 3);
+    }
+
+    #[test]
+    fn lifecycle_error_record_keeps_latest_message() {
+        let diagnostics = Diagnostics::new("@mesh/pipewire-audio");
+
+        assert!(diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "first message"));
+        assert!(!diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "second message"));
+        assert!(!diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "third message"));
+
+        let records = diagnostics.lifecycle_error_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].latest_message, "third message");
+        assert_eq!(records[0].provider_id, "@mesh/pipewire-audio");
+        assert_eq!(records[0].stage, "poll");
+        assert_eq!(records[0].count, 3);
     }
 }
