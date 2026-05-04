@@ -1,0 +1,32 @@
+{
+  "id": "@mesh/reference-media",
+  "name": "MESH Reference Media",
+  "version": "0.1.0",
+  "type": "backend",
+  "api_version": "0.1",
+  "description": "Deterministic in-memory media backend demonstrating the backend MVP contract",
+  "authors": ["MESH Project"],
+  "capabilities": {
+    "required": [
+      "service.media.read",
+      "service.media.control"
+    ]
+  },
+  "dependencies": {
+    "plugins": {
+      "@mesh/media-interface": ">=1.0.0, <2.0.0"
+    }
+  },
+  "entrypoints": {
+    "main": "src/main.luau"
+  },
+  "provides": [
+    {
+      "interface": "mesh.media",
+      "version": "1.0",
+      "base_plugin": "@mesh/media-interface",
+      "backend_name": "Reference",
+      "priority": 10
+    }
+  ]
+}
