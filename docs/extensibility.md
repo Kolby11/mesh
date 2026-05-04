@@ -40,15 +40,18 @@ functionality.
 
 ### Interface
 
-A named, versioned contract describing a set of methods, event channels, and
-required capabilities. An interface is **not** code — it is a declaration.
+A named, versioned contract describing state fields, command methods, event
+channels, and required capabilities. An interface is **not** code — it is a
+declaration.
 
 ```
 interface: mesh.audio
 version:   1.0
+state_fields:
+  available: bool
+  percent: float
+  muted: bool
 methods:
-  default_output() -> Device?
-  output_devices() -> [Device]
   set_volume(device_id: string, level: float) -> Result
   set_mute(device_id: string, muted: bool)    -> Result
 events:
@@ -94,28 +97,26 @@ registry.register(
 Multiple implementations of the same interface may coexist. The active one is
 chosen by:
 
-1. User pin in `~/.config/mesh/config.toml` under `[services]`.
-2. Otherwise the highest `priority` among implementations that report
-   compatibility (e.g. "PipeWire daemon is reachable").
-3. Fallback to the next candidate if init fails.
+1. The installed module graph's explicit active-provider selection for that interface.
+2. Runtime validation that the selected provider can launch.
+3. Visible failure status and diagnostics if the selected provider does not initialize.
 
 ### Consumption
 
-Frontends import interfaces by name and version range:
+Frontends import interfaces by name:
 
 ```luau
-local ok, audio = pcall(require, "@mesh/audio@>=1.0, <2.0")
+local ok, audio = pcall(require, "@mesh/audio")
 if ok and audio then
-  local dev = audio:default_output()
-  audio:on("VolumeChanged", function(sig) ... end)
+  local percent = audio.state.percent
+  local muted = audio.state.muted
+  local result = audio.set_volume("default", 0.75)
 end
 ```
 
-The returned handle is a proxy object. The core validates each call against
-the declared interface: argument types, event payloads, capability grants.
-Event subscriptions opened through the proxy are scoped to the active
-implementation — if the backend is hot-swapped, the proxy stays valid and the
-subscription resumes against the new implementation.
+The returned handle is a proxy object with reactive `.state` plus command
+methods. The core validates each call against the declared interface:
+argument types, event payloads, and capability grants.
 
 ## Declaring a new interface
 
@@ -306,8 +307,8 @@ All default behavior ships as ordinary plugins in the `@mesh` scope:
 | `mesh.media`   | `@mesh/mpris-media` (100)                                            |
 
 They hold no privileged status. A user who prefers `iwd` for network or a
-custom `pw-cli`-based audio daemon just installs a plugin with higher
-priority, or pins it in config.
+custom `pw-cli`-based audio daemon can install a provider for the same
+interface and make it the active provider in the installed module graph.
 
 Frontends likewise (`@mesh/panel`, `@mesh/launcher`, …) are ordinary surface
 plugins. You can disable them and ship your own.
