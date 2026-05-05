@@ -2,6 +2,7 @@
 use crate::tree::ElementState;
 use mesh_core_component::style::{Selector, StyleRule, StyleValue};
 use mesh_core_theme::{Theme, TokenValue};
+use std::collections::HashMap;
 
 /// Author-facing style diagnostic emitted while resolving supported shell CSS.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -547,6 +548,14 @@ impl<'a> StyleResolver<'a> {
 
     /// Resolve a `StyleValue` to a concrete string.
     pub fn resolve_value(&self, value: &StyleValue) -> String {
+        self.resolve_value_with_variables(value, &HashMap::new())
+    }
+
+    fn resolve_value_with_variables(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+    ) -> String {
         match value {
             StyleValue::Literal(s) => s.clone(),
             StyleValue::Token(name) => match self.theme.token(name) {
@@ -558,11 +567,36 @@ impl<'a> StyleResolver<'a> {
                     String::new()
                 }
             },
-            StyleValue::Var(name) => {
-                tracing::debug!("var({name}) not yet resolved");
-                String::new()
-            }
+            StyleValue::Var(name) => variables
+                .get(name)
+                .map(|value| self.resolve_value_with_variables(value, variables))
+                .unwrap_or_default(),
         }
+    }
+
+    fn resolve_color_with_variables(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+    ) -> Color {
+        let resolved = self.resolve_value_with_variables(value, variables);
+        Color::from_hex(&resolved).unwrap_or(Color::TRANSPARENT)
+    }
+
+    fn resolve_number_with_variables(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+    ) -> f32 {
+        parse_px(&self.resolve_value_with_variables(value, variables))
+    }
+
+    fn resolve_time_ms_with_variables(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+    ) -> u32 {
+        parse_time_ms(&self.resolve_value_with_variables(value, variables))
     }
 
     /// Resolve a color value (hex string or theme token).
@@ -607,6 +641,7 @@ impl<'a> StyleResolver<'a> {
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
         let mut style = ComputedStyle::default();
         let mut diagnostics = Vec::new();
+        let mut variables = HashMap::new();
 
         // Apply default direction based on tag.
         if tag == "column" {
@@ -618,6 +653,7 @@ impl<'a> StyleResolver<'a> {
             if rule_matches(rule, tag, classes, id, context, state) {
                 for decl in &rule.declarations {
                     if decl.property.starts_with("--") {
+                        variables.insert(decl.property.clone(), decl.value.clone());
                         continue;
                     }
                     if !is_supported_css_property(&decl.property) {
@@ -628,7 +664,19 @@ impl<'a> StyleResolver<'a> {
                         });
                         continue;
                     }
-                    apply_declaration(&mut style, &decl.property, &decl.value, self);
+                    if let StyleValue::Var(name) = &decl.value
+                        && !variables.contains_key(name)
+                    {
+                        diagnostics.push(StyleDiagnostic {
+                            property: decl.property.clone(),
+                            selector: Some(selector_to_diagnostic_string(&rule.selector)),
+                            message: format!(
+                                "unsupported CSS variable reference '{name}' for property '{}'",
+                                decl.property
+                            ),
+                        });
+                    }
+                    apply_declaration(&mut style, &decl.property, &decl.value, self, &variables);
                 }
             }
         }
@@ -677,6 +725,7 @@ impl<'a> StyleResolver<'a> {
                             &decl.property,
                             &decl.value,
                             self,
+                            &HashMap::new(),
                         );
                     }
                 }
@@ -750,86 +799,163 @@ fn apply_declaration(
     property: &str,
     value: &StyleValue,
     resolver: &StyleResolver,
+    variables: &HashMap<String, StyleValue>,
 ) {
     match property {
-        "background" | "background-color" => style.background_color = resolver.resolve_color(value),
-        "color" => style.color = resolver.resolve_color(value),
-        "border-color" => style.border_color = resolver.resolve_color(value),
-        "font-size" => style.font_size = resolver.resolve_number(value),
-        "font-weight" => style.font_weight = resolver.resolve_number(value) as u16,
-        "font-family" => style.font_family = resolver.resolve_value(value),
+        "background" | "background-color" => {
+            style.background_color = resolver.resolve_color_with_variables(value, variables)
+        }
+        "color" => style.color = resolver.resolve_color_with_variables(value, variables),
+        "border" => apply_border_shorthand(
+            style,
+            &resolver.resolve_value_with_variables(value, variables),
+        ),
+        "border-color" => {
+            style.border_color = parse_border_color_shorthand(
+                &resolver.resolve_value_with_variables(value, variables),
+            )
+        }
+        "font" => apply_font_shorthand(
+            style,
+            &resolver.resolve_value_with_variables(value, variables),
+        ),
+        "font-size" => style.font_size = resolver.resolve_number_with_variables(value, variables),
+        "font-weight" => {
+            style.font_weight = resolver.resolve_number_with_variables(value, variables) as u16
+        }
+        "font-family" => {
+            style.font_family = resolver.resolve_value_with_variables(value, variables)
+        }
         "font-style" => {
-            style.font_style = match resolver.resolve_value(value).as_str() {
+            style.font_style = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
                 "italic" | "oblique" => FontStyle::Italic,
                 _ => FontStyle::Normal,
             };
         }
-        "letter-spacing" => style.letter_spacing = resolver.resolve_number(value),
+        "letter-spacing" => {
+            style.letter_spacing = resolver.resolve_number_with_variables(value, variables)
+        }
         "text-overflow" => {
-            style.text_overflow = match resolver.resolve_value(value).as_str() {
+            style.text_overflow = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
                 "ellipsis" => TextOverflow::Ellipsis,
                 _ => TextOverflow::Clip,
             };
         }
-        "line-height" => style.line_height = resolver.resolve_number(value),
-        "padding" => style.padding = Edges::all(resolver.resolve_number(value)),
-        "padding-top" => style.padding.top = resolver.resolve_number(value),
-        "padding-right" => style.padding.right = resolver.resolve_number(value),
-        "padding-bottom" => style.padding.bottom = resolver.resolve_number(value),
-        "padding-left" => style.padding.left = resolver.resolve_number(value),
+        "line-height" => {
+            style.line_height = resolver.resolve_number_with_variables(value, variables)
+        }
+        "padding" => {
+            style.padding =
+                parse_edges_shorthand(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "padding-top" => {
+            style.padding.top = resolver.resolve_number_with_variables(value, variables)
+        }
+        "padding-right" => {
+            style.padding.right = resolver.resolve_number_with_variables(value, variables)
+        }
+        "padding-bottom" => {
+            style.padding.bottom = resolver.resolve_number_with_variables(value, variables)
+        }
+        "padding-left" => {
+            style.padding.left = resolver.resolve_number_with_variables(value, variables)
+        }
         "padding-x" | "padding-inline" => {
-            let v = resolver.resolve_number(value);
+            let v = resolver.resolve_number_with_variables(value, variables);
             style.padding.left = v;
             style.padding.right = v;
         }
         "padding-y" | "padding-block" => {
-            let v = resolver.resolve_number(value);
+            let v = resolver.resolve_number_with_variables(value, variables);
             style.padding.top = v;
             style.padding.bottom = v;
         }
-        "margin" => style.margin = Edges::all(resolver.resolve_number(value)),
-        "margin-top" => style.margin.top = resolver.resolve_number(value),
-        "margin-right" => style.margin.right = resolver.resolve_number(value),
-        "margin-bottom" => style.margin.bottom = resolver.resolve_number(value),
-        "margin-left" => style.margin.left = resolver.resolve_number(value),
+        "margin" => {
+            style.margin =
+                parse_edges_shorthand(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "margin-top" => style.margin.top = resolver.resolve_number_with_variables(value, variables),
+        "margin-right" => {
+            style.margin.right = resolver.resolve_number_with_variables(value, variables)
+        }
+        "margin-bottom" => {
+            style.margin.bottom = resolver.resolve_number_with_variables(value, variables)
+        }
+        "margin-left" => {
+            style.margin.left = resolver.resolve_number_with_variables(value, variables)
+        }
         "margin-x" | "margin-inline" => {
-            let v = resolver.resolve_number(value);
+            let v = resolver.resolve_number_with_variables(value, variables);
             style.margin.left = v;
             style.margin.right = v;
         }
         "margin-y" | "margin-block" => {
-            let v = resolver.resolve_number(value);
+            let v = resolver.resolve_number_with_variables(value, variables);
             style.margin.top = v;
             style.margin.bottom = v;
         }
-        "gap" => style.gap = resolver.resolve_number(value),
-        "column-gap" | "row-gap" | "gap-x" => style.gap = resolver.resolve_number(value),
-        "border-radius" => style.border_radius = Corners::all(resolver.resolve_number(value)),
-        "border-top-left-radius" => style.border_radius.top_left = resolver.resolve_number(value),
-        "border-top-right-radius" => style.border_radius.top_right = resolver.resolve_number(value),
+        "gap" => style.gap = resolver.resolve_number_with_variables(value, variables),
+        "column-gap" | "row-gap" | "gap-x" => {
+            style.gap = resolver.resolve_number_with_variables(value, variables)
+        }
+        "border-radius" => {
+            style.border_radius =
+                parse_corners_shorthand(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "border-top-left-radius" => {
+            style.border_radius.top_left = resolver.resolve_number_with_variables(value, variables)
+        }
+        "border-top-right-radius" => {
+            style.border_radius.top_right = resolver.resolve_number_with_variables(value, variables)
+        }
         "border-bottom-right-radius" => {
-            style.border_radius.bottom_right = resolver.resolve_number(value)
+            style.border_radius.bottom_right =
+                resolver.resolve_number_with_variables(value, variables)
         }
         "border-bottom-left-radius" => {
-            style.border_radius.bottom_left = resolver.resolve_number(value)
+            style.border_radius.bottom_left =
+                resolver.resolve_number_with_variables(value, variables)
         }
-        "border-width" => style.border_width = Edges::all(resolver.resolve_number(value)),
-        "border-top-width" => style.border_width.top = resolver.resolve_number(value),
-        "border-right-width" => style.border_width.right = resolver.resolve_number(value),
-        "border-bottom-width" => style.border_width.bottom = resolver.resolve_number(value),
-        "border-left-width" => style.border_width.left = resolver.resolve_number(value),
-        "opacity" => style.opacity = resolver.resolve_number(value),
-        "transition-duration" => style.transition.duration_ms = resolver.resolve_time_ms(value),
-        "transition-delay" => style.transition.delay_ms = resolver.resolve_time_ms(value),
+        "border-width" => {
+            style.border_width =
+                parse_edges_shorthand(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "border-top-width" => {
+            style.border_width.top = resolver.resolve_number_with_variables(value, variables)
+        }
+        "border-right-width" => {
+            style.border_width.right = resolver.resolve_number_with_variables(value, variables)
+        }
+        "border-bottom-width" => {
+            style.border_width.bottom = resolver.resolve_number_with_variables(value, variables)
+        }
+        "border-left-width" => {
+            style.border_width.left = resolver.resolve_number_with_variables(value, variables)
+        }
+        "opacity" => style.opacity = resolver.resolve_number_with_variables(value, variables),
+        "transition-duration" => {
+            style.transition.duration_ms = resolver.resolve_time_ms_with_variables(value, variables)
+        }
+        "transition-delay" => {
+            style.transition.delay_ms = resolver.resolve_time_ms_with_variables(value, variables)
+        }
         "transition-timing-function" => {
-            style.transition.easing = parse_easing_keyword(&resolver.resolve_value(value))
+            style.transition.easing =
+                parse_easing_keyword(&resolver.resolve_value_with_variables(value, variables))
         }
         "transition-property" => {
-            style.transition.properties =
-                parse_transition_properties(&resolver.resolve_value(value))
+            style.transition.properties = parse_transition_properties(
+                &resolver.resolve_value_with_variables(value, variables),
+            )
         }
         "transition" => {
-            let resolved = resolver.resolve_value(value);
+            let resolved = resolver.resolve_value_with_variables(value, variables);
             let parsed = parse_transition_shorthand(&resolved);
             style.transition.properties = parsed.0;
             style.transition.duration_ms = parsed.1;
@@ -837,23 +963,47 @@ fn apply_declaration(
             style.transition.easing = parsed.3;
         }
         "overflow" => {
-            let overflow = parse_overflow(&resolver.resolve_value(value));
-            style.overflow_x = overflow;
-            style.overflow_y = overflow;
+            let (x, y) =
+                parse_overflow_shorthand(&resolver.resolve_value_with_variables(value, variables));
+            style.overflow_x = x;
+            style.overflow_y = y;
         }
-        "overflow-x" => style.overflow_x = parse_overflow(&resolver.resolve_value(value)),
-        "overflow-y" => style.overflow_y = parse_overflow(&resolver.resolve_value(value)),
-        "width" => style.width = parse_dimension(&resolver.resolve_value(value)),
-        "height" => style.height = parse_dimension(&resolver.resolve_value(value)),
-        "min-width" => style.min_width = Some(resolver.resolve_number(value)),
-        "max-width" => style.max_width = Some(resolver.resolve_number(value)),
-        "min-height" => style.min_height = Some(resolver.resolve_number(value)),
-        "max-height" => style.max_height = Some(resolver.resolve_number(value)),
-        "flex-grow" => style.flex_grow = resolver.resolve_number(value),
-        "flex-shrink" => style.flex_shrink = resolver.resolve_number(value),
-        "flex-basis" => style.flex_basis = parse_dimension(&resolver.resolve_value(value)),
+        "overflow-x" => {
+            style.overflow_x =
+                parse_overflow(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "overflow-y" => {
+            style.overflow_y =
+                parse_overflow(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "width" => {
+            style.width = parse_dimension(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "height" => {
+            style.height = parse_dimension(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "min-width" => {
+            style.min_width = Some(resolver.resolve_number_with_variables(value, variables))
+        }
+        "max-width" => {
+            style.max_width = Some(resolver.resolve_number_with_variables(value, variables))
+        }
+        "min-height" => {
+            style.min_height = Some(resolver.resolve_number_with_variables(value, variables))
+        }
+        "max-height" => {
+            style.max_height = Some(resolver.resolve_number_with_variables(value, variables))
+        }
+        "flex-grow" => style.flex_grow = resolver.resolve_number_with_variables(value, variables),
+        "flex-shrink" => {
+            style.flex_shrink = resolver.resolve_number_with_variables(value, variables)
+        }
+        "flex-basis" => {
+            style.flex_basis =
+                parse_dimension(&resolver.resolve_value_with_variables(value, variables))
+        }
         "flex" => {
-            let v = resolver.resolve_value(value);
+            let v = resolver.resolve_value_with_variables(value, variables);
             let v = v.trim();
             if v == "none" {
                 style.flex_grow = 0.0;
@@ -867,17 +1017,25 @@ fn apply_declaration(
                 style.flex_grow = n;
                 style.flex_shrink = 1.0;
                 style.flex_basis = Dimension::Px(0.0);
+            } else {
+                apply_flex_shorthand(style, v);
             }
         }
         "flex-wrap" => {
-            style.flex_wrap = match resolver.resolve_value(value).as_str() {
+            style.flex_wrap = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
                 "wrap" => FlexWrap::Wrap,
                 "wrap-reverse" => FlexWrap::WrapReverse,
                 _ => FlexWrap::NoWrap,
             };
         }
         "align-self" => {
-            style.align_self = match resolver.resolve_value(value).as_str() {
+            style.align_self = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
                 "auto" => AlignSelf::Auto,
                 "start" | "flex-start" => AlignSelf::Start,
                 "end" | "flex-end" => AlignSelf::End,
@@ -887,7 +1045,10 @@ fn apply_declaration(
             };
         }
         "align-content" => {
-            style.align_content = match resolver.resolve_value(value).as_str() {
+            style.align_content = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
                 "start" | "flex-start" => AlignContent::Start,
                 "end" | "flex-end" => AlignContent::End,
                 "center" => AlignContent::Center,
@@ -897,13 +1058,19 @@ fn apply_declaration(
             };
         }
         "flex-direction" => {
-            style.direction = match resolver.resolve_value(value).as_str() {
+            style.direction = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
                 "column" | "column-reverse" => FlexDirection::Column,
                 _ => FlexDirection::Row,
             };
         }
         "direction" => {
-            match resolver.resolve_value(value).as_str() {
+            match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
                 "rtl" => style.text_direction = TextDirection::Rtl,
                 "ltr" => style.text_direction = TextDirection::Ltr,
                 // Legacy alias kept for .mesh files that used direction: column/row
@@ -914,7 +1081,10 @@ fn apply_declaration(
             }
         }
         "justify-content" => {
-            style.justify_content = match resolver.resolve_value(value).as_str() {
+            style.justify_content = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
                 "center" => JustifyContent::Center,
                 "end" | "flex-end" => JustifyContent::End,
                 "space-between" => JustifyContent::SpaceBetween,
@@ -923,7 +1093,10 @@ fn apply_declaration(
             };
         }
         "align-items" => {
-            style.align_items = match resolver.resolve_value(value).as_str() {
+            style.align_items = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
                 "center" => AlignItems::Center,
                 "start" | "flex-start" => AlignItems::Start,
                 "end" | "flex-end" => AlignItems::End,
@@ -931,47 +1104,63 @@ fn apply_declaration(
             };
         }
         "text-align" => {
-            style.text_align = match resolver.resolve_value(value).as_str() {
+            style.text_align = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
                 "center" => TextAlign::Center,
                 "right" => TextAlign::Right,
                 _ => TextAlign::Left,
             };
         }
         "display" => {
-            style.display = match resolver.resolve_value(value).as_str() {
+            style.display = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
                 "none" => Display::None,
                 _ => Display::Flex,
             };
         }
         "visibility" => {
             if matches!(
-                resolver.resolve_value(value).as_str(),
+                resolver
+                    .resolve_value_with_variables(value, variables)
+                    .as_str(),
                 "hidden" | "collapse"
             ) {
                 style.opacity = 0.0;
             }
         }
         "position" => {
-            style.position = match resolver.resolve_value(value).as_str() {
+            style.position = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
                 "relative" => Position::Relative,
                 "absolute" => Position::Absolute,
                 _ => Position::Static,
             };
         }
         "z-index" => {
-            let v = resolver.resolve_value(value);
+            let v = resolver.resolve_value_with_variables(value, variables);
             style.z_index = v.trim().parse::<i32>().unwrap_or(0);
         }
-        "top" => style.inset_top = Some(resolver.resolve_number(value)),
-        "right" => style.inset_right = Some(resolver.resolve_number(value)),
-        "bottom" => style.inset_bottom = Some(resolver.resolve_number(value)),
-        "left" => style.inset_left = Some(resolver.resolve_number(value)),
+        "top" => style.inset_top = Some(resolver.resolve_number_with_variables(value, variables)),
+        "right" => {
+            style.inset_right = Some(resolver.resolve_number_with_variables(value, variables))
+        }
+        "bottom" => {
+            style.inset_bottom = Some(resolver.resolve_number_with_variables(value, variables))
+        }
+        "left" => style.inset_left = Some(resolver.resolve_number_with_variables(value, variables)),
         "inset" => {
-            let v = resolver.resolve_number(value);
-            style.inset_top = Some(v);
-            style.inset_right = Some(v);
-            style.inset_bottom = Some(v);
-            style.inset_left = Some(v);
+            let edges =
+                parse_edges_shorthand(&resolver.resolve_value_with_variables(value, variables));
+            style.inset_top = Some(edges.top);
+            style.inset_right = Some(edges.right);
+            style.inset_bottom = Some(edges.bottom);
+            style.inset_left = Some(edges.left);
         }
         _ if property.starts_with("--") => {}
         _ => {
@@ -992,6 +1181,129 @@ fn selector_to_diagnostic_string(selector: &Selector) -> String {
             .map(selector_to_diagnostic_string)
             .collect::<Vec<_>>()
             .join(""),
+    }
+}
+
+fn shorthand_numbers(value: &str) -> Vec<f32> {
+    value
+        .split_whitespace()
+        .take(4)
+        .map(parse_px)
+        .collect::<Vec<_>>()
+}
+
+fn parse_edges_shorthand(value: &str) -> Edges {
+    let values = shorthand_numbers(value);
+    match values.as_slice() {
+        [all] => Edges::all(*all),
+        [vertical, horizontal] => Edges {
+            top: *vertical,
+            right: *horizontal,
+            bottom: *vertical,
+            left: *horizontal,
+        },
+        [top, horizontal, bottom] => Edges {
+            top: *top,
+            right: *horizontal,
+            bottom: *bottom,
+            left: *horizontal,
+        },
+        [top, right, bottom, left] => Edges {
+            top: *top,
+            right: *right,
+            bottom: *bottom,
+            left: *left,
+        },
+        _ => Edges::zero(),
+    }
+}
+
+fn parse_corners_shorthand(value: &str) -> Corners {
+    let edges = parse_edges_shorthand(value);
+    Corners {
+        top_left: edges.top,
+        top_right: edges.right,
+        bottom_right: edges.bottom,
+        bottom_left: edges.left,
+    }
+}
+
+fn parse_border_color_shorthand(value: &str) -> Color {
+    value
+        .split_whitespace()
+        .find_map(Color::from_hex)
+        .or_else(|| Color::from_hex(value.trim()))
+        .unwrap_or(Color::TRANSPARENT)
+}
+
+fn apply_border_shorthand(style: &mut ComputedStyle, value: &str) {
+    if value.trim() == "none" {
+        style.border_width = Edges::zero();
+        style.border_color = Color::TRANSPARENT;
+        return;
+    }
+
+    for token in value.split_whitespace() {
+        if token.ends_with("px") || token.parse::<f32>().is_ok() {
+            style.border_width = Edges::all(parse_px(token));
+        } else if let Some(color) = Color::from_hex(token) {
+            style.border_color = color;
+        }
+    }
+}
+
+fn apply_flex_shorthand(style: &mut ComputedStyle, value: &str) {
+    let parts = value.split_whitespace().collect::<Vec<_>>();
+    if parts.len() >= 3 {
+        if let Ok(grow) = parts[0].parse::<f32>() {
+            style.flex_grow = grow;
+        }
+        if let Ok(shrink) = parts[1].parse::<f32>() {
+            style.flex_shrink = shrink;
+        }
+        style.flex_basis = parse_dimension(parts[2]);
+    }
+}
+
+fn apply_font_shorthand(style: &mut ComputedStyle, value: &str) {
+    let mut family_parts = Vec::new();
+    let mut saw_size = false;
+
+    for token in value.split_whitespace() {
+        if token == "italic" || token == "oblique" {
+            style.font_style = FontStyle::Italic;
+        } else if token == "normal" {
+            style.font_style = FontStyle::Normal;
+        } else if let Ok(weight) = token.parse::<u16>() {
+            style.font_weight = weight;
+        } else if token.contains("px") {
+            let mut size_parts = token.split('/');
+            if let Some(size) = size_parts.next() {
+                style.font_size = parse_px(size);
+                saw_size = true;
+            }
+            if let Some(line_height) = size_parts.next() {
+                style.line_height = parse_px(line_height);
+            }
+        } else if saw_size {
+            family_parts.push(token.trim_matches('"').trim_matches('\''));
+        }
+    }
+
+    if !family_parts.is_empty() {
+        style.font_family = family_parts.join(" ");
+    }
+}
+
+fn parse_overflow_shorthand(value: &str) -> (Overflow, Overflow) {
+    let parts = value.split_whitespace().collect::<Vec<_>>();
+    match parts.as_slice() {
+        [one] => {
+            let overflow = parse_overflow(one);
+            (overflow, overflow)
+        }
+        [x, y, ..] => (parse_overflow(x), parse_overflow(y)),
+        [] => (Overflow::Visible, Overflow::Visible),
     }
 }
 
@@ -1516,5 +1828,257 @@ mod tests {
         assert_eq!(style.padding.right, 16.0, "shorthand right");
         assert_eq!(style.padding.bottom, 16.0, "shorthand bottom");
         assert_eq!(style.padding.left, 16.0, "shorthand left");
+    }
+
+    #[test]
+    fn padding_margin_four_value_shorthands_expand_to_edges() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("card".to_string()),
+            declarations: vec![
+                mesh_core_component::style::Declaration {
+                    property: "padding".to_string(),
+                    value: StyleValue::Literal("1px 2px 3px 4px".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "margin".to_string(),
+                    value: StyleValue::Literal("5px 6px 7px 8px".to_string()),
+                },
+            ],
+            container_query: None,
+        }];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "box",
+            &["card".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.padding.top, 1.0);
+        assert_eq!(style.padding.right, 2.0);
+        assert_eq!(style.padding.bottom, 3.0);
+        assert_eq!(style.padding.left, 4.0);
+        assert_eq!(style.margin.top, 5.0);
+        assert_eq!(style.margin.right, 6.0);
+        assert_eq!(style.margin.bottom, 7.0);
+        assert_eq!(style.margin.left, 8.0);
+    }
+
+    #[test]
+    fn border_shorthand_sets_width_and_color() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Tag("box".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "border".to_string(),
+                value: StyleValue::Literal("2px solid #ffffff".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "box",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.border_width, Edges::all(2.0));
+        assert_eq!(style.border_color, Color::WHITE);
+    }
+
+    #[test]
+    fn overflow_two_value_shorthand_sets_axes() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Tag("box".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "overflow".to_string(),
+                value: StyleValue::Literal("hidden auto".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "box",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.overflow_x, Overflow::Hidden);
+        assert_eq!(style.overflow_y, Overflow::Auto);
+    }
+
+    #[test]
+    fn flex_triple_shorthand_sets_grow_shrink_basis() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Tag("box".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "flex".to_string(),
+                value: StyleValue::Literal("1 0 12px".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "box",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.flex_grow, 1.0);
+        assert_eq!(style.flex_shrink, 0.0);
+        assert!(matches!(style.flex_basis, Dimension::Px(px) if px == 12.0));
+    }
+
+    #[test]
+    fn font_shorthand_sets_text_fields() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Tag("text".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "font".to_string(),
+                value: StyleValue::Literal("italic 600 16px/1.4 Inter".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "text",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.font_style, FontStyle::Italic);
+        assert_eq!(style.font_weight, 600);
+        assert_eq!(style.font_size, 16.0);
+        assert_eq!(style.line_height, 1.4);
+        assert_eq!(style.font_family, "Inter");
+    }
+
+    #[test]
+    fn css_variable_resolves_local_literal_value() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![
+                mesh_core_component::style::Declaration {
+                    property: "--surface".to_string(),
+                    value: StyleValue::Literal("#ffffff".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "background".to_string(),
+                    value: StyleValue::Var("--surface".to_string()),
+                },
+            ],
+            container_query: None,
+        }];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.background_color, Color::WHITE);
+    }
+
+    #[test]
+    fn css_variable_resolves_token_value_before_computed_style() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![
+                mesh_core_component::style::Declaration {
+                    property: "--surface".to_string(),
+                    value: StyleValue::Token("color.primary".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "background".to_string(),
+                    value: StyleValue::Var("--surface".to_string()),
+                },
+            ],
+            container_query: None,
+        }];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.background_color, Color::from_hex("#6750A4").unwrap());
+    }
+
+    #[test]
+    fn missing_css_variable_produces_style_diagnostic() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "background".to_string(),
+                value: StyleValue::Var("--missing".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let (_style, diagnostics) = resolver.resolve_node_style_with_diagnostics(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("--missing"));
+    }
+
+    #[test]
+    fn token_resolution_still_works_after_variable_support() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let value = StyleValue::Token("color.primary".to_string());
+        assert_eq!(resolver.resolve_value(&value), "#6750A4");
+    }
+
+    #[test]
+    fn pseudo_state_rules_still_apply_after_variable_support() {
+        pseudo_state_rules_apply_when_state_matches();
+    }
+
+    #[test]
+    fn container_query_rules_still_apply_after_variable_support() {
+        container_query_rules_apply_against_context();
     }
 }
