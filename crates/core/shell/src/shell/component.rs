@@ -69,6 +69,7 @@ pub(super) struct FrontendSurfaceComponent {
     render_stack: RefCell<Vec<String>>,
     active_theme: RefCell<Theme>,
     measured_size: Option<(u32, u32)>,
+    last_surface_size: Option<(u32, u32)>,
     locale: LocaleEngine,
     interface_catalog: mesh_core_service::InterfaceCatalog,
     last_tree: Option<WidgetNode>,
@@ -413,6 +414,7 @@ impl FrontendSurfaceComponent {
             render_stack: RefCell::new(Vec::new()),
             active_theme: RefCell::new(default_theme()),
             measured_size: None,
+            last_surface_size: None,
             locale: LocaleEngine::new("en"),
             interface_catalog,
             last_tree: None,
@@ -630,6 +632,16 @@ impl FrontendSurfaceComponent {
         resolver.restyle_subtree(&mut tree, rules, context);
 
         tree
+    }
+
+    fn observe_surface_size(&mut self, width: u32, height: u32) -> bool {
+        let size = (width.max(1), height.max(1));
+        if self.last_surface_size == Some(size) {
+            return false;
+        }
+        self.last_surface_size = Some(size);
+        self.dirty = true;
+        true
     }
 
     fn update_slider_from_position(
@@ -1605,6 +1617,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.dirty || !self.style_animations.is_empty()
     }
 
+    fn surface_size_changed(&mut self, width: u32, height: u32) -> bool {
+        self.observe_surface_size(width, height)
+    }
+
     fn render(&mut self, surface: &mut dyn ShellSurface) -> Result<(), ComponentError> {
         self.render_layout(surface);
 
@@ -1658,6 +1674,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         } else {
             requested_height.max(1)
         };
+        self.observe_surface_size(content_width, content_height);
         let mut tree = self.build_tree(theme, content_width, content_height);
         self.apply_style_animations(&mut tree);
         if self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured {
@@ -2973,6 +2990,150 @@ end
             Some("local")
         );
         assert!(node_by_mesh_key(tree, "root/0/1").state.checked);
+    }
+
+    #[test]
+    fn container_size_restyle_preserves_runtime_and_local_state() {
+        let mut component = test_frontend_component(
+            r#"
+<style>
+.panel {
+  width: 100%;
+  height: 100%;
+  background-color: #222222;
+  gap: 4px;
+}
+scroll {
+  height: 20px;
+  overflow-y: auto;
+}
+text {
+  height: 100px;
+}
+@container (min-width: 400px) {
+  .panel {
+    background-color: #eeeeee;
+    gap: 16px;
+  }
+  input {
+    width: 180px;
+  }
+}
+@container (max-width: 399px) {
+  input {
+    width: 90px;
+  }
+}
+</style>
+<template>
+  <column class="panel">
+    <input value="initial" />
+    <slider min="0" max="100" value="25" />
+    <checkbox checked="false" />
+    <scroll>
+      <text>Scrollable content</text>
+    </scroll>
+  </column>
+</template>
+<script lang="luau">
+render_count = 0
+function onRender()
+    render_count = render_count + 1
+end
+</script>
+"#,
+        );
+        component.surface_layout.width = 0;
+        component.surface_layout.height = 0;
+        component
+            .input_values
+            .insert("root/0/0".into(), "local".into());
+        component.slider_values.insert("root/0/1".into(), 73.0);
+        component.checked_values.insert("root/0/2".into(), true);
+        component
+            .scroll_offsets
+            .insert("root/0/3".into(), ScrollOffsetState { x: 3.0, y: 14.0 });
+
+        let theme = default_theme();
+        let mut wide_buffer = PixelBuffer::new(420, 160);
+        component.paint(&theme, 420, 160, &mut wide_buffer).unwrap();
+        let render_count_after_wide = runtime_number(&component, "render_count");
+        let runtime_count_after_wide = component.runtimes.lock().unwrap().len();
+        let wide_tree = component.last_tree.as_ref().unwrap();
+        assert_eq!(
+            node_by_mesh_key(wide_tree, "root/0")
+                .computed_style
+                .background_color,
+            Color::from_hex("#eeeeee").unwrap()
+        );
+        assert_eq!(
+            node_by_mesh_key(wide_tree, "root/0/0")
+                .attributes
+                .get("value")
+                .map(String::as_str),
+            Some("local")
+        );
+
+        component.dirty = false;
+        assert!(
+            !component.surface_size_changed(420, 160),
+            "identical consecutive dimensions should not mark the component dirty"
+        );
+        assert!(!component.wants_render());
+
+        assert!(component.surface_size_changed(260, 160));
+        assert!(component.wants_render());
+        let mut narrow_buffer = PixelBuffer::new(260, 160);
+        component
+            .paint(&theme, 260, 160, &mut narrow_buffer)
+            .unwrap();
+
+        assert_eq!(
+            runtime_count_after_wide,
+            component.runtimes.lock().unwrap().len(),
+            "size restyles must reuse the existing runtime"
+        );
+        assert_eq!(
+            render_count_after_wide,
+            runtime_number(&component, "render_count"),
+            "size restyles should not rerun frontend render hooks"
+        );
+
+        let narrow_tree = component.last_tree.as_ref().unwrap();
+        assert_eq!(
+            node_by_mesh_key(narrow_tree, "root/0")
+                .computed_style
+                .background_color,
+            Color::from_hex("#222222").unwrap()
+        );
+        let input_width = node_by_mesh_key(narrow_tree, "root/0/0")
+            .computed_style
+            .width;
+        assert!(
+            matches!(input_width, mesh_core_elements::Dimension::Px(px) if (px - 90.0).abs() < f32::EPSILON)
+        );
+        assert_eq!(
+            node_by_mesh_key(narrow_tree, "root/0/0")
+                .attributes
+                .get("value")
+                .map(String::as_str),
+            Some("local")
+        );
+        assert_eq!(
+            node_by_mesh_key(narrow_tree, "root/0/1")
+                .attributes
+                .get("value")
+                .map(String::as_str),
+            Some("73.00")
+        );
+        assert!(node_by_mesh_key(narrow_tree, "root/0/2").state.checked);
+        assert_eq!(
+            node_by_mesh_key(narrow_tree, "root/0/3")
+                .attributes
+                .get("_mesh_scroll_y")
+                .map(String::as_str),
+            Some("14.00")
+        );
     }
 
     #[test]

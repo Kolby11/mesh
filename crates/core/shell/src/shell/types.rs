@@ -116,6 +116,9 @@ pub trait ShellComponent: Send {
     ) -> Result<Vec<CoreRequest>, ComponentError>;
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError>;
     fn wants_render(&self) -> bool;
+    fn surface_size_changed(&mut self, _width: u32, _height: u32) -> bool {
+        false
+    }
     fn render(&mut self, surface: &mut dyn ShellSurface) -> Result<(), ComponentError>;
     fn paint(
         &mut self,

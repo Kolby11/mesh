@@ -1117,6 +1117,20 @@ impl Shell {
         let debug_snapshot = self.debug.enabled.then(|| self.build_debug_snapshot());
 
         for runtime in &mut self.components {
+            let surface_size = {
+                let surface = self
+                    .surfaces
+                    .get(&runtime.surface_id)
+                    .ok_or_else(|| ShellRunError::MissingSurface(runtime.surface_id.clone()))?;
+                if surface.width == 0 || surface.height == 0 {
+                    self.render_engine.surface_size(&runtime.surface_id)?
+                } else {
+                    Some((surface.width.max(1), surface.height.max(1)))
+                }
+            };
+            if let Some((width, height)) = surface_size {
+                runtime.component.surface_size_changed(width, height);
+            }
             if !runtime.component.wants_render() {
                 continue;
             }
@@ -1263,6 +1277,15 @@ impl Shell {
             let Some(surface) = self.surfaces.get(&runtime_surface_id) else {
                 continue;
             };
+            let fixed_surface_size = if surface.width == 0 || surface.height == 0 {
+                None
+            } else {
+                Some((surface.width.max(1), surface.height.max(1)))
+            };
+            let _ = surface;
+            let surface_size = fixed_surface_size
+                .or(self.render_engine.surface_size(&runtime_surface_id)?)
+                .unwrap_or((1, 1));
 
             // Intercept global shortcuts before routing to components.
             // Key names vary by backend (minifb: "D", xkbcommon: "d") so
@@ -1311,10 +1334,13 @@ impl Shell {
             );
             let emitted = {
                 let runtime = &mut self.components[index];
+                runtime
+                    .component
+                    .surface_size_changed(surface_size.0, surface_size.1);
                 runtime.component.handle_input(
                     self.theme.active(),
-                    surface.width.max(1),
-                    surface.height.max(1),
+                    surface_size.0,
+                    surface_size.1,
                     input,
                 )
             }
