@@ -14,7 +14,24 @@
 
 ## v1.1 Backend Plugin MVP
 
-**Status:** active
+**Status:** shipped
 **Started:** 2026-05-03
+**Archived:** 2026-05-05
 
 **Goal:** Make backend plugins stable enough for MVP: core backend concepts work predictably, plugins can run service logic, emit state, receive config, log, execute host commands, expose service contracts, and surface failures clearly.
+
+**Delivered:**
+- Shell-owned installed-plugin package manifest and normalized plugin graph
+- Deterministic backend runtime lifecycle with explicit active-provider ownership
+- Locked backend Luau MVP host API centered on structured `mesh.exec(program, args)`
+- Generic service state publication and command routing
+- Backend diagnostics hardening, reference backend proof plugin, and author docs
+- Milestone planning reconciliation so the archive matches the shipped contract
+
+**Stats:** 6 phases, 21 plans, 63 tasks, 28 requirements shipped
+
+**Deferred at close:** 3 validation/verification cleanup items recorded in `.planning/STATE.md`
+
+**Archive artifacts:**
+- `.planning/milestones/v1.1-ROADMAP.md`
+- `.planning/milestones/v1.1-REQUIREMENTS.md`

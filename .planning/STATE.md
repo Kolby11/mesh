@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Backend Plugin MVP
-status: milestone_complete
-stopped_at: Phase 5 context gathered
-last_updated: "2026-05-04T17:37:44.713Z"
-last_activity: 2026-05-04 -- Phase 05 execution started
+status: milestone_archived
+stopped_at: v1.1 archived on 2026-05-05
+last_updated: "2026-05-05T13:45:00+02:00"
+last_activity: 2026-05-05 -- v1.1 milestone archived
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 20
-  completed_plans: 19
+  total_phases: 6
+  completed_phases: 6
+  total_plans: 21
+  completed_plans: 21
   percent: 100
 ---
 
@@ -18,17 +18,17 @@ progress:
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-03)
+See: `.planning/PROJECT.md` (updated 2026-05-05)
 
 **Core value:** A backend plugin author can write a Luau service plugin, configure it, run it under the shell, emit state, handle commands, and understand failures without reading Rust source.
-**Current focus:** Phase 05 — backend-diagnostics-and-mvp-proof
+**Current focus:** Milestone archived; waiting for next milestone definition
 
 ## Current Position
 
-Phase: 05
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-05-04
+Phase: Archived
+Plan: Milestone closeout complete
+Status: `v1.1` archived with functional scope shipped and residual validation debt documented
+Last activity: 2026-05-05 -- milestone archive complete
 
 ## Decisions
 
@@ -102,23 +102,33 @@ Resume File: .planning/phases/05-backend-diagnostics-and-mvp-proof/05-CONTEXT.md
 - v1.0 planning artifacts archived to `.planning/milestones/v1.0-reset-2026-05-03-*`.
 - v1.1 reset roadmap focuses on backend plugin MVP stability.
 
+## Deferred Items
+
+Items accepted at `v1.1` close:
+
+| Category | Item | Status |
+|----------|------|--------|
+| validation | Phase 01-05 Nyquist metadata remains partial rather than finalized | deferred |
+| validation | Live PipeWire or PulseAudio backend startup remains manual-only confirmation | deferred |
+| verification | Obsolete `latest_service_events` note still needs retirement from archived validation metadata | deferred |
+
 ## Blockers
 
 (None)
 
 ## Pending Todos
 
-- Archived v1.0 verification debt remains in `.planning/milestones/v1.0-reset-2026-05-03-phases/` for reference, but is not part of active v1.1 routing.
+- Start the next milestone with fresh requirements and roadmap artifacts.
 
 ## Artifact Index
 
 | Artifact | Path |
 |----------|------|
 | Project context | `.planning/PROJECT.md` |
-| Requirements | `.planning/REQUIREMENTS.md` |
+| Requirements archive | `.planning/milestones/v1.1-REQUIREMENTS.md` |
 | Roadmap | `.planning/ROADMAP.md` |
 | State | `.planning/STATE.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State reset: 2026-05-03 after milestone v1.1 start*
+*State updated: 2026-05-05 after v1.1 milestone archival*
