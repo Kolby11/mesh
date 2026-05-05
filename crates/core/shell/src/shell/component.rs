@@ -2214,6 +2214,14 @@ pub(super) fn annotate_runtime_tree(
     node.attributes.insert("_mesh_key".into(), key.clone());
 
     let key_str = key.as_str();
+    let disabled = node
+        .attributes
+        .get("disabled")
+        .is_some_and(|value| truthy_attribute(value))
+        || node
+            .attributes
+            .get("aria-disabled")
+            .is_some_and(|value| truthy_attribute(value));
     let checked = checked_values
         .get(&key)
         .copied()
@@ -2230,7 +2238,7 @@ pub(super) fn annotate_runtime_tree(
             .iter()
             .any(|hovered_key| hovered_key == key_str),
         active: active_key.as_deref() == Some(key_str),
-        disabled: false,
+        disabled,
         checked,
     };
     if node.state.hovered {
@@ -2295,6 +2303,10 @@ pub(super) fn annotate_runtime_tree(
             scroll_offsets,
         );
     }
+}
+
+fn truthy_attribute(value: &str) -> bool {
+    matches!(value, "" | "true" | "1" | "disabled" | "checked")
 }
 
 pub(super) fn grant_capabilities_from_manifest(
@@ -2673,6 +2685,14 @@ mod tests {
         root
     }
 
+    fn child_with_attrs(tag: &str, attrs: &[(&str, &str)]) -> WidgetNode {
+        let mut node = WidgetNode::new(tag);
+        for (name, value) in attrs {
+            node.attributes.insert((*name).into(), (*value).into());
+        }
+        node
+    }
+
     fn first_node_by_tag<'a>(node: &'a WidgetNode, tag: &str) -> Option<&'a WidgetNode> {
         if node.tag == tag {
             return Some(node);
@@ -2680,6 +2700,124 @@ mod tests {
         node.children
             .iter()
             .find_map(|child| first_node_by_tag(child, tag))
+    }
+
+    fn node_by_mesh_key<'a>(node: &'a WidgetNode, key: &str) -> &'a WidgetNode {
+        if node
+            .attributes
+            .get("_mesh_key")
+            .is_some_and(|value| value == key)
+        {
+            return node;
+        }
+        node.children
+            .iter()
+            .find_map(|child| {
+                if child
+                    .attributes
+                    .get("_mesh_key")
+                    .is_some_and(|value| value == key)
+                {
+                    Some(child)
+                } else {
+                    child.children.iter().find_map(|grandchild| {
+                        if grandchild
+                            .attributes
+                            .get("_mesh_key")
+                            .is_some_and(|value| value == key)
+                        {
+                            Some(grandchild)
+                        } else {
+                            None
+                        }
+                    })
+                }
+            })
+            .unwrap_or_else(|| panic!("expected node with _mesh_key {key}"))
+    }
+
+    #[test]
+    fn pseudo_state_annotation_uses_stable_keys_after_rebuild() {
+        let focused_key = Some("root/0".to_string());
+        let hovered_path = vec!["root".to_string(), "root/0".to_string()];
+        let active_key = Some("root/0".to_string());
+        let checked_values = HashMap::from([("root/1".to_string(), true)]);
+
+        let mut first_tree = root_with(vec![
+            child_with_attrs("button", &[]),
+            child_with_attrs("checkbox", &[]),
+        ]);
+        let first_button_id = first_tree.children[0].id;
+        annotate_runtime_tree(
+            &mut first_tree,
+            "root".to_string(),
+            &focused_key,
+            &hovered_path,
+            &active_key,
+            &HashMap::new(),
+            &HashMap::new(),
+            &checked_values,
+            &HashMap::new(),
+        );
+
+        let mut rebuilt_tree = root_with(vec![
+            child_with_attrs("button", &[]),
+            child_with_attrs("checkbox", &[]),
+        ]);
+        assert_ne!(
+            first_button_id, rebuilt_tree.children[0].id,
+            "rebuilt nodes should have transient ids"
+        );
+        annotate_runtime_tree(
+            &mut rebuilt_tree,
+            "root".to_string(),
+            &focused_key,
+            &hovered_path,
+            &active_key,
+            &HashMap::new(),
+            &HashMap::new(),
+            &checked_values,
+            &HashMap::new(),
+        );
+
+        let button = node_by_mesh_key(&rebuilt_tree, "root/0");
+        assert!(button.state.hovered);
+        assert!(button.state.focused);
+        assert!(button.state.active);
+
+        let checkbox = node_by_mesh_key(&rebuilt_tree, "root/1");
+        assert!(checkbox.state.checked);
+    }
+
+    #[test]
+    fn pseudo_state_annotation_sets_disabled_and_checked_deterministically() {
+        let checked_values = HashMap::from([("root/2".to_string(), false)]);
+        let mut tree = root_with(vec![
+            child_with_attrs("button", &[("disabled", "true")]),
+            child_with_attrs("button", &[("aria-disabled", "true")]),
+            child_with_attrs("checkbox", &[("checked", "true")]),
+            child_with_attrs("checkbox", &[("checked", "checked")]),
+        ]);
+
+        annotate_runtime_tree(
+            &mut tree,
+            "root".to_string(),
+            &None,
+            &[],
+            &None,
+            &HashMap::new(),
+            &HashMap::new(),
+            &checked_values,
+            &HashMap::new(),
+        );
+
+        assert!(node_by_mesh_key(&tree, "root/0").state.disabled);
+        assert!(node_by_mesh_key(&tree, "root/1").state.disabled);
+        assert!(
+            !node_by_mesh_key(&tree, "root/2").state.checked,
+            "runtime checked state should override static checked attributes"
+        );
+        assert!(node_by_mesh_key(&tree, "root/3").state.checked);
     }
 
     #[test]
