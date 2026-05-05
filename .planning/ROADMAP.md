@@ -13,6 +13,8 @@ Make MESH frontend rendering expressive and interactive enough for distinctive s
 
 ### Phase 8: Practical CSS Coverage
 
+**Status:** Complete (2026-05-05)
+
 **Goal:** Expand and document the supported CSS subset so plugin authors can style shell UI with common properties, tokens, shorthands, and clear unsupported-property feedback.
 
 **Requirements:** CSS-01, CSS-02, CSS-03, CSS-04

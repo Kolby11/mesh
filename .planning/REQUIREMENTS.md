@@ -7,10 +7,10 @@
 
 ### CSS Coverage
 
-- [ ] **CSS-01**: Plugin authors can use a documented practical subset of common CSS properties for shell UI styling across layout, spacing, sizing, borders, typography, overflow, visual state, and positioning.
-- [ ] **CSS-02**: The renderer resolves CSS shorthands and longhands consistently for common shell styling, including margin, padding, border, border-radius, overflow, flex, inset, font, transition, and animation-related declarations.
-- [ ] **CSS-03**: Unsupported CSS properties and at-rules produce clear diagnostics or documented no-op behavior instead of silently creating confusing render output.
-- [ ] **CSS-04**: Theme tokens, CSS variables, and existing `token(...)` usage work consistently across the supported CSS subset.
+- [x] **CSS-01**: Plugin authors can use a documented practical subset of common CSS properties for shell UI styling across layout, spacing, sizing, borders, typography, overflow, visual state, and positioning.
+- [x] **CSS-02**: The renderer resolves CSS shorthands and longhands consistently for common shell styling, including margin, padding, border, border-radius, overflow, flex, inset, font, transition, and animation-related declarations.
+- [x] **CSS-03**: Unsupported CSS properties and at-rules produce clear diagnostics or documented no-op behavior instead of silently creating confusing render output.
+- [x] **CSS-04**: Theme tokens, CSS variables, and existing `token(...)` usage work consistently across the supported CSS subset.
 
 ### Responsive Reactivity
 
@@ -76,10 +76,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CSS-01 | Phase 8 | Pending |
-| CSS-02 | Phase 8 | Pending |
-| CSS-03 | Phase 8 | Pending |
-| CSS-04 | Phase 8 | Pending |
+| CSS-01 | Phase 8 | Complete |
+| CSS-02 | Phase 8 | Complete |
+| CSS-03 | Phase 8 | Complete |
+| CSS-04 | Phase 8 | Complete |
 | REACT-01 | Phase 9 | Pending |
 | REACT-02 | Phase 9 | Pending |
 | REACT-03 | Phase 9 | Pending |
@@ -110,4 +110,4 @@
 
 ---
 *Requirements defined: 2026-05-05*
-*Last updated: 2026-05-05 after initial definition*
+*Last updated: 2026-05-05 after Phase 8 completion*
