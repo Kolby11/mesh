@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-05-05T13:59:00.334Z"
 last_activity: 2026-05-05
 progress:
-  total_phases: 0
+  total_phases: 6
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -24,10 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-05)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 08 (practical-css-coverage) - NOT STARTED
 Plan: -
-Status: Defining requirements
-Last activity: 2026-05-05 - Milestone v1.2 started
+Status: Roadmap ready; next step is phase discussion or planning
+Last activity: 2026-05-05 - Milestone v1.2 roadmap created
 
 ## Decisions
 
@@ -117,17 +117,17 @@ Items accepted at `v1.1` close:
 
 ## Pending Todos
 
-- Define v1.2 rendering requirements and roadmap.
+- Start Phase 08 Practical CSS Coverage with `$gsd-discuss-phase 8` or `$gsd-plan-phase 8`.
 
 ## Artifact Index
 
 | Artifact | Path |
 |----------|------|
 | Project context | `.planning/PROJECT.md` |
-| Requirements archive | `.planning/milestones/v1.1-REQUIREMENTS.md` |
+| Requirements | `.planning/REQUIREMENTS.md` |
 | Roadmap | `.planning/ROADMAP.md` |
 | State | `.planning/STATE.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-05 after v1.1 milestone archival*
+*State updated: 2026-05-05 after v1.2 roadmap creation*
