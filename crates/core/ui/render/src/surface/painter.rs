@@ -862,3 +862,126 @@ fn truncate_with_ellipsis(
     }
     ELLIPSIS.to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mesh_core_elements::layout::LayoutRect;
+    use mesh_core_elements::style::{Dimension, Edges};
+
+    fn node(tag: &str, layout: LayoutRect, color: Color) -> WidgetNode {
+        let mut node = WidgetNode::new(tag);
+        node.layout = layout;
+        node.computed_style.width = Dimension::Px(layout.width);
+        node.computed_style.height = Dimension::Px(layout.height);
+        node.computed_style.background_color = color;
+        node
+    }
+
+    fn pixel(buffer: &PixelBuffer, x: u32, y: u32) -> Color {
+        let offset = (y * buffer.stride + x * 4) as usize;
+        Color {
+            b: buffer.data[offset],
+            g: buffer.data[offset + 1],
+            r: buffer.data[offset + 2],
+            a: buffer.data[offset + 3],
+        }
+    }
+
+    #[test]
+    fn painter_draws_border_from_computed_edges() {
+        let mut root = node(
+            "box",
+            LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 20.0,
+                height: 20.0,
+            },
+            Color::TRANSPARENT,
+        );
+        root.computed_style.border_width = Edges::all(2.0);
+        root.computed_style.border_color = Color::from_hex("#ff0000").unwrap();
+
+        let mut buffer = PixelBuffer::new(24, 24);
+        FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+        assert_eq!(pixel(&buffer, 1, 1), Color::from_hex("#ff0000").unwrap());
+        assert_eq!(pixel(&buffer, 10, 10), Color::TRANSPARENT);
+    }
+
+    #[test]
+    fn painter_clips_children_when_overflow_hidden() {
+        let mut root = node(
+            "box",
+            LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 10.0,
+                height: 10.0,
+            },
+            Color::TRANSPARENT,
+        );
+        root.computed_style.overflow_x = Overflow::Hidden;
+        root.computed_style.overflow_y = Overflow::Hidden;
+        root.children = vec![node(
+            "box",
+            LayoutRect {
+                x: 8.0,
+                y: 0.0,
+                width: 8.0,
+                height: 10.0,
+            },
+            Color::from_hex("#00ff00").unwrap(),
+        )];
+
+        let mut buffer = PixelBuffer::new(20, 12);
+        FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+        assert_eq!(pixel(&buffer, 9, 5), Color::from_hex("#00ff00").unwrap());
+        assert_eq!(pixel(&buffer, 11, 5), Color::TRANSPARENT);
+    }
+
+    #[test]
+    fn painter_orders_children_by_z_index() {
+        let mut root = node(
+            "box",
+            LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 16.0,
+                height: 16.0,
+            },
+            Color::TRANSPARENT,
+        );
+
+        let mut bottom = node(
+            "box",
+            LayoutRect {
+                x: 2.0,
+                y: 2.0,
+                width: 10.0,
+                height: 10.0,
+            },
+            Color::from_hex("#ff0000").unwrap(),
+        );
+        bottom.computed_style.z_index = 0;
+        let mut top = node(
+            "box",
+            LayoutRect {
+                x: 2.0,
+                y: 2.0,
+                width: 10.0,
+                height: 10.0,
+            },
+            Color::from_hex("#0000ff").unwrap(),
+        );
+        top.computed_style.z_index = 1;
+        root.children = vec![top, bottom];
+
+        let mut buffer = PixelBuffer::new(20, 20);
+        FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+        assert_eq!(pixel(&buffer, 5, 5), Color::from_hex("#0000ff").unwrap());
+    }
+}

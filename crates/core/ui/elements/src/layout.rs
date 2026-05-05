@@ -522,7 +522,7 @@ fn explicit_size(dim: Dimension, inner_size: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::style::{Edges, FlexDirection};
+    use crate::style::{Display, Edges, FlexDirection, Overflow, Position};
 
     fn make_node(tag: &str, width: Dimension, height: Dimension) -> WidgetNode {
         let mut node = WidgetNode::new(tag);
@@ -637,8 +637,6 @@ mod tests {
 
     #[test]
     fn absolute_child_with_top_left_insets() {
-        use crate::style::Position;
-
         let mut root = make_node("container", Dimension::Px(400.0), Dimension::Px(300.0));
 
         let mut tooltip = make_node("tooltip", Dimension::Px(120.0), Dimension::Px(30.0));
@@ -651,6 +649,83 @@ mod tests {
 
         assert!((root.children[0].layout.x - 50.0).abs() < 0.5);
         assert!((root.children[0].layout.y - 20.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn absolute_position_uses_inset_edges() {
+        let mut root = make_node("container", Dimension::Px(300.0), Dimension::Px(200.0));
+        root.computed_style.padding = Edges::all(10.0);
+
+        let mut panel = make_node("panel", Dimension::Auto, Dimension::Auto);
+        panel.computed_style.position = Position::Absolute;
+        panel.computed_style.inset_top = Some(15.0);
+        panel.computed_style.inset_right = Some(30.0);
+        panel.computed_style.inset_bottom = Some(25.0);
+        panel.computed_style.inset_left = Some(20.0);
+
+        root.children = vec![panel];
+        LayoutEngine::compute(&mut root, 300.0, 200.0);
+
+        assert_eq!(root.children[0].layout.x, 30.0);
+        assert_eq!(root.children[0].layout.y, 25.0);
+        assert_eq!(root.children[0].layout.width, 230.0);
+        assert_eq!(root.children[0].layout.height, 140.0);
+    }
+
+    #[test]
+    fn flex_triple_basis_affects_main_axis_size() {
+        let mut root = make_node("row", Dimension::Px(200.0), Dimension::Px(40.0));
+        root.computed_style.direction = FlexDirection::Row;
+
+        let mut basis_child = make_node("basis", Dimension::Auto, Dimension::Auto);
+        basis_child.computed_style.flex_grow = 1.0;
+        basis_child.computed_style.flex_shrink = 0.0;
+        basis_child.computed_style.flex_basis = Dimension::Px(80.0);
+        let fixed_child = make_node("fixed", Dimension::Px(40.0), Dimension::Auto);
+
+        root.children = vec![basis_child, fixed_child];
+        LayoutEngine::compute(&mut root, 200.0, 40.0);
+
+        assert_eq!(root.children[0].layout.width, 80.0);
+        assert_eq!(root.children[1].layout.x, 80.0);
+        assert_eq!(root.children[1].layout.width, 40.0);
+    }
+
+    #[test]
+    fn display_none_excludes_node_from_layout() {
+        let mut root = make_node("row", Dimension::Px(300.0), Dimension::Px(40.0));
+        root.computed_style.direction = FlexDirection::Row;
+
+        let mut hidden = make_node("hidden", Dimension::Px(100.0), Dimension::Px(20.0));
+        hidden.computed_style.display = Display::None;
+        let visible = make_node("visible", Dimension::Px(50.0), Dimension::Px(20.0));
+
+        root.children = vec![hidden, visible];
+        LayoutEngine::compute(&mut root, 300.0, 40.0);
+
+        assert_eq!(root.children[0].layout.x, 0.0);
+        assert_eq!(root.children[0].layout.y, 0.0);
+        assert_eq!(root.children[0].layout.width, 0.0);
+        assert_eq!(root.children[0].layout.height, 0.0);
+        assert_eq!(root.children[1].layout.x, 0.0);
+        assert_eq!(root.children[1].layout.width, 50.0);
+    }
+
+    #[test]
+    fn overflow_container_preserves_natural_main_axis_size() {
+        let mut root = make_node("scroller", Dimension::Px(100.0), Dimension::Px(40.0));
+        root.computed_style.direction = FlexDirection::Row;
+        root.computed_style.overflow_x = Overflow::Hidden;
+
+        let child = make_node("content", Dimension::Auto, Dimension::Px(20.0));
+        root.children = vec![child];
+        LayoutEngine::compute(&mut root, 100.0, 40.0);
+
+        assert_eq!(root.layout.width, 100.0);
+        assert!(
+            root.children[0].layout.width > root.layout.width,
+            "child width should preserve natural overflow width"
+        );
     }
 
     #[test]

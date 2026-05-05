@@ -557,7 +557,7 @@ impl<'a> StyleResolver<'a> {
         variables: &HashMap<String, StyleValue>,
     ) -> String {
         match value {
-            StyleValue::Literal(s) => s.clone(),
+            StyleValue::Literal(s) => resolve_embedded_tokens(s, self.theme),
             StyleValue::Token(name) => match self.theme.token(name) {
                 Some(TokenValue::String(s)) => s.clone(),
                 Some(TokenValue::Number(n)) => format!("{n}"),
@@ -1182,6 +1182,32 @@ fn selector_to_diagnostic_string(selector: &Selector) -> String {
             .collect::<Vec<_>>()
             .join(""),
     }
+}
+
+fn resolve_embedded_tokens(value: &str, theme: &Theme) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut rest = value;
+
+    while let Some(start) = rest.find("token(") {
+        output.push_str(&rest[..start]);
+        let token_start = start + "token(".len();
+        let Some(end) = rest[token_start..].find(')') else {
+            output.push_str(&rest[start..]);
+            return output;
+        };
+
+        let name = rest[token_start..token_start + end].trim();
+        match theme.token(name) {
+            Some(TokenValue::String(s)) => output.push_str(s),
+            Some(TokenValue::Number(n)) => output.push_str(&format!("{n}")),
+            Some(TokenValue::Bool(b)) => output.push_str(&format!("{b}")),
+            None => tracing::warn!("unresolved theme token: {name}"),
+        }
+        rest = &rest[token_start + end + 1..];
+    }
+
+    output.push_str(rest);
+    output
 }
 
 fn shorthand_numbers(value: &str) -> Vec<f32> {
@@ -2070,6 +2096,53 @@ mod tests {
         let resolver = StyleResolver::new(&theme);
         let value = StyleValue::Token("color.primary".to_string());
         assert_eq!(resolver.resolve_value(&value), "#6750A4");
+    }
+
+    #[test]
+    fn shell_card_css_subset_resolves_for_layout() {
+        use mesh_core_component::parser::parse_component;
+
+        let source = r#"
+<style>
+.shell-card {
+    --pad: token(spacing.md);
+    padding: var(--pad);
+    margin: 4px 8px;
+    border: 1px solid token(color.outline);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: relative;
+    overflow: hidden;
+}
+</style>
+"#;
+        let file = parse_component(source).unwrap();
+        let rules = file.style.unwrap().rules;
+
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let style = resolver.resolve_node_style(
+            &rules,
+            "box",
+            &["shell-card".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.padding, Edges::all(16.0));
+        assert_eq!(style.margin.top, 4.0);
+        assert_eq!(style.margin.right, 8.0);
+        assert_eq!(style.margin.bottom, 4.0);
+        assert_eq!(style.margin.left, 8.0);
+        assert_eq!(style.border_width, Edges::all(1.0));
+        assert_eq!(style.border_color.a, 255);
+        assert_eq!(style.direction, FlexDirection::Column);
+        assert_eq!(style.gap, 6.0);
+        assert_eq!(style.position, Position::Relative);
+        assert_eq!(style.overflow_x, Overflow::Hidden);
+        assert_eq!(style.overflow_y, Overflow::Hidden);
     }
 
     #[test]
