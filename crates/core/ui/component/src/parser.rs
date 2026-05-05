@@ -299,6 +299,35 @@ box {
     }
 
     #[test]
+    fn unsupported_media_rule_reports_at_rule_name() {
+        let source = r#"
+<style>
+@media (min-width: 640px) {
+    .panel {
+        color: #fff;
+    }
+}
+</style>
+"#;
+        let err = parse_component(source).unwrap_err().to_string();
+        assert!(err.contains("unsupported at-rule '@media'"), "{err}");
+    }
+
+    #[test]
+    fn unsupported_keyframes_rule_reports_at_rule_name() {
+        let source = r#"
+<style>
+@keyframes pulse {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+</style>
+"#;
+        let err = parse_component(source).unwrap_err().to_string();
+        assert!(err.contains("unsupported at-rule '@keyframes'"), "{err}");
+    }
+
+    #[test]
     fn parse_self_closing_element() {
         let source = r#"
 <template>

@@ -3,6 +3,115 @@ use crate::tree::ElementState;
 use mesh_core_component::style::{Selector, StyleRule, StyleValue};
 use mesh_core_theme::{Theme, TokenValue};
 
+/// Author-facing style diagnostic emitted while resolving supported shell CSS.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StyleDiagnostic {
+    pub property: String,
+    pub selector: Option<String>,
+    pub message: String,
+}
+
+const SUPPORTED_CSS_PROPERTIES: &[&str] = &[
+    "background",
+    "background-color",
+    "color",
+    "border",
+    "border-color",
+    "border-width",
+    "border-top-width",
+    "border-right-width",
+    "border-bottom-width",
+    "border-left-width",
+    "border-radius",
+    "border-top-left-radius",
+    "border-top-right-radius",
+    "border-bottom-right-radius",
+    "border-bottom-left-radius",
+    "display",
+    "visibility",
+    "opacity",
+    "overflow",
+    "overflow-x",
+    "overflow-y",
+    "width",
+    "height",
+    "min-width",
+    "max-width",
+    "min-height",
+    "max-height",
+    "padding",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "padding-x",
+    "padding-y",
+    "padding-inline",
+    "padding-block",
+    "margin",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
+    "margin-x",
+    "margin-y",
+    "margin-inline",
+    "margin-block",
+    "font",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "line-height",
+    "letter-spacing",
+    "text-align",
+    "text-overflow",
+    "direction",
+    "flex",
+    "flex-direction",
+    "flex-wrap",
+    "flex-grow",
+    "flex-shrink",
+    "flex-basis",
+    "justify-content",
+    "align-items",
+    "align-self",
+    "align-content",
+    "gap",
+    "row-gap",
+    "column-gap",
+    "gap-x",
+    "position",
+    "z-index",
+    "inset",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "transition",
+    "transition-property",
+    "transition-duration",
+    "transition-delay",
+    "transition-timing-function",
+    "animation",
+    "animation-name",
+    "animation-duration",
+    "animation-delay",
+    "animation-timing-function",
+    "animation-iteration-count",
+    "animation-direction",
+    "animation-fill-mode",
+    "animation-play-state",
+];
+
+pub fn supported_css_properties() -> &'static [&'static str] {
+    SUPPORTED_CSS_PROPERTIES
+}
+
+pub fn is_supported_css_property(property: &str) -> bool {
+    property.starts_with("--") || SUPPORTED_CSS_PROPERTIES.contains(&property)
+}
+
 /// Fully resolved style for a widget node.
 #[derive(Debug, Clone)]
 pub struct ComputedStyle {
@@ -483,7 +592,21 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
         state: ElementState,
     ) -> ComputedStyle {
+        self.resolve_node_style_with_diagnostics(rules, tag, classes, id, context, state)
+            .0
+    }
+
+    pub fn resolve_node_style_with_diagnostics(
+        &self,
+        rules: &[StyleRule],
+        tag: &str,
+        classes: &[String],
+        id: Option<&str>,
+        context: StyleContext,
+        state: ElementState,
+    ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
         let mut style = ComputedStyle::default();
+        let mut diagnostics = Vec::new();
 
         // Apply default direction based on tag.
         if tag == "column" {
@@ -494,12 +617,23 @@ impl<'a> StyleResolver<'a> {
         for rule in rules {
             if rule_matches(rule, tag, classes, id, context, state) {
                 for decl in &rule.declarations {
+                    if decl.property.starts_with("--") {
+                        continue;
+                    }
+                    if !is_supported_css_property(&decl.property) {
+                        diagnostics.push(StyleDiagnostic {
+                            property: decl.property.clone(),
+                            selector: Some(selector_to_diagnostic_string(&rule.selector)),
+                            message: format!("unsupported CSS property '{}'", decl.property),
+                        });
+                        continue;
+                    }
                     apply_declaration(&mut style, &decl.property, &decl.value, self);
                 }
             }
         }
 
-        style
+        (style, diagnostics)
     }
 
     /// Re-resolve computed styles for every node in a subtree using each node's
@@ -669,7 +803,7 @@ fn apply_declaration(
             style.margin.bottom = v;
         }
         "gap" => style.gap = resolver.resolve_number(value),
-        "column-gap" | "gap-x" => style.gap = resolver.resolve_number(value),
+        "column-gap" | "row-gap" | "gap-x" => style.gap = resolver.resolve_number(value),
         "border-radius" => style.border_radius = Corners::all(resolver.resolve_number(value)),
         "border-top-left-radius" => style.border_radius.top_left = resolver.resolve_number(value),
         "border-top-right-radius" => style.border_radius.top_right = resolver.resolve_number(value),
@@ -809,6 +943,14 @@ fn apply_declaration(
                 _ => Display::Flex,
             };
         }
+        "visibility" => {
+            if matches!(
+                resolver.resolve_value(value).as_str(),
+                "hidden" | "collapse"
+            ) {
+                style.opacity = 0.0;
+            }
+        }
         "position" => {
             style.position = match resolver.resolve_value(value).as_str() {
                 "relative" => Position::Relative,
@@ -831,9 +973,25 @@ fn apply_declaration(
             style.inset_bottom = Some(v);
             style.inset_left = Some(v);
         }
+        _ if property.starts_with("--") => {}
         _ => {
-            tracing::debug!("unknown style property: {property}");
+            tracing::warn!("unsupported CSS property '{}'", property);
         }
+    }
+}
+
+fn selector_to_diagnostic_string(selector: &Selector) -> String {
+    match selector {
+        Selector::Universal => "*".to_string(),
+        Selector::Tag(tag) => tag.clone(),
+        Selector::Class(class) => format!(".{class}"),
+        Selector::Id(id) => format!("#{id}"),
+        Selector::State(tag, state) => format!("{tag}:{state}"),
+        Selector::Compound(parts) => parts
+            .iter()
+            .map(selector_to_diagnostic_string)
+            .collect::<Vec<_>>()
+            .join(""),
     }
 }
 
@@ -992,6 +1150,118 @@ mod tests {
         let value = StyleValue::Token("color.primary".to_string());
         let resolved = resolver.resolve_value(&value);
         assert_eq!(resolved, "#6750A4");
+    }
+
+    #[test]
+    fn supported_css_properties_cover_phase_8_contract() {
+        for property in [
+            "background",
+            "background-color",
+            "color",
+            "border",
+            "border-color",
+            "border-width",
+            "border-radius",
+            "display",
+            "visibility",
+            "opacity",
+            "overflow",
+            "overflow-x",
+            "overflow-y",
+            "width",
+            "height",
+            "min-width",
+            "max-width",
+            "min-height",
+            "max-height",
+            "padding",
+            "padding-inline",
+            "padding-block",
+            "margin",
+            "margin-inline",
+            "margin-block",
+            "font",
+            "font-family",
+            "font-size",
+            "font-weight",
+            "font-style",
+            "line-height",
+            "letter-spacing",
+            "text-align",
+            "text-overflow",
+            "direction",
+            "flex",
+            "flex-direction",
+            "flex-wrap",
+            "flex-grow",
+            "flex-shrink",
+            "flex-basis",
+            "justify-content",
+            "align-items",
+            "align-self",
+            "align-content",
+            "gap",
+            "row-gap",
+            "column-gap",
+            "position",
+            "z-index",
+            "inset",
+            "top",
+            "right",
+            "bottom",
+            "left",
+            "transition",
+            "transition-property",
+            "transition-duration",
+            "transition-delay",
+            "transition-timing-function",
+            "animation",
+            "animation-name",
+            "animation-duration",
+            "animation-delay",
+            "animation-timing-function",
+            "animation-iteration-count",
+            "animation-direction",
+            "animation-fill-mode",
+            "animation-play-state",
+        ] {
+            assert!(is_supported_css_property(property), "{property}");
+        }
+        assert!(is_supported_css_property("--local-token"));
+        assert!(!is_supported_css_property("grid-template-columns"));
+        assert!(!is_supported_css_property("transform"));
+    }
+
+    #[test]
+    fn style_diagnostics_unsupported_property_produces_style_diagnostic() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "grid-template-columns".to_string(),
+                value: StyleValue::Literal("1fr 1fr".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let (_style, diagnostics) = resolver.resolve_node_style_with_diagnostics(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].property, "grid-template-columns");
+        assert_eq!(diagnostics[0].selector.as_deref(), Some(".panel"));
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("unsupported CSS property 'grid-template-columns'")
+        );
     }
 
     #[test]
