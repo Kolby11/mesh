@@ -59,6 +59,10 @@ impl RenderEngine {
         self.bridge.present(surface_id, title, visible, buffer)
     }
 
+    pub fn surface_size(&mut self, surface_id: &str) -> Result<Option<(u32, u32)>, RenderError> {
+        self.bridge.surface_size(surface_id)
+    }
+
     pub fn pump(&mut self) {
         self.bridge.pump();
     }

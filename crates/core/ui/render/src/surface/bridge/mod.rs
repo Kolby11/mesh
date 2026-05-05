@@ -66,6 +66,13 @@ impl PresentationBridge {
         }
     }
 
+    pub fn surface_size(&mut self, surface_id: &str) -> Result<Option<(u32, u32)>, RenderError> {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.surface_size(surface_id),
+            Backend::DevWindow(_) => Ok(None),
+        }
+    }
+
     pub fn pump(&mut self) {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.pump(),

@@ -88,7 +88,7 @@ pub(super) fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayout
             .and_then(serde_json::Value::as_u64)
             .and_then(|v| u32::try_from(v).ok())
         {
-            layout.width = width.max(1);
+            layout.width = width;
         }
         if let Some(height) = props
             .get("height")
@@ -96,7 +96,7 @@ pub(super) fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayout
             .and_then(serde_json::Value::as_u64)
             .and_then(|v| u32::try_from(v).ok())
         {
-            layout.height = height.max(1);
+            layout.height = height;
         }
         if let Some(zone) = props
             .get("exclusive_zone")
@@ -208,7 +208,7 @@ pub(super) fn load_frontend_plugin_settings(
         .and_then(serde_json::Value::as_u64)
         .and_then(|value| u32::try_from(value).ok())
     {
-        layout.width = width.max(1);
+        layout.width = width;
         layout.size_policy = SurfaceSizePolicy::Fixed;
     }
 
@@ -217,7 +217,7 @@ pub(super) fn load_frontend_plugin_settings(
         .and_then(serde_json::Value::as_u64)
         .and_then(|value| u32::try_from(value).ok())
     {
-        layout.height = height.max(1);
+        layout.height = height;
         layout.size_policy = SurfaceSizePolicy::Fixed;
     }
 

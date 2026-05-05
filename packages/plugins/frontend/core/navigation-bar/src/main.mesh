@@ -24,11 +24,9 @@ import ThemeButton from "./components/theme-button.mesh"
 .nav-shell {
     width: 100%;
     height: 100%;
-    border-radius: token(radius.md);
     justify-content: start;
     align-items: center;
     padding-inline: token(spacing.lg);
-    padding-block: token(spacing.sm);
     background: token(color.surface);
     color: token(color.on-surface);
 }

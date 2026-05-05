@@ -1176,8 +1176,21 @@ impl Shell {
                     break PixelBuffer::new(1, 1);
                 }
 
-                let width = surface.width.max(1);
-                let height = surface.height.max(1);
+                let configured_size = if surface.width == 0 || surface.height == 0 {
+                    self.render_engine.surface_size(&runtime.surface_id)?
+                } else {
+                    None
+                };
+                let width = if surface.width == 0 {
+                    configured_size.map(|(width, _)| width).unwrap_or(1)
+                } else {
+                    surface.width.max(1)
+                };
+                let height = if surface.height == 0 {
+                    configured_size.map(|(_, height)| height).unwrap_or(1)
+                } else {
+                    surface.height.max(1)
+                };
                 let mut buffer = PixelBuffer::new(width, height);
                 runtime
                     .component

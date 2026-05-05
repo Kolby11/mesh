@@ -297,6 +297,38 @@ impl LayerShellBackend {
         Ok(())
     }
 
+    pub fn surface_size(&mut self, surface_id: &str) -> Result<Option<(u32, u32)>, RenderError> {
+        let needs_configure = self
+            .state
+            .surfaces
+            .get(surface_id)
+            .map(|entry| !entry.configured)
+            .unwrap_or(false);
+
+        if needs_configure {
+            for _ in 0..10 {
+                self.event_queue
+                    .roundtrip(&mut self.state)
+                    .map_err(|e| RenderError::SurfaceCreate(format!("roundtrip: {e}")))?;
+                if self
+                    .state
+                    .surfaces
+                    .get(surface_id)
+                    .map(|entry| entry.configured)
+                    .unwrap_or(false)
+                {
+                    break;
+                }
+            }
+        }
+
+        Ok(self
+            .state
+            .surfaces
+            .get(surface_id)
+            .map(|entry| (entry.width.max(1), entry.height.max(1))))
+    }
+
     pub fn pump(&mut self) {
         let _ = self.dispatch_available();
     }

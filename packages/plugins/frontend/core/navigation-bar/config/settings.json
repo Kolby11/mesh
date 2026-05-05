@@ -9,7 +9,7 @@
   "surface": {
     "anchor": "top",
     "layer": "top",
-    "width": 1920,
+    "width": 0,
     "height": 56,
     "exclusive_zone": 56,
     "keyboard_mode": "none",

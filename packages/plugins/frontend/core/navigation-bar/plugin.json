@@ -85,10 +85,10 @@
           },
           "width": {
             "type": "integer",
-            "default": 1920,
-            "min": 320,
+            "default": 0,
+            "min": 0,
             "max": 7680,
-            "description": "Surface width in pixels."
+            "description": "Surface width in pixels. Use 0 to span the full output width."
           },
           "height": {
             "type": "integer",

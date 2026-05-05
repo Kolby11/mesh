@@ -55,9 +55,11 @@ function onRender()
 end
 
 function onVolumeClick(event)
+    local nav_bottom = event.surface.height or event.current_target.position.margin_top or 0
+    local surface_overlap = 8
     mesh.events.publish("shell.position-surface", {
         surface_id = "@mesh/volume-bar",
-        margin_top = event.current_target.position.margin_top,
+        margin_top = math.max(0, nav_bottom - surface_overlap),
         margin_left = event.current_target.position.margin_left,
     })
     mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/volume-bar" })

@@ -533,14 +533,14 @@ impl FrontendSurfaceComponent {
         }
     }
 
-    fn layout_content_size(&self) -> (u32, u32) {
+    fn requested_layout_size(&self) -> (u32, u32) {
         let (width, height) = match self.surface_layout.size_policy {
             SurfaceSizePolicy::Fixed => (self.surface_layout.width, self.surface_layout.height),
             SurfaceSizePolicy::ContentMeasured => self
                 .measured_size
                 .unwrap_or((self.surface_layout.width, self.surface_layout.height)),
         };
-        (width.max(1), height.max(1))
+        (width, height)
     }
 
     fn tooltip_overlay_extra_for_content(width: u32) -> (u32, u32) {
@@ -557,9 +557,12 @@ impl FrontendSurfaceComponent {
     fn render_layout(&self, surface: &mut dyn ShellSurface) {
         surface.anchor(self.surface_layout.edge);
         surface.set_layer(self.surface_layout.layer);
-        let (width, height) = self.layout_content_size();
-        let (tooltip_extra_width, tooltip_extra_height) =
-            Self::tooltip_overlay_extra_for_content(width);
+        let (width, height) = self.requested_layout_size();
+        let (tooltip_extra_width, tooltip_extra_height) = if width == 0 {
+            (0, 0)
+        } else {
+            Self::tooltip_overlay_extra_for_content(width)
+        };
         surface.set_size(
             width.saturating_add(tooltip_extra_width),
             height.saturating_add(tooltip_extra_height),
@@ -1640,11 +1643,21 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn paint(
         &mut self,
         theme: &Theme,
-        _width: u32,
-        _height: u32,
+        width: u32,
+        height: u32,
         buffer: &mut PixelBuffer,
     ) -> Result<(), ComponentError> {
-        let (content_width, content_height) = self.layout_content_size();
+        let (requested_width, requested_height) = self.requested_layout_size();
+        let content_width = if requested_width == 0 {
+            width.max(1)
+        } else {
+            requested_width.max(1)
+        };
+        let content_height = if requested_height == 0 {
+            height.max(1)
+        } else {
+            requested_height.max(1)
+        };
         let mut tree = self.build_tree(theme, content_width, content_height);
         self.apply_style_animations(&mut tree);
         if self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured {
