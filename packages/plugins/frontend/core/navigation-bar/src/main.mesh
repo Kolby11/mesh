@@ -22,13 +22,15 @@ import ThemeButton from "./components/theme-button.mesh"
 
 <style>
 .nav-shell {
+    --nav-surface: token(color.surface);
     width: 100%;
     height: 100%;
     justify-content: start;
     align-items: center;
     padding-inline: token(spacing.lg);
-    background: token(color.surface);
+    background: var(--nav-surface);
     color: token(color.on-surface);
+    transition: background-color 150ms ease-out;
 }
 
 .brand {

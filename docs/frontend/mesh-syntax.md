@@ -311,14 +311,23 @@ frontend script.
 
 ## Style block
 
-Write standard CSS. Use `token()` to reference theme design tokens:
+Write the supported MESH practical shell CSS subset. See
+[`docs/css-coverage.md`](../css-coverage.md) for the complete property and
+unsupported-feature contract. Use `token()` to reference theme design tokens
+and local `var(...)` values for supported declarations:
 
 ```css
 <style>
 .nav-shell {
-    background: token(color.surface);
+    --surface: token(color.surface);
+    background: var(--surface);
     color: token(color.on-surface);
-    padding-inline: token(spacing.lg);
+    padding: token(spacing.md);
+    border: 1px solid token(color.outline);
+    display: flex;
+    flex: 1 1 auto;
+    overflow: hidden;
+    transition: background-color 150ms ease-out;
 }
 
 .chip {

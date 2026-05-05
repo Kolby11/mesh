@@ -5,8 +5,8 @@ pub struct CssProp {
 }
 
 /// The complete set of CSS properties supported by `mesh-core-elements`'s `apply_declaration`.
-/// Do NOT suggest properties not in this list — unsupported properties are silently ignored
-/// by the renderer and would mislead component authors.
+/// Do NOT suggest properties not in this list — unsupported properties produce style diagnostics
+/// and would mislead component authors.
 pub static CSS_PROPERTIES: &[CssProp] = &[
     // Color / typography
     CssProp {
@@ -28,6 +28,16 @@ pub static CSS_PROPERTIES: &[CssProp] = &[
         name: "border-color",
         description: "Border color.",
         values: &["transparent", "token()", "var()"],
+    },
+    CssProp {
+        name: "border",
+        description: "Practical border shorthand: width, style keyword, color.",
+        values: &["none", "1px solid token()"],
+    },
+    CssProp {
+        name: "font",
+        description: "Practical font shorthand.",
+        values: &["italic 600 16px/1.4 Inter"],
     },
     CssProp {
         name: "font-size",
@@ -106,6 +116,16 @@ pub static CSS_PROPERTIES: &[CssProp] = &[
         values: &[],
     },
     CssProp {
+        name: "padding-x",
+        description: "Left + right padding (horizontal alias).",
+        values: &[],
+    },
+    CssProp {
+        name: "padding-y",
+        description: "Top + bottom padding (vertical alias).",
+        values: &[],
+    },
+    CssProp {
         name: "margin",
         description: "Margin on all sides.",
         values: &[],
@@ -138,6 +158,16 @@ pub static CSS_PROPERTIES: &[CssProp] = &[
     CssProp {
         name: "margin-block",
         description: "Top + bottom margin (vertical).",
+        values: &[],
+    },
+    CssProp {
+        name: "margin-x",
+        description: "Left + right margin (horizontal alias).",
+        values: &[],
+    },
+    CssProp {
+        name: "margin-y",
+        description: "Top + bottom margin (vertical alias).",
         values: &[],
     },
     CssProp {
@@ -234,6 +264,16 @@ pub static CSS_PROPERTIES: &[CssProp] = &[
         values: &["flex", "none"],
     },
     CssProp {
+        name: "visibility",
+        description: "Visibility-like behavior; hidden/collapse map to opacity 0.",
+        values: &["visible", "hidden", "collapse"],
+    },
+    CssProp {
+        name: "direction",
+        description: "Text direction.",
+        values: &["ltr", "rtl"],
+    },
+    CssProp {
         name: "flex-direction",
         description: "Main axis direction.",
         values: &["row", "column", "row-reverse", "column-reverse"],
@@ -313,6 +353,16 @@ pub static CSS_PROPERTIES: &[CssProp] = &[
     CssProp {
         name: "column-gap",
         description: "Horizontal gap between flex children.",
+        values: &[],
+    },
+    CssProp {
+        name: "row-gap",
+        description: "Gap alias for Phase 8 flex layout.",
+        values: &[],
+    },
+    CssProp {
+        name: "gap-x",
+        description: "Gap alias for Phase 8 flex layout.",
         values: &[],
     },
     // Overflow
@@ -396,7 +446,98 @@ pub static CSS_PROPERTIES: &[CssProp] = &[
             "opacity",
             "background-color",
             "color",
+            "border-color",
             "border-radius",
         ],
     },
+    // Animation metadata; Phase 12 owns scheduling and keyframes.
+    CssProp {
+        name: "animation",
+        description: "Practical animation shorthand stored as metadata only.",
+        values: &[],
+    },
+    CssProp {
+        name: "animation-name",
+        description: "Animation name metadata.",
+        values: &["none"],
+    },
+    CssProp {
+        name: "animation-duration",
+        description: "Animation duration metadata.",
+        values: &["0ms", "150ms", "300ms"],
+    },
+    CssProp {
+        name: "animation-delay",
+        description: "Animation delay metadata.",
+        values: &["0ms"],
+    },
+    CssProp {
+        name: "animation-timing-function",
+        description: "Animation easing metadata.",
+        values: &["linear", "ease", "ease-in", "ease-out", "ease-in-out"],
+    },
+    CssProp {
+        name: "animation-iteration-count",
+        description: "Animation iteration metadata.",
+        values: &["1", "2", "infinite"],
+    },
+    CssProp {
+        name: "animation-direction",
+        description: "Animation direction metadata.",
+        values: &["normal", "reverse", "alternate", "alternate-reverse"],
+    },
+    CssProp {
+        name: "animation-fill-mode",
+        description: "Animation fill mode metadata.",
+        values: &["none", "forwards", "backwards", "both"],
+    },
+    CssProp {
+        name: "animation-play-state",
+        description: "Animation play state metadata.",
+        values: &["running", "paused"],
+    },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn property_names() -> Vec<&'static str> {
+        CSS_PROPERTIES
+            .iter()
+            .map(|property| property.name)
+            .collect()
+    }
+
+    #[test]
+    fn css_completion_includes_phase_8_shorthands() {
+        let names = property_names();
+        for property in [
+            "border", "padding", "margin", "font", "flex", "overflow", "inset",
+        ] {
+            assert!(names.contains(&property), "{property}");
+        }
+    }
+
+    #[test]
+    fn css_completion_includes_animation_declarations() {
+        let names = property_names();
+        for property in [
+            "animation",
+            "animation-name",
+            "animation-duration",
+            "animation-timing-function",
+            "animation-play-state",
+        ] {
+            assert!(names.contains(&property), "{property}");
+        }
+    }
+
+    #[test]
+    fn css_completion_does_not_include_grid_or_transform() {
+        let names = property_names();
+        assert!(!names.contains(&"display: grid"));
+        assert!(!names.contains(&"grid-template-columns"));
+        assert!(!names.contains(&"transform"));
+    }
+}
