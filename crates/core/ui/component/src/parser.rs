@@ -324,6 +324,7 @@ box {
 </style>
 "#;
         let err = parse_component(source).unwrap_err().to_string();
+        // Phase 12 owns custom keyframe scheduling; Phase 8 only accepts animation declarations.
         assert!(err.contains("unsupported at-rule '@keyframes'"), "{err}");
     }
 

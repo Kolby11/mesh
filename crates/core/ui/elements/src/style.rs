@@ -133,6 +133,7 @@ pub struct ComputedStyle {
     pub border_radius: Corners,
     pub opacity: f32,
     pub transition: TransitionStyle,
+    pub animation: AnimationStyle,
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
 
@@ -189,6 +190,7 @@ impl Default for ComputedStyle {
             border_radius: Corners::zero(),
             opacity: 1.0,
             transition: TransitionStyle::default(),
+            animation: AnimationStyle::default(),
             overflow_x: Overflow::Visible,
             overflow_y: Overflow::Visible,
             font_family: "Inter".to_string(),
@@ -331,6 +333,7 @@ pub struct TransitionProperties {
     pub border_radius: bool,
     pub opacity: bool,
     pub background_color: bool,
+    pub border_color: bool,
     pub color: bool,
 }
 
@@ -345,6 +348,7 @@ impl TransitionProperties {
             border_radius: true,
             opacity: true,
             background_color: true,
+            border_color: true,
             color: true,
         }
     }
@@ -359,6 +363,10 @@ impl TransitionProperties {
 
     pub fn animates_background_color(self) -> bool {
         self.all || self.background_color
+    }
+
+    pub fn animates_border_color(self) -> bool {
+        self.all || self.border_color
     }
 
     pub fn animates_color(self) -> bool {
@@ -382,6 +390,61 @@ pub struct TransitionStyle {
     pub delay_ms: u32,
     pub easing: TransitionEasing,
     pub properties: TransitionProperties,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnimationStyle {
+    pub name: Option<String>,
+    pub duration_ms: u32,
+    pub delay_ms: u32,
+    pub easing: TransitionEasing,
+    pub iteration_count: AnimationIterationCount,
+    pub direction: AnimationDirection,
+    pub fill_mode: AnimationFillMode,
+    pub play_state: AnimationPlayState,
+}
+
+impl Default for AnimationStyle {
+    fn default() -> Self {
+        Self {
+            name: None,
+            duration_ms: 0,
+            delay_ms: 0,
+            easing: TransitionEasing::EaseOut,
+            iteration_count: AnimationIterationCount::Number(1),
+            direction: AnimationDirection::Normal,
+            fill_mode: AnimationFillMode::None,
+            play_state: AnimationPlayState::Running,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnimationIterationCount {
+    Number(u32),
+    Infinite,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnimationDirection {
+    Normal,
+    Reverse,
+    Alternate,
+    AlternateReverse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnimationFillMode {
+    None,
+    Forwards,
+    Backwards,
+    Both,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnimationPlayState {
+    Running,
+    Paused,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -589,14 +652,6 @@ impl<'a> StyleResolver<'a> {
         variables: &HashMap<String, StyleValue>,
     ) -> f32 {
         parse_px(&self.resolve_value_with_variables(value, variables))
-    }
-
-    fn resolve_time_ms_with_variables(
-        &self,
-        value: &StyleValue,
-        variables: &HashMap<String, StyleValue>,
-    ) -> u32 {
-        parse_time_ms(&self.resolve_value_with_variables(value, variables))
     }
 
     /// Resolve a color value (hex string or theme token).
@@ -940,14 +995,17 @@ fn apply_declaration(
         }
         "opacity" => style.opacity = resolver.resolve_number_with_variables(value, variables),
         "transition-duration" => {
-            style.transition.duration_ms = resolver.resolve_time_ms_with_variables(value, variables)
+            style.transition.duration_ms =
+                parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
         }
         "transition-delay" => {
-            style.transition.delay_ms = resolver.resolve_time_ms_with_variables(value, variables)
+            style.transition.delay_ms =
+                parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
         }
         "transition-timing-function" => {
-            style.transition.easing =
-                parse_easing_keyword(&resolver.resolve_value_with_variables(value, variables))
+            style.transition.easing = parse_easing_keyword(first_comma_item(
+                &resolver.resolve_value_with_variables(value, variables),
+            ))
         }
         "transition-property" => {
             style.transition.properties = parse_transition_properties(
@@ -961,6 +1019,48 @@ fn apply_declaration(
             style.transition.duration_ms = parsed.1;
             style.transition.delay_ms = parsed.2;
             style.transition.easing = parsed.3;
+        }
+        "animation-name" => {
+            style.animation.name = parse_animation_name(first_comma_item(
+                &resolver.resolve_value_with_variables(value, variables),
+            ))
+        }
+        "animation-duration" => {
+            style.animation.duration_ms =
+                parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "animation-delay" => {
+            style.animation.delay_ms =
+                parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "animation-timing-function" => {
+            style.animation.easing = parse_easing_keyword(first_comma_item(
+                &resolver.resolve_value_with_variables(value, variables),
+            ))
+        }
+        "animation-iteration-count" => {
+            style.animation.iteration_count = parse_animation_iteration_count(first_comma_item(
+                &resolver.resolve_value_with_variables(value, variables),
+            ))
+        }
+        "animation-direction" => {
+            style.animation.direction = parse_animation_direction(first_comma_item(
+                &resolver.resolve_value_with_variables(value, variables),
+            ))
+        }
+        "animation-fill-mode" => {
+            style.animation.fill_mode = parse_animation_fill_mode(first_comma_item(
+                &resolver.resolve_value_with_variables(value, variables),
+            ))
+        }
+        "animation-play-state" => {
+            style.animation.play_state = parse_animation_play_state(first_comma_item(
+                &resolver.resolve_value_with_variables(value, variables),
+            ))
+        }
+        "animation" => {
+            style.animation =
+                parse_animation_shorthand(&resolver.resolve_value_with_variables(value, variables))
         }
         "overflow" => {
             let (x, y) =
@@ -1354,11 +1454,20 @@ fn parse_transition_properties(value: &str) -> TransitionProperties {
             "border-radius" => properties.border_radius = true,
             "opacity" => properties.opacity = true,
             "background-color" | "background" => properties.background_color = true,
+            "border-color" => properties.border_color = true,
             "color" => properties.color = true,
             _ => {}
         }
     }
     properties
+}
+
+fn first_comma_item(value: &str) -> &str {
+    value.split(',').next().unwrap_or(value).trim()
+}
+
+fn parse_first_time_ms(value: &str) -> u32 {
+    parse_time_ms(first_comma_item(value))
 }
 
 fn parse_easing_keyword(value: &str) -> TransitionEasing {
@@ -1387,36 +1496,122 @@ fn parse_transition_shorthand(value: &str) -> (TransitionProperties, u32, u32, T
     let mut duration_ms = 0u32;
     let mut delay_ms = 0u32;
     let mut easing = TransitionEasing::EaseOut;
-    let mut time_count = 0;
 
-    for token in value.split_whitespace() {
-        let trimmed = token.trim_end_matches(',');
-        if looks_like_time(trimmed) {
-            let ms = parse_time_ms(trimmed);
-            if time_count == 0 {
-                duration_ms = ms;
-            } else {
-                delay_ms = ms;
+    for item in value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
+        let mut item_time_count = 0;
+        for token in item.split_whitespace() {
+            if looks_like_time(token) {
+                let ms = parse_time_ms(token);
+                if item_time_count == 0 && duration_ms == 0 {
+                    duration_ms = ms;
+                } else if item_time_count > 0 && delay_ms == 0 {
+                    delay_ms = ms;
+                }
+                item_time_count += 1;
+                continue;
             }
-            time_count += 1;
-            continue;
-        }
-        match trimmed {
-            "all" => properties = TransitionProperties::all(),
-            "border-radius" => properties.border_radius = true,
-            "opacity" => properties.opacity = true,
-            "background-color" | "background" => properties.background_color = true,
-            "color" => properties.color = true,
-            "linear" => easing = TransitionEasing::Linear,
-            "ease" => easing = TransitionEasing::Ease,
-            "ease-in" => easing = TransitionEasing::EaseIn,
-            "ease-out" => easing = TransitionEasing::EaseOut,
-            "ease-in-out" => easing = TransitionEasing::EaseInOut,
-            _ => {}
+            match token {
+                "all" => properties = TransitionProperties::all(),
+                "border-radius" => properties.border_radius = true,
+                "opacity" => properties.opacity = true,
+                "background-color" | "background" => properties.background_color = true,
+                "border-color" => properties.border_color = true,
+                "color" => properties.color = true,
+                "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
+                    if easing == TransitionEasing::EaseOut =>
+                {
+                    easing = parse_easing_keyword(token)
+                }
+                _ => {}
+            }
         }
     }
 
     (properties, duration_ms, delay_ms, easing)
+}
+
+fn parse_animation_name(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() || value == "none" {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn parse_animation_iteration_count(value: &str) -> AnimationIterationCount {
+    let value = value.trim();
+    if value == "infinite" {
+        AnimationIterationCount::Infinite
+    } else {
+        AnimationIterationCount::Number(value.parse::<u32>().unwrap_or(1))
+    }
+}
+
+fn parse_animation_direction(value: &str) -> AnimationDirection {
+    match value.trim() {
+        "reverse" => AnimationDirection::Reverse,
+        "alternate" => AnimationDirection::Alternate,
+        "alternate-reverse" => AnimationDirection::AlternateReverse,
+        _ => AnimationDirection::Normal,
+    }
+}
+
+fn parse_animation_fill_mode(value: &str) -> AnimationFillMode {
+    match value.trim() {
+        "forwards" => AnimationFillMode::Forwards,
+        "backwards" => AnimationFillMode::Backwards,
+        "both" => AnimationFillMode::Both,
+        _ => AnimationFillMode::None,
+    }
+}
+
+fn parse_animation_play_state(value: &str) -> AnimationPlayState {
+    match value.trim() {
+        "paused" => AnimationPlayState::Paused,
+        _ => AnimationPlayState::Running,
+    }
+}
+
+fn parse_animation_shorthand(value: &str) -> AnimationStyle {
+    let mut animation = AnimationStyle::default();
+    let mut time_count = 0;
+
+    for token in first_comma_item(value).split_whitespace() {
+        if looks_like_time(token) {
+            let ms = parse_time_ms(token);
+            if time_count == 0 {
+                animation.duration_ms = ms;
+            } else {
+                animation.delay_ms = ms;
+            }
+            time_count += 1;
+        } else if matches!(
+            token,
+            "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
+        ) {
+            animation.easing = parse_easing_keyword(token);
+        } else if token == "infinite" || token.parse::<u32>().is_ok() {
+            animation.iteration_count = parse_animation_iteration_count(token);
+        } else if matches!(
+            token,
+            "normal" | "reverse" | "alternate" | "alternate-reverse"
+        ) {
+            animation.direction = parse_animation_direction(token);
+        } else if matches!(token, "none" | "forwards" | "backwards" | "both") {
+            animation.fill_mode = parse_animation_fill_mode(token);
+        } else if matches!(token, "running" | "paused") {
+            animation.play_state = parse_animation_play_state(token);
+        } else {
+            animation.name = parse_animation_name(token);
+        }
+    }
+
+    animation
 }
 
 fn parse_time_ms(value: &str) -> u32 {
@@ -2096,6 +2291,152 @@ mod tests {
         let resolver = StyleResolver::new(&theme);
         let value = StyleValue::Token("color.primary".to_string());
         assert_eq!(resolver.resolve_value(&value), "#6750A4");
+    }
+
+    #[test]
+    fn transition_shorthand_parses_comma_separated_items() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "transition".to_string(),
+                value: StyleValue::Literal(
+                    "opacity 150ms ease-in 25ms, border-color 250ms ease-out".to_string(),
+                ),
+            }],
+            container_query: None,
+        }];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.transition.duration_ms, 150);
+        assert_eq!(style.transition.delay_ms, 25);
+        assert_eq!(style.transition.easing, TransitionEasing::EaseIn);
+        assert!(style.transition.properties.animates_opacity());
+        assert!(style.transition.properties.animates_border_color());
+    }
+
+    #[test]
+    fn transition_property_supports_phase_8_visual_properties() {
+        let properties = parse_transition_properties(
+            "all, opacity, background, background-color, color, border-color, border-radius",
+        );
+
+        assert!(properties.animates_opacity());
+        assert!(properties.animates_background_color());
+        assert!(properties.animates_border_color());
+        assert!(properties.animates_color());
+        assert!(properties.animates_border_radius());
+    }
+
+    #[test]
+    fn animation_longhands_store_metadata_only() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![
+                mesh_core_component::style::Declaration {
+                    property: "animation-name".to_string(),
+                    value: StyleValue::Literal("pulse".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "animation-duration".to_string(),
+                    value: StyleValue::Literal("320ms".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "animation-delay".to_string(),
+                    value: StyleValue::Literal("40ms".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "animation-timing-function".to_string(),
+                    value: StyleValue::Literal("ease-in-out".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "animation-iteration-count".to_string(),
+                    value: StyleValue::Literal("infinite".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "animation-direction".to_string(),
+                    value: StyleValue::Literal("alternate".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "animation-fill-mode".to_string(),
+                    value: StyleValue::Literal("both".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "animation-play-state".to_string(),
+                    value: StyleValue::Literal("paused".to_string()),
+                },
+            ],
+            container_query: None,
+        }];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.animation.name.as_deref(), Some("pulse"));
+        assert_eq!(style.animation.duration_ms, 320);
+        assert_eq!(style.animation.delay_ms, 40);
+        assert_eq!(style.animation.easing, TransitionEasing::EaseInOut);
+        assert_eq!(
+            style.animation.iteration_count,
+            AnimationIterationCount::Infinite
+        );
+        assert_eq!(style.animation.direction, AnimationDirection::Alternate);
+        assert_eq!(style.animation.fill_mode, AnimationFillMode::Both);
+        assert_eq!(style.animation.play_state, AnimationPlayState::Paused);
+    }
+
+    #[test]
+    fn animation_shorthand_stores_metadata_only() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "animation".to_string(),
+                value: StyleValue::Literal(
+                    "pulse 250ms ease-in-out 50ms 2 alternate both paused".to_string(),
+                ),
+            }],
+            container_query: None,
+        }];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.animation.name.as_deref(), Some("pulse"));
+        assert_eq!(style.animation.duration_ms, 250);
+        assert_eq!(style.animation.delay_ms, 50);
+        assert_eq!(style.animation.easing, TransitionEasing::EaseInOut);
+        assert_eq!(
+            style.animation.iteration_count,
+            AnimationIterationCount::Number(2)
+        );
+        assert_eq!(style.animation.direction, AnimationDirection::Alternate);
+        assert_eq!(style.animation.fill_mode, AnimationFillMode::Both);
+        assert_eq!(style.animation.play_state, AnimationPlayState::Paused);
     }
 
     #[test]
