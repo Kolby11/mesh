@@ -15,8 +15,8 @@
 ### Responsive Reactivity
 
 - [ ] **REACT-01**: Components restyle when their surface or container size changes, including container query changes for width and height.
-- [ ] **REACT-02**: Components restyle predictably for hover, focus, active, disabled, checked, and focus-visible states.
-- [ ] **REACT-03**: Layout, hit testing, accessibility bounds, and rendered output stay synchronized after size-driven or state-driven restyles.
+- [x] **REACT-02**: Components restyle predictably for hover, focus, active, disabled, checked, and focus-visible states.
+- [x] **REACT-03**: Layout, hit testing, accessibility bounds, and rendered output stay synchronized after size-driven or state-driven restyles.
 - [ ] **REACT-04**: State-driven style transitions do not require full plugin reloads and do not drop current input, scroll, or service state.
 
 ### Text Selection
@@ -81,8 +81,8 @@
 | CSS-03 | Phase 8 | Complete |
 | CSS-04 | Phase 8 | Complete |
 | REACT-01 | Phase 9 | Pending |
-| REACT-02 | Phase 9 | Pending |
-| REACT-03 | Phase 9 | Pending |
+| REACT-02 | Phase 9 | Complete |
+| REACT-03 | Phase 9 | Complete |
 | REACT-04 | Phase 9 | Pending |
 | TEXT-01 | Phase 10 | Pending |
 | TEXT-02 | Phase 10 | Pending |
