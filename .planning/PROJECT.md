@@ -17,11 +17,23 @@ The project now has a backend plugin MVP with:
 - Generic service state and command routing without service-specific Rust branches
 - A reference backend plugin plus automated proof coverage and backend author docs
 
+## Current Milestone: v1.2 Rendering System Upgrade
+
+**Goal:** Make MESH frontend rendering expressive and interactive enough for distinctive shell UI without turning the renderer into a full browser engine.
+
+**Target features:**
+- Practical CSS coverage for common shell styling: box model, layout, typography, borders, overflow, visual states, selectors, tokens, and documented unsupported properties.
+- Container-size and interaction reactivity so components can restyle on surface/container changes, hover, focus, active, and related state transitions.
+- Selectable text with mouse drag highlighting and copy support.
+- Keyboard navigation and shortcuts for focus movement, activation, and configured key-driven workflows.
+- Theme animation tokens and custom CSS animation support for shell-specific motion.
+- Navigation-bar migration that proves the new styling, reactivity, keyboard, selection, and animation behavior in an existing core surface.
+
 ## Next Milestone Goals
 
-- Decide whether the next milestone finishes validation and audit debt first or moves directly into new product scope.
-- Carry forward deferred `v1.1` cleanup: finalize Nyquist metadata, document the manual live-host validation boundary, and retire obsolete verification notes.
-- Use the shipped backend MVP as the baseline for any next-step work in tooling, distribution, or new shell surfaces.
+- Use the rendering upgrade to make plugin authoring feel closer to normal CSS while preserving MESH-specific limits.
+- Treat navigation-bar migration as the milestone proof instead of leaving new renderer capabilities as isolated engine tests.
+- Keep deferred `v1.1` validation cleanup visible as backlog, but do not mix it into the rendering milestone scope.
 
 ## Key Decisions
 
@@ -33,6 +45,7 @@ The project now has a backend plugin MVP with:
 | Backend runtime failure does not auto-fallback | Deterministic cleanup and visible status are safer than hidden provider switching | Locked |
 | `mesh.exec_shell` is outside the backend MVP host API | Structured argv execution avoids shell parsing ambiguity | Shipped in v1.1 |
 | Backend MVP comes before remote distribution and LSP | Runtime stability and local package semantics are prerequisites for tooling and package workflows | Still true |
+| MESH renderer should support practical shell CSS, not full web compatibility | Plugin authors need expressive styling without inheriting browser-engine scope | Decided in v1.2 |
 
 <details>
 <summary>Archived v1.1 milestone framing</summary>
@@ -46,4 +59,4 @@ Target features included the central plugin package manifest, frontend-to-backen
 </details>
 
 ---
-*Last updated: 2026-05-05 after v1.1 milestone archival*
+*Last updated: 2026-05-05 after v1.2 milestone start*

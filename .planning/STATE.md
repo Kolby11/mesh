@@ -1,34 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Backend Plugin MVP
-status: milestone_archived
-stopped_at: v1.1 archived on 2026-05-05
-last_updated: "2026-05-05T13:45:00+02:00"
-last_activity: 2026-05-05 -- v1.1 milestone archived
+milestone: v1.2
+milestone_name: Rendering System Upgrade
+status: planning
+last_updated: "2026-05-05T13:59:00.334Z"
+last_activity: 2026-05-05
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 21
-  completed_plans: 21
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: MESH v1.1
+# State: MESH v1.2
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-05-05)
 
-**Core value:** A backend plugin author can write a Luau service plugin, configure it, run it under the shell, emit state, handle commands, and understand failures without reading Rust source.
-**Current focus:** Milestone archived; waiting for next milestone definition
+**Core value:** A plugin author can style and animate distinctive shell UI with practical CSS-like primitives while MESH keeps rendering predictable and lightweight.
+**Current focus:** Defining requirements for v1.2 Rendering System Upgrade
 
 ## Current Position
 
-Phase: Archived
-Plan: Milestone closeout complete
-Status: `v1.1` archived with functional scope shipped and residual validation debt documented
-Last activity: 2026-05-05 -- milestone archive complete
+Phase: Not started (defining requirements)
+Plan: -
+Status: Defining requirements
+Last activity: 2026-05-05 - Milestone v1.2 started
 
 ## Decisions
 
@@ -118,7 +117,7 @@ Items accepted at `v1.1` close:
 
 ## Pending Todos
 
-- Start the next milestone with fresh requirements and roadmap artifacts.
+- Define v1.2 rendering requirements and roadmap.
 
 ## Artifact Index
 
