@@ -376,4 +376,188 @@ mod tests {
         }
         out
     }
+
+    fn find_first_by_tag<'a>(
+        node: &'a mesh_core_elements::WidgetNode,
+        tag: &str,
+    ) -> Option<&'a mesh_core_elements::WidgetNode> {
+        if node.tag == tag {
+            return Some(node);
+        }
+        for child in &node.children {
+            if let Some(found) = find_first_by_tag(child, tag) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    fn make_test_plugin(source: &str) -> CompiledFrontendPlugin {
+        let component = mesh_core_component::parse_component(source).unwrap();
+        let manifest = mesh_core_plugin::Manifest {
+            package: mesh_core_plugin::PackageSection {
+                id: "test".into(),
+                version: "0.1.0".into(),
+                plugin_type: mesh_core_plugin::PluginType::Widget,
+                api_version: "0.1.0".into(),
+                name: None,
+                license: None,
+                description: None,
+                authors: vec![],
+                repository: None,
+            },
+            compatibility: Default::default(),
+            dependencies: Default::default(),
+            capabilities: Default::default(),
+            entrypoints: Default::default(),
+            accessibility: None,
+            settings: None,
+            i18n: None,
+            theme: None,
+            service: None,
+            provides: vec![],
+            interface: None,
+            extensions: vec![],
+            exports: Default::default(),
+            provides_slots: Default::default(),
+            slot_contributions: Default::default(),
+            surface_layout: None,
+            assets: None,
+            icon_requirements: Default::default(),
+            translations: Default::default(),
+        };
+        CompiledFrontendPlugin {
+            manifest,
+            source_path: std::path::PathBuf::from("test.mesh"),
+            component,
+            local_components: Default::default(),
+            plugin_component_imports: Default::default(),
+        }
+    }
+
+    /// Container query rules must produce different computed styles when the
+    /// root surface size crosses a declared breakpoint.
+    #[test]
+    fn container_query_applies_different_styles_at_different_root_sizes() {
+        let source = r#"
+<style>
+box {
+  background-color: #111111;
+  width: 100px;
+}
+@container (min-width: 500px) {
+  box {
+    background-color: #eeeeee;
+    width: 200px;
+  }
+}
+</style>
+<template>
+  <box />
+</template>
+"#;
+        let compiled = make_test_plugin(source);
+        let theme = mesh_core_theme::default_theme();
+
+        // Narrow — container query does not match.
+        let narrow = compiled.build_preview_tree(&theme, 400, 300);
+        let narrow_box = find_first_by_tag(&narrow, "box").expect("box node");
+        assert_eq!(
+            narrow_box.computed_style.background_color,
+            mesh_core_elements::Color::from_hex("#111111").unwrap(),
+            "narrow: container query should not apply"
+        );
+
+        // Wide — container query matches.
+        let wide = compiled.build_preview_tree(&theme, 600, 300);
+        let wide_box = find_first_by_tag(&wide, "box").expect("box node");
+        assert_eq!(
+            wide_box.computed_style.background_color,
+            mesh_core_elements::Color::from_hex("#eeeeee").unwrap(),
+            "wide: container query should apply"
+        );
+    }
+
+    /// max-width container queries invert correctly — they match at small
+    /// sizes and stop matching when the surface grows past the threshold.
+    #[test]
+    fn container_query_max_width_inverts_across_breakpoint() {
+        let source = r#"
+<style>
+box {
+  background-color: #333333;
+}
+@container (max-width: 319px) {
+  box {
+    background-color: #aaaaaa;
+  }
+}
+</style>
+<template>
+  <box />
+</template>
+"#;
+        let compiled = make_test_plugin(source);
+        let theme = mesh_core_theme::default_theme();
+
+        // Narrow — max-width matches.
+        let narrow = compiled.build_preview_tree(&theme, 300, 200);
+        let narrow_box = find_first_by_tag(&narrow, "box").expect("box node");
+        assert_eq!(
+            narrow_box.computed_style.background_color,
+            mesh_core_elements::Color::from_hex("#aaaaaa").unwrap(),
+            "narrow: max-width query should match"
+        );
+
+        // Wide — max-width does not match.
+        let wide = compiled.build_preview_tree(&theme, 400, 200);
+        let wide_box = find_first_by_tag(&wide, "box").expect("box node");
+        assert_eq!(
+            wide_box.computed_style.background_color,
+            mesh_core_elements::Color::from_hex("#333333").unwrap(),
+            "wide: max-width query should not match"
+        );
+    }
+
+    /// Building the same plugin twice with different surface sizes must yield
+    /// independent trees — no shared computed-style state bleeds between calls.
+    #[test]
+    fn container_query_consecutive_builds_are_independent() {
+        let source = r#"
+<style>
+box { background-color: #000000; }
+@container (min-width: 400px) {
+  box { background-color: #ffffff; }
+}
+</style>
+<template><box /></template>
+"#;
+        let compiled = make_test_plugin(source);
+        let theme = mesh_core_theme::default_theme();
+
+        let wide = compiled.build_preview_tree(&theme, 500, 200);
+        let narrow = compiled.build_preview_tree(&theme, 300, 200);
+
+        let wide_bg = find_first_by_tag(&wide, "box")
+            .unwrap()
+            .computed_style
+            .background_color;
+        let narrow_bg = find_first_by_tag(&narrow, "box")
+            .unwrap()
+            .computed_style
+            .background_color;
+
+        assert_ne!(
+            wide_bg, narrow_bg,
+            "builds at different sizes must produce different styles"
+        );
+        assert_eq!(
+            wide_bg,
+            mesh_core_elements::Color::from_hex("#ffffff").unwrap()
+        );
+        assert_eq!(
+            narrow_bg,
+            mesh_core_elements::Color::from_hex("#000000").unwrap()
+        );
+    }
 }
