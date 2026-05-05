@@ -2821,6 +2821,161 @@ mod tests {
     }
 
     #[test]
+    fn pseudo_state_restyle_applies_runtime_state_after_rebuild() {
+        let mut component = test_frontend_component(
+            r#"
+<style>
+button {
+  background-color: #101010;
+  border-color: #111111;
+  opacity: 1;
+}
+button:hover {
+  background-color: #202020;
+}
+button:active {
+  border-color: #303030;
+}
+button:disabled {
+  opacity: 0.4;
+}
+input {
+  background-color: #121212;
+  color: #131313;
+}
+input:focus {
+  background-color: #404040;
+}
+input:focus-visible {
+  color: #505050;
+}
+input:checked {
+  background-color: #606060;
+}
+</style>
+<template>
+  <column>
+    <button disabled="true" />
+    <input />
+    <button />
+    <checkbox checked="true" />
+  </column>
+</template>
+"#,
+        );
+        component.render_hooks_pending = false;
+        component.focused_key = Some("root/0/1".into());
+        component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/2".into()];
+        component.hovered_key = Some("root/0/2".into());
+        component.pointer_down_key = Some("root/0/2".into());
+        component.checked_values.insert("root/0/3".into(), true);
+
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(240, 120);
+        component.paint(&theme, 240, 120, &mut buffer).unwrap();
+        let tree = component.last_tree.as_ref().unwrap();
+
+        let disabled_button = node_by_mesh_key(tree, "root/0/0");
+        assert!(disabled_button.state.disabled);
+        assert!((disabled_button.computed_style.opacity - 0.4).abs() < f32::EPSILON);
+
+        let focused_input = node_by_mesh_key(tree, "root/0/1");
+        assert!(focused_input.state.focused);
+        assert_eq!(
+            focused_input.computed_style.background_color,
+            Color::from_hex("#404040").unwrap()
+        );
+        assert_eq!(
+            focused_input.computed_style.color,
+            Color::from_hex("#505050").unwrap()
+        );
+
+        let active_button = node_by_mesh_key(tree, "root/0/2");
+        assert!(active_button.state.hovered);
+        assert!(active_button.state.active);
+        assert_eq!(
+            active_button.computed_style.background_color,
+            Color::from_hex("#202020").unwrap()
+        );
+        assert_eq!(
+            active_button.computed_style.border_color,
+            Color::from_hex("#303030").unwrap()
+        );
+
+        let checked_box = node_by_mesh_key(tree, "root/0/3");
+        assert!(checked_box.state.checked);
+        assert_eq!(
+            checked_box.computed_style.background_color,
+            Color::from_hex("#606060").unwrap()
+        );
+    }
+
+    #[test]
+    fn pseudo_state_restyle_preserves_runtime_instances_and_local_state() {
+        let mut component = test_frontend_component(
+            r#"
+<style>
+input:focus {
+  background-color: #404040;
+}
+input:checked {
+  background-color: #606060;
+}
+</style>
+<template>
+  <column>
+    <input value="initial" />
+    <checkbox checked="false" />
+  </column>
+</template>
+<script lang="luau">
+render_count = 0
+function onRender()
+    render_count = render_count + 1
+end
+</script>
+"#,
+        );
+        let runtime_count_before = component.runtimes.lock().unwrap().len();
+        component
+            .input_values
+            .insert("root/0/0".into(), "local".into());
+        component.checked_values.insert("root/0/1".into(), true);
+        component.focused_key = Some("root/0/0".into());
+
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(240, 120);
+        component.paint(&theme, 240, 120, &mut buffer).unwrap();
+        let render_count_after_first = runtime_number(&component, "render_count");
+        let runtime_count_after_first = component.runtimes.lock().unwrap().len();
+
+        component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/1".into()];
+        component.hovered_key = Some("root/0/1".into());
+        component.dirty = true;
+        component.paint(&theme, 240, 120, &mut buffer).unwrap();
+
+        assert_eq!(runtime_count_before, runtime_count_after_first);
+        assert_eq!(
+            runtime_count_before,
+            component.runtimes.lock().unwrap().len()
+        );
+        assert_eq!(
+            runtime_number(&component, "render_count"),
+            render_count_after_first
+        );
+
+        let tree = component.last_tree.as_ref().unwrap();
+        assert_eq!(
+            node_by_mesh_key(tree, "root/0/0")
+                .attributes
+                .get("value")
+                .map(String::as_str),
+            Some("local")
+        );
+        assert!(node_by_mesh_key(tree, "root/0/1").state.checked);
+    }
+
+    #[test]
     fn slider_change_handler_receives_number_on_pointer_move() {
         let mut component = test_frontend_component(
             r#"
