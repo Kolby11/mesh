@@ -1,7 +1,61 @@
 use super::*;
 use mesh_core_elements::style::{Overflow, TextAlign, TextDirection, TextOverflow};
 
+#[derive(Debug, Clone)]
+struct ResolvedSurfaceShortcut {
+    key: String,
+    handler: String,
+    target_ref: Option<String>,
+}
+
 impl FrontendSurfaceComponent {
+    fn set_focus_target(
+        &mut self,
+        tree: &WidgetNode,
+        next_key: Option<String>,
+        focus_visible: bool,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let previous_key = self.focused_key.clone();
+        let mut requests = Vec::new();
+
+        if previous_key != next_key {
+            if let Some(previous_key) = previous_key.as_deref() {
+                requests.extend(self.call_node_handler(tree, previous_key, "blur", &[])?);
+            }
+            self.focused_key = next_key.clone();
+            if let Some(next_key) = next_key.as_deref() {
+                requests.extend(self.call_node_handler(tree, next_key, "focus", &[])?);
+            }
+        }
+
+        self.focus_visible_key = if focus_visible { next_key } else { None };
+        Ok(requests)
+    }
+
+    fn advance_keyboard_focus(
+        &mut self,
+        tree: &WidgetNode,
+        backward: bool,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let next_key = next_focus_target(tree, self.focused_key.as_deref(), backward);
+        self.set_focus_target(tree, next_key, true)
+    }
+
+    fn pointer_focus_visible_for_key(&self, tree: &WidgetNode, key: &str) -> bool {
+        find_node_by_key(tree, key).is_some_and(|node| node.tag == "input")
+    }
+
+    fn normalized_focused_key(&mut self, tree: &WidgetNode) -> Option<String> {
+        let focused_key = self.focused_key.clone()?;
+        if find_node_by_key(tree, &focused_key).is_some() {
+            Some(focused_key)
+        } else {
+            self.focused_key = None;
+            self.focus_visible_key = None;
+            None
+        }
+    }
+
     fn selectable_text_target_key(&self, tree: &WidgetNode, x: f32, y: f32) -> Option<String> {
         let path = find_node_path_at(tree, x, y)?;
         if path.iter().any(|key| {
@@ -229,6 +283,243 @@ impl FrontendSurfaceComponent {
             "current_target": current_target
         })
     }
+
+    fn build_keyboard_event(
+        &self,
+        tree: &WidgetNode,
+        node_key: &str,
+        event_type: &str,
+        key: &str,
+        modifiers: KeyModifiers,
+    ) -> serde_json::Value {
+        let target = find_node_by_key(tree, node_key);
+        let (left, top, right, bottom) =
+            find_node_bounds_by_key(tree, node_key, 0.0, 0.0).unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let width = (right - left).max(0.0);
+        let height = (bottom - top).max(0.0);
+        let bounds = serde_json::json!({
+            "left": left,
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+            "width": width,
+            "height": height,
+        });
+        let position = serde_json::json!({
+            "margin_left": left.round() as i32,
+            "margin_bottom": bottom.round() as i32,
+        });
+        let tag = target.map(|node| node.tag.clone()).unwrap_or_default();
+        let mut current_target = target
+            .map(|node| element_snapshot_json(node, left - node.layout.x, top - node.layout.y))
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let Some(object) = current_target.as_object_mut() {
+            object.insert(
+                "key".into(),
+                serde_json::Value::String(node_key.to_string()),
+            );
+            object.insert("tag".into(), serde_json::Value::String(tag.clone()));
+            object.insert("bounds".into(), bounds.clone());
+            object.insert("position".into(), position.clone());
+        }
+
+        serde_json::json!({
+            "type": event_type,
+            "key": key,
+            "modifiers": {
+                "ctrl": modifiers.ctrl,
+                "shift": modifiers.shift,
+                "alt": modifiers.alt,
+            },
+            "surface": {
+                "id": self.surface_id(),
+                "width": tree.layout.width,
+                "height": tree.layout.height,
+            },
+            "current": {
+                "key": node_key,
+                "tag": tag,
+                "bounds": bounds,
+                "position": position,
+            },
+            "current_target": current_target,
+        })
+    }
+
+    fn dispatch_focused_keyboard_handler(
+        &mut self,
+        tree: &WidgetNode,
+        node_key: &str,
+        handler_name: &str,
+        event_type: &str,
+        key: &str,
+        modifiers: KeyModifiers,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let event = self.build_keyboard_event(tree, node_key, event_type, key, modifiers);
+        self.call_node_handler(tree, node_key, handler_name, &[event])
+    }
+
+    fn dispatch_keyboard_button_activation(
+        &mut self,
+        tree: &WidgetNode,
+        node_key: &str,
+        key: &str,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(handler) = find_click_handler(tree, node_key) else {
+            return Ok(Vec::new());
+        };
+        let (left, top, right, bottom) =
+            find_node_bounds_by_key(tree, node_key, 0.0, 0.0).unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let center_x = (left + right) * 0.5;
+        let center_y = (top + bottom) * 0.5;
+        let mut event = self.build_click_event(tree, node_key, center_x, center_y);
+        if let Some(object) = event.as_object_mut() {
+            object.insert(
+                "trigger".into(),
+                serde_json::json!({
+                    "type": "keyboard",
+                    "key": key,
+                }),
+            );
+        }
+        self.call_namespaced_handler(&handler, &[event])
+    }
+
+    fn slider_step_value(&self, tree: &WidgetNode, slider_key: &str, delta: f32) -> Option<f32> {
+        let node = find_node_by_key(tree, slider_key)?;
+        let min = node
+            .attributes
+            .get("min")
+            .and_then(|value| value.parse::<f32>().ok())
+            .unwrap_or(0.0);
+        let max = node
+            .attributes
+            .get("max")
+            .and_then(|value| value.parse::<f32>().ok())
+            .unwrap_or(100.0);
+        if max <= min {
+            return None;
+        }
+
+        let current = self
+            .slider_value(tree, slider_key)
+            .unwrap_or(min)
+            .clamp(min, max);
+        let step = node
+            .attributes
+            .get("step")
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|value| *value > 0.0)
+            .unwrap_or_else(|| ((max - min) / 20.0).max(0.01));
+        let raw_next = (current + delta * step).clamp(min, max);
+        let stepped = (((raw_next - min) / step).round() * step + min).clamp(min, max);
+        Some(stepped)
+    }
+
+    fn current_keyboard_settings(&self) -> mesh_core_config::KeyboardSettings {
+        mesh_core_config::load_shell_settings()
+            .map(|settings| settings.keyboard)
+            .unwrap_or_default()
+    }
+
+    fn key_matches_binding(key: &str, binding: &str) -> bool {
+        normalize_key_name(key) == normalize_key_name(binding)
+    }
+
+    fn key_matches_any_binding(key: &str, bindings: &[String]) -> bool {
+        bindings
+            .iter()
+            .any(|binding| Self::key_matches_binding(key, binding))
+    }
+
+    fn resolved_surface_shortcuts(
+        &self,
+        keyboard_settings: &mesh_core_config::KeyboardSettings,
+    ) -> Vec<ResolvedSurfaceShortcut> {
+        let Some(shortcuts) = self
+            .settings_json
+            .get("keyboard")
+            .and_then(|value| value.get("shortcuts"))
+            .and_then(serde_json::Value::as_object)
+        else {
+            return Vec::new();
+        };
+
+        let overrides = keyboard_settings.surface_shortcuts.get(self.surface_id());
+
+        shortcuts
+            .iter()
+            .filter_map(|(shortcut_id, value)| {
+                let handler = value.get("handler")?.as_str()?.to_string();
+                let default_key = value.get("key")?.as_str()?.to_string();
+                let override_key = overrides
+                    .and_then(|surface| surface.get(shortcut_id))
+                    .and_then(|shortcut| shortcut.key.clone());
+                let effective_key = override_key.unwrap_or(default_key);
+                if effective_key.trim().is_empty() {
+                    return None;
+                }
+
+                Some(ResolvedSurfaceShortcut {
+                    key: effective_key,
+                    handler,
+                    target_ref: value
+                        .get("target_ref")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string),
+                })
+            })
+            .collect()
+    }
+
+    fn dispatch_surface_shortcut(
+        &mut self,
+        tree: &WidgetNode,
+        key: &str,
+        modifiers: KeyModifiers,
+        keyboard_settings: &mesh_core_config::KeyboardSettings,
+    ) -> Result<Option<Vec<CoreRequest>>, ComponentError> {
+        let matched = self
+            .resolved_surface_shortcuts(keyboard_settings)
+            .into_iter()
+            .find(|shortcut| Self::key_matches_binding(key, &shortcut.key));
+        let Some(shortcut) = matched else {
+            return Ok(None);
+        };
+
+        let target_key = shortcut
+            .target_ref
+            .as_deref()
+            .and_then(|reference| find_node_key_by_reference(tree, reference))
+            .or_else(|| self.normalized_focused_key(tree))
+            .unwrap_or_else(|| "root".to_string());
+        let event = self.build_keyboard_event(tree, &target_key, "keydown", key, modifiers);
+        Ok(Some(
+            self.call_namespaced_handler(&shortcut.handler, &[event])?,
+        ))
+    }
+
+    pub(super) fn annotate_surface_shortcuts(&self, tree: &mut WidgetNode) {
+        let keyboard_settings = self.current_keyboard_settings();
+        for shortcut in self.resolved_surface_shortcuts(&keyboard_settings) {
+            let Some(target_ref) = shortcut.target_ref.as_deref() else {
+                continue;
+            };
+            let Some(node) = find_node_by_reference_mut(tree, target_ref) else {
+                continue;
+            };
+            match node.accessibility.keyboard_shortcut.as_deref() {
+                Some(existing) if existing == shortcut.key => {}
+                Some(existing) => {
+                    node.accessibility.keyboard_shortcut =
+                        Some(format!("{existing}, {}", shortcut.key));
+                }
+                None => {
+                    node.accessibility.keyboard_shortcut = Some(shortcut.key);
+                }
+            }
+        }
+    }
 }
 
 impl FrontendSurfaceComponent {
@@ -258,34 +549,25 @@ impl FrontendSurfaceComponent {
             ComponentInput::PointerButton { x, y, pressed } => {
                 if pressed {
                     if let Some(selection_key) = self.selectable_text_target_key(&tree, x, y) {
-                        self.focused_key = None;
+                        let requests = self.set_focus_target(&tree, None, false)?;
                         self.pointer_down_key = None;
                         self.active_slider_key = None;
                         self.begin_text_selection(selection_key, x, y);
                         self.dirty = true;
-                        return Ok(Vec::new());
+                        return Ok(requests);
                     }
 
                     self.clear_selection();
                     if let Some(node_key) = self.pointer_event_target_key(&tree, x, y) {
                         self.pointer_down_key = Some(node_key.clone());
-                        let mut requests = Vec::new();
-
-                        if let Some(focused_key) = find_focusable_at(&tree, x, y) {
-                            let focus_changed =
-                                self.focused_key.as_deref() != Some(focused_key.as_str());
-                            self.focused_key = Some(focused_key.clone());
-                            if focus_changed {
-                                requests.extend(self.call_node_handler(
-                                    &tree,
-                                    &focused_key,
-                                    "focus",
-                                    &[],
-                                )?);
-                            }
+                        let mut requests = if let Some(focused_key) = find_focusable_at(&tree, x, y)
+                        {
+                            let focus_visible =
+                                self.pointer_focus_visible_for_key(&tree, &focused_key);
+                            self.set_focus_target(&tree, Some(focused_key), focus_visible)?
                         } else {
-                            self.focused_key = None;
-                        }
+                            self.set_focus_target(&tree, None, false)?
+                        };
 
                         if is_slider_key(&tree, &node_key) {
                             self.active_slider_key = Some(node_key.clone());
@@ -318,10 +600,13 @@ impl FrontendSurfaceComponent {
                             return Ok(requests);
                         }
                     } else {
-                        self.focused_key = None;
+                        let requests = self.set_focus_target(&tree, None, false)?;
                         self.pointer_down_key = None;
                         self.active_slider_key = None;
                         self.dirty = true;
+                        if !requests.is_empty() {
+                            return Ok(requests);
+                        }
                     }
                 } else {
                     let mut requests = Vec::new();
@@ -335,6 +620,8 @@ impl FrontendSurfaceComponent {
                             &[serde_json::json!(value)],
                         )?);
                     }
+
+                    self.end_text_selection_drag();
 
                     if self.selection.is_some() && self.pointer_down_key.is_none() {
                         self.dirty = true;
@@ -441,13 +728,33 @@ impl FrontendSurfaceComponent {
                 }
             }
             ComponentInput::KeyPressed { key, modifiers } => {
+                let keyboard_settings = self.current_keyboard_settings();
+                if matches!(key.as_str(), "Tab") && !modifiers.ctrl && !modifiers.alt {
+                    self.clear_selection();
+                    self.dirty = true;
+                    return self.advance_keyboard_focus(&tree, modifiers.shift);
+                }
                 if modifiers.ctrl
                     && key.eq_ignore_ascii_case("c")
                     && let Some(text) = self.selection_copy_payload(&tree)
                 {
                     return Ok(vec![CoreRequest::WriteClipboard { text }]);
                 }
-                if let Some(focused_key) = self.focused_key.clone() {
+                if let Some(requests) =
+                    self.dispatch_surface_shortcut(&tree, &key, modifiers, &keyboard_settings)?
+                {
+                    return Ok(requests);
+                }
+                self.focus_visible_key = self.focused_key.clone();
+                if let Some(focused_key) = self.normalized_focused_key(&tree) {
+                    let mut requests = self.dispatch_focused_keyboard_handler(
+                        &tree,
+                        &focused_key,
+                        "keydown",
+                        "keydown",
+                        &key,
+                        modifiers,
+                    )?;
                     if is_input_key(&tree, &focused_key) {
                         self.clear_selection();
                         let value = self.input_values.entry(focused_key.clone()).or_default();
@@ -456,34 +763,155 @@ impl FrontendSurfaceComponent {
                                 value.pop();
                                 let current = value.clone();
                                 self.dirty = true;
-                                return self.call_node_handler(
+                                requests.extend(self.call_node_handler(
                                     &tree,
                                     &focused_key,
                                     "change",
                                     &[serde_json::json!(current)],
-                                );
+                                )?);
+                                return Ok(requests);
                             }
                             _ => {}
                         }
-                    } else if matches!(key.as_str(), "Enter" | " " | "Space")
-                        && find_node_by_key(&tree, &focused_key)
-                            .is_some_and(|node| matches!(node.tag.as_str(), "switch" | "checkbox"))
+                    } else if (Self::key_matches_any_binding(
+                        &key,
+                        &keyboard_settings.slider_decrement_keys,
+                    ) || Self::key_matches_any_binding(
+                        &key,
+                        &keyboard_settings.slider_increment_keys,
+                    )) && is_slider_key(&tree, &focused_key)
+                    {
+                        self.clear_selection();
+                        let delta = if Self::key_matches_any_binding(
+                            &key,
+                            &keyboard_settings.slider_decrement_keys,
+                        ) {
+                            -1.0
+                        } else {
+                            1.0
+                        };
+                        if let Some(value) = self.slider_step_value(&tree, &focused_key, delta) {
+                            self.slider_values.insert(focused_key.clone(), value);
+                            self.dirty = true;
+                            requests.extend(self.call_node_handler(
+                                &tree,
+                                &focused_key,
+                                "change",
+                                &[serde_json::json!(value)],
+                            )?);
+                            return Ok(requests);
+                        }
+                    }
+
+                    if !requests.is_empty() {
+                        return Ok(requests);
+                    }
+                }
+            }
+            ComponentInput::KeyReleased { key, modifiers } => {
+                let keyboard_settings = self.current_keyboard_settings();
+                self.focus_visible_key = self.focused_key.clone();
+                if let Some(focused_key) = self.normalized_focused_key(&tree) {
+                    let mut requests = self.dispatch_focused_keyboard_handler(
+                        &tree,
+                        &focused_key,
+                        "keyup",
+                        "keyup",
+                        &key,
+                        modifiers,
+                    )?;
+
+                    if find_node_by_key(&tree, &focused_key)
+                        .is_some_and(|node| node.tag == "button")
+                        && Self::key_matches_any_binding(
+                            &key,
+                            &keyboard_settings.button_activation_keys,
+                        )
+                    {
+                        self.clear_selection();
+                        requests.extend(self.dispatch_keyboard_button_activation(
+                            &tree,
+                            &focused_key,
+                            &key,
+                        )?);
+                        return Ok(requests);
+                    }
+
+                    if Self::key_matches_any_binding(
+                        &key,
+                        &keyboard_settings.toggle_activation_keys,
+                    ) && find_node_by_key(&tree, &focused_key)
+                        .is_some_and(|node| matches!(node.tag.as_str(), "switch" | "checkbox"))
                     {
                         self.clear_selection();
                         let value = self.toggle_checked_value(&tree, &focused_key);
                         self.dirty = true;
-                        return self.call_node_handler(
+                        requests.extend(self.call_node_handler(
                             &tree,
                             &focused_key,
                             "change",
                             &[serde_json::json!(value)],
-                        );
+                        )?);
+                        return Ok(requests);
+                    }
+
+                    if !requests.is_empty() {
+                        return Ok(requests);
                     }
                 }
             }
-            ComponentInput::KeyReleased { .. } => {}
         }
 
         Ok(Vec::new())
     }
+}
+
+fn normalize_key_name(value: &str) -> String {
+    match value {
+        " " => "space".into(),
+        other => other.to_ascii_lowercase(),
+    }
+}
+
+fn find_node_key_by_reference(node: &WidgetNode, reference: &str) -> Option<String> {
+    if node
+        .attributes
+        .get("id")
+        .is_some_and(|value| value == reference)
+        || node
+            .attributes
+            .get("ref")
+            .is_some_and(|value| value == reference)
+    {
+        return node.attributes.get("_mesh_key").cloned();
+    }
+
+    node.children
+        .iter()
+        .find_map(|child| find_node_key_by_reference(child, reference))
+}
+
+fn find_node_by_reference_mut<'a>(
+    node: &'a mut WidgetNode,
+    reference: &str,
+) -> Option<&'a mut WidgetNode> {
+    if node
+        .attributes
+        .get("id")
+        .is_some_and(|value| value == reference)
+        || node
+            .attributes
+            .get("ref")
+            .is_some_and(|value| value == reference)
+    {
+        return Some(node);
+    }
+
+    for child in &mut node.children {
+        if let Some(found) = find_node_by_reference_mut(child, reference) {
+            return Some(found);
+        }
+    }
+
+    None
 }

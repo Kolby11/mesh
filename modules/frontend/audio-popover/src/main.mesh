@@ -201,6 +201,11 @@ end
     height: 28px;
 }
 
+.audio-slider:focus-visible {
+    background: token(color.secondary-container);
+    border-radius: token(radius.md);
+}
+
 .audio-actions {
     width: 100%;
     gap: token(spacing.sm);
@@ -215,6 +220,11 @@ end
     border-radius: token(radius.md);
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
+}
+
+.audio-action:focus-visible {
+    background: token(color.primary-container);
+    color: token(color.on-primary-container);
 }
 
 .audio-action:hover {

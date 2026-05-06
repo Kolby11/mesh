@@ -320,6 +320,114 @@ fn test_frontend_component_with_catalog(
     component
 }
 
+fn real_frontend_module_component(
+    module_id: &str,
+    interface_catalog: InterfaceCatalog,
+) -> FrontendSurfaceComponent {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
+    let navigation_dir = root.join("modules/frontend/navigation-bar");
+    let audio_popover_dir = root.join("modules/frontend/audio-popover");
+
+    let navigation_manifest = mesh_core_module::manifest::load_manifest(&navigation_dir)
+        .expect("navigation manifest")
+        .manifest;
+    let audio_popover_manifest = mesh_core_module::manifest::load_manifest(&audio_popover_dir)
+        .expect("audio manifest")
+        .manifest;
+
+    let navigation_compiled = CompiledFrontendModule {
+        manifest: navigation_manifest,
+        source_path: navigation_dir.join("src/main.mesh"),
+        component: parse_component(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/navigation-bar/src/main.mesh"
+        )))
+        .unwrap(),
+        local_components: HashMap::from([
+            (
+                "SettingsButton".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/navigation-bar/src/components/settings-button.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
+                "VolumeButton".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
+                "ThemeButton".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/navigation-bar/src/components/theme-button.mesh"
+                )))
+                .unwrap(),
+            ),
+        ]),
+        module_component_imports: HashMap::from([(
+            "AudioPopover".into(),
+            "@mesh/audio-popover".into(),
+        )]),
+    };
+    let audio_popover_compiled = CompiledFrontendModule {
+        manifest: audio_popover_manifest,
+        source_path: audio_popover_dir.join("src/main.mesh"),
+        component: parse_component(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/audio-popover/src/main.mesh"
+        )))
+        .unwrap(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+    };
+
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([
+            (
+                "@mesh/navigation-bar".into(),
+                FrontendCatalogEntry {
+                    module_dir: navigation_dir.clone(),
+                    compiled: navigation_compiled.clone(),
+                },
+            ),
+            (
+                "@mesh/audio-popover".into(),
+                FrontendCatalogEntry {
+                    module_dir: audio_popover_dir.clone(),
+                    compiled: audio_popover_compiled.clone(),
+                },
+            ),
+        ]),
+        slot_contributions: HashMap::new(),
+    };
+
+    let (compiled, module_dir) = if module_id == "@mesh/audio-popover" {
+        (audio_popover_compiled, audio_popover_dir)
+    } else {
+        (navigation_compiled, navigation_dir)
+    };
+
+    let mut component =
+        FrontendSurfaceComponent::new(compiled, module_dir, catalog, interface_catalog);
+    component
+        .mount(ComponentContext {
+            component_id: module_id.into(),
+            surface_id: module_id.into(),
+            diagnostics: Diagnostics::new(module_id),
+        })
+        .unwrap();
+    component.visible = true;
+    component
+}
+
 fn runtime_value(component: &FrontendSurfaceComponent, name: &str) -> Option<serde_json::Value> {
     component
         .runtimes
@@ -360,6 +468,23 @@ fn event_node(
         .iter()
         .map(|(event, handler)| ((*event).into(), (*handler).into()))
         .collect();
+    node
+}
+
+fn event_node_with_attrs(
+    tag: &str,
+    key: &str,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    attrs: &[(&str, &str)],
+    handlers: &[(&str, &str)],
+) -> WidgetNode {
+    let mut node = event_node(tag, key, x, y, width, height, handlers);
+    for (name, value) in attrs {
+        node.attributes.insert((*name).into(), (*value).into());
+    }
     node
 }
 
@@ -459,6 +584,7 @@ fn pseudo_state_annotation_uses_stable_keys_after_rebuild() {
         &mut first_tree,
         "root".to_string(),
         &focused_key,
+        &focused_key,
         &hovered_path,
         &active_key,
         &HashMap::new(),
@@ -478,6 +604,7 @@ fn pseudo_state_annotation_uses_stable_keys_after_rebuild() {
     annotate_runtime_tree(
         &mut rebuilt_tree,
         "root".to_string(),
+        &focused_key,
         &focused_key,
         &hovered_path,
         &active_key,
@@ -509,6 +636,7 @@ fn pseudo_state_annotation_sets_disabled_and_checked_deterministically() {
     annotate_runtime_tree(
         &mut tree,
         "root".to_string(),
+        &None,
         &None,
         &[],
         &None,
@@ -596,6 +724,7 @@ input:checked {
         focused_input.computed_style.color,
         Color::from_hex("#505050").unwrap()
     );
+    assert!(focused_input.state.focus_visible);
 
     let active_button = node_by_mesh_key(tree, "root/0/2");
     assert!(active_button.state.hovered);
@@ -615,6 +744,1104 @@ input:checked {
         checked_box.computed_style.background_color,
         Color::from_hex("#606060").unwrap()
     );
+}
+
+#[test]
+fn keyboard_navigation_pointer_focus_visible_tracks_input_modality() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    component.last_tree = Some(root_with(vec![
+        event_node("input", "root/0", 0.0, 0.0, 80.0, 24.0, &[]),
+        event_node("button", "root/1", 0.0, 32.0, 80.0, 24.0, &[]),
+    ]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerButton {
+                x: 8.0,
+                y: 8.0,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(component.focused_key.as_deref(), Some("root/0"));
+    assert_eq!(component.focus_visible_key.as_deref(), Some("root/0"));
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerButton {
+                x: 8.0,
+                y: 40.0,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(component.focused_key.as_deref(), Some("root/1"));
+    assert!(
+        component.focus_visible_key.is_none(),
+        "pointer-focused non-text controls should keep logical focus but clear visible focus"
+    );
+}
+
+#[test]
+fn keyboard_navigation_tab_orders_by_visual_position_and_wraps() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    component.last_tree = Some(root_with(vec![
+        event_node("button", "root/0", 120.0, 0.0, 80.0, 24.0, &[]),
+        event_node("button", "root/1", 0.0, 0.0, 80.0, 24.0, &[]),
+        event_node("button", "root/2", 0.0, 32.0, 80.0, 24.0, &[]),
+    ]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Tab".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(component.focused_key.as_deref(), Some("root/1"));
+    assert_eq!(component.focus_visible_key.as_deref(), Some("root/1"));
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Tab".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(component.focused_key.as_deref(), Some("root/0"));
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Tab".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(component.focused_key.as_deref(), Some("root/2"));
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Tab".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        component.focused_key.as_deref(),
+        Some("root/1"),
+        "Tab should wrap back to the first tabbable target"
+    );
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Tab".into(),
+                modifiers: KeyModifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        component.focused_key.as_deref(),
+        Some("root/2"),
+        "Shift+Tab should wrap backward from the first target"
+    );
+}
+
+#[test]
+fn keyboard_navigation_skips_disabled_hidden_and_tabindex_negative_targets() {
+    let mut hidden = event_node("button", "root/1", 48.0, 0.0, 40.0, 24.0, &[]);
+    hidden.computed_style.display = mesh_core_elements::style::Display::None;
+
+    let mut component = test_frontend_component("<template><box /></template>");
+    component.last_tree = Some(root_with(vec![
+        event_node("button", "root/0", 0.0, 0.0, 40.0, 24.0, &[]),
+        hidden,
+        event_node_with_attrs(
+            "button",
+            "root/2",
+            96.0,
+            0.0,
+            40.0,
+            24.0,
+            &[("disabled", "true")],
+            &[],
+        ),
+        event_node_with_attrs(
+            "button",
+            "root/3",
+            144.0,
+            0.0,
+            40.0,
+            24.0,
+            &[("tabindex", "-1")],
+            &[],
+        ),
+        event_node("button", "root/4", 192.0, 0.0, 40.0, 24.0, &[]),
+    ]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Tab".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(component.focused_key.as_deref(), Some("root/0"));
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Tab".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        component.focused_key.as_deref(),
+        Some("root/4"),
+        "normal traversal should skip hidden, disabled, and tabindex=-1 targets"
+    );
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerButton {
+                x: 150.0,
+                y: 8.0,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        component.focused_key.as_deref(),
+        Some("root/3"),
+        "tabindex=-1 should remain pointer-focusable"
+    );
+}
+
+#[test]
+fn keyboard_navigation_tabindex_positive_overrides_visual_order() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    component.last_tree = Some(root_with(vec![
+        event_node_with_attrs(
+            "button",
+            "root/0",
+            120.0,
+            0.0,
+            40.0,
+            24.0,
+            &[("tabindex", "2")],
+            &[],
+        ),
+        event_node_with_attrs(
+            "button",
+            "root/1",
+            0.0,
+            32.0,
+            40.0,
+            24.0,
+            &[("tabindex", "1")],
+            &[],
+        ),
+        event_node("button", "root/2", 0.0, 0.0, 40.0, 24.0, &[]),
+    ]));
+
+    let theme = default_theme();
+    for expected in ["root/1", "root/0", "root/2"] {
+        component
+            .handle_input(
+                &theme,
+                240,
+                160,
+                ComponentInput::KeyPressed {
+                    key: "Tab".into(),
+                    modifiers: KeyModifiers::default(),
+                },
+            )
+            .unwrap();
+        assert_eq!(component.focused_key.as_deref(), Some(expected));
+    }
+}
+
+#[test]
+fn keyboard_navigation_tab_triggers_blur_and_focus_handlers() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+focus_a = 0
+blur_a = 0
+focus_b = 0
+
+function onFocusA()
+    focus_a = focus_a + 1
+end
+
+function onBlurA()
+    blur_a = blur_a + 1
+end
+
+function onFocusB()
+    focus_b = focus_b + 1
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![
+        event_node(
+            "button",
+            "root/0",
+            0.0,
+            0.0,
+            40.0,
+            24.0,
+            &[("focus", "onFocusA"), ("blur", "onBlurA")],
+        ),
+        event_node(
+            "button",
+            "root/1",
+            48.0,
+            0.0,
+            40.0,
+            24.0,
+            &[("focus", "onFocusB")],
+        ),
+    ]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Tab".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Tab".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(runtime_number(&component, "focus_a"), 1.0);
+    assert_eq!(runtime_number(&component, "blur_a"), 1.0);
+    assert_eq!(runtime_number(&component, "focus_b"), 1.0);
+}
+
+#[test]
+fn keyboard_activation_button_and_toggle_fire_on_key_release() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+button_count = 0
+toggle_seen = false
+
+function onButtonClick(event)
+    if event.trigger and event.trigger.type == "keyboard" then
+        button_count = button_count + 1
+    end
+end
+
+function onToggleChange(value)
+    toggle_seen = value
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![
+        event_node(
+            "button",
+            "root/0",
+            0.0,
+            0.0,
+            40.0,
+            24.0,
+            &[("click", "onButtonClick")],
+        ),
+        event_node(
+            "checkbox",
+            "root/1",
+            48.0,
+            0.0,
+            40.0,
+            24.0,
+            &[("change", "onToggleChange")],
+        ),
+    ]));
+    let theme = default_theme();
+
+    component.focused_key = Some("root/0".into());
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(runtime_number(&component, "button_count"), 1.0);
+
+    component.focused_key = Some("root/1".into());
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Space".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!(
+        !runtime_bool(&component, "toggle_seen"),
+        "toggle default activation should wait for key release"
+    );
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyReleased {
+                key: "Space".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!(runtime_bool(&component, "toggle_seen"));
+}
+
+#[test]
+fn keyboard_activation_slider_arrow_keys_step_value() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+slider_seen = -1
+function onSliderChange(value)
+    slider_seen = value
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![event_node_with_attrs(
+        "slider",
+        "root/0",
+        0.0,
+        0.0,
+        120.0,
+        24.0,
+        &[
+            ("min", "0"),
+            ("max", "1"),
+            ("step", "0.1"),
+            ("value", "0.5"),
+        ],
+        &[("change", "onSliderChange")],
+    )]));
+    component.focused_key = Some("root/0".into());
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "ArrowRight".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!((runtime_number(&component, "slider_seen") - 0.6).abs() < 0.001);
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "ArrowLeft".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!((runtime_number(&component, "slider_seen") - 0.5).abs() < 0.001);
+}
+
+#[test]
+fn keyboard_activation_focused_input_backspace_edits_value() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+input_seen = ""
+function onInputChange(value)
+    input_seen = value
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![event_node(
+        "input",
+        "root/0",
+        0.0,
+        0.0,
+        120.0,
+        24.0,
+        &[("change", "onInputChange")],
+    )]));
+    component.focused_key = Some("root/0".into());
+    component.input_values.insert("root/0".into(), "ab".into());
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Backspace".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        component.input_values.get("root/0").map(String::as_str),
+        Some("a")
+    );
+    assert_eq!(
+        runtime_value(&component, "input_seen"),
+        Some(serde_json::Value::String("a".into()))
+    );
+}
+
+#[test]
+fn keyboard_handlers_keydown_and_keyup_payloads_route_to_focused_node() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+keydown_key = ""
+keydown_ctrl = false
+keydown_target = ""
+keydown_surface = ""
+keyup_key = ""
+keyup_shift = false
+
+function onKeyDown(event)
+    keydown_key = event.key
+    keydown_ctrl = event.modifiers.ctrl
+    keydown_target = event.current.key
+    keydown_surface = event.surface.id
+end
+
+function onKeyUp(event)
+    keyup_key = event.key
+    keyup_shift = event.modifiers.shift
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![event_node(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        40.0,
+        24.0,
+        &[("keydown", "onKeyDown"), ("keyup", "onKeyUp")],
+    )]));
+    component.focused_key = Some("root/0".into());
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Enter".into(),
+                modifiers: KeyModifiers {
+                    ctrl: true,
+                    shift: false,
+                    alt: false,
+                },
+            },
+        )
+        .unwrap();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers {
+                    ctrl: false,
+                    shift: true,
+                    alt: false,
+                },
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        runtime_value(&component, "keydown_key"),
+        Some(serde_json::Value::String("Enter".into()))
+    );
+    assert_eq!(
+        runtime_value(&component, "keydown_target"),
+        Some(serde_json::Value::String("root/0".into()))
+    );
+    assert_eq!(
+        runtime_value(&component, "keydown_surface"),
+        Some(serde_json::Value::String("@test/reactive-surface".into()))
+    );
+    assert!(runtime_bool(&component, "keydown_ctrl"));
+    assert_eq!(
+        runtime_value(&component, "keyup_key"),
+        Some(serde_json::Value::String("Enter".into()))
+    );
+    assert!(runtime_bool(&component, "keyup_shift"));
+}
+
+#[test]
+fn keyboard_handlers_ctrl_c_selection_still_wins_over_focused_button() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+button_count = 0
+function onButtonClick()
+    button_count = button_count + 1
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![
+        text_node("root/0", 0.0, 0.0, 180.0, 40.0, true),
+        event_node(
+            "button",
+            "root/1",
+            0.0,
+            48.0,
+            40.0,
+            24.0,
+            &[("click", "onButtonClick")],
+        ),
+    ]));
+    component.focused_key = Some("root/1".into());
+    component.selection = Some(TextSelectionState {
+        anchor: TextSelectionPoint {
+            node_key: "root/0".into(),
+            x: 0.0,
+            y: 0.0,
+        },
+        focus: TextSelectionPoint {
+            node_key: "root/0".into(),
+            x: 1000.0,
+            y: 1000.0,
+        },
+        dragging: false,
+    });
+
+    let theme = default_theme();
+    let requests = component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "c".into(),
+                modifiers: KeyModifiers {
+                    ctrl: true,
+                    shift: false,
+                    alt: false,
+                },
+            },
+        )
+        .unwrap();
+
+    assert!(matches!(
+        requests.as_slice(),
+        [CoreRequest::WriteClipboard { text }] if text == "Selectable text"
+    ));
+    assert_eq!(runtime_number(&component, "button_count"), 0.0);
+}
+
+#[test]
+fn keyboard_handlers_stale_focus_is_pruned_before_dispatch() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+keydown_count = 0
+function onKeyDown()
+    keydown_count = keydown_count + 1
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![event_node(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        40.0,
+        24.0,
+        &[("keydown", "onKeyDown")],
+    )]));
+    component.focused_key = Some("root/missing".into());
+    component.focus_visible_key = Some("root/missing".into());
+
+    let theme = default_theme();
+    let requests = component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+
+    assert!(requests.is_empty());
+    assert!(component.focused_key.is_none());
+    assert!(component.focus_visible_key.is_none());
+    assert_eq!(runtime_number(&component, "keydown_count"), 0.0);
+}
+
+#[test]
+fn keyboard_shortcuts_surface_handler_runs_and_metadata_matches_binding() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+mute_count = 0
+function onMuteShortcut()
+    mute_count = mute_count + 1
+end
+</script>
+"#,
+    );
+    component.settings_json = serde_json::json!({
+        "keyboard": {
+            "shortcuts": {
+                "mute": {
+                    "key": "m",
+                    "handler": "onMuteShortcut",
+                    "target_ref": "volume-button"
+                }
+            }
+        }
+    });
+    component.last_tree = Some(root_with(vec![event_node_with_attrs(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        40.0,
+        24.0,
+        &[("ref", "volume-button")],
+        &[],
+    )]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "m".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(runtime_number(&component, "mute_count"), 1.0);
+
+    let mut tree = root_with(vec![event_node_with_attrs(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        40.0,
+        24.0,
+        &[("ref", "volume-button")],
+        &[],
+    )]);
+    annotate_runtime_tree(
+        &mut tree,
+        "root".to_string(),
+        &None,
+        &None,
+        &[],
+        &None,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+    component.annotate_surface_shortcuts(&mut tree);
+    assert_eq!(
+        node_by_mesh_key(&tree, "root/0")
+            .accessibility
+            .keyboard_shortcut
+            .as_deref(),
+        Some("m")
+    );
+}
+
+#[test]
+fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 80);
+    component.paint(&theme, 320, 80, &mut buffer).unwrap();
+
+    let shortcut_requests = component
+        .handle_input(
+            &theme,
+            320,
+            80,
+            ComponentInput::KeyPressed {
+                key: "m".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        shortcut_requests.as_slice(),
+        [CoreRequest::ServiceCommand { interface, command, .. }]
+            if interface == "mesh.audio" && command == "toggle_mute"
+    ));
+
+    for _ in 0..3 {
+        component
+            .handle_input(
+                &theme,
+                320,
+                80,
+                ComponentInput::KeyPressed {
+                    key: "Tab".into(),
+                    modifiers: KeyModifiers::default(),
+                },
+            )
+            .unwrap();
+    }
+    let activation_requests = component
+        .handle_input(
+            &theme,
+            320,
+            80,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        activation_requests.as_slice(),
+        [CoreRequest::SetTheme { theme_id }] if theme_id == "mesh-default-light"
+    ));
+}
+
+#[test]
+fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
+    fn find_settings_button(node: &WidgetNode) -> Option<&WidgetNode> {
+        if node.tag == "button"
+            && node.attributes.get("class").is_some_and(|class| {
+                class
+                    .split_whitespace()
+                    .any(|name| name == "settings-button")
+            })
+        {
+            return Some(node);
+        }
+        node.children.iter().find_map(find_settings_button)
+    }
+
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 80);
+    component.paint(&theme, 320, 80, &mut buffer).unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    let settings_button = find_settings_button(tree).expect("rendered settings button");
+    assert_eq!(
+        settings_button
+            .event_handlers
+            .get("focus")
+            .map(String::as_str),
+        Some("__mesh_embed__::@mesh/navigation-bar::onSettingsFocus")
+    );
+    let x = settings_button.layout.x + settings_button.layout.width / 2.0;
+    let y = settings_button.layout.y + settings_button.layout.height / 2.0;
+    component
+        .handle_input(
+            &theme,
+            320,
+            80,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+
+    assert!(component.focused_key.is_some());
+    assert_ne!(
+        runtime_value(&component, "keyboard_diag_label"),
+        Some(serde_json::Value::String("kbd: no control focus".into()))
+    );
+}
+
+#[test]
+fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
+    let mut component =
+        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 220);
+    component.paint(&theme, 320, 220, &mut buffer).unwrap();
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered audio popover");
+    let slider = first_node_by_tag(tree, "slider").expect("slider node");
+    let slider_key = slider
+        .attributes
+        .get("_mesh_key")
+        .expect("slider key")
+        .clone();
+    component.focused_key = Some(slider_key);
+
+    let requests = component
+        .handle_input(
+            &theme,
+            320,
+            220,
+            ComponentInput::KeyPressed {
+                key: "ArrowRight".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    match requests.as_slice() {
+        [
+            CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+                ..
+            },
+        ] => {
+            assert_eq!(interface, "mesh.audio");
+            assert_eq!(command, "set_volume");
+            assert_eq!(payload["device_id"], serde_json::json!("default"));
+            let volume = payload["volume"].as_f64().expect("numeric volume payload");
+            assert!(
+                (volume - 0.55).abs() < 0.001,
+                "expected slider keyboard step near 0.55, got {volume}"
+            );
+        }
+        other => panic!("expected one audio set_volume request, got {other:?}"),
+    }
+}
+
+#[test]
+fn keyboard_regression_buttons_sliders_inputs_and_pointer_modality() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+button_count = 0
+slider_seen = 0
+input_seen = ""
+
+function onButtonClick()
+    button_count = button_count + 1
+end
+
+function onSliderChange(value)
+    slider_seen = value
+end
+
+function onInputChange(value)
+    input_seen = value
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![
+        event_node(
+            "input",
+            "root/0",
+            0.0,
+            0.0,
+            80.0,
+            24.0,
+            &[("change", "onInputChange")],
+        ),
+        event_node(
+            "button",
+            "root/1",
+            0.0,
+            32.0,
+            80.0,
+            24.0,
+            &[("click", "onButtonClick")],
+        ),
+        event_node_with_attrs(
+            "slider",
+            "root/2",
+            0.0,
+            64.0,
+            120.0,
+            24.0,
+            &[
+                ("min", "0"),
+                ("max", "1"),
+                ("step", "0.1"),
+                ("value", "0.5"),
+            ],
+            &[("change", "onSliderChange")],
+        ),
+    ]));
+    component.input_values.insert("root/0".into(), "ab".into());
+    let theme = default_theme();
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerButton {
+                x: 8.0,
+                y: 8.0,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(component.focus_visible_key.as_deref(), Some("root/0"));
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Backspace".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        runtime_value(&component, "input_seen"),
+        Some(serde_json::Value::String("a".into()))
+    );
+
+    component.focused_key = Some("root/1".into());
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(runtime_number(&component, "button_count"), 1.0);
+
+    component.focused_key = Some("root/2".into());
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "ArrowRight".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!((runtime_number(&component, "slider_seen") - 0.6).abs() < 0.001);
 }
 
 #[test]
@@ -1738,8 +2965,8 @@ fn icon_reliability_core_surfaces_proof() {
                 .dependencies
                 .icon_packs
                 .required
-                .contains(&"material".to_string()),
-            "{} must declare the material icon pack",
+                .contains(&"system".to_string()),
+            "{} must declare the system icon pack",
             loaded.manifest.package.id
         );
         for semantic_name in &loaded.manifest.icon_requirements.required {
@@ -3766,6 +4993,7 @@ fn selection_boundaries_clear_when_selected_node_is_removed() {
             x: 24.0,
             y: 4.0,
         },
+        dragging: false,
     });
     component.prune_stale_interaction_targets(&root_with(vec![]));
 
@@ -3789,6 +5017,7 @@ fn selection_boundaries_clear_when_surface_hides() {
             x: 16.0,
             y: 4.0,
         },
+        dragging: false,
     });
 
     component
@@ -3821,6 +5050,7 @@ fn selection_clipboard_returns_visible_selected_text_for_ctrl_c() {
             x: 1000.0,
             y: 1000.0,
         },
+        dragging: false,
     });
 
     let theme = default_theme();
@@ -3868,6 +5098,7 @@ fn selection_clipboard_rejects_clipped_text_payloads() {
             x: 1000.0,
             y: 1000.0,
         },
+        dragging: false,
     });
 
     let theme = default_theme();

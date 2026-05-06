@@ -102,6 +102,7 @@ pub enum ComponentInput {
     },
     KeyReleased {
         key: String,
+        modifiers: KeyModifiers,
     },
     Char {
         ch: char,

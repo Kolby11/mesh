@@ -6,17 +6,12 @@ mod fallback;
 mod registry;
 mod xdg;
 
-pub use config::{IconCandidate, IconConfig, IconPackRoot, IconProfile};
+pub use config::{IconCandidate, IconConfig, IconPackKind, IconPackRoot, IconProfile};
 pub use fallback::BuiltInIconFallback;
 pub use registry::{IconRegistry, IconResolution};
 
-fn bundled_icon_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/material")
-}
-
 fn default_icon_config() -> IconConfig {
-    IconConfig::builtin_material(bundled_icon_dir())
-        .expect("builtin material icon config should be valid")
+    IconConfig::builtin_xdg().expect("builtin xdg icon config should be valid")
 }
 
 static DEFAULT_REGISTRY: OnceLock<Mutex<IconRegistry>> = OnceLock::new();
@@ -29,8 +24,9 @@ fn default_registry() -> &'static Mutex<IconRegistry> {
 /// Resolve an icon name to a file path using the default configured icon registry.
 ///
 /// Explicit file paths are still accepted for compatibility with older callers.
-/// Semantic names resolve through the built-in Material profile unless a caller
-/// uses [`IconRegistry`] directly with a different config.
+/// Semantic names resolve through the built-in XDG profile (installed system
+/// icon themes) unless a caller uses [`IconRegistry`] directly with a
+/// different config.
 pub fn resolve_icon(name: &str, size: u32) -> Option<PathBuf> {
     match resolve_icon_result(name, size) {
         IconResolution::Found { path, .. } => Some(path),
@@ -63,6 +59,17 @@ pub fn resolve_icon_with_registry(
     registry.resolve(name, size)
 }
 
+/// Register an icon pack on the process-wide default registry.
+///
+/// Used by the shell to auto-register packs contributed by modules that
+/// declare `assets.icons` in their manifest. Returns `Ok(true)` when the
+/// pack was newly registered and `Ok(false)` when a pack with the same id
+/// already existed (treated as a no-op so duplicate registration during
+/// module reloads is harmless).
+pub fn register_default_pack(pack: IconPackRoot) -> anyhow::Result<bool> {
+    default_registry().lock().unwrap().register_pack(pack)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,29 +98,6 @@ mod tests {
 
         let got = resolve_icon(&ui.to_string_lossy(), 24);
         assert!(got.is_some());
-    }
-
-    #[test]
-    fn resolves_bundled_material_fallback() {
-        let got = resolve_icon("audio-volume-high", 24);
-        assert!(got.is_some());
-        let got = got.unwrap();
-        assert!(got.ends_with("assets/material/audio-volume-high.svg"));
-    }
-
-    #[test]
-    fn resolves_builtin_semantic_aliases_used_by_core_surfaces() {
-        for name in [
-            "weather-clear-night",
-            "weather-clear",
-            "battery-empty",
-            "battery-caution",
-            "battery-low",
-            "battery-good",
-            "battery-full",
-        ] {
-            assert!(resolve_icon(name, 24).is_some(), "{name} should resolve");
-        }
     }
 
     #[test]

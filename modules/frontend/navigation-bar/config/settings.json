@@ -10,9 +10,18 @@
     "anchor": "top",
     "layer": "top",
     "width": 0,
-    "height": 56,
-    "exclusive_zone": 56,
-    "keyboard_mode": "none",
+    "height": 50,
+    "exclusive_zone": 50,
+    "keyboard_mode": "on_demand",
     "visible_on_start": true
+  },
+  "keyboard": {
+    "shortcuts": {
+      "mute": {
+        "key": "m",
+        "handler": "onMuteShortcut",
+        "target_ref": "volume-button"
+      }
+    }
   }
 }

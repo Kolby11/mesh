@@ -19,10 +19,40 @@ pub struct IconPackRoot {
     pub root: Option<PathBuf>,
     #[serde(default = "default_hicolor")]
     pub theme: String,
+    #[serde(default)]
+    pub kind: IconPackKind,
+}
+
+/// What kind of icon source backs this pack.
+///
+/// `Xdg` packs follow the freedesktop icon-theme spec (files laid out as
+/// `<root>/<theme>/<size>/<category>/<name>.svg`). `Font` packs are a font
+/// file plus a `name -> codepoint` mapping table; resolution returns a
+/// glyph reference instead of a file path. Font rendering still needs to
+/// land in the painter — for now the data model is wired so authors can
+/// declare font packs and the registry will track them.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum IconPackKind {
+    #[default]
+    Xdg,
+    Font {
+        /// Path to the font file, relative to the pack root.
+        font_file: String,
+        /// Path to the JSON glyph map (`{ "asset-name": "", ... }`)
+        /// relative to the pack root.
+        glyph_map: String,
+    },
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct IconProfile {
+    /// Optional discipline hint: when set, `validate()` warns if any
+    /// candidate list's first entry is not from this pack. Encourages
+    /// "one profile = one visual style"; cross-pack fallbacks remain
+    /// allowed for missing-icon handling.
+    #[serde(default)]
+    pub primary_pack: Option<String>,
     #[serde(default)]
     pub icons: HashMap<String, Vec<IconCandidate>>,
 }
@@ -45,7 +75,12 @@ impl IconConfig {
         Ok(config)
     }
 
-    pub fn builtin_material(root: PathBuf) -> Result<Self> {
+    /// Build the default icon config. Resolves semantic names through the
+    /// installed XDG icon themes only — no bundled assets. Each candidate
+    /// list tries the canonical XDG name plus its `-symbolic` and `-panel`
+    /// variants where applicable, with sensible fallbacks (e.g. volume
+    /// icons fall back to `volume`/`volume-off`).
+    pub fn builtin_xdg() -> Result<Self> {
         let mut profile = IconProfile::default();
         for (name, assets) in [
             ("audio-volume-high", vec!["audio-volume-high", "volume"]),
@@ -57,21 +92,20 @@ impl IconConfig {
             ),
             ("network-wireless", vec!["network-wireless", "wifi"]),
             ("bluetooth", vec!["bluetooth"]),
-            ("settings", vec!["settings"]),
-            ("weather-clear-night", vec!["star", "warning"]),
-            ("weather-clear", vec!["star", "warning"]),
-            ("battery-empty", vec!["warning", "battery-80"]),
-            ("battery-caution", vec!["warning", "battery-80"]),
-            ("battery-low", vec!["battery-80", "warning"]),
-            ("battery-good", vec!["battery-80", "battery-full"]),
-            ("battery-full", vec!["battery-full"]),
-            ("battery-80", vec!["battery-80"]),
-            ("close", vec!["close"]),
-            ("star", vec!["star"]),
-            ("warning", vec!["warning"]),
-            ("wifi", vec!["wifi"]),
-            ("volume", vec!["volume"]),
-            ("volume-off", vec!["volume-off"]),
+            ("settings", vec!["preferences-system", "settings"]),
+            ("weather-clear-night", vec!["weather-clear-night", "weather-clear"]),
+            ("weather-clear", vec!["weather-clear"]),
+            ("battery-empty", vec!["battery-empty", "battery-low"]),
+            ("battery-caution", vec!["battery-caution", "battery-low"]),
+            ("battery-low", vec!["battery-low"]),
+            ("battery-good", vec!["battery-good", "battery"]),
+            ("battery-full", vec!["battery-full", "battery"]),
+            ("close", vec!["window-close", "close"]),
+            ("star", vec!["starred", "star"]),
+            ("warning", vec!["dialog-warning", "warning"]),
+            ("wifi", vec!["network-wireless", "wifi"]),
+            ("volume", vec!["audio-volume-high", "volume"]),
+            ("volume-off", vec!["audio-volume-muted", "volume-off"]),
         ] {
             profile.icons.insert(
                 name.into(),
@@ -85,8 +119,8 @@ impl IconConfig {
                                 multicolor: false,
                             },
                             IconCandidate {
-                                pack_id: "material".into(),
-                                asset_name: asset_name.into(),
+                                pack_id: "system".into(),
+                                asset_name: format!("{asset_name}-symbolic"),
                                 multicolor: false,
                             },
                         ]
@@ -96,20 +130,14 @@ impl IconConfig {
         }
 
         let config = Self {
-            active_profile: "material".into(),
-            packs: vec![
-                IconPackRoot {
-                    id: "system".into(),
-                    root: None,
-                    theme: "hicolor".into(),
-                },
-                IconPackRoot {
-                    id: "material".into(),
-                    root: Some(root),
-                    theme: "hicolor".into(),
-                },
-            ],
-            profiles: HashMap::from([("material".into(), profile)]),
+            active_profile: "system".into(),
+            packs: vec![IconPackRoot {
+                id: "system".into(),
+                root: None,
+                theme: "hicolor".into(),
+                kind: IconPackKind::Xdg,
+            }],
+            profiles: HashMap::from([("system".into(), profile)]),
         };
         config.validate()?;
         Ok(config)
@@ -139,11 +167,38 @@ impl IconConfig {
             if pack.theme.trim().is_empty() {
                 bail!("pack '{}' theme must not be empty", pack.id);
             }
+            if let IconPackKind::Font {
+                font_file,
+                glyph_map,
+            } = &pack.kind
+            {
+                if font_file.trim().is_empty() {
+                    bail!("font pack '{}' font_file must not be empty", pack.id);
+                }
+                if glyph_map.trim().is_empty() {
+                    bail!("font pack '{}' glyph_map must not be empty", pack.id);
+                }
+                if pack.root.is_none() {
+                    bail!(
+                        "font pack '{}' must declare a root containing the font file",
+                        pack.id
+                    );
+                }
+            }
         }
 
         for (profile_id, profile) in &self.profiles {
             if profile_id.trim().is_empty() {
                 bail!("profile id must not be empty");
+            }
+            if let Some(primary) = profile.primary_pack.as_deref()
+                && !pack_ids.contains(primary)
+            {
+                bail!(
+                    "profile '{}' primary_pack '{}' references unknown pack",
+                    profile_id,
+                    primary
+                );
             }
             for (semantic_name, candidates) in &profile.icons {
                 if semantic_name.trim().is_empty() {
@@ -163,6 +218,24 @@ impl IconConfig {
                     if candidate.asset_name.trim().is_empty() {
                         bail!("candidate asset name must not be empty");
                     }
+                }
+                // Soft consistency check: warn if the *first* candidate isn't
+                // from the profile's declared primary pack. Cross-pack
+                // fallbacks remain allowed; this just nudges authors toward
+                // a single visual style as the default resolution path.
+                if let Some(primary) = profile.primary_pack.as_deref()
+                    && let Some(first) = candidates.first()
+                    && first.pack_id != primary
+                {
+                    tracing::warn!(
+                        "profile '{}' icon '{}' resolves to '{}' before primary pack '{}'; \
+                         consider listing a '{}:*' candidate first to keep the look consistent",
+                        profile_id,
+                        semantic_name,
+                        first.as_mapping(),
+                        primary,
+                        primary,
+                    );
                 }
             }
         }

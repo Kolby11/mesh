@@ -436,7 +436,55 @@ pub struct SurfaceLayoutSection {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssetsSection {
     #[serde(default)]
-    pub icons: Option<String>,
+    pub icons: Option<IconAssets>,
+}
+
+/// Module-shipped icons. Authoring shortcut: `"icons": "assets/icons"` is
+/// equivalent to `"icons": { "path": "assets/icons", "kind": "xdg" }` —
+/// the directory is treated as an XDG icon pack rooted there.
+///
+/// For font-glyph icon packs (Nerd Fonts and similar), use the object form
+/// with `kind = "font"` and the in-pack paths to the font file and glyph
+/// map JSON. The shell registers the pack at `<module_id>` so authors can
+/// reference its assets via candidates like `<module_id>:audio-volume-muted`
+/// in `icons.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum IconAssets {
+    Path(String),
+    Detailed(DetailedIconAssets),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetailedIconAssets {
+    pub path: String,
+    #[serde(default)]
+    pub kind: IconAssetsKind,
+    /// Required when `kind = "font"`. Path to the font file relative to
+    /// `path`. Ignored for `kind = "xdg"`.
+    #[serde(default)]
+    pub font_file: Option<String>,
+    /// Required when `kind = "font"`. Path to the JSON glyph map relative
+    /// to `path`. Ignored for `kind = "xdg"`.
+    #[serde(default)]
+    pub glyph_map: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IconAssetsKind {
+    #[default]
+    Xdg,
+    Font,
+}
+
+impl IconAssets {
+    pub fn path(&self) -> &str {
+        match self {
+            Self::Path(p) => p,
+            Self::Detailed(d) => &d.path,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1092,7 +1140,7 @@ main = "src/main.mesh"
   "api_version": "0.1",
   "dependencies": {
     "icon_packs": {
-      "required": ["material"]
+      "required": ["system"]
     }
   },
   "assets": {
@@ -1118,10 +1166,10 @@ main = "src/main.mesh"
         assert_eq!(manifest.icon_requirements.optional, vec!["weather-clear"]);
         assert_eq!(
             manifest.dependencies.icon_packs.required,
-            vec!["material".to_string()]
+            vec!["system".to_string()]
         );
         assert_eq!(
-            manifest.assets.unwrap().icons.as_deref(),
+            manifest.assets.unwrap().icons.as_ref().map(|i| i.path()),
             Some("assets/icons")
         );
     }

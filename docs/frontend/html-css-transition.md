@@ -33,6 +33,18 @@ Functional now:
   pseudo-state selectors, selector lists, and bounded container queries.
 - Runtime state styling works for hover/focus/active/disabled/checked where the
   state is populated.
+- `:focus-visible` is distinct from plain `:focus` and follows the shell's
+  input-modality tracking.
+- Transition parsing and interpolation now cover practical shell properties:
+  color, background, border color/width/radius, opacity, sizing, spacing, and
+  transform metadata.
+- `transform: translate(...)` is painted and hit-tested; the transform data
+  model also carries scale/rotate for future paint paths.
+- Shell focus traversal is no longer pointer-only: tabbable controls participate
+  in visual-order keyboard traversal and receive focused `keydown` / `keyup`
+  events.
+- Read-only selectable text exists as an explicit opt-in on `text` nodes via
+  `selectable="true"`.
 - Runtime layout/rendering still operates on a small primitive tag set.
 
 Partially functional:
@@ -50,6 +62,8 @@ Partially functional:
 - Input controls support text-like editing. `password-input` masks its display,
   and `number-input` filters typed characters lightly, but there is no cursor
   movement, selection, validation, or form semantics.
+- `scale(...)` and `rotate(...)` parse and animate through style state, but the
+  current painter still treats them as identity.
 
 Not functional yet:
 
@@ -59,8 +73,8 @@ Not functional yet:
 - Browser layout models such as grid and browser formatting contexts are not
   supported.
 - Full CSS cascade/custom property semantics are not supported.
-- Keyframes, arbitrary transforms, filters, and browser-style animation
-  timelines are not supported.
+- Keyframes, filter effects, full transform painting, and browser-style
+  animation timelines are not supported.
 
 ## Current pipeline in this codebase
 
@@ -382,6 +396,7 @@ Selectors to support:
 - id selectors
 - compound selectors like `Button.primary`
 - state selectors backed by real runtime state: `:hover`, `:focus`, `:active`, `:disabled`, `:checked`
+- modality-aware visible focus through `:focus-visible`
 - selector lists
 - container queries
 
@@ -405,6 +420,9 @@ Properties to keep leaning on:
 - flex layout subset
 - overflow
 - opacity
+- transitions for the practical visual properties above
+- bounded transforms, with translate painted today and scale/rotate staged in
+  the style pipeline
 
 Properties to reject until there is a compelling shell use-case:
 
@@ -412,8 +430,6 @@ Properties to reject until there is a compelling shell use-case:
 - arbitrary positioning beyond the current bounded model
 - filters
 - shadows, if they require expensive blur paths
-- transforms
-- transitions beyond already-supported narrow cases
 - animations / keyframes
 - custom properties with browser-like cascading semantics
 

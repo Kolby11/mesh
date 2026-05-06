@@ -343,7 +343,7 @@ impl ModulePackageManifest {
             .icons
             .first()
             .map(|icons| manifest::AssetsSection {
-                icons: Some(icons.path.clone()),
+                icons: Some(manifest::IconAssets::Path(icons.path.clone())),
             });
         let provides = mesh
             .implementations()
@@ -455,7 +455,7 @@ impl ModulePackageManifest {
             if let Some(icons) = &assets.icons {
                 contributes.icons.push(PathContribution {
                     id: package.id.clone(),
-                    path: icons.clone(),
+                    path: icons.path().to_string(),
                     label: package.name.clone(),
                 });
             }

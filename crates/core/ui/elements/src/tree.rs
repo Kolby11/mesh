@@ -14,6 +14,7 @@ pub struct ElementState {
     pub hovered: bool,
     pub active: bool,
     pub focused: bool,
+    pub focus_visible: bool,
     pub disabled: bool,
     pub checked: bool,
 }

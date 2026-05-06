@@ -2,15 +2,16 @@ use super::layout::{
     annotate_overflow_tree, find_click_handler, find_event_handler, find_focusable_at,
     find_node_bounds_by_key, find_node_by_key, find_node_path_at, find_scrollable_at,
     find_tooltip_text_by_key, is_input_key, is_slider_key, measure_content_size,
-    namespace_event_handlers, node_tooltip_text, parse_namespaced_handler, scroll_limits,
+    namespace_event_handlers, next_focus_target, node_tooltip_text, parse_namespaced_handler,
+    scroll_limits,
 };
 use super::service::{apply_service_update, script_events_to_requests, seed_service_state};
 use super::surface_layout::{
     SurfaceLayoutSettings, SurfaceSizePolicy, load_frontend_module_settings,
 };
 use super::types::{
-    ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, ServiceEvent,
-    ShellComponent,
+    ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, KeyModifiers,
+    ServiceEvent, ShellComponent,
 };
 mod animation;
 mod catalog;
@@ -65,6 +66,7 @@ pub(super) struct TextSelectionPoint {
 pub(super) struct TextSelectionState {
     pub(super) anchor: TextSelectionPoint,
     pub(super) focus: TextSelectionPoint,
+    pub(super) dragging: bool,
 }
 
 pub(super) struct FrontendSurfaceComponent {
@@ -78,6 +80,7 @@ pub(super) struct FrontendSurfaceComponent {
     dirty: bool,
     last_service_update: Option<String>,
     focused_key: Option<String>,
+    focus_visible_key: Option<String>,
     pointer_down_key: Option<String>,
     active_slider_key: Option<String>,
     selection: Option<TextSelectionState>,
@@ -135,6 +138,7 @@ impl FrontendSurfaceComponent {
             dirty: true,
             last_service_update: None,
             focused_key: None,
+            focus_visible_key: None,
             pointer_down_key: None,
             active_slider_key: None,
             selection: None,

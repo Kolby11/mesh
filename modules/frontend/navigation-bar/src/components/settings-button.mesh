@@ -2,6 +2,8 @@
   <button
     class="settings-button"
     onclick={onSettingsClick}
+    onfocus={onfocus}
+    onblur={onblur}
     title="{t('nav.open_settings')}"
     aria-label="{t('nav.open_settings')}"
   >
@@ -27,12 +29,31 @@ end
     border-radius: token(radius.sm);
     background: token(color.surface-container);
     color: token(color.on-surface);
+    border-width: 2px;
+    border-style: solid;
+    border-color: transparent;
     text-wrap: none;
+    transition: background-color 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out, border-radius 140ms ease-out;
 }
 
 .settings-button:hover {
-    background: token(color.primary-container);
-    color: token(color.on-primary-container);
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
+    border-color: token(color.outline);
+    border-radius: token(radius.full);
+}
+
+.settings-button:focus {
+    background: token(color.tertiary-container);
+    color: token(color.on-tertiary-container);
+    border-color: token(color.primary);
+    border-radius: token(radius.full);
+}
+
+.settings-button:focus-visible {
+    background: token(color.tertiary-container);
+    color: token(color.on-tertiary-container);
+    border-color: token(color.primary);
     border-radius: token(radius.full);
 }
 
@@ -42,7 +63,7 @@ end
     flex-shrink: 0;
     justify-content: center;
     align-items: center;
-    color: token(color.on-tertiary-container);
+    color: inherit;
 }
 
 @container (max-width: 760px) {

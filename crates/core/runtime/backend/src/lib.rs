@@ -269,8 +269,9 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     fn bundled_backend_script_path(module_slug: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join(format!("../../../../modules/backend/{module_slug}/src/main.luau"))
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../../../modules/backend/{module_slug}/src/main.luau"
+        ))
     }
 
     async fn next_update(

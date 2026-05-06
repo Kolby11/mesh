@@ -1285,6 +1285,7 @@ dependencies = [
  "serde",
  "tempfile",
  "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -1332,6 +1333,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "wayland-client 0.31.14",
+ "wayland-protocols-hyprland",
 ]
 
 [[package]]
@@ -3037,6 +3039,20 @@ dependencies = [
  "bitflags 2.11.1",
  "wayland-backend",
  "wayland-client 0.31.14",
+ "wayland-scanner 0.31.10",
+]
+
+[[package]]
+name = "wayland-protocols-hyprland"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "398431fac4608bdae919e5c21a1f53af76deb9fcafdf682912a506ecc945582f"
+dependencies = [
+ "bitflags 2.11.1",
+ "wayland-backend",
+ "wayland-client 0.31.14",
+ "wayland-protocols 0.32.12",
+ "wayland-protocols-wlr",
  "wayland-scanner 0.31.10",
 ]
 

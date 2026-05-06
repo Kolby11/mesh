@@ -58,6 +58,16 @@ impl FrontendRenderEngine {
             return;
         }
 
+        // Apply the additive part of `transform` (translate). Scale and
+        // rotation aren't visually applied yet — see
+        // `crate::animation::transform::is_paintable`. They still propagate
+        // through the data model so authors can wire them up and see the
+        // animation graph activate; the painter will start honoring them
+        // once the tiny_skia path lands.
+        let transform = style.transform;
+        let offset_x = offset_x + transform.translate_x;
+        let offset_y = offset_y + transform.translate_y;
+
         let layout = &node.layout;
         let x = ((layout.x + offset_x) * scale).round() as i32;
         let y = ((layout.y + offset_y) * scale).round() as i32;

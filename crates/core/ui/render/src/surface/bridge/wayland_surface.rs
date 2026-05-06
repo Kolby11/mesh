@@ -10,9 +10,11 @@ use mesh_core_wayland::{Edge, KeyboardMode, Layer as MeshLayer};
 use rustix::event::{PollFd, PollFlags, poll};
 
 use smithay_client_toolkit::{
+    activation::{ActivationHandler, ActivationState, RequestData},
     compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_keyboard, delegate_layer, delegate_output, delegate_pointer,
-    delegate_registry, delegate_seat, delegate_shm,
+    delegate_activation, delegate_compositor, delegate_keyboard, delegate_layer, delegate_output,
+    delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
+    globals::GlobalData,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
@@ -33,10 +35,14 @@ use smithay_client_toolkit::{
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use wayland_client::{
-    Connection, EventQueue, QueueHandle,
+    Connection, Dispatch, EventQueue, QueueHandle,
     backend::WaylandError,
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
+};
+use wayland_protocols_hyprland::focus_grab::v1::client::{
+    hyprland_focus_grab_manager_v1, hyprland_focus_grab_manager_v1::HyprlandFocusGrabManagerV1,
+    hyprland_focus_grab_v1, hyprland_focus_grab_v1::HyprlandFocusGrabV1,
 };
 
 /// Configuration passed from the shell before each present.
@@ -85,7 +91,12 @@ struct State {
     compositor_state: CompositorState,
     shm: Shm,
     layer_shell: LayerShell,
+    activation_state: Option<ActivationState>,
+    focus_grab_manager: Option<HyprlandFocusGrabManagerV1>,
     seat_state: SeatState,
+    activation_seat: Option<wl_seat::WlSeat>,
+    focus_grab: Option<HyprlandFocusGrabV1>,
+    focus_grab_surface_id: Option<String>,
 
     qh: QueueHandle<State>,
     pool: Option<SlotPool>,
@@ -104,6 +115,7 @@ struct State {
 struct SurfaceEntry {
     layer_surface: LayerSurface,
     cfg: LayerSurfaceConfig,
+    applied_keyboard_mode: KeyboardMode,
     width: u32,
     height: u32,
     configured: bool,
@@ -125,6 +137,8 @@ impl LayerShellBackend {
             .map_err(|e| RenderError::ProtocolUnsupported(format!("wl_shm: {e}")))?;
         let layer_shell = LayerShell::bind(&globals, &qh)
             .map_err(|e| RenderError::ProtocolUnsupported(format!("zwlr_layer_shell_v1: {e}")))?;
+        let activation_state = ActivationState::bind(&globals, &qh).ok();
+        let focus_grab_manager = globals.bind(&qh, 1..=1, GlobalData).ok();
         let seat_state = SeatState::new(&globals, &qh);
 
         let pool = SlotPool::new(256 * 256 * 4, &shm).ok();
@@ -135,7 +149,12 @@ impl LayerShellBackend {
             compositor_state,
             shm,
             layer_shell,
+            activation_state,
+            focus_grab_manager,
             seat_state,
+            activation_seat: None,
+            focus_grab: None,
+            focus_grab_surface_id: None,
             qh,
             pool,
             surfaces: HashMap::new(),
@@ -157,13 +176,16 @@ impl LayerShellBackend {
     /// Apply a surface's desired config. Creates the layer surface lazily on first call.
     pub fn configure(&mut self, surface_id: &str, cfg: LayerSurfaceConfig) {
         let qh = self.state.qh.clone();
+        let effective_keyboard_mode = self
+            .state
+            .effective_keyboard_mode_for(surface_id, cfg.keyboard_mode);
         let entry = self.state.surfaces.get_mut(surface_id);
         match entry {
             Some(entry) => {
                 let config_changed = entry.cfg.edge != cfg.edge
                     || entry.cfg.layer != cfg.layer
                     || entry.cfg.exclusive_zone != cfg.exclusive_zone
-                    || entry.cfg.keyboard_mode != cfg.keyboard_mode
+                    || entry.applied_keyboard_mode != effective_keyboard_mode
                     || entry.cfg.width != cfg.width
                     || entry.cfg.height != cfg.height
                     || entry.cfg.margin_top != cfg.margin_top
@@ -173,9 +195,12 @@ impl LayerShellBackend {
                 if config_changed || !entry.configured {
                     // Re-commit to re-map the surface and prompt the compositor to
                     // send a fresh configure event before we attach a buffer.
-                    apply_config(&entry.layer_surface, &cfg);
+                    let mut effective_cfg = cfg.clone();
+                    effective_cfg.keyboard_mode = effective_keyboard_mode;
+                    apply_config(&entry.layer_surface, &effective_cfg);
                     entry.layer_surface.commit();
                     entry.cfg = cfg;
+                    entry.applied_keyboard_mode = effective_keyboard_mode;
                 }
             }
             None => {
@@ -187,12 +212,15 @@ impl LayerShellBackend {
                     Some(cfg.namespace.clone()),
                     None,
                 );
-                apply_config(&layer_surface, &cfg);
+                let mut effective_cfg = cfg.clone();
+                effective_cfg.keyboard_mode = effective_keyboard_mode;
+                apply_config(&layer_surface, &effective_cfg);
                 layer_surface.commit();
                 self.state.surfaces.insert(
                     surface_id.to_string(),
                     SurfaceEntry {
                         layer_surface,
+                        applied_keyboard_mode: effective_keyboard_mode,
                         width: cfg.width.max(1),
                         height: cfg.height.max(1),
                         cfg,
@@ -211,6 +239,7 @@ impl LayerShellBackend {
         buffer: &PixelBuffer,
     ) -> Result<(), RenderError> {
         if !visible {
+            self.state.release_surface_focus_grab(surface_id);
             // Only detach a buffer (to hide) if the compositor has already configured this
             // surface. Before the first configure event the surface has no buffer attached
             // and is already invisible; committing a null buffer before configure arrives
@@ -589,6 +618,7 @@ impl SeatHandler for State {
         seat: wl_seat::WlSeat,
         capability: SeatCapability,
     ) {
+        self.activation_seat = Some(seat.clone());
         if capability == SeatCapability::Pointer && self.pointer.is_none() {
             if let Ok(ptr) = self.seat_state.get_pointer(qh, &seat) {
                 tracing::debug!("[hover] layer_shell: pointer capability acquired");
@@ -619,7 +649,11 @@ impl SeatHandler for State {
             }
         }
     }
-    fn remove_seat(&mut self, _c: &Connection, _q: &QueueHandle<Self>, _s: wl_seat::WlSeat) {}
+    fn remove_seat(&mut self, _c: &Connection, _q: &QueueHandle<Self>, s: wl_seat::WlSeat) {
+        if self.activation_seat.as_ref() == Some(&s) {
+            self.activation_seat = None;
+        }
+    }
 }
 
 impl PointerHandler for State {
@@ -656,6 +690,7 @@ impl PointerHandler for State {
                 }
                 PointerEventKind::Press { button, .. } => {
                     if button == 0x110 {
+                        self.request_surface_focus(&surface_id, event);
                         let (x, y) = (event.position.0 as f32, event.position.1 as f32);
                         tracing::debug!(
                             "[hover] layer_shell: pointer press surface_id={surface_id} x={x:.1} y={y:.1}"
@@ -700,6 +735,52 @@ impl PointerHandler for State {
                         });
                     }
                 }
+            }
+        }
+    }
+}
+
+impl ActivationHandler for State {
+    type RequestData = RequestData;
+
+    fn new_token(&mut self, token: String, data: &Self::RequestData) {
+        let Some(activation) = self.activation_state.as_ref() else {
+            return;
+        };
+        let Some(surface) = data.surface.as_ref() else {
+            return;
+        };
+        tracing::debug!("[focus] layer_shell: activating surface via xdg-activation");
+        activation.activate::<State>(surface, token);
+    }
+}
+
+impl Dispatch<HyprlandFocusGrabManagerV1, GlobalData, State> for State {
+    fn event(
+        _: &mut State,
+        _: &HyprlandFocusGrabManagerV1,
+        _: hyprland_focus_grab_manager_v1::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        unreachable!("hyprland_focus_grab_manager_v1 has no events");
+    }
+}
+
+impl Dispatch<HyprlandFocusGrabV1, (), State> for State {
+    fn event(
+        state: &mut State,
+        _: &HyprlandFocusGrabV1,
+        event: hyprland_focus_grab_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        if let hyprland_focus_grab_v1::Event::Cleared = event {
+            tracing::debug!("[focus] layer_shell: compositor cleared focus grab");
+            if let Some(surface_id) = state.focus_grab_surface_id.take() {
+                state.reapply_surface_config(&surface_id);
             }
         }
     }
@@ -794,11 +875,169 @@ impl KeyboardHandler for State {
 
 fn keysym_name(sym: Keysym) -> String {
     sym.name()
-        .map(|s| s.to_string())
+        .map(normalize_keysym_name)
         .unwrap_or_else(|| format!("{:#x}", sym.raw()))
 }
 
+fn normalize_keysym_name(name: &str) -> String {
+    // `xkeysym::Keysym::name()` returns Rust-constant identifiers like `XK_Tab`.
+    // Strip the prefix so downstream key matching sees the bare xkbcommon name.
+    let name = name.strip_prefix("XK_").unwrap_or(name);
+    match name {
+        "Return" | "KP_Enter" => "Enter".into(),
+        "space" | "KP_Space" => "Space".into(),
+        "Tab" | "ISO_Left_Tab" => "Tab".into(),
+        "BackSpace" => "Backspace".into(),
+        "Left" | "KP_Left" => "ArrowLeft".into(),
+        "Right" | "KP_Right" => "ArrowRight".into(),
+        "Up" | "KP_Up" => "ArrowUp".into(),
+        "Down" | "KP_Down" => "ArrowDown".into(),
+        "Prior" => "PageUp".into(),
+        "Next" => "PageDown".into(),
+        "Escape" => "Esc".into(),
+        other => other.to_string(),
+    }
+}
+
 impl State {
+    fn effective_keyboard_mode_for(
+        &self,
+        surface_id: &str,
+        requested: KeyboardMode,
+    ) -> KeyboardMode {
+        if requested == KeyboardMode::OnDemand
+            && self.focus_grab_surface_id.as_deref() == Some(surface_id)
+        {
+            KeyboardMode::Exclusive
+        } else {
+            requested
+        }
+    }
+
+    fn reapply_surface_config(&mut self, surface_id: &str) {
+        let effective_keyboard_mode = match self.surfaces.get(surface_id) {
+            Some(entry) => self.effective_keyboard_mode_for(surface_id, entry.cfg.keyboard_mode),
+            None => return,
+        };
+        let Some(entry) = self.surfaces.get_mut(surface_id) else {
+            return;
+        };
+        if entry.applied_keyboard_mode == effective_keyboard_mode {
+            return;
+        }
+
+        let mut effective_cfg = entry.cfg.clone();
+        effective_cfg.keyboard_mode = effective_keyboard_mode;
+        tracing::debug!(
+            "[focus] layer_shell: reapplying keyboard mode for surface_id={surface_id} mode={:?}",
+            effective_keyboard_mode
+        );
+        apply_config(&entry.layer_surface, &effective_cfg);
+        entry.layer_surface.commit();
+        entry.applied_keyboard_mode = effective_keyboard_mode;
+    }
+
+    fn request_surface_focus(&mut self, surface_id: &str, event: &PointerEvent) {
+        if self.request_surface_focus_grab(surface_id) {
+            return;
+        }
+        self.request_surface_activation(surface_id, event);
+    }
+
+    fn request_surface_focus_grab(&mut self, surface_id: &str) -> bool {
+        let Some(manager) = self.focus_grab_manager.as_ref() else {
+            return false;
+        };
+        if self.keyboard_focus.as_deref() == Some(surface_id) {
+            return true;
+        }
+        let Some(entry) = self.surfaces.get(surface_id) else {
+            return false;
+        };
+        if entry.cfg.keyboard_mode != KeyboardMode::OnDemand {
+            return false;
+        }
+
+        let grab = self
+            .focus_grab
+            .get_or_insert_with(|| manager.create_grab(&self.qh, ()));
+        let previous_surface_id = self.focus_grab_surface_id.clone();
+        if let Some(previous_surface_id) = self.focus_grab_surface_id.as_deref()
+            && previous_surface_id != surface_id
+            && let Some(previous_entry) = self.surfaces.get(previous_surface_id)
+        {
+            grab.remove_surface(previous_entry.layer_surface.wl_surface());
+        }
+
+        if self.focus_grab_surface_id.as_deref() != Some(surface_id) {
+            tracing::debug!("[focus] layer_shell: starting focus grab for surface_id={surface_id}");
+            grab.add_surface(entry.layer_surface.wl_surface());
+            grab.commit();
+            self.focus_grab_surface_id = Some(surface_id.to_string());
+            if let Some(previous_surface_id) = previous_surface_id.as_deref()
+                && previous_surface_id != surface_id
+            {
+                self.reapply_surface_config(previous_surface_id);
+            }
+            self.reapply_surface_config(surface_id);
+        }
+
+        true
+    }
+
+    fn request_surface_activation(&self, surface_id: &str, event: &PointerEvent) {
+        let Some(activation) = self.activation_state.as_ref() else {
+            return;
+        };
+        if self.keyboard_focus.as_deref() == Some(surface_id) {
+            return;
+        }
+        let Some(entry) = self.surfaces.get(surface_id) else {
+            return;
+        };
+        if entry.cfg.keyboard_mode != KeyboardMode::OnDemand {
+            return;
+        }
+        let Some(seat) = self.activation_seat.clone() else {
+            tracing::debug!("[focus] layer_shell: skipping activation request without seat");
+            return;
+        };
+        let PointerEventKind::Press { serial, .. } = event.kind else {
+            return;
+        };
+
+        tracing::debug!(
+            "[focus] layer_shell: requesting activation for surface_id={surface_id} serial={serial}"
+        );
+        activation.request_token(
+            &self.qh,
+            RequestData {
+                app_id: None,
+                seat_and_serial: Some((seat, serial)),
+                surface: Some(entry.layer_surface.wl_surface().clone()),
+            },
+        );
+    }
+
+    fn release_surface_focus_grab(&mut self, surface_id: &str) {
+        if self.focus_grab_surface_id.as_deref() != Some(surface_id) {
+            return;
+        }
+        let Some(grab) = self.focus_grab.as_ref() else {
+            self.focus_grab_surface_id = None;
+            return;
+        };
+        if let Some(entry) = self.surfaces.get(surface_id) {
+            tracing::debug!(
+                "[focus] layer_shell: releasing focus grab for surface_id={surface_id}"
+            );
+            grab.remove_surface(entry.layer_surface.wl_surface());
+            grab.commit();
+        }
+        self.focus_grab_surface_id = None;
+        self.reapply_surface_config(surface_id);
+    }
+
     fn surface_id_for_wl_surface(&self, surface: &wl_surface::WlSurface) -> Option<String> {
         self.surfaces
             .iter()
@@ -814,6 +1053,7 @@ impl ProvidesRegistryState for State {
     registry_handlers![OutputState, SeatState];
 }
 
+delegate_activation!(State);
 delegate_compositor!(State);
 delegate_output!(State);
 delegate_shm!(State);
@@ -822,3 +1062,20 @@ delegate_seat!(State);
 delegate_pointer!(State);
 delegate_keyboard!(State);
 delegate_registry!(State);
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_keysym_name;
+
+    #[test]
+    fn normalize_keysym_name_maps_common_xkb_names_to_shell_names() {
+        assert_eq!(normalize_keysym_name("Return"), "Enter");
+        assert_eq!(normalize_keysym_name("space"), "Space");
+        assert_eq!(normalize_keysym_name("ISO_Left_Tab"), "Tab");
+        assert_eq!(normalize_keysym_name("BackSpace"), "Backspace");
+        assert_eq!(normalize_keysym_name("Left"), "ArrowLeft");
+        assert_eq!(normalize_keysym_name("Right"), "ArrowRight");
+        assert_eq!(normalize_keysym_name("Up"), "ArrowUp");
+        assert_eq!(normalize_keysym_name("Down"), "ArrowDown");
+    }
+}

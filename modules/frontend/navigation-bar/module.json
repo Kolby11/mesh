@@ -18,6 +18,7 @@
     "required": [
       "shell.surface",
       "service.audio.read",
+      "service.audio.control",
       "theme.read",
       "locale.read"
     ]
@@ -28,7 +29,7 @@
     },
     "icon_packs": {
       "required": [
-        "material"
+        "system"
       ]
     }
   },
@@ -110,6 +111,16 @@
             "type": "boolean",
             "default": true,
             "description": "Whether this surface starts visible when Mesh boots."
+          }
+        }
+      },
+      "keyboard": {
+        "type": "object",
+        "description": "Focused-surface keyboard defaults for the navigation bar.",
+        "properties": {
+          "shortcuts": {
+            "type": "object",
+            "description": "Shortcut definitions keyed by action id. Shell settings may remap the effective key per surface."
           }
         }
       }

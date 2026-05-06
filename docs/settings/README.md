@@ -59,6 +59,17 @@ the inline module section in the system file - that's the override direction.
     "allow_unsigned": false,
     "auto_update": false
   },
+  "keyboard": {
+    "button_activation_keys": ["Enter", "Space"],
+    "toggle_activation_keys": ["Space", "Enter"],
+    "slider_decrement_keys": ["ArrowLeft", "ArrowDown"],
+    "slider_increment_keys": ["ArrowRight", "ArrowUp"],
+    "surface_shortcuts": {
+      "@mesh/navigation-bar": {
+        "mute": { "key": "m" }
+      }
+    }
+  },
 
   "interfaces": {
     "mesh.audio":   { "pin": "@mesh/pipewire-audio" },
@@ -102,6 +113,33 @@ file.
 Same shape as the user system file. Distributions ship this to set sensible
 defaults before any user has touched anything. The file in this repo's
 `config/settings-default.json` is the project's fallback.
+
+## Keyboard settings
+
+Shell-owned keyboard defaults live under the top-level `keyboard` object.
+
+- `button_activation_keys` controls which keys activate focused buttons.
+- `toggle_activation_keys` controls focused switch and checkbox activation.
+- `slider_decrement_keys` and `slider_increment_keys` define focused slider step keys.
+- `surface_shortcuts` lets the shell remap module-declared shortcut ids on a
+  per-surface basis without editing the module itself.
+
+Example override:
+
+```json
+{
+  "keyboard": {
+    "surface_shortcuts": {
+      "@mesh/navigation-bar": {
+        "mute": { "key": "u" }
+      }
+    }
+  }
+}
+```
+
+In that example, the navigation bar still declares the `mute` shortcut, but
+the shell changes its effective key from the module default to `u`.
 
 ## Keys, namespaces, and validation
 
@@ -200,6 +238,25 @@ Schemas are JSON. The keys supported today:
 Frontend modules declare their settings in `package.json` under
 `mesh.contributes.settings` or in a sibling `settings.schema.json` next to the
 manifest. The JSON file wins if both exist.
+
+Frontend surfaces commonly expose a `surface` object with placement and input
+policy keys such as:
+
+- `anchor`
+- `layer`
+- `width`
+- `height`
+- `exclusive_zone`
+- `keyboard_mode`
+- `visible_on_start`
+
+`keyboard_mode` is the important new input-policy hook:
+
+- `none` keeps the surface passive.
+- `exclusive` makes it a dedicated keyboard sink while focused.
+- `on_demand` asks the shell/compositor for keyboard focus only when the user
+  actively engages that surface, which is the preferred mode for keyboardable
+  shell chrome like the navigation bar.
 
 ## Generated UI
 

@@ -415,7 +415,7 @@ fn build_component_ref(
         if let AttributeValue::EventHandler(handler) = &attr.value {
             props.insert(
                 attr.name.clone(),
-                resolve_event_handler_value(state, handler),
+                resolve_component_prop_handler_value(state, host_instance_key, handler),
             );
         }
     }
@@ -483,7 +483,11 @@ pub(crate) fn parse_attributes(
                 let value = state
                     .map(|store| eval_expr(binding, store))
                     .unwrap_or_default();
-                resolved.insert(attr.name.clone(), value);
+                if is_event_handler_attribute(&attr.name) {
+                    event_handlers.insert(normalize_event_handler_name(&attr.name), value);
+                } else {
+                    resolved.insert(attr.name.clone(), value);
+                }
             }
             AttributeValue::EventHandler(handler) => {
                 let resolved_handler = resolve_event_handler_value(state, handler);
@@ -503,8 +507,28 @@ fn resolve_event_handler_value(state: Option<&dyn VariableStore>, handler: &str)
         .unwrap_or_else(|| handler.to_string())
 }
 
+fn resolve_component_prop_handler_value(
+    state: Option<&dyn VariableStore>,
+    host_instance_key: &str,
+    handler: &str,
+) -> String {
+    let resolved = resolve_event_handler_value(state, handler);
+    if resolved.starts_with("__mesh_embed__::") {
+        resolved
+    } else {
+        format!("__mesh_embed__::{host_instance_key}::{resolved}")
+    }
+}
+
 fn normalize_event_handler_name(name: &str) -> String {
     name.strip_prefix("on").unwrap_or(name).to_string()
+}
+
+fn is_event_handler_attribute(name: &str) -> bool {
+    matches!(
+        normalize_event_handler_name(name).as_str(),
+        "click" | "change" | "release" | "focus" | "blur" | "keydown" | "keyup"
+    )
 }
 
 fn accessibility_for_tag(tag: &str) -> AccessibilityInfo {
@@ -513,10 +537,12 @@ fn accessibility_for_tag(tag: &str) -> AccessibilityInfo {
         "button" => mesh_core_elements::AccessibilityRole::Button,
         "input" => mesh_core_elements::AccessibilityRole::TextInput,
         "slider" => mesh_core_elements::AccessibilityRole::Slider,
+        "checkbox" => mesh_core_elements::AccessibilityRole::Checkbox,
+        "switch" => mesh_core_elements::AccessibilityRole::Switch,
         "text" => mesh_core_elements::AccessibilityRole::Label,
         _ => mesh_core_elements::AccessibilityRole::Region,
     };
-    info.focusable = matches!(tag, "button" | "input" | "slider");
+    info.focusable = matches!(tag, "button" | "input" | "slider" | "checkbox" | "switch");
     info
 }
 
@@ -613,5 +639,19 @@ mod tests {
             slider.event_handlers.get("release"),
             Some(&"onSliderRelease".into())
         );
+    }
+
+    #[test]
+    fn accessibility_for_tag_marks_switch_and_checkbox_focusable() {
+        let checkbox = accessibility_for_tag("checkbox");
+        assert_eq!(
+            checkbox.role,
+            mesh_core_elements::AccessibilityRole::Checkbox
+        );
+        assert!(checkbox.focusable);
+
+        let switch = accessibility_for_tag("switch");
+        assert_eq!(switch.role, mesh_core_elements::AccessibilityRole::Switch);
+        assert!(switch.focusable);
     }
 }

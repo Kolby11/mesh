@@ -5,5 +5,24 @@
   "i18n": {
     "locale": "en",
     "fallback_locale": "en"
+  },
+  "keyboard": {
+    "button_activation_keys": [
+      "Enter",
+      "Space"
+    ],
+    "toggle_activation_keys": [
+      "Space",
+      "Enter"
+    ],
+    "slider_decrement_keys": [
+      "ArrowLeft",
+      "ArrowDown"
+    ],
+    "slider_increment_keys": [
+      "ArrowRight",
+      "ArrowUp"
+    ],
+    "surface_shortcuts": {}
   }
 }

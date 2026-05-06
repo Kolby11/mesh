@@ -103,6 +103,8 @@ const SUPPORTED_CSS_PROPERTIES: &[&str] = &[
     "animation-direction",
     "animation-fill-mode",
     "animation-play-state",
+    "transform",
+    "transform-origin",
 ];
 
 pub fn supported_css_properties() -> &'static [&'static str] {
@@ -132,6 +134,7 @@ pub struct ComputedStyle {
     pub border_color: Color,
     pub border_radius: Corners,
     pub opacity: f32,
+    pub transform: Transform2D,
     pub transition: TransitionStyle,
     pub animation: AnimationStyle,
     pub overflow_x: Overflow,
@@ -189,6 +192,7 @@ impl Default for ComputedStyle {
             border_color: Color::TRANSPARENT,
             border_radius: Corners::zero(),
             opacity: 1.0,
+            transform: Transform2D::IDENTITY,
             transition: TransitionStyle::default(),
             animation: AnimationStyle::default(),
             overflow_x: Overflow::Visible,
@@ -224,7 +228,7 @@ impl Default for ComputedStyle {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Dimension {
     Auto,
     Px(f32),
@@ -331,10 +335,16 @@ impl Corners {
 pub struct TransitionProperties {
     pub all: bool,
     pub border_radius: bool,
+    pub border_width: bool,
     pub opacity: bool,
     pub background_color: bool,
     pub border_color: bool,
     pub color: bool,
+    pub width: bool,
+    pub height: bool,
+    pub padding: bool,
+    pub margin: bool,
+    pub transform: bool,
 }
 
 impl TransitionProperties {
@@ -346,15 +356,25 @@ impl TransitionProperties {
         Self {
             all: true,
             border_radius: true,
+            border_width: true,
             opacity: true,
             background_color: true,
             border_color: true,
             color: true,
+            width: true,
+            height: true,
+            padding: true,
+            margin: true,
+            transform: true,
         }
     }
 
     pub fn animates_border_radius(self) -> bool {
         self.all || self.border_radius
+    }
+
+    pub fn animates_border_width(self) -> bool {
+        self.all || self.border_width
     }
 
     pub fn animates_opacity(self) -> bool {
@@ -372,9 +392,66 @@ impl TransitionProperties {
     pub fn animates_color(self) -> bool {
         self.all || self.color
     }
+
+    pub fn animates_width(self) -> bool {
+        self.all || self.width
+    }
+
+    pub fn animates_height(self) -> bool {
+        self.all || self.height
+    }
+
+    pub fn animates_padding(self) -> bool {
+        self.all || self.padding
+    }
+
+    pub fn animates_margin(self) -> bool {
+        self.all || self.margin
+    }
+
+    pub fn animates_transform(self) -> bool {
+        self.all || self.transform
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Decomposed 2D affine transform.
+///
+/// Stored as separate translate / scale / rotation components rather than a
+/// 3x2 matrix because that's the form interpolation needs — lerping a matrix
+/// directly produces shear artifacts. The painter and hit-test pipelines
+/// recompose at the point of use.
+///
+/// `rotation` is in radians.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transform2D {
+    pub translate_x: f32,
+    pub translate_y: f32,
+    pub scale_x: f32,
+    pub scale_y: f32,
+    pub rotation: f32,
+}
+
+impl Transform2D {
+    pub const IDENTITY: Self = Self {
+        translate_x: 0.0,
+        translate_y: 0.0,
+        scale_x: 1.0,
+        scale_y: 1.0,
+        rotation: 0.0,
+    };
+
+    pub fn is_identity(&self) -> bool {
+        *self == Self::IDENTITY
+    }
+}
+
+impl Default for Transform2D {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum TransitionEasing {
     Linear,
     Ease,
@@ -382,9 +459,12 @@ pub enum TransitionEasing {
     #[default]
     EaseOut,
     EaseInOut,
+    /// Custom cubic-bezier curve, parameters are `(x1, y1, x2, y2)`.
+    /// Themeable via `transition-timing-function: token(motion.easing.<name>)`.
+    CubicBezier(f32, f32, f32, f32),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct TransitionStyle {
     pub duration_ms: u32,
     pub delay_ms: u32,
@@ -392,7 +472,7 @@ pub struct TransitionStyle {
     pub properties: TransitionProperties,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AnimationStyle {
     pub name: Option<String>,
     pub duration_ms: u32,
@@ -816,7 +896,7 @@ fn selector_matches(
                 "active" => state.active,
                 "disabled" => state.disabled,
                 "checked" => state.checked,
-                "focus-visible" => state.focused,
+                "focus-visible" => state.focus_visible,
                 _ => false,
             };
             tag_matches && state_matches
@@ -994,6 +1074,10 @@ fn apply_declaration(
             style.border_width.left = resolver.resolve_number_with_variables(value, variables)
         }
         "opacity" => style.opacity = resolver.resolve_number_with_variables(value, variables),
+        "transform" => {
+            style.transform =
+                parse_transform(&resolver.resolve_value_with_variables(value, variables))
+        }
         "transition-duration" => {
             style.transition.duration_ms =
                 parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
@@ -1344,6 +1428,122 @@ fn parse_edges_shorthand(value: &str) -> Edges {
     }
 }
 
+/// Parse the CSS `transform` shorthand value. Functions are applied in
+/// authoring order; for non-commuting compositions (rotate + translate) this
+/// matches CSS semantics. Unknown functions are ignored.
+///
+/// Recognised forms:
+///   - `none`
+///   - `translate(<x>)`            — y defaults to 0
+///   - `translate(<x> <y>)`        — space-separated
+///   - `translate(<x>, <y>)`       — comma-separated
+///   - `translateX(<x>)`, `translateY(<y>)`
+///   - `scale(<s>)`                — uniform
+///   - `scale(<sx> <sy>)`, `scale(<sx>, <sy>)`
+///   - `scaleX(<s>)`, `scaleY(<s>)`
+///   - `rotate(<angle>)`           — `deg`, `rad`, `turn`
+fn parse_transform(value: &str) -> Transform2D {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "none" {
+        return Transform2D::IDENTITY;
+    }
+
+    let mut transform = Transform2D::IDENTITY;
+    let mut rest = trimmed;
+    while !rest.is_empty() {
+        rest = rest.trim_start();
+        let Some(open) = rest.find('(') else {
+            break;
+        };
+        let name = rest[..open].trim();
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find(')') else {
+            break;
+        };
+        let args_str = &after_open[..close];
+        let args: Vec<f32> = args_str
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(parse_transform_length)
+            .collect();
+        let angle_arg: Option<f32> = args_str
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .map(str::trim)
+            .find(|s| !s.is_empty())
+            .map(parse_transform_angle);
+
+        match name {
+            "translate" => {
+                if let Some(&x) = args.first() {
+                    transform.translate_x += x;
+                }
+                if let Some(&y) = args.get(1) {
+                    transform.translate_y += y;
+                }
+            }
+            "translateX" => {
+                if let Some(&x) = args.first() {
+                    transform.translate_x += x;
+                }
+            }
+            "translateY" => {
+                if let Some(&y) = args.first() {
+                    transform.translate_y += y;
+                }
+            }
+            "scale" => {
+                if let Some(&sx) = args.first() {
+                    transform.scale_x *= sx;
+                    let sy = args.get(1).copied().unwrap_or(sx);
+                    transform.scale_y *= sy;
+                }
+            }
+            "scaleX" => {
+                if let Some(&sx) = args.first() {
+                    transform.scale_x *= sx;
+                }
+            }
+            "scaleY" => {
+                if let Some(&sy) = args.first() {
+                    transform.scale_y *= sy;
+                }
+            }
+            "rotate" => {
+                if let Some(angle) = angle_arg {
+                    transform.rotation += angle;
+                }
+            }
+            _ => {}
+        }
+
+        rest = &after_open[close + 1..];
+    }
+    transform
+}
+
+fn parse_transform_length(token: &str) -> f32 {
+    let token = token.trim();
+    if let Some(rest) = token.strip_suffix("px") {
+        rest.trim().parse::<f32>().unwrap_or(0.0)
+    } else {
+        token.parse::<f32>().unwrap_or(0.0)
+    }
+}
+
+fn parse_transform_angle(token: &str) -> f32 {
+    let token = token.trim();
+    if let Some(rest) = token.strip_suffix("deg") {
+        rest.trim().parse::<f32>().unwrap_or(0.0).to_radians()
+    } else if let Some(rest) = token.strip_suffix("turn") {
+        rest.trim().parse::<f32>().unwrap_or(0.0) * std::f32::consts::TAU
+    } else if let Some(rest) = token.strip_suffix("rad") {
+        rest.trim().parse::<f32>().unwrap_or(0.0)
+    } else {
+        token.parse::<f32>().unwrap_or(0.0).to_radians()
+    }
+}
+
 fn parse_corners_shorthand(value: &str) -> Corners {
     let edges = parse_edges_shorthand(value);
     Corners {
@@ -1452,10 +1652,16 @@ fn parse_transition_properties(value: &str) -> TransitionProperties {
         match property {
             "all" => return TransitionProperties::all(),
             "border-radius" => properties.border_radius = true,
+            "border-width" => properties.border_width = true,
             "opacity" => properties.opacity = true,
             "background-color" | "background" => properties.background_color = true,
             "border-color" => properties.border_color = true,
             "color" => properties.color = true,
+            "width" => properties.width = true,
+            "height" => properties.height = true,
+            "padding" => properties.padding = true,
+            "margin" => properties.margin = true,
+            "transform" => properties.transform = true,
             _ => {}
         }
     }
@@ -1463,22 +1669,85 @@ fn parse_transition_properties(value: &str) -> TransitionProperties {
 }
 
 fn first_comma_item(value: &str) -> &str {
-    value.split(',').next().unwrap_or(value).trim()
+    let mut depth: i32 = 0;
+    let mut split_at = value.len();
+    for (idx, ch) in value.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = (depth - 1).max(0),
+            ',' if depth == 0 => {
+                split_at = idx;
+                break;
+            }
+            _ => {}
+        }
+    }
+    value[..split_at].trim()
 }
 
 fn parse_first_time_ms(value: &str) -> u32 {
     parse_time_ms(first_comma_item(value))
 }
 
+/// Split `value` on `delim` while ignoring any `delim` that appears inside
+/// parentheses. Lets `transition: opacity 200ms cubic-bezier(0.2, 0, 0, 1)`
+/// keep the bezier call together when the shorthand is tokenized.
+fn split_paren_aware(value: &str, delim: char) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth: i32 = 0;
+    let mut buf = String::new();
+    for ch in value.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                buf.push(ch);
+            }
+            ')' => {
+                depth = (depth - 1).max(0);
+                buf.push(ch);
+            }
+            c if c == delim && depth == 0 => {
+                out.push(std::mem::take(&mut buf));
+            }
+            _ => buf.push(ch),
+        }
+    }
+    if !buf.is_empty() {
+        out.push(buf);
+    }
+    out
+}
+
 fn parse_easing_keyword(value: &str) -> TransitionEasing {
-    match value.trim() {
+    let trimmed = value.trim();
+    match trimmed {
         "linear" => TransitionEasing::Linear,
         "ease" => TransitionEasing::Ease,
         "ease-in" => TransitionEasing::EaseIn,
         "ease-out" => TransitionEasing::EaseOut,
         "ease-in-out" => TransitionEasing::EaseInOut,
-        _ => TransitionEasing::EaseOut,
+        _ => parse_cubic_bezier(trimmed).unwrap_or(TransitionEasing::EaseOut),
     }
+}
+
+fn parse_cubic_bezier(value: &str) -> Option<TransitionEasing> {
+    let inner = value
+        .strip_prefix("cubic-bezier(")
+        .and_then(|rest| rest.strip_suffix(')'))?;
+    let parts: Vec<f32> = inner
+        .split(',')
+        .map(|part| part.trim().parse::<f32>())
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    if parts.len() != 4 {
+        return None;
+    }
+    Some(TransitionEasing::CubicBezier(
+        parts[0].clamp(0.0, 1.0),
+        parts[1],
+        parts[2].clamp(0.0, 1.0),
+        parts[3],
+    ))
 }
 
 fn looks_like_time(token: &str) -> bool {
@@ -1487,7 +1756,9 @@ fn looks_like_time(token: &str) -> bool {
     } else if let Some(rest) = token.strip_suffix('s') {
         rest.trim().parse::<f32>().is_ok()
     } else {
-        false
+        // Bare numeric tokens (from `motion.duration.*` theme values that
+        // resolve to plain numbers) are interpreted as milliseconds.
+        token.trim().parse::<f32>().is_ok()
     }
 }
 
@@ -1497,13 +1768,13 @@ fn parse_transition_shorthand(value: &str) -> (TransitionProperties, u32, u32, T
     let mut delay_ms = 0u32;
     let mut easing = TransitionEasing::EaseOut;
 
-    for item in value
-        .split(',')
-        .map(str::trim)
-        .filter(|item| !item.is_empty())
-    {
+    for item in split_paren_aware(value, ',') {
+        let item = item.trim();
+        if item.is_empty() {
+            continue;
+        }
         let mut item_time_count = 0;
-        for token in item.split_whitespace() {
+        for token in split_paren_aware(item, ' ').iter().map(|s| s.trim()).filter(|s| !s.is_empty()) {
             if looks_like_time(token) {
                 let ms = parse_time_ms(token);
                 if item_time_count == 0 && duration_ms == 0 {
@@ -1517,14 +1788,23 @@ fn parse_transition_shorthand(value: &str) -> (TransitionProperties, u32, u32, T
             match token {
                 "all" => properties = TransitionProperties::all(),
                 "border-radius" => properties.border_radius = true,
+                "border-width" => properties.border_width = true,
                 "opacity" => properties.opacity = true,
                 "background-color" | "background" => properties.background_color = true,
                 "border-color" => properties.border_color = true,
                 "color" => properties.color = true,
+                "width" => properties.width = true,
+                "height" => properties.height = true,
+                "padding" => properties.padding = true,
+                "margin" => properties.margin = true,
+                "transform" => properties.transform = true,
                 "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
                     if easing == TransitionEasing::EaseOut =>
                 {
                     easing = parse_easing_keyword(token)
+                }
+                _ if token.starts_with("cubic-bezier(") && easing == TransitionEasing::EaseOut => {
+                    easing = parse_easing_keyword(token);
                 }
                 _ => {}
             }
@@ -1622,7 +1902,14 @@ fn parse_time_ms(value: &str) -> u32 {
     if let Some(seconds) = raw.strip_suffix('s') {
         return (seconds.trim().parse::<f32>().unwrap_or(0.0).max(0.0) * 1000.0).round() as u32;
     }
-    0
+    // Bare numeric values are treated as milliseconds. This is what makes
+    // numeric duration tokens (e.g. `motion.duration.short`: 150) usable
+    // directly: `transition-duration: token(motion.duration.short)`
+    // expands to `150` which, without a unit, is interpreted as 150ms.
+    raw.parse::<f32>()
+        .ok()
+        .map(|v| v.max(0.0).round() as u32)
+        .unwrap_or(0)
 }
 
 fn parse_px(s: &str) -> f32 {
@@ -1932,6 +2219,54 @@ mod tests {
             hovered.background_color,
             Color::from_hex("#ffffff").unwrap()
         );
+    }
+
+    #[test]
+    fn focus_visible_requires_focus_visible_state() {
+        use crate::tree::ElementState;
+        use mesh_core_component::style::{Declaration, Selector};
+
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::State("input".to_string(), "focus-visible".to_string()),
+            declarations: vec![Declaration {
+                property: "color".to_string(),
+                value: StyleValue::Literal("#abcdef".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let focused_only = resolver.resolve_node_style(
+            &rules,
+            "input",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState {
+                focused: true,
+                ..Default::default()
+            },
+        );
+        assert_ne!(
+            focused_only.color,
+            Color::from_hex("#abcdef").unwrap(),
+            ":focus-visible should no longer alias plain focused state"
+        );
+
+        let focus_visible = resolver.resolve_node_style(
+            &rules,
+            "input",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState {
+                focused: true,
+                focus_visible: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(focus_visible.color, Color::from_hex("#abcdef").unwrap());
     }
 
     #[test]

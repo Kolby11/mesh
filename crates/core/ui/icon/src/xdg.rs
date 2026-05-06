@@ -1,7 +1,15 @@
-use crate::config::IconPackRoot;
+use crate::config::{IconPackKind, IconPackRoot};
 use std::path::{Path, PathBuf};
 
 pub fn find_icon_in_pack(pack: &IconPackRoot, asset_name: &str, size: u32) -> Option<PathBuf> {
+    // Font packs don't store icons as files; the painter needs a glyph
+    // reference, not a path. Until the font path is implemented in the
+    // painter, font packs always miss here so the fallback chain proceeds
+    // to the next candidate.
+    if matches!(pack.kind, IconPackKind::Font { .. }) {
+        return None;
+    }
+
     let path = search_for_pack(pack)
         .search()
         .icons()

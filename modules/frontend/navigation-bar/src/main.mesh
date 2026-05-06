@@ -1,9 +1,16 @@
 <template>
   <row class="nav-shell">
     <box class="meta">
-        <SettingsButton />
-        <VolumeButton onActivate={audio_surface_handler} />
-        <ThemeButton />
+        <SettingsButton onfocus={onSettingsFocus} onblur={onNavControlBlur} />
+        <VolumeButton
+          onActivate={audio_surface_handler}
+          onfocus={onVolumeFocus}
+          onblur={onNavControlBlur}
+        />
+        <ThemeButton onfocus={onThemeFocus} onblur={onNavControlBlur} />
+        <box class="focus-diagnostic">
+            <text class="focus-diagnostic-label">{keyboard_diag_label}</text>
+        </box>
     </box>
     <AudioPopover hidden={audio_surface_hidden} />
   </row>
@@ -16,9 +23,13 @@ import SettingsButton from "./components/settings-button.mesh"
 import VolumeButton from "./components/volume-button.mesh"
 import ThemeButton from "./components/theme-button.mesh"
 
+local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+if not audio_ok then audio = nil end
+
 audio_surface_id = "@mesh/audio-popover"
 audio_surface_hidden = true
 audio_surface_handler = "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface"
+keyboard_diag_label = "kbd: no control focus"
 
 function onToggleAudioSurface(event)
     local position = event.current_target.position or {}
@@ -34,6 +45,28 @@ function onToggleAudioSurface(event)
     end
 
     audio_surface_hidden = not audio_surface_hidden
+end
+
+function onMuteShortcut()
+    if audio_ok and audio and audio.available ~= false then
+        audio.toggle_mute()
+    end
+end
+
+function onSettingsFocus()
+    keyboard_diag_label = "kbd: settings focused"
+end
+
+function onVolumeFocus()
+    keyboard_diag_label = "kbd: volume focused"
+end
+
+function onThemeFocus()
+    keyboard_diag_label = "kbd: theme focused"
+end
+
+function onNavControlBlur()
+    keyboard_diag_label = "kbd: no control focus"
 end
 </script>
 
@@ -115,6 +148,50 @@ end
     gap: token(spacing.xs);
 }
 
+.focus-diagnostic {
+    min-width: 172px;
+    height: 36px;
+    justify-content: center;
+    align-items: center;
+    padding-inline: token(spacing.md);
+    border-radius: token(radius.full);
+    background: token(color.surface-container-high);
+    border-width: 1px;
+    border-style: solid;
+    border-color: token(color.outline-variant);
+}
+
+.focus-diagnostic-label {
+    color: token(color.on-surface);
+    font-size: token(typography.size.xs);
+    font-weight: 700;
+}
+
+button:hover {
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
+    border-color: token(color.outline);
+    border-radius: token(radius.full);
+}
+
+button:focus,
+button:focus-visible {
+    background: token(color.tertiary-container);
+    color: token(color.on-tertiary-container);
+    border-color: token(color.primary);
+    border-radius: token(radius.full);
+}
+
+.volume-widget:hover {
+    background: token(color.secondary-container);
+    border-radius: token(radius.full);
+}
+
+.volume-widget:focus-visible {
+    background: token(color.tertiary-container);
+    border-radius: token(radius.full);
+}
+
 @container (max-width: 760px) {
     .brand-copy {
         display: none;
@@ -126,6 +203,11 @@ end
     }
 
     .link {
+        padding-inline: token(spacing.sm);
+    }
+
+    .focus-diagnostic {
+        min-width: 148px;
         padding-inline: token(spacing.sm);
     }
 }

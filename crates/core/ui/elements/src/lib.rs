@@ -31,8 +31,8 @@ pub use layout::{LayoutEngine, LayoutRect, TextMeasurer};
 pub use style::{
     AlignContent, AlignItems, AlignSelf, Color, ComputedStyle, Corners, Dimension, Display, Edges,
     FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow, Position, StyleContext,
-    StyleResolver, TextAlign, TextDirection, TextOverflow, TransitionEasing, TransitionProperties,
-    TransitionStyle,
+    StyleResolver, TextAlign, TextDirection, TextOverflow, Transform2D, TransitionEasing,
+    TransitionProperties, TransitionStyle,
 };
 pub use tree::{ElementState, NodeId, WidgetNode};
 

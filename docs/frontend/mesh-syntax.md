@@ -209,6 +209,37 @@ Common event attributes:
 
 Do not use `@click=` or `:on*=` — those are not valid MESH syntax.
 
+### Keyboard focus and traversal
+
+- `Tab` and `Shift+Tab` move through the final rendered visual order by default.
+- `tabindex` is supported as an override path for keyboard traversal.
+- `tabindex="0"` keeps an element in normal traversal, positive values sort before visual-order defaults, and `tabindex="-1"` keeps the element pointer/script focusable but removes it from normal `Tab` traversal.
+- `onkeydown` and `onkeyup` fire only for the currently focused element. They are not surface-global handlers.
+- Focused-surface shortcuts are configured separately through surface settings and only run while that surface owns keyboard focus.
+
+Keyboard event handlers receive the pressed key plus modifier state:
+
+```lua
+function onKeyDown(event)
+  if event.key == "Enter" and event.modifiers.shift then
+    mesh.log.info("shift-enter on " .. (event.current.key or "unknown"))
+  end
+end
+```
+
+### Selectable text
+
+- `selectable="true"` opts a `text` node into passive pointer selection.
+- Selection is currently bounded to that text node. MESH does not yet support document-style selection that spans multiple text nodes or containers.
+- `Ctrl+C` copies the current selection when the surface is receiving keyboard input.
+- Use this for status copy, proof surfaces, and read-only text. It does not make the element editable.
+
+```xml
+<text class="status-copy" selectable="true">
+  {status_line}
+</text>
+```
+
 ### Accessibility attributes
 
 Always include accessibility attributes where they add meaning. MESH treats these as first-class:
@@ -348,6 +379,13 @@ Container queries are supported:
 }
 ```
 
+Transitions currently interpolate `background-color`, `border-color`,
+`border-radius`, `border-width`, `color`, `opacity`, `width`, `height`,
+`padding`, `margin`, and `transform`. `transition-timing-function` accepts the
+standard easing keywords plus `cubic-bezier(...)`. `transform` parses
+`translate(...)`, `scale(...)`, and `rotate(...)`, but only translation is
+painted and hit-tested today.
+
 ---
 
 ## Complete example
@@ -458,6 +496,8 @@ end
 | Dynamic attribute   | `title="{expr}"`          |
 | Two-way bind        | `bind:value="variable"`   |
 | Event handler       | `onclick={handler}`       |
+| Selectable text     | `selectable="true"`       |
+| Focus order hint    | `tabindex="0"`            |
 | Theme token         | `token(color.surface)`    |
 | Translation key     | `{t("key")}`              |
 | Tooltip             | `title="..."`             |

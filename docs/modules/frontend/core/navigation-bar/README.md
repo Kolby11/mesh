@@ -17,12 +17,18 @@ Top-edge navigation surface.
 - Dynamic attribute binding with `title="{expr}"`
 - Surface placement through `config/settings.json`
 - Container-query adaptation for narrower widths
+- Real keyboard traversal and default button activation on shipped shell chrome
+- A focused-surface shortcut example: `m` toggles mute only while the navigation bar owns keyboard focus
+- Author-facing `:focus-visible` styling on the shipped controls
 
 ## Default behavior
 
 The shell discovers this as its own top-level frontend surface, and the
 default settings pin it to the top edge with an exclusive zone so it behaves
-like normal shell chrome.
+like normal shell chrome. The bundled settings also switch the surface to
+`keyboard_mode: "on_demand"` so keyboard focus can move through the settings,
+volume, and theme controls without turning the surface into an always-capturing
+keyboard sink.
 
 ## Syntax patterns used
 
@@ -58,6 +64,16 @@ The callback receives an event object, so the navigation bar can position
 quick-settings and volume surfaces explicitly from
 `event.current_target.position`.
 
+### Keyboard behavior
+
+The shipped controls rely on shell-owned keyboard defaults:
+
+- `Tab` / `Shift+Tab` traverse the settings, volume, and theme buttons in visual order
+- `Enter` and `Space` activate the focused buttons
+- The focused-surface shortcut `m` calls the navigation bar's mute handler, advertises that binding on the volume control metadata, and can be remapped through the shell-level `keyboard.surface_shortcuts["@mesh/navigation-bar"]` override
+
+Use `:focus-visible` when styling the strong keyboard ring or highlight. Use `:focus` for broader logical-focus styling.
+
 ### Accessibility
 
 ```xml
@@ -75,4 +91,4 @@ announced.
 
 ## See also
 
-- [`docs/frontend/mesh-syntax.md`](../../../../frontend/mesh-syntax.md) — full `.mesh` syntax reference
+- [`docs/frontend/mesh-syntax.md`](../../../frontend/mesh-syntax.md) — full `.mesh` syntax reference

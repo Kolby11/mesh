@@ -1,27 +1,67 @@
-active_profile = "material"
+active_profile = "system"
 
 [[packs]]
 id = "system"
 theme = "hicolor"
 
-[[packs]]
-id = "material"
-root = "crates/core/ui/icon/assets/material"
-theme = "hicolor"
-
-[profiles.material.icons]
-audio-volume-muted = ["system:audio-volume-muted", "system:audio-volume-muted-symbolic", "system:audio-volume-muted-panel", "material:audio-volume-muted", "system:volume-off", "material:volume-off"]
-audio-volume-low = ["system:audio-volume-low", "system:audio-volume-low-symbolic", "material:audio-volume-low", "system:volume", "material:volume"]
-audio-volume-medium = ["system:audio-volume-medium", "system:audio-volume-medium-symbolic", "material:audio-volume-medium", "system:volume", "material:volume"]
-audio-volume-high = ["system:audio-volume-high", "system:audio-volume-high-symbolic", "material:audio-volume-high", "system:volume", "material:volume"]
-network-wireless = ["system:network-wireless", "system:network-wireless-symbolic", "material:network-wireless", "system:wifi", "material:wifi"]
-bluetooth = ["system:bluetooth", "system:bluetooth-symbolic", "material:bluetooth"]
-settings = ["system:preferences-system", "system:settings", "material:settings"]
-weather-clear-night = ["system:weather-clear-night", "system:weather-clear-night-symbolic", "material:star", "system:weather-clear", "material:warning"]
-weather-clear = ["system:weather-clear", "system:weather-clear-symbolic", "material:star", "material:warning"]
-battery-empty = ["system:battery-empty", "system:battery-empty-symbolic", "material:warning", "material:battery-80"]
-battery-caution = ["system:battery-caution", "system:battery-caution-symbolic", "system:battery-low", "material:warning", "material:battery-80"]
-battery-low = ["system:battery-low", "system:battery-low-symbolic", "material:battery-80", "material:warning"]
-battery-good = ["system:battery-good", "system:battery-good-symbolic", "system:battery", "material:battery-80", "material:battery-full"]
-battery-full = ["system:battery-full", "system:battery-full-symbolic", "system:battery", "material:battery-full"]
-missing-proof = ["system:no-such-icon", "material:no-such-icon"]
+[profiles.system.icons]
+audio-volume-muted = [
+  "system:audio-volume-muted",
+  "system:audio-volume-muted-symbolic",
+  "system:audio-volume-muted-panel",
+  "system:volume-off",
+]
+audio-volume-low = [
+  "system:audio-volume-low",
+  "system:audio-volume-low-symbolic",
+  "system:volume",
+]
+audio-volume-medium = [
+  "system:audio-volume-medium",
+  "system:audio-volume-medium-symbolic",
+  "system:volume",
+]
+audio-volume-high = [
+  "system:audio-volume-high",
+  "system:audio-volume-high-symbolic",
+  "system:volume",
+]
+network-wireless = [
+  "system:network-wireless",
+  "system:network-wireless-symbolic",
+  "system:wifi",
+]
+bluetooth = ["system:bluetooth", "system:bluetooth-symbolic"]
+settings = [
+  "system:preferences-system",
+  "system:preferences-system-symbolic",
+  "system:settings",
+]
+weather-clear-night = [
+  "system:weather-clear-night",
+  "system:weather-clear-night-symbolic",
+  "system:weather-clear",
+]
+weather-clear = ["system:weather-clear", "system:weather-clear-symbolic"]
+battery-empty = [
+  "system:battery-empty",
+  "system:battery-empty-symbolic",
+  "system:battery-low",
+]
+battery-caution = [
+  "system:battery-caution",
+  "system:battery-caution-symbolic",
+  "system:battery-low",
+]
+battery-low = ["system:battery-low", "system:battery-low-symbolic"]
+battery-good = [
+  "system:battery-good",
+  "system:battery-good-symbolic",
+  "system:battery",
+]
+battery-full = [
+  "system:battery-full",
+  "system:battery-full-symbolic",
+  "system:battery",
+]
+missing-proof = ["system:no-such-icon"]

@@ -1,8 +1,11 @@
 <template>
   <row class="volume-widget" title="{audio_tooltip}">
     <button
+      ref="volume-button"
       class="volume-button"
       onclick={onActivate}
+      onfocus={onfocus}
+      onblur={onblur}
       title="{audio_tooltip}"
       aria-label="{t('nav.open_audio')}"
     >
@@ -71,10 +74,16 @@ end
     border-radius: token(radius.sm);
     background: token(color.surface-container);
     color: token(color.on-surface);
+    transition: background-color 140ms ease-out, border-radius 140ms ease-out;
 }
 
 .volume-widget:hover {
-    background: token(color.surface-container-high);
+    background: token(color.secondary-container);
+    border-radius: token(radius.full);
+}
+
+.volume-widget:focus-visible {
+    background: token(color.tertiary-container);
     border-radius: token(radius.full);
 }
 
@@ -89,6 +98,29 @@ end
     border-radius: token(radius.sm);
     background: transparent;
     color: token(color.on-surface);
+    border-width: 2px;
+    border-style: solid;
+    border-color: transparent;
+    transition: background-color 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out, border-radius 140ms ease-out;
+}
+
+.volume-button:hover {
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
+    border-color: token(color.outline);
+    border-radius: token(radius.full);
+}
+
+.volume-button:focus {
+    background: token(color.tertiary-container);
+    color: token(color.on-tertiary-container);
+    border-color: token(color.primary);
+}
+
+.volume-button:focus-visible {
+    background: token(color.tertiary-container);
+    color: token(color.on-tertiary-container);
+    border-color: token(color.primary);
 }
 
 .volume-glyph {
@@ -96,7 +128,7 @@ end
     height: 28px;
     justify-content: center;
     align-items: center;
-    color: token(color.on-secondary-container);
+    color: inherit;
 }
 
 </style>

@@ -69,6 +69,7 @@ pub(super) fn annotate_runtime_tree(
     node: &mut WidgetNode,
     key: String,
     focused_key: &Option<String>,
+    focus_visible_key: &Option<String>,
     hovered_path: &[String],
     active_key: &Option<String>,
     input_values: &HashMap<String, String>,
@@ -99,6 +100,7 @@ pub(super) fn annotate_runtime_tree(
 
     node.state = ElementState {
         focused: focused_key.as_deref() == Some(key_str),
+        focus_visible: focus_visible_key.as_deref() == Some(key_str),
         hovered: hovered_path
             .iter()
             .any(|hovered_key| hovered_key == key_str),
@@ -117,6 +119,7 @@ pub(super) fn annotate_runtime_tree(
         node.attributes
             .insert("_mesh_focused".into(), "true".into());
     }
+    node.accessibility.focused = node.state.focused;
 
     match node.tag.as_str() {
         "input" => {
@@ -160,6 +163,7 @@ pub(super) fn annotate_runtime_tree(
             child,
             format!("{key}/{index}"),
             focused_key,
+            focus_visible_key,
             hovered_path,
             active_key,
             input_values,

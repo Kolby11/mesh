@@ -56,6 +56,87 @@ use types::{
 
 use service::{service_command_control_capability, service_name_from_interface};
 
+/// If `assets.icons` is declared in a module manifest, register an icon pack
+/// at `<module_id>` rooted at `<module_dir>/<assets.icons.path>`. The pack
+/// kind comes from the manifest — XDG directory layout by default, or a
+/// font-glyph pack when `kind = "font"`. Authors can then reference module
+/// assets via candidates like `<module_id>:<name>` in `icons.toml`. No-op
+/// when the manifest doesn't ship icons. Failures log but don't abort
+/// module discovery — a module with bad icons should still load.
+fn register_module_icon_pack(
+    module_id: &str,
+    module_dir: &Path,
+    assets: Option<&mesh_core_module::manifest::AssetsSection>,
+) {
+    use mesh_core_module::manifest::{IconAssets, IconAssetsKind};
+
+    let Some(icons) = assets.and_then(|a| a.icons.as_ref()) else {
+        return;
+    };
+    let root = module_dir.join(icons.path());
+    if !root.is_dir() {
+        tracing::warn!(
+            "module {} declares assets.icons={} but {} is not a directory; skipping pack",
+            module_id,
+            icons.path(),
+            root.display()
+        );
+        return;
+    }
+
+    let kind = match icons {
+        IconAssets::Path(_) => mesh_core_icon::IconPackKind::Xdg,
+        IconAssets::Detailed(detailed) => match detailed.kind {
+            IconAssetsKind::Xdg => mesh_core_icon::IconPackKind::Xdg,
+            IconAssetsKind::Font => {
+                let Some(font_file) = detailed.font_file.clone() else {
+                    tracing::warn!(
+                        "module {} declares font icon pack at {} but is missing assets.icons.font_file; skipping",
+                        module_id,
+                        root.display()
+                    );
+                    return;
+                };
+                let Some(glyph_map) = detailed.glyph_map.clone() else {
+                    tracing::warn!(
+                        "module {} declares font icon pack at {} but is missing assets.icons.glyph_map; skipping",
+                        module_id,
+                        root.display()
+                    );
+                    return;
+                };
+                mesh_core_icon::IconPackKind::Font {
+                    font_file,
+                    glyph_map,
+                }
+            }
+        },
+    };
+
+    let pack = mesh_core_icon::IconPackRoot {
+        id: module_id.to_string(),
+        root: Some(root.clone()),
+        theme: "hicolor".into(),
+        kind,
+    };
+    match mesh_core_icon::register_default_pack(pack) {
+        Ok(true) => tracing::info!(
+            "registered icon pack '{}' from {}",
+            module_id,
+            root.display()
+        ),
+        Ok(false) => tracing::debug!(
+            "icon pack '{}' already registered; leaving existing root in place",
+            module_id
+        ),
+        Err(err) => tracing::warn!(
+            "failed to register icon pack '{}' from {}: {err}",
+            module_id,
+            root.display()
+        ),
+    }
+}
+
 fn shell_global_shortcut_request(
     key: &str,
     ctrl: bool,
@@ -73,6 +154,21 @@ fn component_key_pressed_input(key: String, ctrl: bool, shift: bool, alt: bool) 
     ComponentInput::KeyPressed {
         key,
         modifiers: KeyModifiers { ctrl, shift, alt },
+    }
+}
+
+fn component_key_released_input(key: String, modifiers: KeyModifiers) -> ComponentInput {
+    ComponentInput::KeyReleased { key, modifiers }
+}
+
+fn update_modifiers_for_key_release(modifiers: &mut KeyModifiers, key: &str) {
+    let normalized = key.to_ascii_lowercase();
+    if normalized.contains("shift") {
+        modifiers.shift = false;
+    } else if normalized.contains("control") || normalized == "ctrl" {
+        modifiers.ctrl = false;
+    } else if normalized.contains("alt") {
+        modifiers.alt = false;
     }
 }
 
@@ -96,6 +192,7 @@ pub struct Shell {
     settings_watch: SettingsWatchState,
     debug: DebugOverlayState,
     debug_overlay: DebugOverlay,
+    active_key_modifiers: KeyModifiers,
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,
     backend_runtime_statuses: HashMap<(String, String), BackendRuntimeStatusEntry>,
@@ -248,6 +345,7 @@ impl Shell {
             settings_watch,
             debug: DebugOverlayState::default(),
             debug_overlay: DebugOverlay::new(),
+            active_key_modifiers: KeyModifiers::default(),
             service_handlers: HashMap::new(),
             backend_runtimes: HashMap::new(),
             backend_runtime_statuses: HashMap::new(),
@@ -311,6 +409,7 @@ impl Shell {
                         loaded.manifest.package.module_type,
                         loaded.source
                     );
+                    register_module_icon_pack(&id, dir, loaded.manifest.assets.as_ref());
                     self.modules.insert(
                         id,
                         ModuleInstance::new(
@@ -1387,11 +1486,21 @@ impl Shell {
                 WindowEvent::Key {
                     event: WindowKeyEvent::Pressed(key, mods),
                     ..
-                } => component_key_pressed_input(key, mods.ctrl, mods.shift, mods.alt),
+                } => {
+                    self.active_key_modifiers = KeyModifiers {
+                        ctrl: mods.ctrl,
+                        shift: mods.shift,
+                        alt: mods.alt,
+                    };
+                    component_key_pressed_input(key, mods.ctrl, mods.shift, mods.alt)
+                }
                 WindowEvent::Key {
                     event: WindowKeyEvent::Released(key),
                     ..
-                } => ComponentInput::KeyReleased { key },
+                } => {
+                    update_modifiers_for_key_release(&mut self.active_key_modifiers, &key);
+                    component_key_released_input(key, self.active_key_modifiers)
+                }
                 WindowEvent::Char { ch, .. } => ComponentInput::Char { ch },
             };
 
@@ -2274,8 +2383,9 @@ fn resolve_default_module_dirs(config: &ShellConfig) -> Vec<PathBuf> {
 mod tests {
     use super::{
         BackendLaunchCandidate, BackendRuntimeSlot, BackendRuntimeStatus, ComponentInput,
-        CoreRequest, InterfaceProvider, InterfaceRegistry, ServiceCommandMsg, ServiceEvent, Shell,
-        backend_launch_candidates_from_graph, component_key_pressed_input,
+        CoreRequest, InterfaceProvider, InterfaceRegistry, KeyModifiers, ServiceCommandMsg,
+        ServiceEvent, Shell, backend_launch_candidates_from_graph, component_key_pressed_input,
+        component_key_released_input,
         layout::measure_content_size,
         service::{apply_service_update, seed_service_state, service_name_from_interface},
         shell_global_shortcut_request,
@@ -2631,6 +2741,27 @@ mod tests {
     }
 
     #[test]
+    fn selection_input_contract_key_released_preserves_modifiers() {
+        let input = component_key_released_input(
+            "Enter".into(),
+            KeyModifiers {
+                ctrl: true,
+                shift: true,
+                alt: false,
+            },
+        );
+        match input {
+            ComponentInput::KeyReleased { key, modifiers } => {
+                assert_eq!(key, "Enter");
+                assert!(modifiers.ctrl);
+                assert!(modifiers.shift);
+                assert!(!modifiers.alt);
+            }
+            other => panic!("expected key release input, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn selection_input_contract_debug_shortcuts_remain_global() {
         assert!(matches!(
             shell_global_shortcut_request("d", true, true, false),
@@ -2641,6 +2772,31 @@ mod tests {
             Some(CoreRequest::CycleDebugTab)
         ));
         assert!(shell_global_shortcut_request("c", true, false, false).is_none());
+    }
+
+    #[test]
+    fn keyboard_shortcuts_shell_global_shortcuts_still_win() {
+        assert!(matches!(
+            shell_global_shortcut_request("d", true, true, false),
+            Some(CoreRequest::ToggleDebugOverlay)
+        ));
+        assert!(matches!(
+            shell_global_shortcut_request("Tab", true, false, true),
+            Some(CoreRequest::CycleDebugTab)
+        ));
+    }
+
+    #[test]
+    fn keyboard_regression_shell_global_shortcut_precedence_stays_global() {
+        assert!(matches!(
+            shell_global_shortcut_request("d", true, true, false),
+            Some(CoreRequest::ToggleDebugOverlay)
+        ));
+        assert!(matches!(
+            shell_global_shortcut_request("Tab", true, false, true),
+            Some(CoreRequest::CycleDebugTab)
+        ));
+        assert!(shell_global_shortcut_request("m", false, false, false).is_none());
     }
 
     #[test]
@@ -3331,7 +3487,10 @@ mod tests {
         assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
         assert!(graph.active_provider("mesh.network").is_none());
         assert!(graph.active_provider("mesh.power").is_none());
-        assert_eq!(graph.backend_providers_for_interface("mesh.network").len(), 0);
+        assert_eq!(
+            graph.backend_providers_for_interface("mesh.network").len(),
+            0
+        );
         assert_eq!(graph.backend_providers_for_interface("mesh.power").len(), 0);
 
         let layout = graph.layout_entrypoint().unwrap();

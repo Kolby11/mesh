@@ -10,13 +10,23 @@ impl FrontendSurfaceComponent {
         self.selection = Some(TextSelectionState {
             anchor: point.clone(),
             focus: point,
+            dragging: true,
         });
+    }
+
+    pub(super) fn end_text_selection_drag(&mut self) {
+        if let Some(selection) = self.selection.as_mut() {
+            selection.dragging = false;
+        }
     }
 
     pub(super) fn update_text_selection_focus(&mut self, x: f32, y: f32) {
         let Some(selection) = self.selection.as_mut() else {
             return;
         };
+        if !selection.dragging {
+            return;
+        }
         selection.focus.x = x;
         selection.focus.y = y;
         selection.focus.node_key = selection.anchor.node_key.clone();
@@ -56,7 +66,14 @@ impl FrontendSurfaceComponent {
         if let Some(key) = &self.focused_key {
             if !valid_keys.contains(key) {
                 self.focused_key = None;
+                self.focus_visible_key = None;
             }
+        }
+
+        if let Some(key) = &self.focus_visible_key
+            && !valid_keys.contains(key)
+        {
+            self.focus_visible_key = None;
         }
 
         if let Some(key) = &self.hovered_key {

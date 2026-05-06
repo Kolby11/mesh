@@ -1,4 +1,5 @@
 mod accessibility;
+pub mod animation;
 mod compile;
 mod expr;
 mod render;
@@ -286,6 +287,30 @@ mod tests {
         assert_eq!(
             handlers.get("click").map(String::as_str),
             Some("__mesh_embed__::@test/root::toggleSurface")
+        );
+    }
+
+    #[test]
+    fn resolves_bound_event_handler_props_from_state_strings() {
+        let attrs = vec![Attribute {
+            name: "onfocus".into(),
+            value: AttributeValue::Binding("onFocusProxy".into()),
+        }];
+        let store = MapStore(
+            [(
+                "onFocusProxy".to_string(),
+                serde_json::json!("__mesh_embed__::@test/root::markFocused"),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        let (_, _, resolved, handlers) = render::parse_attributes(&attrs, Some(&store));
+
+        assert!(resolved.is_empty());
+        assert_eq!(
+            handlers.get("focus").map(String::as_str),
+            Some("__mesh_embed__::@test/root::markFocused")
         );
     }
 

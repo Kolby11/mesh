@@ -1,6 +1,26 @@
 use super::*;
 
 impl FrontendSurfaceComponent {
+    fn module_restyle_rules(&self) -> Vec<mesh_core_component::style::StyleRule> {
+        let mut rules = Vec::new();
+
+        if let Some(style) = self.compiled.component.style.as_ref() {
+            rules.extend(style.rules.iter().cloned());
+        }
+
+        let mut aliases: Vec<_> = self.compiled.local_components.keys().cloned().collect();
+        aliases.sort();
+        for alias in aliases {
+            if let Some(component) = self.compiled.local_components.get(&alias)
+                && let Some(style) = component.style.as_ref()
+            {
+                rules.extend(style.rules.iter().cloned());
+            }
+        }
+
+        rules
+    }
+
     pub(super) fn requested_layout_size(&self) -> (u32, u32) {
         let (width, height) = match self.surface_layout.size_policy {
             SurfaceSizePolicy::Fixed => (self.surface_layout.width, self.surface_layout.height),
@@ -74,6 +94,7 @@ impl FrontendSurfaceComponent {
             &mut tree,
             "root".to_string(),
             &self.focused_key,
+            &self.focus_visible_key,
             &self.hovered_path,
             &self.pointer_down_key,
             &self.input_values,
@@ -81,21 +102,16 @@ impl FrontendSurfaceComponent {
             &self.checked_values,
             &self.scroll_offsets,
         );
+        self.annotate_surface_shortcuts(&mut tree);
         annotate_overflow_tree(&mut tree, "root", &mut self.scroll_offsets);
 
-        let rules = self
-            .compiled
-            .component
-            .style
-            .as_ref()
-            .map(|s| s.rules.as_slice())
-            .unwrap_or(&[]);
+        let restyle_rules = self.module_restyle_rules();
         let resolver = StyleResolver::new(theme);
         let context = StyleContext {
             container_width: width as f32,
             container_height: height as f32,
         };
-        resolver.restyle_subtree(&mut tree, rules, context);
+        resolver.restyle_subtree(&mut tree, &restyle_rules, context);
 
         // Recompute layout after restyle so that pseudo-state and container-query style
         // changes (display:none, width, height, etc.) are reflected in final layout

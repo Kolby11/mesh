@@ -22,6 +22,40 @@ pub struct ShellSettings {
     pub i18n: I18nSettings,
     #[serde(default)]
     pub sounds: ShellSounds,
+    #[serde(default)]
+    pub keyboard: KeyboardSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KeyboardSettings {
+    #[serde(default = "default_button_activation_keys")]
+    pub button_activation_keys: Vec<String>,
+    #[serde(default = "default_toggle_activation_keys")]
+    pub toggle_activation_keys: Vec<String>,
+    #[serde(default = "default_slider_decrement_keys")]
+    pub slider_decrement_keys: Vec<String>,
+    #[serde(default = "default_slider_increment_keys")]
+    pub slider_increment_keys: Vec<String>,
+    #[serde(default)]
+    pub surface_shortcuts: HashMap<String, HashMap<String, SurfaceShortcutOverride>>,
+}
+
+impl Default for KeyboardSettings {
+    fn default() -> Self {
+        Self {
+            button_activation_keys: default_button_activation_keys(),
+            toggle_activation_keys: default_toggle_activation_keys(),
+            slider_decrement_keys: default_slider_decrement_keys(),
+            slider_increment_keys: default_slider_increment_keys(),
+            surface_shortcuts: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SurfaceShortcutOverride {
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 /// System sound file mappings for shell events.
@@ -98,6 +132,22 @@ fn default_locale() -> String {
 
 fn default_fallback_locale() -> String {
     "en".to_string()
+}
+
+fn default_button_activation_keys() -> Vec<String> {
+    vec!["Enter".into(), "Space".into()]
+}
+
+fn default_toggle_activation_keys() -> Vec<String> {
+    vec!["Space".into(), "Enter".into()]
+}
+
+fn default_slider_decrement_keys() -> Vec<String> {
+    vec!["ArrowLeft".into(), "ArrowDown".into()]
+}
+
+fn default_slider_increment_keys() -> Vec<String> {
+    vec!["ArrowRight".into(), "ArrowUp".into()]
 }
 
 impl Default for ShellSection {
@@ -275,6 +325,7 @@ fn merge_shell_settings(base: &mut ShellSettings, overrides: ShellSettings) {
     base.theme = overrides.theme;
     base.i18n = overrides.i18n;
     base.sounds = overrides.sounds;
+    base.keyboard = overrides.keyboard;
 }
 
 /// Write a per-module overrides file under XDG config (~/..../mesh/modules/<scope>/<name>.json).
@@ -614,5 +665,53 @@ mod tests {
 
         let path2 = module_override_path("generic-module");
         assert!(path2.ends_with("mesh/modules/generic-module.json"));
+    }
+
+    #[test]
+    fn keyboard_settings_defaults_and_overrides_merge_deterministically() {
+        let mut base = ShellSettings::default();
+        let overrides = ShellSettings {
+            keyboard: KeyboardSettings {
+                surface_shortcuts: HashMap::from([(
+                    "@mesh/navigation-bar".into(),
+                    HashMap::from([(
+                        "mute".into(),
+                        SurfaceShortcutOverride {
+                            key: Some("u".into()),
+                        },
+                    )]),
+                )]),
+                ..KeyboardSettings::default()
+            },
+            ..ShellSettings::default()
+        };
+
+        merge_shell_settings(&mut base, overrides);
+
+        assert_eq!(
+            base.keyboard.button_activation_keys,
+            vec!["Enter".to_string(), "Space".to_string()]
+        );
+        assert_eq!(
+            base.keyboard
+                .surface_shortcuts
+                .get("@mesh/navigation-bar")
+                .and_then(|shortcuts| shortcuts.get("mute"))
+                .and_then(|shortcut| shortcut.key.as_deref()),
+            Some("u")
+        );
+    }
+
+    #[test]
+    fn keyboard_settings_default_shortcuts_remain_available_without_user_overrides() {
+        let settings = ShellSettings::default();
+        assert_eq!(
+            settings.keyboard.toggle_activation_keys,
+            vec!["Space".to_string(), "Enter".to_string()]
+        );
+        assert!(
+            settings.keyboard.surface_shortcuts.is_empty(),
+            "module-owned defaults should remain the fallback when shell overrides are absent"
+        );
     }
 }

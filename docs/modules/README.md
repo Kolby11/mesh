@@ -42,6 +42,7 @@ modules/
 │   │   ├── launcher/            — application launcher
 │   │   ├── notification-center/ — notification drawer
 │   │   └── quick-settings/      — toggles + sliders surface
+│   ├── text-selection-proof/    — passive selectable-text proof surface
 │   └── examples/                — larger composition examples for module authors
 └── backend/
     └── core/
@@ -58,6 +59,15 @@ modules/
         ├── mpris-media/             — mesh.media via MPRIS D-Bus
         └── mock-notifications/      — mesh.notifications default provider
 ```
+
+## Standalone frontend proof surfaces
+
+Some shipped frontends live outside `core/` and `examples/` because they are
+small proof modules rather than part of the default daily shell chrome.
+
+- [`frontend/text-selection-proof`](./frontend/text-selection-proof/README.md)
+  — selectable-text proof surface used to exercise passive text selection and
+  clipboard-copy behavior without implying full document editing semantics.
 
 ## Module anatomy
 

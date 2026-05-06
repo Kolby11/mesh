@@ -1,72 +1,116 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use mesh_core_elements::{Corners, TransitionEasing, TransitionStyle, WidgetNode, style::Color};
+use mesh_core_elements::{
+    Corners, Dimension, Edges, Transform2D, TransitionEasing, TransitionStyle, WidgetNode,
+    style::Color,
+};
+use mesh_core_render::animation::Interpolate;
 
 use super::FrontendSurfaceComponent;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct AnimatedVisualStyle {
     border_radius: Corners,
+    border_width: Edges,
     opacity: f32,
     background_color: Color,
+    border_color: Color,
     color: Color,
+    width: Dimension,
+    height: Dimension,
+    padding: Edges,
+    margin: Edges,
+    transform: Transform2D,
 }
 
 impl AnimatedVisualStyle {
     fn from_node(node: &WidgetNode) -> Self {
+        let s = &node.computed_style;
         Self {
-            border_radius: node.computed_style.border_radius,
-            opacity: node.computed_style.opacity,
-            background_color: node.computed_style.background_color,
-            color: node.computed_style.color,
+            border_radius: s.border_radius,
+            border_width: s.border_width,
+            opacity: s.opacity,
+            background_color: s.background_color,
+            border_color: s.border_color,
+            color: s.color,
+            width: s.width,
+            height: s.height,
+            padding: s.padding,
+            margin: s.margin,
+            transform: s.transform,
         }
     }
 
     fn apply_to_node(self, node: &mut WidgetNode) {
-        node.computed_style.border_radius = self.border_radius;
-        node.computed_style.opacity = self.opacity;
-        node.computed_style.background_color = self.background_color;
-        node.computed_style.color = self.color;
+        let s = &mut node.computed_style;
+        s.border_radius = self.border_radius;
+        s.border_width = self.border_width;
+        s.opacity = self.opacity;
+        s.background_color = self.background_color;
+        s.border_color = self.border_color;
+        s.color = self.color;
+        s.width = self.width;
+        s.height = self.height;
+        s.padding = self.padding;
+        s.margin = self.margin;
+        s.transform = self.transform;
     }
 
+    /// Per-field lerp. Edges/Corners/Color/f32 use the renderer's `Interpolate`.
+    /// `Dimension` only interpolates between matching variants (`Px`->`Px`,
+    /// `Percent`->`Percent`); cross-variant changes snap to the target.
     fn interpolate(self, target: Self, progress: f32) -> Self {
         Self {
-            border_radius: lerp_corners(self.border_radius, target.border_radius, progress),
-            opacity: lerp_f32(self.opacity, target.opacity, progress),
-            background_color: lerp_color(self.background_color, target.background_color, progress),
-            color: lerp_color(self.color, target.color, progress),
+            border_radius: self.border_radius.lerp(target.border_radius, progress),
+            border_width: self.border_width.lerp(target.border_width, progress),
+            opacity: self.opacity.lerp(target.opacity, progress),
+            background_color: self.background_color.lerp(target.background_color, progress),
+            border_color: self.border_color.lerp(target.border_color, progress),
+            color: self.color.lerp(target.color, progress),
+            width: lerp_dimension(self.width, target.width, progress),
+            height: lerp_dimension(self.height, target.height, progress),
+            padding: self.padding.lerp(target.padding, progress),
+            margin: self.margin.lerp(target.margin, progress),
+            transform: self.transform.lerp(target.transform, progress),
         }
     }
 
+    /// Build the start-of-animation snapshot: take the previous displayed
+    /// value for any property the transition opts into, and the desired (new)
+    /// value for everything else. The animator only lerps the opted-in
+    /// properties because everything else has matching from/to.
     fn selective_from(
         previous: Self,
         desired: Self,
         props: mesh_core_elements::TransitionProperties,
     ) -> Self {
         Self {
-            border_radius: if props.animates_border_radius() {
-                previous.border_radius
-            } else {
-                desired.border_radius
-            },
-            opacity: if props.animates_opacity() {
-                previous.opacity
-            } else {
-                desired.opacity
-            },
-            background_color: if props.animates_background_color() {
-                previous.background_color
-            } else {
-                desired.background_color
-            },
-            color: if props.animates_color() {
-                previous.color
-            } else {
-                desired.color
-            },
+            border_radius: pick(props.animates_border_radius(), previous.border_radius, desired.border_radius),
+            border_width: pick(props.animates_border_width(), previous.border_width, desired.border_width),
+            opacity: pick(props.animates_opacity(), previous.opacity, desired.opacity),
+            background_color: pick(
+                props.animates_background_color(),
+                previous.background_color,
+                desired.background_color,
+            ),
+            border_color: pick(
+                props.animates_border_color(),
+                previous.border_color,
+                desired.border_color,
+            ),
+            color: pick(props.animates_color(), previous.color, desired.color),
+            width: pick(props.animates_width(), previous.width, desired.width),
+            height: pick(props.animates_height(), previous.height, desired.height),
+            padding: pick(props.animates_padding(), previous.padding, desired.padding),
+            margin: pick(props.animates_margin(), previous.margin, desired.margin),
+            transform: pick(props.animates_transform(), previous.transform, desired.transform),
         }
     }
+}
+
+fn pick<T>(use_previous: bool, previous: T, desired: T) -> T {
+    if use_previous { previous } else { desired }
 }
 
 #[derive(Debug, Clone)]
@@ -171,10 +215,20 @@ impl FrontendSurfaceComponent {
         let should_animate = transition.duration_ms > 0
             && ((props.animates_border_radius()
                 && previous_displayed.border_radius != desired.border_radius)
+                || (props.animates_border_width()
+                    && previous_displayed.border_width != desired.border_width)
                 || (props.animates_opacity() && previous_displayed.opacity != desired.opacity)
                 || (props.animates_background_color()
                     && previous_displayed.background_color != desired.background_color)
-                || (props.animates_color() && previous_displayed.color != desired.color));
+                || (props.animates_border_color()
+                    && previous_displayed.border_color != desired.border_color)
+                || (props.animates_color() && previous_displayed.color != desired.color)
+                || (props.animates_width() && previous_displayed.width != desired.width)
+                || (props.animates_height() && previous_displayed.height != desired.height)
+                || (props.animates_padding() && previous_displayed.padding != desired.padding)
+                || (props.animates_margin() && previous_displayed.margin != desired.margin)
+                || (props.animates_transform()
+                    && previous_displayed.transform != desired.transform));
 
         if should_animate {
             let restart = self.style_animations.get(key).is_none_or(|animation| {
@@ -231,49 +285,18 @@ fn collect_visual_styles_into(
 }
 
 fn apply_easing(easing: TransitionEasing, t: f32) -> f32 {
-    match easing {
-        TransitionEasing::Linear => t,
-        TransitionEasing::Ease => ease_in_out_cubic(t),
-        TransitionEasing::EaseIn => ease_in_cubic(t),
-        TransitionEasing::EaseOut => ease_out_cubic(t),
-        TransitionEasing::EaseInOut => ease_in_out_cubic(t),
+    let renderer_easing: mesh_core_render::animation::Easing = easing.into();
+    mesh_core_render::animation::apply_easing(renderer_easing, t)
+}
+
+/// Interpolate between two `Dimension` values when the variants match.
+/// Cross-variant changes (e.g. `auto` -> `100px`) cannot be lerped without
+/// resolving against a parent size, so they snap straight to the target.
+fn lerp_dimension(from: Dimension, to: Dimension, progress: f32) -> Dimension {
+    match (from, to) {
+        (Dimension::Px(a), Dimension::Px(b)) => Dimension::Px(a.lerp(b, progress)),
+        (Dimension::Percent(a), Dimension::Percent(b)) => Dimension::Percent(a.lerp(b, progress)),
+        _ => to,
     }
 }
 
-fn ease_in_cubic(t: f32) -> f32 {
-    t * t * t
-}
-
-fn ease_out_cubic(t: f32) -> f32 {
-    1.0 - (1.0 - t).powi(3)
-}
-
-fn ease_in_out_cubic(t: f32) -> f32 {
-    if t < 0.5 {
-        4.0 * t * t * t
-    } else {
-        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
-    }
-}
-
-fn lerp_corners(from: Corners, to: Corners, progress: f32) -> Corners {
-    Corners {
-        top_left: lerp_f32(from.top_left, to.top_left, progress),
-        top_right: lerp_f32(from.top_right, to.top_right, progress),
-        bottom_right: lerp_f32(from.bottom_right, to.bottom_right, progress),
-        bottom_left: lerp_f32(from.bottom_left, to.bottom_left, progress),
-    }
-}
-
-fn lerp_color(from: Color, to: Color, progress: f32) -> Color {
-    Color {
-        r: lerp_f32(from.r as f32, to.r as f32, progress).round() as u8,
-        g: lerp_f32(from.g as f32, to.g as f32, progress).round() as u8,
-        b: lerp_f32(from.b as f32, to.b as f32, progress).round() as u8,
-        a: lerp_f32(from.a as f32, to.a as f32, progress).round() as u8,
-    }
-}
-
-fn lerp_f32(from: f32, to: f32, progress: f32) -> f32 {
-    from + (to - from) * progress
-}
