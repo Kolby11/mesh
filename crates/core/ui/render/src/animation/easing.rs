@@ -94,9 +94,7 @@ fn bezier_axis(s: f32, c1: f32, c2: f32) -> f32 {
 
 fn bezier_axis_derivative(s: f32, c1: f32, c2: f32) -> f32 {
     let one_minus = 1.0 - s;
-    3.0 * one_minus * one_minus * c1
-        + 6.0 * one_minus * s * (c2 - c1)
-        + 3.0 * s * s * (1.0 - c2)
+    3.0 * one_minus * one_minus * c1 + 6.0 * one_minus * s * (c2 - c1) + 3.0 * s * s * (1.0 - c2)
 }
 
 fn solve_curve_x(target_x: f32, x1: f32, x2: f32) -> f32 {

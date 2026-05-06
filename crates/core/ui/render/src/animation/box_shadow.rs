@@ -60,7 +60,11 @@ impl Interpolate for BoxShadow {
             spread_radius: self.spread_radius.lerp(other.spread_radius, progress),
             color: self.color.lerp(other.color, progress),
             // `inset` doesn't interpolate; snap at midpoint.
-            inset: if progress < 0.5 { self.inset } else { other.inset },
+            inset: if progress < 0.5 {
+                self.inset
+            } else {
+                other.inset
+            },
         }
     }
 }
