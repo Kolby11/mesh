@@ -1,0 +1,148 @@
+use super::{
+    AccessibilitySection, AssetsSection, CapabilitiesSection, CompatibilitySection,
+    DependenciesSection, DependencySpec, EntrypointsSection, ExportsSection, ExtensionSection,
+    I18nSection, IconRequirementsSection, InterfaceSection, Manifest, PackageSection,
+    ProvidedInterface, ServiceSection, SettingsSection, SlotContribution, SlotDefinition,
+    SurfaceLayoutSection, ThemeSection,
+};
+use serde::Deserialize;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct TomlManifest {
+    package: PackageSection,
+    #[serde(default)]
+    compatibility: CompatibilitySection,
+    #[serde(default)]
+    dependencies: HashMap<String, DependencySpec>,
+    #[serde(default)]
+    capabilities: CapabilitiesSection,
+    #[serde(default)]
+    entrypoints: EntrypointsSection,
+    #[serde(default)]
+    accessibility: Option<AccessibilitySection>,
+    #[serde(default)]
+    settings: Option<TomlSettingsSection>,
+    #[serde(default)]
+    i18n: Option<TomlI18nSection>,
+    #[serde(default)]
+    theme: Option<TomlThemeSection>,
+    #[serde(default)]
+    service: Option<ServiceSection>,
+    #[serde(default)]
+    provides: Vec<ProvidedInterface>,
+    #[serde(default)]
+    interface: Option<InterfaceSection>,
+    #[serde(default)]
+    extensions: Vec<ExtensionSection>,
+    #[serde(default)]
+    exports: ExportsSection,
+    #[serde(default)]
+    provides_slots: HashMap<String, SlotDefinition>,
+    #[serde(default, rename = "slot-contributions")]
+    slot_contributions: HashMap<String, Vec<SlotContribution>>,
+    #[serde(default)]
+    assets: Option<AssetsSection>,
+    #[serde(default)]
+    icon_requirements: IconRequirementsSection,
+    #[serde(default)]
+    translations: HashMap<String, HashMap<String, String>>,
+    #[serde(default, rename = "surface-layout")]
+    surface_layout: Option<SurfaceLayoutSection>,
+}
+
+impl TomlManifest {
+    pub(super) fn into_manifest(self) -> Manifest {
+        Manifest {
+            package: self.package,
+            compatibility: self.compatibility,
+            dependencies: DependenciesSection {
+                modules: self.dependencies,
+                ..DependenciesSection::default()
+            },
+            capabilities: self.capabilities,
+            entrypoints: self.entrypoints,
+            accessibility: self.accessibility,
+            settings: self.settings.map(TomlSettingsSection::into_settings),
+            i18n: self.i18n.map(TomlI18nSection::into_i18n),
+            theme: self.theme.map(TomlThemeSection::into_theme),
+            service: self.service,
+            provides: self.provides,
+            interface: self.interface,
+            extensions: self.extensions,
+            exports: self.exports,
+            provides_slots: self.provides_slots,
+            slot_contributions: self.slot_contributions,
+            assets: self.assets,
+            icon_requirements: self.icon_requirements,
+            translations: self.translations,
+            surface_layout: self.surface_layout,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TomlSettingsSection {
+    #[serde(default)]
+    namespace: Option<String>,
+    #[serde(default)]
+    schema: Option<toml::Value>,
+}
+
+impl TomlSettingsSection {
+    fn into_settings(self) -> SettingsSection {
+        let (schema_path, inline_schema) = match self.schema {
+            Some(toml::Value::String(path)) => (Some(path), None),
+            Some(other) => (None, serde_json::to_value(other).ok()),
+            None => (None, None),
+        };
+
+        SettingsSection {
+            namespace: self.namespace,
+            schema_path,
+            inline_schema,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TomlI18nSection {
+    default_locale: String,
+    #[serde(default, alias = "translations")]
+    bundled: String,
+}
+
+impl TomlI18nSection {
+    fn into_i18n(self) -> I18nSection {
+        I18nSection {
+            default_locale: self.default_locale,
+            bundled: self.bundled,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TomlThemeSection {
+    #[serde(default)]
+    tokens_used: Vec<String>,
+    #[serde(default)]
+    base: Option<String>,
+    #[serde(default)]
+    modes: HashMap<String, String>,
+    #[serde(default)]
+    default_mode: Option<String>,
+    #[serde(default)]
+    extends: Option<String>,
+}
+
+impl TomlThemeSection {
+    fn into_theme(self) -> ThemeSection {
+        ThemeSection {
+            tokens_used: self.tokens_used,
+            base: self.base,
+            modes: self.modes,
+            default_mode: self.default_mode,
+            extends: self.extends,
+        }
+    }
+}

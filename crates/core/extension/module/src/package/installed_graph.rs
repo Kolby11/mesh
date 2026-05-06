@@ -1,0 +1,683 @@
+use super::{
+    InterfaceRelationship, MeshDependencies, ModuleKind, ModulePackageManifest,
+    PackageManifestError, PathContribution, RootPackageManifest, dependency_spec_to_string,
+    parse_module_entrypoint, validate_relative_path,
+};
+use crate::manifest::{self, ManifestSource};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone)]
+pub struct LoadedModuleManifest {
+    pub manifest: ModulePackageManifest,
+    pub path: PathBuf,
+    pub source: ModuleManifestSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleManifestSource {
+    PackageJson,
+    LegacyModuleJson,
+}
+
+#[derive(Debug, Clone)]
+pub struct InstalledModuleGraph {
+    modules: HashMap<String, InstalledModuleNode>,
+    backend_providers: HashMap<String, Vec<BackendProviderNode>>,
+    active_providers: HashMap<String, String>,
+    frontend_requirements: HashMap<String, FrontendRequirementSet>,
+    interface_declarations: HashMap<String, InterfaceDeclarationNode>,
+    interface_guidance: Vec<InterfaceGuidanceRecord>,
+    contributions: ModuleContributionIndex,
+    layout_entrypoint: Option<ResolvedLayoutEntrypoint>,
+}
+
+impl InstalledModuleGraph {
+    pub fn from_parts(
+        root: RootPackageManifest,
+        modules: Vec<LoadedModuleManifest>,
+    ) -> Result<Self, PackageManifestError> {
+        root.validate()?;
+        let mut loaded_by_id = HashMap::new();
+        for loaded in modules {
+            loaded.manifest.validate()?;
+            if loaded_by_id
+                .insert(loaded.manifest.name.clone(), loaded)
+                .is_some()
+            {
+                return Err(PackageManifestError::Validation(
+                    "duplicate loaded module package".into(),
+                ));
+            }
+        }
+
+        let mut graph_modules = HashMap::new();
+        let mut backend_providers: HashMap<String, Vec<BackendProviderNode>> = HashMap::new();
+        let mut frontend_requirements = HashMap::new();
+        let mut interface_declarations = HashMap::new();
+        let mut contributions = ModuleContributionIndex::default();
+
+        for (module_id, entry) in &root.modules {
+            let loaded = loaded_by_id.get(module_id).ok_or_else(|| {
+                PackageManifestError::Validation(format!(
+                    "root package references module {module_id} but no module package was loaded"
+                ))
+            })?;
+            if loaded.manifest.mesh.kind != entry.kind {
+                return Err(PackageManifestError::Validation(format!(
+                    "module {module_id} kind mismatch: root has {:?}, package has {:?}",
+                    entry.kind, loaded.manifest.mesh.kind
+                )));
+            }
+
+            let node = InstalledModuleNode {
+                id: module_id.clone(),
+                kind: entry.kind,
+                path: entry.path.clone(),
+                enabled: entry.enabled,
+                manifest: loaded.manifest.clone(),
+            };
+
+            if entry.enabled {
+                if entry.kind == ModuleKind::Frontend {
+                    frontend_requirements.insert(
+                        module_id.clone(),
+                        FrontendRequirementSet::from_dependencies(
+                            module_id,
+                            &node.manifest.mesh.dependencies,
+                        ),
+                    );
+                }
+
+                if entry.kind == ModuleKind::Interface
+                    && let Some(interface) = &node.manifest.mesh.interface
+                {
+                    let declaration = InterfaceDeclarationNode {
+                        module_id: module_id.clone(),
+                        name: interface.name.clone(),
+                        version: interface.version.clone(),
+                        domain: interface.domain.clone(),
+                        extends: interface.extends.clone(),
+                        relationship: interface.effective_relationship(),
+                        reason: interface.reason.clone(),
+                    };
+                    interface_declarations.insert(declaration.name.clone(), declaration);
+                }
+
+                for provided in node.manifest.mesh.implementations() {
+                    let provider = BackendProviderNode {
+                        module_id: module_id.clone(),
+                        interface: provided.interface.clone(),
+                        provider: provided.provider.clone(),
+                        label: provided.label.clone(),
+                        priority: provided.priority,
+                    };
+                    backend_providers
+                        .entry(provided.interface.clone())
+                        .or_default()
+                        .push(provider);
+                }
+
+                contributions.index_module(module_id, &node.manifest)?;
+            }
+
+            graph_modules.insert(module_id.clone(), node);
+        }
+
+        for providers in backend_providers.values_mut() {
+            providers.sort_by(|a, b| {
+                b.priority
+                    .cmp(&a.priority)
+                    .then_with(|| a.module_id.cmp(&b.module_id))
+            });
+        }
+
+        for (interface, module_id) in &root.providers {
+            let Some(node) = graph_modules.get(module_id) else {
+                return Err(PackageManifestError::Validation(format!(
+                    "active provider {module_id} for {interface} is not installed"
+                )));
+            };
+            if !node.enabled {
+                return Err(PackageManifestError::Validation(format!(
+                    "active provider {module_id} for {interface} is disabled"
+                )));
+            }
+            if node.kind != ModuleKind::Backend {
+                return Err(PackageManifestError::Validation(format!(
+                    "active provider {module_id} for {interface} is not a backend module"
+                )));
+            }
+            let provides_interface = backend_providers
+                .get(interface)
+                .map(|providers| {
+                    providers
+                        .iter()
+                        .any(|provider| provider.module_id == *module_id)
+                })
+                .unwrap_or(false);
+            if !provides_interface {
+                return Err(PackageManifestError::Validation(format!(
+                    "active provider {module_id} does not provide {interface}"
+                )));
+            }
+        }
+
+        let layout_entrypoint = match root.layout {
+            Some(layout) => {
+                let (module_id, entrypoint_id) = parse_module_entrypoint(&layout.entrypoint)
+                    .ok_or_else(|| {
+                        PackageManifestError::Validation(format!(
+                            "invalid layout entrypoint {}",
+                            layout.entrypoint
+                        ))
+                    })?;
+                let node = graph_modules.get(module_id).ok_or_else(|| {
+                    PackageManifestError::Validation(format!(
+                        "layout entrypoint module {module_id} is not installed"
+                    ))
+                })?;
+                if !node.enabled || node.kind != ModuleKind::Frontend {
+                    return Err(PackageManifestError::Validation(format!(
+                        "layout entrypoint module {module_id} must be an enabled frontend module"
+                    )));
+                }
+                let contribution = contributions
+                    .layout
+                    .iter()
+                    .find(|item| item.module_id == module_id && item.id == entrypoint_id)
+                    .ok_or_else(|| {
+                        PackageManifestError::Validation(format!(
+                            "layout contribution {} not found",
+                            layout.entrypoint
+                        ))
+                    })?;
+                Some(ResolvedLayoutEntrypoint {
+                    module_id: module_id.into(),
+                    entrypoint_id: entrypoint_id.into(),
+                    path: contribution.path.clone(),
+                })
+            }
+            None => None,
+        };
+        let interface_guidance = build_interface_guidance(&interface_declarations);
+
+        Ok(Self {
+            modules: graph_modules,
+            backend_providers,
+            active_providers: root.providers,
+            frontend_requirements,
+            interface_declarations,
+            interface_guidance,
+            contributions,
+            layout_entrypoint,
+        })
+    }
+
+    pub fn module(&self, id: &str) -> Option<&InstalledModuleNode> {
+        self.modules.get(id)
+    }
+
+    pub fn enabled_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules
+            .values()
+            .filter(|module| module.enabled)
+            .collect()
+    }
+
+    pub fn modules_by_kind(&self, kind: ModuleKind) -> Vec<&InstalledModuleNode> {
+        self.modules
+            .values()
+            .filter(|module| module.enabled && module.kind == kind)
+            .collect()
+    }
+
+    pub fn frontend_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::Frontend)
+    }
+
+    pub fn backend_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::Backend)
+    }
+
+    pub fn interface_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::Interface)
+    }
+
+    pub fn theme_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::Theme)
+    }
+
+    pub fn icon_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::IconPack)
+    }
+
+    pub fn font_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::FontPack)
+    }
+
+    pub fn language_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::LanguagePack)
+    }
+
+    pub fn library_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::Library)
+    }
+
+    pub fn requirements_for_frontend(&self, module_id: &str) -> Option<&FrontendRequirementSet> {
+        self.frontend_requirements.get(module_id)
+    }
+
+    pub fn declared_interface(&self, interface: &str) -> Option<&InterfaceDeclarationNode> {
+        self.interface_declarations.get(interface)
+    }
+
+    pub fn interface_guidance(&self) -> &[InterfaceGuidanceRecord] {
+        &self.interface_guidance
+    }
+
+    pub fn backend_providers_for_interface(&self, interface: &str) -> &[BackendProviderNode] {
+        self.backend_providers
+            .get(interface)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    pub fn active_provider(&self, interface: &str) -> Option<&BackendProviderNode> {
+        let module_id = self.active_providers.get(interface)?;
+        self.backend_providers_for_interface(interface)
+            .iter()
+            .find(|provider| &provider.module_id == module_id)
+    }
+
+    pub fn fallback_provider(&self, interface: &str) -> Option<&BackendProviderNode> {
+        self.backend_providers_for_interface(interface).first()
+    }
+
+    pub fn unresolved_backend_requirements(&self) -> Vec<UnresolvedModuleRequirement> {
+        let mut unresolved = Vec::new();
+        for requirements in self.frontend_requirements.values() {
+            for interface in requirements.backend.keys() {
+                if self.backend_providers_for_interface(interface).is_empty() {
+                    unresolved.push(UnresolvedModuleRequirement {
+                        module_id: requirements.module_id.clone(),
+                        requirement: interface.clone(),
+                    });
+                }
+            }
+        }
+        unresolved.sort_by(|a, b| {
+            a.module_id
+                .cmp(&b.module_id)
+                .then_with(|| a.requirement.cmp(&b.requirement))
+        });
+        unresolved
+    }
+
+    pub fn layout_entrypoint(&self) -> Option<&ResolvedLayoutEntrypoint> {
+        self.layout_entrypoint.as_ref()
+    }
+
+    pub fn contributed_themes(&self) -> &[ContributedTheme] {
+        &self.contributions.themes
+    }
+
+    pub fn contributed_icons(&self) -> &[ContributedPathResource] {
+        &self.contributions.icons
+    }
+
+    pub fn contributed_fonts(&self) -> &[ContributedPathResource] {
+        &self.contributions.fonts
+    }
+
+    pub fn contributed_i18n(&self) -> &[ContributedI18n] {
+        &self.contributions.i18n
+    }
+
+    pub fn contributed_libraries(&self) -> &[ContributedLibrary] {
+        &self.contributions.libraries
+    }
+
+    pub fn settings_schemas(&self) -> &[ContributedSettingsSchema] {
+        &self.contributions.settings
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InstalledModuleNode {
+    pub id: String,
+    pub kind: ModuleKind,
+    pub path: String,
+    pub enabled: bool,
+    pub manifest: ModulePackageManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendProviderNode {
+    pub module_id: String,
+    pub interface: String,
+    pub provider: Option<String>,
+    pub label: Option<String>,
+    pub priority: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterfaceDeclarationNode {
+    pub module_id: String,
+    pub name: String,
+    pub version: Option<String>,
+    pub domain: Option<String>,
+    pub extends: Option<String>,
+    pub relationship: InterfaceRelationship,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterfaceGuidanceRecord {
+    pub module_id: String,
+    pub interface: String,
+    pub domain: String,
+    pub recommended_base: String,
+    pub status: String,
+    pub message: String,
+}
+
+fn build_interface_guidance(
+    declarations: &HashMap<String, InterfaceDeclarationNode>,
+) -> Vec<InterfaceGuidanceRecord> {
+    let mut base_by_domain: HashMap<String, String> = HashMap::new();
+    for declaration in declarations.values() {
+        if declaration.relationship != InterfaceRelationship::Base {
+            continue;
+        }
+        let Some(domain) = &declaration.domain else {
+            continue;
+        };
+        let replace = base_by_domain.get(domain).map_or(true, |current| {
+            !current.starts_with("mesh.") && declaration.name.starts_with("mesh.")
+        });
+        if replace {
+            base_by_domain.insert(domain.clone(), declaration.name.clone());
+        }
+    }
+
+    let mut guidance = Vec::new();
+    for declaration in declarations.values() {
+        if declaration.relationship != InterfaceRelationship::Independent
+            || declaration.extends.is_some()
+        {
+            continue;
+        }
+        let Some(domain) = &declaration.domain else {
+            continue;
+        };
+        let Some(base) = base_by_domain.get(domain) else {
+            continue;
+        };
+        if base == &declaration.name {
+            continue;
+        }
+        guidance.push(InterfaceGuidanceRecord {
+            module_id: declaration.module_id.clone(),
+            interface: declaration.name.clone(),
+            domain: domain.clone(),
+            recommended_base: base.clone(),
+            status: "consider_extending_base_interface".into(),
+            message: format!(
+                "interface {} is an independent {domain} interface; prefer extending {base} when it can share normal {domain} state or commands",
+                declaration.name
+            ),
+        });
+    }
+    guidance.sort_by(|a, b| {
+        a.domain
+            .cmp(&b.domain)
+            .then_with(|| a.interface.cmp(&b.interface))
+            .then_with(|| a.module_id.cmp(&b.module_id))
+    });
+    guidance
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontendRequirementSet {
+    pub module_id: String,
+    pub modules: HashMap<String, String>,
+    pub backend: HashMap<String, String>,
+    pub icons: HashMap<String, String>,
+    pub fonts: HashMap<String, String>,
+    pub i18n: HashMap<String, String>,
+    pub themes: HashMap<String, String>,
+}
+
+impl FrontendRequirementSet {
+    fn from_dependencies(module_id: &str, dependencies: &MeshDependencies) -> Self {
+        let modules = dependencies
+            .modules
+            .iter()
+            .map(|(id, spec)| (id.clone(), dependency_spec_to_string(spec)))
+            .collect();
+        Self {
+            module_id: module_id.into(),
+            modules,
+            backend: dependencies.backend.clone(),
+            icons: dependencies.icons.clone(),
+            fonts: dependencies.fonts.clone(),
+            i18n: dependencies.i18n.clone(),
+            themes: dependencies.themes.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ModuleContributionIndex {
+    layout: Vec<ContributedLayout>,
+    themes: Vec<ContributedTheme>,
+    icons: Vec<ContributedPathResource>,
+    fonts: Vec<ContributedPathResource>,
+    i18n: Vec<ContributedI18n>,
+    libraries: Vec<ContributedLibrary>,
+    settings: Vec<ContributedSettingsSchema>,
+}
+
+impl ModuleContributionIndex {
+    fn index_module(
+        &mut self,
+        module_id: &str,
+        manifest: &ModulePackageManifest,
+    ) -> Result<(), PackageManifestError> {
+        for contribution in &manifest.mesh.contributes.layout {
+            validate_relative_path("layout entrypoint", &contribution.entrypoint)?;
+            self.layout.push(ContributedLayout {
+                module_id: module_id.into(),
+                id: contribution.id.clone(),
+                path: contribution.entrypoint.clone(),
+                label: contribution.label.clone(),
+            });
+        }
+        for contribution in &manifest.mesh.contributes.themes {
+            for path in contribution.modes.values() {
+                validate_relative_path("theme mode", path)?;
+            }
+            self.themes.push(ContributedTheme {
+                module_id: module_id.into(),
+                id: contribution.id.clone(),
+                label: contribution.label.clone(),
+                modes: contribution.modes.clone(),
+                default_mode: contribution.default_mode.clone(),
+            });
+        }
+        for contribution in &manifest.mesh.contributes.icons {
+            self.icons.push(ContributedPathResource::from_contribution(
+                module_id,
+                contribution,
+            )?);
+        }
+        for contribution in &manifest.mesh.contributes.fonts {
+            self.fonts.push(ContributedPathResource::from_contribution(
+                module_id,
+                contribution,
+            )?);
+        }
+        for contribution in &manifest.mesh.contributes.i18n {
+            validate_relative_path("i18n contribution", &contribution.path)?;
+            self.i18n.push(ContributedI18n {
+                module_id: module_id.into(),
+                id: contribution.id.clone(),
+                locale: contribution.locale.clone(),
+                path: contribution.path.clone(),
+            });
+        }
+        for contribution in &manifest.mesh.contributes.libraries {
+            contribution.validate()?;
+            self.libraries.push(ContributedLibrary {
+                module_id: module_id.into(),
+                namespace: contribution.namespace.clone(),
+                path: contribution.path.clone(),
+            });
+        }
+        if let Some(settings) = &manifest.mesh.contributes.settings {
+            self.settings.push(ContributedSettingsSchema {
+                module_id: module_id.into(),
+                namespace: settings.namespace.clone(),
+                schema: settings.schema.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnresolvedModuleRequirement {
+    pub module_id: String,
+    pub requirement: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedLayoutEntrypoint {
+    pub module_id: String,
+    pub entrypoint_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedLayout {
+    pub module_id: String,
+    pub id: String,
+    pub path: String,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedTheme {
+    pub module_id: String,
+    pub id: String,
+    pub label: String,
+    pub modes: HashMap<String, String>,
+    pub default_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedPathResource {
+    pub module_id: String,
+    pub id: String,
+    pub path: String,
+    pub label: Option<String>,
+}
+
+impl ContributedPathResource {
+    fn from_contribution(
+        module_id: &str,
+        contribution: &PathContribution,
+    ) -> Result<Self, PackageManifestError> {
+        validate_relative_path("path contribution", &contribution.path)?;
+        Ok(Self {
+            module_id: module_id.into(),
+            id: contribution.id.clone(),
+            path: contribution.path.clone(),
+            label: contribution.label.clone(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedI18n {
+    pub module_id: String,
+    pub id: String,
+    pub locale: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedLibrary {
+    pub module_id: String,
+    pub namespace: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContributedSettingsSchema {
+    pub module_id: String,
+    pub namespace: String,
+    pub schema: serde_json::Value,
+}
+
+pub fn load_installed_module_graph(
+    root_package_path: &Path,
+) -> Result<InstalledModuleGraph, PackageManifestError> {
+    let root = RootPackageManifest::from_path(root_package_path)?;
+    let root_dir = root_package_path.parent().ok_or_else(|| {
+        PackageManifestError::Validation(format!(
+            "root package path must have a parent directory: {}",
+            root_package_path.display()
+        ))
+    })?;
+    let modules_dir = root_dir.join(&root.modules_dir);
+    let mut modules = Vec::new();
+
+    for entry in root.modules.values() {
+        modules.push(load_module_manifest(&modules_dir.join(&entry.path))?);
+    }
+
+    InstalledModuleGraph::from_parts(root, modules)
+}
+
+pub fn load_module_manifest(
+    module_dir: &Path,
+) -> Result<LoadedModuleManifest, PackageManifestError> {
+    let package_json = module_dir.join("package.json");
+    if package_json.exists() {
+        let manifest = ModulePackageManifest::from_path(&package_json)?;
+        return Ok(LoadedModuleManifest {
+            manifest,
+            path: package_json,
+            source: ModuleManifestSource::PackageJson,
+        });
+    }
+
+    let module_json = module_dir.join("module.json");
+    if module_json.exists() {
+        let loaded = manifest::load_manifest(module_dir).map_err(|err| {
+            PackageManifestError::LegacyManifest {
+                path: module_dir.to_path_buf(),
+                message: err.to_string(),
+            }
+        })?;
+        let path = loaded.path.clone();
+        let manifest = ModulePackageManifest::from_legacy_manifest(loaded.manifest);
+        return Ok(LoadedModuleManifest {
+            manifest,
+            path,
+            source: match loaded.source {
+                ManifestSource::PackageJson => ModuleManifestSource::PackageJson,
+                ManifestSource::ModuleJson | ManifestSource::MeshToml => {
+                    ModuleManifestSource::LegacyModuleJson
+                }
+            },
+        });
+    }
+
+    Err(PackageManifestError::Validation(format!(
+        "no package.json or module.json found in {}",
+        module_dir.display()
+    )))
+}

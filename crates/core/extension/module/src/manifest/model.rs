@@ -1,0 +1,511 @@
+use mesh_core_capability::Capability;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// The normalized contents of a module manifest, regardless of source format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Manifest {
+    pub package: PackageSection,
+    #[serde(default)]
+    pub compatibility: CompatibilitySection,
+    #[serde(default)]
+    pub dependencies: DependenciesSection,
+    #[serde(default)]
+    pub capabilities: CapabilitiesSection,
+    #[serde(default)]
+    pub entrypoints: EntrypointsSection,
+    #[serde(default)]
+    pub accessibility: Option<AccessibilitySection>,
+    #[serde(default)]
+    pub settings: Option<SettingsSection>,
+    #[serde(default)]
+    pub i18n: Option<I18nSection>,
+    #[serde(default)]
+    pub theme: Option<ThemeSection>,
+    #[serde(default)]
+    pub service: Option<ServiceSection>,
+    #[serde(default)]
+    pub provides: Vec<ProvidedInterface>,
+    #[serde(default)]
+    pub interface: Option<InterfaceSection>,
+    #[serde(default)]
+    pub extensions: Vec<ExtensionSection>,
+    #[serde(default)]
+    pub exports: ExportsSection,
+    #[serde(default)]
+    pub provides_slots: HashMap<String, SlotDefinition>,
+    #[serde(default)]
+    pub slot_contributions: HashMap<String, Vec<SlotContribution>>,
+    #[serde(default)]
+    pub assets: Option<AssetsSection>,
+    #[serde(default)]
+    pub icon_requirements: IconRequirementsSection,
+    #[serde(default)]
+    pub translations: HashMap<String, HashMap<String, String>>,
+    #[serde(default)]
+    pub surface_layout: Option<SurfaceLayoutSection>,
+}
+
+impl Manifest {
+    /// Return normalized backend/interface declarations.
+    pub fn declared_provides(&self) -> Vec<ProvidedInterface> {
+        if !self.provides.is_empty() {
+            return self.provides.clone();
+        }
+
+        self.service
+            .as_ref()
+            .map(|service| {
+                vec![ProvidedInterface {
+                    interface: service.provides.clone(),
+                    version: None,
+                    base_module: None,
+                    backend_name: Some(service.backend_name.clone()),
+                    priority: service.priority,
+                    optional_capabilities: Vec::new(),
+                }]
+            })
+            .unwrap_or_default()
+    }
+
+    /// Return the primary service declaration for compatibility with the older runtime.
+    pub fn primary_service(&self) -> Option<ServiceSection> {
+        if let Some(service) = &self.service {
+            return Some(service.clone());
+        }
+
+        self.provides.first().map(|provided| ServiceSection {
+            provides: provided.interface.clone(),
+            backend_name: provided
+                .backend_name
+                .clone()
+                .unwrap_or_else(|| self.package.id.clone()),
+            priority: provided.priority,
+        })
+    }
+
+    pub fn required_module_dependencies(&self) -> Vec<String> {
+        self.dependencies
+            .modules
+            .iter()
+            .filter(|(_, spec)| !spec.is_optional())
+            .map(|(module_id, _)| module_id.clone())
+            .collect()
+    }
+
+    pub fn slot_host_dependencies(&self) -> Vec<String> {
+        self.slot_contributions
+            .keys()
+            .filter_map(|slot_id| slot_id.split_once(':').map(|(module_id, _)| module_id))
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    pub fn exported_component_tag(&self) -> Option<&str> {
+        self.exports
+            .component
+            .as_ref()
+            .map(|component| component.tag.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageSection {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub version: String,
+    #[serde(rename = "type")]
+    pub module_type: ModuleType,
+    pub api_version: String,
+    #[serde(default)]
+    pub license: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub authors: Vec<String>,
+    #[serde(default)]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AccessibilitySection {
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModuleType {
+    Surface,
+    Widget,
+    Backend,
+    Theme,
+    LanguagePack,
+    IconPack,
+    Interface,
+}
+
+impl std::fmt::Display for ModuleType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Surface => write!(f, "surface"),
+            Self::Widget => write!(f, "widget"),
+            Self::Backend => write!(f, "backend"),
+            Self::Theme => write!(f, "theme"),
+            Self::LanguagePack => write!(f, "language-pack"),
+            Self::IconPack => write!(f, "icon-pack"),
+            Self::Interface => write!(f, "interface"),
+        }
+    }
+}
+
+/// Legacy single-service declaration used by current `mesh.toml` manifests.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceSection {
+    pub provides: String,
+    pub backend_name: String,
+    #[serde(default)]
+    pub priority: u32,
+}
+
+/// New-style backend/interface declaration from `package.json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProvidedInterface {
+    pub interface: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub base_module: Option<String>,
+    #[serde(default)]
+    pub backend_name: Option<String>,
+    #[serde(default)]
+    pub priority: u32,
+    #[serde(default)]
+    pub optional_capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompatibilitySection {
+    #[serde(default)]
+    pub mesh: Option<String>,
+    #[serde(default)]
+    pub compositors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DependenciesSection {
+    #[serde(default)]
+    pub modules: HashMap<String, DependencySpec>,
+    #[serde(default)]
+    pub interfaces: Vec<InterfaceDependency>,
+    #[serde(default)]
+    pub icon_packs: OptionalDependencyGroup,
+    #[serde(default)]
+    pub language_packs: OptionalDependencyGroup,
+    #[serde(default)]
+    pub themes: OptionalDependencyGroup,
+    #[serde(default)]
+    pub native_libs: Vec<NativeDependency>,
+    #[serde(default)]
+    pub binaries: Vec<BinaryDependency>,
+    #[serde(default)]
+    pub fonts: Vec<FontDependency>,
+}
+
+impl DependenciesSection {
+    pub fn is_empty(&self) -> bool {
+        self.modules.is_empty()
+            && self.interfaces.is_empty()
+            && self.icon_packs.is_empty()
+            && self.language_packs.is_empty()
+            && self.themes.is_empty()
+            && self.native_libs.is_empty()
+            && self.binaries.is_empty()
+            && self.fonts.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DependencySpec {
+    Simple(String),
+    Detailed {
+        version: String,
+        #[serde(default)]
+        optional: Option<bool>,
+    },
+}
+
+impl DependencySpec {
+    pub fn is_optional(&self) -> bool {
+        matches!(
+            self,
+            Self::Detailed {
+                optional: Some(true),
+                ..
+            }
+        )
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OptionalDependencyGroup {
+    #[serde(default)]
+    pub required: Vec<String>,
+    #[serde(default)]
+    pub optional: Vec<String>,
+}
+
+impl OptionalDependencyGroup {
+    pub fn is_empty(&self) -> bool {
+        self.required.is_empty() && self.optional.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterfaceDependency {
+    pub name: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NativeDependency {
+    pub name: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BinaryDependency {
+    pub name: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub optional: bool,
+    #[serde(default)]
+    pub packages: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FontDependency {
+    pub family: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CapabilitiesSection {
+    #[serde(default)]
+    pub required: Vec<String>,
+    #[serde(default)]
+    pub optional: Vec<String>,
+}
+
+impl CapabilitiesSection {
+    pub fn required_capabilities(&self) -> Vec<Capability> {
+        self.required.iter().map(Capability::new).collect()
+    }
+
+    pub fn optional_capabilities(&self) -> Vec<Capability> {
+        self.optional.iter().map(Capability::new).collect()
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EntrypointsSection {
+    #[serde(default)]
+    pub main: Option<String>,
+    #[serde(default)]
+    pub settings_ui: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingsSection {
+    #[serde(default)]
+    pub namespace: Option<String>,
+    #[serde(default)]
+    pub schema_path: Option<String>,
+    #[serde(default)]
+    pub inline_schema: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct I18nSection {
+    pub default_locale: String,
+    pub bundled: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThemeSection {
+    #[serde(default)]
+    pub tokens_used: Vec<String>,
+    #[serde(default)]
+    pub base: Option<String>,
+    #[serde(default)]
+    pub modes: HashMap<String, String>,
+    #[serde(default)]
+    pub default_mode: Option<String>,
+    #[serde(default)]
+    pub extends: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterfaceSection {
+    pub name: String,
+    pub version: String,
+    pub file: String,
+    #[serde(default)]
+    pub extends: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtensionSection {
+    pub interface: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ExportsSection {
+    #[serde(default)]
+    pub component: Option<ComponentExport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComponentExport {
+    pub tag: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SlotDefinition {
+    #[serde(default)]
+    pub accepts: Option<String>,
+    #[serde(default)]
+    pub layout: Option<String>,
+    #[serde(default)]
+    pub max: Option<u32>,
+    #[serde(default)]
+    pub min: Option<u32>,
+    #[serde(default)]
+    pub default: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SlotContribution {
+    #[serde(default)]
+    pub widget: Option<String>,
+    #[serde(default)]
+    pub props: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub order: Option<i64>,
+    #[serde(default)]
+    pub when: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SurfaceLayoutSection {
+    /// "fixed" | "content_measured"
+    #[serde(default)]
+    pub size_policy: Option<String>,
+    /// Use content-children bounds (vs root bounds) when measuring size
+    #[serde(default)]
+    pub prefers_content_children_sizing: Option<bool>,
+    #[serde(default)]
+    pub min_width: Option<u32>,
+    #[serde(default)]
+    pub max_width: Option<u32>,
+    #[serde(default)]
+    pub min_height: Option<u32>,
+    #[serde(default)]
+    pub max_height: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AssetsSection {
+    #[serde(default)]
+    pub icons: Option<IconAssets>,
+}
+
+/// Module-shipped icons. Authoring shortcut: `"icons": "assets/icons"` is
+/// equivalent to `"icons": { "path": "assets/icons", "kind": "xdg" }` -
+/// the directory is treated as an XDG icon pack rooted there.
+///
+/// For font-glyph icon packs (Nerd Fonts and similar), use the object form
+/// with `kind = "font"` and the in-pack paths to the font file and glyph
+/// map JSON. The shell registers the pack at `<module_id>` so authors can
+/// reference its assets via candidates like `<module_id>:audio-volume-muted`
+/// in `icons.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum IconAssets {
+    Path(String),
+    Detailed(DetailedIconAssets),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetailedIconAssets {
+    pub path: String,
+    #[serde(default)]
+    pub kind: IconAssetsKind,
+    /// Required when `kind = "font"`. Path to the font file relative to
+    /// `path`. Ignored for `kind = "xdg"`.
+    #[serde(default)]
+    pub font_file: Option<String>,
+    /// Required when `kind = "font"`. Path to the JSON glyph map relative
+    /// to `path`. Ignored for `kind = "xdg"`.
+    #[serde(default)]
+    pub glyph_map: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IconAssetsKind {
+    #[default]
+    Xdg,
+    Font,
+}
+
+impl IconAssets {
+    pub fn path(&self) -> &str {
+        match self {
+            Self::Path(path) => path,
+            Self::Detailed(details) => &details.path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IconRequirementsSection {
+    #[serde(default)]
+    pub required: Vec<String>,
+    #[serde(default)]
+    pub optional: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManifestSource {
+    PackageJson,
+    MeshToml,
+    ModuleJson,
+}
+
+impl std::fmt::Display for ManifestSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PackageJson => write!(f, "package.json"),
+            Self::MeshToml => write!(f, "mesh.toml"),
+            Self::ModuleJson => write!(f, "module.json"),
+        }
+    }
+}
