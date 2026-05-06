@@ -7,15 +7,23 @@ impl FrontendSurfaceComponent {
             return;
         }
 
-        let Some(config) = self.load_icon_config_for_diagnostics() else {
+        if let Some(config) = self.load_icon_config_for_diagnostics() {
+            let Ok(mut registry) = mesh_core_icon::IconRegistry::from_config(config) else {
+                return;
+            };
+            for semantic_name in required {
+                match registry.resolve(semantic_name, 24) {
+                    mesh_core_icon::IconResolution::Found { .. } => {}
+                    mesh_core_icon::IconResolution::Missing { tried, .. } => {
+                        self.record_missing_icon_diagnostic(semantic_name, tried);
+                    }
+                }
+            }
             return;
-        };
-        let Ok(mut registry) = mesh_core_icon::IconRegistry::from_config(config) else {
-            return;
-        };
+        }
 
         for semantic_name in required {
-            match registry.resolve(semantic_name, 24) {
+            match mesh_core_icon::resolve_icon_result(semantic_name, 24) {
                 mesh_core_icon::IconResolution::Found { .. } => {}
                 mesh_core_icon::IconResolution::Missing { tried, .. } => {
                     self.record_missing_icon_diagnostic(semantic_name, tried);
@@ -25,8 +33,7 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn load_icon_config_for_diagnostics(&self) -> Option<mesh_core_icon::IconConfig> {
-        let shell_manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let workspace_root = shell_manifest_dir.join("../../..");
+        let workspace_root = self.find_workspace_root_for_diagnostics()?;
         let config_path = workspace_root.join("config/icons.toml");
 
         if let Ok(input) = std::fs::read_to_string(&config_path) {
@@ -43,11 +50,14 @@ impl FrontendSurfaceComponent {
                 }
             }
         }
+        None
+    }
 
-        mesh_core_icon::IconConfig::builtin_material(
-            shell_manifest_dir.join("../ui/icon/assets/material"),
-        )
-        .ok()
+    fn find_workspace_root_for_diagnostics(&self) -> Option<PathBuf> {
+        self.module_dir.ancestors().find_map(|ancestor| {
+            let root = ancestor.to_path_buf();
+            root.join("config/icons.toml").is_file().then_some(root)
+        })
     }
 
     pub(super) fn record_missing_icon_diagnostic(

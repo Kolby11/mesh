@@ -7,11 +7,10 @@ impl FrontendSurfaceComponent {
         slider_key: &str,
         x: f32,
         y: f32,
-    ) -> Option<CoreRequest> {
+    ) {
         let Some(node) = find_node_by_key(tree, slider_key) else {
-            return None;
+            return;
         };
-        let action = node.attributes.get("mesh-action").cloned();
         let is_vertical = node
             .attributes
             .get("orient")
@@ -19,7 +18,7 @@ impl FrontendSurfaceComponent {
             .unwrap_or(false);
         let Some((left, top, right, bottom)) = find_node_bounds_by_key(tree, slider_key, 0.0, 0.0)
         else {
-            return None;
+            return;
         };
 
         let min = node
@@ -34,7 +33,7 @@ impl FrontendSurfaceComponent {
             .unwrap_or(100.0);
 
         if max <= min {
-            return None;
+            return;
         }
 
         let pct = if is_vertical {
@@ -49,24 +48,6 @@ impl FrontendSurfaceComponent {
         };
         let value = min + (max - min) * pct;
         self.slider_values.insert(slider_key.to_string(), value);
-        if action.as_deref() == Some("audio-volume") {
-            let percent = value.round().clamp(0.0, 100.0) as u32;
-            self.update_local_audio_percent(percent);
-            if self.last_audio_slider_percent != Some(percent) {
-                self.last_audio_slider_percent = Some(percent);
-                return Some(CoreRequest::ServiceCommand {
-                    interface: "mesh.audio".to_string(),
-                    command: "set_volume".to_string(),
-                    payload: serde_json::json!({
-                        "device_id": "default",
-                        "volume": percent as f64 / 100.0,
-                    }),
-                    source_module_id: self.id().to_string(),
-                    source_capabilities: self.source_capabilities(),
-                });
-            }
-        }
-        None
     }
 
     pub(super) fn slider_value(&self, tree: &WidgetNode, slider_key: &str) -> Option<f32> {
@@ -108,40 +89,6 @@ impl FrontendSurfaceComponent {
         })
     }
 
-    pub(super) fn slider_release_request(
-        &self,
-        tree: &WidgetNode,
-        slider_key: &str,
-    ) -> Option<CoreRequest> {
-        let node = find_node_by_key(tree, slider_key)?;
-        match node.attributes.get("mesh-action").map(String::as_str) {
-            Some("audio-volume") => {
-                let value = self
-                    .slider_values
-                    .get(slider_key)
-                    .copied()
-                    .or_else(|| {
-                        node.attributes
-                            .get("value")
-                            .and_then(|value| value.parse::<f32>().ok())
-                    })
-                    .unwrap_or(0.0);
-                let percent = value.round().clamp(0.0, 100.0) as u32;
-                Some(CoreRequest::ServiceCommand {
-                    interface: "mesh.audio".to_string(),
-                    command: "set_volume".to_string(),
-                    payload: serde_json::json!({
-                        "device_id": "default",
-                        "volume": percent as f64 / 100.0,
-                    }),
-                    source_module_id: self.id().to_string(),
-                    source_capabilities: self.source_capabilities(),
-                })
-            }
-            _ => None,
-        }
-    }
-
     pub(super) fn build_click_event(
         &self,
         tree: &WidgetNode,
@@ -164,7 +111,7 @@ impl FrontendSurfaceComponent {
         });
         let position = serde_json::json!({
             "margin_left": left.round() as i32,
-            "margin_top": bottom.round() as i32,
+            "margin_bottom": bottom.round() as i32,
         });
         let tag = target.map(|node| node.tag.clone()).unwrap_or_default();
         let mut current_target = target
@@ -250,12 +197,7 @@ impl FrontendSurfaceComponent {
 
                         if is_slider_key(&tree, &node_key) {
                             self.active_slider_key = Some(node_key.clone());
-                            self.last_audio_slider_percent = None;
-                            if let Some(request) =
-                                self.update_slider_from_position(&tree, &node_key, x, y)
-                            {
-                                requests.push(request);
-                            }
+                            self.update_slider_from_position(&tree, &node_key, x, y);
                             if let Some(value) = self.slider_value(&tree, &node_key) {
                                 requests.extend(self.call_node_handler(
                                     &tree,
@@ -266,7 +208,6 @@ impl FrontendSurfaceComponent {
                             }
                         } else {
                             self.active_slider_key = None;
-                            self.last_audio_slider_percent = None;
                             if find_node_by_key(&tree, &node_key).is_some_and(|node| {
                                 matches!(node.tag.as_str(), "switch" | "checkbox")
                             }) {
@@ -288,16 +229,10 @@ impl FrontendSurfaceComponent {
                         self.focused_key = None;
                         self.pointer_down_key = None;
                         self.active_slider_key = None;
-                        self.last_audio_slider_percent = None;
                         self.dirty = true;
                     }
                 } else {
                     let mut requests = Vec::new();
-                    let slider_request = self
-                        .active_slider_key
-                        .as_ref()
-                        .and_then(|slider_key| self.slider_release_request(&tree, slider_key));
-
                     if let Some(slider_key) = self.active_slider_key.clone()
                         && let Some(value) = self.slider_value(&tree, &slider_key)
                     {
@@ -321,23 +256,16 @@ impl FrontendSurfaceComponent {
                     }
                     self.pointer_down_key = None;
                     self.active_slider_key = None;
-                    self.last_audio_slider_percent = None;
-                    if let Some(request) = slider_request {
-                        requests.push(request);
-                    }
+                    self.dirty = true;
                     if !requests.is_empty() {
-                        self.dirty = true;
                         return Ok(requests);
                     }
                 }
             }
             ComponentInput::PointerMove { x, y } => {
                 if let Some(slider_key) = self.active_slider_key.clone() {
-                    let request = self.update_slider_from_position(&tree, &slider_key, x, y);
+                    self.update_slider_from_position(&tree, &slider_key, x, y);
                     let mut requests = Vec::new();
-                    if let Some(request) = request {
-                        requests.push(request);
-                    }
                     if let Some(value) = self.slider_value(&tree, &slider_key) {
                         requests.extend(self.call_node_handler(
                             &tree,

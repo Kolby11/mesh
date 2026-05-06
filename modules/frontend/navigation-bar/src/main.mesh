@@ -2,17 +2,39 @@
   <row class="nav-shell">
     <box class="meta">
         <SettingsButton />
-        <VolumeButton />
+        <VolumeButton onActivate={audio_surface_handler} />
         <ThemeButton />
     </box>
+    <AudioPopover hidden={audio_surface_hidden} />
   </row>
 </template>
 
 <script lang="luau">
+import AudioPopover from "@mesh/audio-popover"
 import MetaLabel from "./components/meta-label.mesh"
 import SettingsButton from "./components/settings-button.mesh"
 import VolumeButton from "./components/volume-button.mesh"
 import ThemeButton from "./components/theme-button.mesh"
+
+audio_surface_id = "@mesh/audio-popover"
+audio_surface_hidden = true
+audio_surface_handler = "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface"
+
+function onToggleAudioSurface(event)
+    local position = event.current_target.position or {}
+    local margin_left = tonumber(position.margin_left) or 0
+    local margin_top = (tonumber(position.margin_bottom) or 0) + 8
+
+    if audio_surface_hidden then
+        mesh.events.publish("shell.position-surface", {
+            surface_id = audio_surface_id,
+            margin_top = margin_top,
+            margin_left = margin_left
+        })
+    end
+
+    audio_surface_hidden = not audio_surface_hidden
+end
 </script>
 
 <style>

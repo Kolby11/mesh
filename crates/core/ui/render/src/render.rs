@@ -410,7 +410,15 @@ fn build_component_ref(
     host_instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> WidgetNode {
-    let (_, _, props, _) = parse_attributes(&component.props, state);
+    let (_, _, mut props, _) = parse_attributes(&component.props, state);
+    for attr in &component.props {
+        if let AttributeValue::EventHandler(handler) = &attr.value {
+            props.insert(
+                attr.name.clone(),
+                resolve_event_handler_value(state, handler),
+            );
+        }
+    }
     if let Some(composition) = composition {
         if let Some(node) = composition.render_import(
             manifest,
@@ -478,12 +486,21 @@ pub(crate) fn parse_attributes(
                 resolved.insert(attr.name.clone(), value);
             }
             AttributeValue::EventHandler(handler) => {
-                event_handlers.insert(normalize_event_handler_name(&attr.name), handler.clone());
+                let resolved_handler = resolve_event_handler_value(state, handler);
+                event_handlers.insert(normalize_event_handler_name(&attr.name), resolved_handler);
             }
         }
     }
 
     (classes, id, resolved, event_handlers)
+}
+
+fn resolve_event_handler_value(state: Option<&dyn VariableStore>, handler: &str) -> String {
+    state
+        .and_then(|store| store.get(handler))
+        .and_then(|value| value.as_str().map(str::to_string))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| handler.to_string())
 }
 
 fn normalize_event_handler_name(name: &str) -> String {

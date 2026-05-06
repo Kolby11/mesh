@@ -2,7 +2,7 @@
   <row class="volume-widget" title="{audio_tooltip}">
     <button
       class="volume-button"
-      onclick={onVolumeClick}
+      onclick={onActivate}
       title="{audio_tooltip}"
       aria-label="{t('nav.open_audio')}"
     >
@@ -54,9 +54,7 @@ function onRender()
     update_audio_copy(percent, muted)
 end
 
-function onVolumeClick(event)
-    audio_tooltip = "Standalone volume surface removed"
-    mesh.log.info("[navigation-bar] volume button pressed; no standalone volume surface is installed")
+function onActivate()
 end
 </script>
 

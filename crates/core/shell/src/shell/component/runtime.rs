@@ -63,32 +63,6 @@ impl FrontendSurfaceComponent {
         }
     }
 
-    pub(super) fn update_local_audio_percent(&self, percent: u32) {
-        let percent = percent.min(100);
-        for runtime in self.runtimes.lock().unwrap().values_mut() {
-            if !runtime
-                .script_ctx
-                .capabilities
-                .is_granted(&Capability::new("service.audio.read"))
-            {
-                continue;
-            }
-            let mut audio = runtime
-                .script_ctx
-                .state()
-                .get("audio")
-                .unwrap_or_else(|| serde_json::json!({}));
-            if let Some(obj) = audio.as_object_mut() {
-                obj.insert("percent".into(), serde_json::Value::from(percent));
-            }
-            runtime.script_ctx.state_mut().set("audio", audio);
-        }
-    }
-
-    pub(super) fn source_capabilities(&self) -> CapabilitySet {
-        grant_capabilities_from_manifest(&self.compiled.manifest)
-    }
-
     pub(super) fn runtime_state(
         &self,
         instance_key: &str,

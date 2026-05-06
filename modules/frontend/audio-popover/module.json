@@ -1,10 +1,10 @@
 {
-  "id": "@mesh/navigation-bar",
-  "name": "Navigation Bar",
+  "id": "@mesh/audio-popover",
+  "name": "Audio Popover",
   "version": "0.1.0",
   "type": "surface",
   "api_version": "0.1",
-  "description": "Top-edge navigation bar surface.",
+  "description": "Compact audio controls surface anchored from the navigation bar.",
   "authors": [
     "MESH Project"
   ],
@@ -18,14 +18,11 @@
     "required": [
       "shell.surface",
       "service.audio.read",
-      "theme.read",
+      "service.audio.control",
       "locale.read"
     ]
   },
   "dependencies": {
-    "modules": {
-      "@mesh/audio-popover": ">=0.1.0"
-    },
     "icon_packs": {
       "required": [
         "material"
@@ -34,9 +31,6 @@
   },
   "icon_requirements": {
     "required": [
-      "settings",
-      "weather-clear-night",
-      "weather-clear",
       "audio-volume-muted",
       "audio-volume-low",
       "audio-volume-medium",
@@ -47,11 +41,11 @@
     "main": "src/main.mesh"
   },
   "settings": {
-    "namespace": "@mesh/navigation-bar",
+    "namespace": "@mesh/audio-popover",
     "schema": {
       "surface": {
         "type": "object",
-        "description": "Placement and sizing for the navigation bar surface.",
+        "description": "Placement and sizing for the audio popover surface.",
         "properties": {
           "anchor": {
             "type": "enum",
@@ -61,7 +55,7 @@
               "left",
               "right"
             ],
-            "default": "top",
+            "default": "left",
             "description": "Screen edge this surface anchors to."
           },
           "layer": {
@@ -72,26 +66,26 @@
               "top",
               "overlay"
             ],
-            "default": "top",
+            "default": "overlay",
             "description": "Layer-shell stacking layer."
           },
           "width": {
             "type": "integer",
-            "default": 0,
-            "min": 0,
+            "default": 280,
+            "min": 160,
             "max": 7680,
-            "description": "Surface width in pixels. Use 0 to span the full output width."
+            "description": "Surface width in pixels."
           },
           "height": {
             "type": "integer",
-            "default": 56,
-            "min": 32,
-            "max": 160,
+            "default": 164,
+            "min": 96,
+            "max": 1080,
             "description": "Surface height in pixels."
           },
           "exclusive_zone": {
             "type": "integer",
-            "default": 56,
+            "default": 0,
             "min": 0,
             "max": 256,
             "description": "Reserved compositor space in pixels."
@@ -108,7 +102,7 @@
           },
           "visible_on_start": {
             "type": "boolean",
-            "default": true,
+            "default": false,
             "description": "Whether this surface starts visible when Mesh boots."
           }
         }
@@ -119,8 +113,8 @@
     "size_policy": "fixed"
   },
   "accessibility": {
-    "role": "toolbar",
-    "label": "Navigation bar",
-    "description": "Top-level navigation bar surface"
+    "role": "dialog",
+    "label": "Audio controls",
+    "description": "Compact audio controls popover"
   }
 }

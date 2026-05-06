@@ -267,6 +267,29 @@ mod tests {
     }
 
     #[test]
+    fn resolves_event_handler_props_from_state_strings() {
+        let attrs = vec![Attribute {
+            name: "onclick".into(),
+            value: AttributeValue::EventHandler("onActivate".into()),
+        }];
+        let store = MapStore(
+            [(
+                "onActivate".to_string(),
+                serde_json::json!("__mesh_embed__::@test/root::toggleSurface"),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        let (_, _, _, handlers) = render::parse_attributes(&attrs, Some(&store));
+
+        assert_eq!(
+            handlers.get("click").map(String::as_str),
+            Some("__mesh_embed__::@test/root::toggleSurface")
+        );
+    }
+
+    #[test]
     fn eval_expr_length_operator() {
         let store = MapStore(
             [("items".to_string(), serde_json::json!(["a", "b", "c"]))]

@@ -136,7 +136,7 @@ pub(super) fn annotate_runtime_tree(
                         .get("value")
                         .and_then(|value: &String| value.parse::<f32>().ok())
                 })
-                .unwrap_or(50.0);
+                .unwrap_or(0.0);
             node.attributes
                 .insert("value".into(), format!("{value:.2}"));
         }

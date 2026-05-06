@@ -1,7 +1,8 @@
 use super::*;
+use crate::shell::component::catalog::FrontendCatalogEntry;
 use mesh_core_capability::Capability;
 use mesh_core_component::parse_component;
-use mesh_core_elements::LayoutRect;
+use mesh_core_elements::{Color, LayoutRect};
 use mesh_core_module::manifest::{
     CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
     ExportsSection, Manifest, ModuleType, PackageSection,
@@ -377,37 +378,20 @@ fn first_node_by_tag<'a>(node: &'a WidgetNode, tag: &str) -> Option<&'a WidgetNo
 }
 
 fn node_by_mesh_key<'a>(node: &'a WidgetNode, key: &str) -> &'a WidgetNode {
+    find_node_by_mesh_key(node, key).unwrap_or_else(|| panic!("expected node with _mesh_key {key}"))
+}
+
+fn find_node_by_mesh_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetNode> {
     if node
         .attributes
         .get("_mesh_key")
         .is_some_and(|value| value == key)
     {
-        return node;
+        return Some(node);
     }
     node.children
         .iter()
-        .find_map(|child| {
-            if child
-                .attributes
-                .get("_mesh_key")
-                .is_some_and(|value| value == key)
-            {
-                Some(child)
-            } else {
-                child.children.iter().find_map(|grandchild| {
-                    if grandchild
-                        .attributes
-                        .get("_mesh_key")
-                        .is_some_and(|value| value == key)
-                    {
-                        Some(grandchild)
-                    } else {
-                        None
-                    }
-                })
-            }
-        })
-        .unwrap_or_else(|| panic!("expected node with _mesh_key {key}"))
+        .find_map(|child| find_node_by_mesh_key(child, key))
 }
 
 #[test]
@@ -1199,10 +1183,10 @@ fn click_handler_keeps_current_target_position_payload() {
 <template><box /></template>
 <script lang="luau">
 click_left = -1
-click_top = -1
+click_bottom = -1
 function onButtonClick(event)
     click_left = event.current_target.position.margin_left
-    click_top = event.current_target.position.margin_top
+    click_bottom = event.current_target.position.margin_bottom
 end
 </script>
 "#,
@@ -1244,7 +1228,63 @@ end
         .unwrap();
 
     assert_eq!(runtime_number(&component, "click_left"), 32.0);
-    assert_eq!(runtime_number(&component, "click_top"), 28.0);
+    assert_eq!(runtime_number(&component, "click_bottom"), 28.0);
+}
+
+#[test]
+fn pointer_release_without_requests_still_clears_active_state() {
+    let mut component =
+        test_frontend_component("<template><button class=\"pressable\" /></template>");
+    component.last_tree = Some(root_with(vec![event_node(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        48.0,
+        24.0,
+        &[],
+    )]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerButton {
+                x: 8.0,
+                y: 8.0,
+                pressed: true,
+            },
+        )
+        .unwrap();
+
+    assert!(component.wants_render(), "press should dirty the component");
+    component.dirty = false;
+
+    let release_requests = component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerButton {
+                x: 8.0,
+                y: 8.0,
+                pressed: false,
+            },
+        )
+        .unwrap();
+
+    assert!(
+        release_requests.is_empty(),
+        "plain button release should not synthesize service requests"
+    );
+    assert!(
+        component.wants_render(),
+        "release must dirty the component so :active styling is cleared"
+    );
+    assert!(component.pointer_down_key.is_none());
+    assert!(component.active_slider_key.is_none());
 }
 
 #[test]
@@ -1640,7 +1680,7 @@ fn icon_reliability_core_surfaces_proof() {
     }
     assert!(config.active_profile().icons.contains_key("missing-proof"));
 
-    let surface_manifests = [root.join("packages/modules/frontend/core/navigation-bar")];
+    let surface_manifests = [root.join("modules/frontend/navigation-bar")];
     for module_dir in surface_manifests {
         let loaded = mesh_core_module::manifest::load_manifest(&module_dir).unwrap();
         assert!(
@@ -1664,12 +1704,12 @@ fn icon_reliability_core_surfaces_proof() {
     }
 
     for path in [
-        "packages/modules/frontend/core/navigation-bar/src/main.mesh",
-        "packages/modules/frontend/core/navigation-bar/src/components/volume-button.mesh",
-        "packages/modules/frontend/core/navigation-bar/src/components/settings-button.mesh",
-        "packages/modules/frontend/core/navigation-bar/src/components/theme-button.mesh",
-        "packages/modules/frontend/core/navigation-bar/src/components/battery-widget.mesh",
-        "packages/modules/frontend/core/navigation-bar/src/components/battery-button.mesh",
+        "modules/frontend/navigation-bar/src/main.mesh",
+        "modules/frontend/navigation-bar/src/components/volume-button.mesh",
+        "modules/frontend/navigation-bar/src/components/settings-button.mesh",
+        "modules/frontend/navigation-bar/src/components/theme-button.mesh",
+        "modules/frontend/navigation-bar/src/components/battery-widget.mesh",
+        "modules/frontend/navigation-bar/src/components/battery-button.mesh",
     ] {
         let source = fs::read_to_string(root.join(path)).unwrap();
         for line in source.lines().filter(|line| line.contains("<icon")) {
@@ -2449,6 +2489,337 @@ end
 }
 
 #[test]
+fn navigation_volume_button_opens_audio_surface_via_parent_handler() {
+    let button_component = parse_component(
+        r#"
+<template>
+  <button onclick={onActivate}>Volume</button>
+</template>
+
+<script lang="luau">
+function onActivate()
+end
+</script>
+"#,
+    )
+    .unwrap();
+    let root_component = parse_component(
+        r#"
+<template>
+  <row>
+    <VolumeButton onActivate={audio_surface_handler} />
+    <AudioPopover hidden={audio_surface_hidden} />
+  </row>
+</template>
+
+<script lang="luau">
+import AudioPopover from "@mesh/audio-popover"
+import VolumeButton from "./components/volume-button.mesh"
+
+audio_surface_id = "@mesh/audio-popover"
+audio_surface_hidden = true
+audio_surface_handler = "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface"
+
+function onToggleAudioSurface(event)
+    local position = event.current_target.position or {}
+    local margin_left = tonumber(position.margin_left) or 0
+    local margin_top = (tonumber(position.margin_bottom) or 0) + 8
+
+    if audio_surface_hidden then
+        mesh.events.publish("shell.position-surface", {
+            surface_id = audio_surface_id,
+            margin_top = margin_top,
+            margin_left = margin_left
+        })
+    end
+
+    audio_surface_hidden = not audio_surface_hidden
+end
+</script>
+"#,
+    )
+    .unwrap();
+    let popover_component = parse_component("<template><box /></template>").unwrap();
+
+    let mut root_manifest = minimal_test_manifest("@mesh/navigation-bar");
+    root_manifest.dependencies.modules.insert(
+        "@mesh/audio-popover".into(),
+        mesh_core_module::manifest::DependencySpec::Simple(">=0.1.0".into()),
+    );
+    let popover_manifest = minimal_test_manifest("@mesh/audio-popover");
+
+    let root_compiled = CompiledFrontendModule {
+        manifest: root_manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: root_component,
+        local_components: HashMap::from([("VolumeButton".into(), button_component)]),
+        module_component_imports: HashMap::from([(
+            "AudioPopover".into(),
+            "@mesh/audio-popover".into(),
+        )]),
+    };
+    let popover_compiled = CompiledFrontendModule {
+        manifest: popover_manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: popover_component,
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+    };
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([
+            (
+                "@mesh/navigation-bar".into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("."),
+                    compiled: root_compiled.clone(),
+                },
+            ),
+            (
+                "@mesh/audio-popover".into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("."),
+                    compiled: popover_compiled,
+                },
+            ),
+        ]),
+        slot_contributions: HashMap::new(),
+    };
+    let mut component = FrontendSurfaceComponent::new(
+        root_compiled,
+        PathBuf::from("."),
+        catalog,
+        InterfaceCatalog::default(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: "@mesh/navigation-bar".into(),
+            surface_id: "@mesh/navigation-bar".into(),
+            diagnostics: Diagnostics::new("@mesh/navigation-bar"),
+        })
+        .unwrap();
+    component.visible = true;
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(220, 80);
+    component.paint(&theme, 220, 80, &mut buffer).unwrap();
+    let tree = component.last_tree.as_ref().expect("rendered tree");
+    let button = first_node_by_tag(tree, "button").expect("button node");
+    let handler = button
+        .event_handlers
+        .get("click")
+        .expect("click handler")
+        .clone();
+
+    assert_eq!(
+        handler,
+        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface"
+    );
+
+    let requests = component
+        .call_namespaced_handler(
+            &handler,
+            &[serde_json::json!({
+                "current_target": {
+                    "position": {
+                        "margin_left": 32,
+                        "margin_bottom": 40
+                    }
+                }
+            })],
+        )
+        .unwrap();
+
+    match requests.as_slice() {
+        [
+            CoreRequest::PositionSurface {
+                surface_id,
+                margin_top,
+                margin_left,
+            },
+        ] => {
+            assert_eq!(surface_id, "@mesh/audio-popover");
+            assert_eq!(*margin_left, 32);
+            assert_eq!(*margin_top, 48);
+        }
+        other => panic!("expected audio popover position request, got {other:?}"),
+    }
+
+    assert!(!runtime_bool(&component, "audio_surface_hidden"));
+
+    component.paint(&theme, 220, 80, &mut buffer).unwrap();
+    let visibility_requests = component.tick().unwrap();
+    match visibility_requests.as_slice() {
+        [CoreRequest::ShowSurface { surface_id }] => {
+            assert_eq!(surface_id, "@mesh/audio-popover");
+        }
+        other => {
+            panic!("expected audio popover show request from portal visibility, got {other:?}")
+        }
+    }
+}
+
+#[test]
+fn navigation_volume_button_second_click_hides_audio_surface_via_parent_handler() {
+    let button_component = parse_component(
+        r#"
+<template>
+  <button onclick={onActivate}>Volume</button>
+</template>
+
+<script lang="luau">
+function onActivate()
+end
+</script>
+"#,
+    )
+    .unwrap();
+    let root_component = parse_component(
+        r#"
+<template>
+  <row>
+    <VolumeButton onActivate={audio_surface_handler} />
+    <AudioPopover hidden={audio_surface_hidden} />
+  </row>
+</template>
+
+<script lang="luau">
+import AudioPopover from "@mesh/audio-popover"
+import VolumeButton from "./components/volume-button.mesh"
+
+audio_surface_id = "@mesh/audio-popover"
+audio_surface_hidden = true
+audio_surface_handler = "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface"
+
+function onToggleAudioSurface(event)
+    local position = event.current_target.position or {}
+    local margin_left = tonumber(position.margin_left) or 0
+    local margin_top = (tonumber(position.margin_bottom) or 0) + 8
+
+    if audio_surface_hidden then
+        mesh.events.publish("shell.position-surface", {
+            surface_id = audio_surface_id,
+            margin_top = margin_top,
+            margin_left = margin_left
+        })
+    end
+
+    audio_surface_hidden = not audio_surface_hidden
+end
+</script>
+"#,
+    )
+    .unwrap();
+    let popover_component = parse_component("<template><box /></template>").unwrap();
+
+    let mut root_manifest = minimal_test_manifest("@mesh/navigation-bar");
+    root_manifest.dependencies.modules.insert(
+        "@mesh/audio-popover".into(),
+        mesh_core_module::manifest::DependencySpec::Simple(">=0.1.0".into()),
+    );
+    let popover_manifest = minimal_test_manifest("@mesh/audio-popover");
+
+    let root_compiled = CompiledFrontendModule {
+        manifest: root_manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: root_component,
+        local_components: HashMap::from([("VolumeButton".into(), button_component)]),
+        module_component_imports: HashMap::from([(
+            "AudioPopover".into(),
+            "@mesh/audio-popover".into(),
+        )]),
+    };
+    let popover_compiled = CompiledFrontendModule {
+        manifest: popover_manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: popover_component,
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+    };
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([
+            (
+                "@mesh/navigation-bar".into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("."),
+                    compiled: root_compiled.clone(),
+                },
+            ),
+            (
+                "@mesh/audio-popover".into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("."),
+                    compiled: popover_compiled,
+                },
+            ),
+        ]),
+        slot_contributions: HashMap::new(),
+    };
+    let mut component = FrontendSurfaceComponent::new(
+        root_compiled,
+        PathBuf::from("."),
+        catalog,
+        InterfaceCatalog::default(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: "@mesh/navigation-bar".into(),
+            surface_id: "@mesh/navigation-bar".into(),
+            diagnostics: Diagnostics::new("@mesh/navigation-bar"),
+        })
+        .unwrap();
+    component.visible = true;
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(220, 80);
+    component.paint(&theme, 220, 80, &mut buffer).unwrap();
+    let tree = component.last_tree.as_ref().expect("rendered tree");
+    let button = first_node_by_tag(tree, "button").expect("button node");
+    let handler = button
+        .event_handlers
+        .get("click")
+        .expect("click handler")
+        .clone();
+
+    let click_event = serde_json::json!({
+        "current_target": {
+            "position": {
+                "margin_left": 32,
+                "margin_bottom": 40
+            }
+        }
+    });
+    component
+        .call_namespaced_handler(&handler, std::slice::from_ref(&click_event))
+        .unwrap();
+    component.paint(&theme, 220, 80, &mut buffer).unwrap();
+    let show_requests = component.tick().unwrap();
+    assert!(matches!(
+        show_requests.as_slice(),
+        [CoreRequest::ShowSurface { surface_id }] if surface_id == "@mesh/audio-popover"
+    ));
+
+    let requests = component
+        .call_namespaced_handler(&handler, &[click_event])
+        .unwrap();
+    assert!(
+        requests.is_empty(),
+        "closing toggle should not publish direct shell events"
+    );
+    assert!(runtime_bool(&component, "audio_surface_hidden"));
+
+    component.paint(&theme, 220, 80, &mut buffer).unwrap();
+    let requests = component.tick().unwrap();
+    match requests.as_slice() {
+        [CoreRequest::HideSurface { surface_id }] => {
+            assert_eq!(surface_id, "@mesh/audio-popover");
+        }
+        other => {
+            panic!("expected audio popover hide request from portal visibility, got {other:?}")
+        }
+    }
+}
+
+#[test]
 fn real_core_surfaces_quick_settings_commands_publish_service_requests() {
     let mut audio_ctx = make_audio_ctx();
     audio_ctx
@@ -2539,21 +2910,21 @@ fn real_core_surfaces_reject_legacy_service_callback_api_in_shipped_surfaces() {
             "navigation-bar root",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../../packages/modules/frontend/core/navigation-bar/src/main.mesh"
+                "/../../../modules/frontend/navigation-bar/src/main.mesh"
             )),
         ),
         (
             "navigation-bar volume button",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../../packages/modules/frontend/core/navigation-bar/src/components/volume-button.mesh"
+                "/../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
             )),
         ),
         (
             "navigation-bar settings button",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../../packages/modules/frontend/core/navigation-bar/src/components/settings-button.mesh"
+                "/../../../modules/frontend/navigation-bar/src/components/settings-button.mesh"
             )),
         ),
     ];

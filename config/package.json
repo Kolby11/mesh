@@ -12,6 +12,11 @@
         "path": "frontend/navigation-bar",
         "enabled": true
       },
+      "@mesh/audio-popover": {
+        "kind": "frontend",
+        "path": "frontend/audio-popover",
+        "enabled": true
+      },
       "@mesh/pipewire-audio": {
         "kind": "backend",
         "path": "backend/pipewire-audio",
