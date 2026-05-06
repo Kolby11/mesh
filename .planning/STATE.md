@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Rendering System Upgrade
 status: planning
-stopped_at: Phase 10 UI-SPEC approved
-last_updated: "2026-05-06T09:32:51.154Z"
+stopped_at: Phase 10 plans ready
+last_updated: "2026-05-06T09:43:45.000Z"
 last_activity: 2026-05-06
 progress:
   total_phases: 6
   completed_phases: 2
-  total_plans: 9
+  total_plans: 12
   completed_plans: 9
-  percent: 100
+  percent: 75
 ---
 
 # State: MESH v1.2
@@ -26,8 +26,8 @@ See: `.planning/PROJECT.md` (updated 2026-05-05)
 ## Current Position
 
 Phase: 10
-Plan: Not started
-Status: Ready to plan
+Plan: 10-01
+Status: Ready to execute
 Last activity: 2026-05-06
 
 ## Decisions
@@ -68,6 +68,10 @@ Last activity: 2026-05-06
 - [Phase 04]: Plan 05 makes theme file-watch reload return pending CoreRequest queues and synchronize mesh.theme only when the resolved active theme id changes.
 - [Phase 09]: Disabled pseudo state is derived from disabled and aria-disabled attributes during runtime annotation.
 - [Phase 09]: Focus-visible remains mapped to focused state until a keyboard modality source exists.
+- [Phase 10]: The first release is explicit opt-in selectable text only, limited to a single selectable text node with wrapped-line support inside that node.
+- [Phase 10]: Interactive control labels, clipped or ellipsized text, and nested cross-node selection are deferred beyond the first Phase 10 release.
+- [Phase 10]: Selection colors are shell/theme-owned through dedicated `color.selection-background` and `color.selection-foreground` tokens.
+- [Phase 10]: Standard copy behavior routes through explicit `Ctrl+C` handling only when a Phase 10 selection exists.
 
 ## Performance Metrics
 
@@ -99,9 +103,9 @@ Last activity: 2026-05-06
 
 ## Session
 
-Last session: 2026-05-06T09:32:51.145Z
-Stopped At: Phase 10 UI-SPEC approved
-Resume File: .planning/phases/10-selectable-text-and-clipboard-copy/10-UI-SPEC.md
+Last session: 2026-05-06T09:43:45.000Z
+Stopped At: Phase 10 plans ready
+Resume File: .planning/phases/10-selectable-text-and-clipboard-copy/10-01-PLAN.md
 
 ## Accumulated Context
 
@@ -139,4 +143,4 @@ Items accepted at `v1.1` close:
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-06 after Phase 9 completion*
+*State updated: 2026-05-06 after Phase 10 planning*
