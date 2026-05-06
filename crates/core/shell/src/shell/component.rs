@@ -54,6 +54,19 @@ const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
 const TOOLTIP_OVERLAY_WIDTH: u32 = 260;
 const TOOLTIP_OVERLAY_HEIGHT: u32 = 96;
 
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct TextSelectionPoint {
+    pub(super) node_key: String,
+    pub(super) x: f32,
+    pub(super) y: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct TextSelectionState {
+    pub(super) anchor: TextSelectionPoint,
+    pub(super) focus: TextSelectionPoint,
+}
+
 pub(super) struct FrontendSurfaceComponent {
     pub(super) compiled: CompiledFrontendModule,
     pub(super) module_dir: PathBuf,
@@ -67,6 +80,7 @@ pub(super) struct FrontendSurfaceComponent {
     focused_key: Option<String>,
     pointer_down_key: Option<String>,
     active_slider_key: Option<String>,
+    selection: Option<TextSelectionState>,
     input_values: HashMap<String, String>,
     slider_values: HashMap<String, f32>,
     checked_values: HashMap<String, bool>,
@@ -123,6 +137,7 @@ impl FrontendSurfaceComponent {
             focused_key: None,
             pointer_down_key: None,
             active_slider_key: None,
+            selection: None,
             input_values: HashMap::new(),
             slider_values: HashMap::new(),
             checked_values: HashMap::new(),

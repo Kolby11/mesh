@@ -1,6 +1,30 @@
 use super::*;
 
 impl FrontendSurfaceComponent {
+    fn selectable_text_target_key(&self, tree: &WidgetNode, x: f32, y: f32) -> Option<String> {
+        let path = find_node_path_at(tree, x, y)?;
+        if path.iter().any(|key| {
+            find_node_by_key(tree, key).is_some_and(|node| {
+                matches!(
+                    node.tag.as_str(),
+                    "button" | "slider" | "switch" | "checkbox" | "input"
+                ) || node.event_handlers.contains_key("click")
+            })
+        }) {
+            return None;
+        }
+
+        path.into_iter().rev().find(|key| {
+            find_node_by_key(tree, key).is_some_and(|node| {
+                node.tag == "text"
+                    && node
+                        .attributes
+                        .get("selectable")
+                        .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1"))
+            })
+        })
+    }
+
     pub(super) fn update_slider_from_position(
         &mut self,
         tree: &WidgetNode,
@@ -175,6 +199,16 @@ impl FrontendSurfaceComponent {
         match input {
             ComponentInput::PointerButton { x, y, pressed } => {
                 if pressed {
+                    if let Some(selection_key) = self.selectable_text_target_key(&tree, x, y) {
+                        self.focused_key = None;
+                        self.pointer_down_key = None;
+                        self.active_slider_key = None;
+                        self.begin_text_selection(selection_key, x, y);
+                        self.dirty = true;
+                        return Ok(Vec::new());
+                    }
+
+                    self.clear_selection();
                     if let Some(node_key) = self.pointer_event_target_key(&tree, x, y) {
                         self.pointer_down_key = Some(node_key.clone());
                         let mut requests = Vec::new();
@@ -244,6 +278,11 @@ impl FrontendSurfaceComponent {
                         )?);
                     }
 
+                    if self.selection.is_some() && self.pointer_down_key.is_none() {
+                        self.dirty = true;
+                        return Ok(requests);
+                    }
+
                     if let Some(node_key) = self.pointer_event_target_key(&tree, x, y) {
                         if self.pointer_down_key.as_deref() == Some(node_key.as_str()) {
                             if let Some(handler) = find_click_handler(&tree, &node_key) {
@@ -278,6 +317,11 @@ impl FrontendSurfaceComponent {
                     if !requests.is_empty() {
                         return Ok(requests);
                     }
+                }
+
+                if self.selection.is_some() {
+                    self.update_text_selection_focus(x, y);
+                    self.dirty = true;
                 }
 
                 // Update hover state for CSS :hover and the tooltip system.
@@ -337,9 +381,10 @@ impl FrontendSurfaceComponent {
                     }
                 }
             }
-            ComponentInput::KeyPressed { key } => {
+            ComponentInput::KeyPressed { key, modifiers: _ } => {
                 if let Some(focused_key) = self.focused_key.clone() {
                     if is_input_key(&tree, &focused_key) {
+                        self.clear_selection();
                         let value = self.input_values.entry(focused_key.clone()).or_default();
                         match key.as_str() {
                             "Backspace" => {
@@ -359,6 +404,7 @@ impl FrontendSurfaceComponent {
                         && find_node_by_key(&tree, &focused_key)
                             .is_some_and(|node| matches!(node.tag.as_str(), "switch" | "checkbox"))
                     {
+                        self.clear_selection();
                         let value = self.toggle_checked_value(&tree, &focused_key);
                         self.dirty = true;
                         return self.call_node_handler(

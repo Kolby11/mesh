@@ -1,6 +1,27 @@
 use super::*;
 
 impl FrontendSurfaceComponent {
+    pub(super) fn clear_selection(&mut self) {
+        self.selection = None;
+    }
+
+    pub(super) fn begin_text_selection(&mut self, node_key: String, x: f32, y: f32) {
+        let point = TextSelectionPoint { node_key, x, y };
+        self.selection = Some(TextSelectionState {
+            anchor: point.clone(),
+            focus: point,
+        });
+    }
+
+    pub(super) fn update_text_selection_focus(&mut self, x: f32, y: f32) {
+        let Some(selection) = self.selection.as_mut() else {
+            return;
+        };
+        selection.focus.x = x;
+        selection.focus.y = y;
+        selection.focus.node_key = selection.anchor.node_key.clone();
+    }
+
     pub(super) fn clear_runtime_dirty_states(&self) {
         for runtime in self.runtimes.lock().unwrap().values_mut() {
             runtime.script_ctx.state_mut().clear_dirty();
@@ -56,6 +77,14 @@ impl FrontendSurfaceComponent {
             if !valid_keys.contains(key) {
                 self.active_slider_key = None;
             }
+        }
+
+        let should_clear_selection = self
+            .selection
+            .as_ref()
+            .is_some_and(|selection| !valid_keys.contains(&selection.anchor.node_key));
+        if should_clear_selection {
+            self.selection = None;
         }
     }
 }

@@ -360,6 +360,21 @@ fn root_with(children: Vec<WidgetNode>) -> WidgetNode {
     root
 }
 
+fn text_node(key: &str, x: f32, y: f32, width: f32, height: f32, selectable: bool) -> WidgetNode {
+    let mut node = WidgetNode::new("text");
+    node.attributes.insert("_mesh_key".into(), key.into());
+    node.attributes
+        .insert("content".into(), "Selectable text".into());
+    if selectable {
+        node.attributes.insert("selectable".into(), "true".into());
+    }
+    node.layout.x = x;
+    node.layout.y = y;
+    node.layout.width = width;
+    node.layout.height = height;
+    node
+}
+
 fn child_with_attrs(tag: &str, attrs: &[(&str, &str)]) -> WidgetNode {
     let mut node = WidgetNode::new(tag);
     for (name, value) in attrs {
@@ -3618,4 +3633,139 @@ button:hover {
     assert!(node_by_mesh_key(tree, "root/0/0").state.focused);
     assert!(node_by_mesh_key(tree, "root/0/1").state.hovered);
     assert!(node_by_mesh_key(tree, "root/0/0").state.active);
+}
+
+#[test]
+fn selection_boundaries_ignore_selectable_text_inside_controls() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let mut button = event_node(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        120.0,
+        32.0,
+        &[("click", "noop")],
+    );
+    button
+        .children
+        .push(text_node("root/0/0", 4.0, 4.0, 100.0, 20.0, true));
+    component.last_tree = Some(root_with(vec![button]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerButton {
+                x: 8.0,
+                y: 8.0,
+                pressed: true,
+            },
+        )
+        .unwrap();
+
+    assert!(
+        component.selection.is_none(),
+        "selectable text nested inside controls must not start Phase 10 selection"
+    );
+    assert_eq!(
+        component.pointer_down_key.as_deref(),
+        Some("root/0"),
+        "control pointer handling should still win when text lives inside a button"
+    );
+}
+
+#[test]
+fn selection_boundaries_clamp_drag_to_same_text_node() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    component.last_tree = Some(root_with(vec![
+        text_node("root/0", 0.0, 0.0, 100.0, 20.0, true),
+        text_node("root/1", 120.0, 0.0, 100.0, 20.0, true),
+    ]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerButton {
+                x: 8.0,
+                y: 8.0,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerMove { x: 140.0, y: 8.0 },
+        )
+        .unwrap();
+
+    let selection = component
+        .selection
+        .as_ref()
+        .expect("selection should start");
+    assert_eq!(selection.anchor.node_key, "root/0");
+    assert_eq!(
+        selection.focus.node_key, "root/0",
+        "Phase 10 selection must stay within the first selectable text node"
+    );
+}
+
+#[test]
+fn selection_boundaries_clear_when_selected_node_is_removed() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    component.selection = Some(TextSelectionState {
+        anchor: TextSelectionPoint {
+            node_key: "root/0".into(),
+            x: 4.0,
+            y: 4.0,
+        },
+        focus: TextSelectionPoint {
+            node_key: "root/0".into(),
+            x: 24.0,
+            y: 4.0,
+        },
+    });
+    component.prune_stale_interaction_targets(&root_with(vec![]));
+
+    assert!(
+        component.selection.is_none(),
+        "selection must clear when the selected node disappears during rebuild"
+    );
+}
+
+#[test]
+fn selection_boundaries_clear_when_surface_hides() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    component.selection = Some(TextSelectionState {
+        anchor: TextSelectionPoint {
+            node_key: "root/0".into(),
+            x: 4.0,
+            y: 4.0,
+        },
+        focus: TextSelectionPoint {
+            node_key: "root/0".into(),
+            x: 16.0,
+            y: 4.0,
+        },
+    });
+
+    component
+        .handle_core_event(&CoreEvent::SurfaceVisibilityChanged {
+            surface_id: component.surface_id().to_string(),
+            visible: false,
+        })
+        .unwrap();
+
+    assert!(
+        component.selection.is_none(),
+        "surface hide should clear shell-owned selection state"
+    );
 }

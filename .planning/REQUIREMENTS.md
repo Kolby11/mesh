@@ -24,7 +24,7 @@
 - [ ] **TEXT-01**: Users can select rendered text by dragging across selectable text nodes with the mouse.
 - [ ] **TEXT-02**: Selected text is visibly highlighted using theme-aware selection foreground/background styling.
 - [ ] **TEXT-03**: Users can copy selected text to the clipboard with the standard copy shortcut.
-- [ ] **TEXT-04**: Text selection works with wrapped text, clipped text, and nested component trees without breaking normal pointer interactions on buttons, sliders, or inputs.
+- [ ] **TEXT-04**: Text selection works within a single selectable text node, supports wrapped text inside that node, excludes clipped or ellipsized text, and preserves normal pointer interactions on buttons, sliders, and inputs.
 
 ### Keyboard Navigation
 

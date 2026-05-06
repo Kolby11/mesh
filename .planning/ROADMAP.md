@@ -57,8 +57,8 @@ Make MESH frontend rendering expressive and interactive enough for distinctive s
 1. Dragging across selectable text nodes creates a stable text selection range.
 2. Selected text renders with theme-aware selection foreground and background colors.
 3. The standard copy shortcut copies selected text to the clipboard.
-4. Selection works across wrapped, clipped, and nested text without breaking normal pointer behavior for controls.
-5. Tests cover selection range calculation, highlight rendering, clipboard payload, and control interaction boundaries.
+4. Selection stays within a single selectable text node, supports wrapped text inside that node, excludes clipped or ellipsized text, and preserves normal pointer behavior for controls.
+5. Tests cover selection range calculation, highlight rendering, clipboard payload, rebuild-safe clearing, and control interaction boundaries.
 
 **Dependencies:** Phase 9
 **UI hint:** no

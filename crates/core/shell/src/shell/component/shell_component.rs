@@ -38,6 +38,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         {
             if surface_id == self.surface_id() {
                 self.visible = *visible;
+                if !visible {
+                    self.clear_selection();
+                }
                 self.dirty = true;
             }
         }

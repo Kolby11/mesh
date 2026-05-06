@@ -78,12 +78,38 @@ pub struct ComponentContext {
 
 #[derive(Debug, Clone)]
 pub enum ComponentInput {
-    PointerMove { x: f32, y: f32 },
-    PointerButton { x: f32, y: f32, pressed: bool },
-    Scroll { x: f32, y: f32, dx: f32, dy: f32 },
-    KeyPressed { key: String },
-    KeyReleased { key: String },
-    Char { ch: char },
+    PointerMove {
+        x: f32,
+        y: f32,
+    },
+    PointerButton {
+        x: f32,
+        y: f32,
+        pressed: bool,
+    },
+    Scroll {
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    },
+    KeyPressed {
+        key: String,
+        modifiers: KeyModifiers,
+    },
+    KeyReleased {
+        key: String,
+    },
+    Char {
+        ch: char,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KeyModifiers {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
 }
 
 #[derive(Debug, thiserror::Error)]

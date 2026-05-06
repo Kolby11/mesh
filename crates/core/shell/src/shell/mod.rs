@@ -46,8 +46,8 @@ use mesh_core_render::{
 use sounds::{SoundKind, play_shell_sound};
 use surface_layout::{default_surface_visibility, load_active_theme};
 pub use types::{
-    ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, ServiceEvent,
-    ShellComponent, SurfaceId,
+    ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, KeyModifiers,
+    ServiceEvent, ShellComponent, SurfaceId,
 };
 use types::{
     ComponentRuntime, LatestServiceState, ServiceCommandMsg, SettingsWatchState, ShellCoreState,
@@ -55,6 +55,26 @@ use types::{
 };
 
 use service::{service_command_control_capability, service_name_from_interface};
+
+fn shell_global_shortcut_request(
+    key: &str,
+    ctrl: bool,
+    shift: bool,
+    debug_enabled: bool,
+) -> Option<CoreRequest> {
+    match key.to_ascii_lowercase().as_str() {
+        "d" if ctrl && shift => Some(CoreRequest::ToggleDebugOverlay),
+        "tab" | "iso_left_tab" if ctrl && debug_enabled => Some(CoreRequest::CycleDebugTab),
+        _ => None,
+    }
+}
+
+fn component_key_pressed_input(key: String, ctrl: bool, shift: bool, alt: bool) -> ComponentInput {
+    ComponentInput::KeyPressed {
+        key,
+        modifiers: KeyModifiers { ctrl, shift, alt },
+    }
+}
 
 pub struct Shell {
     pub config: ShellConfig,
@@ -1341,18 +1361,12 @@ impl Shell {
                 ..
             } = &event
             {
-                match key.to_ascii_lowercase().as_str() {
-                    "d" if mods.ctrl && mods.shift => {
-                        let mut pending = VecDeque::from([CoreRequest::ToggleDebugOverlay]);
-                        self.drain_requests(&mut pending)?;
-                        continue;
-                    }
-                    "tab" | "iso_left_tab" if mods.ctrl && self.debug.enabled => {
-                        let mut pending = VecDeque::from([CoreRequest::CycleDebugTab]);
-                        self.drain_requests(&mut pending)?;
-                        continue;
-                    }
-                    _ => {}
+                if let Some(request) =
+                    shell_global_shortcut_request(key, mods.ctrl, mods.shift, self.debug.enabled)
+                {
+                    let mut pending = VecDeque::from([request]);
+                    self.drain_requests(&mut pending)?;
+                    continue;
                 }
             }
 
@@ -1363,9 +1377,9 @@ impl Shell {
                 }
                 WindowEvent::Scroll { x, y, dx, dy, .. } => ComponentInput::Scroll { x, y, dx, dy },
                 WindowEvent::Key {
-                    event: WindowKeyEvent::Pressed(key, _mods),
+                    event: WindowKeyEvent::Pressed(key, mods),
                     ..
-                } => ComponentInput::KeyPressed { key },
+                } => component_key_pressed_input(key, mods.ctrl, mods.shift, mods.alt),
                 WindowEvent::Key {
                     event: WindowKeyEvent::Released(key),
                     ..
@@ -2251,11 +2265,12 @@ fn resolve_default_module_dirs(config: &ShellConfig) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendLaunchCandidate, BackendRuntimeSlot, BackendRuntimeStatus, InterfaceProvider,
-        InterfaceRegistry, ServiceCommandMsg, ServiceEvent, Shell,
-        backend_launch_candidates_from_graph,
+        BackendLaunchCandidate, BackendRuntimeSlot, BackendRuntimeStatus, ComponentInput,
+        CoreRequest, InterfaceProvider, InterfaceRegistry, ServiceCommandMsg, ServiceEvent, Shell,
+        backend_launch_candidates_from_graph, component_key_pressed_input,
         layout::measure_content_size,
         service::{apply_service_update, seed_service_state, service_name_from_interface},
+        shell_global_shortcut_request,
         surface_layout::{SurfaceSizePolicy, load_active_theme, load_frontend_module_settings},
     };
     use mesh_core_config::ShellConfig;
@@ -2579,6 +2594,33 @@ mod tests {
         let latest = shell.latest_service_state.get("mesh.audio").unwrap();
         assert_eq!(latest.interface, "mesh.audio");
         assert_eq!(latest.state["percent"], serde_json::json!(42.0));
+    }
+
+    #[test]
+    fn selection_input_contract_key_pressed_preserves_modifiers() {
+        let input = component_key_pressed_input("C".into(), true, false, true);
+        match input {
+            ComponentInput::KeyPressed { key, modifiers } => {
+                assert_eq!(key, "C");
+                assert!(modifiers.ctrl);
+                assert!(!modifiers.shift);
+                assert!(modifiers.alt);
+            }
+            other => panic!("expected key press input, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn selection_input_contract_debug_shortcuts_remain_global() {
+        assert!(matches!(
+            shell_global_shortcut_request("d", true, true, false),
+            Some(CoreRequest::ToggleDebugOverlay)
+        ));
+        assert!(matches!(
+            shell_global_shortcut_request("Tab", true, false, true),
+            Some(CoreRequest::CycleDebugTab)
+        ));
+        assert!(shell_global_shortcut_request("c", true, false, false).is_none());
     }
 
     #[test]
