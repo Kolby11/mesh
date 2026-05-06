@@ -94,7 +94,7 @@ The original `mesh-renderer/src/painter.rs` contains the complete implementation
 3. Implement `render_text_node()` using text_renderer
 4. Implement `render_input_node()` using text_renderer
 5. Update `render_tooltip()` to use text_renderer
-6. Test with a simple frontend plugin that has text nodes
+6. Test with a simple frontend module that has text nodes
 7. Verify font loading and rendering
 
 ## Compilation Check

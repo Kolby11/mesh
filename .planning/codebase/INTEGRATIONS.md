@@ -8,7 +8,7 @@
 - Wayland compositor - Displays shell surfaces as a Wayland client.
   - SDK/Client: `wayland-client` 0.31.14, `smithay-client-toolkit` 0.19.2, `minifb` 0.27.0 with `wayland`, plus internal abstractions in `crates/core/platform/wayland/src/lib.rs` and rendering code in `crates/core/ui/render/Cargo.toml`.
   - Auth: Local Wayland session environment; no app-level credentials detected.
-  - Capability/compatibility: Frontend modules can declare compositor requirements such as `wlr-layer-shell-v1` in `modules/frontend/navigation-bar/module.json`.
+  - Capability/compatibility: Frontend modules can declare compositor requirements such as `wlr-layer-shell-v1` in `modules/frontend/navigation-bar/package.json`.
 
 **Desktop Shell IPC:**
 - Local Unix socket IPC - CLI commands control a running shell instance.
@@ -30,7 +30,7 @@
   - Provider pin: `config/package.json` maps `mesh.audio` to `@mesh/pipewire-audio`.
 - PulseAudio - Alternative installed audio backend for `mesh.audio`.
   - SDK/Client: `pactl` binary invoked by `modules/backend/pulseaudio-audio/src/main.luau`.
-  - Auth: Required capabilities `exec.pactl` and `exec.aplay` in `modules/backend/pulseaudio-audio/module.json` and `config/modules/@mesh/pulseaudio-audio/package.json`.
+  - Auth: Required capabilities `exec.pactl` and `exec.aplay` in `modules/backend/pulseaudio-audio/package.json` and `config/modules/@mesh/pulseaudio-audio/package.json`.
   - System packages: `pulseaudio-utils` / `libpulse` for `pactl`, `alsa-utils` for `aplay`.
   - Provider priority: `@mesh/pulseaudio-audio` priority 50 versus PipeWire priority 100 in module manifests.
 
@@ -45,7 +45,7 @@
   - SDK/Client: Not implemented as a Rust or Luau host API in current source; documented capability names include `dbus.system` and D-Bus helper library examples in `docs/module-system.md`, `docs/extensibility.md`, and `spec/pluggable-backend.md`.
   - Auth: Planned capability identifiers such as `dbus.session` and `dbus.system`; no current D-Bus client crate detected in `Cargo.toml`.
 
-**Module/Plugin Distribution Sources:**
+**Module Distribution Sources:**
 - MESH registry / HTTPS archive / Git / local path - Installation sources documented for package resolution.
   - SDK/Client: Installer design in `docs/installation.md`; no current network client crate such as `reqwest`, `hyper`, or `ureq` detected in `Cargo.toml`.
   - Auth: Signature/trust-tier design documented in `docs/installation.md` and `spec/pluggable-backend.md`; no implemented signing or credential storage detected in source.
@@ -69,7 +69,7 @@
   - Module directories: repo `modules/`, `~/.mesh/modules`, and `/usr/share/mesh/modules` via `crates/core/foundation/config/src/lib.rs`.
   - Shell config: `~/.config/mesh/config.toml` via `crates/core/foundation/config/src/lib.rs`.
   - Settings: `config/settings-default.json`, `config/shell-settings.json`, optional `MESH_SETTINGS_PATH`, and fallback `~/.mesh/settings.json` via `crates/core/foundation/config/src/lib.rs`.
-  - Per-plugin overrides: XDG config path under `mesh/plugins/<scope>/<name>.json` via `crates/core/foundation/config/src/lib.rs`.
+  - Per-module overrides: legacy XDG config path under `mesh/plugins/<scope>/<name>.json` via `crates/core/foundation/config/src/lib.rs`.
   - Themes: `config/themes/*.json` and theme loading paths used by `mesh-core-theme`.
   - Icons/assets: `config/icons.toml`, bundled Material SVG assets under `crates/core/ui/icon/assets/material/`, and XDG/system icon lookup in `crates/core/ui/icon/src/lib.rs`.
   - Installation design storage: `~/.config/mesh/plugins.lock.json`, `~/.cache/mesh/packages/`, `/usr/share/mesh/plugins/`, and `~/.local/share/mesh/plugins/` documented in `docs/installation.md`.
@@ -88,8 +88,8 @@
   - Implementation: No OAuth, OIDC, session, JWT, password, or external identity provider integration detected in source manifests or Rust dependencies.
 
 **Capability Model:**
-- Custom capability-based plugin permission system.
-  - Implementation: Capability types in `crates/core/foundation/capability/Cargo.toml`; backend exec checks in `crates/core/runtime/scripting/src/backend.rs`; manifest capabilities in `modules/backend/pipewire-audio/package.json`, `modules/backend/pulseaudio-audio/module.json`, and `modules/frontend/navigation-bar/module.json`.
+- Custom capability-based module permission system.
+  - Implementation: Capability types in `crates/core/foundation/capability/Cargo.toml`; backend exec checks in `crates/core/runtime/scripting/src/backend.rs`; manifest capabilities in `modules/backend/pipewire-audio/package.json`, `modules/backend/pulseaudio-audio/package.json`, and `modules/frontend/navigation-bar/package.json`.
   - Permission examples: `exec.wpctl`, `exec.pactl`, `exec.aplay`, `service.audio.read`, `service.audio.control`, `theme.read`, `locale.read`, and `shell.surface`.
   - Install UX design: Standard/elevated/high capability tiers documented in `docs/extensibility.md` and `spec/pluggable-backend.md`.
 
@@ -126,9 +126,9 @@
   - No `.github/workflows`, `.gitlab-ci.yml`, CircleCI, or Buildkite files found.
 
 **Distribution/Install Design:**
-- System and user module/plugin directories.
-  - System paths: `/usr/share/mesh/modules` in `crates/core/foundation/config/src/lib.rs`; `/usr/share/mesh/plugins/` documented in `docs/installation.md`.
-  - User paths: `~/.mesh/modules`, `~/.local/share/mesh/plugins/`, `~/.local/share/mesh/dev-plugins/`, and `~/.config/mesh/plugins.lock.json` documented in `docs/installation.md`.
+- System and user module directories.
+  - System paths: `/usr/share/mesh/modules` in `crates/core/foundation/config/src/lib.rs`; legacy `/usr/share/mesh/plugins/` remains documented in `docs/installation.md`.
+  - User paths: `~/.mesh/modules`; legacy install-design paths such as `~/.local/share/mesh/plugins/`, `~/.local/share/mesh/dev-plugins/`, and `~/.config/mesh/plugins.lock.json` remain documented in `docs/installation.md`.
   - Current binary: `mesh-shell` from `crates/tools/cli/Cargo.toml`.
 
 ## Environment Configuration
@@ -141,7 +141,7 @@
 - `MESH_SETTINGS_PATH` - Override user settings JSON in `crates/core/foundation/config/src/lib.rs`.
 - `MESH_SETTINGS_DEFAULTS_PATH` - Override default settings JSON in `crates/core/foundation/config/src/lib.rs`.
 - `MESH_IPC_SOCKET` - Override Unix IPC socket path in `crates/core/shell/src/shell/mod.rs`.
-- `XDG_CONFIG_HOME` - Override XDG config root for `mesh/config.toml` and plugin overrides in `crates/core/foundation/config/src/lib.rs`.
+- `XDG_CONFIG_HOME` - Override XDG config root for `mesh/config.toml` and legacy module override files in `crates/core/foundation/config/src/lib.rs`.
 - `XDG_DATA_HOME` - Override XDG data root helper in `crates/core/foundation/config/src/lib.rs`.
 - `XDG_RUNTIME_DIR` - Preferred runtime directory for `mesh.sock` in `crates/core/shell/src/shell/mod.rs`.
 - `HOME` - Fallback base for `~/.mesh`, XDG paths, and package manifest discovery.

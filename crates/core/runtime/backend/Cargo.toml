@@ -1,6 +1,6 @@
 [package]
 name = "mesh-core-backend"
-description = "Backend plugin Luau runtime orchestration for MESH"
+description = "Backend module Luau runtime orchestration for MESH"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

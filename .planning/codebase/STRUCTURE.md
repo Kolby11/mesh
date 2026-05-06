@@ -20,14 +20,14 @@ mesh/
 │   ├── themes/                   # Theme token JSON files
 │   └── modules/@mesh/*/          # Package-shaped bundled/catalog module manifests
 ├── crates/                       # Rust workspace crates
-│   ├── core/extension/           # Module/plugin manifests and service contracts
+│   ├── core/extension/           # Module manifests/packages and service contracts
 │   ├── core/foundation/          # Capability, config, diagnostics, events, locale, theme, debug
 │   ├── core/platform/            # Wayland platform abstraction
 │   ├── core/runtime/             # Luau runtime, backend runtime, host runtime
 │   ├── core/shell/               # Main shell orchestration and component host
 │   ├── core/ui/                  # Component parser, element model, icons, renderer
 │   └── tools/                    # CLI and LSP binaries
-├── docs/                         # Architecture, module-system, frontend, plugin, settings, theming docs
+├── docs/                         # Architecture, module-system, frontend, module, settings, theming docs
 ├── modules/                      # Source modules loaded by `config/package.json`
 │   ├── backend/                  # Backend provider modules
 │   ├── frontend/                 # Frontend surface/widget modules
@@ -65,7 +65,7 @@ mesh/
 - Key files: `crates/core/runtime/backend/src/lib.rs`.
 
 **`crates/core/runtime/host`:**
-- Purpose: Model sandbox runtime tiers and generic plugin runtime configuration.
+- Purpose: Model sandbox runtime tiers and generic module runtime configuration.
 - Contains: `SandboxConfig`, `ExecutionTier`, `PluginRuntime`.
 - Key files: `crates/core/runtime/host/src/lib.rs`.
 
@@ -111,13 +111,13 @@ mesh/
 
 **`modules/backend`:**
 - Purpose: Source backend provider modules used by the local root graph.
-- Contains: `pipewire-audio` package manifest and Luau source, `pulseaudio-audio` compatibility `module.json` and Luau source, placeholder/partial backend directories.
-- Key files: `modules/backend/pipewire-audio/package.json`, `modules/backend/pipewire-audio/src/main.luau`, `modules/backend/pulseaudio-audio/module.json`, `modules/backend/pulseaudio-audio/src/main.luau`.
+- Contains: `pipewire-audio` package manifest and Luau source, `pulseaudio-audio` compatibility `package.json` and Luau source, placeholder/partial backend directories.
+- Key files: `modules/backend/pipewire-audio/package.json`, `modules/backend/pipewire-audio/src/main.luau`, `modules/backend/pulseaudio-audio/package.json`, `modules/backend/pulseaudio-audio/src/main.luau`.
 
 **`modules/frontend`:**
 - Purpose: Source frontend surface/widget modules used by local discovery and root graph.
 - Contains: `navigation-bar` surface module with settings, translations, components, `.mesh` entrypoint.
-- Key files: `modules/frontend/navigation-bar/module.json`, `modules/frontend/navigation-bar/src/main.mesh`, `modules/frontend/navigation-bar/src/components/*.mesh`, `modules/frontend/navigation-bar/config/settings.json`.
+- Key files: `modules/frontend/navigation-bar/package.json`, `modules/frontend/navigation-bar/src/main.mesh`, `modules/frontend/navigation-bar/src/components/*.mesh`, `modules/frontend/navigation-bar/config/settings.json`.
 
 **`modules/interfaces`:**
 - Purpose: Interface contract TOML files for service APIs.
@@ -131,7 +131,7 @@ mesh/
 
 **`docs`:**
 - Purpose: Human-facing architecture and authoring documentation.
-- Contains: Module system, extensibility, installation, health, frontend syntax, slots, theming, settings, plugin indexes.
+- Contains: Module system, extensibility, installation, health, frontend syntax, slots, theming, settings, and legacy plugin/module indexes.
 - Key files: `docs/module-system.md`, `docs/extensibility.md`, `docs/frontend/mesh-syntax.md`, `docs/settings/README.md`, `docs/theming/themes.md`, `docs/plugins/README.md`.
 
 **`spec`:**
@@ -185,8 +185,8 @@ mesh/
 - `config/modules/@mesh/upower/package.json`: Package-shaped bundled/catalog provider manifest.
 - `config/modules/@mesh/shell-theme/package.json`: Package-shaped bundled/catalog resource module manifest.
 - `modules/backend/pipewire-audio/package.json`: Source backend package manifest used by `config/package.json`.
-- `modules/backend/pulseaudio-audio/module.json`: Compatibility backend manifest used by `config/package.json`.
-- `modules/frontend/navigation-bar/module.json`: Compatibility frontend manifest used by `config/package.json`.
+- `modules/backend/pulseaudio-audio/package.json`: Compatibility backend manifest used by `config/package.json`.
+- `modules/frontend/navigation-bar/package.json`: Compatibility frontend manifest used by `config/package.json`.
 
 **Testing:**
 - Tests are colocated in Rust source files under `#[cfg(test)]`, especially `crates/core/extension/plugin/src/package.rs`, `crates/core/extension/plugin/src/manifest.rs`, `crates/core/extension/service/src/contract.rs`, `crates/core/runtime/scripting/src/context.rs`, `crates/core/runtime/backend/src/lib.rs`, and `crates/core/shell/src/shell/component/tests.rs`.
@@ -197,7 +197,7 @@ mesh/
 - Rust source uses `snake_case.rs`: `crates/core/shell/src/shell/surface_layout.rs`, `crates/core/runtime/scripting/src/host_api.rs`.
 - Rust crate manifests are `Cargo.toml` at each crate root: `crates/core/shell/Cargo.toml`, `crates/tools/cli/Cargo.toml`.
 - Module manifests use `package.json` for the target package model: `modules/backend/pipewire-audio/package.json`, `config/modules/@mesh/panel/package.json`.
-- Compatibility module manifests use `module.json`: `modules/frontend/navigation-bar/module.json`, `modules/backend/pulseaudio-audio/module.json`.
+- Compatibility module manifests use `package.json`: `modules/frontend/navigation-bar/package.json`, `modules/backend/pulseaudio-audio/package.json`.
 - Frontend components use kebab-case `.mesh`: `modules/frontend/navigation-bar/src/components/settings-button.mesh`.
 - Backend scripts use `src/main.luau`: `modules/backend/pipewire-audio/src/main.luau`.
 - Interface contracts use domain TOML names: `modules/interfaces/audio.toml`.
@@ -213,7 +213,7 @@ mesh/
 
 **Rust Symbols:**
 - Public types use PascalCase: `Shell`, `InstalledModuleGraph`, `ModulePackageManifest`, `ScriptContext`.
-- Functions and methods use snake_case: `load_installed_module_graph`, `spawn_backend_plugins`, `compile_frontend_plugin`.
+- Functions and methods use snake_case: `load_installed_module_graph`, `spawn_backend_plugins`, `compile_frontend_module`.
 - Crates use hyphenated package names and underscore Rust imports: package `mesh-core-shell`, import `mesh_core_shell`.
 
 **Module IDs And Interfaces:**
@@ -248,7 +248,7 @@ mesh/
 - Contract: depend on or add an interface contract under `modules/interfaces/` or an interface module package.
 
 **New Frontend Surface Or Widget Module:**
-- Implementation: `modules/frontend/<module-name>/package.json` for target package shape, or `modules/frontend/<module-name>/module.json` only when compatibility with existing runtime fields is required.
+- Implementation: `modules/frontend/<module-name>/package.json` for target package shape, or `modules/frontend/<module-name>/package.json` only when compatibility with existing runtime fields is required.
 - Entrypoint: `modules/frontend/<module-name>/src/main.mesh`.
 - Local components: `modules/frontend/<module-name>/src/components/*.mesh`.
 - Settings: `modules/frontend/<module-name>/config/settings.json`.

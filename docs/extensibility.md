@@ -17,19 +17,19 @@ earlier drafts of `spec/pluggable-backend.md`.
 > code — treat them as synonyms during the transition.
 
 The shell core starts with an empty service registry. Default interfaces and
-providers are discovered from plugins on disk under the `plugins/` tree, so
+providers are discovered from modules on disk under the `modules/` tree, so
 the core acts as the bridge and validator rather than the source of service
 functionality.
 
 ## Design goals
 
 1. The core knows about **the registry**, not about specific services.
-2. Any plugin can declare a new interface. Any plugin can implement it. Any
-   plugin can consume it.
-3. Defaults ship as ordinary plugins with no special status — they can be
+2. Any module can declare a new interface. Any module can implement it. Any
+   module can consume it.
+3. Defaults ship as ordinary modules with no special status — they can be
    replaced, disabled, or swapped by choosing a different active provider in
    the installed module graph.
-4. Cross-language by construction: Luau, WASM, and Rust plugins must be able
+4. Cross-language by construction: Luau, WASM, and Rust modules must be able
    to publish and consume the same interface.
 5. Inspired by D-Bus: named interfaces, typed methods, typed events,
    discoverable at runtime.
@@ -66,7 +66,7 @@ Events declared inside an interface are **channels owned by that interface**
 — only the currently-active implementation may publish to them, and their
 payload schema is part of the contract. Channels declared *outside* any
 interface (e.g. `shell.toggle-quick-settings`, `theme.changed`) are unowned:
-any plugin with the right capability can publish. Both are the same
+any module with the right capability can publish. Both are the same
 primitive; ownership is the only thing that differs.
 
 Interfaces live in **contract packages** — distributable units with
@@ -91,7 +91,7 @@ registry.register(
     version   = "1.0",
     provider  = "@mesh/pipewire-audio",
     priority  = 100,
-    handle    = <plugin-provided dispatcher>,
+    handle    = <module-provided dispatcher>,
 )
 ```
 
@@ -174,7 +174,7 @@ required = ["service.thermal.read"]
     {
       "interface": "alice.thermal",
       "version": "1.0",
-      "base_plugin": "@alice/thermal-contract",
+      "base_module": "@alice/thermal-contract",
       "backend_name": "lm-sensors",
       "priority": 100
     }
@@ -238,7 +238,7 @@ served by the same process.
 ## Event channels
 
 All asynchronous messaging flows through a single mechanism: **typed event
-channels**. A channel is a `(name, payload schema)` pair. Any plugin can
+channels**. A channel is a `(name, payload schema)` pair. Any module can
 subscribe to any channel it has capability for; publication is gated by
 ownership.
 
@@ -248,8 +248,8 @@ ownership.
   currently-active implementation of that interface may publish. The channel
   name is the interface-qualified event name (e.g.
   `mesh.audio/VolumeChanged`). Payload is validated against the contract.
-- **Unowned (shell) channels** — declared by a regular plugin outside any
-  interface. Any plugin holding the right publish capability may emit. Use
+- **Unowned (shell) channels** — declared by a regular module outside any
+  interface. Any module holding the right publish capability may emit. Use
   these for cross-cutting shell events like `shell.toggle-quick-settings` or
   `theme.changed`. Payload schema is declared on the channel itself.
 
@@ -299,9 +299,9 @@ The core refuses to load a contract that introduces a capability without a
 declared level. Third-party tiers beyond standard/elevated/high are not
 supported — the three tiers are part of the install UX.
 
-## Defaults are plugins
+## Defaults are modules
 
-All default behavior ships as ordinary plugins in the `@mesh` scope:
+All default behavior ships as ordinary modules in the `@mesh` scope:
 
 | Interface      | Default implementations                                              |
 | -------------- | -------------------------------------------------------------------- |
@@ -315,7 +315,7 @@ custom `pw-cli`-based audio daemon can install a provider for the same
 interface and make it the active provider in the installed module graph.
 
 Frontends likewise (`@mesh/panel`, `@mesh/launcher`, …) are ordinary surface
-plugins. You can disable them and ship your own.
+modules. You can disable them and ship your own.
 
 ## Cross-language story
 
@@ -331,7 +331,7 @@ at load:
   built against the same contract *package version*; because Rust has no
   stable ABI across compiler versions, they must also be built with a
   compatible toolchain (the MESH release pins the Rust toolchain for Tier 1
-  plugins). Luau and WASM plugins have no such constraint — they go through
+  modules). Luau and WASM modules have no such constraint — they go through
   the registry's dynamic dispatch and interoperate across languages freely.
 
 This keeps strongly-typed ergonomics where it matters (Rust) without forcing
@@ -362,12 +362,12 @@ mesh interfaces call alice.thermal sensors
 ```
 
 The shell also exposes this through its diagnostics panel so users can see
-exactly which plugin is currently backing each interface and switch between
+exactly which module is currently backing each interface and switch between
 candidates.
 
 ## Relationship to `spec/pluggable-backend.md`
 
-`spec/pluggable-backend.md` describes the plugin lifecycle, manifest format,
+`spec/pluggable-backend.md` describes the module lifecycle, manifest format,
 capability system, and security model — all of which still apply. This
 document refines its "Backend / frontend separation" section: service traits
 are no longer a fixed list baked into `mesh-core-service`, they are

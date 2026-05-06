@@ -15,14 +15,14 @@ pub struct BackendServiceCommand {
 #[derive(Debug, Clone)]
 pub struct BackendServiceUpdate {
     pub service: String,
-    pub source_plugin: String,
+    pub source_module: String,
     pub payload: serde_json::Value,
 }
 
 #[derive(Debug, Clone)]
 pub struct BackendCommandResult {
     pub service: String,
-    pub source_plugin: String,
+    pub source_module: String,
     pub command: String,
     pub result: serde_json::Value,
 }
@@ -31,39 +31,39 @@ pub struct BackendCommandResult {
 pub enum BackendServiceEvent {
     Started {
         service: String,
-        source_plugin: String,
+        source_module: String,
     },
     Update(BackendServiceUpdate),
     InitFailed {
         service: String,
-        source_plugin: String,
+        source_module: String,
         message: String,
     },
     PollFailed {
         service: String,
-        source_plugin: String,
+        source_module: String,
         count: u32,
         message: String,
     },
     Failed {
         service: String,
-        source_plugin: String,
+        source_module: String,
         stage: String,
         message: String,
     },
     CommandResult(BackendCommandResult),
     Stopped {
         service: String,
-        source_plugin: String,
+        source_module: String,
     },
 }
 
-/// Run a backend plugin script and publish service updates.
+/// Run a backend module script and publish service updates.
 ///
-/// Core owns plugin discovery and channel wiring; this crate owns the Luau
+/// Core owns module discovery and channel wiring; this crate owns the Luau
 /// backend execution loop and polling/command dispatch policy.
 pub async fn spawn_backend_service(
-    plugin_id: String,
+    module_id: String,
     service_name: String,
     capabilities: Vec<String>,
     settings: JsonValue,
@@ -72,15 +72,15 @@ pub async fn spawn_backend_service(
     mut cmd_rx: mpsc::UnboundedReceiver<BackendServiceCommand>,
 ) {
     let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
-        &plugin_id,
+        &module_id,
         settings,
         capabilities,
     );
     if let Err(e) = ctx.load_script(&script_source) {
-        tracing::error!("{plugin_id} failed to load backend script: {e}");
+        tracing::error!("{module_id} failed to load backend script: {e}");
         let _ = tx.send(BackendServiceEvent::Failed {
             service: service_name,
-            source_plugin: plugin_id,
+            source_module: module_id,
             stage: "load".to_string(),
             message: e.to_string(),
         });
@@ -89,10 +89,10 @@ pub async fn spawn_backend_service(
     let init_payload = match ctx.call_init() {
         Ok(payload) => payload,
         Err(e) => {
-            tracing::error!("{plugin_id} failed to initialize backend script: {e}");
+            tracing::error!("{module_id} failed to initialize backend script: {e}");
             let _ = tx.send(BackendServiceEvent::InitFailed {
                 service: service_name,
-                source_plugin: plugin_id,
+                source_module: module_id,
                 message: e.to_string(),
             });
             return;
@@ -101,7 +101,7 @@ pub async fn spawn_backend_service(
 
     let _ = tx.send(BackendServiceEvent::Started {
         service: service_name.clone(),
-        source_plugin: plugin_id.clone(),
+        source_module: module_id.clone(),
     });
 
     let mut interval_ms = bounded_poll_interval_ms(&ctx);
@@ -110,7 +110,7 @@ pub async fn spawn_backend_service(
     let mut consecutive_poll_failures = 0;
 
     if let Some(payload) = init_payload {
-        if !publish_changed_update(&tx, &service_name, &plugin_id, &mut last_payload, payload) {
+        if !publish_changed_update(&tx, &service_name, &module_id, &mut last_payload, payload) {
             return;
         }
     }
@@ -128,14 +128,14 @@ pub async fn spawn_backend_service(
                         let message = err.to_string();
                         let _ = tx.send(BackendServiceEvent::PollFailed {
                             service: service_name.clone(),
-                            source_plugin: plugin_id.clone(),
+                            source_module: module_id.clone(),
                             count: consecutive_poll_failures,
                             message: message.clone(),
                         });
                         if consecutive_poll_failures >= MAX_CONSECUTIVE_POLL_FAILURES {
                             let _ = tx.send(BackendServiceEvent::Failed {
                                 service: service_name.clone(),
-                                source_plugin: plugin_id.clone(),
+                                source_module: module_id.clone(),
                                 stage: "poll".to_string(),
                                 message,
                             });
@@ -150,7 +150,7 @@ pub async fn spawn_backend_service(
                 if !publish_changed_update(
                     &tx,
                     &service_name,
-                    &plugin_id,
+                    &module_id,
                     &mut last_payload,
                     payload,
                 ) {
@@ -164,7 +164,7 @@ pub async fn spawn_backend_service(
                         refresh_interval(&ctx, &mut interval_ms, &mut tick);
                         if tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
                             service: service_name.clone(),
-                            source_plugin: plugin_id.clone(),
+                            source_module: module_id.clone(),
                             command: msg.command.clone(),
                             result: outcome.result,
                         })).is_err() {
@@ -173,7 +173,7 @@ pub async fn spawn_backend_service(
                         if let Some(message) = outcome.error {
                             let _ = tx.send(BackendServiceEvent::Failed {
                                 service: service_name.clone(),
-                                source_plugin: plugin_id.clone(),
+                                source_module: module_id.clone(),
                                 stage: "command".to_string(),
                                 message,
                             });
@@ -182,7 +182,7 @@ pub async fn spawn_backend_service(
                             if !publish_changed_update(
                                 &tx,
                                 &service_name,
-                                &plugin_id,
+                                &module_id,
                                 &mut last_payload,
                                 payload,
                             ) {
@@ -200,7 +200,7 @@ pub async fn spawn_backend_service(
                         };
                         let _ = tx.send(BackendServiceEvent::Failed {
                             service: service_name.clone(),
-                            source_plugin: plugin_id.clone(),
+                            source_module: module_id.clone(),
                             stage: stage.to_string(),
                             message: err.to_string(),
                         });
@@ -213,14 +213,14 @@ pub async fn spawn_backend_service(
 
     let _ = tx.send(BackendServiceEvent::Stopped {
         service: service_name,
-        source_plugin: plugin_id,
+        source_module: module_id,
     });
 }
 
 fn publish_changed_update(
     tx: &mpsc::UnboundedSender<BackendServiceEvent>,
     service_name: &str,
-    plugin_id: &str,
+    module_id: &str,
     last_payload: &mut Option<serde_json::Value>,
     payload: serde_json::Value,
 ) -> bool {
@@ -230,7 +230,7 @@ fn publish_changed_update(
     last_payload.replace(payload.clone());
     tx.send(BackendServiceEvent::Update(BackendServiceUpdate {
         service: service_name.to_string(),
-        source_plugin: plugin_id.to_string(),
+        source_module: module_id.to_string(),
         payload,
     }))
     .is_ok()
@@ -318,7 +318,7 @@ mod tests {
 
         let update = next_update(&mut update_rx, "backend should emit initial payload").await;
         assert_eq!(update.service, "settings");
-        assert_eq!(update.source_plugin, "@test/settings");
+        assert_eq!(update.source_module, "@test/settings");
         assert_eq!(
             update.payload.get("label").and_then(|v| v.as_str()),
             Some("demo")
@@ -358,7 +358,7 @@ mod tests {
 
         let update = next_update(&mut update_rx, "init should publish exported state").await;
         assert_eq!(update.service, "audio");
-        assert_eq!(update.source_plugin, "@test/exported-init");
+        assert_eq!(update.source_module, "@test/exported-init");
         assert_eq!(
             update.payload.get("available").and_then(|v| v.as_bool()),
             Some(true)
@@ -576,7 +576,7 @@ mod tests {
     #[tokio::test]
     async fn shell_theme_backend_runs_through_runtime_loop() {
         let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../packages/plugins/backend/core/shell-theme/src/main.luau");
+            .join("../../../../packages/modules/backend/core/shell-theme/src/main.luau");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (update_tx, mut update_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -666,7 +666,7 @@ mod tests {
         )
         .await;
         assert_eq!(update.service, "audio");
-        assert_eq!(update.source_plugin, "@test/audio");
+        assert_eq!(update.source_module, "@test/audio");
         assert_eq!(
             update.payload.get("device_id").and_then(|v| v.as_str()),
             Some("default")
@@ -713,7 +713,7 @@ mod tests {
         )
         .await;
         assert_eq!(result.service, "audio");
-        assert_eq!(result.source_plugin, "@test/command-error");
+        assert_eq!(result.source_module, "@test/command-error");
         assert_eq!(result.command, "fail");
         assert_eq!(
             result.result.get("ok").and_then(|v| v.as_bool()),
@@ -759,7 +759,7 @@ mod tests {
 
     async fn assert_bundled_command_handler_returns_result_table() {
         let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../packages/plugins/backend/core/pipewire-audio/src/main.luau");
+            .join("../../../../packages/modules/backend/core/pipewire-audio/src/main.luau");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -787,7 +787,7 @@ mod tests {
         )
         .await;
         assert_eq!(result.service, "audio");
-        assert_eq!(result.source_plugin, "@mesh/pipewire-audio");
+        assert_eq!(result.source_module, "@mesh/pipewire-audio");
         assert_eq!(result.command, "play-sound");
         assert_eq!(
             result.result.get("ok").and_then(|v| v.as_bool()),
@@ -893,7 +893,7 @@ mod tests {
         )
         .await;
         assert_eq!(result.service, "audio");
-        assert_eq!(result.source_plugin, "@test/no-handler");
+        assert_eq!(result.source_module, "@test/no-handler");
         assert_eq!(result.command, "nonexistent-command");
         assert_eq!(
             result.result.get("ok").and_then(|v| v.as_bool()),
@@ -1126,7 +1126,7 @@ mod tests {
     #[tokio::test]
     async fn reference_media_backend_emits_initial_state() {
         let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../packages/plugins/backend/core/reference-media/src/main.luau");
+            .join("../../../../packages/modules/backend/core/reference-media/src/main.luau");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (update_tx, mut update_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -1155,7 +1155,7 @@ mod tests {
         .await;
 
         assert_eq!(update.service, "media");
-        assert_eq!(update.source_plugin, "@mesh/reference-media");
+        assert_eq!(update.source_module, "@mesh/reference-media");
         assert_eq!(
             update.payload.get("available").and_then(|v| v.as_bool()),
             Some(true),
@@ -1186,7 +1186,7 @@ mod tests {
     #[tokio::test]
     async fn reference_media_backend_command_returns_result_and_updated_state() {
         let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../packages/plugins/backend/core/reference-media/src/main.luau");
+            .join("../../../../packages/modules/backend/core/reference-media/src/main.luau");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -1223,7 +1223,7 @@ mod tests {
         let result =
             next_command_result(&mut event_rx, "play command should emit a CommandResult").await;
         assert_eq!(result.service, "media");
-        assert_eq!(result.source_plugin, "@mesh/reference-media");
+        assert_eq!(result.source_module, "@mesh/reference-media");
         assert_eq!(result.command, "play");
         assert_eq!(
             result.result.get("ok").and_then(|v| v.as_bool()),
@@ -1268,9 +1268,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reference_media_invalid_command_returns_plugin_scoped_failure() {
+    async fn reference_media_invalid_command_returns_module_scoped_failure() {
         let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../packages/plugins/backend/core/reference-media/src/main.luau");
+            .join("../../../../packages/modules/backend/core/reference-media/src/main.luau");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -1312,8 +1312,8 @@ mod tests {
 
         // Provider id must be attributable in the result
         assert_eq!(
-            result.source_plugin, "@mesh/reference-media",
-            "CommandResult source_plugin must identify the provider"
+            result.source_module, "@mesh/reference-media",
+            "CommandResult source_module must identify the provider"
         );
         assert_eq!(result.service, "media");
         // The pause command when not playing returns ok=false

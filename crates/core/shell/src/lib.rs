@@ -1,6 +1,6 @@
 /// Core runtime and orchestration for MESH shell.
 ///
-/// This crate ties together all subsystems: plugin loading, capability
+/// This crate ties together all subsystems: module loading, capability
 /// enforcement, event routing, theming, localization, and diagnostics.
 pub mod shell;
 

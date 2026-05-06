@@ -7,7 +7,7 @@ use mesh_core_scripting::{PublishedEvent, ScriptState};
 pub(super) fn seed_service_state(state: &mut ScriptState) {
     state.set(
         "last_service_update",
-        serde_json::json!({ "name": "", "source_plugin": "" }),
+        serde_json::json!({ "name": "", "source_module": "" }),
     );
 }
 
@@ -20,14 +20,14 @@ pub(super) fn apply_service_update(
     state: &mut ScriptState,
     has_read: bool,
     service: &str,
-    source_plugin: &str,
+    source_module: &str,
     payload: serde_json::Value,
 ) {
     let service_name = service_name_from_interface(service);
     if has_read {
         state.set(
             "last_service_update",
-            serde_json::json!({ "name": service_name, "source_plugin": source_plugin }),
+            serde_json::json!({ "name": service_name, "source_module": source_module }),
         );
         state.set(service_name, payload);
     }
@@ -106,12 +106,12 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                         interface,
                         command,
                         payload: event.payload,
-                        source_plugin_id: event.source_plugin_id,
+                        source_module_id: event.source_module_id,
                         source_capabilities: event.source_capabilities,
                     }
                 } else {
                     tracing::warn!(
-                        source_plugin_id = %event.source_plugin_id,
+                        source_module_id = %event.source_module_id,
                         required_capability = %required,
                         channel = %event.channel,
                         "denied frontend service command publication"
@@ -119,7 +119,7 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                     CoreRequest::PublishDiagnostics {
                         message: format!(
                             "Denied service command '{}' from '{}' without {}",
-                            event.channel, event.source_plugin_id, required
+                            event.channel, event.source_module_id, required
                         ),
                     }
                 }
@@ -148,7 +148,7 @@ mod tests {
 
         assert_eq!(
             state.get("last_service_update"),
-            Some(serde_json::json!({ "name": "", "source_plugin": "" }))
+            Some(serde_json::json!({ "name": "", "source_module": "" }))
         );
         assert_eq!(state.get("audio"), None);
     }
@@ -163,13 +163,13 @@ mod tests {
             PublishedEvent {
                 channel: "mesh.audio.set_volume".into(),
                 payload: serde_json::json!({ "percent": 55 }),
-                source_plugin_id: "@mesh/quick-settings".into(),
+                source_module_id: "@mesh/quick-settings".into(),
                 source_capabilities: audio_caps,
             },
             PublishedEvent {
                 channel: "mesh.network.set_wifi_enabled".into(),
                 payload: serde_json::json!({ "enabled": true }),
-                source_plugin_id: "@mesh/quick-settings".into(),
+                source_module_id: "@mesh/quick-settings".into(),
                 source_capabilities: network_caps,
             },
         ]);
@@ -180,13 +180,13 @@ mod tests {
                 interface,
                 command,
                 payload,
-                source_plugin_id,
+                source_module_id,
                 source_capabilities,
             } => {
                 assert_eq!(interface, "mesh.audio");
                 assert_eq!(command, "set_volume");
                 assert_eq!(payload, &serde_json::json!({ "percent": 55 }));
-                assert_eq!(source_plugin_id, "@mesh/quick-settings");
+                assert_eq!(source_module_id, "@mesh/quick-settings");
                 assert!(source_capabilities.is_granted(&Capability::new("service.audio.control")));
             }
             other => panic!("expected audio ServiceCommand, got {other:?}"),
@@ -196,13 +196,13 @@ mod tests {
                 interface,
                 command,
                 payload,
-                source_plugin_id,
+                source_module_id,
                 source_capabilities,
             } => {
                 assert_eq!(interface, "mesh.network");
                 assert_eq!(command, "set_wifi_enabled");
                 assert_eq!(payload, &serde_json::json!({ "enabled": true }));
-                assert_eq!(source_plugin_id, "@mesh/quick-settings");
+                assert_eq!(source_module_id, "@mesh/quick-settings");
                 assert!(
                     source_capabilities.is_granted(&Capability::new("service.network.control"))
                 );
@@ -218,7 +218,7 @@ mod tests {
         let requests = script_events_to_requests(vec![PublishedEvent {
             channel: "mesh.audio.set_volume".into(),
             payload: serde_json::json!({ "percent": 55 }),
-            source_plugin_id: "@mesh/panel".into(),
+            source_module_id: "@mesh/panel".into(),
             source_capabilities: caps,
         }]);
 

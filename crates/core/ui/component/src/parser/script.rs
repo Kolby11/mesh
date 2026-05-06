@@ -94,7 +94,7 @@ fn classify_import_target(source: &str) -> Option<ComponentImportTarget> {
         return Some(ComponentImportTarget::ComponentLocal(source.to_string()));
     }
     if source.starts_with("@mesh/") {
-        return Some(ComponentImportTarget::ComponentPlugin(source.to_string()));
+        return Some(ComponentImportTarget::ComponentModule(source.to_string()));
     }
     if source.starts_with("mesh.") {
         let (interface, version) = source

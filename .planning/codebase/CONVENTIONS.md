@@ -9,7 +9,7 @@
 - Use `mod.rs` only for directory modules that own child files, for example `crates/core/shell/src/shell/mod.rs` and `crates/tools/lsp/src/analyzer/mod.rs`.
 - Use kebab-case crate package names in `Cargo.toml` and `mesh-core-*` internal crate prefixes, for example `mesh-core-plugin` in `crates/core/extension/plugin/Cargo.toml` and `mesh-tools-cli` in `crates/tools/cli/Cargo.toml`.
 - Use `.mesh` for single-file frontend components and kebab-case component file names, for example `modules/frontend/navigation-bar/src/components/volume-button.mesh`.
-- Use `package.json` for new module manifests under `config/modules/@mesh/*/package.json`. Legacy `module.json` remains present in `modules/frontend/navigation-bar/module.json` and legacy backend manifests remain present in `modules/backend/*/module.json`.
+- Use `package.json` for new module manifests under `config/modules/@mesh/*/package.json`. Legacy `package.json` remains present in `modules/frontend/navigation-bar/package.json` and legacy backend manifests remain present in `modules/backend/*/package.json`.
 
 **Functions:**
 - Use Rust `snake_case` for free functions, methods, and test names, for example `load_installed_module_graph`, `validate_relative_path`, `backend_launch_candidates_from_graph`, and `installed_module_graph_rejects_active_provider_interface_mismatch`.
@@ -108,7 +108,7 @@
 - Use the allowed `mesh.kind` values defined by `ModuleKind` in `crates/core/extension/plugin/src/package.rs`: `frontend`, `backend`, `theme`, `icon-pack`, `font-pack`, `language-pack`, `interface`, and `library`.
 - Root installed-module graphs live in `config/package.json` with `mesh.schemaVersion`, `mesh.modulesDir`, `mesh.modules`, `mesh.providers`, and `mesh.layout`. This root graph selects active providers such as `mesh.audio` and layout entrypoints such as `@mesh/navigation-bar:main`.
 - Module package fixtures live under `config/modules/@mesh/*/package.json`. Keep these fixtures in sync with `docs/module-system.md` examples and graph tests in `crates/core/extension/plugin/src/package.rs`.
-- Legacy `module.json`, `plugin.json`, and `mesh.toml` are compatibility inputs only. Loader precedence is encoded in `load_module_manifest` in `crates/core/extension/plugin/src/package.rs`: `module.json` compatibility path, then `package.json`, then `plugin.json`. Tests also assert `package.json` wins over `plugin.json` when both are present.
+- Legacy `package.json`, `plugin.json`, and `mesh.toml` are compatibility inputs only. Loader precedence is encoded in `load_module_manifest` in `crates/core/extension/plugin/src/package.rs`: `package.json` compatibility path, then `package.json`, then `plugin.json`. Tests also assert `package.json` wins over `plugin.json` when both are present.
 - Frontends consume interfaces through `mesh.dependencies.backend` and Luau `require("@mesh/<service>@<version>")`; they must not depend on backend module IDs. Backend providers declare `mesh.implements` entries with `interface`, `provider`, `label`, and `priority`, as in `config/modules/@mesh/pipewire-audio/package.json`.
 - Libraries are modules with `mesh.kind = "library"` and `mesh.contributes.libraries`. Validate contribution paths as relative paths without `..`, matching `installed_module_graph_rejects_library_path_escape` in `crates/core/extension/plugin/src/package.rs`.
 

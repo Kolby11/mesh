@@ -1,5 +1,5 @@
 use crate::manifest::{
-    self, CapabilitiesSection, DependencySpec, Manifest, ManifestSource, PluginType,
+    self, CapabilitiesSection, DependencySpec, Manifest, ManifestSource, ModuleType,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -352,7 +352,7 @@ impl ModulePackageManifest {
             .map(|provided| manifest::ProvidedInterface {
                 interface: provided.interface,
                 version: provided.version,
-                base_plugin: provided.base_plugin,
+                base_module: provided.base_module,
                 backend_name: provided.label.or(provided.provider),
                 priority: provided.priority,
                 optional_capabilities: Vec::new(),
@@ -374,7 +374,7 @@ impl ModulePackageManifest {
                 id: self.name,
                 name: None,
                 version: self.version,
-                plugin_type: PluginType::from(mesh.kind),
+                module_type: ModuleType::from(mesh.kind),
                 api_version: mesh.api_version,
                 license: self.license,
                 description: self.description,
@@ -410,7 +410,7 @@ impl ModulePackageManifest {
         let package = manifest.package.clone();
         let mut contributes = MeshContributes::default();
 
-        if package.plugin_type == PluginType::Surface || package.plugin_type == PluginType::Widget {
+        if package.module_type == ModuleType::Surface || package.module_type == ModuleType::Widget {
             if let Some(main) = manifest.entrypoints.main.clone() {
                 contributes.layout.push(LayoutContribution {
                     id: "main".into(),
@@ -501,7 +501,7 @@ impl ModulePackageManifest {
             }),
             mesh: MeshModuleSection {
                 api_version: package.api_version,
-                kind: ModuleKind::from(package.plugin_type),
+                kind: ModuleKind::from(package.module_type),
                 capabilities: manifest.capabilities,
                 i18n: MeshI18nSupport {
                     default_locale: manifest
@@ -588,7 +588,7 @@ impl MeshModuleSection {
         self.contributes.validate()
     }
 
-    fn implementations(&self) -> impl Iterator<Item = &MeshProvidesDeclaration> {
+    pub fn implementations(&self) -> impl Iterator<Item = &MeshProvidesDeclaration> {
         self.provides.iter().chain(self.implements.iter())
     }
 }
@@ -645,20 +645,20 @@ pub enum ModuleKind {
     Library,
 }
 
-impl From<PluginType> for ModuleKind {
-    fn from(plugin_type: PluginType) -> Self {
-        match plugin_type {
-            PluginType::Surface | PluginType::Widget => Self::Frontend,
-            PluginType::Backend => Self::Backend,
-            PluginType::Theme => Self::Theme,
-            PluginType::IconPack => Self::IconPack,
-            PluginType::LanguagePack => Self::LanguagePack,
-            PluginType::Interface => Self::Interface,
+impl From<ModuleType> for ModuleKind {
+    fn from(module_type: ModuleType) -> Self {
+        match module_type {
+            ModuleType::Surface | ModuleType::Widget => Self::Frontend,
+            ModuleType::Backend => Self::Backend,
+            ModuleType::Theme => Self::Theme,
+            ModuleType::IconPack => Self::IconPack,
+            ModuleType::LanguagePack => Self::LanguagePack,
+            ModuleType::Interface => Self::Interface,
         }
     }
 }
 
-impl From<ModuleKind> for PluginType {
+impl From<ModuleKind> for ModuleType {
     fn from(kind: ModuleKind) -> Self {
         match kind {
             ModuleKind::Frontend => Self::Surface,
@@ -742,7 +742,7 @@ impl MeshDependencies {
             .map(|font| (font.family, "*".into()))
             .collect();
         Self {
-            modules: dependencies.plugins,
+            modules: dependencies.modules,
             backend: HashMap::new(),
             icons,
             fonts,
@@ -754,7 +754,7 @@ impl MeshDependencies {
 
     fn into_manifest_dependencies(self) -> manifest::DependenciesSection {
         manifest::DependenciesSection {
-            plugins: self.modules,
+            modules: self.modules,
             interfaces: Vec::new(),
             icon_packs: manifest::OptionalDependencyGroup {
                 required: self.icons.keys().cloned().collect(),
@@ -788,8 +788,8 @@ pub struct MeshProvidesDeclaration {
     pub interface: String,
     #[serde(default)]
     pub version: Option<String>,
-    #[serde(default, rename = "basePlugin", alias = "base_plugin")]
-    pub base_plugin: Option<String>,
+    #[serde(default, rename = "baseModule", alias = "base_module")]
+    pub base_module: Option<String>,
     #[serde(default)]
     pub provider: Option<String>,
     #[serde(default)]
@@ -890,7 +890,7 @@ impl From<crate::manifest::ProvidedInterface> for MeshProvidesDeclaration {
         Self {
             interface: provided.interface,
             version: provided.version,
-            base_plugin: provided.base_plugin,
+            base_module: provided.base_module,
             provider: provided.backend_name.clone(),
             label: provided.backend_name,
             priority: provided.priority,
@@ -1010,7 +1010,7 @@ pub struct LoadedModuleManifest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModuleManifestSource {
     PackageJson,
-    LegacyPluginJson,
+    LegacyModuleJson,
 }
 
 #[derive(Debug, Clone)]
@@ -1637,6 +1637,16 @@ pub fn load_installed_module_graph(
 pub fn load_module_manifest(
     module_dir: &Path,
 ) -> Result<LoadedModuleManifest, PackageManifestError> {
+    let package_json = module_dir.join("package.json");
+    if package_json.exists() {
+        let manifest = ModulePackageManifest::from_path(&package_json)?;
+        return Ok(LoadedModuleManifest {
+            manifest,
+            path: package_json,
+            source: ModuleManifestSource::PackageJson,
+        });
+    }
+
     let module_json = module_dir.join("module.json");
     if module_json.exists() {
         let loaded = manifest::load_manifest(module_dir).map_err(|err| {
@@ -1651,46 +1661,16 @@ pub fn load_module_manifest(
             manifest,
             path,
             source: match loaded.source {
-                ManifestSource::PluginJson | ManifestSource::MeshToml => {
-                    ModuleManifestSource::LegacyPluginJson
-                }
-            },
-        });
-    }
-
-    let package_json = module_dir.join("package.json");
-    if package_json.exists() {
-        let manifest = ModulePackageManifest::from_path(&package_json)?;
-        return Ok(LoadedModuleManifest {
-            manifest,
-            path: package_json,
-            source: ModuleManifestSource::PackageJson,
-        });
-    }
-
-    let plugin_json = module_dir.join("plugin.json");
-    if plugin_json.exists() {
-        let loaded = manifest::load_manifest(module_dir).map_err(|err| {
-            PackageManifestError::LegacyManifest {
-                path: module_dir.to_path_buf(),
-                message: err.to_string(),
-            }
-        })?;
-        let path = loaded.path.clone();
-        let manifest = ModulePackageManifest::from_legacy_manifest(loaded.manifest);
-        return Ok(LoadedModuleManifest {
-            manifest,
-            path,
-            source: match loaded.source {
-                ManifestSource::PluginJson | ManifestSource::MeshToml => {
-                    ModuleManifestSource::LegacyPluginJson
+                ManifestSource::PackageJson => ModuleManifestSource::PackageJson,
+                ManifestSource::ModuleJson | ManifestSource::MeshToml => {
+                    ModuleManifestSource::LegacyModuleJson
                 }
             },
         });
     }
 
     Err(PackageManifestError::Validation(format!(
-        "no package.json or plugin.json found in {}",
+        "no package.json or module.json found in {}",
         module_dir.display()
     )))
 }
@@ -1883,7 +1863,7 @@ mod tests {
     },
     "entrypoints": { "main": "src/main.luau" },
     "implements": [
-      { "interface": "mesh.audio", "version": "1.0", "basePlugin": "@mesh/audio-interface", "provider": "pipewire", "label": "PipeWire", "priority": 100 }
+      { "interface": "mesh.audio", "version": "1.0", "baseModule": "@mesh/audio-interface", "provider": "pipewire", "label": "PipeWire", "priority": 100 }
     ]
   }
 }
@@ -1904,7 +1884,7 @@ mod tests {
         assert_eq!(manifest.mesh.i18n.default_locale.as_deref(), Some("en"));
         assert_eq!(manifest.mesh.i18n.supported_locales, vec!["en", "sk"]);
         assert_eq!(
-            manifest.mesh.implements[0].base_plugin.as_deref(),
+            manifest.mesh.implements[0].base_module.as_deref(),
             Some("@mesh/audio-interface")
         );
     }
@@ -1954,7 +1934,7 @@ mod tests {
     }
 
     #[test]
-    fn module_manifest_loader_prefers_package_json_over_plugin_json() {
+    fn module_manifest_loader_prefers_package_json_over_module_json() {
         let dir = temp_dir("module-precedence");
         fs::write(
             dir.join("package.json"),
@@ -1962,8 +1942,8 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            dir.join("plugin.json"),
-            r#"{"id":"@mesh/plugin","version":"0.1.0","type":"surface","api_version":"0.1"}"#,
+            dir.join("module.json"),
+            r#"{"id":"@mesh/module","version":"0.1.0","type":"surface","api_version":"0.1"}"#,
         )
         .unwrap();
         let loaded = load_module_manifest(&dir).unwrap();
@@ -1972,16 +1952,16 @@ mod tests {
     }
 
     #[test]
-    fn module_manifest_loader_accepts_legacy_plugin_json() {
-        let dir = temp_dir("legacy-plugin");
+    fn module_manifest_loader_accepts_legacy_module_json() {
+        let dir = temp_dir("legacy-module");
         fs::write(
-            dir.join("plugin.json"),
-            r#"{"id":"@mesh/plugin","version":"0.1.0","type":"surface","api_version":"0.1","entrypoints":{"main":"src/main.mesh"}}"#,
+            dir.join("module.json"),
+            r#"{"id":"@mesh/module","version":"0.1.0","type":"surface","api_version":"0.1","entrypoints":{"main":"src/main.mesh"}}"#,
         )
         .unwrap();
         let loaded = load_module_manifest(&dir).unwrap();
-        assert_eq!(loaded.source, ModuleManifestSource::LegacyPluginJson);
-        assert_eq!(loaded.manifest.name, "@mesh/plugin");
+        assert_eq!(loaded.source, ModuleManifestSource::LegacyModuleJson);
+        assert_eq!(loaded.manifest.name, "@mesh/module");
     }
 
     #[test]
@@ -1989,7 +1969,7 @@ mod tests {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../modules/frontend/navigation-bar");
         let loaded = load_module_manifest(&dir).unwrap();
-        assert_eq!(loaded.source, ModuleManifestSource::LegacyPluginJson);
+        assert_eq!(loaded.source, ModuleManifestSource::LegacyModuleJson);
         assert_eq!(loaded.manifest.name, "@mesh/navigation-bar");
         assert_eq!(
             loaded.manifest.mesh.entrypoints.main.as_deref(),
@@ -2171,7 +2151,7 @@ mod tests {
                 vec![MeshProvidesDeclaration {
                     interface: "mesh.audio".into(),
                     version: None,
-                    base_plugin: None,
+                    base_module: None,
                     provider: Some("pipewire".into()),
                     label: Some("PipeWire".into()),
                     priority: 100,
@@ -2185,7 +2165,7 @@ mod tests {
                 vec![MeshProvidesDeclaration {
                     interface: "mesh.audio".into(),
                     version: None,
-                    base_plugin: None,
+                    base_module: None,
                     provider: Some("pulseaudio".into()),
                     label: Some("PulseAudio".into()),
                     priority: 50,
@@ -2389,7 +2369,7 @@ mod tests {
             vec![MeshProvidesDeclaration {
                 interface: "mesh.network".into(),
                 version: None,
-                base_plugin: None,
+                base_module: None,
                 provider: Some("networkmanager".into()),
                 label: Some("NetworkManager".into()),
                 priority: 100,

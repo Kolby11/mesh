@@ -28,8 +28,8 @@ Use these terms precisely in code, documentation, and architecture discussions:
 - **Module**: the target installable package unit for MESH. New packages use
   `package.json` with a `mesh` section. `mesh.kind` describes the role
   (`frontend`, `backend`, `interface`, `theme`, `icon-pack`, `font-pack`,
-  `language-pack`, or `library`). Older `module.json`,
-  `plugin.json`, and `mesh.toml` files are compatibility inputs during
+  `language-pack`, or `library`). Older `package.json`,
+  `package.json`, and `mesh.toml` files are compatibility inputs during
   migration, not the preferred authoring model.
 - **Element**: a base UI primitive exposed by MESH core, such as `box`,
   `row`, `button`, `icon`, `input`, `slider`, or `text`. Elements are the
@@ -40,10 +40,10 @@ Use these terms precisely in code, documentation, and architecture discussions:
   and, optionally, other components. Components encapsulate markup, Luau state
   and handlers, styles, schema, translations, and metadata. A component is not
   a core primitive.
-- **Frontend plugin**: a complete frontend implementation for a specific shell
-  capability or feature. A frontend plugin has a `plugin.json`, an entrypoint
+- **Frontend module**: a complete frontend implementation for a specific shell
+  capability or feature. A frontend module has a `package.json`, an entrypoint
   `.mesh` file, capabilities, settings, and may contain multiple reusable
-  components. For example, an audio controls frontend plugin can contain
+  components. For example, an audio controls frontend module can contain
   separate components for a volume mixer, output selector, mute button, and
   device list.
 - **Interface**: a named, versioned contract distributed as an `interface`
@@ -55,7 +55,7 @@ Use these terms precisely in code, documentation, and architecture discussions:
   capabilities by themselves.
 
 When modeling Lua or LSP APIs, prefer this hierarchy: core **elements** expose
-the base typed API; user **components** compose elements; **frontend plugins**
+the base typed API; user **components** compose elements; **frontend modules**
 package one or more components into a complete shell feature.
 
 For the target module/package direction, see `docs/module-system.md`.
@@ -95,7 +95,7 @@ Responsible for:
 
 ### 2. Wayland frontend
 
-Responsible for frontend plugins that implement shell surfaces and widgets such as:
+Responsible for frontend modules that implement shell surfaces and widgets such as:
 
 - panel
 - launcher
@@ -116,10 +116,10 @@ Extensions can implement:
 - themes
 - language packs
 
-Backend/service plugins must be implemented in the plugin's scripting language
-through the extension runtime host API, not in Rust shell code. If a plugin
+Backend/service modules must be implemented in the module's scripting language
+through the extension runtime host API, not in Rust shell code. If a module
 needs a new system capability, add a generic host API to the runtime and keep
-the service-specific logic inside the plugin script.
+the service-specific logic inside the module script.
 
 Luau execution should go through a real runtime library, not hand-written
 string parsing. Use `mlua` in Luau mode for script execution and treat any

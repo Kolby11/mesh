@@ -1,8 +1,6 @@
 <template>
   <row class="nav-shell">
     <box class="meta">
-        <MetaLabel />
-        <MetaPill />
         <SettingsButton />
         <VolumeButton />
         <ThemeButton />
@@ -12,7 +10,6 @@
 
 <script lang="luau">
 import MetaLabel from "./components/meta-label.mesh"
-import MetaPill from "./components/meta-pill.mesh"
 import SettingsButton from "./components/settings-button.mesh"
 import VolumeButton from "./components/volume-button.mesh"
 import ThemeButton from "./components/theme-button.mesh"

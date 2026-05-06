@@ -1,27 +1,27 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use mesh_core_plugin::PluginType;
-use mesh_core_plugin::lifecycle::PluginInstance;
-use mesh_core_render::{CompiledFrontendPlugin, compile_frontend_plugin};
+use mesh_core_module::ModuleType;
+use mesh_core_module::lifecycle::ModuleInstance;
+use mesh_core_render::{CompiledFrontendModule, compile_frontend_module};
 
 use crate::shell::ShellRunError;
 
 #[derive(Debug, Clone)]
 pub(in crate::shell) struct FrontendCatalog {
-    pub(super) plugins: HashMap<String, FrontendCatalogEntry>,
+    pub(super) modules: HashMap<String, FrontendCatalogEntry>,
     pub(super) slot_contributions: HashMap<String, Vec<ResolvedSlotContribution>>,
 }
 
 #[derive(Debug, Clone)]
 pub(in crate::shell) struct FrontendCatalogEntry {
-    pub(in crate::shell) plugin_dir: PathBuf,
-    pub(in crate::shell) compiled: CompiledFrontendPlugin,
+    pub(in crate::shell) module_dir: PathBuf,
+    pub(in crate::shell) compiled: CompiledFrontendModule,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct ResolvedSlotContribution {
-    pub(super) source_plugin_id: String,
+    pub(super) source_module_id: String,
     pub(super) widget_id: String,
     pub(super) contribution_id: String,
     pub(super) order: i64,
@@ -29,44 +29,44 @@ pub(super) struct ResolvedSlotContribution {
 }
 
 impl FrontendCatalog {
-    pub(in crate::shell) fn from_plugins(
-        plugins: &HashMap<String, PluginInstance>,
+    pub(in crate::shell) fn from_modules(
+        modules: &HashMap<String, ModuleInstance>,
     ) -> Result<Self, ShellRunError> {
-        let mut plugin_ids: Vec<String> = plugins.keys().cloned().collect();
-        plugin_ids.sort();
+        let mut module_ids: Vec<String> = modules.keys().cloned().collect();
+        module_ids.sort();
 
         let mut catalog = Self {
-            plugins: HashMap::new(),
+            modules: HashMap::new(),
             slot_contributions: HashMap::new(),
         };
 
-        for plugin_id in plugin_ids {
-            let Some(plugin) = plugins.get(&plugin_id) else {
+        for module_id in module_ids {
+            let Some(module) = modules.get(&module_id) else {
                 continue;
             };
 
-            if !mesh_core_render::is_frontend_plugin(&plugin.manifest) {
+            if !mesh_core_render::is_frontend_module(&module.manifest) {
                 continue;
             }
 
             let compiled =
-                compile_frontend_plugin(&plugin.manifest, &plugin.path).map_err(|source| {
+                compile_frontend_module(&module.manifest, &module.path).map_err(|source| {
                     ShellRunError::FrontendCompile {
-                        plugin_id: plugin_id.clone(),
+                        module_id: module_id.clone(),
                         source,
                     }
                 })?;
 
-            catalog.plugins.insert(
-                plugin_id.clone(),
+            catalog.modules.insert(
+                module_id.clone(),
                 FrontendCatalogEntry {
-                    plugin_dir: plugin.path.clone(),
+                    module_dir: module.path.clone(),
                     compiled,
                 },
             );
         }
 
-        for (plugin_id, entry) in &catalog.plugins {
+        for (module_id, entry) in &catalog.modules {
             for (slot_id, contributions) in &entry.compiled.manifest.slot_contributions {
                 let bucket = catalog
                     .slot_contributions
@@ -74,15 +74,15 @@ impl FrontendCatalog {
                     .or_default();
                 for (index, contribution) in contributions.iter().enumerate() {
                     bucket.push(ResolvedSlotContribution {
-                        source_plugin_id: plugin_id.clone(),
+                        source_module_id: module_id.clone(),
                         widget_id: contribution
                             .widget
                             .clone()
-                            .unwrap_or_else(|| plugin_id.clone()),
+                            .unwrap_or_else(|| module_id.clone()),
                         contribution_id: contribution
                             .id
                             .clone()
-                            .unwrap_or_else(|| format!("{plugin_id}:{slot_id}:{index}")),
+                            .unwrap_or_else(|| format!("{module_id}:{slot_id}:{index}")),
                         order: contribution.order.unwrap_or(0),
                         props: contribution.props.clone(),
                     });
@@ -99,13 +99,13 @@ impl FrontendCatalog {
             });
         }
 
-        for (plugin_id, entry) in &catalog.plugins {
-            for (alias, target_plugin_id) in &entry.compiled.plugin_component_imports {
+        for (module_id, entry) in &catalog.modules {
+            for (alias, target_module_id) in &entry.compiled.module_component_imports {
                 catalog
-                    .validate_component_plugin_import(&entry.compiled.manifest, target_plugin_id)
+                    .validate_component_module_import(&entry.compiled.manifest, target_module_id)
                     .map_err(|message| ShellRunError::FrontendComposition {
                         message: format!(
-                            "plugin '{plugin_id}' cannot import {alias} from '{target_plugin_id}': {message}"
+                            "module '{module_id}' cannot import {alias} from '{target_module_id}': {message}"
                         ),
                     })?;
             }
@@ -115,14 +115,14 @@ impl FrontendCatalog {
                 }
                 if entry
                     .compiled
-                    .plugin_component_imports
+                    .module_component_imports
                     .contains_key(&component_tag)
                 {
                     continue;
                 }
                 return Err(ShellRunError::FrontendComposition {
                     message: format!(
-                        "plugin '{plugin_id}' references <{component_tag}> but no explicit component import was compiled for that tag"
+                        "module '{module_id}' references <{component_tag}> but no explicit component import was compiled for that tag"
                     ),
                 });
             }
@@ -140,9 +140,9 @@ impl FrontendCatalog {
 
     pub(in crate::shell) fn top_level_surfaces(&self) -> Vec<FrontendCatalogEntry> {
         let mut entries: Vec<FrontendCatalogEntry> = self
-            .plugins
+            .modules
             .values()
-            .filter(|entry| entry.compiled.manifest.package.plugin_type == PluginType::Surface)
+            .filter(|entry| entry.compiled.manifest.package.module_type == ModuleType::Surface)
             .cloned()
             .collect();
         entries.sort_by(|left, right| {
@@ -155,43 +155,43 @@ impl FrontendCatalog {
         entries
     }
 
-    fn validate_component_plugin_import(
+    fn validate_component_module_import(
         &self,
-        host: &mesh_core_plugin::Manifest,
-        plugin_id: &str,
+        host: &mesh_core_module::Manifest,
+        module_id: &str,
     ) -> Result<(), String> {
         if !host
-            .required_plugin_dependencies()
+            .required_module_dependencies()
             .iter()
-            .any(|dependency_id| dependency_id == plugin_id)
+            .any(|dependency_id| dependency_id == module_id)
         {
-            return Err("target plugin is not a required dependency".into());
+            return Err("target module is not a required dependency".into());
         }
-        let Some(entry) = self.plugins.get(plugin_id) else {
-            return Err("target plugin is not loaded".into());
+        let Some(entry) = self.modules.get(module_id) else {
+            return Err("target module is not loaded".into());
         };
-        match entry.compiled.manifest.package.plugin_type {
-            PluginType::Widget | PluginType::Surface => Ok(()),
+        match entry.compiled.manifest.package.module_type {
+            ModuleType::Widget | ModuleType::Surface => Ok(()),
             other => Err(format!(
-                "target plugin must be a frontend widget or surface, got {other}"
+                "target module must be a frontend widget or surface, got {other}"
             )),
         }
     }
 
-    pub(super) fn imported_component_plugin_id(
+    pub(super) fn imported_component_module_id(
         &self,
-        host: &mesh_core_plugin::Manifest,
+        host: &mesh_core_module::Manifest,
         alias: &str,
     ) -> Result<String, String> {
-        let Some(entry) = self.plugins.get(&host.package.id) else {
-            return Err("host plugin is not loaded".into());
+        let Some(entry) = self.modules.get(&host.package.id) else {
+            return Err("host module is not loaded".into());
         };
-        let Some(plugin_id) = entry.compiled.plugin_component_imports.get(alias) else {
+        let Some(module_id) = entry.compiled.module_component_imports.get(alias) else {
             return Err(format!(
-                "no explicit plugin import for component alias '{alias}'"
+                "no explicit module import for component alias '{alias}'"
             ));
         };
-        self.validate_component_plugin_import(host, plugin_id)?;
-        Ok(plugin_id.clone())
+        self.validate_component_module_import(host, module_id)?;
+        Ok(module_id.clone())
     }
 }

@@ -1,12 +1,12 @@
 /// Legacy typed registry used while Rust-side callers finish migrating to
-/// plugin-declared interfaces.
+/// module-declared interfaces.
 ///
 /// The long-term runtime path is contract + provider lookup via the interface
 /// registry. This registry still holds one active typed backend per service so
 /// older Rust integrations can keep working during the transition.
 ///
 /// ```text
-/// Backend plugin registers:   registry.register_audio(Box::new(PipewireBackend))
+/// Backend module registers:   registry.register_audio(Box::new(PipewireBackend))
 /// Frontend widget looks up:   registry.audio()  ->  &dyn AudioService
 /// ```
 use std::any::{Any, TypeId};
@@ -20,13 +20,13 @@ pub struct ServiceEntry {
     pub service_type: String,
     /// The active backend's identifier (e.g. "pipewire", "networkmanager").
     pub backend_id: String,
-    /// The plugin that provides this backend (e.g. "@mesh/pipewire-audio").
-    pub plugin_id: String,
+    /// The module that provides this backend (e.g. "@mesh/pipewire-audio").
+    pub module_id: String,
 }
 
 /// Central registry that holds one active typed backend per service type.
 ///
-/// New frontend plugins should prefer `require("@mesh/<service>")` and contract
+/// New frontend modules should prefer `require("@mesh/<service>")` and contract
 /// providers. This registry is for compatibility with older Rust call sites.
 #[derive(Default)]
 pub struct ServiceRegistry {
@@ -57,7 +57,7 @@ impl ServiceRegistry {
         &self,
         service_type: &str,
         backend_id: &str,
-        plugin_id: &str,
+        module_id: &str,
         backend: Arc<T>,
     ) where
         T: Send + Sync,
@@ -72,7 +72,7 @@ impl ServiceRegistry {
         entries.push(ServiceEntry {
             service_type: service_type.to_string(),
             backend_id: backend_id.to_string(),
-            plugin_id: plugin_id.to_string(),
+            module_id: module_id.to_string(),
         });
     }
 

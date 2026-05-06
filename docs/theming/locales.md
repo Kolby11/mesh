@@ -1,6 +1,6 @@
 # Localization
 
-MESH localization is **plugin-authored and user-extensible**. Every plugin
+MESH localization is **module-authored and user-extensible**. Every module
 ships translations for its own strings; third-party **language packs** layer
 additional or replacement translations on top; the user picks a locale and a
 fallback chain.
@@ -10,11 +10,11 @@ hardcoded code path.
 
 ## Model
 
-1. **Plugins own their strings.** A plugin's `<i18n>` block (or a bundled
-   `i18n/<locale>.json`) is the baseline for every locale that plugin
+1. **Modules own their strings.** A module's `<i18n>` block (or a bundled
+   `i18n/<locale>.json`) is the baseline for every locale that module
    supports.
-2. **Language packs layer on top.** A language pack is a plugin that
-   provides translations *for other plugins*. Multiple packs can be active
+2. **Language packs layer on top.** A language pack is a module that
+   provides translations *for other modules*. Multiple packs can be active
    at once.
 3. **The user picks a locale + fallback chain.** Missing keys walk the
    chain.
@@ -30,23 +30,23 @@ version:   1.0
 methods:
   current() -> string                           # e.g. "sk-SK"
   chain() -> [string]                           # resolution order
-  translate(plugin_id: string, key: string, args: map?) -> string
+  translate(module_id: string, key: string, args: map?) -> string
   format_number(n: number, options?: map) -> string
   format_date(d: datetime, pattern: string) -> string
   format_duration(seconds: number) -> string
   pluralize(count: number, forms: map<string,string>) -> string
-  has(plugin_id: string, key: string) -> bool
+  has(module_id: string, key: string) -> bool
 events:
   LocaleChanged(locale: string, chain: [string])
-  TranslationsReloaded(plugin_id: string)
+  TranslationsReloaded(module_id: string)
 ```
 
-Translations are **scoped by plugin ID**. A key `results.files` in
+Translations are **scoped by module ID**. A key `results.files` in
 `@mesh/launcher` never collides with `results.files` in
 `@community/file-manager`. This is what makes third-party language packs
-safe: they target plugins individually.
+safe: they target modules individually.
 
-## Plugin-bundled translations
+## Module-bundled translations
 
 The simplest case: a module declares the locales it supports in
 `package.json` and ships its own locale files next to the manifest.
@@ -94,7 +94,7 @@ At load, the core indexes these under `@mesh/launcher`.
 
 ## Language packs
 
-A language pack is a plugin that provides translations for other plugins.
+A language pack is a module that provides translations for other modules.
 
 ```
 @community/cs-language-pack/
@@ -163,15 +163,15 @@ selects the right form for the active locale.
 
 ## Lookup chain
 
-For a given `(plugin_id, key)`:
+For a given `(module_id, key)`:
 
-1. **User-pinned override** (per-plugin settings, rare — mainly for
+1. **User-pinned override** (per-module settings, rare — mainly for
    corrections without repackaging)
-2. **Highest-priority language pack** providing `(plugin_id, active_locale)`
+2. **Highest-priority language pack** providing `(module_id, active_locale)`
 3. **Next language pack** providing the same
-4. **Plugin-bundled** `active_locale`
+4. **Module-bundled** `active_locale`
 5. For each locale in the user's fallback chain, repeat 2–4
-6. **Plugin-bundled** `default_locale`
+6. **Module-bundled** `default_locale`
 7. Return the raw key prefixed with `!!` as a visible diagnostic
    (`!!results.files`) so missing translations surface in the UI
 
@@ -200,9 +200,9 @@ BCP 47 tags: `en`, `en-US`, `sk-SK`, `zh-Hant-TW`. Matching is
 most-specific-first: `sk-SK` satisfies a `sk` request; `sk` does not
 satisfy `sk-SK` unless the chain says so.
 
-## Providing translations for third-party plugins
+## Providing translations for third-party modules
 
-A community translator can ship a pack translating plugins they don't own:
+A community translator can ship a pack translating modules they don't own:
 
 ```toml
 # @polyglot/slovak-extras / mesh.toml
@@ -211,14 +211,14 @@ A community translator can ship a pack translating plugins they don't own:
 "@community/cpu-graph"      = { sk = "cpu-graph/sk.json" }
 ```
 
-As long as the target plugin's keys are stable, the pack works. When a
-plugin renames keys, packs targeting it need an update — the
+As long as the target module's keys are stable, the pack works. When a
+module renames keys, packs targeting it need an update — the
 `TranslationsReloaded` event fires on hot-reload during development.
 
 ## Number, date, and duration formatting
 
 These go through `mesh.locale` and follow the active locale's CLDR rules.
-Plugins should never hand-format dates or numbers — the formatted output
+Modules should never hand-format dates or numbers — the formatted output
 differs across locales (decimal separators, date order, first day of
 week, thousand grouping).
 
@@ -229,14 +229,14 @@ loc:format_date(os.time(), "short")     -- "20. 4. 2026"
 loc:format_duration(3675)               -- "1 h 1 min"
 ```
 
-Plugins can pass locale-specific options (currency, unit systems) through
+Modules can pass locale-specific options (currency, unit systems) through
 the `options` map.
 
 ## RTL, bidi, and font fallback
 
 - Direction is derived from the active locale and exposed as `locale.dir`
   (`"ltr"` or `"rtl"`).
-- Surfaces flip layout automatically when the current locale is RTL; plugin
+- Surfaces flip layout automatically when the current locale is RTL; module
   authors use logical properties (`margin-inline-start`) rather than
   physical (`margin-left`) to get correct behaviour.
 - Font fallback for scripts the active theme's font lacks is handled by the
@@ -248,22 +248,22 @@ the `options` map.
 mesh locale list                       # locales available from bundled + packs
 mesh locale active                     # current locale + chain
 mesh locale set <code>                 # switch primary locale
-mesh locale which <plugin> <key>       # which pack/layer supplied the string
-mesh locale missing <plugin>           # keys the plugin declares but no locale satisfies
-mesh locale extract <plugin>           # dump keys from a plugin's <i18n> for translators
+mesh locale which <module> <key>       # which pack/layer supplied the string
+mesh locale missing <module>           # keys the module declares but no locale satisfies
+mesh locale extract <module>           # dump keys from a module's <i18n> for translators
 ```
 
 `mesh locale extract` is the translator's entry point — it produces a
-template JSON with every key the plugin uses, ready to fill in.
+template JSON with every key the module uses, ready to fill in.
 
 ## Summary
 
-- Translations are scoped by plugin ID; no global namespace collisions.
-- Plugins bundle their own strings; language packs layer on top; multiple
+- Translations are scoped by module ID; no global namespace collisions.
+- Modules bundle their own strings; language packs layer on top; multiple
   packs coexist as an ordered chain.
 - Lookups go through `mesh.locale`; missing keys fall through a user-defined
   chain and surface visibly when still missing.
 - Number, date, duration, and plural handling are delegated to the locale
-  service — plugins never format these themselves.
-- RTL / bidi / font-fallback are the renderer's job; plugin CSS should use
+  service — modules never format these themselves.
+- RTL / bidi / font-fallback are the renderer's job; module CSS should use
   logical properties.

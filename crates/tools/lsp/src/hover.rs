@@ -4,11 +4,11 @@ use crate::{
     analyzer::script::{element_field_markdown, element_ref_markdown},
     document::Document,
     knowledge::{css::CSS_PROPERTIES, mesh_api::MESH_API_ENTRIES, tags::TAG_DEFS},
-    plugin_registry::PluginRegistry,
+    module_registry::ModuleRegistry,
     util::{Block, block_at_offset, block_content, position_to_offset},
 };
 
-pub fn hover(doc: &Document, position: Position, _registry: &PluginRegistry) -> Option<Hover> {
+pub fn hover(doc: &Document, position: Position, _registry: &ModuleRegistry) -> Option<Hover> {
     let offset = position_to_offset(&doc.source, position);
     let loc = block_at_offset(&doc.source, offset);
     let content = block_content(&doc.source, &loc.block);

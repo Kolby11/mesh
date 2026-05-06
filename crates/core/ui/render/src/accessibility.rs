@@ -1,5 +1,5 @@
 use mesh_core_elements::AccessibilityRole;
-use mesh_core_plugin::Manifest;
+use mesh_core_module::Manifest;
 
 pub(crate) fn parse_accessibility_role(role: &str) -> AccessibilityRole {
     match role.trim().to_ascii_lowercase().as_str() {

@@ -3,12 +3,12 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use tower_lsp::{Client, LanguageServer, jsonrpc::Result, lsp_types::*};
 
-use crate::{analyzer, diagnostics, document::Document, hover, plugin_registry::PluginRegistry};
+use crate::{analyzer, diagnostics, document::Document, hover, module_registry::ModuleRegistry};
 
 pub struct Backend {
     client: Client,
     documents: Arc<RwLock<HashMap<Url, Document>>>,
-    registry: Arc<RwLock<PluginRegistry>>,
+    registry: Arc<RwLock<ModuleRegistry>>,
 }
 
 impl Backend {
@@ -16,7 +16,7 @@ impl Backend {
         Self {
             client,
             documents: Arc::new(RwLock::new(HashMap::new())),
-            registry: Arc::new(RwLock::new(PluginRegistry::empty())),
+            registry: Arc::new(RwLock::new(ModuleRegistry::empty())),
         }
     }
 }
@@ -24,18 +24,18 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        // Discover plugins from the workspace root provided by the client.
+        // Discover modules from the workspace root provided by the client.
         let workspace_root = params
             .root_uri
             .as_ref()
             .and_then(|uri| uri.to_file_path().ok());
 
         if let Some(root) = workspace_root {
-            let registry = PluginRegistry::discover(&root);
+            let registry = ModuleRegistry::discover(&root);
             tracing::info!(
-                plugins = registry.manifests.len(),
+                modules = registry.manifests.len(),
                 services = registry.interface_fields.len(),
-                "plugin registry built"
+                "module registry built"
             );
             *self.registry.write().await = registry;
         }

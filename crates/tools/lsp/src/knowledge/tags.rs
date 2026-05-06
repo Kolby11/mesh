@@ -224,7 +224,7 @@ static ICON_ATTRS: &[AttrDef] = &[
     },
     AttrDef {
         name: "src",
-        description: "Absolute or plugin-relative path to an icon file",
+        description: "Absolute or module-relative path to an icon file",
     },
     AttrDef {
         name: "size",

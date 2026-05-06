@@ -1,6 +1,6 @@
 /// Localization engine for MESH.
 ///
-/// Provides system-wide locale management with per-plugin translation support,
+/// Provides system-wide locale management with per-module translation support,
 /// fallback chains, and runtime locale switching.
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

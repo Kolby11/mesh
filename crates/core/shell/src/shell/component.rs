@@ -6,7 +6,7 @@ use super::layout::{
 };
 use super::service::{apply_service_update, script_events_to_requests, seed_service_state};
 use super::surface_layout::{
-    SurfaceLayoutSettings, SurfaceSizePolicy, load_frontend_plugin_settings,
+    SurfaceLayoutSettings, SurfaceSizePolicy, load_frontend_module_settings,
 };
 use super::types::{
     ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, ServiceEvent,
@@ -37,7 +37,7 @@ use mesh_core_elements::{
 };
 use mesh_core_locale::LocaleEngine;
 use mesh_core_render::{
-    CompiledFrontendPlugin, FrontendRenderMode, compile_frontend_plugin, root_accessibility_role,
+    CompiledFrontendModule, FrontendRenderMode, compile_frontend_module, root_accessibility_role,
 };
 use mesh_core_scripting::{LocaleBoundState, ScriptContext, ScriptInterfaceImport};
 use mesh_core_theme::{Theme, default_theme};
@@ -55,9 +55,9 @@ const TOOLTIP_OVERLAY_WIDTH: u32 = 260;
 const TOOLTIP_OVERLAY_HEIGHT: u32 = 96;
 
 pub(super) struct FrontendSurfaceComponent {
-    pub(super) compiled: CompiledFrontendPlugin,
-    pub(super) plugin_dir: PathBuf,
-    plugin_settings_file: PathBuf,
+    pub(super) compiled: CompiledFrontendModule,
+    pub(super) module_dir: PathBuf,
+    module_settings_file: PathBuf,
     settings_json: serde_json::Value,
     pub(super) surface_layout: SurfaceLayoutSettings,
     pub(super) frontend_catalog: FrontendCatalog,
@@ -97,24 +97,24 @@ pub(super) struct FrontendSurfaceComponent {
 
 #[derive(Debug)]
 struct EmbeddedFrontendRuntime {
-    plugin_id: String,
+    module_id: String,
     script_ctx: ScriptContext,
 }
 
 impl FrontendSurfaceComponent {
     pub(super) fn new(
-        compiled: CompiledFrontendPlugin,
-        plugin_dir: PathBuf,
+        compiled: CompiledFrontendModule,
+        module_dir: PathBuf,
         frontend_catalog: FrontendCatalog,
         interface_catalog: mesh_core_service::InterfaceCatalog,
     ) -> Self {
-        let plugin_settings_file = plugin_dir.join("config/settings.json");
+        let module_settings_file = module_dir.join("config/settings.json");
         let settings_state =
-            load_frontend_plugin_settings(&plugin_settings_file, &compiled.manifest);
+            load_frontend_module_settings(&module_settings_file, &compiled.manifest);
         Self {
             compiled,
-            plugin_dir,
-            plugin_settings_file,
+            module_dir,
+            module_settings_file,
             settings_json: settings_state.raw,
             surface_layout: settings_state.layout.clone(),
             frontend_catalog,
@@ -163,7 +163,7 @@ fn tracked_service_fields_changed(
 }
 
 pub(super) fn grant_capabilities_from_manifest(
-    manifest: &mesh_core_plugin::Manifest,
+    manifest: &mesh_core_module::Manifest,
 ) -> CapabilitySet {
     let mut granted = CapabilitySet::new();
 

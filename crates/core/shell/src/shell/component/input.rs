@@ -61,7 +61,7 @@ impl FrontendSurfaceComponent {
                         "device_id": "default",
                         "volume": percent as f64 / 100.0,
                     }),
-                    source_plugin_id: self.id().to_string(),
+                    source_module_id: self.id().to_string(),
                     source_capabilities: self.source_capabilities(),
                 });
             }
@@ -134,7 +134,7 @@ impl FrontendSurfaceComponent {
                         "device_id": "default",
                         "volume": percent as f64 / 100.0,
                     }),
-                    source_plugin_id: self.id().to_string(),
+                    source_module_id: self.id().to_string(),
                     source_capabilities: self.source_capabilities(),
                 })
             }

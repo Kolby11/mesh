@@ -13,7 +13,7 @@ a theme, an icon pack, or a shared library.
 ## Principles
 
 1. **One package model.** Every installable thing is a module with
-   `package.json` and a `mesh` section. Legacy `module.json`, `plugin.json`,
+   `package.json` and a `mesh` section. Legacy `package.json`, `package.json`,
    and `mesh.toml` can remain loaders during migration, but new docs and
    examples should use `package.json`.
 2. **Interfaces are data, not code.** Service APIs live in interface modules
@@ -131,16 +131,16 @@ graph under `mesh`:
 
 The `mesh.kind` value describes the module's main role:
 
-| Kind | Purpose |
-| --- | --- |
-| `interface` | Declares a named contract, types, methods, events, and shared settings. |
-| `backend` | Provides one or more interfaces. |
-| `frontend` | Contributes `.mesh` UI entrypoints, widgets, surfaces, or settings UI. |
-| `theme` | Contributes token files. |
-| `icon-pack` | Contributes icons, usually as a multi-active `mesh.icons` provider. |
-| `font-pack` | Contributes fonts. |
-| `language-pack` | Contributes translations. |
-| `library` | Contributes importable Luau modules. |
+| Kind            | Purpose                                                                 |
+| --------------- | ----------------------------------------------------------------------- |
+| `interface`     | Declares a named contract, types, methods, events, and shared settings. |
+| `backend`       | Provides one or more interfaces.                                        |
+| `frontend`      | Contributes `.mesh` UI entrypoints, widgets, surfaces, or settings UI.  |
+| `theme`         | Contributes token files.                                                |
+| `icon-pack`     | Contributes icons, usually as a multi-active `mesh.icons` provider.     |
+| `font-pack`     | Contributes fonts.                                                      |
+| `language-pack` | Contributes translations.                                               |
+| `library`       | Contributes importable Luau modules.                                    |
 
 `library` is the missing piece for extensible scripting. It is not a service
 provider and does not render UI; it contributes files that other modules can
@@ -216,7 +216,7 @@ Interface contracts should separate:
 - **Capabilities:** access required to consume or implement the contract.
 - **Shared settings:** user preferences that survive provider swaps.
 
-Do not put provider identity such as `source_plugin` in the contract state.
+Do not put provider identity such as `source_module` in the contract state.
 That is runtime metadata.
 
 ### Interface Relationship Metadata
@@ -229,10 +229,10 @@ can encourage reuse where it helps interoperability.
 Use `mesh.interface.domain` to group related interfaces, and
 `mesh.interface.relationship` to explain intent:
 
-| Relationship | Meaning |
-| --- | --- |
-| `base` | A broad shared contract for a domain, such as `mesh.audio`. |
-| `extension` | Extra surface area that builds on another interface. |
+| Relationship  | Meaning                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `base`        | A broad shared contract for a domain, such as `mesh.audio`.                                                        |
+| `extension`   | Extra surface area that builds on another interface.                                                               |
 | `independent` | A separate model in the same or a new domain. Allowed, but less interoperable unless frontends target it directly. |
 
 An audio extension can be explicit:
@@ -517,10 +517,10 @@ model.
 ## Migration Recommendations
 
 1. Treat `package.json` plus `mesh` as the target manifest.
-2. Keep loading `module.json`, `plugin.json`, and `mesh.toml` for compatibility
+2. Keep loading `package.json`, `package.json`, and `mesh.toml` for compatibility
    but mark them legacy in docs.
-3. Rename docs from "plugin" toward "module" where they describe the package
-   model. Keep "frontend plugin" and "backend plugin" only as legacy wording
+3. Rename docs from "module" toward "module" where they describe the package
+   model. Keep "frontend module" and "backend module" only as legacy wording
    or when discussing old manifests.
 4. Add a library resolver to both backend and frontend Luau runtimes.
 5. Move common backend helpers out of individual providers into

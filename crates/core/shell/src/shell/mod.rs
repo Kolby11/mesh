@@ -4,14 +4,14 @@ use mesh_core_config::{
 };
 use mesh_core_debug::{
     BackendRuntimeEntry, DebugOverlayState, DebugSnapshot, HealthEntry, InterfaceEntry,
-    PluginEntry, ProviderEntry,
+    ModuleEntry, ProviderEntry,
 };
 use mesh_core_diagnostics::DiagnosticsCollector;
 use mesh_core_events::EventBus;
 use mesh_core_locale::LocaleEngine;
-use mesh_core_plugin::lifecycle::{PluginInstance, PluginState};
-use mesh_core_plugin::package::{InstalledModuleGraph, ModuleKind, load_installed_module_graph};
-use mesh_core_plugin::{DependencyGraphError, PluginType, validate_plugin_dependency_graph};
+use mesh_core_module::lifecycle::{ModuleInstance, ModuleState};
+use mesh_core_module::package::{InstalledModuleGraph, ModuleKind, load_installed_module_graph};
+use mesh_core_module::{DependencyGraphError, ModuleType, validate_module_dependency_graph};
 use mesh_core_service::{
     InterfaceContract, InterfaceProvider, InterfaceRegistry, ServiceRegistry,
     canonical_interface_name, load_interface_contract,
@@ -65,8 +65,8 @@ pub struct Shell {
     pub diagnostics: DiagnosticsCollector,
     pub services: ServiceRegistry,
     pub interfaces: InterfaceRegistry,
-    plugins: HashMap<String, PluginInstance>,
-    plugin_dirs: Vec<PathBuf>,
+    modules: HashMap<String, ModuleInstance>,
+    module_dirs: Vec<PathBuf>,
     core: ShellCoreState,
     components: Vec<ComponentRuntime>,
     surfaces: HashMap<SurfaceId, StubSurface>,
@@ -186,7 +186,7 @@ impl Shell {
             tracing::warn!("failed to load config, using defaults: {e}");
             ShellConfig {
                 shell: Default::default(),
-                plugins: HashMap::new(),
+                modules: HashMap::new(),
             }
         });
         let settings = load_shell_settings().unwrap_or_else(|e| {
@@ -198,7 +198,7 @@ impl Shell {
             settings.i18n.locale.clone(),
             settings.i18n.fallback_locale.clone(),
         );
-        let plugin_dirs = resolve_default_plugin_dirs(&config);
+        let module_dirs = resolve_default_module_dirs(&config);
         let settings_watch = {
             let path = default_settings_path();
             let modified_at = std::fs::metadata(&path)
@@ -216,8 +216,8 @@ impl Shell {
             diagnostics: DiagnosticsCollector::new(),
             services: ServiceRegistry::new(),
             interfaces: InterfaceRegistry::new(),
-            plugins: HashMap::new(),
-            plugin_dirs,
+            modules: HashMap::new(),
+            module_dirs,
             core: ShellCoreState::default(),
             components: Vec::new(),
             surfaces: HashMap::new(),
@@ -233,27 +233,27 @@ impl Shell {
         }
     }
 
-    pub fn discover_plugins(&mut self) {
-        for dir in self.plugin_dirs.clone() {
+    pub fn discover_modules(&mut self) {
+        for dir in self.module_dirs.clone() {
             if !dir.exists() {
-                tracing::debug!("plugin directory does not exist: {}", dir.display());
+                tracing::debug!("module directory does not exist: {}", dir.display());
                 continue;
             }
-            self.scan_plugin_dir(&dir);
+            self.scan_module_dir(&dir);
         }
-        tracing::info!("discovered {} plugins", self.plugins.len());
+        tracing::info!("discovered {} modules", self.modules.len());
     }
 
-    fn scan_plugin_dir(&mut self, dir: &Path) {
+    fn scan_module_dir(&mut self, dir: &Path) {
         let has_manifest = dir.join("package.json").exists()
-            || dir.join("plugin.json").exists()
+            || dir.join("module.json").exists()
             || dir.join("mesh.toml").exists();
         let has_module_manifest = dir.join("module.json").exists();
         if has_manifest || has_module_manifest {
-            match mesh_core_plugin::manifest::load_manifest(dir) {
+            match mesh_core_module::manifest::load_manifest(dir) {
                 Ok(loaded) => {
                     let id = loaded.manifest.package.id.clone();
-                    if loaded.manifest.package.plugin_type == PluginType::Interface {
+                    if loaded.manifest.package.module_type == ModuleType::Interface {
                         if let Some(interface) = &loaded.manifest.interface {
                             match load_interface_contract(
                                 dir,
@@ -263,7 +263,7 @@ impl Shell {
                             ) {
                                 Ok(contract) => self.interfaces.register_contract(contract),
                                 Err(err) => tracing::warn!(
-                                    "failed to load interface contract for plugin {}: {err}",
+                                    "failed to load interface contract for module {}: {err}",
                                     id
                                 ),
                             }
@@ -273,8 +273,8 @@ impl Shell {
                         self.interfaces.register(InterfaceProvider {
                             interface: canonical_interface_name(&provided.interface),
                             version: provided.version.clone(),
-                            base_plugin: provided.base_plugin.clone(),
-                            provider_plugin: id.clone(),
+                            base_module: provided.base_module.clone(),
+                            provider_module: id.clone(),
                             backend_name: provided
                                 .backend_name
                                 .clone()
@@ -283,15 +283,15 @@ impl Shell {
                         });
                     }
                     tracing::info!(
-                        "discovered plugin: {} v{} ({}) from {}",
+                        "discovered module: {} v{} ({}) from {}",
                         id,
                         loaded.manifest.package.version,
-                        loaded.manifest.package.plugin_type,
+                        loaded.manifest.package.module_type,
                         loaded.source
                     );
-                    self.plugins.insert(
+                    self.modules.insert(
                         id,
-                        PluginInstance::new(
+                        ModuleInstance::new(
                             loaded.manifest,
                             dir.to_path_buf(),
                             loaded.path,
@@ -299,7 +299,7 @@ impl Shell {
                         ),
                     );
                 }
-                Err(e) => tracing::warn!("failed to load plugin {}: {e}", dir.display()),
+                Err(e) => tracing::warn!("failed to load module {}: {e}", dir.display()),
             }
             return;
         }
@@ -307,7 +307,7 @@ impl Shell {
         let entries = match std::fs::read_dir(dir) {
             Ok(entries) => entries,
             Err(e) => {
-                tracing::warn!("failed to read plugin directory {}: {e}", dir.display());
+                tracing::warn!("failed to read module directory {}: {e}", dir.display());
                 return;
             }
         };
@@ -315,7 +315,7 @@ impl Shell {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                self.scan_plugin_dir(&path);
+                self.scan_module_dir(&path);
             } else if path
                 .extension()
                 .and_then(|ext| ext.to_str())
@@ -360,14 +360,14 @@ impl Shell {
         }
     }
 
-    pub fn resolve_plugins(&mut self) -> Result<(), ShellRunError> {
-        validate_plugin_dependency_graph(self.plugins.values().map(|plugin| &plugin.manifest))?;
-        let ids: Vec<String> = self.plugins.keys().cloned().collect();
+    pub fn resolve_modules(&mut self) -> Result<(), ShellRunError> {
+        validate_module_dependency_graph(self.modules.values().map(|module| &module.manifest))?;
+        let ids: Vec<String> = self.modules.keys().cloned().collect();
         for id in ids {
-            if let Some(plugin) = self.plugins.get_mut(&id) {
-                if plugin.state == PluginState::Discovered {
-                    if let Err(e) = plugin.transition(PluginState::Resolved) {
-                        tracing::warn!("failed to resolve plugin {id}: {e}");
+            if let Some(module) = self.modules.get_mut(&id) {
+                if module.state == ModuleState::Discovered {
+                    if let Err(e) = module.transition(ModuleState::Resolved) {
+                        tracing::warn!("failed to resolve module {id}: {e}");
                     }
                 }
             }
@@ -375,17 +375,17 @@ impl Shell {
         Ok(())
     }
 
-    pub fn plugin(&self, id: &str) -> Option<&PluginInstance> {
-        self.plugins.get(id)
+    pub fn module(&self, id: &str) -> Option<&ModuleInstance> {
+        self.modules.get(id)
     }
 
     fn build_debug_snapshot(&self) -> DebugSnapshot {
-        let plugins = self
-            .plugins
+        let modules = self
+            .modules
             .values()
-            .map(|inst| PluginEntry {
+            .map(|inst| ModuleEntry {
                 id: inst.manifest.package.id.clone(),
-                plugin_type: format!("{:?}", inst.manifest.package.plugin_type).to_lowercase(),
+                module_type: format!("{:?}", inst.manifest.package.module_type).to_lowercase(),
                 state: inst.state.to_string(),
                 error_count: inst.error_count,
                 last_error: inst.last_error.clone(),
@@ -417,7 +417,7 @@ impl Shell {
             .snapshot()
             .into_iter()
             .map(|(id, status)| HealthEntry {
-                plugin_id: id,
+                module_id: id,
                 status: status.to_string(),
             })
             .collect();
@@ -448,7 +448,7 @@ impl Shell {
             .collect();
 
         DebugSnapshot {
-            plugins,
+            modules,
             interfaces,
             backend_runtimes,
             health,
@@ -456,24 +456,24 @@ impl Shell {
         }
     }
 
-    pub fn plugins(&self) -> impl Iterator<Item = (&str, PluginState)> {
-        self.plugins
+    pub fn modules(&self) -> impl Iterator<Item = (&str, ModuleState)> {
+        self.modules
             .iter()
             .map(|(id, inst)| (id.as_str(), inst.state))
     }
 
     pub fn run(&mut self) -> Result<(), ShellRunError> {
-        self.discover_plugins();
+        self.discover_modules();
         for theme in mesh_core_theme::load_themes_from_dir(&mesh_core_theme::theme_dir_path()) {
             tracing::debug!("registering theme '{}'", theme.id);
             self.theme.register_theme(theme);
         }
-        self.resolve_plugins()?;
+        self.resolve_modules()?;
         self.load_frontend_components()?;
 
         let runtime = Runtime::new().map_err(ShellRunError::RuntimeInit)?;
         let (tx, mut rx) = mpsc::unbounded_channel::<ShellMessage>();
-        self.spawn_backend_plugins(&runtime, tx.clone());
+        self.spawn_backend_modules(&runtime, tx.clone());
         let ipc_socket_path = default_ipc_socket_path();
         spawn_ipc_server(&runtime, ipc_socket_path.clone(), tx).map_err(|source| {
             ShellRunError::IpcInit {
@@ -501,7 +501,7 @@ impl Shell {
         while !self.core.shutting_down {
             pending.extend(self.reload_theme_if_changed()?);
             pending.extend(self.reload_locale_if_settings_changed()?);
-            self.reload_plugin_settings_if_changed()?;
+            self.reload_module_settings_if_changed()?;
             self.reload_frontend_components_if_changed()?;
             self.dispatch_wayland()?;
 
@@ -662,7 +662,7 @@ impl Shell {
         }
         self.broadcast_service_event(ServiceEvent::Updated {
             service: "mesh.theme".into(),
-            source_plugin: "@mesh/shell".into(),
+            source_module: "@mesh/shell".into(),
             payload,
         })
     }
@@ -733,17 +733,17 @@ impl Shell {
         Ok(requests)
     }
 
-    fn reload_plugin_settings_if_changed(&mut self) -> Result<(), ShellRunError> {
+    fn reload_module_settings_if_changed(&mut self) -> Result<(), ShellRunError> {
         for runtime in &mut self.components {
-            let current_settings_path = runtime.component.plugin_settings_path().map(PathBuf::from);
-            if runtime.plugin_settings_path != current_settings_path {
-                runtime.plugin_settings_path = current_settings_path.clone();
-                runtime.plugin_settings_modified_at = None;
+            let current_settings_path = runtime.component.module_settings_path().map(PathBuf::from);
+            if runtime.module_settings_path != current_settings_path {
+                runtime.module_settings_path = current_settings_path.clone();
+                runtime.module_settings_modified_at = None;
             }
 
             let Some(settings_path) = current_settings_path
                 .as_ref()
-                .or(runtime.plugin_settings_path.as_ref())
+                .or(runtime.module_settings_path.as_ref())
             else {
                 continue;
             };
@@ -755,20 +755,20 @@ impl Shell {
                 continue;
             };
 
-            if runtime.plugin_settings_modified_at == Some(modified_at) {
+            if runtime.module_settings_modified_at == Some(modified_at) {
                 continue;
             }
 
-            runtime.plugin_settings_modified_at = Some(modified_at);
+            runtime.module_settings_modified_at = Some(modified_at);
 
             let changed = runtime
                 .component
-                .reload_plugin_settings()
+                .reload_module_settings()
                 .map_err(ShellRunError::Component)?;
 
             if changed {
                 tracing::info!(
-                    "plugin settings changed for component '{}'",
+                    "module settings changed for component '{}'",
                     runtime.component.id()
                 );
             }
@@ -792,11 +792,11 @@ impl Shell {
             return Ok(());
         }
 
-        let frontend_catalog = FrontendCatalog::from_plugins(&self.plugins)?;
+        let frontend_catalog = FrontendCatalog::from_modules(&self.modules)?;
         for entry in frontend_catalog.top_level_surfaces() {
             self.register_component(Box::new(FrontendSurfaceComponent::new(
                 entry.compiled,
-                entry.plugin_dir,
+                entry.module_dir,
                 frontend_catalog.clone(),
                 self.interfaces.catalog(),
             )));
@@ -887,17 +887,17 @@ impl Shell {
     fn record_latest_service_state(&mut self, event: &ServiceEvent) -> bool {
         let ServiceEvent::Updated {
             service,
-            source_plugin,
+            source_module,
             payload,
         } = event;
         let interface = canonical_interface_name(service);
         let shell_authoritative_theme_update =
-            interface == "mesh.theme" && source_plugin == "@mesh/shell";
+            interface == "mesh.theme" && source_module == "@mesh/shell";
         if let Some(slot) = self.backend_runtimes.get(&interface) {
-            if slot.provider_id != *source_plugin && !shell_authoritative_theme_update {
+            if slot.provider_id != *source_module && !shell_authoritative_theme_update {
                 tracing::debug!(
                     interface,
-                    source_plugin,
+                    source_module,
                     active_provider = %slot.provider_id,
                     "ignoring stale service update from inactive provider"
                 );
@@ -905,7 +905,7 @@ impl Shell {
             }
         } else if self
             .backend_runtime_statuses
-            .get(&(interface.clone(), source_plugin.clone()))
+            .get(&(interface.clone(), source_module.clone()))
             .is_some_and(|entry| {
                 matches!(
                     entry.status,
@@ -917,17 +917,17 @@ impl Shell {
         {
             tracing::debug!(
                 interface,
-                source_plugin,
+                source_module,
                 "ignoring service update from terminal backend provider"
             );
             return false;
         }
-        self.validate_service_state_shape(&interface, source_plugin, payload);
+        self.validate_service_state_shape(&interface, source_module, payload);
         self.latest_service_state.insert(
             interface.clone(),
             LatestServiceState {
                 interface,
-                provider_id: source_plugin.clone(),
+                provider_id: source_module.clone(),
                 state: payload.clone(),
             },
         );
@@ -971,7 +971,7 @@ impl Shell {
             .values()
             .map(|latest| ServiceEvent::Updated {
                 service: latest.interface.clone(),
-                source_plugin: latest.provider_id.clone(),
+                source_module: latest.provider_id.clone(),
                 payload: latest.state.clone(),
             })
             .collect::<Vec<_>>();
@@ -1034,14 +1034,14 @@ impl Shell {
                 interface,
                 command,
                 payload,
-                source_plugin_id,
+                source_module_id,
                 source_capabilities,
             } => {
                 let _ = self.dispatch_service_command(
                     &interface,
                     &command,
                     &payload,
-                    &source_plugin_id,
+                    &source_module_id,
                     &source_capabilities,
                 );
                 Ok(VecDeque::new())
@@ -1071,13 +1071,13 @@ impl Shell {
         interface: &str,
         command: &str,
         payload: &serde_json::Value,
-        source_plugin_id: &str,
+        source_module_id: &str,
         source_capabilities: &mesh_core_capability::CapabilitySet,
     ) -> serde_json::Value {
         let required = service_command_control_capability(interface);
         if !source_capabilities.is_granted(&required) {
             tracing::warn!(
-                source_plugin_id,
+                source_module_id,
                 interface,
                 command,
                 required_capability = %required,
@@ -1093,13 +1093,13 @@ impl Shell {
         if !self.service_command_is_supported(interface, command) {
             let message = format!("unsupported_service_command: {interface}.{command}");
             tracing::warn!(
-                source_plugin_id,
+                source_module_id,
                 interface,
                 command,
                 "unsupported_service_command"
             );
             self.diagnostics.record_lifecycle_error(
-                source_plugin_id.to_string(),
+                source_module_id.to_string(),
                 "unsupported_service_command",
                 message.clone(),
             );
@@ -1568,7 +1568,7 @@ impl Shell {
         );
     }
 
-    fn spawn_backend_plugins(
+    fn spawn_backend_modules(
         &mut self,
         runtime: &Runtime,
         tx: mpsc::UnboundedSender<ShellMessage>,
@@ -1579,7 +1579,7 @@ impl Shell {
             Ok(graph) => {
                 let (candidates, statuses) = backend_launch_candidates_from_graph(
                     &graph,
-                    &self.plugins,
+                    &self.modules,
                     &self.config,
                     &self.interfaces,
                 );
@@ -1612,7 +1612,7 @@ impl Shell {
                     graph_path.display()
                 );
                 for mut candidate in
-                    legacy_backend_candidates_from_discovery(&self.plugins, &self.config)
+                    legacy_backend_candidates_from_discovery(&self.modules, &self.config)
                 {
                     self.apply_shell_runtime_settings(&mut candidate);
                     self.spawn_backend_candidate(runtime, tx.clone(), candidate);
@@ -1661,7 +1661,7 @@ impl Shell {
                         if shell_tx
                             .send(ShellMessage::Service(ServiceEvent::Updated {
                                 service: update.service,
-                                source_plugin: update.source_plugin,
+                                source_module: update.source_module,
                                 payload: update.payload,
                             }))
                             .is_err()
@@ -1774,7 +1774,7 @@ impl Shell {
 
 fn backend_launch_candidates_from_graph(
     graph: &InstalledModuleGraph,
-    plugins: &HashMap<String, PluginInstance>,
+    modules: &HashMap<String, ModuleInstance>,
     config: &ShellConfig,
     interfaces: &InterfaceRegistry,
 ) -> (
@@ -1789,8 +1789,7 @@ fn backend_launch_candidates_from_graph(
             module
                 .manifest
                 .mesh
-                .provides
-                .iter()
+                .implementations()
                 .map(|provided| provided.interface.clone())
                 .collect::<Vec<_>>()
         })
@@ -1839,8 +1838,7 @@ fn backend_launch_candidates_from_graph(
         if !module
             .manifest
             .mesh
-            .provides
-            .iter()
+            .implementations()
             .any(|provided| provided.interface == interface)
         {
             statuses.push(BackendLifecycleStatusRecord {
@@ -1862,7 +1860,7 @@ fn backend_launch_candidates_from_graph(
             continue;
         }
 
-        let Some(plugin) = plugins.get(&active_provider.module_id) else {
+        let Some(module) = modules.get(&active_provider.module_id) else {
             statuses.push(BackendLifecycleStatusRecord {
                 interface: interface.clone(),
                 provider_id: Some(active_provider.module_id.clone()),
@@ -1875,12 +1873,12 @@ fn backend_launch_candidates_from_graph(
             continue;
         };
 
-        if let Some(binary) = plugin
+        if let Some(binary) = module
             .manifest
             .dependencies
             .binaries
             .iter()
-            .find(|binary| !binary_exists(&binary.name))
+            .find(|binary| !binary.optional && !binary_exists(&binary.name))
         {
             statuses.push(BackendLifecycleStatusRecord {
                 interface: interface.clone(),
@@ -1894,11 +1892,7 @@ fn backend_launch_candidates_from_graph(
             continue;
         }
 
-        let entrypoint = module.manifest.mesh.entrypoints.main.as_deref().or(plugin
-            .manifest
-            .entrypoints
-            .main
-            .as_deref());
+        let entrypoint = module.manifest.entrypoints.main.as_deref();
         let Some(entrypoint) = entrypoint else {
             statuses.push(BackendLifecycleStatusRecord {
                 interface: interface.clone(),
@@ -1912,7 +1906,7 @@ fn backend_launch_candidates_from_graph(
             continue;
         };
 
-        let entrypoint_path = plugin.path.join(entrypoint);
+        let entrypoint_path = module.path.join(entrypoint);
         let Ok(script_source) = std::fs::read_to_string(&entrypoint_path) else {
             statuses.push(BackendLifecycleStatusRecord {
                 interface: interface.clone(),
@@ -1927,15 +1921,15 @@ fn backend_launch_candidates_from_graph(
             continue;
         };
 
-        let capabilities = plugin
+        let capabilities = module
             .manifest
             .capabilities
             .required
             .iter()
-            .chain(plugin.manifest.capabilities.optional.iter())
+            .chain(module.manifest.capabilities.optional.iter())
             .cloned()
             .collect::<Vec<_>>();
-        let settings = backend_plugin_settings_json(config, &active_provider.module_id);
+        let settings = backend_module_settings_json(config, &active_provider.module_id);
         candidates.push(BackendLaunchCandidate {
             module_id: active_provider.module_id.clone(),
             interface: interface.clone(),
@@ -2005,7 +1999,7 @@ fn validate_backend_provider_contract(
     if !interfaces
         .providers_for(interface)
         .iter()
-        .any(|provider| provider.provider_plugin == provider_id)
+        .any(|provider| provider.provider_module == provider_id)
     {
         return Some(BackendLifecycleStatusRecord {
             interface: canonical_interface_name(interface),
@@ -2022,28 +2016,28 @@ fn validate_backend_provider_contract(
 }
 
 fn legacy_backend_candidates_from_discovery(
-    plugins: &HashMap<String, PluginInstance>,
+    modules: &HashMap<String, ModuleInstance>,
     config: &ShellConfig,
 ) -> Vec<BackendLaunchCandidate> {
-    let mut plugin_ids: Vec<String> = plugins.keys().cloned().collect();
-    plugin_ids.sort();
-    let mut services: HashMap<String, Vec<(&PluginInstance, u32)>> = HashMap::new();
+    let mut module_ids: Vec<String> = modules.keys().cloned().collect();
+    module_ids.sort();
+    let mut services: HashMap<String, Vec<(&ModuleInstance, u32)>> = HashMap::new();
 
-    for plugin_id in plugin_ids {
-        let Some(plugin) = plugins.get(&plugin_id) else {
+    for module_id in module_ids {
+        let Some(module) = modules.get(&module_id) else {
             continue;
         };
-        if plugin.manifest.package.plugin_type != PluginType::Backend {
+        if module.manifest.package.module_type != ModuleType::Backend {
             continue;
         }
-        let Some(service) = plugin.manifest.primary_service() else {
+        let Some(service) = module.manifest.primary_service() else {
             continue;
         };
         let service_name = service_name_from_interface(&service.provides);
         services
             .entry(service_name)
             .or_default()
-            .push((plugin, service.priority));
+            .push((module, service.priority));
     }
 
     let mut candidates = Vec::new();
@@ -2053,56 +2047,56 @@ fn legacy_backend_candidates_from_discovery(
                 .cmp(a_priority)
                 .then_with(|| a.manifest.package.id.cmp(&b.manifest.package.id))
         });
-        let Some((plugin, _)) = service_candidates.into_iter().next() else {
+        let Some((module, _)) = service_candidates.into_iter().next() else {
             continue;
         };
-        let missing_binary = plugin
+        let missing_binary = module
             .manifest
             .dependencies
             .binaries
             .iter()
-            .find(|binary| !binary_exists(&binary.name));
+            .find(|binary| !binary.optional && !binary_exists(&binary.name));
         if let Some(binary) = missing_binary {
             tracing::info!(
                 "skipping legacy backend '{}' for service '{}' because binary '{}' is unavailable",
-                plugin.manifest.package.id,
+                module.manifest.package.id,
                 service_name,
                 binary.name
             );
             continue;
         }
-        let Some(entrypoint) = plugin.manifest.entrypoints.main.as_deref() else {
+        let Some(entrypoint) = module.manifest.entrypoints.main.as_deref() else {
             tracing::warn!(
-                "legacy backend plugin {} has no service entrypoint",
-                plugin.manifest.package.id
+                "legacy backend module {} has no service entrypoint",
+                module.manifest.package.id
             );
             continue;
         };
-        let entrypoint_path = plugin.path.join(entrypoint);
+        let entrypoint_path = module.path.join(entrypoint);
         let Ok(script_source) = std::fs::read_to_string(&entrypoint_path) else {
             tracing::warn!(
-                "legacy backend plugin {} has no readable script at {}",
-                plugin.manifest.package.id,
+                "legacy backend module {} has no readable script at {}",
+                module.manifest.package.id,
                 entrypoint_path.display()
             );
             continue;
         };
-        let capabilities = plugin
+        let capabilities = module
             .manifest
             .capabilities
             .required
             .iter()
-            .chain(plugin.manifest.capabilities.optional.iter())
+            .chain(module.manifest.capabilities.optional.iter())
             .cloned()
             .collect::<Vec<_>>();
         candidates.push(BackendLaunchCandidate {
-            module_id: plugin.manifest.package.id.clone(),
+            module_id: module.manifest.package.id.clone(),
             interface: format!("mesh.{service_name}"),
             service_name,
             entrypoint_path,
             script_source,
             capabilities,
-            settings: backend_plugin_settings_json(config, &plugin.manifest.package.id),
+            settings: backend_module_settings_json(config, &module.manifest.package.id),
         });
     }
 
@@ -2121,17 +2115,17 @@ fn binary_exists(name: &str) -> bool {
     env::split_paths(&paths).any(|dir| dir.join(name).is_file())
 }
 
-fn backend_plugin_settings_json(config: &ShellConfig, plugin_id: &str) -> serde_json::Value {
+fn backend_module_settings_json(config: &ShellConfig, module_id: &str) -> serde_json::Value {
     config
-        .plugins
-        .get(plugin_id)
-        .map(|plugin| match serde_json::to_value(&plugin.values) {
+        .modules
+        .get(module_id)
+        .map(|module| match serde_json::to_value(&module.values) {
             Ok(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
             Ok(_) => serde_json::json!({}),
             Err(err) => {
                 tracing::warn!(
-                    plugin_id = plugin_id,
-                    "failed to serialize backend plugin settings: {err}"
+                    module_id = module_id,
+                    "failed to serialize backend module settings: {err}"
                 );
                 serde_json::json!({})
             }
@@ -2177,7 +2171,7 @@ fn service_state_contract_warnings(
 }
 
 fn is_runtime_metadata_state_field(name: &str) -> bool {
-    name == "source_plugin"
+    name == "source_module"
 }
 
 fn json_value_matches_contract_type(value: &serde_json::Value, field_type: &str) -> bool {
@@ -2221,9 +2215,9 @@ pub enum ShellRunError {
     #[error(transparent)]
     Component(#[from] ComponentError),
 
-    #[error("failed to compile frontend plugin '{plugin_id}': {source}")]
+    #[error("failed to compile frontend module '{module_id}': {source}")]
     FrontendCompile {
-        plugin_id: String,
+        module_id: String,
         source: mesh_core_render::CompileFrontendError,
     },
 
@@ -2249,7 +2243,7 @@ pub enum ShellRunError {
     Theme(#[from] mesh_core_theme::ThemeError),
 }
 
-fn resolve_default_plugin_dirs(config: &ShellConfig) -> Vec<PathBuf> {
+fn resolve_default_module_dirs(config: &ShellConfig) -> Vec<PathBuf> {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
     resolve_discovery_paths(&workspace_root, &config.shell.discovery_paths)
 }
@@ -2262,17 +2256,17 @@ mod tests {
         backend_launch_candidates_from_graph,
         layout::measure_content_size,
         service::{apply_service_update, seed_service_state, service_name_from_interface},
-        surface_layout::{SurfaceSizePolicy, load_active_theme, load_frontend_plugin_settings},
+        surface_layout::{SurfaceSizePolicy, load_active_theme, load_frontend_module_settings},
     };
     use mesh_core_config::ShellConfig;
     use mesh_core_elements::{LayoutRect, VariableStore, WidgetNode};
-    use mesh_core_plugin::PluginInstance;
-    use mesh_core_plugin::manifest::{
+    use mesh_core_module::ModuleInstance;
+    use mesh_core_module::manifest::{
         CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
-        ExportsSection, Manifest, ManifestSource, PackageSection, PluginType, ProvidedInterface,
+        ExportsSection, Manifest, ManifestSource, ModuleType, PackageSection, ProvidedInterface,
         SurfaceLayoutSection,
     };
-    use mesh_core_plugin::package::{
+    use mesh_core_module::package::{
         InstalledModuleGraph, LoadedModuleManifest, ModuleManifestSource, ModulePackageManifest,
         RootPackageManifest,
     };
@@ -2334,7 +2328,7 @@ mod tests {
                 id: id.to_string(),
                 name: None,
                 version: "0.1.0".into(),
-                plugin_type: PluginType::Surface,
+                module_type: ModuleType::Surface,
                 api_version: "0.1".into(),
                 license: None,
                 description: None,
@@ -2357,7 +2351,7 @@ mod tests {
             provides_slots: HashMap::new(),
             slot_contributions: HashMap::new(),
             assets: None,
-            icon_requirements: mesh_core_plugin::IconRequirementsSection::default(),
+            icon_requirements: mesh_core_module::IconRequirementsSection::default(),
             translations: HashMap::new(),
             surface_layout: None,
         }
@@ -2365,12 +2359,12 @@ mod tests {
 
     fn minimal_backend_manifest(id: &str, entrypoint: Option<&str>) -> Manifest {
         let mut manifest = minimal_manifest(id);
-        manifest.package.plugin_type = PluginType::Backend;
+        manifest.package.module_type = ModuleType::Backend;
         manifest.entrypoints.main = entrypoint.map(str::to_string);
         manifest.provides = vec![ProvidedInterface {
             interface: "mesh.audio".to_string(),
             version: Some("1.0".to_string()),
-            base_plugin: None,
+            base_module: None,
             backend_name: Some(id.to_string()),
             priority: 100,
             optional_capabilities: Vec::new(),
@@ -2378,7 +2372,7 @@ mod tests {
         manifest
     }
 
-    fn plugin_instance(id: &str, entrypoint: Option<&str>) -> (tempfile::TempDir, PluginInstance) {
+    fn module_instance(id: &str, entrypoint: Option<&str>) -> (tempfile::TempDir, ModuleInstance) {
         let dir = tempfile::tempdir().unwrap();
         if let Some(entrypoint) = entrypoint {
             let path = dir.path().join(entrypoint);
@@ -2386,11 +2380,11 @@ mod tests {
             fs::write(&path, "function init()\nend\nfunction on_poll()\nend").unwrap();
         }
         let manifest = minimal_backend_manifest(id, entrypoint);
-        let instance = PluginInstance::new(
+        let instance = ModuleInstance::new(
             manifest,
             dir.path().to_path_buf(),
-            dir.path().join("plugin.json"),
-            ManifestSource::PluginJson,
+            dir.path().join("package.json"),
+            ManifestSource::ModuleJson,
         );
         (dir, instance)
     }
@@ -2398,7 +2392,7 @@ mod tests {
     fn test_config() -> ShellConfig {
         ShellConfig {
             shell: Default::default(),
-            plugins: HashMap::new(),
+            modules: HashMap::new(),
         }
     }
 
@@ -2435,7 +2429,7 @@ mod tests {
                     description: None,
                 },
                 ContractStateField {
-                    name: "source_plugin".to_string(),
+                    name: "source_module".to_string(),
                     field_type: "string".to_string(),
                     description: None,
                 },
@@ -2455,8 +2449,8 @@ mod tests {
         interfaces.register(InterfaceProvider {
             interface: interface.to_string(),
             version: Some("1.0".to_string()),
-            base_plugin: Some("@mesh/test-interface".to_string()),
-            provider_plugin: provider_id.to_string(),
+            base_module: Some("@mesh/test-interface".to_string()),
+            provider_module: provider_id.to_string(),
             backend_name: provider_id.to_string(),
             priority: 100,
         });
@@ -2492,7 +2486,7 @@ mod tests {
     ) -> ServiceEvent {
         ServiceEvent::Updated {
             service: interface.to_string(),
-            source_plugin: provider_id.to_string(),
+            source_module: provider_id.to_string(),
             payload,
         }
     }
@@ -2602,7 +2596,7 @@ mod tests {
         let latest = shell.latest_service_state.get("mesh.audio").unwrap();
         assert_eq!(latest.provider_id, "@mesh/pipewire-audio");
         assert_eq!(latest.state["available"], serde_json::json!(true));
-        assert!(latest.state.get("source_plugin").is_none());
+        assert!(latest.state.get("source_module").is_none());
     }
 
     #[test]
@@ -2725,18 +2719,18 @@ mod tests {
         let events = seen_events.lock().unwrap();
         assert_eq!(events.len(), 2);
         let ServiceEvent::Updated {
-            source_plugin,
+            source_module,
             payload,
             ..
         } = &events[0];
-        assert_eq!(source_plugin, "@mesh/pipewire-audio");
+        assert_eq!(source_module, "@mesh/pipewire-audio");
         assert_eq!(payload["percent"], serde_json::json!(40.0));
         let ServiceEvent::Updated {
-            source_plugin,
+            source_module,
             payload,
             ..
         } = events.last().unwrap();
-        assert_eq!(source_plugin, "@mesh/pulseaudio-audio");
+        assert_eq!(source_module, "@mesh/pulseaudio-audio");
         assert_eq!(payload["percent"], serde_json::json!(55.0));
     }
 
@@ -3095,13 +3089,13 @@ mod tests {
                 }"#,
             ],
         );
-        let (_dir, plugin) = plugin_instance("@mesh/backend", Some("src/main.luau"));
-        let plugins = HashMap::from([("@mesh/backend".to_string(), plugin)]);
+        let (_dir, module) = module_instance("@mesh/backend", Some("src/main.luau"));
+        let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
         let interfaces = InterfaceRegistry::new();
         interfaces.register_contract(test_contract("mesh.audio"));
 
         let (candidates, statuses) =
-            backend_launch_candidates_from_graph(&graph, &plugins, &test_config(), &interfaces);
+            backend_launch_candidates_from_graph(&graph, &modules, &test_config(), &interfaces);
 
         assert!(candidates.is_empty());
         assert!(statuses.iter().any(|status| {
@@ -3112,7 +3106,7 @@ mod tests {
 
         register_test_provider(&interfaces, "mesh.audio", "@mesh/backend");
         let (candidates, statuses) =
-            backend_launch_candidates_from_graph(&graph, &plugins, &test_config(), &interfaces);
+            backend_launch_candidates_from_graph(&graph, &modules, &test_config(), &interfaces);
 
         assert_eq!(candidates.len(), 1);
         assert!(
@@ -3139,12 +3133,12 @@ mod tests {
             .unwrap();
 
         let snapshot = shell.diagnostics.snapshot();
-        assert!(snapshot.iter().any(|(plugin_id, health)| {
-            plugin_id == "@mesh/pipewire-audio"
+        assert!(snapshot.iter().any(|(module_id, health)| {
+            module_id == "@mesh/pipewire-audio"
                 && health.to_string().contains("service_contract_warning")
         }));
         let latest = shell.latest_service_state.get("mesh.audio").unwrap();
-        assert!(latest.state.get("source_plugin").is_none());
+        assert!(latest.state.get("source_module").is_none());
     }
 
     #[test]
@@ -3181,8 +3175,8 @@ mod tests {
                 .diagnostics
                 .snapshot()
                 .iter()
-                .any(|(plugin_id, health)| {
-                    plugin_id == "@mesh/panel"
+                .any(|(module_id, health)| {
+                    module_id == "@mesh/panel"
                         && health.to_string().contains("unsupported_service_command")
                 })
         );
@@ -3246,7 +3240,7 @@ mod tests {
     #[test]
     fn installed_module_graph_exposes_shell_package_choices() {
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let graph = mesh_core_plugin::package::load_installed_module_graph(
+        let graph = mesh_core_module::package::load_installed_module_graph(
             &workspace_root.join("config/package.json"),
         )
         .unwrap();
@@ -3278,17 +3272,17 @@ mod tests {
     #[test]
     fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let graph = mesh_core_plugin::package::load_installed_module_graph(
+        let graph = mesh_core_module::package::load_installed_module_graph(
             &workspace_root.join("config/package.json"),
         )
         .unwrap();
         let (_pipewire_dir, pipewire) =
-            plugin_instance("@mesh/pipewire-audio", Some("src/main.luau"));
-        let (_pulse_dir, pulse) = plugin_instance("@mesh/pulseaudio-audio", Some("src/main.luau"));
+            module_instance("@mesh/pipewire-audio", Some("src/main.luau"));
+        let (_pulse_dir, pulse) = module_instance("@mesh/pulseaudio-audio", Some("src/main.luau"));
         let (_network_dir, network) =
-            plugin_instance("@mesh/networkmanager", Some("src/main.luau"));
-        let (_power_dir, power) = plugin_instance("@mesh/upower", Some("src/main.luau"));
-        let plugins = HashMap::from([
+            module_instance("@mesh/networkmanager", Some("src/main.luau"));
+        let (_power_dir, power) = module_instance("@mesh/upower", Some("src/main.luau"));
+        let modules = HashMap::from([
             ("@mesh/pipewire-audio".to_string(), pipewire),
             ("@mesh/pulseaudio-audio".to_string(), pulse),
             ("@mesh/networkmanager".to_string(), network),
@@ -3297,7 +3291,7 @@ mod tests {
 
         let (candidates, statuses) = backend_launch_candidates_from_graph(
             &graph,
-            &plugins,
+            &modules,
             &test_config(),
             &InterfaceRegistry::new(),
         );
@@ -3354,12 +3348,12 @@ mod tests {
                 }"#,
             ],
         );
-        let (_dir, plugin) = plugin_instance("@mesh/backend", None);
-        let plugins = HashMap::from([("@mesh/backend".to_string(), plugin)]);
+        let (_dir, module) = module_instance("@mesh/backend", None);
+        let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
 
         let (candidates, statuses) = backend_launch_candidates_from_graph(
             &graph,
-            &plugins,
+            &modules,
             &test_config(),
             &InterfaceRegistry::new(),
         );
@@ -3405,12 +3399,12 @@ mod tests {
                 }"#,
             ],
         );
-        let (_dir, plugin) = plugin_instance("@mesh/backend", Some("src/main.luau"));
-        let plugins = HashMap::from([("@mesh/backend".to_string(), plugin)]);
+        let (_dir, module) = module_instance("@mesh/backend", Some("src/main.luau"));
+        let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
 
         let (candidates, statuses) = backend_launch_candidates_from_graph(
             &graph,
-            &plugins,
+            &modules,
             &test_config(),
             &InterfaceRegistry::new(),
         );
@@ -3455,12 +3449,12 @@ mod tests {
                 }"#,
             ],
         );
-        let (_dir, plugin) = plugin_instance("@mesh/backend", Some("src/main.luau"));
-        let plugins = HashMap::from([("@mesh/backend".to_string(), plugin)]);
+        let (_dir, module) = module_instance("@mesh/backend", Some("src/main.luau"));
+        let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
 
         let (candidates, statuses) = backend_launch_candidates_from_graph(
             &graph,
-            &plugins,
+            &modules,
             &test_config(),
             &InterfaceRegistry::new(),
         );
@@ -3888,7 +3882,7 @@ mod tests {
         .unwrap();
 
         let manifest = minimal_manifest("@mesh/base-surface");
-        let settings = load_frontend_plugin_settings(&path, &manifest);
+        let settings = load_frontend_module_settings(&path, &manifest);
         fs::remove_file(&path).ok();
 
         assert_eq!(settings.layout.edge, mesh_core_wayland::Edge::Left);

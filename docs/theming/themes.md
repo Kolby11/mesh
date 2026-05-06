@@ -193,7 +193,7 @@ own files through `mesh.contributes.themes`.
 
 Changing theme is hot. The active implementation is replaced in the
 registry, `ThemeChanged` fires, every surface re-resolves its `token(...)`
-references on the next frame. No plugin code runs during the swap; the core
+references on the next frame. No module code runs during the swap; the core
 owns it.
 
 ## Auto-detect
@@ -215,7 +215,7 @@ mesh themes which <token-name>    # show which layer supplied a value
 ## Summary
 
 - One active `mesh.theme`, user-switchable, hot-swappable.
-- Token values live in JSON files shipped with the theme plugin.
+- Token values live in JSON files shipped with the theme module.
 - Modes (dark/light/high-contrast) are inside a single theme, selectable at runtime.
 - Themes may `extends` another for partial overrides.
 - Components reference `token(name)`; per-component overrides cascade like CSS variables.

@@ -8,7 +8,7 @@
 - Issue: `docs/module-system.md` defines `package.json` plus `mesh` as the target module manifest, while `docs/installation.md` still presents `plugin.json` as the authoritative package root. Runtime loaders accept both shapes, but author-facing docs do not give one consistent source of truth.
 - Files: `docs/module-system.md`, `docs/installation.md`, `crates/core/extension/plugin/src/package.rs`, `crates/core/extension/plugin/src/manifest.rs`
 - Impact: New module authors can create `plugin.json` manifests from `docs/installation.md` that do not match the package model described in `docs/module-system.md`; planners and tests can target the wrong manifest shape.
-- Fix approach: Make `docs/installation.md` describe `package.json` + `mesh` as the primary installer format, keep `plugin.json`, `module.json`, and `mesh.toml` as compatibility-only paths, and align examples with `ModulePackageManifest` in `crates/core/extension/plugin/src/package.rs`.
+- Fix approach: Make `docs/installation.md` describe `package.json` + `mesh` as the primary installer format, keep `plugin.json`, `package.json`, and `mesh.toml` as compatibility-only paths, and align examples with `ModulePackageManifest` in `crates/core/extension/plugin/src/package.rs`.
 
 **Root module graph and catalog fixtures are different sources of truth:**
 - Issue: `config/package.json` loads modules from `../modules` and enables only `@mesh/navigation-bar`, `@mesh/pipewire-audio`, and `@mesh/pulseaudio-audio`. Separate package-style manifests under `config/modules/@mesh/**/package.json` include `@mesh/networkmanager`, `@mesh/upower`, `@mesh/panel`, `@mesh/quick-settings`, and `@mesh/shell-theme`, but those files are not loaded by `load_installed_module_graph(&config/package.json)`.
@@ -16,11 +16,11 @@
 - Impact: Docs and shell tests can assume network, power, panel, and theme modules exist in the active graph while the actual root graph exposes only navigation bar and audio providers.
 - Fix approach: Either move `config/modules/@mesh/**` into the root graph's `mesh.modules` and `mesh.providers`, or document them as an unused registry/catalog fixture and keep runtime tests pointed at `modules/**`.
 
-**Manifest loader precedence keeps `module.json` ahead of `package.json`:**
-- Issue: `load_module_manifest()` checks `module.json` before `package.json`, so a module directory containing both files resolves to the legacy manifest even though `docs/module-system.md` says new examples should use `package.json`.
-- Files: `crates/core/extension/plugin/src/package.rs`, `crates/core/extension/plugin/src/manifest.rs`, `modules/frontend/navigation-bar/module.json`
-- Impact: Adding `modules/frontend/navigation-bar/package.json` beside the current `module.json` will not activate the new manifest unless `module.json` is removed first.
-- Fix approach: Decide whether coexistence is supported. If yes, prefer `package.json` and add a regression test for `module.json` + `package.json`; if no, document that migration requires deleting the legacy manifest.
+**Manifest loader precedence keeps `package.json` ahead of `package.json`:**
+- Issue: `load_module_manifest()` checks `package.json` before `package.json`, so a module directory containing both files resolves to the legacy manifest even though `docs/module-system.md` says new examples should use `package.json`.
+- Files: `crates/core/extension/plugin/src/package.rs`, `crates/core/extension/plugin/src/manifest.rs`, `modules/frontend/navigation-bar/package.json`
+- Impact: Adding `modules/frontend/navigation-bar/package.json` beside the current `package.json` will not activate the new manifest unless `package.json` is removed first.
+- Fix approach: Decide whether coexistence is supported. If yes, prefer `package.json` and add a regression test for `package.json` + `package.json`; if no, document that migration requires deleting the legacy manifest.
 
 **Backend and scripting fixture paths point at a non-existent tree:**
 - Issue: Several backend runtime and scripting tests read scripts from `../../../../packages/plugins/backend/core/**/src/main.luau`, but the repo contains live scripts under `modules/backend/**/src/main.luau` and docs-only plugin READMEs under `docs/plugins/**`.
@@ -70,7 +70,7 @@
 
 **Executable path capabilities are basename-based:**
 - Risk: `exec_program_capability()` derives capability from the executable basename, so any absolute or relative path ending in an allowed basename maps to the same capability.
-- Files: `crates/core/runtime/scripting/src/backend.rs`, `modules/backend/pipewire-audio/package.json`, `modules/backend/pulseaudio-audio/module.json`
+- Files: `crates/core/runtime/scripting/src/backend.rs`, `modules/backend/pipewire-audio/package.json`, `modules/backend/pulseaudio-audio/package.json`
 - Current mitigation: Bundled backend scripts call fixed program names such as `wpctl`, `pactl`, and `aplay`; single-string shell execution is not supported.
 - Recommendations: Restrict `mesh.exec()` to bare binary names resolved through trusted PATH lookup or explicitly declared binary dependency paths.
 
@@ -97,7 +97,7 @@
 ## Fragile Areas
 
 **Installed module graph validation is strict but fixture coverage is split:**
-- Files: `crates/core/extension/plugin/src/package.rs`, `config/package.json`, `modules/frontend/navigation-bar/module.json`, `modules/backend/pipewire-audio/package.json`, `modules/backend/pulseaudio-audio/module.json`
+- Files: `crates/core/extension/plugin/src/package.rs`, `config/package.json`, `modules/frontend/navigation-bar/package.json`, `modules/backend/pipewire-audio/package.json`, `modules/backend/pulseaudio-audio/package.json`
 - Why fragile: `InstalledModuleGraph::from_parts()` rejects missing modules, kind mismatches, disabled active providers, and provider/interface mismatches. That is good behavior, but docs, config fixtures, and shell tests currently target different expected graphs.
 - Safe modification: Update `config/package.json`, live module manifests, and graph tests together; verify with `cargo test -p mesh-core-plugin package -- --nocapture`.
 - Test coverage: Package graph tests pass, but shell graph tests are blocked here by missing `xkbcommon` and contain stale expectations.
@@ -105,7 +105,7 @@
 **Backend lifecycle depends on both graph manifests and discovered plugin manifests:**
 - Files: `crates/core/shell/src/shell/mod.rs`, `crates/core/extension/plugin/src/package.rs`, `crates/core/extension/plugin/src/manifest.rs`
 - Why fragile: `backend_launch_candidates_from_graph()` validates graph nodes, then looks up runtime `PluginInstance` entries and falls back to legacy backend discovery if graph loading fails.
-- Safe modification: Preserve provider IDs across graph nodes and plugin discovery, and add tests for mixed `package.json`/`module.json` discovery before changing loader precedence.
+- Safe modification: Preserve provider IDs across graph nodes and plugin discovery, and add tests for mixed `package.json`/`package.json` discovery before changing loader precedence.
 - Test coverage: Shell lifecycle tests cover missing entrypoints, disabled backends, active providers, and stale failures, but they require a system environment with Wayland build dependencies.
 
 **Reference provider documentation has no committed implementation fixture:**
@@ -134,7 +134,7 @@
 - Migration plan: Document `nix develop` as required for shell/render tests, and split module graph/lifecycle unit tests away from render dependencies where possible.
 
 **Legacy manifest formats:**
-- Risk: `module.json`, `plugin.json`, and `mesh.toml` remain loadable while docs promote `package.json`, and loader precedence can make a stale legacy file override a new package file.
+- Risk: `package.json`, `plugin.json`, and `mesh.toml` remain loadable while docs promote `package.json`, and loader precedence can make a stale legacy file override a new package file.
 - Impact: A migration can appear complete in docs/config while runtime still reads legacy manifests.
 - Migration plan: Add deprecation warnings with `ModuleManifestSource::LegacyPluginJson`, prefer `package.json` after a compatibility window, and add tests for directories containing multiple manifest files.
 
@@ -161,9 +161,9 @@
 - Priority: High
 
 **Manifest coexistence behavior lacks explicit coverage:**
-- What's not tested: Directories containing both `module.json` and `package.json`.
-- Files: `crates/core/extension/plugin/src/package.rs`, `crates/core/extension/plugin/src/manifest.rs`, `modules/frontend/navigation-bar/module.json`
-- Risk: A package migration can silently keep using `module.json`.
+- What's not tested: Directories containing both `package.json` and `package.json`.
+- Files: `crates/core/extension/plugin/src/package.rs`, `crates/core/extension/plugin/src/manifest.rs`, `modules/frontend/navigation-bar/package.json`
+- Risk: A package migration can silently keep using `package.json`.
 - Priority: High
 
 **Backend provider fixture tests do not cover current live module paths:**

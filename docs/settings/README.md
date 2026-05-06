@@ -2,9 +2,9 @@
 
 MESH's settings system has two goals:
 
-1. **Extensibility** — any plugin can declare its own settings and the core
+1. **Extensibility** — any module can declare its own settings and the core
    will generate a UI, validate input, and apply user overrides without
-   plugin-specific code.
+   module-specific code.
 2. **Portability across implementations** — a user's configuration for
    `mesh.audio` should survive swapping PipeWire for PulseAudio. Shared
    contracts carry a shared schema; backends add their own on top.
@@ -20,7 +20,7 @@ ones, key by key:
 
 ```
  1. Contract default         (shipped with the interface contract package)
- 2. Implementation default   (shipped with the backend/frontend plugin)
+ 2. Implementation default   (shipped with the backend/frontend module)
  3. System default            (/usr/share/mesh/settings-default.json or distro pkg)
  4. User system override      (~/.mesh/settings.json)
  5. User module override      (~/.mesh/modules/<module-id>/settings.json)
@@ -33,7 +33,7 @@ read-only. The core composes all six into an effective view on every read.
 ### System-wide vs. module-wide
 
 - **System-wide settings** apply across the whole shell (active theme,
-  locale, allow-unsigned plugins, plugin frame budgets, …). Keys live at the
+  locale, allow-unsigned modules, module frame budgets, …). Keys live at the
   root of `~/.mesh/settings.json`.
 - **Module-wide settings** belong to a single module. They live under a
   module-scoped key in the system file *or* in a dedicated per-module file
@@ -55,7 +55,7 @@ the inline module section in the system file - that's the override direction.
     "locale": "en",
     "fallback_locale": "en"
   },
-  "plugins": {
+  "modules": {
     "allow_unsigned": false,
     "auto_update": false
   },
@@ -73,9 +73,9 @@ the inline module section in the system file - that's the override direction.
 }
 ```
 
-Top-level keys that are *not* plugin IDs are reserved for the shell itself
-(`theme`, `i18n`, `plugins`, `interfaces`). Plugin-scoped overrides use the
-plugin's fully qualified ID as the key.
+Top-level keys that are *not* module IDs are reserved for the shell itself
+(`theme`, `i18n`, `modules`, `interfaces`). Module-scoped overrides use the
+module's fully qualified ID as the key.
 
 ### Per-module file - `~/.mesh/modules/<module-id>/settings.json`
 
@@ -107,7 +107,7 @@ defaults before any user has touched anything. The file in this repo's
 
 Every key has exactly one owner:
 
-- **Shell keys** (`theme.*`, `i18n.*`, `plugins.*`, `interfaces.*`) — owned by
+- **Shell keys** (`theme.*`, `i18n.*`, `modules.*`, `interfaces.*`) — owned by
   the core. Schema lives in `mesh-core-config`.
 - **Contract keys** (`mesh.audio.*`, `mesh.network.*`, …) — owned by the
   interface contract. Every implementation inherits them.
@@ -163,7 +163,7 @@ These keys are addressed under the contract's name:
 ```
 
 Every backend implementing `mesh.audio` reads this block. A backend may
-**extend** with its own keys under its plugin scope:
+**extend** with its own keys under its module scope:
 
 ```json
 {
@@ -211,12 +211,12 @@ Modules that need a custom layout may ship a `settings_ui` entrypoint
 (declared in `package.json`) that renders a `.mesh` component instead of the
 generated form. The schema still governs validation.
 
-## Reading settings from a plugin
+## Reading settings from a module
 
 ```luau
 local cfg = mesh.config
 
--- own plugin's settings
+-- own module's settings
 local fmt = cfg.get("clock_format")   -- resolved through the full stack
 
 -- contract-level settings (via the proxy)
@@ -227,16 +227,16 @@ local pri   = audio.config.get("default_output_priority")
 cfg.on_change("clock_format", function(v) updateClock() end)
 ```
 
-Reads always return the effective value. The plugin never needs to know
+Reads always return the effective value. The module never needs to know
 which layer supplied it.
 
 ## CLI
 
 ```
 mesh settings get <key>                  # print effective value
-mesh settings set <key> <value>          # write to user plugin/system file
+mesh settings set <key> <value>          # write to user module/system file
 mesh settings unset <key>                # remove override, next layer wins
-mesh settings reset <plugin-id>          # remove all user overrides for a plugin
+mesh settings reset <module-id>          # remove all user overrides for a module
 mesh settings diff                       # show which layer supplied each key
 mesh settings validate                   # re-check the stack against current schemas
 ```
@@ -249,6 +249,6 @@ actually supplied the effective value.
 
 - JSON everywhere for runtime settings; TOML for manifests/declarations.
 - Six layers, composed in strict order; later wins.
-- Shell-level keys live at the root; plugin keys are scoped by plugin ID.
+- Shell-level keys live at the root; module keys are scoped by module ID.
 - Interface contracts export shared schemas so settings survive backend swaps.
-- Plugins publish a schema and read effective values; only the core writes.
+- Modules publish a schema and read effective values; only the core writes.

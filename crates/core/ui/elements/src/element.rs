@@ -1,7 +1,7 @@
 //! Core element model exposed to runtime code and tooling.
 //!
 //! Elements are MESH-owned primitives (`button`, `icon`, `input`, etc.).
-//! Components compose these primitives; plugins package complete features.
+//! Components compose these primitives; modules package complete features.
 
 use crate::{ElementState, WidgetNode};
 use serde::{Deserialize, Serialize};

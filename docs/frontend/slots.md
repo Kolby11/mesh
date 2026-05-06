@@ -1,7 +1,7 @@
 # Slots
 
 Slots let third parties **extend an existing surface without forking it**. A
-surface declares named slot points in its template; other plugins contribute
+surface declares named slot points in its template; other modules contribute
 widgets into those slots via their manifest; the user reorders, disables, or
 adds contributions through configuration.
 
@@ -40,12 +40,12 @@ Slot attributes:
 | `min` | Minimum expected. Below this, a placeholder / empty-state hint renders. |
 | `default` | ID of a widget to render when no contributions exist (e.g. a clock in `panel:center`). |
 
-A surface **should document its slots** in its README. This is the plugin's
+A surface **should document its slots** in its README. This is the module's
 public contribution API.
 
 ## Contributing a widget
 
-Plugins contribute via manifest. No code changes to the target surface.
+Modules contribute via manifest. No code changes to the target surface.
 
 ```toml
 # @community/weather-widget / mesh.toml
@@ -66,7 +66,7 @@ Each contribution entry carries:
 
 | Field | Purpose |
 |-------|---------|
-| `widget` | Widget ID. Omitted when the contributing plugin *is* the widget (common case). |
+| `widget` | Widget ID. Omitted when the contributing module *is* the widget (common case). |
 | `props` | Props passed to the widget instance. Must validate against the widget's prop schema. |
 | `order` | Sort key within the slot. Lower first. |
 | `when` | Optional condition expression (capability presence, interface available, user setting). If false, the contribution is skipped. |
@@ -77,7 +77,7 @@ match is rejected at load with a diagnostic.
 
 ## User control
 
-Users reshape any slot without editing plugin code. The system settings file
+Users reshape any slot without editing module code. The system settings file
 (see [`../settings/README.md`](../settings/README.md)) has a reserved
 `slots` section:
 
@@ -93,7 +93,7 @@ Users reshape any slot without editing plugin code. The system settings file
 }
 ```
 
-When a user-defined entry exists for a slot, it **replaces** plugin
+When a user-defined entry exists for a slot, it **replaces** module
 contributions for that slot entirely — predictable, no merge surprises. To
 tweak one contribution while keeping the rest automatic, the user can edit
 the generated settings UI, which rewrites the full list.
@@ -119,10 +119,10 @@ The array form and the patch form are mutually exclusive per slot.
 
 For a given slot, the core builds the contribution list in this order:
 
-1. Plugin contributions declared via `[slot-contributions]`
+1. Module contributions declared via `[slot-contributions]`
 2. Patch operations from the user's `slots.*.{disable,add,reorder}` (if patch form is used)
 3. Full user replacement from `slots.*` as an array (if array form is used — skips step 1–2)
-4. Sort by `order`, then by plugin ID (stable tiebreaker)
+4. Sort by `order`, then by module ID (stable tiebreaker)
 5. Enforce `max`; drop overflow with a diagnostic
 6. If empty and `default` is set on the slot, render the default
 
@@ -145,7 +145,7 @@ panel looks the way it does.
 
 Shipping a replacement panel means re-implementing the clock, the network
 icon, the volume control, the battery indicator — and keeping up with their
-updates. Slot contributions let a plugin author ship *only the new thing*
+updates. Slot contributions let a module author ship *only the new thing*
 and leave the rest of the default surface alone. The user gets a coherent
 panel from mixed sources, maintained by their respective authors.
 

@@ -15,7 +15,7 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn mount(&mut self, ctx: ComponentContext) -> Result<Vec<CoreRequest>, ComponentError> {
         self.diagnostics = Some(ctx.diagnostics);
-        self.load_plugin_i18n();
+        self.load_module_i18n();
         self.load_catalog_i18n();
         self.record_declared_missing_icon_diagnostics();
         self.init_root_runtime()?;
@@ -50,10 +50,10 @@ impl ShellComponent for FrontendSurfaceComponent {
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let ServiceEvent::Updated {
             service,
-            source_plugin,
+            source_module,
             payload,
         } = event;
-        self.last_service_update = Some(format!("{service}:{source_plugin}"));
+        self.last_service_update = Some(format!("{service}:{source_module}"));
         for runtime in self.runtimes.lock().unwrap().values_mut() {
             let service_name = crate::shell::service::service_name_from_interface(service);
             let required = format!("service.{service_name}.read");
@@ -67,7 +67,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 runtime.script_ctx.state_mut(),
                 has_read,
                 service,
-                source_plugin,
+                source_module,
                 payload.clone(),
             );
             let state_changed = runtime.script_ctx.state().is_dirty();
@@ -241,17 +241,17 @@ impl ShellComponent for FrontendSurfaceComponent {
         Some(self.compiled.source_path.as_path())
     }
 
-    fn plugin_settings_path(&self) -> Option<&Path> {
-        if self.plugin_settings_file.exists() {
-            Some(self.plugin_settings_file.as_path())
+    fn module_settings_path(&self) -> Option<&Path> {
+        if self.module_settings_file.exists() {
+            Some(self.module_settings_file.as_path())
         } else {
             None
         }
     }
 
-    fn reload_plugin_settings(&mut self) -> Result<bool, ComponentError> {
+    fn reload_module_settings(&mut self) -> Result<bool, ComponentError> {
         let settings_state =
-            load_frontend_plugin_settings(&self.plugin_settings_file, &self.compiled.manifest);
+            load_frontend_module_settings(&self.module_settings_file, &self.compiled.manifest);
         let layout_changed = self.surface_layout != settings_state.layout;
         let settings_changed = self.settings_json != settings_state.raw;
 
@@ -281,7 +281,7 @@ impl ShellComponent for FrontendSurfaceComponent {
 
         if self.locale.current() != locale {
             tracing::info!(
-                "plugin '{}': applying locale '{}' from plugin settings",
+                "module '{}': applying locale '{}' from module settings",
                 self.id(),
                 locale
             );
@@ -296,7 +296,7 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn reload_source(&mut self) -> Result<bool, ComponentError> {
         let manifest = self.compiled.manifest.clone();
-        let recompiled = compile_frontend_plugin(&manifest, &self.plugin_dir).map_err(|err| {
+        let recompiled = compile_frontend_module(&manifest, &self.module_dir).map_err(|err| {
             ComponentError::Failed {
                 component_id: self.id().to_string(),
                 message: format!("frontend recompile failed: {err}"),
@@ -305,7 +305,7 @@ impl ShellComponent for FrontendSurfaceComponent {
 
         let component_id = self.id().to_string();
         self.compiled = recompiled;
-        if let Some(entry) = self.frontend_catalog.plugins.get_mut(&component_id) {
+        if let Some(entry) = self.frontend_catalog.modules.get_mut(&component_id) {
             entry.compiled = self.compiled.clone();
         }
         self.runtimes.lock().unwrap().clear();

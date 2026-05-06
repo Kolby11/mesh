@@ -3,7 +3,7 @@ use super::types::ServiceCommandMsg;
 ///
 /// Core's only audio responsibility: when a system event occurs (startup,
 /// device connected, etc.), send a `play-sound` command to whatever audio
-/// backend plugin is registered. The plugin does the actual playback.
+/// backend module is registered. The module does the actual playback.
 use mesh_core_config::ShellSounds;
 use tokio::sync::mpsc;
 

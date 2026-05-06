@@ -1,14 +1,14 @@
-/// Interface plumbing for MESH's plugin runtime.
+/// Interface plumbing for MESH's module runtime.
 ///
-/// The source of truth is the interface contract plugin on disk plus the
-/// backend plugin that provides it. This crate hosts the registry and contract
-/// loader. All service interfaces are declared by plugins; there are no
+/// The source of truth is the interface contract module on disk plus the
+/// backend module that provides it. This crate hosts the registry and contract
+/// loader. All service interfaces are declared by modules; there are no
 /// hardcoded Rust trait adapters.
 ///
 /// # Runtime model
 ///
 /// ```text
-///  interface contract plugin  +  backend plugin implementation
+///  interface contract module  +  backend module implementation
 ///                 |                         |
 ///                 +-----------+-------------+
 ///                             |
@@ -18,8 +18,8 @@
 /// ```
 ///
 /// - An **interface contract** defines methods, events, and capability names.
-/// - A **backend plugin** provides an implementation of that contract.
-/// - A **frontend plugin** consumes the interface through runtime bindings.
+/// - A **backend module** provides an implementation of that contract.
+/// - A **frontend module** consumes the interface through runtime bindings.
 /// - The **registry** tracks discovered contracts and providers.
 pub mod contract;
 pub mod interface;

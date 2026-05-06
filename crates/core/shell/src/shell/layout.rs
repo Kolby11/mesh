@@ -1,5 +1,5 @@
 use mesh_core_elements::WidgetNode;
-use mesh_core_plugin::manifest::SurfaceLayoutSection;
+use mesh_core_module::manifest::SurfaceLayoutSection;
 use std::collections::HashMap;
 
 // ScrollOffsetState belongs to the frontend component but layout functions need it.

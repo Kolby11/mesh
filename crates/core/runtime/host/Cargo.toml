@@ -1,6 +1,6 @@
 [package]
 name = "mesh-core-runtime"
-description = "Extension runtime (Luau sandbox) for MESH plugins"
+description = "Extension runtime (Luau sandbox) for MESH modules"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

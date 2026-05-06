@@ -1,17 +1,17 @@
-# Frontend Core Plugins
+# Frontend Core Modules
 
-Frontend plugins render the shell UI. They are declared with
-`"type": "surface"` (or `"widget"`) in `plugin.json` and provide a single-file
+Frontend modules render the shell UI. They are declared with
+`"type": "surface"` (or `"widget"`) in `package.json` and provide a single-file
 `.mesh` component as their entrypoint.
 
-Frontends look up services **by interface name only** — never by backend plugin
+Frontends look up services **by interface name only** — never by backend module
 ID. If no implementation is registered, `pcall(require, ...)` returns false and
 the frontend is expected to degrade gracefully with visible explanatory copy.
 
 The core's job here is generic: compile the `.mesh` file, host the Luau
 runtime, forward raw service payloads into script state, and route emitted
 events back into shell requests or backend commands. Frontend-specific display
-logic still lives in the plugin.
+logic still lives in the module.
 
 ## Reading service state
 
@@ -184,8 +184,8 @@ always go through `mesh.events.publish`.
 
 Frontend composition happens in two ways:
 
-- Dependency-backed component imports: add a frontend plugin to
-  `dependencies.plugins`, then import the plugin ID in the `<script>` block
+- Dependency-backed component imports: add a frontend module to
+  `dependencies.modules`, then import the module ID in the `<script>` block
   and use the imported PascalCase alias in `<template>` markup.
 - Slot hosting via `provides_slots` and `slot_contributions`.
 
@@ -201,7 +201,7 @@ import CalendarCard from "@mesh/calendar-card"
 ```
 
 If you create a reusable frontend component, export its custom tag explicitly in
-`plugin.json.exports.component.tag` so other plugins can consume it as a normal
+`package.json.exports.component.tag` so other modules can consume it as a normal
 template tag.
 
 ## The `.mesh` component format
@@ -212,13 +212,13 @@ these blocks:
 | Block                  | Purpose                                                                                                                                                                                                          |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `<template>`           | XHTML-like markup describing the UI tree. Dynamic attributes use `{}` and event handlers use `onclick={handler}`-style attributes.                                                                               |
-| `<script lang="luau">` | Luau code implementing state, service proxy reads via `require("@mesh/<service>")`, display-state derivation in `onRender()`, and element event handlers.                                                       |
+| `<script lang="luau">` | Luau code implementing state, service proxy reads via `require("@mesh/<service>")`, display-state derivation in `onRender()`, and element event handlers.                                                        |
 | `<style>`              | CSS-like styling. Token references use `token(group.name)` and inherit the active theme. Supports `overflow`, `overflow-x`, `overflow-y`, and container breakpoints via `@container (min-width: 640px) { ... }`. |
 | `<i18n>`               | Translations scoped to the component (optional).                                                                                                                                                                 |
 
 ## Core surfaces
 
-| Plugin                                                 | Manifest ID                 | Purpose                                                                                    |
+| Module                                                 | Manifest ID                 | Purpose                                                                                    |
 | ------------------------------------------------------ | --------------------------- | ------------------------------------------------------------------------------------------ |
 | [base-surface](./base-surface/README.md)               | `@mesh/base-surface`        | Composition test surface with imported launcher/sidebar widgets and configurable placement |
 | [navigation-bar](./navigation-bar/README.md)           | `@mesh/navigation-bar`      | Top-edge navigation bar surface                                                            |

@@ -51,7 +51,7 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
             matches!(
                 import.target,
                 ComponentImportTarget::ComponentLocal(_)
-                    | ComponentImportTarget::ComponentPlugin(_)
+                    | ComponentImportTarget::ComponentModule(_)
             )
         })
         .map(|import| import.alias.clone())
@@ -576,7 +576,7 @@ mesh.state.set("ready", true)
         ));
         assert!(matches!(
             file.imports[1].target,
-            ComponentImportTarget::ComponentPlugin(_)
+            ComponentImportTarget::ComponentModule(_)
         ));
         assert!(matches!(
             file.imports[2].target,

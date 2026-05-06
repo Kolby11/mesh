@@ -1,6 +1,6 @@
 # UI XML/CSS Transition Sketch
 
-This note sketches how to move `.mesh` frontend plugins toward:
+This note sketches how to move `.mesh` frontend modules toward:
 
 - a UI-focused XML vocabulary instead of HTML
 - a bounded CSS subset for styling
@@ -84,7 +84,7 @@ The main transition pressure points are:
 - `crates/core/ui/component/src/style.rs`
   Current style AST is intentionally small: simple selectors, declarations, container queries.
 - `crates/core/ui/render/src/lib.rs`
-  Compiles frontend plugins and builds widget trees.
+  Compiles frontend modules and builds widget trees.
 - `crates/core/ui/render/src/tags.rs`
   Lowers source-level `SourceTag` values to runtime `UiTag` primitives.
 - `crates/core/ui/elements/src/style.rs`
@@ -117,7 +117,7 @@ Use three layers instead of one:
 
 ### 1. Source AST
 
-Keep a source-faithful representation of what the plugin author wrote.
+Keep a source-faithful representation of what the module author wrote.
 
 - UI tags stay intact: `panel`, `row`, `column`, `text`, `icon`, `button`
 - CSS is parsed with a real parser, including syntax we may later reject
@@ -218,7 +218,7 @@ Suggested source vocabulary:
 - `widget`
 
 Built-in tags are not the only tags the language should allow.
-Frontend plugins should also be able to introduce custom tags by exporting a
+Frontend modules should also be able to introduce custom tags by exporting a
 component tag from their manifest.
 
 Suggested lowered `UiTag` set:
@@ -298,8 +298,8 @@ Still needed:
 
 The UI XML vocabulary should be open for composition.
 
-If a plugin defines a reusable component, it should be able to export a custom
-tag through `plugin.json.exports.component.tag`, and dependent plugins should be
+If a module defines a reusable component, it should be able to export a custom
+tag through `package.json.exports.component.tag`, and dependent modules should be
 able to use that tag directly in template markup.
 
 Example:
@@ -314,7 +314,7 @@ Example:
 }
 ```
 
-Then another frontend plugin that declares the dependency can write:
+Then another frontend module that declares the dependency can write:
 
 ```xml
 <template>
@@ -326,7 +326,7 @@ Then another frontend plugin that declares the dependency can write:
 
 That behavior already fits the current composition path in this repo:
 
-- manifest helper: `crates/core/extension/plugin/src/manifest.rs`
+- manifest helper: `crates/core/extension/module/src/manifest.rs`
 - compile-time reference collection: `crates/core/ui/render/src/lib.rs`
 - dependency/tag resolution: `crates/core/shell/src/shell/component.rs`
 
@@ -460,7 +460,7 @@ pub struct LoweredFrontend {
 }
 ```
 
-This phase should be called from `compile_frontend_plugin()`, not during every frame.
+This phase should be called from `compile_frontend_module()`, not during every frame.
 
 ### Phase 2: precompile selectors
 
@@ -496,7 +496,7 @@ That will make rendering/layout code simpler and make diagnostics more accurate.
 
 ### Phase 4: make diagnostics first-class
 
-When a plugin writes unsupported CSS, fail clearly.
+When a module writes unsupported CSS, fail clearly.
 
 Examples:
 
@@ -504,11 +504,11 @@ Examples:
 - "`display: grid` is not supported; use flex containers"
 - "`box-shadow` is intentionally unavailable in the shell CSS profile"
 
-This should live near `compile_frontend_plugin()` so plugin authors get feedback at load/compile time.
+This should live near `compile_frontend_module()` so module authors get feedback at load/compile time.
 
-### Phase 5: migrate shipped plugins
+### Phase 5: migrate shipped modules
 
-Update core frontend plugins so they author in the new source model while staying inside the supported profile.
+Update core frontend modules so they author in the new source model while staying inside the supported profile.
 
 That means:
 
@@ -530,7 +530,7 @@ Recommended first-pass tag families:
   `search-input`, `number-input`, `email-input`, `url-input`, `slider`, `switch`,
   `checkbox`
 - Structure: `list`, `list-item`, `slot`
-- Composition: `surface`, `widget`, plugin-exported custom tags like `BatteryWidget`
+- Composition: `surface`, `widget`, module-exported custom tags like `BatteryWidget`
 
 That set is small enough to optimize well and expressive enough for shell UI.
 
@@ -605,7 +605,7 @@ If we want HTML/CSS authoring without browser costs, the profile should follow a
 4. No paint features that require expensive blur/filter passes by default.
 5. No dynamic cascade features that force broad invalidation.
 
-That profile still gives plugin authors familiar syntax while keeping the shell responsive.
+That profile still gives module authors familiar syntax while keeping the shell responsive.
 
 ## Short version
 

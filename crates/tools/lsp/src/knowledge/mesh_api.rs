@@ -32,7 +32,7 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
     //     local m = audio.muted     -- boolean
     //
     //   Runtime-defined extras — additive fields emitted by richer providers
-    //   (e.g. the NetworkManager provider emits `networks` and `source_plugin`
+    //   (e.g. the NetworkManager provider emits `networks` and `source_module`
     //   in addition to the base contract fields). These are also read as plain
     //   field access but are not guaranteed by the portable base contract.
     //
@@ -55,7 +55,7 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
     MeshApiEntry {
         path: "service.emit",
         signature: "mesh.service.emit(data: table)",
-        description: "Emit service state to all listening frontend plugins. The table should include all guaranteed core state fields declared in [[state_fields]] of the interface contract, plus any additive runtime extras this provider exposes.",
+        description: "Emit service state to all listening frontend modules. The table should include all guaranteed core state fields declared in [[state_fields]] of the interface contract, plus any additive runtime extras this provider exposes.",
         backend_only: true,
     },
     MeshApiEntry {
@@ -73,19 +73,19 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
     MeshApiEntry {
         path: "service.set_poll_interval",
         signature: "mesh.service.set_poll_interval(ms: number)",
-        description: "Set how often the backend plugin's poll cycle runs (in milliseconds).",
+        description: "Set how often the backend module's poll cycle runs (in milliseconds).",
         backend_only: true,
     },
     MeshApiEntry {
         path: "service.payload",
         signature: "mesh.service.payload() -> table",
-        description: "Get the current command payload sent by the shell or a frontend plugin.",
+        description: "Get the current command payload sent by the shell or a frontend module.",
         backend_only: true,
     },
     MeshApiEntry {
         path: "service.has_capability",
         signature: "mesh.service.has_capability(name: string) -> boolean",
-        description: "Check whether the plugin was granted a specific capability at startup.",
+        description: "Check whether the module was granted a specific capability at startup.",
         backend_only: true,
     },
     // Events

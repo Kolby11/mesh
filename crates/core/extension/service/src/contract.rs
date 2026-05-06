@@ -79,12 +79,12 @@ pub enum ContractError {
 }
 
 pub fn load_interface_contract(
-    plugin_dir: &Path,
+    module_dir: &Path,
     interface_name: &str,
     interface_version: &str,
     relative_file: &str,
 ) -> Result<InterfaceContract, ContractError> {
-    let path = plugin_dir.join(relative_file);
+    let path = module_dir.join(relative_file);
     let content = std::fs::read_to_string(&path).map_err(|source| ContractError::Io {
         path: path.clone(),
         source,

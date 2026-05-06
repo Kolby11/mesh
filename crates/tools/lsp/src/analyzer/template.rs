@@ -6,14 +6,14 @@ use tower_lsp::lsp_types::{
 use crate::{
     document::Document,
     knowledge::tags::{EVENT_ATTRS, TAG_DEFS, TagDef, UNIVERSAL_ATTRS},
-    plugin_registry::PluginRegistry,
+    module_registry::ModuleRegistry,
     util::TemplateContext,
 };
 
 pub fn complete(
     ctx: TemplateContext,
     doc: &Document,
-    _registry: &PluginRegistry,
+    _registry: &ModuleRegistry,
 ) -> Vec<CompletionItem> {
     match ctx {
         TemplateContext::TagName { .. } => complete_tags(doc),
@@ -30,7 +30,7 @@ fn complete_tags(doc: &Document) -> Vec<CompletionItem> {
     for import in &doc.imports {
         if matches!(
             import.target,
-            ComponentImportTarget::ComponentLocal(_) | ComponentImportTarget::ComponentPlugin(_)
+            ComponentImportTarget::ComponentLocal(_) | ComponentImportTarget::ComponentModule(_)
         ) {
             let alias = &import.alias;
             items.push(CompletionItem {

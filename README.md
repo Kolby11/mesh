@@ -49,20 +49,20 @@ MESH is split into four main parts.
 
 ### Rust core
 
-The Rust core is the host and bridge for the plugin system. It is responsible
+The Rust core is the host and bridge for the module system. It is responsible
 for the generic shell machinery:
 
 - lifecycle and runtime coordination
-- plugin discovery, loading, and dependency validation
+- module discovery, loading, and dependency validation
 - `.mesh` compilation and Luau runtime hosting
 - settings storage and validation
 - theme and localization plumbing
 - permission and capability enforcement
 - IPC, event routing, diagnostics, and logging
-- moving raw service payloads between backend and frontend plugins
+- moving raw service payloads between backend and frontend modules
 
 It should not own service-specific or UI-specific business logic. Battery,
-audio, network, media, and similar behavior belong in plugins.
+audio, network, media, and similar behavior belong in modules.
 
 ### Wayland frontend layer
 
@@ -91,7 +91,7 @@ Extensions can provide:
 - language packs
 
 The extension runtime exposes stable host APIs instead of raw unrestricted
-access to the system. Plugins implement behavior on top of those APIs; the
+access to the system. Modules implement behavior on top of those APIs; the
 core does not ship privileged widget logic or built-in service code paths.
 
 ### UI component layer

@@ -26,7 +26,7 @@ The panel is a three-column row:
 - **Center** — clock (`%H:%M`)
 - **Right** — network icon, clickable volume icon, battery percentage
 
-This plugin is a legacy reference surface. It derives its own clock, battery,
+This module is a legacy reference surface. It derives its own clock, battery,
 volume, and network display state inside the frontend script rather than
 asking the core for presentation-ready values.
 
@@ -35,7 +35,7 @@ asking the core for presentation-ready values.
 Looked up via `require("@mesh/<service>")`; all are optional and fall
 back to `"N/A"` / `"0"` / `"disconnected"` when no implementation is
 registered. The core only brokers those lookups and payloads; formatting and
-fallback presentation live in the plugin script.
+fallback presentation live in the module script.
 
 | Interface      | Used for                          |
 | -------------- | --------------------------------- |

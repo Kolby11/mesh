@@ -1,10 +1,10 @@
-# Frontend Example Plugins
+# Frontend Example Modules
 
-This directory documents a fuller composition example for frontend plugin
-authors. The example plugins live in `packages/plugins/frontend/examples/`.
+This directory documents a fuller composition example for frontend module
+authors. The example modules live in `packages/modules/frontend/examples/`.
 
-The shell discovers them the same way it discovers any other plugin under the
-repo `plugins/` tree. The `examples/` folder is a naming convention for human
+The shell discovers them the same way it discovers any other module under the
+repo `modules/` tree. The `examples/` folder is a naming convention for human
 organization, not a special discovery boundary.
 
 ## Example set
@@ -12,8 +12,8 @@ organization, not a special discovery boundary.
 ### Host surface
 
 - `@mesh/workspace-hub`
-  - Surface plugin
-  - Declares required plugin dependencies on five widget plugins
+  - Surface module
+  - Declares required module dependencies on five widget modules
   - Imports dependency-backed component tags directly in template markup
   - Exposes three slot points for third-party extension
 
@@ -25,7 +25,7 @@ organization, not a special discovery boundary.
 - `@mesh/focus-timer` exports `<FocusTimer/>`
 - `@mesh/status-rail` exports `<StatusRail/>`
 
-These are imported by `@mesh/workspace-hub` through `dependencies.plugins`.
+These are imported by `@mesh/workspace-hub` through `dependencies.modules`.
 The loader validates that each referenced tag resolves to exactly one required
 widget dependency before runtime.
 
@@ -33,14 +33,14 @@ widget dependency before runtime.
 
 - `@mesh/weather-brief`
   - Contributes into `@mesh/workspace-hub:main-extra`
-  - Demonstrates slot props in `plugin.json`
+  - Demonstrates slot props in `package.json`
 - `@mesh/habit-streaks`
   - Contributes into `@mesh/workspace-hub:footer`
   - Demonstrates footer-style chip contributions
 
 ## Copyable pattern
 
-1. Export a component tag from the child plugin:
+1. Export a component tag from the child module:
 
 ```json
 {
@@ -50,12 +50,12 @@ widget dependency before runtime.
 }
 ```
 
-2. Add the child plugin as a required plugin dependency in the host:
+2. Add the child module as a required module dependency in the host:
 
 ```json
 {
   "dependencies": {
-    "plugins": {
+    "modules": {
       "@mesh/calendar-card": ">=0.1.0"
     }
   }
@@ -68,7 +68,7 @@ widget dependency before runtime.
 <CalendarCard heading="This week" accent="Launch prep"/>
 ```
 
-4. Optionally expose slots so unrelated plugins can extend the host without
+4. Optionally expose slots so unrelated modules can extend the host without
 editing it:
 
 ```json
@@ -81,6 +81,6 @@ editing it:
 
 ## Why this example exists
 
-The core plugins stay fairly small. This example set is more explicit on
+The core modules stay fairly small. This example set is more explicit on
 purpose: it shows dependency-backed imports, exported tags, host slots, slot
-props, and a realistic multi-plugin layout all in one place.
+props, and a realistic multi-module layout all in one place.

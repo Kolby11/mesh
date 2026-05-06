@@ -1,4 +1,4 @@
-This plugin has been split into smaller presentational components inside `src/components`:
+This module has been split into smaller presentational components inside `src/components`:
 
 `settings-button.mesh` — clickable wrapper for the settings glyph that toggles the quick settings surface.
 `volume-button.mesh` — clickable wrapper for volume that toggles the volume surface and reuses reactive audio globals.

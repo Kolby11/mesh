@@ -1,4 +1,4 @@
-use mesh_core_plugin::PluginType;
+use mesh_core_module::ModuleType;
 use mesh_core_shell::{Shell, default_ipc_socket_path};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -40,40 +40,40 @@ fn cmd_start() {
 
 fn cmd_list() {
     let mut shell = Shell::new();
-    shell.discover_plugins();
-    if let Err(err) = shell.resolve_plugins() {
-        eprintln!("failed to resolve plugins: {err}");
+    shell.discover_modules();
+    if let Err(err) = shell.resolve_modules() {
+        eprintln!("failed to resolve modules: {err}");
         std::process::exit(1);
     }
 
     let mut count = 0;
-    for (id, _state) in shell.plugins() {
-        let plugin = shell.plugin(id).unwrap();
-        let kind = plugin.manifest.package.plugin_type;
-        match (&kind, plugin.manifest.primary_service()) {
-            (PluginType::Backend, Some(svc)) => {
+    for (id, _state) in shell.modules() {
+        let module = shell.module(id).unwrap();
+        let kind = module.manifest.package.module_type;
+        match (&kind, module.manifest.primary_service()) {
+            (ModuleType::Backend, Some(svc)) => {
                 println!(
                     "{id}  ({kind}, provides: {}, backend: {}, manifest: {})",
-                    svc.provides, svc.backend_name, plugin.manifest_source
+                    svc.provides, svc.backend_name, module.manifest_source
                 );
             }
             _ => {
-                println!("{id}  ({kind}, manifest: {})", plugin.manifest_source);
+                println!("{id}  ({kind}, manifest: {})", module.manifest_source);
             }
         }
         count += 1;
     }
 
     if count == 0 {
-        println!("no plugins found");
+        println!("no modules found");
     }
 }
 
 fn cmd_services() {
     let mut shell = Shell::new();
-    shell.discover_plugins();
-    if let Err(err) = shell.resolve_plugins() {
-        eprintln!("failed to resolve plugins: {err}");
+    shell.discover_modules();
+    if let Err(err) = shell.resolve_modules() {
+        eprintln!("failed to resolve modules: {err}");
         std::process::exit(1);
     }
 
@@ -81,10 +81,10 @@ fn cmd_services() {
     let mut by_service: std::collections::HashMap<String, Vec<(String, String, u32)>> =
         std::collections::HashMap::new();
 
-    for (id, _) in shell.plugins() {
-        let plugin = shell.plugin(id).unwrap();
-        if plugin.manifest.package.plugin_type == PluginType::Backend {
-            if let Some(svc) = plugin.manifest.primary_service() {
+    for (id, _) in shell.modules() {
+        let module = shell.module(id).unwrap();
+        if module.manifest.package.module_type == ModuleType::Backend {
+            if let Some(svc) = module.manifest.primary_service() {
                 by_service.entry(svc.provides.clone()).or_default().push((
                     id.to_string(),
                     svc.backend_name.clone(),
@@ -201,7 +201,7 @@ fn cmd_help() {
     println!();
     println!("COMMANDS:");
     println!("  start     Start the shell (default)");
-    println!("  list      List discovered plugins");
+    println!("  list      List discovered modules");
     println!("  services  List available service backends");
     println!("  debug     Toggle the debug overlay on the running shell");
     println!("  ipc       Send an IPC command to the running shell");

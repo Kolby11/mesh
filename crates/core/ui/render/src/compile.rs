@@ -1,21 +1,21 @@
-use crate::CompiledFrontendPlugin;
+use crate::CompiledFrontendModule;
 
 use mesh_core_component::{
     ComponentFile, ComponentImportTarget, parse_component,
     template::{Attribute, AttributeValue, TemplateNode},
 };
-use mesh_core_plugin::{Manifest, PluginType};
+use mesh_core_module::{Manifest, ModuleType};
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CompileFrontendError {
-    #[error("plugin '{plugin_id}' is not a frontend plugin")]
-    NotFrontendPlugin { plugin_id: String },
+    #[error("module '{module_id}' is not a frontend module")]
+    NotFrontendModule { module_id: String },
 
-    #[error("plugin '{plugin_id}' is missing a .mesh frontend entrypoint")]
-    MissingMeshEntrypoint { plugin_id: String },
+    #[error("module '{module_id}' is missing a .mesh frontend entrypoint")]
+    MissingFrontendEntrypoint { module_id: String },
 
     #[error("failed to read component source {path}: {source}")]
     ReadSource {
@@ -38,20 +38,20 @@ pub enum CompileFrontendError {
     StandaloneComponentViolation { path: PathBuf, message: String },
 }
 
-pub fn is_frontend_plugin(manifest: &Manifest) -> bool {
+pub fn is_frontend_module(manifest: &Manifest) -> bool {
     matches!(
-        manifest.package.plugin_type,
-        PluginType::Surface | PluginType::Widget
+        manifest.package.module_type,
+        ModuleType::Surface | ModuleType::Widget
     )
 }
 
-pub fn compile_frontend_plugin(
+pub fn compile_frontend_module(
     manifest: &Manifest,
-    plugin_dir: &Path,
-) -> Result<CompiledFrontendPlugin, CompileFrontendError> {
-    if !is_frontend_plugin(manifest) {
-        return Err(CompileFrontendError::NotFrontendPlugin {
-            plugin_id: manifest.package.id.clone(),
+    module_dir: &Path,
+) -> Result<CompiledFrontendModule, CompileFrontendError> {
+    if !is_frontend_module(manifest) {
+        return Err(CompileFrontendError::NotFrontendModule {
+            module_id: manifest.package.id.clone(),
         });
     }
 
@@ -60,37 +60,37 @@ pub fn compile_frontend_plugin(
         .main
         .as_deref()
         .filter(|path| path.ends_with(".mesh"))
-        .ok_or_else(|| CompileFrontendError::MissingMeshEntrypoint {
-            plugin_id: manifest.package.id.clone(),
+        .ok_or_else(|| CompileFrontendError::MissingFrontendEntrypoint {
+            module_id: manifest.package.id.clone(),
         })?;
 
-    let source_path = plugin_dir.join(entrypoint);
+    let source_path = module_dir.join(entrypoint);
     let component = parse_component_file(&source_path)?;
     let mut local_components: HashMap<String, ComponentFile> = HashMap::new();
-    let mut plugin_component_imports = HashMap::new();
+    let mut module_component_imports = HashMap::new();
     let mut seen_local_paths = HashSet::new();
     collect_imports(
         &component,
         &source_path,
-        plugin_dir,
+        module_dir,
         &mut local_components,
-        &mut plugin_component_imports,
+        &mut module_component_imports,
         &mut seen_local_paths,
     )?;
-    validate_standalone_imports(&component, &source_path, plugin_dir, &local_components)?;
+    validate_standalone_imports(&component, &source_path, module_dir, &local_components)?;
 
     tracing::info!(
-        "compiled frontend plugin '{}' from {}",
+        "compiled frontend module '{}' from {}",
         manifest.package.id,
         source_path.display()
     );
 
-    Ok(CompiledFrontendPlugin {
+    Ok(CompiledFrontendModule {
         manifest: manifest.clone(),
         source_path,
         component,
         local_components,
-        plugin_component_imports,
+        module_component_imports,
     })
 }
 
@@ -109,15 +109,15 @@ fn parse_component_file(path: &Path) -> Result<ComponentFile, CompileFrontendErr
 fn collect_imports(
     component: &ComponentFile,
     component_path: &Path,
-    plugin_dir: &Path,
+    module_dir: &Path,
     local_components: &mut HashMap<String, ComponentFile>,
-    plugin_component_imports: &mut HashMap<String, String>,
+    module_component_imports: &mut HashMap<String, String>,
     seen_local_paths: &mut HashSet<PathBuf>,
 ) -> Result<(), CompileFrontendError> {
     for import in &component.imports {
         match &import.target {
             ComponentImportTarget::ComponentLocal(source) => {
-                let target_path = resolve_local_component_path(source, component_path, plugin_dir);
+                let target_path = resolve_local_component_path(source, component_path, module_dir);
                 let parsed = parse_component_file(&target_path)?;
                 insert_local_component(
                     &import.alias,
@@ -130,15 +130,15 @@ fn collect_imports(
                     collect_imports(
                         &parsed,
                         &target_path,
-                        plugin_dir,
+                        module_dir,
                         local_components,
-                        plugin_component_imports,
+                        module_component_imports,
                         seen_local_paths,
                     )?;
                 }
             }
-            ComponentImportTarget::ComponentPlugin(plugin_id) => {
-                insert_plugin_component_import(&import.alias, plugin_id, plugin_component_imports)?;
+            ComponentImportTarget::ComponentModule(module_id) => {
+                insert_module_component_import(&import.alias, module_id, module_component_imports)?;
             }
             ComponentImportTarget::InterfaceApi { .. } => {}
         }
@@ -160,29 +160,29 @@ fn insert_local_component(
     Ok(())
 }
 
-fn insert_plugin_component_import(
+fn insert_module_component_import(
     alias: &str,
-    plugin_id: &str,
-    plugin_component_imports: &mut HashMap<String, String>,
+    module_id: &str,
+    module_component_imports: &mut HashMap<String, String>,
 ) -> Result<(), CompileFrontendError> {
-    if let Some(existing) = plugin_component_imports.get(alias) {
-        if existing != plugin_id {
+    if let Some(existing) = module_component_imports.get(alias) {
+        if existing != module_id {
             return Err(CompileFrontendError::ConflictingImportAlias {
                 alias: alias.to_string(),
             });
         }
     }
-    plugin_component_imports.insert(alias.to_string(), plugin_id.to_string());
+    module_component_imports.insert(alias.to_string(), module_id.to_string());
     Ok(())
 }
 
-fn resolve_local_component_path(source: &str, component_path: &Path, plugin_dir: &Path) -> PathBuf {
+fn resolve_local_component_path(source: &str, component_path: &Path, module_dir: &Path) -> PathBuf {
     let mut path = if let Some(rest) = source.strip_prefix("@src/") {
-        plugin_dir.join("src").join(rest)
+        module_dir.join("src").join(rest)
     } else if source.starts_with('/') {
         PathBuf::from(source)
     } else {
-        component_path.parent().unwrap_or(plugin_dir).join(source)
+        component_path.parent().unwrap_or(module_dir).join(source)
     };
     if path.extension().is_none() {
         path.set_extension("mesh");
@@ -193,14 +193,14 @@ fn resolve_local_component_path(source: &str, component_path: &Path, plugin_dir:
 fn validate_standalone_imports(
     root: &ComponentFile,
     root_path: &Path,
-    plugin_dir: &Path,
+    module_dir: &Path,
     local_components: &HashMap<String, ComponentFile>,
 ) -> Result<(), CompileFrontendError> {
     let mut ancestry = Vec::new();
     validate_component_template(
         root,
         root_path,
-        plugin_dir,
+        module_dir,
         local_components,
         false,
         &HashSet::new(),
@@ -211,7 +211,7 @@ fn validate_standalone_imports(
 fn validate_component_template(
     component: &ComponentFile,
     path: &Path,
-    plugin_dir: &Path,
+    module_dir: &Path,
     local_components: &HashMap<String, ComponentFile>,
     strict_scope: bool,
     explicit_props: &HashSet<String>,
@@ -236,7 +236,7 @@ fn validate_component_template(
         validate_template_nodes(
             &template.root,
             path,
-            plugin_dir,
+            module_dir,
             local_components,
             strict_scope,
             &allowed_symbols,
@@ -253,7 +253,7 @@ fn validate_component_template(
 fn validate_template_nodes(
     nodes: &[TemplateNode],
     path: &Path,
-    plugin_dir: &Path,
+    module_dir: &Path,
     local_components: &HashMap<String, ComponentFile>,
     strict_scope: bool,
     allowed_symbols: &HashSet<String>,
@@ -270,7 +270,7 @@ fn validate_template_nodes(
                 validate_template_nodes(
                     &element.children,
                     path,
-                    plugin_dir,
+                    module_dir,
                     local_components,
                     strict_scope,
                     allowed_symbols,
@@ -292,7 +292,7 @@ fn validate_template_nodes(
                 validate_template_nodes(
                     &if_node.then_children,
                     path,
-                    plugin_dir,
+                    module_dir,
                     local_components,
                     strict_scope,
                     allowed_symbols,
@@ -303,7 +303,7 @@ fn validate_template_nodes(
                 validate_template_nodes(
                     &if_node.else_children,
                     path,
-                    plugin_dir,
+                    module_dir,
                     local_components,
                     strict_scope,
                     allowed_symbols,
@@ -321,7 +321,7 @@ fn validate_template_nodes(
                 validate_template_nodes(
                     &for_node.children,
                     path,
-                    plugin_dir,
+                    module_dir,
                     local_components,
                     strict_scope,
                     allowed_symbols,
@@ -337,7 +337,7 @@ fn validate_template_nodes(
                 validate_template_nodes(
                     &component_ref.children,
                     path,
-                    plugin_dir,
+                    module_dir,
                     local_components,
                     strict_scope,
                     allowed_symbols,
@@ -347,7 +347,7 @@ fn validate_template_nodes(
                 )?;
 
                 if let Some(source) = local_imports.get(component_ref.name.as_str()) {
-                    let child_path = resolve_local_component_path(source, path, plugin_dir);
+                    let child_path = resolve_local_component_path(source, path, module_dir);
                     let Some(child_component) = local_components.get(&component_ref.name) else {
                         continue;
                     };
@@ -359,7 +359,7 @@ fn validate_template_nodes(
                     validate_component_template(
                         child_component,
                         &child_path,
-                        plugin_dir,
+                        module_dir,
                         local_components,
                         true,
                         &explicit_props,

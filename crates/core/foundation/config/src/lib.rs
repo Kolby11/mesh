@@ -10,7 +10,7 @@ pub struct ShellConfig {
     #[serde(default)]
     pub shell: ShellSection,
     #[serde(default)]
-    pub plugins: HashMap<String, PluginConfig>,
+    pub modules: HashMap<String, ModuleConfig>,
 }
 
 /// Global shell settings sourced from JSON files.
@@ -27,7 +27,7 @@ pub struct ShellSettings {
 /// System sound file mappings for shell events.
 ///
 /// Paths are absolute or relative to the shell's data directory.
-/// The audio backend plugin plays these via its `play-sound` command.
+/// The audio backend module plays these via its `play-sound` command.
 /// Leave a field as `None` to silence that event.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ShellSounds {
@@ -150,9 +150,9 @@ fn default_discovery_paths(workspace_root: &Path) -> Vec<PathBuf> {
     paths
 }
 
-/// Per-plugin configuration values.
+/// Per-module configuration values.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginConfig {
+pub struct ModuleConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(flatten)]
@@ -163,7 +163,7 @@ fn default_true() -> bool {
     true
 }
 
-/// Schema definition for a plugin's settings.
+/// Schema definition for a module's settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingsSchema {
     #[serde(flatten)]
@@ -257,7 +257,7 @@ pub fn load_config(path: &Path) -> Result<ShellConfig, ConfigError> {
     if !path.exists() {
         return Ok(ShellConfig {
             shell: ShellSection::default(),
-            plugins: HashMap::new(),
+            modules: HashMap::new(),
         });
     }
     let content = std::fs::read_to_string(path)?;
@@ -277,13 +277,13 @@ fn merge_shell_settings(base: &mut ShellSettings, overrides: ShellSettings) {
     base.sounds = overrides.sounds;
 }
 
-/// Write a per-plugin overrides file under XDG config (~/..../mesh/plugins/<scope>/<name>.json).
-pub fn plugin_override_path(plugin_id: &str) -> PathBuf {
-    let mut parts = plugin_id.splitn(2, '/');
-    let scope = parts.next().unwrap_or(plugin_id);
+/// Write a per-module overrides file under XDG config (~/..../mesh/modules/<scope>/<name>.json).
+pub fn module_override_path(module_id: &str) -> PathBuf {
+    let mut parts = module_id.splitn(2, '/');
+    let scope = parts.next().unwrap_or(module_id);
     let name = parts.next().unwrap_or("");
 
-    let mut path = dirs_path("config").join("mesh").join("plugins");
+    let mut path = dirs_path("config").join("mesh").join("modules");
     if !name.is_empty() {
         path = path.join(scope).join(format!("{}.json", name));
     } else {
@@ -293,9 +293,9 @@ pub fn plugin_override_path(plugin_id: &str) -> PathBuf {
     path
 }
 
-/// Persist per-plugin overrides atomically.
-pub fn save_plugin_overrides(plugin_id: &str, overrides: &JsonValue) -> Result<(), ConfigError> {
-    let path = plugin_override_path(plugin_id);
+/// Persist per-module overrides atomically.
+pub fn save_module_overrides(module_id: &str, overrides: &JsonValue) -> Result<(), ConfigError> {
+    let path = module_override_path(module_id);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -307,9 +307,9 @@ pub fn save_plugin_overrides(plugin_id: &str, overrides: &JsonValue) -> Result<(
     Ok(())
 }
 
-/// Remove a single key from a plugin overrides file. If the file becomes empty it is removed.
-pub fn remove_plugin_override(plugin_id: &str, key: &str) -> Result<(), ConfigError> {
-    let path = plugin_override_path(plugin_id);
+/// Remove a single key from a module overrides file. If the file becomes empty it is removed.
+pub fn remove_module_override(module_id: &str, key: &str) -> Result<(), ConfigError> {
+    let path = module_override_path(module_id);
     if !path.exists() {
         return Ok(());
     }
@@ -330,9 +330,9 @@ pub fn remove_plugin_override(plugin_id: &str, key: &str) -> Result<(), ConfigEr
     Ok(())
 }
 
-/// Reset (remove) the per-plugin overrides file entirely.
-pub fn reset_plugin_overrides(plugin_id: &str) -> Result<(), ConfigError> {
-    let path = plugin_override_path(plugin_id);
+/// Reset (remove) the per-module overrides file entirely.
+pub fn reset_module_overrides(module_id: &str) -> Result<(), ConfigError> {
+    let path = module_override_path(module_id);
     if path.exists() {
         std::fs::remove_file(path)?;
     }
@@ -342,7 +342,7 @@ pub fn reset_plugin_overrides(plugin_id: &str) -> Result<(), ConfigError> {
 /// Validate a JSON value against a simple SettingsSchema. This performs basic
 /// checks for type, enum values, and numeric min/max. It is intentionally
 /// conservative: unknown keys are allowed (validation is per-field).
-pub fn validate_plugin_settings(
+pub fn validate_module_settings(
     schema: &SettingsSchema,
     values: &JsonValue,
 ) -> Result<(), ConfigError> {
@@ -500,7 +500,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn test_validate_plugin_settings_valid() {
+    fn test_validate_module_settings_valid() {
         let mut fields = HashMap::new();
         fields.insert(
             "active".to_string(),
@@ -532,11 +532,11 @@ mod tests {
             "speed": 5
         });
 
-        assert!(validate_plugin_settings(&schema, &valid_json).is_ok());
+        assert!(validate_module_settings(&schema, &valid_json).is_ok());
     }
 
     #[test]
-    fn test_validate_plugin_settings_invalid_enum() {
+    fn test_validate_module_settings_invalid_enum() {
         let mut fields = HashMap::new();
         fields.insert(
             "active".to_string(),
@@ -556,11 +556,11 @@ mod tests {
             "active": "neon"
         });
 
-        assert!(validate_plugin_settings(&schema, &invalid_json).is_err());
+        assert!(validate_module_settings(&schema, &invalid_json).is_err());
     }
 
     #[test]
-    fn test_validate_plugin_settings_invalid_type() {
+    fn test_validate_module_settings_invalid_type() {
         let mut fields = HashMap::new();
         fields.insert(
             "speed".to_string(),
@@ -580,11 +580,11 @@ mod tests {
             "speed": "fast"
         });
 
-        assert!(validate_plugin_settings(&schema, &invalid_json).is_err());
+        assert!(validate_module_settings(&schema, &invalid_json).is_err());
     }
 
     #[test]
-    fn test_validate_plugin_settings_out_of_bounds() {
+    fn test_validate_module_settings_out_of_bounds() {
         let mut fields = HashMap::new();
         fields.insert(
             "speed".to_string(),
@@ -603,16 +603,16 @@ mod tests {
         let invalid_json_low = json!({ "speed": 0 });
         let invalid_json_high = json!({ "speed": 11 });
 
-        assert!(validate_plugin_settings(&schema, &invalid_json_low).is_err());
-        assert!(validate_plugin_settings(&schema, &invalid_json_high).is_err());
+        assert!(validate_module_settings(&schema, &invalid_json_low).is_err());
+        assert!(validate_module_settings(&schema, &invalid_json_high).is_err());
     }
 
     #[test]
-    fn test_plugin_override_path_formats() {
-        let path1 = plugin_override_path("@mesh/system-panel");
-        assert!(path1.ends_with("mesh/plugins/@mesh/system-panel.json"));
+    fn test_module_override_path_formats() {
+        let path1 = module_override_path("@mesh/system-panel");
+        assert!(path1.ends_with("mesh/modules/@mesh/system-panel.json"));
 
-        let path2 = plugin_override_path("generic-plugin");
-        assert!(path2.ends_with("mesh/plugins/generic-plugin.json"));
+        let path2 = module_override_path("generic-module");
+        assert!(path2.ends_with("mesh/modules/generic-package.json"));
     }
 }

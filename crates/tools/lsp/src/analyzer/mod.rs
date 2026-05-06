@@ -2,7 +2,7 @@ use tower_lsp::lsp_types::{CompletionItem, Position};
 
 use crate::{
     document::Document,
-    plugin_registry::PluginRegistry,
+    module_registry::ModuleRegistry,
     util::{Block, ScriptContext, block_at_offset, block_content, position_to_offset},
 };
 
@@ -65,7 +65,7 @@ fn try_upgrade_to_proxy_ctx(
 pub fn complete(
     doc: &Document,
     position: Position,
-    registry: &PluginRegistry,
+    registry: &ModuleRegistry,
 ) -> Vec<CompletionItem> {
     let offset = position_to_offset(&doc.source, position);
     let loc = block_at_offset(&doc.source, offset);

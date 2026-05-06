@@ -8,14 +8,14 @@ mod tags;
 
 use mesh_core_component::ComponentFile;
 use mesh_core_elements::{LayoutEngine, StyleContext, StyleResolver, VariableStore, WidgetNode};
-use mesh_core_plugin::Manifest;
+use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub use accessibility::root_accessibility_role;
-pub use compile::{CompileFrontendError, compile_frontend_plugin, is_frontend_plugin};
+pub use compile::{CompileFrontendError, compile_frontend_module, is_frontend_module};
 pub use render::build_widget_tree_from_component;
 pub use surface::{
     DebugOverlay, FrontendRenderEngine, LayerSurfaceConfig, PixelBuffer, RenderEngine, RenderError,
@@ -83,18 +83,18 @@ pub trait FrontendCompositionResolver {
 }
 
 #[derive(Debug, Clone)]
-pub struct CompiledFrontendPlugin {
+pub struct CompiledFrontendModule {
     pub manifest: Manifest,
     pub source_path: PathBuf,
     pub component: ComponentFile,
     /// Local single-file components shipped in `src/components/*.mesh` inside
-    /// the plugin directory. Keyed by filename stem (e.g. `settings-button`).
+    /// the module directory. Keyed by filename stem (e.g. `settings-button`).
     pub local_components: std::collections::HashMap<String, mesh_core_component::ComponentFile>,
-    /// Explicit component plugin imports keyed by template alias.
-    pub plugin_component_imports: std::collections::HashMap<String, String>,
+    /// Explicit component module imports keyed by template alias.
+    pub module_component_imports: std::collections::HashMap<String, String>,
 }
 
-impl CompiledFrontendPlugin {
+impl CompiledFrontendModule {
     pub fn surface_id(&self) -> &str {
         &self.manifest.package.id
     }
@@ -303,12 +303,12 @@ mod tests {
   </box>
 </template>
 "#;
-        let plugin = mesh_core_component::parse_component(source).unwrap();
-        let manifest = mesh_core_plugin::Manifest {
-            package: mesh_core_plugin::PackageSection {
+        let module = mesh_core_component::parse_component(source).unwrap();
+        let manifest = mesh_core_module::Manifest {
+            package: mesh_core_module::PackageSection {
                 id: "test".into(),
                 version: "0.1.0".into(),
-                plugin_type: mesh_core_plugin::PluginType::Widget,
+                module_type: mesh_core_module::ModuleType::Widget,
                 api_version: "0.1.0".into(),
                 name: None,
                 license: None,
@@ -345,12 +345,12 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        let compiled = CompiledFrontendPlugin {
+        let compiled = CompiledFrontendModule {
             manifest,
             source_path: std::path::PathBuf::from("test.mesh"),
-            component: plugin,
+            component: module,
             local_components: Default::default(),
-            plugin_component_imports: Default::default(),
+            module_component_imports: Default::default(),
         };
         let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&store));
         let texts = collect_text_content(&tree);
@@ -392,13 +392,13 @@ mod tests {
         None
     }
 
-    fn make_test_plugin(source: &str) -> CompiledFrontendPlugin {
+    fn make_test_module(source: &str) -> CompiledFrontendModule {
         let component = mesh_core_component::parse_component(source).unwrap();
-        let manifest = mesh_core_plugin::Manifest {
-            package: mesh_core_plugin::PackageSection {
+        let manifest = mesh_core_module::Manifest {
+            package: mesh_core_module::PackageSection {
                 id: "test".into(),
                 version: "0.1.0".into(),
-                plugin_type: mesh_core_plugin::PluginType::Widget,
+                module_type: mesh_core_module::ModuleType::Widget,
                 api_version: "0.1.0".into(),
                 name: None,
                 license: None,
@@ -426,12 +426,12 @@ mod tests {
             icon_requirements: Default::default(),
             translations: Default::default(),
         };
-        CompiledFrontendPlugin {
+        CompiledFrontendModule {
             manifest,
             source_path: std::path::PathBuf::from("test.mesh"),
             component,
             local_components: Default::default(),
-            plugin_component_imports: Default::default(),
+            module_component_imports: Default::default(),
         }
     }
 
@@ -456,7 +456,7 @@ box {
   <box />
 </template>
 "#;
-        let compiled = make_test_plugin(source);
+        let compiled = make_test_module(source);
         let theme = mesh_core_theme::default_theme();
 
         // Narrow — container query does not match.
@@ -497,7 +497,7 @@ box {
   <box />
 </template>
 "#;
-        let compiled = make_test_plugin(source);
+        let compiled = make_test_module(source);
         let theme = mesh_core_theme::default_theme();
 
         // Narrow — max-width matches.
@@ -519,7 +519,7 @@ box {
         );
     }
 
-    /// Building the same plugin twice with different surface sizes must yield
+    /// Building the same module twice with different surface sizes must yield
     /// independent trees — no shared computed-style state bleeds between calls.
     #[test]
     fn container_query_consecutive_builds_are_independent() {
@@ -532,7 +532,7 @@ box { background-color: #000000; }
 </style>
 <template><box /></template>
 "#;
-        let compiled = make_test_plugin(source);
+        let compiled = make_test_module(source);
         let theme = mesh_core_theme::default_theme();
 
         let wide = compiled.build_preview_tree(&theme, 500, 200);

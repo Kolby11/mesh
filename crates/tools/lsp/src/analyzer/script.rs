@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{
 use crate::{
     document::{Document, ElementRefSource},
     knowledge::mesh_api::MESH_API_ENTRIES,
-    plugin_registry::PluginRegistry,
+    module_registry::ModuleRegistry,
     util::ScriptContext,
 };
 
@@ -17,7 +17,7 @@ use mesh_core_elements::{
 pub fn complete(
     ctx: ScriptContext,
     doc: &Document,
-    registry: &PluginRegistry,
+    registry: &ModuleRegistry,
 ) -> Vec<CompletionItem> {
     match ctx {
         ScriptContext::MeshApi { prefix } => complete_mesh_api(&prefix, doc, registry),
@@ -37,7 +37,7 @@ pub fn complete(
 fn complete_mesh_api(
     prefix: &str,
     _doc: &Document,
-    _registry: &PluginRegistry,
+    _registry: &ModuleRegistry,
 ) -> Vec<CompletionItem> {
     MESH_API_ENTRIES
         .iter()
@@ -115,7 +115,7 @@ fn complete_interface_proxy(
     var_name: &str,
     prefix: &str,
     doc: &Document,
-    registry: &PluginRegistry,
+    registry: &ModuleRegistry,
 ) -> Vec<CompletionItem> {
     let Some(iface_name) = doc.interface_proxies.get(var_name) else {
         return vec![];
@@ -187,7 +187,7 @@ fn complete_interface_proxy(
     items
 }
 
-fn complete_service_names(registry: &PluginRegistry) -> Vec<CompletionItem> {
+fn complete_service_names(registry: &ModuleRegistry) -> Vec<CompletionItem> {
     registry
         .service_names()
         .into_iter()

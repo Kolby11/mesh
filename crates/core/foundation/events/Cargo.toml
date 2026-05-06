@@ -1,6 +1,6 @@
 [package]
 name = "mesh-core-events"
-description = "Typed event bus and inter-plugin communication for MESH"
+description = "Typed event bus and inter-module communication for MESH"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

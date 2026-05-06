@@ -1,4 +1,4 @@
-/// Typed event bus and inter-plugin communication for MESH.
+/// Typed event bus and inter-module communication for MESH.
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

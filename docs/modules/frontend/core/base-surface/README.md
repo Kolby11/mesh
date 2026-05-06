@@ -8,7 +8,7 @@ single top-level surface.
 
 ## What it demonstrates
 
-- Direct frontend composition through required plugin dependencies:
+- Direct frontend composition through required module dependencies:
   `@mesh/base-launcher-widget` and `@mesh/base-sidebar-widget`
 - Host markup that uses explicitly imported component tags:
   `<BaseLauncher/>` and `<BaseSidebar/>`

@@ -2,9 +2,9 @@ use super::*;
 use mesh_core_capability::Capability;
 use mesh_core_component::parse_component;
 use mesh_core_elements::LayoutRect;
-use mesh_core_plugin::manifest::{
+use mesh_core_module::manifest::{
     CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
-    ExportsSection, Manifest, PackageSection, PluginType,
+    ExportsSection, Manifest, ModuleType, PackageSection,
 };
 use mesh_core_scripting::ScriptContext;
 use mesh_core_service::{
@@ -19,17 +19,17 @@ fn service_update_marks_component_dirty_only_when_tracked_fields_change() {
     let previous = serde_json::json!({
         "percent": 65,
         "muted": false,
-        "source_plugin": "@mesh/pipewire-audio"
+        "source_module": "@mesh/pipewire-audio"
     });
     let unchanged_tracked = serde_json::json!({
         "percent": 65,
         "muted": false,
-        "source_plugin": "@mesh/alternate-audio"
+        "source_module": "@mesh/alternate-audio"
     });
     let changed_tracked = serde_json::json!({
         "percent": 66,
         "muted": false,
-        "source_plugin": "@mesh/alternate-audio"
+        "source_module": "@mesh/alternate-audio"
     });
     let tracked_fields = HashSet::from(["percent".to_string(), "muted".to_string()]);
 
@@ -92,8 +92,8 @@ fn audio_network_catalog() -> InterfaceCatalog {
     catalog.register_provider(InterfaceProvider {
         interface: "mesh.audio".into(),
         version: Some("1.0".into()),
-        base_plugin: Some("@mesh/audio-interface".into()),
-        provider_plugin: "@mesh/pipewire-audio".into(),
+        base_module: Some("@mesh/audio-interface".into()),
+        provider_module: "@mesh/pipewire-audio".into(),
         backend_name: "PipeWire".into(),
         priority: 100,
     });
@@ -117,8 +117,8 @@ fn audio_network_catalog() -> InterfaceCatalog {
     catalog.register_provider(InterfaceProvider {
         interface: "mesh.network".into(),
         version: Some("1.0".into()),
-        base_plugin: Some("@mesh/network-interface".into()),
-        provider_plugin: "@mesh/networkmanager-network".into(),
+        base_module: Some("@mesh/network-interface".into()),
+        provider_module: "@mesh/networkmanager-network".into(),
         backend_name: "NetworkManager".into(),
         priority: 100,
     });
@@ -140,8 +140,8 @@ fn audio_network_power_catalog() -> InterfaceCatalog {
     catalog.register_provider(InterfaceProvider {
         interface: "mesh.power".into(),
         version: Some("1.0".into()),
-        base_plugin: Some("@mesh/power-interface".into()),
-        provider_plugin: "@mesh/upower-power".into(),
+        base_module: Some("@mesh/power-interface".into()),
+        provider_module: "@mesh/upower-power".into(),
         backend_name: "UPower".into(),
         priority: 100,
     });
@@ -199,7 +199,7 @@ fn minimal_test_manifest(id: &str) -> Manifest {
             id: id.to_string(),
             name: None,
             version: "0.1.0".into(),
-            plugin_type: PluginType::Surface,
+            module_type: ModuleType::Surface,
             api_version: "0.1".into(),
             license: None,
             description: None,
@@ -225,7 +225,7 @@ fn minimal_test_manifest(id: &str) -> Manifest {
         provides_slots: HashMap::new(),
         slot_contributions: HashMap::new(),
         assets: None,
-        icon_requirements: mesh_core_plugin::IconRequirementsSection::default(),
+        icon_requirements: mesh_core_module::IconRequirementsSection::default(),
         translations: HashMap::new(),
         surface_layout: None,
     }
@@ -244,15 +244,15 @@ fn test_frontend_component_with_required_icons(
         .iter()
         .map(|semantic_name| (*semantic_name).to_string())
         .collect();
-    let compiled = CompiledFrontendPlugin {
+    let compiled = CompiledFrontendModule {
         manifest,
         source_path: PathBuf::from("src/main.mesh"),
         component: parse_component(source).unwrap(),
         local_components: HashMap::new(),
-        plugin_component_imports: HashMap::new(),
+        module_component_imports: HashMap::new(),
     };
     let catalog = FrontendCatalog {
-        plugins: HashMap::new(),
+        modules: HashMap::new(),
         slot_contributions: HashMap::new(),
     };
     let mut component = FrontendSurfaceComponent::new(
@@ -283,15 +283,15 @@ fn test_frontend_component_with_catalog(
         .iter()
         .map(|capability| (*capability).to_string())
         .collect();
-    let compiled = CompiledFrontendPlugin {
+    let compiled = CompiledFrontendModule {
         manifest,
         source_path: PathBuf::from("src/main.mesh"),
         component: parse_component(source).unwrap(),
         local_components: HashMap::new(),
-        plugin_component_imports: HashMap::new(),
+        module_component_imports: HashMap::new(),
     };
     let catalog = FrontendCatalog {
-        plugins: HashMap::new(),
+        modules: HashMap::new(),
         slot_contributions: HashMap::new(),
     };
     let mut component =
@@ -1367,7 +1367,7 @@ end
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
-            source_plugin: "@mesh/pipewire-audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
             payload: serde_json::json!({ "percent": 64, "muted": false }),
         })
         .unwrap();
@@ -1411,7 +1411,7 @@ fn raw_service_state_update_schedules_repaint_without_proxy_tracking() {
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
-            source_plugin: "@mesh/pipewire-audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
             payload: serde_json::json!({ "percent": 64, "muted": false }),
         })
         .unwrap();
@@ -1460,7 +1460,7 @@ end
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
-            source_plugin: "@mesh/pipewire-audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
             payload: serde_json::json!({ "percent": 73, "muted": false }),
         })
         .unwrap();
@@ -1512,7 +1512,7 @@ end
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
-            source_plugin: "@mesh/pipewire-audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
             payload: serde_json::json!({ "percent": 20, "muted": false }),
         })
         .unwrap();
@@ -1536,7 +1536,7 @@ end
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
-            source_plugin: "@mesh/pipewire-audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
             payload: serde_json::json!({ "percent": 35, "muted": false }),
         })
         .unwrap();
@@ -1574,7 +1574,7 @@ end
 }
 
 #[test]
-fn missing_required_icon_degrades_plugin_without_unloading() {
+fn missing_required_icon_degrades_module_without_unloading() {
     let component_source = r#"
 <template>
   <box />
@@ -1640,9 +1640,9 @@ fn icon_reliability_core_surfaces_proof() {
     }
     assert!(config.active_profile().icons.contains_key("missing-proof"));
 
-    let surface_manifests = [root.join("packages/plugins/frontend/core/navigation-bar")];
-    for plugin_dir in surface_manifests {
-        let loaded = mesh_core_plugin::manifest::load_manifest(&plugin_dir).unwrap();
+    let surface_manifests = [root.join("packages/modules/frontend/core/navigation-bar")];
+    for module_dir in surface_manifests {
+        let loaded = mesh_core_module::manifest::load_manifest(&module_dir).unwrap();
         assert!(
             loaded
                 .manifest
@@ -1664,12 +1664,12 @@ fn icon_reliability_core_surfaces_proof() {
     }
 
     for path in [
-        "packages/plugins/frontend/core/navigation-bar/src/main.mesh",
-        "packages/plugins/frontend/core/navigation-bar/src/components/volume-button.mesh",
-        "packages/plugins/frontend/core/navigation-bar/src/components/settings-button.mesh",
-        "packages/plugins/frontend/core/navigation-bar/src/components/theme-button.mesh",
-        "packages/plugins/frontend/core/navigation-bar/src/components/battery-widget.mesh",
-        "packages/plugins/frontend/core/navigation-bar/src/components/battery-button.mesh",
+        "packages/modules/frontend/core/navigation-bar/src/main.mesh",
+        "packages/modules/frontend/core/navigation-bar/src/components/volume-button.mesh",
+        "packages/modules/frontend/core/navigation-bar/src/components/settings-button.mesh",
+        "packages/modules/frontend/core/navigation-bar/src/components/theme-button.mesh",
+        "packages/modules/frontend/core/navigation-bar/src/components/battery-widget.mesh",
+        "packages/modules/frontend/core/navigation-bar/src/components/battery-button.mesh",
     ] {
         let source = fs::read_to_string(root.join(path)).unwrap();
         for line in source.lines().filter(|line| line.contains("<icon")) {
@@ -2106,7 +2106,7 @@ function onRender()
     local percent = math.floor((tonumber(audio.percent) or 0) + 0.5)
     local muted = audio.muted or false
     audio_label = string.format("%d%%", percent)
-    audio_backend = audio.source_plugin or "Unavailable"
+    audio_backend = audio.source_module or "Unavailable"
     if muted then
         audio_tooltip = string.format("Volume muted at %d%%", percent)
     else
@@ -2133,7 +2133,7 @@ end
             "available": true,
             "percent": 42,
             "muted": false,
-            "source_plugin": "@mesh/pipewire-audio"
+            "source_module": "@mesh/pipewire-audio"
         }),
     );
 
@@ -2539,21 +2539,21 @@ fn real_core_surfaces_reject_legacy_service_callback_api_in_shipped_surfaces() {
             "navigation-bar root",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../../packages/plugins/frontend/core/navigation-bar/src/main.mesh"
+                "/../../../packages/modules/frontend/core/navigation-bar/src/main.mesh"
             )),
         ),
         (
             "navigation-bar volume button",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../../packages/plugins/frontend/core/navigation-bar/src/components/volume-button.mesh"
+                "/../../../packages/modules/frontend/core/navigation-bar/src/components/volume-button.mesh"
             )),
         ),
         (
             "navigation-bar settings button",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../../packages/plugins/frontend/core/navigation-bar/src/components/settings-button.mesh"
+                "/../../../packages/modules/frontend/core/navigation-bar/src/components/settings-button.mesh"
             )),
         ),
     ];

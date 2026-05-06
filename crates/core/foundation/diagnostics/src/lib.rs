@@ -1,10 +1,10 @@
-/// Logging, health reporting, and performance monitoring for MESH plugins.
+/// Logging, health reporting, and performance monitoring for MESH modules.
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-/// Health status of a plugin.
+/// Health status of a module.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HealthStatus {
     Healthy,
@@ -22,10 +22,10 @@ impl fmt::Display for HealthStatus {
     }
 }
 
-/// Per-plugin performance metrics.
+/// Per-module performance metrics.
 #[derive(Debug, Clone)]
-pub struct PluginMetrics {
-    pub plugin_id: String,
+pub struct ModuleMetrics {
+    pub module_id: String,
     pub avg_frame_time: Duration,
     pub peak_frame_time: Duration,
     pub memory_bytes: u64,
@@ -33,10 +33,10 @@ pub struct PluginMetrics {
     pub health: HealthStatus,
 }
 
-/// Diagnostics handle given to each plugin.
+/// Diagnostics handle given to each module.
 #[derive(Debug, Clone)]
 pub struct Diagnostics {
-    plugin_id: String,
+    module_id: String,
     state: Arc<Mutex<DiagnosticsState>>,
 }
 
@@ -61,9 +61,9 @@ struct DiagnosticsState {
 }
 
 impl Diagnostics {
-    pub fn new(plugin_id: impl Into<String>) -> Self {
+    pub fn new(module_id: impl Into<String>) -> Self {
         Self {
-            plugin_id: plugin_id.into(),
+            module_id: module_id.into(),
             state: Arc::new(Mutex::new(DiagnosticsState {
                 health: HealthStatus::Healthy,
                 error_count: 0,
@@ -74,8 +74,8 @@ impl Diagnostics {
         }
     }
 
-    pub fn plugin_id(&self) -> &str {
-        &self.plugin_id
+    pub fn module_id(&self) -> &str {
+        &self.module_id
     }
 
     pub fn healthy(&self) {
@@ -127,7 +127,7 @@ impl Diagnostics {
         let mut state = self.state.lock().unwrap();
         let inserted = state
             .missing_icons
-            .insert((self.plugin_id.clone(), semantic_name.clone()));
+            .insert((self.module_id.clone(), semantic_name.clone()));
         if inserted {
             let tried = if tried.is_empty() {
                 "no configured candidates".to_string()
@@ -135,8 +135,8 @@ impl Diagnostics {
                 format!("tried {}", tried.join(", "))
             };
             state.health = HealthStatus::Degraded(format!(
-                "missing icon '{semantic_name}' for plugin '{}': {tried}",
-                self.plugin_id
+                "missing icon '{semantic_name}' for module '{}': {tried}",
+                self.module_id
             ));
         }
         inserted
@@ -199,10 +199,10 @@ impl Diagnostics {
     }
 }
 
-/// Central diagnostics collector that aggregates metrics from all plugins.
+/// Central diagnostics collector that aggregates metrics from all modules.
 #[derive(Debug, Default)]
 pub struct DiagnosticsCollector {
-    plugins: Vec<Diagnostics>,
+    modules: Vec<Diagnostics>,
 }
 
 impl DiagnosticsCollector {
@@ -210,10 +210,10 @@ impl DiagnosticsCollector {
         Self::default()
     }
 
-    /// Register a plugin and return its diagnostics handle.
-    pub fn register(&mut self, plugin_id: impl Into<String>) -> Diagnostics {
-        let diag = Diagnostics::new(plugin_id);
-        self.plugins.push(diag.clone());
+    /// Register a module and return its diagnostics handle.
+    pub fn register(&mut self, module_id: impl Into<String>) -> Diagnostics {
+        let diag = Diagnostics::new(module_id);
+        self.modules.push(diag.clone());
         diag
     }
 
@@ -225,19 +225,19 @@ impl DiagnosticsCollector {
     ) -> bool {
         let provider_id = provider_id.into();
         let diagnostics = self
-            .plugins
+            .modules
             .iter()
-            .find(|diagnostics| diagnostics.plugin_id() == provider_id)
+            .find(|diagnostics| diagnostics.module_id() == provider_id)
             .cloned()
             .unwrap_or_else(|| self.register(provider_id.clone()));
         diagnostics.record_lifecycle_error(provider_id, stage, message)
     }
 
-    /// Snapshot the health of all registered plugins.
+    /// Snapshot the health of all registered modules.
     pub fn snapshot(&self) -> Vec<(String, HealthStatus)> {
-        self.plugins
+        self.modules
             .iter()
-            .map(|d| (d.plugin_id().to_string(), d.health()))
+            .map(|d| (d.module_id().to_string(), d.health()))
             .collect()
     }
 }
@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_icon_diagnostics_are_deduplicated_by_plugin_and_semantic_name() {
+    fn missing_icon_diagnostics_are_deduplicated_by_module_and_semantic_name() {
         let diagnostics = Diagnostics::new("@mesh/quick-settings");
 
         assert!(

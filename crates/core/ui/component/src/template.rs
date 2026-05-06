@@ -2,7 +2,7 @@
 
 /// Source-level UI tag classification.
 ///
-/// Encodes the semantic intent of the tag as written by the plugin author.
+/// Encodes the semantic intent of the tag as written by the module author.
 /// Distinct from `UiTag` in `mesh-core-render`, which is the lowered
 /// runtime primitive set.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -4,7 +4,7 @@ Placeholder media backend target for a future real **MPRIS** D-Bus integration.
 It is not the Phase 5 MVP authoring reference.
 
 - **Type:** `backend`
-- **Implements:** interface `mesh.media` (base plugin `@mesh/media-interface`)
+- **Implements:** interface `mesh.media` (base module `@mesh/media-interface`)
 - **Backend name:** `MPRIS`
 - **Priority:** `100`
 - **Entrypoint:** `src/main.luau`

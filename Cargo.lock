@@ -1298,7 +1298,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-core-plugin"
+name = "mesh-core-module"
 version = "0.1.0"
 dependencies = [
  "mesh-core-capability",
@@ -1320,7 +1320,7 @@ dependencies = [
  "mesh-core-debug",
  "mesh-core-elements",
  "mesh-core-icon",
- "mesh-core-plugin",
+ "mesh-core-module",
  "mesh-core-theme",
  "mesh-core-wayland",
  "minifb",
@@ -1390,7 +1390,7 @@ dependencies = [
  "mesh-core-events",
  "mesh-core-icon",
  "mesh-core-locale",
- "mesh-core-plugin",
+ "mesh-core-module",
  "mesh-core-render",
  "mesh-core-runtime",
  "mesh-core-scripting",
@@ -1428,7 +1428,7 @@ version = "0.1.0"
 dependencies = [
  "mesh-core-config",
  "mesh-core-diagnostics",
- "mesh-core-plugin",
+ "mesh-core-module",
  "mesh-core-shell",
  "tokio",
  "tracing",
@@ -1442,7 +1442,7 @@ dependencies = [
  "mesh-core-component",
  "mesh-core-config",
  "mesh-core-elements",
- "mesh-core-plugin",
+ "mesh-core-module",
  "serde",
  "serde_json",
  "tokio",

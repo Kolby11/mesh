@@ -1,7 +1,7 @@
 # Rendering Architecture Refactoring: Summary
 
 ## Overview
-Refactored the rendering pipeline to separate concerns between frontend plugin rendering and core shell surface painting. The `mesh-core-render` now handles all frontend plugin rendering, while `mesh-core-shell` provides a thin `CorePainter` wrapper for integrating with shell surfaces.
+Refactored the rendering pipeline to separate concerns between frontend module rendering and core shell surface painting. The `mesh-core-render` now handles all frontend module rendering, while `mesh-core-shell` provides a thin `CorePainter` wrapper for integrating with shell surfaces.
 
 ## Changes Made
 
@@ -90,12 +90,12 @@ RenderEngine::present() → Wayland surface
 | Component            | Responsibility                               |
 | -------------------- | -------------------------------------------- |
 | `mesh-renderer`      | Low-level pixel operations, Wayland backends |
-| `mesh-core-render` | Frontend plugin rendering pipeline (new)     |
+| `mesh-core-render` | Frontend module rendering pipeline (new)     |
 | `mesh-core-shell`          | Shell surface orchestration, component state |
 
 ## Benefits
 
-1. **Modularity**: Plugin rendering logic is now cleanly separated into `mesh-core-render`
+1. **Modularity**: Module rendering logic is now cleanly separated into `mesh-core-render`
 2. **Reusability**: The `FrontendRenderEngine` can be used independently for rendering previews or other UIs
 3. **Testability**: Rendering logic can be tested without full shell integration
 4. **Maintenance**: Changes to rendering don't require changes to shell core logic

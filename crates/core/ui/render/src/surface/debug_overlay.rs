@@ -1,7 +1,7 @@
 /// Debug overlay renderer.
 ///
 /// Paints over an already-rendered PixelBuffer: a right-side info panel
-/// (plugins / interfaces / health) and optional coloured bounding boxes for
+/// (modules / interfaces / health) and optional coloured bounding boxes for
 /// every node in the widget tree.
 use super::buffer::PixelBuffer;
 use super::painter::{ClipRect, fill_rect_clipped, fill_rounded_rect_clipped};
@@ -191,7 +191,7 @@ impl DebugOverlay {
 
         // Tab bar
         let tab_w = pw / 3;
-        let tabs = [DebugTab::Plugins, DebugTab::Interfaces, DebugTab::Health];
+        let tabs = [DebugTab::Modules, DebugTab::Interfaces, DebugTab::Health];
         for (i, tab) in tabs.iter().enumerate() {
             let tx = panel_x + (i as i32) * tab_w;
             let tab_bg = if *tab == active_tab {
@@ -237,7 +237,7 @@ impl DebugOverlay {
 
         let content_y = HEADER_H + 4;
         match active_tab {
-            DebugTab::Plugins => self.paint_plugins(
+            DebugTab::Modules => self.paint_modules(
                 snapshot, buffer, panel_x, pw, content_y, bh, panel_clip, scale,
             ),
             DebugTab::Interfaces => self.paint_interfaces(
@@ -249,7 +249,7 @@ impl DebugOverlay {
         }
     }
 
-    fn paint_plugins(
+    fn paint_modules(
         &self,
         snapshot: &DebugSnapshot,
         buffer: &mut PixelBuffer,
@@ -261,7 +261,7 @@ impl DebugOverlay {
         scale: f32,
     ) {
         let mut y = start_y;
-        for entry in &snapshot.plugins {
+        for entry in &snapshot.modules {
             if y + ROW_H > max_y {
                 break;
             }
@@ -288,7 +288,7 @@ impl DebugOverlay {
                 row_clip,
             );
 
-            // Plugin id
+            // Module id
             let id_x = panel_x + PAD + 14;
             let max_label_w = (pw - PAD * 2 - 14 - 60) as f32 * scale;
             self.draw_text_clipped(
@@ -304,7 +304,7 @@ impl DebugOverlay {
             );
 
             // Type badge
-            let badge_text = format!("{}  {}", entry.plugin_type, entry.state);
+            let badge_text = format!("{}  {}", entry.module_type, entry.state);
             self.draw_text(
                 &badge_text,
                 FONT_SM,
@@ -360,9 +360,9 @@ impl DebugOverlay {
             }
         }
 
-        if snapshot.plugins.is_empty() {
+        if snapshot.modules.is_empty() {
             self.draw_text(
-                "No plugins loaded",
+                "No modules loaded",
                 FONT_MD,
                 400,
                 TEXT_DIM,
@@ -523,9 +523,9 @@ impl DebugOverlay {
         );
         y += 6;
 
-        // Plugin health
+        // Module health
         self.draw_text(
-            "Plugin Health",
+            "Module Health",
             FONT_SM,
             700,
             TEXT_DIM,
@@ -542,7 +542,7 @@ impl DebugOverlay {
             }
             let color = health_color(&entry.status);
             self.draw_text(
-                &entry.plugin_id,
+                &entry.module_id,
                 FONT_MD,
                 400,
                 TEXT_PRIMARY,

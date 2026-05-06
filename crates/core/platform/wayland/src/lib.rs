@@ -1,7 +1,7 @@
 /// Wayland surface management and compositor abstraction for MESH.
 ///
 /// This crate abstracts over compositor-specific protocol extensions so that
-/// plugins can create shell surfaces without knowing which compositor is running.
+/// modules can create shell surfaces without knowing which compositor is running.
 
 /// Screen edge for surface anchoring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

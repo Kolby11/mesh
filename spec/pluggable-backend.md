@@ -1,30 +1,30 @@
 # Pluggable Shell Backend
 
-This document specifies the pluggable backend architecture for MESH. The backend is the core runtime that hosts plugins and provides them with the services they need to build shell experiences.
+This document specifies the pluggable backend architecture for MESH. The backend is the core runtime that hosts modules and provides them with the services they need to build shell experiences.
 
-The backend does not define what the shell looks like or how it behaves. That is the job of plugins. The backend provides lifecycle management, security enforcement, rendering coordination, Wayland surface management, inter-plugin communication, and system service access.
+The backend does not define what the shell looks like or how it behaves. That is the job of modules. The backend provides lifecycle management, security enforcement, rendering coordination, Wayland surface management, inter-module communication, and system service access.
 
 ## Design principles
 
-1. The shell is defined by its plugins. The backend is infrastructure.
-2. Plugins are isolated by default and granted capabilities explicitly.
+1. The shell is defined by its modules. The backend is infrastructure.
+2. Modules are isolated by default and granted capabilities explicitly.
 3. Frontend scripts must explicitly import backend services (via `require("@mesh/<service>")`) before calling methods or subscribing.
-4. The default experience must be complete without third-party plugins.
-5. Plugin APIs are versioned independently from the shell release.
+4. The default experience must be complete without third-party modules.
+5. Module APIs are versioned independently from the shell release.
 6. Compositor differences are abstracted behind capability queries.
-7. Performance-critical paths stay in the core. Plugins describe intent; the core executes.
+7. Performance-critical paths stay in the core. Modules describe intent; the core executes.
 
-## Plugin model
+## Module model
 
-### What a plugin is
+### What a module is
 
-A plugin is a distributable unit that extends the shell. Every plugin has:
+A module is a distributable unit that extends the shell. Every module has:
 
 - a manifest declaring identity, capabilities, dependencies, and metadata
 - one or more entrypoints
 - optional assets (icons, translations, styles, schemas)
 
-### Plugin types
+### Module types
 
 | Type            | Purpose                                      | Example                                |
 | --------------- | -------------------------------------------- | -------------------------------------- |
@@ -33,18 +33,18 @@ A plugin is a distributable unit that extends the shell. Every plugin has:
 | `widget`        | Embeddable UI inside a surface               | Clock, battery indicator, weather card |
 | `service`       | State provider or action handler             | Battery, network, media, notifications |
 | `theme`         | Visual token set                             | Dark theme, accent color pack          |
-| `language-pack` | Translations for core or other plugins       | French language pack                   |
+| `language-pack` | Translations for core or other modules       | French language pack                   |
 | `icon-pack`     | Icon set                                     | Custom symbolic icon theme             |
 
-### Plugin identity
+### Module identity
 
-Every plugin has a namespaced identifier:
+Every module has a namespaced identifier:
 
 ```
 @scope/name
 ```
 
-`scope` is the author or organization. `name` is the plugin name. Together they form a globally unique ID within the MESH ecosystem.
+`scope` is the author or organization. `name` is the module name. Together they form a globally unique ID within the MESH ecosystem.
 
 Examples:
 
@@ -55,11 +55,11 @@ Examples:
 @alice/custom-theme
 ```
 
-Core plugins shipped with MESH use the `@mesh` scope.
+Core modules shipped with MESH use the `@mesh` scope.
 
-## Plugin manifest
+## Module manifest
 
-Every plugin must include a `mesh.toml` manifest at its package root.
+Every module must include a `mesh.toml` manifest at its package root.
 
 ```toml
 [package]
@@ -68,7 +68,7 @@ version = "1.2.0"
 type = "widget"
 api_version = "0.1"
 license = "MIT"
-description = "A short description of what this plugin does."
+description = "A short description of what this module does."
 authors = ["Alice <alice@example.com>"]
 repository = "https://github.com/alice/mesh-weather"
 
@@ -112,15 +112,15 @@ icons = "assets/icons/"
 
 ### Manifest rules
 
-- `api_version` declares which version of the plugin API this plugin targets. The core loads the appropriate compatibility shim if needed.
-- `compatibility.compositors` lists Wayland protocol extensions the plugin requires. If the current compositor does not support them, the plugin will not load. If omitted, the plugin is assumed compositor-agnostic.
-- `capabilities.required` must all be granted or the plugin will not load.
-- `capabilities.optional` may be denied. The plugin must handle their absence.
-- `dependencies` are resolved before the plugin loads. Circular dependencies are rejected.
+- `api_version` declares which version of the module API this module targets. The core loads the appropriate compatibility shim if needed.
+- `compatibility.compositors` lists Wayland protocol extensions the module requires. If the current compositor does not support them, the module will not load. If omitted, the module is assumed compositor-agnostic.
+- `capabilities.required` must all be granted or the module will not load.
+- `capabilities.optional` may be denied. The module must handle their absence.
+- `dependencies` are resolved before the module loads. Circular dependencies are rejected.
 
-## Plugin lifecycle
+## Module lifecycle
 
-A plugin moves through these states:
+A module moves through these states:
 
 ```
 Discovered -> Resolved -> Loaded -> Initialized -> Running -> Suspended -> Unloaded
@@ -131,84 +131,84 @@ Discovered -> Resolved -> Loaded -> Initialized -> Running -> Suspended -> Unloa
 
 ### Discovered
 
-The core scans plugin directories and reads manifests. No code is executed. Invalid manifests are logged and skipped.
+The core scans module directories and reads manifests. No code is executed. Invalid manifests are logged and skipped.
 
 ### Resolved
 
-The core resolves the dependency graph across all discovered plugins. Plugins with unsatisfiable dependencies are rejected with a diagnostic message. Circular dependencies are rejected.
+The core resolves the dependency graph across all discovered modules. Modules with unsatisfiable dependencies are rejected with a diagnostic message. Circular dependencies are rejected.
 
 Resolution order:
 
-1. Core plugins (always loaded first)
-2. Service plugins (provide APIs others depend on)
-3. Surface plugins
-4. Widget plugins
+1. Core modules (always loaded first)
+2. Service modules (provide APIs others depend on)
+3. Surface modules
+4. Widget modules
 5. Theme, language, and icon packs (loaded in parallel, no ordering requirement)
 
 ### Loaded
 
-The plugin's code and assets are loaded into memory. For Luau plugins, the script is parsed and type-checked. For compiled plugins, the shared library or WASM module is loaded.
+The module's code and assets are loaded into memory. For Luau modules, the script is parsed and type-checked. For compiled modules, the shared library or WASM module is loaded.
 
-No plugin code is executed yet.
+No module code is executed yet.
 
 ### Initialized
 
-The core calls the plugin's `init` entrypoint. The plugin receives:
+The core calls the module's `init` entrypoint. The module receives:
 
 - its scoped configuration
 - handles to its granted capabilities
-- a reference to the plugin context (logging, diagnostics, state store)
+- a reference to the module context (logging, diagnostics, state store)
 
-The plugin performs setup: registering event handlers, subscribing to services, declaring its UI tree. If `init` fails, the plugin moves to `Errored`.
+The module performs setup: registering event handlers, subscribing to services, declaring its UI tree. If `init` fails, the module moves to `Errored`.
 
 ### Running
 
-The plugin is active. It receives events, updates state, and submits UI updates through the core's rendering pipeline.
+The module is active. It receives events, updates state, and submits UI updates through the core's rendering pipeline.
 
 ### Suspended
 
-The plugin is temporarily inactive. This happens when:
+The module is temporarily inactive. This happens when:
 
-- the shell surface containing the plugin is not visible
-- the user explicitly disables the plugin
+- the shell surface containing the module is not visible
+- the user explicitly disables the module
 - the system enters a low-power state
 
-Suspended plugins receive no events and submit no UI. Their state is preserved in memory. Resuming returns them to `Running`.
+Suspended modules receive no events and submit no UI. Their state is preserved in memory. Resuming returns them to `Running`.
 
 ### Unloaded
 
-The plugin is removed from memory. This happens on:
+The module is removed from memory. This happens on:
 
 - shell shutdown
-- plugin uninstall
-- plugin update (unload old, load new)
+- module uninstall
+- module update (unload old, load new)
 
-The core calls `shutdown` before unloading. The plugin should persist any state it needs through the scoped state store.
+The core calls `shutdown` before unloading. The module should persist any state it needs through the scoped state store.
 
 ### Errored
 
-The plugin encountered an unrecoverable fault. The core:
+The module encountered an unrecoverable fault. The core:
 
 1. Logs the error with full context
-2. Removes the plugin's UI from the render tree
-3. Notifies dependent plugins
-4. Shows a placeholder in the UI if the plugin was visible (not a blank gap)
-5. Optionally offers the user a "restart plugin" action
+2. Removes the module's UI from the render tree
+3. Notifies dependent modules
+4. Shows a placeholder in the UI if the module was visible (not a blank gap)
+5. Optionally offers the user a "restart module" action
 
-A plugin that errors repeatedly (3 times within 60 seconds) is disabled until the next shell restart or manual re-enable.
+A module that errors repeatedly (3 times within 60 seconds) is disabled until the next shell restart or manual re-enable.
 
-## Plugin execution model
+## Module execution model
 
 ### Execution tiers
 
-Plugins run in one of three execution tiers. The tier determines isolation level, performance characteristics, and trust requirements.
+Modules run in one of three execution tiers. The tier determines isolation level, performance characteristics, and trust requirements.
 
 #### Tier 1 — In-process (Rust)
 
 - Compiled Rust code loaded as a dynamic library
 - Full performance, no serialization overhead
 - Can crash the shell if it panics (mitigated by catch_unwind at boundaries)
-- Reserved for core plugins and explicitly trusted packages
+- Reserved for core modules and explicitly trusted packages
 - Must pass review and signing by the MESH project
 
 #### Tier 2 — Sandboxed interpreter (Luau)
@@ -216,7 +216,7 @@ Plugins run in one of three execution tiers. The tier determines isolation level
 - Luau scripts running in the embedded interpreter
 - Sandboxed: no filesystem, no network, no process spawning by default
 - Access to system resources only through granted capability handles
-- This is the default and recommended tier for community plugins
+- This is the default and recommended tier for community modules
 - Hot-reloadable during development
 
 #### Tier 3 — Sandboxed compiled (WASM)
@@ -224,23 +224,23 @@ Plugins run in one of three execution tiers. The tier determines isolation level
 - WebAssembly modules running in a WASM runtime (e.g. wasmtime)
 - Near-native performance with memory isolation
 - Communicates with the core through a defined ABI
-- Suitable for performance-sensitive community plugins
-- More complex to build than Luau plugins
+- Suitable for performance-sensitive community modules
+- More complex to build than Luau modules
 
 ### Frame budgets
 
-Every plugin that produces UI is assigned a frame budget. The budget is the maximum time the plugin may spend computing its UI update per frame.
+Every module that produces UI is assigned a frame budget. The budget is the maximum time the module may spend computing its UI update per frame.
 
-- Default budget: 4ms per plugin per frame (targeting 60fps, ~16ms total frame time)
-- If a plugin exceeds its budget, the core skips that plugin's update and reuses the previous frame
+- Default budget: 4ms per module per frame (targeting 60fps, ~16ms total frame time)
+- If a module exceeds its budget, the core skips that module's update and reuses the previous frame
 - Repeated budget overruns are logged and surfaced to the user
-- The user can adjust budgets per plugin in shell settings
+- The user can adjust budgets per module in shell settings
 
 ### Thread model
 
 - The core runs on the main thread and owns the Wayland event loop
-- Tier 1 plugins run on the main thread (must not block)
-- Tier 2 and 3 plugins run on dedicated worker threads, one per plugin
+- Tier 1 modules run on the main thread (must not block)
+- Tier 2 and 3 modules run on dedicated worker threads, one per module
 - UI updates from worker threads are submitted to the core via a lock-free channel
 - The core applies UI updates on the main thread during the next frame
 
@@ -248,9 +248,9 @@ Every plugin that produces UI is assigned a frame budget. The budget is the maxi
 
 ### How capabilities work
 
-A capability is a named permission that grants access to a specific host API or system resource. Plugins declare required and optional capabilities in their manifest. The core grants or denies them at load time.
+A capability is a named permission that grants access to a specific host API or system resource. Modules declare required and optional capabilities in their manifest. The core grants or denies them at load time.
 
-A capability is represented as a handle. Plugins cannot forge handles. The core mints handles during initialization and passes them to the plugin. If a plugin does not have a handle, it cannot call the associated API.
+A capability is represented as a handle. Modules cannot forge handles. The core mints handles during initialization and passes them to the module. If a module does not have a handle, it cannot call the associated API.
 
 ### Capability categories
 
@@ -314,21 +314,21 @@ A capability is represented as a handle. Plugins cannot forge handles. The core 
 
 Capabilities are grouped into three privilege levels:
 
-- **Standard** — safe for most plugins. Read-only access to services, theme, locale. Examples: `theme.read`, `service.battery.read`, `locale.read`.
+- **Standard** — safe for most modules. Read-only access to services, theme, locale. Examples: `theme.read`, `service.battery.read`, `locale.read`.
 - **Elevated** — grants meaningful system interaction. Write access, notifications, launching apps. Examples: `service.network.control`, `exec.launch-app`, `net.http`. Requires user confirmation at install.
 - **High** — grants powerful or sensitive access. Screenshots, arbitrary commands, D-Bus system bus, raw sockets. Examples: `exec.command`, `shell.screenshot`, `dbus.system`. Requires explicit user opt-in with a warning.
 
 ### Capability enforcement
 
-- Luau plugins: the interpreter only exposes API functions for granted capabilities. Ungrantable APIs do not exist in the plugin's environment.
-- WASM plugins: host function imports are selectively linked based on granted capabilities.
-- Rust plugins: capability handles are passed at init. Calling an API without a handle is a compile-time error (the API requires the handle as a parameter).
+- Luau modules: the interpreter only exposes API functions for granted capabilities. Ungrantable APIs do not exist in the module's environment.
+- WASM modules: host function imports are selectively linked based on granted capabilities.
+- Rust modules: capability handles are passed at init. Calling an API without a handle is a compile-time error (the API requires the handle as a parameter).
 
-## Inter-plugin communication
+## Inter-module communication
 
 ### Event bus
 
-The core provides a typed event bus. Plugins can:
+The core provides a typed event bus. Modules can:
 
 - **Publish** events to named channels
 - **Subscribe** to named channels
@@ -340,22 +340,22 @@ Channel: "service.battery.changed"
 Payload: { level: number, charging: boolean, time_to_empty: number? }
 ```
 
-Plugins can only publish to channels they own (matching their package scope) or to shared channels they have capability for. Any plugin can subscribe to any public channel.
+Modules can only publish to channels they own (matching their package scope) or to shared channels they have capability for. Any module can subscribe to any public channel.
 
 ### Service registry
 
-Service plugins register themselves with the core under a typed interface. Consumer plugins look up services by interface ID, not by plugin ID. This allows swapping implementations.
+Service modules register themselves with the core under a typed interface. Consumer modules look up services by interface ID, not by module ID. This allows swapping implementations.
 
 ```
 Interface: "mesh.service.network"
 Provider: "@mesh/networkmanager-service" (or "@community/iwd-service", etc.)
 ```
 
-If multiple plugins provide the same interface, the user chooses which one is active. Only one provider per interface is active at a time.
+If multiple modules provide the same interface, the user chooses which one is active. Only one provider per interface is active at a time.
 
 ### Direct messaging
 
-Plugins can send direct messages to other plugins by ID if both plugins declare a messaging contract. This is for tightly coupled plugin pairs (e.g., a widget and its companion service).
+Modules can send direct messages to other modules by ID if both modules declare a messaging contract. This is for tightly coupled module pairs (e.g., a widget and its companion service).
 
 Direct messaging requires the `ipc.direct` capability.
 
@@ -373,7 +373,7 @@ MESH enforces a strict separation between service backends and UI frontends. The
 └──────────┬──────────────────────────┬────────────┘
            │                          │
   ┌────────▼─────────┐     ┌─────────▼────────┐
-  │  Backend Plugins  │     │  Backend Plugins  │
+  │  Backend Modules  │     │  Backend Modules  │
   │  (implementations)│     │  (implementations)│
   │                   │     │                   │
   │  @mesh/pipewire   │     │  @mesh/pulseaudio │
@@ -388,7 +388,7 @@ MESH enforces a strict separation between service backends and UI frontends. The
            └────────────┬────────────┘
                         │
            ┌────────────▼────────────┐
-           │   Frontend Plugins      │
+           │   Frontend Modules      │
            │  (surfaces + widgets)   │
            │                         │
            │  Uses trait API only.   │
@@ -409,9 +409,9 @@ Each system service is defined as a Rust trait in the `mesh-core-service` crate:
 
 Traits use async methods and return `Result` types. Each trait also defines an event enum so backends can push changes to subscribers.
 
-### Backend plugins
+### Backend modules
 
-A backend plugin has `type = "backend"` in its manifest and includes a `[service]` section:
+A backend module has `type = "backend"` in its manifest and includes a `[service]` section:
 
 ```toml
 [package]
@@ -439,9 +439,9 @@ audio = "@mesh/pulseaudio-audio"    # override: use PulseAudio instead of PipeWi
 network = "@mesh/networkmanager"    # explicit selection
 ```
 
-### Frontend plugins
+### Frontend modules
 
-Frontend plugins (surfaces and widgets) look up services by trait, never by backend:
+Frontend modules (surfaces and widgets) look up services by trait, never by backend:
 
 ```lua
 -- A volume widget does not know or care if PipeWire or PulseAudio is running
@@ -465,7 +465,7 @@ If no backend is registered for a service, the frontend receives `nil` and shoul
 
 When no explicit backend is configured, the core:
 
-1. Discovers all backend plugins for each service type
+1. Discovers all backend modules for each service type
 2. Checks system compatibility (e.g. is PipeWire running? is NetworkManager on D-Bus?)
 3. Selects the highest-priority compatible backend
 4. Falls back to the next candidate if the first fails to initialize
@@ -487,7 +487,7 @@ This enables switching audio systems, network managers, or power daemons without
 
 ### Problem
 
-Wayland compositors implement different protocol extensions. MESH must work on multiple compositors without requiring every plugin to handle compositor differences.
+Wayland compositors implement different protocol extensions. MESH must work on multiple compositors without requiring every module to handle compositor differences.
 
 ### Abstraction layer
 
@@ -501,7 +501,7 @@ compositor.name() -> string  // "sway", "hyprland", "cosmic-comp", etc.
 compositor.version() -> string
 ```
 
-Plugins declare compositor requirements in their manifest. The core checks compatibility at load time.
+Modules declare compositor requirements in their manifest. The core checks compatibility at load time.
 
 ### Surface abstraction
 
@@ -524,21 +524,21 @@ This maps to `wlr-layer-shell` where available and degrades to `xdg-toplevel` wi
 
 If a compositor does not support a required protocol:
 
-- Plugins that listed it in `compatibility.compositors` do not load. The user sees a message explaining why.
-- Plugins that did not list it load normally but may find some `CompositorCapabilities` queries return false. They adapt at runtime.
+- Modules that listed it in `compatibility.compositors` do not load. The user sees a message explaining why.
+- Modules that did not list it load normally but may find some `CompositorCapabilities` queries return false. They adapt at runtime.
 
-## Plugin API surface
+## Module API surface
 
 ### Core context
 
-Every plugin receives a `PluginContext` at init:
+Every module receives a `ModuleContext` at init:
 
 ```
-PluginContext
-  .id          -> string         // this plugin's ID
-  .version     -> string         // this plugin's version
+ModuleContext
+  .id          -> string         // this module's ID
+  .version     -> string         // this module's version
   .log         -> Logger         // scoped logger
-  .config      -> Config         // this plugin's settings (read-only unless it owns them)
+  .config      -> Config         // this module's settings (read-only unless it owns them)
   .state       -> StateStore     // scoped persistent key-value store
   .events      -> EventBus       // publish/subscribe
   .services    -> ServiceRegistry // look up service interfaces
@@ -547,7 +547,7 @@ PluginContext
 
 ### UI API
 
-Plugins that produce UI use a declarative component API:
+Modules that produce UI use a declarative component API:
 
 ```
 UI
@@ -557,7 +557,7 @@ UI
   .animate(property, from, to, duration, easing)
 ```
 
-The core owns rendering. Plugins submit component trees. The core diffs, layouts, and paints.
+The core owns rendering. Modules submit component trees. The core diffs, layouts, and paints.
 
 ### Theme API
 
@@ -587,10 +587,10 @@ Config
   .get(key) -> value
   .get_all() -> map
   .on_change(key, callback)     // called when user changes a setting
-  .schema() -> Schema           // the plugin's declared schema
+  .schema() -> Schema           // the module's declared schema
 ```
 
-Plugins do not write their own config. The core writes config based on user input validated against the plugin's schema.
+Modules do not write their own config. The core writes config based on user input validated against the module's schema.
 
 ### State store API
 
@@ -602,7 +602,7 @@ StateStore
   .clear()
 ```
 
-Scoped per plugin. Persisted to disk by the core. Plugins cannot access other plugins' state stores.
+Scoped per module. Persisted to disk by the core. Modules cannot access other modules' state stores.
 
 ## Security model
 
@@ -610,13 +610,13 @@ Scoped per plugin. Persisted to disk by the core. Plugins cannot access other pl
 
 | Threat                 | Vector                                                 | Mitigation                                                                                                    |
 | ---------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| Malicious plugin code  | Compromised or intentionally harmful plugin            | Capability sandbox, execution tier isolation                                                                  |
-| Supply chain attack    | Trusted plugin updated with malicious code             | Package signing, update diffing, reproducible builds                                                          |
-| UI spoofing            | Plugin overlays fake auth dialog                       | Core owns trusted UI chrome (password prompts, capability dialogs). Plugins cannot draw over trusted surfaces |
-| Data exfiltration      | Plugin reads sensitive data and sends it out           | `net.http` is a capability, not a default. Most plugins should never need it                                  |
-| Resource abuse         | Plugin mines crypto or leaks memory                    | CPU/memory budgets per plugin. Core kills plugins exceeding limits                                            |
-| Keystroke interception | Plugin captures input meant for other contexts         | `shell.input.keyboard` is an elevated capability. Input routing is managed by the core                        |
-| Privilege escalation   | Plugin escapes sandbox                                 | Luau has no FFI. WASM is memory-isolated. Rust plugins are review-gated                                       |
+| Malicious module code  | Compromised or intentionally harmful module            | Capability sandbox, execution tier isolation                                                                  |
+| Supply chain attack    | Trusted module updated with malicious code             | Package signing, update diffing, reproducible builds                                                          |
+| UI spoofing            | Module overlays fake auth dialog                       | Core owns trusted UI chrome (password prompts, capability dialogs). Modules cannot draw over trusted surfaces |
+| Data exfiltration      | Module reads sensitive data and sends it out           | `net.http` is a capability, not a default. Most modules should never need it                                  |
+| Resource abuse         | Module mines crypto or leaks memory                    | CPU/memory budgets per module. Core kills modules exceeding limits                                            |
+| Keystroke interception | Module captures input meant for other contexts         | `shell.input.keyboard` is an elevated capability. Input routing is managed by the core                        |
+| Privilege escalation   | Module escapes sandbox                                 | Luau has no FFI. WASM is memory-isolated. Rust modules are review-gated                                       |
 | Dependency confusion   | Attacker publishes `@mesh/panel` on community registry | `@mesh` scope is reserved. Scopes are verified at publish time                                                |
 
 ### Trust tiers
@@ -630,20 +630,20 @@ Scoped per plugin. Persisted to disk by the core. Plugins cannot access other pl
 
 ### Package signing
 
-- Core and verified plugins are signed with the MESH project key
-- Community plugins are signed with the author's key
+- Core and verified modules are signed with the MESH project key
+- Community modules are signed with the author's key
 - The core verifies signatures at install and at load
-- Unsigned plugins only load if the user explicitly enables unsigned loading in settings
+- Unsigned modules only load if the user explicitly enables unsigned loading in settings
 
 ### Update policy
 
-- Plugin updates are fetched from the registry
+- Module updates are fetched from the registry
 - Before applying an update, the core shows a diff of changed capabilities
 - If an update adds new elevated or high-privilege capabilities, the user must re-approve
-- Users can pin plugins to specific versions
-- Automatic updates are opt-in per plugin
+- Users can pin modules to specific versions
+- Automatic updates are opt-in per module
 
-## Plugin distribution
+## Module distribution
 
 ### Registry
 
@@ -662,28 +662,28 @@ mesh-shell install @community/weather-widget
 mesh-shell install @community/weather-widget@1.2.0   # pinned version
 mesh-shell uninstall @community/weather-widget
 mesh-shell update @community/weather-widget
-mesh-shell list                                       # installed plugins
+mesh-shell list                                       # installed modules
 mesh-shell search weather                             # search registry
 ```
 
 ### Local development
 
 ```
-mesh-shell dev ./my-plugin                            # load from local path with hot reload
-mesh-shell dev ./my-plugin --tier local               # full trust, no sandbox
-mesh-shell package ./my-plugin                        # build distributable archive
-mesh-shell publish ./my-plugin                        # publish to registry
+mesh-shell dev ./my-module                            # load from local path with hot reload
+mesh-shell dev ./my-module --tier local               # full trust, no sandbox
+mesh-shell package ./my-module                        # build distributable archive
+mesh-shell publish ./my-module                        # publish to registry
 ```
 
-### Plugin directories
+### Module directories
 
 ```
-~/.local/share/mesh/plugins/          # user-installed plugins
-/usr/share/mesh/plugins/              # system-installed plugins (core, distro)
-~/.local/share/mesh/dev-plugins/      # plugins loaded via `mesh-shell dev`
+~/.local/share/mesh/modules/          # user-installed modules
+/usr/share/mesh/modules/              # system-installed modules (core, distro)
+~/.local/share/mesh/dev-modules/      # modules loaded via `mesh-shell dev`
 ```
 
-Core plugins at the system path take precedence. User plugins override system plugins with the same ID.
+Core modules at the system path take precedence. User modules override system modules with the same ID.
 
 ## Configuration and settings
 
@@ -695,16 +695,16 @@ The shell itself is configured in `~/.config/mesh/config.toml`:
 [shell]
 default_surface = "@mesh/panel"
 
-[plugins]
+[modules]
 allow_unsigned = false
 auto_update = false
 
-[plugins."@mesh/panel"]
+[modules."@mesh/panel"]
 enabled = true
 position = "top"
 height = 32
 
-[plugins."@community/weather-widget"]
+[modules."@community/weather-widget"]
 enabled = true
 location = "auto"
 units = "metric"
@@ -712,7 +712,7 @@ units = "metric"
 
 ### Settings schema validation
 
-Plugin settings are validated against the plugin's declared schema. The core rejects invalid values and provides defaults for missing keys.
+Module settings are validated against the module's declared schema. The core rejects invalid values and provides defaults for missing keys.
 
 ```toml
 # settings.schema.toml for a weather widget
@@ -737,21 +737,21 @@ description = "How often to refresh weather data, in seconds."
 
 ### Generated settings UI
 
-The core can generate a settings UI for any plugin based on its schema. Plugin authors do not need to build their own settings screens unless they want a custom layout (via the optional `settings_ui` entrypoint).
+The core can generate a settings UI for any module based on its schema. Module authors do not need to build their own settings screens unless they want a custom layout (via the optional `settings_ui` entrypoint).
 
 ## Error handling and diagnostics
 
-### Plugin errors
+### Module errors
 
-- Errors within a plugin do not crash the shell
+- Errors within a module do not crash the shell
 - The core catches panics (Rust), runtime errors (Luau), and traps (WASM)
-- Failed plugins show a placeholder in the UI with an error indicator
+- Failed modules show a placeholder in the UI with an error indicator
 - The user can inspect errors through the shell diagnostics panel
 - The error log is written to `~/.local/share/mesh/logs/`
 
 ### Health reporting
 
-Plugins can report health status through the `Diagnostics` API:
+Modules can report health status through the `Diagnostics` API:
 
 ```
 diagnostics.healthy()
@@ -763,7 +763,7 @@ The core aggregates health status and surfaces it in a diagnostics panel.
 
 ### Performance monitoring
 
-The core tracks per-plugin:
+The core tracks per-module:
 
 - Frame budget usage (average and peak)
 - Memory usage
@@ -774,33 +774,33 @@ This data is available through the diagnostics panel and the `mesh-shell status`
 
 ## Hot reload
 
-During development, plugins loaded via `mesh-shell dev` support hot reload:
+During development, modules loaded via `mesh-shell dev` support hot reload:
 
-- The core watches the plugin directory for file changes
-- On change, the plugin is unloaded and reloaded
-- Plugin state is preserved through the state store (state survives reload)
+- The core watches the module directory for file changes
+- On change, the module is unloaded and reloaded
+- Module state is preserved through the state store (state survives reload)
 - UI state (scroll position, input focus) is best-effort preserved
 
-Hot reload is not available for Tier 1 (Rust) plugins. They require a full rebuild and shell restart.
+Hot reload is not available for Tier 1 (Rust) modules. They require a full rebuild and shell restart.
 
 ## Versioning and compatibility
 
 ### API versioning
 
-The plugin API is versioned with semver. The current version is declared in the core and in each plugin's manifest.
+The module API is versioned with semver. The current version is declared in the core and in each module's manifest.
 
-- **Major** version bump: breaking changes to the plugin API. Old plugins will not load without updating.
-- **Minor** version bump: new APIs added. Old plugins continue to work.
+- **Major** version bump: breaking changes to the module API. Old modules will not load without updating.
+- **Minor** version bump: new APIs added. Old modules continue to work.
 - **Patch** version bump: bug fixes only.
 
 ### Compatibility strategy
 
-The core supports loading plugins targeting the current major version. When a new major version ships:
+The core supports loading modules targeting the current major version. When a new major version ships:
 
-- Plugins targeting the previous major version get a 6-month deprecation window
+- Modules targeting the previous major version get a 6-month deprecation window
 - The core includes a compatibility shim for the previous major version during this period
-- After deprecation, old plugins must update or they will not load
+- After deprecation, old modules must update or they will not load
 
 ### Minimum viable API
 
-The initial API version (`0.x`) is explicitly unstable. Breaking changes can happen between minor versions during the `0.x` phase. The project will aim to stabilize at `1.0` once the core plugin types (surface, widget, service, theme, locale) have proven stable in real use.
+The initial API version (`0.x`) is explicitly unstable. Breaking changes can happen between minor versions during the `0.x` phase. The project will aim to stabilize at `1.0` once the core module types (surface, widget, service, theme, locale) have proven stable in real use.

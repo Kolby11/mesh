@@ -14,7 +14,7 @@ path = "src/main.rs"
 mesh-core-component = { workspace = true }
 mesh-core-config    = { workspace = true }
 mesh-core-elements  = { workspace = true }
-mesh-core-plugin    = { workspace = true }
+mesh-core-module    = { workspace = true }
 
 tower-lsp  = "0.20"
 tokio      = { workspace = true }

@@ -2,7 +2,7 @@ Span takes defaultly full width of the parent component, the tags should initial
 
 Icon rendering using icon packs
 
-Settings plugin to manager plugins and core settings like theme and i18n
+Settings module to manager modules and core settings like theme and i18n
 
 Popups, also with custom content rendering if users desire
 
@@ -14,6 +14,6 @@ make sure positioning system works (relative, absolute, fixed)
 
 Variable state management and and binding for components
 
-Clean up the backend plugins and interfaces, right now interfaces are separate from the backend, we should check our options and consider moving the interface into the plugin itself
+Clean up the backend modules and interfaces, right now interfaces are separate from the backend, we should check our options and consider moving the interface into the module itself
 
 Remove the icon assts from the core/ui. The icons should be installed into a folder outside the core

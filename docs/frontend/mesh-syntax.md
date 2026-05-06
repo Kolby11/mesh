@@ -83,8 +83,8 @@ import audio from "mesh.audio@>=1.0"
 ```
 
 Local component imports resolve relative to the importing file, `@src/...`
-resolves from the plugin's `src/` directory, plugin component imports resolve
-through declared plugin dependencies, and `mesh.*` imports expose the same
+resolves from the module's `src/` directory, module component imports resolve
+through declared module dependencies, and `mesh.*` imports expose the same
 interface proxy returned by `require("@mesh/<service>")`.
 
 Imported components are standalone. Inside an imported component template,
@@ -255,7 +255,7 @@ end
 
 ### Receiving service data
 
-Service data is produced by backend plugins, routed by the core, and exposed
+Service data is produced by backend modules, routed by the core, and exposed
 to frontend scripts as raw payload. Frontends should derive display state
 locally in their own script code.
 

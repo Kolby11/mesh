@@ -6,7 +6,7 @@
 /// A point-in-time snapshot of shell state for the debug overlay.
 #[derive(Debug, Clone, Default)]
 pub struct DebugSnapshot {
-    pub plugins: Vec<PluginEntry>,
+    pub modules: Vec<ModuleEntry>,
     pub interfaces: Vec<InterfaceEntry>,
     pub backend_runtimes: Vec<BackendRuntimeEntry>,
     pub health: Vec<HealthEntry>,
@@ -14,9 +14,9 @@ pub struct DebugSnapshot {
 }
 
 #[derive(Debug, Clone)]
-pub struct PluginEntry {
+pub struct ModuleEntry {
     pub id: String,
-    pub plugin_type: String,
+    pub module_type: String,
     pub state: String,
     pub error_count: u32,
     pub last_error: Option<String>,
@@ -47,7 +47,7 @@ pub struct BackendRuntimeEntry {
 
 #[derive(Debug, Clone)]
 pub struct HealthEntry {
-    pub plugin_id: String,
+    pub module_id: String,
     pub status: String,
 }
 
@@ -66,9 +66,9 @@ impl DebugOverlayState {
 
     pub fn cycle_tab(&mut self) {
         self.active_tab = match self.active_tab {
-            DebugTab::Plugins => DebugTab::Interfaces,
+            DebugTab::Modules => DebugTab::Interfaces,
             DebugTab::Interfaces => DebugTab::Health,
-            DebugTab::Health => DebugTab::Plugins,
+            DebugTab::Health => DebugTab::Modules,
         };
     }
 }
@@ -76,7 +76,7 @@ impl DebugOverlayState {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum DebugTab {
     #[default]
-    Plugins,
+    Modules,
     Interfaces,
     Health,
 }
@@ -84,7 +84,7 @@ pub enum DebugTab {
 impl DebugTab {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Plugins => "Plugins",
+            Self::Modules => "Modules",
             Self::Interfaces => "Interfaces",
             Self::Health => "Health",
         }

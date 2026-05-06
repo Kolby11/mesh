@@ -1,4 +1,4 @@
-use mesh_core_plugin::Manifest;
+use mesh_core_module::Manifest;
 use mesh_core_theme::{ThemeEngine, default_theme, load_theme_from_path, theme_path_for_id};
 use mesh_core_wayland::{Edge, KeyboardMode, Layer};
 use std::path::Path;
@@ -29,7 +29,7 @@ pub(super) struct SurfaceLayoutSettings {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct FrontendPluginSettingsState {
+pub(super) struct FrontendModuleSettingsState {
     pub(super) raw: serde_json::Value,
     pub(super) layout: SurfaceLayoutSettings,
 }
@@ -165,10 +165,10 @@ pub(super) fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayout
     layout
 }
 
-pub(super) fn load_frontend_plugin_settings(
+pub(super) fn load_frontend_module_settings(
     settings_path: &Path,
     manifest: &Manifest,
-) -> FrontendPluginSettingsState {
+) -> FrontendModuleSettingsState {
     let raw = match std::fs::read_to_string(settings_path) {
         Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
             Ok(value) => value,
@@ -273,7 +273,7 @@ pub(super) fn load_frontend_plugin_settings(
         layout.margin_left = v;
     }
 
-    FrontendPluginSettingsState { raw, layout }
+    FrontendModuleSettingsState { raw, layout }
 }
 
 pub(super) fn parse_surface_edge(value: &str) -> Option<Edge> {

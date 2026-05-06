@@ -1,25 +1,25 @@
-# Plugin Health
+# Module Health
 
-Every plugin has a **health state** — a first-class runtime primitive the
+Every module has a **health state** — a first-class runtime primitive the
 core tracks and frontends can subscribe to. Health is how a missing system
 dependency, a daemon that stopped, or a degraded capability becomes
 something the user sees as "Audio unavailable: install `playerctl`" rather
 than a silent broken widget.
 
 Health and installation share one source of truth: the **same dependency
-declaration** in `plugin.json` drives the installer's pre-flight check
-*and* the plugin's runtime self-check. There is no duplication between
-"what the installer looks for" and "what the plugin verifies on start".
+declaration** in `package.json` drives the installer's pre-flight check
+*and* the module's runtime self-check. There is no duplication between
+"what the installer looks for" and "what the module verifies on start".
 
 ## States
 
-A plugin reports one of three states at a time:
+A module reports one of three states at a time:
 
 | State         | Meaning                                                                                                                                                                        |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `healthy`     | Running normally. All required deps present, all declared features available.                                                                                                  |
-| `degraded`    | Running, but one or more optional features are unavailable. The plugin works; some capability is missing.                                                                      |
-| `unavailable` | Cannot run. A required dependency is missing, the daemon is down, or an unrecoverable error occurred. The plugin is loaded but does not register its interface implementation. |
+| `degraded`    | Running, but one or more optional features are unavailable. The module works; some capability is missing.                                                                      |
+| `unavailable` | Cannot run. A required dependency is missing, the daemon is down, or an unrecoverable error occurred. The module is loaded but does not register its interface implementation. |
 
 State transitions emit events (see [Health channel](#health-channel)) so
 subscribers can update UI in real time.
@@ -60,35 +60,35 @@ Fields:
 | `fix_suggestion`    | string   | What the user can do, in plain language                                                              |
 | `missing`           | array    | Structured list of missing deps (for tooling and package-manager integration)                        |
 | `degraded_features` | array    | Names of optional capabilities that are not available (only on `degraded`)                           |
-| `since`             | ISO 8601 | When the plugin last entered this state                                                              |
+| `since`             | ISO 8601 | When the module last entered this state                                                              |
 | `recoverable`       | bool     | Whether periodic re-checks may succeed (e.g. user installs `playerctl` without restarting the shell) |
 
-`reason` and `fix_suggestion` come from the plugin's dependency
+`reason` and `fix_suggestion` come from the module's dependency
 declaration — the `reason` field on each `native_libs` / `binaries` /
-`fonts` entry, plus the per-distro `packages` map. Plugin authors write
-this once, in `plugin.json`; the installer and the runtime both use it.
+`fonts` entry, plus the per-distro `packages` map. Module authors write
+this once, in `package.json`; the installer and the runtime both use it.
 
 ## How health is set
 
 1. **Install-time probe.** The installer runs the dep check, lands the
-   plugin on disk, and writes the result into the plugin's initial health
+   module on disk, and writes the result into the module's initial health
    record. Missing hard deps → `unavailable`. Missing optional deps →
    `degraded`.
-2. **Load-time probe.** On every shell start, the plugin re-runs the same
+2. **Load-time probe.** On every shell start, the module re-runs the same
    checks. Results are fresh (the user may have fixed or broken things
    since install).
-3. **Runtime reports.** The plugin can update its own state during
-   execution through the `PluginContext.diagnostics` API:
+3. **Runtime reports.** The module can update its own state during
+   execution through the `ModuleContext.diagnostics` API:
    ```luau
    mesh.diagnostics.degraded("Per-app volume not supported on this sound server")
    mesh.diagnostics.unavailable("PipeWire daemon is not running")
    mesh.diagnostics.healthy()
    ```
 4. **Periodic re-check.** The core re-runs probes for `recoverable`
-   plugins at a low cadence (default every 30s for `unavailable`, 5m for
+   modules at a low cadence (default every 30s for `unavailable`, 5m for
    `degraded`). A user who installs `playerctl` while the shell is
    running should see the media widget come alive without restarting.
-5. **Dependency health propagation.** A plugin's reported state is
+5. **Dependency health propagation.** A module's reported state is
    **combined** with the health of anything it depends on. A frontend
    consuming `mesh.audio` from a backend that's `unavailable` sees the
    interface as `unavailable` — it does not need to code for both cases
@@ -99,10 +99,10 @@ this once, in `plugin.json`; the installer and the runtime both use it.
 Health flows on the same typed-channel bus as everything else. The core
 exposes:
 
-- `plugin.health/<plugin-id>` — state changes for a specific plugin
+- `module.health/<module-id>` — state changes for a specific module
 - `interface.health/<interface-name>` — state changes for an interface
   (computed from the active provider's health)
-- `plugin.health` — a fan-out channel that fires for every state change
+- `module.health` — a fan-out channel that fires for every state change
   across the shell, used by the diagnostics panel
 
 Subscription works like any other channel:
@@ -145,7 +145,7 @@ denied, version range unsatisfiable).
 ### Via ordinary frontend state
 
 For the very common "show a default state when the backing service is
-unavailable" pattern, keep the rendering logic in the frontend plugin and use
+unavailable" pattern, keep the rendering logic in the frontend module and use
 health events as just another input:
 
 ```luau
@@ -205,24 +205,24 @@ contract-optional methods that aren't guarded.
 
 ## Diagnostics panel
 
-The shell's built-in diagnostics panel is wired to the `plugin.health`
+The shell's built-in diagnostics panel is wired to the `module.health`
 fan-out channel. It shows, at a glance:
 
-- Every plugin and its current health
+- Every module and its current health
 - Missing system deps across the whole installation, with the right
   package-manager commands
 - Which backend is currently active for each interface
 - History of state transitions (so "why did my volume widget disappear
   five minutes ago?" is answerable)
 
-The panel is a plugin (`@mesh/diagnostics`). Like everything else, it
+The panel is a module (`@mesh/diagnostics`). Like everything else, it
 can be replaced — its contract is `mesh.diagnostics.ui`.
 
 ## CLI
 
 ```
-mesh-shell doctor                       # full health report for every plugin
-mesh-shell health <plugin-id>           # single plugin
+mesh-shell doctor                       # full health report for every module
+mesh-shell health <module-id>           # single module
 mesh-shell health --interface mesh.audio
 mesh-shell health --watch               # live stream of health events
 ```
@@ -256,11 +256,11 @@ Surfaces
 
 - Health is a first-class runtime primitive with three states and a
   structured reason.
-- The same `plugin.json` dep declaration drives both install-time probes
+- The same `package.json` dep declaration drives both install-time probes
   and runtime self-checks. No duplicated reason strings.
 - Unavailable backends don't register; the registry and frontends see a
   single "no active provider" story.
 - Frontends subscribe to per-interface health through the normal event
-  bus; frontend plugins decide how to render degraded or unavailable states
+  bus; frontend modules decide how to render degraded or unavailable states
   declaratively.
 - `mesh-shell doctor` is the one command a user runs when things look wrong.

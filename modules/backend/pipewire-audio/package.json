@@ -8,7 +8,9 @@
     "kind": "backend",
     "capabilities": {
       "required": [
-        "exec.wpctl",
+        "exec.wpctl"
+      ],
+      "optional": [
         "exec.aplay"
       ]
     },
@@ -30,6 +32,7 @@
         {
           "name": "aplay",
           "reason": "Playback for shell sound effects.",
+          "optional": true,
           "packages": {
             "debian": "alsa-utils",
             "arch": "alsa-utils",
@@ -45,7 +48,7 @@
       {
         "interface": "mesh.audio",
         "version": "1.0",
-        "basePlugin": "@mesh/audio-interface",
+        "baseModule": "@mesh/audio-interface",
         "provider": "pipewire",
         "label": "PipeWire",
         "priority": 100

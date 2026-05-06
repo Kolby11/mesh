@@ -1,7 +1,7 @@
-/// Capability-based permission model for MESH plugins.
+/// Capability-based permission model for MESH modules.
 ///
 /// Capabilities are named permissions that grant access to specific host APIs.
-/// Plugins declare required and optional capabilities in their manifest.
+/// Modules declare required and optional capabilities in their manifest.
 /// The core grants or denies them at load time.
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -56,7 +56,7 @@ impl fmt::Display for Capability {
 /// How sensitive a capability is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum PrivilegeLevel {
-    /// Safe for most plugins. Read-only access to services, theme, locale.
+    /// Safe for most modules. Read-only access to services, theme, locale.
     Standard,
     /// Grants meaningful system interaction. Requires user confirmation at install.
     Elevated,
@@ -76,9 +76,9 @@ impl fmt::Display for PrivilegeLevel {
 
 /// A handle proving that a capability has been granted.
 ///
-/// Plugins receive handles at init for each granted capability.
+/// Modules receive handles at init for each granted capability.
 /// APIs require the corresponding handle as a parameter, making
-/// unauthorized access a compile-time error for Rust plugins.
+/// unauthorized access a compile-time error for Rust modules.
 #[derive(Debug, Clone)]
 pub struct CapabilityHandle {
     capability: Capability,
@@ -90,7 +90,7 @@ impl CapabilityHandle {
     }
 }
 
-/// Manages capability grants for a plugin.
+/// Manages capability grants for a module.
 #[derive(Debug, Clone)]
 pub struct CapabilitySet {
     granted: HashSet<Capability>,

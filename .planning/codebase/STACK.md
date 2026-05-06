@@ -72,7 +72,7 @@
 - `MESH_SETTINGS_PATH` - Overrides the user shell settings path in `crates/core/foundation/config/src/lib.rs`.
 - `MESH_SETTINGS_DEFAULTS_PATH` - Overrides bundled default settings path in `crates/core/foundation/config/src/lib.rs`.
 - `MESH_IPC_SOCKET` - Overrides the shell Unix IPC socket path in `crates/core/shell/src/shell/mod.rs`.
-- `XDG_CONFIG_HOME` / `XDG_DATA_HOME` - Control config/data roots for shell config and plugin overrides in `crates/core/foundation/config/src/lib.rs`.
+- `XDG_CONFIG_HOME` / `XDG_DATA_HOME` - Control config/data roots for shell config and legacy module override files in `crates/core/foundation/config/src/lib.rs`.
 - `XDG_RUNTIME_DIR` - Preferred runtime directory for `mesh.sock` in `crates/core/shell/src/shell/mod.rs`.
 - `HOME` / `UID` - Fallbacks for `~/.mesh`, XDG defaults, and `/tmp/mesh-<uid>.sock` in `crates/core/extension/plugin/src/package.rs`, `crates/core/foundation/config/src/lib.rs`, and `crates/core/shell/src/shell/mod.rs`.
 - `RUST_LOG` - Standard tracing env-filter input used by `tracing_subscriber::EnvFilter` in `crates/tools/cli/src/main.rs` and `crates/tools/lsp/src/main.rs`.
@@ -89,7 +89,7 @@
 **Application Config:**
 - `config/package.json` - Local installed-module graph. Use `mesh.schemaVersion`, `mesh.modulesDir`, `mesh.modules`, `mesh.providers`, and `mesh.layout` for active modules and provider pins.
 - `config/modules/@mesh/*/package.json` - Package-shaped module manifests for bundled/default module metadata and distribution examples.
-- `modules/**/package.json` and `modules/**/module.json` - Runtime module manifests loaded by the shell; new modules should use `package.json`, while the current compatibility loader still accepts legacy `module.json`.
+- `modules/**/package.json` and `modules/**/package.json` - Runtime module manifests loaded by the shell; new modules should use `package.json`, while the current compatibility loader still accepts legacy `package.json`.
 - `config/settings-default.json` - Bundled defaults for theme and i18n.
 - `config/shell-settings.json` - Repo-local shell settings loaded before falling back to `~/.mesh/settings.json`.
 - `config/icons.toml` - Icon pack/profile fallback order for semantic icon names.
@@ -101,7 +101,7 @@
 - Use npm-compatible `package.json` for every new module; all MESH-specific fields live under the top-level `mesh` object as documented in `docs/module-system.md`.
 - Use top-level `name`, `version`, `description`, `private`, `license`, and `repository`; do not place MESH-only fields such as kind, capabilities, providers, entrypoints, themes, settings, or binary requirements at the top level.
 - Root module graph lives in `config/package.json` as `@mesh/local-config`, with `mesh.modulesDir = "../modules"` and active modules under `mesh.modules`.
-- The runtime loader accepts `module.json`, `package.json`, and `plugin.json` in `crates/core/extension/plugin/src/manifest.rs` and `crates/core/extension/plugin/src/package.rs`; write new module docs and examples against `package.json`.
+- The runtime loader accepts `package.json`, `package.json`, and `plugin.json` in `crates/core/extension/plugin/src/manifest.rs` and `crates/core/extension/plugin/src/package.rs`; write new module docs and examples against `package.json`.
 
 **Module Kinds:**
 - `interface` - Contract package declaring interface name/version/file, methods, events, types, and capability metadata; example contract file at `modules/interfaces/audio.toml`.
@@ -125,10 +125,10 @@
 
 **Production:**
 - Linux desktop session running an existing Wayland compositor; MESH is a shell client, not a compositor or window manager, per `README.md`.
-- Wayland compositor support for layer-shell-style shell surfaces where available; frontend compatibility examples declare `wlr-layer-shell-v1` in `modules/frontend/navigation-bar/module.json` and `docs/installation.md`.
+- Wayland compositor support for layer-shell-style shell surfaces where available; frontend compatibility examples declare `wlr-layer-shell-v1` in `modules/frontend/navigation-bar/package.json` and `docs/installation.md`.
 - Runtime module locations include repo `modules/`, `~/.mesh/modules`, and `/usr/share/mesh/modules` from `crates/core/foundation/config/src/lib.rs`.
-- User configuration uses `~/.config/mesh/config.toml`, `~/.mesh/settings.json`, and per-plugin override files under XDG config paths in `crates/core/foundation/config/src/lib.rs`.
-- System-installed modules/assets may live under `/usr/share/mesh/modules` and `/usr/share/mesh/plugins` as documented in `docs/installation.md`.
+- User configuration uses `~/.config/mesh/config.toml`, `~/.mesh/settings.json`, and legacy per-module override files under XDG config paths in `crates/core/foundation/config/src/lib.rs`.
+- System-installed modules/assets may live under `/usr/share/mesh/modules`; older `/usr/share/mesh/plugins` paths remain documented as legacy installation design in `docs/installation.md`.
 
 ---
 

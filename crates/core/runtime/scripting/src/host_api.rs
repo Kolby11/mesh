@@ -1,7 +1,7 @@
 /// Host API injection — exposes MESH subsystems to Luau scripts.
 ///
 /// This module injects a `mesh` global table into the Luau VM with sub-tables
-/// for each subsystem the plugin has capability to access.
+/// for each subsystem the module has capability to access.
 ///
 /// The injected API:
 ///
@@ -14,7 +14,7 @@
 /// mesh.service.use(name)      → service proxy  (frontend helper)
 /// mesh.locale.current()       → string         (requires locale.read)
 /// mesh.locale.translate(key)  → string         (requires locale.read)
-/// mesh.config()               → table          (backend helper; full plugin settings)
+/// mesh.config()               → table          (backend helper; full module settings)
 /// mesh.exec(program, args)    → table          (backend helper)
 /// mesh.service.set_poll_interval(ms)           (backend helper)
 /// mesh.events.subscribe(ch, cb) → subscription
@@ -82,9 +82,9 @@ impl HostApiManifest {
 pub struct InterfaceProxy;
 
 impl InterfaceProxy {
-    /// List which docs-era interfaces are available given the plugin's capabilities.
+    /// List which docs-era interfaces are available given the module's capabilities.
     ///
-    /// E.g., if the plugin has `service.audio.read`, this returns `["mesh.audio"]`.
+    /// E.g., if the module has `service.audio.read`, this returns `["mesh.audio"]`.
     pub fn available_interfaces(caps: &CapabilitySet) -> Vec<String> {
         let mut interfaces = Vec::new();
         for cap in caps.granted() {

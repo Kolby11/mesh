@@ -1,9 +1,9 @@
 use mesh_core_config::{default_config_path, load_config, resolve_discovery_paths};
-use mesh_core_plugin::manifest::{Manifest, PluginType, load_manifest};
+use mesh_core_module::manifest::{Manifest, ModuleType, load_manifest};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// State fields and commands exposed by a backend service plugin.
+/// State fields and commands exposed by a backend service module.
 #[derive(Debug, Default, Clone)]
 pub struct InterfaceShape {
     /// Fields emitted via `mesh.service.emit({...})` in the backend script.
@@ -12,19 +12,19 @@ pub struct InterfaceShape {
     pub commands: Vec<String>,
 }
 
-/// A discovered and indexed view of all plugins available in the workspace.
-pub struct PluginRegistry {
-    /// Maps plugin-id → Manifest for all discovered plugins.
+/// A discovered and indexed view of all modules available in the workspace.
+pub struct ModuleRegistry {
+    /// Maps module-id → Manifest for all discovered modules.
     pub manifests: HashMap<String, Manifest>,
     /// Maps interface name (e.g. "mesh.audio") → list of field names it emits.
     pub interface_fields: HashMap<String, Vec<String>>,
     /// Maps interface name → inferred shape (state fields + commands) from backend script.
     pub interface_shapes: HashMap<String, InterfaceShape>,
-    /// Maps component tag name → plugin-id for plugins that export a component tag.
+    /// Maps component tag name → module-id for modules that export a component tag.
     pub exported_tags: HashMap<String, String>,
 }
 
-impl PluginRegistry {
+impl ModuleRegistry {
     pub fn empty() -> Self {
         Self {
             manifests: HashMap::new(),
@@ -34,7 +34,7 @@ impl PluginRegistry {
         }
     }
 
-    /// Discover plugins from the workspace root and standard system paths.
+    /// Discover modules from the workspace root and standard system paths.
     pub fn discover(workspace_root: &Path) -> Self {
         let mut registry = Self::empty();
 
@@ -56,24 +56,24 @@ impl PluginRegistry {
             if !path.is_dir() {
                 continue;
             }
-            // Try direct plugin dir (e.g. packages/plugins/backend/core/pipewire-audio)
-            self.try_load_plugin(&path);
-            // Recurse one level (e.g. packages/plugins/frontend/core/<name>)
+            // Try direct module dir (e.g. packages/modules/backend/core/pipewire-audio)
+            self.try_load_module(&path);
+            // Recurse one level (e.g. packages/modules/frontend/core/<name>)
             let Ok(sub) = std::fs::read_dir(&path) else {
                 continue;
             };
             for sub_entry in sub.flatten() {
                 let sub_path = sub_entry.path();
                 if sub_path.is_dir() {
-                    self.try_load_plugin(&sub_path);
-                    // One more level (e.g. packages/plugins/frontend/core/panel/src - skip)
+                    self.try_load_module(&sub_path);
+                    // One more level (e.g. packages/modules/frontend/core/panel/src - skip)
                     let Ok(sub2) = std::fs::read_dir(&sub_path) else {
                         continue;
                     };
                     for sub2_entry in sub2.flatten() {
                         let sub2_path = sub2_entry.path();
                         if sub2_path.is_dir() {
-                            self.try_load_plugin(&sub2_path);
+                            self.try_load_module(&sub2_path);
                         }
                     }
                 }
@@ -81,29 +81,29 @@ impl PluginRegistry {
         }
     }
 
-    fn try_load_plugin(&mut self, dir: &Path) {
+    fn try_load_module(&mut self, dir: &Path) {
         let Ok(loaded) = load_manifest(dir) else {
             return;
         };
         let manifest = loaded.manifest;
-        let plugin_id = manifest.package.id.clone();
+        let module_id = manifest.package.id.clone();
 
         // Record exported component tag
         if let Some(tag) = manifest.exported_component_tag() {
             self.exported_tags
-                .insert(tag.to_string(), plugin_id.clone());
+                .insert(tag.to_string(), module_id.clone());
         }
 
-        // For interface plugins, record the interface name
-        if manifest.package.plugin_type == PluginType::Interface {
+        // For interface modules, record the interface name
+        if manifest.package.module_type == ModuleType::Interface {
             if let Some(iface) = &manifest.interface {
                 self.interface_fields.entry(iface.name.clone()).or_default();
             }
         }
 
-        // For backend plugins, record what interfaces they provide and analyze
+        // For backend modules, record what interfaces they provide and analyze
         // the main script to infer state fields + commands.
-        let is_backend = manifest.package.plugin_type == PluginType::Backend;
+        let is_backend = manifest.package.module_type == ModuleType::Backend;
         let interface_names: Vec<String> = {
             let mut names: Vec<String> = manifest
                 .provides
@@ -148,7 +148,7 @@ impl PluginRegistry {
             }
         }
 
-        self.manifests.insert(plugin_id, manifest);
+        self.manifests.insert(module_id, manifest);
     }
 
     /// All discovered interface/service names (e.g. "mesh.audio").
@@ -156,7 +156,7 @@ impl PluginRegistry {
         self.interface_fields.keys().map(String::as_str).collect()
     }
 
-    /// Component tags exported by plugins: tag name → plugin-id.
+    /// Component tags exported by modules: tag name → module-id.
     pub fn exported_component_tags(&self) -> &HashMap<String, String> {
         &self.exported_tags
     }

@@ -14,8 +14,8 @@ pub struct InterfaceCatalog {
 pub struct InterfaceProvider {
     pub interface: String,
     pub version: Option<String>,
-    pub base_plugin: Option<String>,
-    pub provider_plugin: String,
+    pub base_module: Option<String>,
+    pub provider_module: String,
     pub backend_name: String,
     pub priority: u32,
 }
@@ -174,14 +174,14 @@ fn register_provider_in_map(
 ) {
     let entry = providers.entry(provider.interface.clone()).or_default();
     entry.retain(|existing| {
-        !(existing.provider_plugin == provider.provider_plugin
+        !(existing.provider_module == provider.provider_module
             && existing.version == provider.version)
     });
     entry.push(provider);
     entry.sort_by(|a, b| {
         b.priority
             .cmp(&a.priority)
-            .then_with(|| a.provider_plugin.cmp(&b.provider_plugin))
+            .then_with(|| a.provider_module.cmp(&b.provider_module))
     });
 }
 
@@ -253,16 +253,16 @@ mod tests {
         registry.register(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
-            base_plugin: Some("@mesh/audio-interface".into()),
-            provider_plugin: "@mesh/pulseaudio-audio".into(),
+            base_module: Some("@mesh/audio-interface".into()),
+            provider_module: "@mesh/pulseaudio-audio".into(),
             backend_name: "PulseAudio".into(),
             priority: 50,
         });
         registry.register(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
-            base_plugin: Some("@mesh/audio-interface".into()),
-            provider_plugin: "@mesh/pipewire-audio".into(),
+            base_module: Some("@mesh/audio-interface".into()),
+            provider_module: "@mesh/pipewire-audio".into(),
             backend_name: "PipeWire".into(),
             priority: 100,
         });
@@ -270,7 +270,7 @@ mod tests {
         let resolved = registry.resolve("audio", Some(">=1.0"));
         assert_eq!(resolved.contract.unwrap().version.to_string(), "1.0.0");
         assert_eq!(
-            resolved.provider.unwrap().provider_plugin,
+            resolved.provider.unwrap().provider_module,
             "@mesh/pipewire-audio"
         );
     }
@@ -281,15 +281,15 @@ mod tests {
         catalog.register_provider(InterfaceProvider {
             interface: "mesh.network".into(),
             version: Some("1.0".into()),
-            base_plugin: Some("@mesh/network-interface".into()),
-            provider_plugin: "@mesh/networkmanager".into(),
+            base_module: Some("@mesh/network-interface".into()),
+            provider_module: "@mesh/networkmanager".into(),
             backend_name: "NetworkManager".into(),
             priority: 100,
         });
 
         let resolved = catalog.resolve("network", Some(">=1.0"));
         assert_eq!(
-            resolved.provider.unwrap().base_plugin.as_deref(),
+            resolved.provider.unwrap().base_module.as_deref(),
             Some("@mesh/network-interface")
         );
     }
@@ -310,15 +310,15 @@ mod tests {
         registry.register(InterfaceProvider {
             interface: "alice.thermal".into(),
             version: None,
-            base_plugin: None,
-            provider_plugin: "@alice/lmsensors".into(),
+            base_module: None,
+            provider_module: "@alice/lmsensors".into(),
             backend_name: "lm-sensors".into(),
             priority: 100,
         });
 
         let resolved = registry.resolve("alice.thermal", Some(">=1.0"));
         assert_eq!(
-            resolved.provider.unwrap().provider_plugin,
+            resolved.provider.unwrap().provider_module,
             "@alice/lmsensors"
         );
     }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use mesh_core_elements::WidgetNode;
-use mesh_core_plugin::PluginType;
+use mesh_core_module::ModuleType;
 use mesh_core_render::FrontendCompositionResolver;
 
 use super::FrontendSurfaceComponent;
@@ -9,14 +9,14 @@ use super::FrontendSurfaceComponent;
 impl FrontendCompositionResolver for FrontendSurfaceComponent {
     fn render_import(
         &self,
-        host: &mesh_core_plugin::Manifest,
+        host: &mesh_core_module::Manifest,
         host_instance_key: &str,
         alias: &str,
         props: &HashMap<String, String>,
         container_width: f32,
         container_height: f32,
     ) -> Option<WidgetNode> {
-        if let Some(entry) = self.frontend_catalog.plugins.get(&host.package.id) {
+        if let Some(entry) = self.frontend_catalog.modules.get(&host.package.id) {
             if entry.compiled.local_components.contains_key(alias) {
                 let props_json: HashMap<String, serde_json::Value> = props
                     .iter()
@@ -34,21 +34,21 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             }
         }
 
-        let plugin_id = match self
+        let module_id = match self
             .frontend_catalog
-            .imported_component_plugin_id(host, alias)
+            .imported_component_module_id(host, alias)
         {
             Ok(id) => id,
             Err(message) => return Some(self.build_error_widget(message)),
         };
 
-        // Surface plugins are portals: their visibility is tracked via pending_surface_states
+        // Surface modules are portals: their visibility is tracked via pending_surface_states
         // and translated to ShowSurface/HideSurface requests in tick(). They render nothing inline.
         let is_surface = self
             .frontend_catalog
-            .plugins
-            .get(&plugin_id)
-            .map(|e| e.compiled.manifest.package.plugin_type == PluginType::Surface)
+            .modules
+            .get(&module_id)
+            .map(|e| e.compiled.manifest.package.module_type == ModuleType::Surface)
             .unwrap_or(false);
         if is_surface {
             let hidden = props
@@ -57,7 +57,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 .unwrap_or(false);
             self.pending_surface_states
                 .borrow_mut()
-                .insert(plugin_id, !hidden);
+                .insert(module_id, !hidden);
             return Some(WidgetNode::new("box"));
         }
 
@@ -68,7 +68,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         let instance_key = format!("{host_instance_key}/import:{alias}");
         Some(self.render_embedded_instance(
             &instance_key,
-            &plugin_id,
+            &module_id,
             &props_json,
             container_width,
             container_height,
@@ -77,7 +77,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
 
     fn render_slot(
         &self,
-        host: &mesh_core_plugin::Manifest,
+        host: &mesh_core_module::Manifest,
         host_instance_key: &str,
         slot_name: Option<&str>,
         container_width: f32,
@@ -97,18 +97,18 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
 
         let mut nodes = Vec::new();
         for contribution in self.frontend_catalog.slot_contributions_for(&slot_id) {
-            let Some(entry) = self.frontend_catalog.plugins.get(&contribution.widget_id) else {
+            let Some(entry) = self.frontend_catalog.modules.get(&contribution.widget_id) else {
                 nodes.push(self.build_error_widget(format!(
-                    "slot '{slot_id}' references missing plugin '{}'",
+                    "slot '{slot_id}' references missing module '{}'",
                     contribution.widget_id
                 )));
                 continue;
             };
 
-            if accepts_widget && entry.compiled.manifest.package.plugin_type != PluginType::Widget {
+            if accepts_widget && entry.compiled.manifest.package.module_type != ModuleType::Widget {
                 nodes.push(self.build_error_widget(format!(
                     "slot '{slot_id}' accepts widgets, but '{}' is {}",
-                    contribution.widget_id, entry.compiled.manifest.package.plugin_type
+                    contribution.widget_id, entry.compiled.manifest.package.module_type
                 )));
                 continue;
             }
@@ -131,7 +131,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             );
             node.attributes.insert(
                 "_mesh_slot_source".into(),
-                contribution.source_plugin_id.clone(),
+                contribution.source_module_id.clone(),
             );
             nodes.push(node);
         }

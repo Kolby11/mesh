@@ -8,12 +8,14 @@
   "authors": ["MESH Project"],
   "capabilities": {
     "required": [
-      "exec.pactl",
+      "exec.pactl"
+    ],
+    "optional": [
       "exec.aplay"
     ]
   },
   "dependencies": {
-    "plugins": {
+    "modules": {
       "@mesh/audio-interface": ">=1.0.0, <2.0.0"
     },
     "binaries": [
@@ -29,6 +31,7 @@
       {
         "name": "aplay",
         "reason": "Playback for shell sound effects.",
+        "optional": true,
         "packages": {
           "debian": "alsa-utils",
           "arch": "alsa-utils",
@@ -44,7 +47,7 @@
     {
       "interface": "mesh.audio",
       "version": "1.0",
-      "base_plugin": "@mesh/audio-interface",
+      "base_module": "@mesh/audio-interface",
       "backend_name": "PulseAudio",
       "priority": 50
     }

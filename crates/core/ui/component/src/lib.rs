@@ -32,8 +32,8 @@ pub struct ComponentImport {
 pub enum ComponentImportTarget {
     /// A local component file, either relative to the importing file or `@src/...`.
     ComponentLocal(String),
-    /// A frontend plugin ID, such as `@mesh/volume-bar`.
-    ComponentPlugin(String),
+    /// A frontend module ID, such as `@mesh/volume-bar`.
+    ComponentModule(String),
     /// A MESH interface API, such as `mesh.audio` with an optional version requirement.
     InterfaceApi {
         interface: String,

@@ -18,9 +18,9 @@ type = "boolean"
 description = "Whether the default output is muted"
 
 [[state_fields]]
-name = "source_plugin"
+name = "source_module"
 type = "string"
-description = "Backend plugin ID that emitted this state (runtime-additive)"
+description = "Backend module ID that emitted this state (runtime-additive)"
 
 [[methods]]
 name = "set_volume"

@@ -1,6 +1,6 @@
 [package]
 name = "mesh-core-capability"
-description = "Capability-based permission model for MESH plugins"
+description = "Capability-based permission model for MESH modules"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

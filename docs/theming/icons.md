@@ -131,7 +131,7 @@ does the rest.
 
 ## Declaring icon-pack dependencies
 
-A plugin that truly needs a bundled XDG theme lists the icon-pack module in its
+A module that truly needs a bundled XDG theme lists the icon-pack module in its
 manifest so the installer can guarantee it is present:
 
 ```toml
@@ -140,13 +140,13 @@ required = ["@mesh/symbols", "@flags/country"]
 optional = ["@lucide/icons"]
 ```
 
-- **Required** — installed (or pulled in) before the plugin loads. If
-  unavailable, the plugin refuses to load with a clear diagnostic.
-- **Optional** — used when present, absent gracefully. The plugin is
+- **Required** — installed (or pulled in) before the module loads. If
+  unavailable, the module refuses to load with a clear diagnostic.
+- **Optional** — used when present, absent gracefully. The module is
   expected to degrade (e.g. fall back to text, or use an unqualified name
   that another pack can satisfy).
 
-Plugins that use only common XDG names do not need to declare a specific pack;
+Modules that use only common XDG names do not need to declare a specific pack;
 the user's selected XDG theme and hicolor fallback are the contract.
 
 ## Rendering tokens
@@ -240,7 +240,7 @@ mesh icons missing <module>         # report names a module requests but no them
 ```
 
 The diagnostics panel surfaces the same info: active chain, miss counts per
-plugin, which pack is currently serving each name.
+module, which pack is currently serving each name.
 
 ## Defaults
 
@@ -256,5 +256,5 @@ systems. That fallback should also be laid out as an XDG icon theme.
   inheritance, and hicolor fallback.
 - MESH semantic aliases map stable UI names onto standard XDG icon names.
 - Rendering parameters are theme tokens; color is inherited from context.
-- Plugins declare required/optional packs in their manifest.
+- Modules declare required/optional packs in their manifest.
 - Multicolor icons opt out of tinting per asset.

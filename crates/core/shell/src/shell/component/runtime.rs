@@ -22,7 +22,7 @@ impl FrontendSurfaceComponent {
             }
 
             if let Err(source) = runtime.script_ctx.call_handler("onRender", &[]) {
-                let component_id = runtime.plugin_id.clone();
+                let component_id = runtime.module_id.clone();
                 let error_message = source.to_string();
                 tracing::warn!(
                     component_id = %component_id,
@@ -58,7 +58,7 @@ impl FrontendSurfaceComponent {
         for diagnostic in runtime.script_ctx.drain_diagnostics() {
             diagnostics.error(format!(
                 "interface '{}' unavailable for '{}': {}",
-                diagnostic.interface, diagnostic.plugin_id, diagnostic.reason
+                diagnostic.interface, diagnostic.module_id, diagnostic.reason
             ));
         }
     }
@@ -100,10 +100,10 @@ impl FrontendSurfaceComponent {
             .map(|runtime| runtime.script_ctx.state().clone())
     }
 
-    /// Load translation files from `config/i18n/{locale}.json` inside the plugin directory.
+    /// Load translation files from `config/i18n/{locale}.json` inside the module directory.
 
-    pub(super) fn load_plugin_i18n_from_dir(&mut self, plugin_dir: &Path) {
-        let i18n_dir = plugin_dir.join("config/i18n");
+    pub(super) fn load_module_i18n_from_dir(&mut self, module_dir: &Path) {
+        let i18n_dir = module_dir.join("config/i18n");
         let entries = match std::fs::read_dir(&i18n_dir) {
             Ok(e) => e,
             Err(_) => return,
@@ -124,7 +124,7 @@ impl FrontendSurfaceComponent {
                 Ok(m) => m,
                 Err(_) => {
                     tracing::warn!(
-                        "plugin '{}': failed to parse i18n file {}",
+                        "module '{}': failed to parse i18n file {}",
                         self.id(),
                         path.display()
                     );
@@ -132,7 +132,7 @@ impl FrontendSurfaceComponent {
                 }
             };
             tracing::debug!(
-                "plugin '{}': loaded {} translations for locale '{}'",
+                "module '{}': loaded {} translations for locale '{}'",
                 self.id(),
                 messages.len(),
                 stem
@@ -145,27 +145,27 @@ impl FrontendSurfaceComponent {
         }
     }
 
-    pub(super) fn load_plugin_i18n(&mut self) {
-        let plugin_dir = self.plugin_dir.clone();
-        self.load_plugin_i18n_from_dir(&plugin_dir);
+    pub(super) fn load_module_i18n(&mut self) {
+        let module_dir = self.module_dir.clone();
+        self.load_module_i18n_from_dir(&module_dir);
     }
 
     pub(super) fn load_catalog_i18n(&mut self) {
-        let plugin_dirs: Vec<PathBuf> = self
+        let module_dirs: Vec<PathBuf> = self
             .frontend_catalog
-            .plugins
+            .modules
             .values()
-            .map(|entry| entry.plugin_dir.clone())
+            .map(|entry| entry.module_dir.clone())
             .collect();
-        for plugin_dir in plugin_dirs {
-            self.load_plugin_i18n_from_dir(&plugin_dir);
+        for module_dir in module_dirs {
+            self.load_module_i18n_from_dir(&module_dir);
         }
     }
 
     pub(super) fn create_runtime_for_component(
         &self,
         component_id: String,
-        manifest: &mesh_core_plugin::Manifest,
+        manifest: &mesh_core_module::Manifest,
         component: &mesh_core_component::ComponentFile,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<EmbeddedFrontendRuntime, ComponentError> {
@@ -215,14 +215,14 @@ impl FrontendSurfaceComponent {
         }
 
         Ok(EmbeddedFrontendRuntime {
-            plugin_id: component_id,
+            module_id: component_id,
             script_ctx,
         })
     }
 
     pub(super) fn create_runtime(
         &self,
-        compiled: &CompiledFrontendPlugin,
+        compiled: &CompiledFrontendModule,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<EmbeddedFrontendRuntime, ComponentError> {
         self.create_runtime_for_component(
@@ -247,14 +247,14 @@ impl FrontendSurfaceComponent {
     pub(super) fn ensure_runtime(
         &self,
         instance_key: &str,
-        plugin_id: &str,
+        module_id: &str,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
         if !self.runtimes.lock().unwrap().contains_key(instance_key) {
-            let Some(entry) = self.frontend_catalog.plugins.get(plugin_id) else {
+            let Some(entry) = self.frontend_catalog.modules.get(module_id) else {
                 return Err(ComponentError::Failed {
                     component_id: self.id().to_string(),
-                    message: format!("missing embedded frontend plugin '{plugin_id}'"),
+                    message: format!("missing embedded frontend module '{module_id}'"),
                 });
             };
             let runtime = self.create_runtime(&entry.compiled, props)?;
@@ -289,15 +289,15 @@ impl FrontendSurfaceComponent {
     pub(super) fn ensure_local_component_runtime(
         &self,
         instance_key: &str,
-        host_plugin_id: &str,
+        host_module_id: &str,
         alias: &str,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
         if !self.runtimes.lock().unwrap().contains_key(instance_key) {
-            let Some(entry) = self.frontend_catalog.plugins.get(host_plugin_id) else {
+            let Some(entry) = self.frontend_catalog.modules.get(host_module_id) else {
                 return Err(ComponentError::Failed {
                     component_id: self.id().to_string(),
-                    message: format!("missing host plugin '{host_plugin_id}'"),
+                    message: format!("missing host module '{host_module_id}'"),
                 });
             };
             let Some(component) = entry.compiled.local_components.get(alias) else {
@@ -307,7 +307,7 @@ impl FrontendSurfaceComponent {
                 });
             };
             let runtime = self.create_runtime_for_component(
-                format!("{host_plugin_id}::{alias}"),
+                format!("{host_module_id}::{alias}"),
                 &entry.compiled.manifest,
                 component,
                 props,
@@ -332,7 +332,7 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn render_local_component(
         &self,
-        host: &mesh_core_plugin::Manifest,
+        host: &mesh_core_module::Manifest,
         alias: &str,
         instance_key: &str,
         props: &HashMap<String, serde_json::Value>,
@@ -345,8 +345,8 @@ impl FrontendSurfaceComponent {
             return self.build_error_widget(err.to_string());
         }
 
-        let Some(entry) = self.frontend_catalog.plugins.get(&host.package.id) else {
-            return self.build_error_widget(format!("missing host plugin '{}'", host.package.id));
+        let Some(entry) = self.frontend_catalog.modules.get(&host.package.id) else {
+            return self.build_error_widget(format!("missing host module '{}'", host.package.id));
         };
         let Some(component) = entry.compiled.local_components.get(alias) else {
             return self.build_error_widget(format!("missing local component import '{alias}'"));
@@ -380,7 +380,7 @@ impl FrontendSurfaceComponent {
     pub(super) fn render_embedded_instance(
         &self,
         instance_key: &str,
-        plugin_id: &str,
+        module_id: &str,
         props: &HashMap<String, serde_json::Value>,
         container_width: f32,
         container_height: f32,
@@ -389,25 +389,25 @@ impl FrontendSurfaceComponent {
             .render_stack
             .borrow()
             .iter()
-            .filter(|ancestor| ancestor.as_str() == plugin_id)
+            .filter(|ancestor| ancestor.as_str() == module_id)
             .count()
             >= 2
         {
-            return self.build_error_widget(format!("composition cycle blocked for '{plugin_id}'"));
+            return self.build_error_widget(format!("composition cycle blocked for '{module_id}'"));
         }
 
-        if let Err(err) = self.ensure_runtime(instance_key, plugin_id, props) {
+        if let Err(err) = self.ensure_runtime(instance_key, module_id, props) {
             return self.build_error_widget(err.to_string());
         }
 
-        let Some(entry) = self.frontend_catalog.plugins.get(plugin_id) else {
-            return self.build_error_widget(format!("missing embedded plugin '{plugin_id}'"));
+        let Some(entry) = self.frontend_catalog.modules.get(module_id) else {
+            return self.build_error_widget(format!("missing embedded module '{module_id}'"));
         };
 
         let state = self.runtime_state(instance_key).unwrap_or_default();
         let bound = LocaleBoundState::new(&state, &self.locale);
         let active_theme = self.active_theme.borrow().clone();
-        self.render_stack.borrow_mut().push(plugin_id.to_string());
+        self.render_stack.borrow_mut().push(module_id.to_string());
         let measurer = SharedTextMeasurer;
         let mut tree = entry.compiled.build_tree_with_state(
             &active_theme,
@@ -436,7 +436,7 @@ impl FrontendSurfaceComponent {
                     .lock()
                     .unwrap()
                     .get(instance_key)
-                    .map(|runtime| runtime.plugin_id.clone())
+                    .map(|runtime| runtime.module_id.clone())
                     .unwrap_or_else(|| self.id().to_string());
                 (
                     instance_key.to_string(),

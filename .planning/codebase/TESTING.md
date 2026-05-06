@@ -188,7 +188,7 @@ fn root_with_modules(
 - Manifest and graph fixtures live in `crates/core/extension/plugin/src/package.rs`.
 - Runtime script fixtures are inline raw Luau strings in `crates/core/runtime/scripting/src/context.rs`, `crates/core/runtime/scripting/src/backend.rs`, and `crates/core/shell/src/shell/component/tests.rs`.
 - Real repo fixtures are used by package graph tests through `config/package.json` and `config/modules/@mesh/*/package.json`. Keep these files aligned with the assertions in `crates/core/extension/plugin/src/package.rs` and `crates/core/shell/src/shell/mod.rs`.
-- Legacy manifest compatibility fixtures are real files under `modules/frontend/navigation-bar/module.json` and `modules/backend/*/module.json`.
+- Legacy manifest compatibility fixtures are real files under `modules/frontend/navigation-bar/package.json` and `modules/backend/*/package.json`.
 
 ## Coverage
 
@@ -257,7 +257,7 @@ This pattern from `crates/core/runtime/scripting/src/context.rs` is the model fo
 - Add tests for every new `mesh` manifest field in both parsing and validation layers. Use `ModulePackageManifest::from_json_str` for module manifests and `RootPackageManifest::from_json_str` for `config/package.json` shape changes.
 - Provider resolution changes need tests for explicit selection, multiple installed providers, unknown provider rejection, interface mismatch rejection, and priority/default behavior in `crates/core/extension/plugin/src/package.rs`.
 - Shell provider lifecycle changes need tests in `crates/core/shell/src/shell/mod.rs` proving `backend_launch_candidates_from_graph` launches only active providers and records invalid/missing provider status without service-specific branches.
-- Legacy compatibility changes need tests for `module.json`, `plugin.json`, and `package.json` precedence in `load_module_manifest`.
+- Legacy compatibility changes need tests for `package.json`, `plugin.json`, and `package.json` precedence in `load_module_manifest`.
 - Resource contribution changes need path traversal tests like `installed_module_graph_rejects_library_path_escape` and `installed_module_graph_rejects_contribution_path_escape`.
 
 ---

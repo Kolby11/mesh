@@ -37,7 +37,7 @@ pub enum CoreRequest {
         interface: String,
         command: String,
         payload: serde_json::Value,
-        source_plugin_id: String,
+        source_module_id: String,
         source_capabilities: CapabilitySet,
     },
     SetTheme {
@@ -62,8 +62,8 @@ pub enum CoreEvent {
 pub enum ServiceEvent {
     Updated {
         service: String,
-        source_plugin: String,
-        /// Structured state emitted by the backend plugin.
+        source_module: String,
+        /// Structured state emitted by the backend module.
         /// Stored directly into `state[service]` on all frontend components.
         payload: serde_json::Value,
     },
@@ -146,10 +146,10 @@ pub trait ShellComponent: Send {
     fn reload_source(&mut self) -> Result<bool, ComponentError> {
         Ok(false)
     }
-    fn plugin_settings_path(&self) -> Option<&Path> {
+    fn module_settings_path(&self) -> Option<&Path> {
         None
     }
-    fn reload_plugin_settings(&mut self) -> Result<bool, ComponentError> {
+    fn reload_module_settings(&mut self) -> Result<bool, ComponentError> {
         Ok(false)
     }
     /// Return the last widget tree built by `paint`, for the debug layout inspector.
@@ -167,8 +167,8 @@ pub(super) struct ComponentRuntime {
     pub(super) component: Box<dyn ShellComponent>,
     pub(super) source_path: Option<PathBuf>,
     pub(super) source_modified_at: Option<SystemTime>,
-    pub(super) plugin_settings_path: Option<PathBuf>,
-    pub(super) plugin_settings_modified_at: Option<SystemTime>,
+    pub(super) module_settings_path: Option<PathBuf>,
+    pub(super) module_settings_modified_at: Option<SystemTime>,
 }
 
 impl ComponentRuntime {
@@ -179,14 +179,14 @@ impl ComponentRuntime {
             .as_ref()
             .and_then(|path| std::fs::metadata(path).ok())
             .and_then(|metadata| metadata.modified().ok());
-        let plugin_settings_path = component.plugin_settings_path().map(PathBuf::from);
+        let module_settings_path = component.module_settings_path().map(PathBuf::from);
         Self {
             surface_id,
             component,
             source_path,
             source_modified_at,
-            plugin_settings_path,
-            plugin_settings_modified_at: None,
+            module_settings_path,
+            module_settings_modified_at: None,
         }
     }
 }

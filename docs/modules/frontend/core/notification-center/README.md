@@ -1,7 +1,7 @@
 # `@mesh/notification-center`
 
 Notification center host surface. It now acts as a container for embeddable
-widget plugins rather than owning every piece of UI directly.
+widget modules rather than owning every piece of UI directly.
 
 - **Type:** `surface`
 - **Entrypoint:** `src/main.mesh`
@@ -30,7 +30,7 @@ The default core build fills those slots via:
   and `<NotificationSidebar/>` from `@mesh/notification-sidebar`
 
 This makes the notification center a real composition host: third-party widget
-plugins can still contribute to either slot without forking the surface.
+modules can still contribute to either slot without forking the surface.
 
 ## Theme tokens
 

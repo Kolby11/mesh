@@ -11,7 +11,7 @@ use mesh_core_component::template::{
 };
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{ComputedStyle, StyleContext, StyleResolver, VariableStore, WidgetNode};
-use mesh_core_plugin::Manifest;
+use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
 
 use std::collections::HashMap;
@@ -38,7 +38,7 @@ pub(crate) fn collect_component_tags(nodes: &[TemplateNode], tags: &mut Vec<Stri
 /// This is a public helper so other crates (core) can render local
 /// component templates without duplicating the template->widget logic.
 ///
-/// `host_rules` are the parent plugin's CSS rules. They are merged before the
+/// `host_rules` are the parent module's CSS rules. They are merged before the
 /// component's own rules so that parent-defined classes (e.g. `.battery-widget`)
 /// apply inside child component templates as intended.
 pub fn build_widget_tree_from_component(
@@ -509,10 +509,10 @@ mod tests {
 
     fn test_manifest() -> Manifest {
         Manifest {
-            package: mesh_core_plugin::PackageSection {
+            package: mesh_core_module::PackageSection {
                 id: "test".into(),
                 version: "0.1.0".into(),
-                plugin_type: mesh_core_plugin::PluginType::Widget,
+                module_type: mesh_core_module::ModuleType::Widget,
                 api_version: "0.1.0".into(),
                 name: None,
                 license: None,

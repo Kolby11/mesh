@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 mesh-core-shell = { workspace = true }
-mesh-core-plugin = { workspace = true }
+mesh-core-module = { workspace = true }
 mesh-core-config = { workspace = true }
 mesh-core-diagnostics = { workspace = true }
 

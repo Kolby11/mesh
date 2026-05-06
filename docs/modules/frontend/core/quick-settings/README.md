@@ -35,7 +35,7 @@ A column containing:
 
 The surface is intended to be opened by shared shell events from other
 frontends. The core only routes those events into shell requests; the
-frontend plugins decide when to publish them and how the surface should react.
+frontend modules decide when to publish them and how the surface should react.
 
 ## Theme tokens
 

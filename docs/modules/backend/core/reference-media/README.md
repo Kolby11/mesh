@@ -5,12 +5,12 @@ Deterministic in-memory media backend used as the Phase 5 MVP authoring referenc
 - **Type:** `backend`
 - **Manifest ID:** `@mesh/reference-media`
 - **Implements:** `mesh.media`
-- **Base plugin:** `@mesh/media-interface`
+- **Base module:** `@mesh/media-interface`
 - **Backend name:** `Reference`
 - **Priority:** `10`
-- **Entrypoint:** `packages/plugins/backend/core/reference-media/src/main.luau`
+- **Entrypoint:** `packages/modules/backend/core/reference-media/src/main.luau`
 
-## Why this plugin is the reference
+## Why this module is the reference
 
 `@mesh/reference-media` is intentionally simple and deterministic:
 
@@ -20,22 +20,22 @@ Deterministic in-memory media backend used as the Phase 5 MVP authoring referenc
 - it uses `init()` plus `mesh.service.set_poll_interval(5000)`
 - it handles commands with `on_command_play`, `on_command_pause`, `on_command_next`, and `on_command_previous`
 
-That makes it the shortest proven path for backend plugin authors who want to copy the MVP contract without inheriting placeholder or platform-specific behavior.
+That makes it the shortest proven path for backend module authors who want to copy the MVP contract without inheriting placeholder or platform-specific behavior.
 
 ## Manifest contract
 
-The provider manifest lives at `packages/plugins/backend/core/reference-media/plugin.json` and declares:
+The provider manifest lives at `packages/modules/backend/core/reference-media/package.json` and declares:
 
 - `id = "@mesh/reference-media"`
 - `type = "backend"`
 - `entrypoints.main = "src/main.luau"`
 - `provides[0].interface = "mesh.media"`
-- `provides[0].base_plugin = "@mesh/media-interface"`
+- `provides[0].base_module = "@mesh/media-interface"`
 - required capabilities `service.media.read` and `service.media.control`
 
 ## Runtime shape
 
-The implementation lives in `packages/plugins/backend/core/reference-media/src/main.luau`.
+The implementation lives in `packages/modules/backend/core/reference-media/src/main.luau`.
 
 It reads config once at startup:
 
@@ -86,8 +86,8 @@ Each handler reads the current payload with `mesh.service.payload()` so the comm
 
 For a new backend MVP provider, copy this structure:
 
-1. Declare the provider in `package.json` with `mesh.implements[].interface` and `basePlugin`.
-2. Read plugin settings from `mesh.config()`.
+1. Declare the provider in `package.json` with `mesh.implements[].interface` and `baseModule`.
+2. Read module settings from `mesh.config()`.
 3. Export top-level `state = { ... }` with the interface's required fields.
 4. Use `init()` to log startup, set the poll interval, and prepare the first state snapshot.
 5. Keep `on_poll()` deterministic and focused on refreshing exported state.

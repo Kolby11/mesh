@@ -1,7 +1,7 @@
 # MESH Documentation
 
 Docs for the MESH shell framework. For a high-level project description see
-[`../README.md`](../README.md); for the authoritative plugin / capability /
+[`../README.md`](../README.md); for the authoritative module / capability /
 lifecycle spec see [`../spec/pluggable-backend.md`](../spec/pluggable-backend.md).
 
 ## Contents
@@ -12,13 +12,13 @@ lifecycle spec see [`../spec/pluggable-backend.md`](../spec/pluggable-backend.md
 - **[`extensibility.md`](./extensibility.md)** — interface registry, contract
   packages, cross-language bindings, event channels, capability
   classification. The backbone of the extensibility story.
-- **Plugins**
-  - [`plugins/README.md`](./plugins/README.md) — core-plugin index.
-  - [shipped frontend plugin docs](./plugins/frontend/core/README.md) — shipped
+- **Modules**
+  - [`modules/README.md`](./modules/README.md) — core-module index.
+  - [shipped frontend module docs](./modules/frontend/core/README.md) — shipped
     frontend surfaces and widgets.
-  - [example frontend plugin docs](./plugins/frontend/examples/README.md) —
+  - [example frontend module docs](./modules/frontend/examples/README.md) —
     example frontend compositions and reusable sample widgets.
-  - [shipped backend plugin docs](./plugins/backend/core/README.md) — shipped
+  - [shipped backend module docs](./modules/backend/core/README.md) — shipped
     backends and interface packages.
 - **Frontend**
   - [`frontend/mesh-syntax.md`](./frontend/mesh-syntax.md) — `.mesh` component syntax: tags, text interpolation, attribute binding, two-way binding, event handlers, accessibility.
@@ -30,13 +30,13 @@ lifecycle spec see [`../spec/pluggable-backend.md`](../spec/pluggable-backend.md
     inheritance, modes, hot-swap.
   - [`theming/icons.md`](./theming/icons.md) — icon packs, fallback chain,
     Material-3-style variable axes.
-  - [`theming/locales.md`](./theming/locales.md) — plugin-bundled
+  - [`theming/locales.md`](./theming/locales.md) — module-bundled
     translations, third-party language packs, locale fallback chain.
 - **Settings**
   - [`settings/README.md`](./settings/README.md) — JSON settings with a
     six-layer override stack, contract-level shared schemas.
 - **Lifecycle**
-  - [`installation.md`](./installation.md) — `plugin.json` manifest,
+  - [`installation.md`](./installation.md) — `package.json` manifest,
     dependency kinds, resolution, multi-provider handling, lockfile.
-  - [`health.md`](./health.md) — plugin health states, dep-driven fix
+  - [`health.md`](./health.md) — module health states, dep-driven fix
     suggestions, health subscriptions, `mesh doctor`.

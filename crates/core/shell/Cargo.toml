@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-mesh-core-plugin = { workspace = true }
+mesh-core-module = { workspace = true }
 mesh-core-capability = { workspace = true }
 mesh-core-component = { workspace = true }
 mesh-core-events = { workspace = true }

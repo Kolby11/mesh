@@ -1,11 +1,11 @@
-/// Plugin lifecycle state machine.
+/// Module lifecycle state machine.
 use crate::manifest::{Manifest, ManifestSource};
 use std::path::PathBuf;
 use std::time::Instant;
 
-/// The states a plugin moves through during its lifetime.
+/// The states a module moves through during its lifetime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginState {
+pub enum ModuleState {
     Discovered,
     Resolved,
     Loaded,
@@ -16,7 +16,7 @@ pub enum PluginState {
     Errored,
 }
 
-impl std::fmt::Display for PluginState {
+impl std::fmt::Display for ModuleState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Discovered => write!(f, "discovered"),
@@ -31,20 +31,20 @@ impl std::fmt::Display for PluginState {
     }
 }
 
-/// A live plugin instance tracked by the core.
+/// A live module instance tracked by the core.
 #[derive(Debug)]
-pub struct PluginInstance {
+pub struct ModuleInstance {
     pub manifest: Manifest,
     pub path: PathBuf,
     pub manifest_path: PathBuf,
     pub manifest_source: ManifestSource,
-    pub state: PluginState,
+    pub state: ModuleState,
     pub error_count: u32,
     pub last_error: Option<String>,
     pub loaded_at: Option<Instant>,
 }
 
-impl PluginInstance {
+impl ModuleInstance {
     pub fn new(
         manifest: Manifest,
         path: PathBuf,
@@ -56,7 +56,7 @@ impl PluginInstance {
             path,
             manifest_path,
             manifest_source,
-            state: PluginState::Discovered,
+            state: ModuleState::Discovered,
             error_count: 0,
             last_error: None,
             loaded_at: None,
@@ -68,33 +68,33 @@ impl PluginInstance {
     }
 
     /// Transition to a new state, enforcing valid transitions.
-    pub fn transition(&mut self, to: PluginState) -> Result<(), LifecycleError> {
+    pub fn transition(&mut self, to: ModuleState) -> Result<(), LifecycleError> {
         let valid = matches!(
             (self.state, to),
-            (PluginState::Discovered, PluginState::Resolved)
-                | (PluginState::Resolved, PluginState::Loaded)
-                | (PluginState::Loaded, PluginState::Initialized)
-                | (PluginState::Initialized, PluginState::Running)
-                | (PluginState::Running, PluginState::Suspended)
-                | (PluginState::Suspended, PluginState::Running)
-                | (PluginState::Running, PluginState::Unloaded)
-                | (PluginState::Suspended, PluginState::Unloaded)
-                | (_, PluginState::Errored)
+            (ModuleState::Discovered, ModuleState::Resolved)
+                | (ModuleState::Resolved, ModuleState::Loaded)
+                | (ModuleState::Loaded, ModuleState::Initialized)
+                | (ModuleState::Initialized, ModuleState::Running)
+                | (ModuleState::Running, ModuleState::Suspended)
+                | (ModuleState::Suspended, ModuleState::Running)
+                | (ModuleState::Running, ModuleState::Unloaded)
+                | (ModuleState::Suspended, ModuleState::Unloaded)
+                | (_, ModuleState::Errored)
         );
 
         if !valid {
             return Err(LifecycleError::InvalidTransition {
-                plugin_id: self.id().to_string(),
+                module_id: self.id().to_string(),
                 from: self.state,
                 to,
             });
         }
 
-        if to == PluginState::Loaded {
+        if to == ModuleState::Loaded {
             self.loaded_at = Some(Instant::now());
         }
 
-        if to == PluginState::Errored {
+        if to == ModuleState::Errored {
             self.error_count += 1;
         }
 
@@ -102,7 +102,7 @@ impl PluginInstance {
         Ok(())
     }
 
-    /// Whether the plugin has errored too many times and should be disabled.
+    /// Whether the module has errored too many times and should be disabled.
     pub fn should_disable(&self) -> bool {
         self.error_count >= 3
     }
@@ -110,10 +110,10 @@ impl PluginInstance {
 
 #[derive(Debug, thiserror::Error)]
 pub enum LifecycleError {
-    #[error("invalid state transition for plugin '{plugin_id}': {from} -> {to}")]
+    #[error("invalid state transition for module '{module_id}': {from} -> {to}")]
     InvalidTransition {
-        plugin_id: String,
-        from: PluginState,
-        to: PluginState,
+        module_id: String,
+        from: ModuleState,
+        to: ModuleState,
     },
 }

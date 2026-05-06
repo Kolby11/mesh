@@ -1,10 +1,10 @@
-/// Plugin manifest loading and normalized representation.
+/// Module manifest loading and normalized representation.
 use mesh_core_capability::Capability;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// The normalized contents of a plugin manifest, regardless of source format.
+/// The normalized contents of a module manifest, regardless of source format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub package: PackageSection,
@@ -61,7 +61,7 @@ impl Manifest {
                 vec![ProvidedInterface {
                     interface: service.provides.clone(),
                     version: None,
-                    base_plugin: None,
+                    base_module: None,
                     backend_name: Some(service.backend_name.clone()),
                     priority: service.priority,
                     optional_capabilities: Vec::new(),
@@ -86,19 +86,19 @@ impl Manifest {
         })
     }
 
-    pub fn required_plugin_dependencies(&self) -> Vec<String> {
+    pub fn required_module_dependencies(&self) -> Vec<String> {
         self.dependencies
-            .plugins
+            .modules
             .iter()
             .filter(|(_, spec)| !spec.is_optional())
-            .map(|(plugin_id, _)| plugin_id.clone())
+            .map(|(module_id, _)| module_id.clone())
             .collect()
     }
 
     pub fn slot_host_dependencies(&self) -> Vec<String> {
         self.slot_contributions
             .keys()
-            .filter_map(|slot_id| slot_id.split_once(':').map(|(plugin_id, _)| plugin_id))
+            .filter_map(|slot_id| slot_id.split_once(':').map(|(module_id, _)| module_id))
             .map(ToString::to_string)
             .collect()
     }
@@ -118,7 +118,7 @@ pub struct PackageSection {
     pub name: Option<String>,
     pub version: String,
     #[serde(rename = "type")]
-    pub plugin_type: PluginType,
+    pub module_type: ModuleType,
     pub api_version: String,
     #[serde(default)]
     pub license: Option<String>,
@@ -142,7 +142,7 @@ pub struct AccessibilitySection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum PluginType {
+pub enum ModuleType {
     Surface,
     Widget,
     Backend,
@@ -152,7 +152,7 @@ pub enum PluginType {
     Interface,
 }
 
-impl std::fmt::Display for PluginType {
+impl std::fmt::Display for ModuleType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Surface => write!(f, "surface"),
@@ -175,14 +175,14 @@ pub struct ServiceSection {
     pub priority: u32,
 }
 
-/// New-style backend/interface declaration from `plugin.json`.
+/// New-style backend/interface declaration from `package.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProvidedInterface {
     pub interface: String,
     #[serde(default)]
     pub version: Option<String>,
     #[serde(default)]
-    pub base_plugin: Option<String>,
+    pub base_module: Option<String>,
     #[serde(default)]
     pub backend_name: Option<String>,
     #[serde(default)]
@@ -202,7 +202,7 @@ pub struct CompatibilitySection {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DependenciesSection {
     #[serde(default)]
-    pub plugins: HashMap<String, DependencySpec>,
+    pub modules: HashMap<String, DependencySpec>,
     #[serde(default)]
     pub interfaces: Vec<InterfaceDependency>,
     #[serde(default)]
@@ -221,7 +221,7 @@ pub struct DependenciesSection {
 
 impl DependenciesSection {
     pub fn is_empty(&self) -> bool {
-        self.plugins.is_empty()
+        self.modules.is_empty()
             && self.interfaces.is_empty()
             && self.icon_packs.is_empty()
             && self.language_packs.is_empty()
@@ -292,6 +292,8 @@ pub struct BinaryDependency {
     pub version: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
+    #[serde(default)]
+    pub optional: bool,
     #[serde(default)]
     pub packages: HashMap<String, String>,
 }
@@ -447,15 +449,17 @@ pub struct IconRequirementsSection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManifestSource {
+    PackageJson,
     MeshToml,
-    PluginJson,
+    ModuleJson,
 }
 
 impl std::fmt::Display for ManifestSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::PackageJson => write!(f, "package.json"),
             Self::MeshToml => write!(f, "mesh.toml"),
-            Self::PluginJson => write!(f, "plugin.json"),
+            Self::ModuleJson => write!(f, "module.json"),
         }
     }
 }
@@ -469,11 +473,11 @@ pub struct LoadedManifest {
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum DependencyGraphError {
-    #[error("plugin dependency cycle detected: {cycle:?}")]
+    #[error("module dependency cycle detected: {cycle:?}")]
     Cycle { cycle: Vec<String> },
 }
 
-pub fn validate_plugin_dependency_graph<'a, I>(manifests: I) -> Result<(), DependencyGraphError>
+pub fn validate_module_dependency_graph<'a, I>(manifests: I) -> Result<(), DependencyGraphError>
 where
     I: IntoIterator<Item = &'a Manifest>,
 {
@@ -489,20 +493,20 @@ where
         .collect();
     let mut state = HashMap::<String, VisitState>::new();
     let mut stack = Vec::<String>::new();
-    let mut plugin_ids: Vec<String> = manifest_map.keys().cloned().collect();
-    plugin_ids.sort();
+    let mut module_ids: Vec<String> = manifest_map.keys().cloned().collect();
+    module_ids.sort();
 
-    fn adjacency(manifest: &Manifest, known_plugins: &HashMap<String, &Manifest>) -> Vec<String> {
+    fn adjacency(manifest: &Manifest, known_modules: &HashMap<String, &Manifest>) -> Vec<String> {
         let mut neighbors: Vec<String> = manifest
-            .required_plugin_dependencies()
+            .required_module_dependencies()
             .into_iter()
-            .filter(|plugin_id| known_plugins.contains_key(plugin_id))
+            .filter(|module_id| known_modules.contains_key(module_id))
             .collect();
         neighbors.extend(
             manifest
                 .slot_host_dependencies()
                 .into_iter()
-                .filter(|plugin_id| known_plugins.contains_key(plugin_id)),
+                .filter(|module_id| known_modules.contains_key(module_id)),
         );
         neighbors.sort();
         neighbors.dedup();
@@ -510,15 +514,15 @@ where
     }
 
     fn visit(
-        plugin_id: &str,
+        module_id: &str,
         manifest_map: &HashMap<String, &Manifest>,
         state: &mut HashMap<String, VisitState>,
         stack: &mut Vec<String>,
     ) -> Result<(), DependencyGraphError> {
-        state.insert(plugin_id.to_string(), VisitState::Visiting);
-        stack.push(plugin_id.to_string());
+        state.insert(module_id.to_string(), VisitState::Visiting);
+        stack.push(module_id.to_string());
 
-        for neighbor in adjacency(manifest_map[plugin_id], manifest_map) {
+        for neighbor in adjacency(manifest_map[module_id], manifest_map) {
             match state.get(&neighbor).copied() {
                 Some(VisitState::Visited) => continue,
                 Some(VisitState::Visiting) => {
@@ -535,15 +539,15 @@ where
         }
 
         stack.pop();
-        state.insert(plugin_id.to_string(), VisitState::Visited);
+        state.insert(module_id.to_string(), VisitState::Visited);
         Ok(())
     }
 
-    for plugin_id in plugin_ids {
-        if state.contains_key(&plugin_id) {
+    for module_id in module_ids {
+        if state.contains_key(&module_id) {
             continue;
         }
-        visit(&plugin_id, &manifest_map, &mut state, &mut stack)?;
+        visit(&module_id, &manifest_map, &mut state, &mut stack)?;
     }
 
     Ok(())
@@ -557,35 +561,30 @@ pub enum ManifestError {
     #[error("failed to parse mesh.toml manifest: {0}")]
     Toml(#[from] toml::de::Error),
 
-    #[error("failed to parse plugin.json manifest: {0}")]
+    #[error("failed to parse package.json manifest: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("no manifest found in plugin directory {0}")]
+    #[error("no manifest found in module directory {0}")]
     NotFound(PathBuf),
 }
 
-pub fn load_manifest(plugin_dir: &Path) -> Result<LoadedManifest, ManifestError> {
-    let module_json_path = plugin_dir.join("module.json");
-    if module_json_path.exists() {
-        return load_plugin_json(&module_json_path);
-    }
-
-    let package_json_path = plugin_dir.join("package.json");
+pub fn load_manifest(module_dir: &Path) -> Result<LoadedManifest, ManifestError> {
+    let package_json_path = module_dir.join("package.json");
     if package_json_path.exists() {
         return load_package_json(&package_json_path);
     }
 
-    let plugin_json_path = plugin_dir.join("plugin.json");
-    if plugin_json_path.exists() {
-        return load_plugin_json(&plugin_json_path);
+    let module_json_path = module_dir.join("module.json");
+    if module_json_path.exists() {
+        return load_module_json(&module_json_path);
     }
 
-    let mesh_toml_path = plugin_dir.join("mesh.toml");
+    let mesh_toml_path = module_dir.join("mesh.toml");
     if mesh_toml_path.exists() {
         return load_mesh_toml(&mesh_toml_path);
     }
 
-    Err(ManifestError::NotFound(plugin_dir.to_path_buf()))
+    Err(ManifestError::NotFound(module_dir.to_path_buf()))
 }
 
 fn load_package_json(path: &Path) -> Result<LoadedManifest, ManifestError> {
@@ -595,18 +594,18 @@ fn load_package_json(path: &Path) -> Result<LoadedManifest, ManifestError> {
     Ok(LoadedManifest {
         manifest: parsed.into_runtime_manifest(),
         path: path.to_path_buf(),
-        source: ManifestSource::PluginJson,
+        source: ManifestSource::PackageJson,
     })
 }
 
-fn load_plugin_json(path: &Path) -> Result<LoadedManifest, ManifestError> {
+fn load_module_json(path: &Path) -> Result<LoadedManifest, ManifestError> {
     let content = std::fs::read_to_string(path)?;
     let parsed: JsonManifest = serde_json::from_str(&content)?;
 
     Ok(LoadedManifest {
         manifest: parsed.into_manifest(),
         path: path.to_path_buf(),
-        source: ManifestSource::PluginJson,
+        source: ManifestSource::ModuleJson,
     })
 }
 
@@ -670,7 +669,7 @@ impl TomlManifest {
             package: self.package,
             compatibility: self.compatibility,
             dependencies: DependenciesSection {
-                plugins: self.dependencies,
+                modules: self.dependencies,
                 ..DependenciesSection::default()
             },
             capabilities: self.capabilities,
@@ -767,7 +766,7 @@ struct JsonManifest {
     name: Option<String>,
     version: String,
     #[serde(rename = "type")]
-    plugin_type: PluginType,
+    module_type: ModuleType,
     api_version: String,
     #[serde(default)]
     license: Option<String>,
@@ -822,7 +821,7 @@ impl JsonManifest {
                 id: self.id,
                 name: self.name,
                 version: self.version,
-                plugin_type: self.plugin_type,
+                module_type: self.module_type,
                 api_version: self.api_version,
                 license: self.license,
                 description: self.description,
@@ -855,7 +854,7 @@ impl JsonManifest {
 #[derive(Debug, Clone, Default, Deserialize)]
 struct JsonDependenciesSection {
     #[serde(default)]
-    plugins: HashMap<String, DependencySpec>,
+    modules: HashMap<String, DependencySpec>,
     #[serde(default)]
     interfaces: Vec<InterfaceDependency>,
     #[serde(default)]
@@ -875,7 +874,7 @@ struct JsonDependenciesSection {
 impl JsonDependenciesSection {
     fn into_dependencies(self) -> DependenciesSection {
         DependenciesSection {
-            plugins: self.plugins,
+            modules: self.modules,
             interfaces: self.interfaces,
             icon_packs: self.icon_packs,
             language_packs: self.language_packs,
@@ -976,7 +975,7 @@ main = "src/main.mesh"
     }
 
     #[test]
-    fn parses_plugin_json_manifest() {
+    fn parses_module_json_manifest() {
         let content = r#"
 {
   "id": "@mesh/panel",
@@ -984,7 +983,7 @@ main = "src/main.mesh"
   "type": "surface",
   "api_version": "0.1",
   "dependencies": {
-    "plugins": {
+    "modules": {
       "@mesh/audio-contract": ">=1.0.0"
     },
     "interfaces": [
@@ -1003,7 +1002,7 @@ main = "src/main.mesh"
     {
       "interface": "mesh.audio",
       "version": "1.0",
-      "base_plugin": "@mesh/audio-interface",
+      "base_module": "@mesh/audio-interface",
       "backend_name": "PipeWire",
       "priority": 100
     }
@@ -1017,12 +1016,12 @@ main = "src/main.mesh"
         assert_eq!(manifest.package.id, "@mesh/panel");
         assert_eq!(manifest.exported_component_tag(), Some("PanelRoot"));
         assert_eq!(
-            manifest.dependencies.plugins["@mesh/audio-contract"],
+            manifest.dependencies.modules["@mesh/audio-contract"],
             DependencySpec::Simple(">=1.0.0".to_string())
         );
         assert_eq!(manifest.declared_provides()[0].interface, "mesh.audio");
         assert_eq!(
-            manifest.declared_provides()[0].base_plugin.as_deref(),
+            manifest.declared_provides()[0].base_module.as_deref(),
             Some("@mesh/audio-interface")
         );
     }
@@ -1052,7 +1051,7 @@ main = "src/main.mesh"
       {
         "interface": "mesh.audio",
         "version": "1.0",
-        "basePlugin": "@mesh/audio-interface",
+        "baseModule": "@mesh/audio-interface",
         "provider": "pipewire",
         "label": "PipeWire",
         "priority": 100
@@ -1066,7 +1065,7 @@ main = "src/main.mesh"
         let loaded = load_manifest(&dir).unwrap();
         assert_eq!(loaded.path, dir.join("package.json"));
         assert_eq!(loaded.manifest.package.id, "@mesh/pipewire-audio");
-        assert_eq!(loaded.manifest.package.plugin_type, PluginType::Backend);
+        assert_eq!(loaded.manifest.package.module_type, ModuleType::Backend);
         assert_eq!(
             loaded.manifest.entrypoints.main.as_deref(),
             Some("src/main.luau")
@@ -1075,7 +1074,7 @@ main = "src/main.mesh"
         assert_eq!(loaded.manifest.dependencies.binaries[0].name, "wpctl");
         assert_eq!(
             loaded.manifest.declared_provides()[0]
-                .base_plugin
+                .base_module
                 .as_deref(),
             Some("@mesh/audio-interface")
         );
@@ -1084,7 +1083,7 @@ main = "src/main.mesh"
     }
 
     #[test]
-    fn parses_plugin_json_icon_requirements() {
+    fn parses_module_json_icon_requirements() {
         let content = r#"
 {
   "id": "@mesh/panel",
@@ -1137,7 +1136,7 @@ main = "src/main.mesh"
                 id: id.to_string(),
                 name: None,
                 version: "0.1.0".into(),
-                plugin_type: PluginType::Widget,
+                module_type: ModuleType::Widget,
                 api_version: "0.1".into(),
                 license: None,
                 description: None,
@@ -1146,7 +1145,7 @@ main = "src/main.mesh"
             },
             compatibility: CompatibilitySection::default(),
             dependencies: DependenciesSection {
-                plugins: dependencies
+                modules: dependencies
                     .iter()
                     .map(|(dependency_id, optional)| {
                         let spec = if *optional {
@@ -1189,11 +1188,11 @@ main = "src/main.mesh"
     }
 
     #[test]
-    fn detects_required_plugin_dependency_cycles() {
+    fn detects_required_module_dependency_cycles() {
         let a = manifest_with_dependencies("@mesh/a", &[("@mesh/b", false)], &[]);
         let b = manifest_with_dependencies("@mesh/b", &[("@mesh/a", false)], &[]);
 
-        let err = validate_plugin_dependency_graph([&a, &b]).unwrap_err();
+        let err = validate_module_dependency_graph([&a, &b]).unwrap_err();
         match err {
             DependencyGraphError::Cycle { cycle } => {
                 assert_eq!(cycle, vec!["@mesh/a", "@mesh/b", "@mesh/a"]);
@@ -1206,7 +1205,7 @@ main = "src/main.mesh"
         let a = manifest_with_dependencies("@mesh/a", &[("@mesh/b", true)], &[]);
         let b = manifest_with_dependencies("@mesh/b", &[("@mesh/a", false)], &[]);
 
-        validate_plugin_dependency_graph([&a, &b]).unwrap();
+        validate_module_dependency_graph([&a, &b]).unwrap();
     }
 
     #[test]
@@ -1214,7 +1213,7 @@ main = "src/main.mesh"
         let a = manifest_with_dependencies("@mesh/a", &[("@mesh/b", false)], &[]);
         let b = manifest_with_dependencies("@mesh/b", &[], &["@mesh/a:main"]);
 
-        let err = validate_plugin_dependency_graph([&a, &b]).unwrap_err();
+        let err = validate_module_dependency_graph([&a, &b]).unwrap_err();
         match err {
             DependencyGraphError::Cycle { cycle } => {
                 assert_eq!(cycle, vec!["@mesh/a", "@mesh/b", "@mesh/a"]);

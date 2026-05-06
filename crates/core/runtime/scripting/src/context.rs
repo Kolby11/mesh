@@ -1,5 +1,5 @@
 use crate::host_api::{HostApiManifest, InterfaceProxy};
-/// Script execution context — one per plugin/component instance.
+/// Script execution context — one per module/component instance.
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_elements::VariableStore;
 use mesh_core_locale::LocaleEngine;
@@ -14,13 +14,13 @@ use std::sync::{Arc, Mutex};
 pub struct PublishedEvent {
     pub channel: String,
     pub payload: Value,
-    pub source_plugin_id: String,
+    pub source_module_id: String,
     pub source_capabilities: CapabilitySet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptDiagnostic {
-    pub plugin_id: String,
+    pub module_id: String,
     pub interface: String,
     pub requested_version: Option<String>,
     pub reason: String,
@@ -215,7 +215,7 @@ impl ScriptState {
 /// synced to the template; `local` variables are private to the script.
 #[derive(Debug)]
 pub struct ScriptContext {
-    pub plugin_id: String,
+    pub module_id: String,
     pub capabilities: CapabilitySet,
     pub state: ScriptState,
     lua: Lua,
@@ -233,13 +233,13 @@ pub struct ScriptContext {
 }
 
 impl ScriptContext {
-    /// Create a new script context for a plugin.
+    /// Create a new script context for a module.
     pub fn new(
-        plugin_id: impl Into<String>,
+        module_id: impl Into<String>,
         capabilities: CapabilitySet,
     ) -> Result<Self, ScriptError> {
         Ok(Self {
-            plugin_id: plugin_id.into(),
+            module_id: module_id.into(),
             capabilities,
             state: ScriptState::new(),
             lua: Lua::new(),
@@ -287,11 +287,11 @@ impl ScriptContext {
             .collect();
         self.lua
             .load(source)
-            .set_name(&self.plugin_id)
+            .set_name(&self.module_id)
             .exec()
             .map_err(|err| map_lua_error(&self.interface_catalog, err))?;
         self.sync_state_from_lua();
-        tracing::info!("loaded script for plugin {}", self.plugin_id);
+        tracing::info!("loaded script for module {}", self.module_id);
         Ok(())
     }
 
@@ -326,7 +326,7 @@ impl ScriptContext {
     /// Call the script's `init()` function if it exists.
     pub fn call_init(&mut self) -> Result<(), ScriptError> {
         if let Ok(init) = self.lua.globals().get::<Function>("init") {
-            tracing::debug!("calling init() for {}", self.plugin_id);
+            tracing::debug!("calling init() for {}", self.module_id);
             init.call::<()>(())
                 .map_err(|err| map_lua_error(&self.interface_catalog, err))?;
             self.sync_state_from_lua();
@@ -341,7 +341,7 @@ impl ScriptContext {
         let handler = globals
             .get::<Function>(name)
             .map_err(|_| ScriptError::HandlerNotFound(name.to_string()))?;
-        tracing::debug!("calling handler {name}() for {}", self.plugin_id);
+        tracing::debug!("calling handler {name}() for {}", self.module_id);
         match _args.len() {
             0 => handler
                 .call::<()>(())
@@ -409,7 +409,7 @@ impl ScriptContext {
         let tracked_service_fields = Arc::clone(&self.tracked_service_fields);
         let interface_catalog_for_service = interface_catalog.clone();
         let allowed_interfaces_for_service = allowed_interfaces.clone();
-        let plugin_id_for_service = self.plugin_id.clone();
+        let module_id_for_service = self.module_id.clone();
         let capabilities_for_service = self.capabilities.clone();
         let diagnostics_for_service = Arc::clone(&self.shared_diagnostics);
         mesh_core_service
@@ -425,7 +425,7 @@ impl ScriptContext {
                         if canonical.starts_with("mesh.") && !readable {
                             return Err(record_lookup_diagnostic_lua(
                                 &diagnostics_for_service,
-                                &plugin_id_for_service,
+                                &module_id_for_service,
                                 &canonical,
                                 None,
                                 "capability denied",
@@ -439,7 +439,7 @@ impl ScriptContext {
                                 lookup_failure_reason(&interface_catalog_for_service, &resolution);
                             return Err(record_lookup_diagnostic_lua(
                                 &diagnostics_for_service,
-                                &plugin_id_for_service,
+                                &module_id_for_service,
                                 &canonical,
                                 None,
                                 &reason,
@@ -451,7 +451,7 @@ impl ScriptContext {
                             service_name_from_interface(&canonical),
                             resolution.contract.clone(),
                             canonical,
-                            plugin_id_for_service.clone(),
+                            module_id_for_service.clone(),
                             capabilities_for_service.clone(),
                             Arc::clone(&tracked_service_fields),
                             Arc::clone(&published_events),
@@ -462,7 +462,7 @@ impl ScriptContext {
             .map_err(lua_err)?;
 
         let published_events = Arc::clone(&self.shared_published_events);
-        let plugin_id = self.plugin_id.clone();
+        let module_id = self.module_id.clone();
         let capabilities = self.capabilities.clone();
         mesh_core_events
             .set(
@@ -471,11 +471,11 @@ impl ScriptContext {
                     .create_function(move |lua, (channel, payload): (String, Option<LuaValue>)| {
                         let payload = payload.unwrap_or(LuaValue::Nil);
                         let payload = lua.from_value::<Value>(payload)?;
-                        tracing::info!("{} published event {}", plugin_id, channel);
+                        tracing::info!("{} published event {}", module_id, channel);
                         published_events.lock().unwrap().push(PublishedEvent {
                             channel,
                             payload,
-                            source_plugin_id: plugin_id.clone(),
+                            source_module_id: module_id.clone(),
                             source_capabilities: capabilities.clone(),
                         });
                         Ok(())
@@ -496,37 +496,37 @@ impl ScriptContext {
             )
             .map_err(lua_err)?;
 
-        let plugin_id = self.plugin_id.clone();
+        let module_id = self.module_id.clone();
         mesh_log
             .set(
                 "info",
                 self.lua
                     .create_function(move |_lua, message: String| {
-                        tracing::info!("{}: {}", plugin_id, message);
+                        tracing::info!("{}: {}", module_id, message);
                         Ok(())
                     })
                     .map_err(lua_err)?,
             )
             .map_err(lua_err)?;
-        let plugin_id = self.plugin_id.clone();
+        let module_id = self.module_id.clone();
         mesh_log
             .set(
                 "warn",
                 self.lua
                     .create_function(move |_lua, message: String| {
-                        tracing::warn!("{}: {}", plugin_id, message);
+                        tracing::warn!("{}: {}", module_id, message);
                         Ok(())
                     })
                     .map_err(lua_err)?,
             )
             .map_err(lua_err)?;
-        let plugin_id = self.plugin_id.clone();
+        let module_id = self.module_id.clone();
         mesh_log
             .set(
                 "error",
                 self.lua
                     .create_function(move |_lua, message: String| {
-                        tracing::error!("{}: {}", plugin_id, message);
+                        tracing::error!("{}: {}", module_id, message);
                         Ok(())
                     })
                     .map_err(lua_err)?,
@@ -544,7 +544,7 @@ impl ScriptContext {
 
         let published_events = Arc::clone(&self.shared_published_events);
         let tracked_service_fields = Arc::clone(&self.tracked_service_fields);
-        let plugin_id_for_require = self.plugin_id.clone();
+        let module_id_for_require = self.module_id.clone();
         let capabilities_for_require = self.capabilities.clone();
         let diagnostics_for_require = Arc::clone(&self.shared_diagnostics);
         let require = self
@@ -594,7 +594,7 @@ impl ScriptContext {
                 if canonical.starts_with("mesh.") && !readable {
                     return Err(record_lookup_diagnostic_lua(
                         &diagnostics_for_require,
-                        &plugin_id_for_require,
+                        &module_id_for_require,
                         &canonical,
                         version.as_deref(),
                         "capability denied",
@@ -607,7 +607,7 @@ impl ScriptContext {
                     let reason = lookup_failure_reason(&interface_catalog, &resolution);
                     return Err(record_lookup_diagnostic_lua(
                         &diagnostics_for_require,
-                        &plugin_id_for_require,
+                        &module_id_for_require,
                         &canonical,
                         version.as_deref(),
                         &reason,
@@ -621,7 +621,7 @@ impl ScriptContext {
                 let proxy = create_interface_proxy(
                     lua,
                     resolution,
-                    plugin_id_for_require.clone(),
+                    module_id_for_require.clone(),
                     capabilities_for_require.clone(),
                     Arc::clone(&tracked_service_fields),
                     Arc::clone(&published_events),
@@ -652,7 +652,7 @@ impl ScriptContext {
             if canonical.starts_with("mesh.") && !readable {
                 record_lookup_diagnostic(
                     &self.shared_diagnostics,
-                    &self.plugin_id,
+                    &self.module_id,
                     &canonical,
                     import.version.as_deref(),
                     "capability denied",
@@ -667,7 +667,7 @@ impl ScriptContext {
                 let reason = lookup_failure_reason(&self.interface_catalog, &resolution);
                 record_lookup_diagnostic(
                     &self.shared_diagnostics,
-                    &self.plugin_id,
+                    &self.module_id,
                     &canonical,
                     import.version.as_deref(),
                     &reason,
@@ -685,7 +685,7 @@ impl ScriptContext {
             let proxy = create_interface_proxy(
                 &self.lua,
                 resolution,
-                self.plugin_id.clone(),
+                self.module_id.clone(),
                 self.capabilities.clone(),
                 Arc::clone(&self.tracked_service_fields),
                 Arc::clone(&self.shared_published_events),
@@ -750,32 +750,32 @@ impl ScriptContext {
 
 fn record_lookup_diagnostic_lua(
     diagnostics: &Arc<Mutex<Vec<ScriptDiagnostic>>>,
-    plugin_id: &str,
+    module_id: &str,
     interface: &str,
     requested_version: Option<&str>,
     reason: &str,
     err: ScriptError,
 ) -> mlua::Error {
-    record_lookup_diagnostic(diagnostics, plugin_id, interface, requested_version, reason);
+    record_lookup_diagnostic(diagnostics, module_id, interface, requested_version, reason);
     mlua::Error::external(err)
 }
 
 fn record_lookup_diagnostic(
     diagnostics: &Arc<Mutex<Vec<ScriptDiagnostic>>>,
-    plugin_id: &str,
+    module_id: &str,
     interface: &str,
     requested_version: Option<&str>,
     reason: &str,
 ) {
     tracing::error!(
-        plugin_id,
+        module_id,
         interface,
         requested_version = requested_version.unwrap_or(""),
         reason,
         "service interface lookup failed"
     );
     diagnostics.lock().unwrap().push(ScriptDiagnostic {
-        plugin_id: plugin_id.to_string(),
+        module_id: module_id.to_string(),
         interface: interface.to_string(),
         requested_version: requested_version.map(ToOwned::to_owned),
         reason: reason.to_string(),
@@ -826,7 +826,7 @@ fn interface_error_message(interface: &str, requested_version: Option<&str>) -> 
 fn create_interface_proxy(
     lua: &Lua,
     resolution: InterfaceResolution,
-    source_plugin_id: String,
+    source_module_id: String,
     source_capabilities: CapabilitySet,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
@@ -836,7 +836,7 @@ fn create_interface_proxy(
         service_name_from_interface(&resolution.requested),
         resolution.contract,
         resolution.requested,
-        source_plugin_id,
+        source_module_id,
         source_capabilities,
         tracked_service_fields,
         published_events,
@@ -848,7 +848,7 @@ fn create_service_proxy(
     service_name: String,
     contract: Option<InterfaceContract>,
     interface_name: String,
-    source_plugin_id: String,
+    source_module_id: String,
     source_capabilities: CapabilitySet,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
@@ -884,7 +884,7 @@ fn create_service_proxy(
                 let method = method.clone();
                 let iface = interface_name.clone();
                 let events = Arc::clone(&published_events);
-                let source_plugin_id = source_plugin_id.clone();
+                let source_module_id = source_module_id.clone();
                 let source_capabilities = source_capabilities.clone();
                 return Ok(LuaValue::Function(lua.create_function(
                     move |lua, args: mlua::Variadic<LuaValue>| {
@@ -912,7 +912,7 @@ fn create_service_proxy(
                         events.lock().unwrap().push(PublishedEvent {
                             channel: format!("{}.{}", iface, method.name),
                             payload: Value::Object(payload),
-                            source_plugin_id: source_plugin_id.clone(),
+                            source_module_id: source_module_id.clone(),
                             source_capabilities: source_capabilities.clone(),
                         });
                         command_result_table(lua, true, true, None).map(LuaValue::Table)
@@ -1130,8 +1130,8 @@ mod tests {
         catalog.register_provider(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
-            base_plugin: Some("@mesh/audio-interface".into()),
-            provider_plugin: "@mesh/pipewire-audio".into(),
+            base_module: Some("@mesh/audio-interface".into()),
+            provider_module: "@mesh/pipewire-audio".into(),
             backend_name: "PipeWire".into(),
             priority: 100,
         });
@@ -1143,8 +1143,8 @@ mod tests {
         catalog.register_provider(InterfaceProvider {
             interface: "mesh.theme".into(),
             version: Some("1.0".into()),
-            base_plugin: None,
-            provider_plugin: "@mesh/shell-theme".into(),
+            base_module: None,
+            provider_module: "@mesh/shell-theme".into(),
             backend_name: "Shell Theme".into(),
             priority: 100,
         });
@@ -1256,7 +1256,7 @@ end
         assert!(matches!(err, ScriptError::InterfaceUnavailable(_)));
         let diagnostics = ctx.drain_diagnostics();
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].plugin_id, "@mesh/diagnostic-test");
+        assert_eq!(diagnostics[0].module_id, "@mesh/diagnostic-test");
         assert_eq!(diagnostics[0].interface, "mesh.audio");
         assert_eq!(diagnostics[0].requested_version.as_deref(), Some(">=1.0"));
         assert!(diagnostics[0].reason.contains("missing contract"));
@@ -1282,7 +1282,7 @@ end
         assert_eq!(ctx.state.get("ok"), Some(Value::Bool(false)));
         let diagnostics = ctx.drain_diagnostics();
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].plugin_id, "@mesh/pcall-test");
+        assert_eq!(diagnostics[0].module_id, "@mesh/pcall-test");
         assert_eq!(diagnostics[0].interface, "mesh.audio");
     }
 
@@ -1671,7 +1671,7 @@ function sync_audio_state()
     local audio = require("@mesh/audio@>=1.0")
     audio_percent = audio.percent or 0
     audio_muted = audio.muted or false
-    audio_source = audio.source_plugin or ""
+    audio_source = audio.source_module or ""
 end
 "#,
         )
@@ -1682,7 +1682,7 @@ end
             &serde_json::json!({
                 "percent": 25,
                 "muted": false,
-                "source_plugin": "@mesh/pulse"
+                "source_module": "@mesh/pulse"
             }),
         );
         ctx.call_handler("sync_audio_state", &[]).unwrap();
@@ -1698,7 +1698,7 @@ end
             &serde_json::json!({
                 "percent": 82,
                 "muted": true,
-                "source_plugin": "@mesh/pipewire"
+                "source_module": "@mesh/pipewire"
             }),
         );
         ctx.call_handler("sync_audio_state", &[]).unwrap();
@@ -1794,7 +1794,7 @@ end
         assert_eq!(published.len(), 2);
         for event in published {
             assert_eq!(event.channel, "mesh.audio.set_volume");
-            assert_eq!(event.source_plugin_id, "@test/audio-widget");
+            assert_eq!(event.source_module_id, "@test/audio-widget");
             assert!(
                 event
                     .source_capabilities

@@ -1,7 +1,7 @@
 # MESH Codebase Context
 
 This file is the primary orientation guide for an LLM working on this codebase.
-It covers the crate map, plugin layout, key data flows, and common task entry points.
+It covers the crate map, module layout, key data flows, and common task entry points.
 
 ---
 
@@ -20,22 +20,22 @@ hierarchy clear:
   elements and, optionally, other components. Components own their template,
   Luau state and handlers, styles, schema, translations, and metadata. A
   component is an authoring abstraction, not a built-in core primitive.
-- **Frontend plugin**: a complete frontend implementation for a specific shell
-  feature or capability. It has a `plugin.json`, entrypoint `.mesh`,
+- **Frontend module**: a complete frontend implementation for a specific shell
+  feature or capability. It has a `package.json`, entrypoint `.mesh`,
   capabilities, settings, optional exports, and can contain multiple
-  components. For example, an audio controls frontend plugin may include
+  components. For example, an audio controls frontend module may include
   components for the volume mixer, mute toggle, output selector, and device
   list.
 
 When designing Lua access or intellisense, model this as:
 
 ```
-MESH core elements -> user components -> frontend plugin
+MESH core elements -> user components -> frontend module
 ```
 
 For example, `icon` is an element with core-defined fields such as `name`,
 `src`, and `size`; `VolumeButton.mesh` is a component that composes `button`,
-`icon`, and `text`; `@mesh/audio-controls` is a frontend plugin that packages
+`icon`, and `text`; `@mesh/audio-controls` is a frontend module that packages
 multiple audio-related components into a complete UI.
 
 The LSP must use the shared `mesh-core-elements` element model for `refs.<name>`
@@ -53,16 +53,16 @@ downward — lower crates know nothing about higher ones.
 ```
 mesh-tools-cli
   └─ mesh-core-shell          ← shell orchestrator, owns the main event loop
-       ├─ mesh-core-render ← compiles .mesh frontend plugins and paints WidgetNode trees
+       ├─ mesh-core-render ← compiles .mesh frontend modules and paints WidgetNode trees
        │    ├─ mesh-core-component     ← parser for .mesh single-file components
        │    └─ mesh-core-elements   ← core element model, layout engine, style resolver, WidgetNode
-       ├─ mesh-core-backend   ← Luau backend plugin polling and command runtime
+       ├─ mesh-core-backend   ← Luau backend module polling and command runtime
        │    └─ mesh-core-scripting     ← Luau host APIs and script state bridge
        ├─ mesh-core-service   ← interface/service registry (InterfaceRegistry)
-       ├─ mesh-core-plugin    ← manifest parsing (Manifest, plugin.json / mesh.toml)
+       ├─ mesh-core-module    ← manifest parsing (Manifest, package.json / mesh.toml)
        ├─ mesh-core-theme     ← token-based theming (ThemeEngine, Theme)
        ├─ mesh-core-locale    ← localization (LocaleEngine)
-       ├─ mesh-core-events    ← typed event bus for inter-plugin communication
+       ├─ mesh-core-events    ← typed event bus for inter-module communication
        ├─ mesh-core-config    ← shell-wide settings (ShellConfig, ShellSettings)
        ├─ mesh-core-capability← capability/permission model
        ├─ mesh-core-wayland   ← Wayland surface abstractions (ShellSurface, Layer)
@@ -75,10 +75,10 @@ mesh-tools-cli
 
 | Crate                 | Key types / files                                                                                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `mesh-core-shell`     | `Shell` in `shell/mod.rs` — plugin host and shell orchestrator; `FrontendSurfaceComponent`, `ShellComponent` trait, `CoreRequest`, `CoreEvent`   |
-| `mesh-core-plugin`    | `Manifest`, `PluginType`, `SurfaceLayoutSection` in `manifest.rs`; `PluginInstance` in `lifecycle.rs`                                            |
+| `mesh-core-shell`     | `Shell` in `shell/mod.rs` — module host and shell orchestrator; `FrontendSurfaceComponent`, `ShellComponent` trait, `CoreRequest`, `CoreEvent`   |
+| `mesh-core-module`    | `Manifest`, `ModuleType`, `SurfaceLayoutSection` in `manifest.rs`; `ModuleInstance` in `lifecycle.rs`                                            |
 | `mesh-core-component` | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>`, and `<i18n>` blocks                                                   |
-| `mesh-core-render`    | `CompiledFrontendPlugin`, `FrontendCompositionResolver`, `RenderEngine`, `PixelBuffer`, `SharedTextMeasurer`, `LayerSurfaceConfig`               |
+| `mesh-core-render`    | `CompiledFrontendModule`, `FrontendCompositionResolver`, `RenderEngine`, `PixelBuffer`, `SharedTextMeasurer`, `LayerSurfaceConfig`               |
 | `mesh-core-backend`   | `spawn_backend_service`, `BackendServiceCommand`, `BackendServiceUpdate`                                                                         |
 | `mesh-core-scripting` | `ScriptContext`, `BackendScriptContext`, `ScriptState`, `LocaleBoundState`                                                                       |
 | `mesh-core-elements`  | `ElementKind`, `ElementTypeDef`, `ElementSnapshot`, `WidgetNode`, `LayoutRect`, `StyleContext`, `StyleResolver`, `VariableStore`, `ElementState` |
@@ -90,11 +90,11 @@ mesh-tools-cli
 
 ---
 
-## Plugin Ecosystem
+## Module Ecosystem
 
 ```
-plugins/
-  frontend/core/        ← built-in surface and widget plugins
+modules/
+  frontend/core/        ← built-in surface and widget modules
     panel/              ← top panel (surface)
     launcher/           ← app launcher popover (surface, content_measured)
     quick-settings/     ← quick settings drawer (surface)
@@ -107,7 +107,7 @@ plugins/
     notification-feed/
     notification-sidebar/
 
-  backend/core/         ← service plugins (scripted backends, declared by plugin.json)
+  backend/core/         ← service modules (scripted backends, declared by package.json)
     pipewire-audio/     ← audio via PipeWire
     pulseaudio-audio/   ← audio via PulseAudio
     mpris-media/        ← media via MPRIS
@@ -123,18 +123,18 @@ plugins/
     brightness-interface/
 ```
 
-### Frontend plugin anatomy (`plugin.json`)
+### Frontend module anatomy (`package.json`)
 
-Every frontend plugin is a complete feature package. It declares in its
-`plugin.json`:
+Every frontend module is a complete feature package. It declares in its
+`package.json`:
 - `type`: `"surface"` | `"widget"` | `"backend"` | `"interface"`
 - `entrypoints.main`: path to the `.mesh` single-file component
 - `settings.schema.surface.properties`: layout defaults (anchor, layer, width, height, etc.) — **user-editable**
 - `surface_layout`: non-user renderer hints (`size_policy`, `prefers_content_children_sizing`, clamp bounds)
 - `capabilities.required`: permission gates (`shell.surface`, `theme.read`, etc.)
-- `dependencies.plugins`: plugin IDs this plugin depends on
+- `dependencies.modules`: module IDs this module depends on
 
-Surface layout defaults live in `plugin.json`, **not** in Rust. `mesh-core-shell` reads them via `surface_layout_from_manifest()` in `shell.rs`.
+Surface layout defaults live in `package.json`, **not** in Rust. `mesh-core-shell` reads them via `surface_layout_from_manifest()` in `shell.rs`.
 
 ### `.mesh` single-file component structure
 
@@ -147,7 +147,7 @@ Surface layout defaults live in `plugin.json`, **not** in Rust. `mesh-core-shell
 
 Components are reusable authoring units. They should be made from MESH core
 elements (`button`, `icon`, `input`, etc.) or other components. Do not call a
-full frontend plugin a component; the plugin is the package that owns settings,
+full frontend module a component; the module is the package that owns settings,
 capabilities, manifests, and one or more components.
 
 **CRITICAL CODE STYLE**: Component files should be small and focused. Always extract layout sections, list items, and logically distinct UI blocks into their own separate components (e.g., in a `components/` subdirectory). Custom PascalCase component tags must be imported explicitly in the script block, such as `import ItemRow from "./components/item-row.mesh"`. This is especially important for items inside `{#for ...}` loops so they can encapsulate their own event state (like capturing list item IDs) instead of relying on DOM dataset attributes (which are not supported in event handlers).
@@ -159,10 +159,10 @@ capabilities, manifests, and one or more components.
 ### Shell startup
 
 1. `mesh-tools-cli` → `Shell::run()` in `mesh-core-shell/src/shell.rs`
-2. Shell discovers plugins via `plugin_search_paths()` (workspace, `/usr/share/mesh`, `~/.local/share/mesh`)
-3. Each plugin dir is loaded from manifest metadata; frontend plugins are compiled via `mesh-core-render`, backend plugins are hosted by `mesh-core-backend`
-4. `FrontendSurfaceComponent::new()` is created per surface plugin:
-   - reads `plugin.json` manifest → `surface_layout_from_manifest()` for layout defaults
+2. Shell discovers modules via `module_search_paths()` (workspace, `/usr/share/mesh`, `~/.local/share/mesh`)
+3. Each module dir is loaded from manifest metadata; frontend modules are compiled via `mesh-core-render`, backend modules are hosted by `mesh-core-backend`
+4. `FrontendSurfaceComponent::new()` is created per surface module:
+   - reads `package.json` manifest → `surface_layout_from_manifest()` for layout defaults
    - reads `config/settings.json` → user overrides applied on top of manifest defaults
 5. Shell enters the main event loop (Tokio runtime)
 
@@ -177,11 +177,11 @@ capabilities, manifests, and one or more components.
 ### Settings flow
 
 ```
-plugin.json settings.schema.surface.properties[field].default
+package.json settings.schema.surface.properties[field].default
   ↓  (baseline)
 surface_layout_from_manifest()
   ↓  + user overrides
-config/settings.json  →  load_frontend_plugin_settings()
+config/settings.json  →  load_frontend_module_settings()
   ↓
 FrontendSurfaceComponent.surface_layout / settings_json
   ↓
@@ -191,29 +191,29 @@ ScriptContext state["settings"]  ←  Luau reads {settings.surface.anchor}
 ### Service/interface flow
 
 ```
-backend plugin (mesh.toml, provides = "mesh.audio")
+backend module (mesh.toml, provides = "mesh.audio")
   → registered in InterfaceRegistry
   → emits events on EventBus
   → Shell sets __mesh_svc_audio Lua table and calls on_change handlers via ScriptContext
-  → frontend plugins use require("@mesh/audio") proxy to read state and call commands
+  → frontend modules use require("@mesh/audio") proxy to read state and call commands
 ```
 
 ---
 
 ## Common Task Entry Points
 
-| Task                           | Where to start                                                                                                                  |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| Add a CSS property             | `mesh-core-elements/src/style.rs` (parse), `mesh-core-render/src/surface/painter.rs` (paint)                                    |
-| Add a new surface plugin       | Create `packages/plugins/frontend/core/<name>/`, `plugin.json` with `"type": "surface"`, `src/main.mesh`                        |
-| Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core-shell/src/shell.rs`; manifest's `surface_layout` section                         |
-| Add a service (backend plugin) | `packages/plugins/backend/core/<name>/`, `plugin.json` + `src/main.luau`, implement the interface contract in the plugin script |
-| Add a new CoreRequest action   | `CoreRequest` enum + match arm in `handle_request()` in `mesh-core-shell/src/shell.rs`                                          |
-| Add a theme token              | `mesh-core-theme/src/lib.rs`, default theme JSON, then reference with `token(group.name)` in `.mesh`                            |
-| Add localization               | Plugin's `<i18n>` block or `config/i18n/<locale>.json`; `LocaleEngine` in `mesh-core-locale`                                    |
-| Debug rendering                | `ToggleDebugOverlay` / `CoreRequest::CycleDebugTab`; see `mesh-core-debug/src/lib.rs`                                           |
-| Plugin manifest parsing        | `mesh-core-plugin/src/manifest.rs` — `JsonManifest`, `TomlManifest`, `into_manifest()`                                          |
-| Fix icons                      | See "Icon System" section below — four specific files need changes                                                              |
+| Task                           | Where to start                                                                                                                   |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| Add a CSS property             | `mesh-core-elements/src/style.rs` (parse), `mesh-core-render/src/surface/painter.rs` (paint)                                     |
+| Add a new surface module       | Create `packages/modules/frontend/core/<name>/`, `package.json` with `"type": "surface"`, `src/main.mesh`                        |
+| Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core-shell/src/shell.rs`; manifest's `surface_layout` section                          |
+| Add a service (backend module) | `packages/modules/backend/core/<name>/`, `package.json` + `src/main.luau`, implement the interface contract in the module script |
+| Add a new CoreRequest action   | `CoreRequest` enum + match arm in `handle_request()` in `mesh-core-shell/src/shell.rs`                                           |
+| Add a theme token              | `mesh-core-theme/src/lib.rs`, default theme JSON, then reference with `token(group.name)` in `.mesh`                             |
+| Add localization               | Module's `<i18n>` block or `config/i18n/<locale>.json`; `LocaleEngine` in `mesh-core-locale`                                     |
+| Debug rendering                | `ToggleDebugOverlay` / `CoreRequest::CycleDebugTab`; see `mesh-core-debug/src/lib.rs`                                            |
+| Module manifest parsing        | `mesh-core-module/src/manifest.rs` — `JsonManifest`, `TomlManifest`, `into_manifest()`                                           |
+| Fix icons                      | See "Icon System" section below — four specific files need changes                                                               |
 
 ---
 
@@ -351,8 +351,8 @@ Once all four fixes are in place, icons in `.mesh` files work like this:
 <icon name="audio-volume-high" size="24"/>
 <icon name="network-wireless" size="16"/>
 
-<!-- Icon from a file path (absolute or plugin-relative) -->
-<icon src="{plugin_dir}/assets/logo.svg"/>
+<!-- Icon from a file path (absolute or module-relative) -->
+<icon src="{module_dir}/assets/logo.svg"/>
 
 <!-- Icon with CSS sizing (overrides the 18px default) -->
 <icon name="battery-full" style="width: 20px; height: 20px;"/>
@@ -369,21 +369,21 @@ Size attribute is used only for XDG resolution hints; actual rendered size is al
 **The shell core must never implement service logic.** This is the single most important architectural rule.
 
 Core's only job is:
-- discover plugins
+- discover modules
 - load manifests
-- wire plugins to the event bus
+- wire modules to the event bus
 - forward service events to frontend state
 
-Everything else — reading audio volume, querying network status, checking battery, calling system tools like `wpctl` or `pactl` — belongs exclusively in backend plugins, written in Luau using the exec host API.
+Everything else — reading audio volume, querying network status, checking battery, calling system tools like `wpctl` or `pactl` — belongs exclusively in backend modules, written in Luau using the exec host API.
 
-Backend plugins should always be implemented in Luau, or in the plugin's
+Backend modules should always be implemented in Luau, or in the module's
 respective scripting language if the runtime grows beyond Luau. Do not move
 service-specific parsing, polling, command shaping, or fallback behavior into
 Rust just because the current host API is missing a helper.
 
 **If you find Rust code in `mesh-core-shell` that calls system tools, spawns polling loops for a specific service, or has `if service_name == "audio"` style branches, that is a bug, not a pattern to follow.**
 
-The exec host API in `mesh-core-scripting` is what enables backend Luau plugins to call system commands. When it does not exist yet for a given capability, the right fix is to implement a generic host API primitive — not to move the logic into core.
+The exec host API in `mesh-core-scripting` is what enables backend Luau modules to call system commands. When it does not exist yet for a given capability, the right fix is to implement a generic host API primitive — not to move the logic into core.
 
 Backend scripts now run in a real Luau VM through `mlua`. Do not add new
 hand-written backend parsers or mini-interpreters in Rust.
@@ -401,18 +401,18 @@ if service_name == "audio" {
 
 Example of what is RIGHT:
 ```lua
--- packages/plugins/backend/core/pipewire-audio/src/main.luau
+-- packages/modules/backend/core/pipewire-audio/src/main.luau
 local volume = exec("wpctl", {"get-volume", "@DEFAULT_AUDIO_SINK@"})
 service.emit("audio", { volume = parse_volume(volume) })
 ```
 
-Core wires the plugin. The plugin does the work.
+Core wires the module. The module does the work.
 
-### CRITICAL: Frontend and backend plugins are standalone — each owns its own state
+### CRITICAL: Frontend and backend modules are standalone — each owns its own state
 
-**Frontend plugins must never read derived state that was injected by core.** Each plugin computes its own display state from the raw service payload inside its `<script>` block.
+**Frontend modules must never read derived state that was injected by core.** Each module computes its own display state from the raw service payload inside its `<script>` block.
 
-Backend plugins emit raw data (volume percent, mute flag, etc.). Frontend plugins transform that into display-ready state (icon names, labels, formatted strings) inside their own scripts.
+Backend modules emit raw data (volume percent, mute flag, etc.). Frontend modules transform that into display-ready state (icon names, labels, formatted strings) inside their own scripts.
 
 The mechanism: when a service update arrives, core calls `on_<service>_update()` on the frontend script if it declares that handler. The handler reads from `audio.*` (the raw payload) and writes to local script variables, which the template then binds to.
 
@@ -425,7 +425,7 @@ obj.insert("icon_name", icon_name);
 
 Example of what is RIGHT:
 ```lua
--- packages/plugins/frontend/core/volume-slider/src/main.mesh <script>
+-- packages/modules/frontend/core/volume-slider/src/main.mesh <script>
 local audio = require("@mesh/audio@>=1.0")
 
 icon_name = "audio-volume-muted"
@@ -486,10 +486,10 @@ LSP completions for `audio.` derive state fields and commands by analyzing the b
 
 ---
 
-- **Everything is a plugin.** The shell core must not hardcode plugin IDs or behavior. Layout defaults, size policies, and content sizing are declared in `plugin.json`, not in Rust match arms.
+- **Everything is a module.** The shell core must not hardcode module IDs or behavior. Layout defaults, size policies, and content sizing are declared in `package.json`, not in Rust match arms.
 - **`mesh-core-shell/src/shell.rs` is large** (~4000 lines). When reading it, use `Grep` to find specific functions rather than reading the whole file.
-- **Frontend plugins are compiled at startup**, not interpreted at runtime. Hot-reload is supported via file watching (`reload_plugin_settings`, `source_path()` watching).
+- **Frontend modules are compiled at startup**, not interpreted at runtime. Hot-reload is supported via file watching (`reload_module_settings`, `source_path()` watching).
 - **Globals are reactive state.** Any global assigned in `<script>` is synced to `ScriptState` after each call. Templates bind to `{variable_name}`. `local` variables are private.
-- **Surface layout is user-configurable.** Any surface can have its anchor, layer, size, keyboard mode overridden via `config/settings.json` inside the plugin directory.
-- **`SurfaceSizePolicy::ContentMeasured`** means the surface resizes itself to fit its content. Declared in `plugin.json` as `surface_layout.size_policy = "content_measured"`. Only the launcher uses this currently.
+- **Surface layout is user-configurable.** Any surface can have its anchor, layer, size, keyboard mode overridden via `config/settings.json` inside the module directory.
+- **`SurfaceSizePolicy::ContentMeasured`** means the surface resizes itself to fit its content. Declared in `package.json` as `surface_layout.size_policy = "content_measured"`. Only the launcher uses this currently.
 - **Test location:** unit tests live in `#[cfg(test)]` modules at the bottom of each source file.

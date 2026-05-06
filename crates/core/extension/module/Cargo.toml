@@ -1,6 +1,6 @@
 [package]
-name = "mesh-core-plugin"
-description = "Plugin manifest, lifecycle, and loading for MESH"
+name = "mesh-core-module"
+description = "Module manifest, lifecycle, and loading for MESH"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
