@@ -1,129 +1,170 @@
 # External Integrations
 
-**Analysis Date:** 2026-05-01
+**Analysis Date:** 2026-05-06
 
-## System Service Integrations (via Backend Plugins in Luau)
+## APIs & External Services
 
-All system integrations are implemented as Luau backend plugins under
-`packages/plugins/backend/core/`. The Rust core never calls system tools
-directly — it only wires plugins to the event bus.
+**Wayland / Compositor:**
+- Wayland compositor - Displays shell surfaces as a Wayland client.
+  - SDK/Client: `wayland-client` 0.31.14, `smithay-client-toolkit` 0.19.2, `minifb` 0.27.0 with `wayland`, plus internal abstractions in `crates/core/platform/wayland/src/lib.rs` and rendering code in `crates/core/ui/render/Cargo.toml`.
+  - Auth: Local Wayland session environment; no app-level credentials detected.
+  - Capability/compatibility: Frontend modules can declare compositor requirements such as `wlr-layer-shell-v1` in `modules/frontend/navigation-bar/module.json`.
 
-**Audio:**
-- PipeWire — `packages/plugins/backend/core/pipewire-audio/src/main.luau`
-  - Polls via `wpctl status` + `wpctl get-volume`; commands via `wpctl set-volume`, `wpctl set-mute`
-  - Interface contract: `packages/plugins/backend/core/audio-interface/interface.toml`
-- PulseAudio — `packages/plugins/backend/core/pulseaudio-audio/src/main.luau`
-  - Alternative provider for the same `@mesh/audio` interface
-  - Uses `pactl` via `mesh.exec_shell`
+**Desktop Shell IPC:**
+- Local Unix socket IPC - CLI commands control a running shell instance.
+  - SDK/Client: Rust standard library `std::os::unix::net::UnixStream` in `crates/tools/cli/src/main.rs`; Tokio `UnixListener` in `crates/core/shell/src/shell/ipc.rs`.
+  - Auth: Local filesystem/socket permissions only; socket path is controlled by `MESH_IPC_SOCKET`, `XDG_RUNTIME_DIR`, or `/tmp/mesh-<uid>.sock` in `crates/core/shell/src/shell/mod.rs`.
+  - Commands: `shell:debug_overlay`, `shell:debug_cycle_tab`, `shell:shutdown`, `shell:show_surface:<id>`, `shell:hide_surface:<id>`, and `shell:toggle_surface:<id>` in `crates/core/shell/src/shell/ipc.rs`.
 
-**Network:**
-- NetworkManager — `packages/plugins/backend/core/networkmanager-network/src/main.luau`
-  - Polls via `nmcli`; interface contract: `packages/plugins/backend/core/network-interface/interface.toml`
+**System Command Host API:**
+- Generic `mesh.exec` host API - Backend Luau modules call external programs through `std::process::Command`.
+  - SDK/Client: `mesh.exec(program, args)` in `crates/core/runtime/scripting/src/backend.rs`.
+  - Auth: Capability-gated by `exec.<binary>` or `exec.command` in `crates/core/runtime/scripting/src/backend.rs`.
+  - Current backends: `modules/backend/pipewire-audio/src/main.luau` calls `wpctl` and `aplay`; `modules/backend/pulseaudio-audio/src/main.luau` calls `pactl` and `aplay`.
 
-**Power / Battery:**
-- UPower — `packages/plugins/backend/core/upower-power/src/main.luau`
-  - Polls via `upower`; interface contract: `packages/plugins/backend/core/power-interface/interface.toml`
+**Audio Providers:**
+- PipeWire / WirePlumber - Default active audio backend for `mesh.audio`.
+  - SDK/Client: `wpctl` binary invoked by `modules/backend/pipewire-audio/src/main.luau`.
+  - Auth: Required capabilities `exec.wpctl` and `exec.aplay` in `modules/backend/pipewire-audio/package.json` and `config/modules/@mesh/pipewire-audio/package.json`.
+  - System packages: `wireplumber` for `wpctl`, `alsa-utils` for `aplay` from `modules/backend/pipewire-audio/package.json`.
+  - Provider pin: `config/package.json` maps `mesh.audio` to `@mesh/pipewire-audio`.
+- PulseAudio - Alternative installed audio backend for `mesh.audio`.
+  - SDK/Client: `pactl` binary invoked by `modules/backend/pulseaudio-audio/src/main.luau`.
+  - Auth: Required capabilities `exec.pactl` and `exec.aplay` in `modules/backend/pulseaudio-audio/module.json` and `config/modules/@mesh/pulseaudio-audio/package.json`.
+  - System packages: `pulseaudio-utils` / `libpulse` for `pactl`, `alsa-utils` for `aplay`.
+  - Provider priority: `@mesh/pulseaudio-audio` priority 50 versus PipeWire priority 100 in module manifests.
 
-**Media:**
-- MPRIS — `packages/plugins/backend/core/mpris-media/src/main.luau`
-  - Media player control via `playerctl` or direct MPRIS D-Bus; interface contract: `packages/plugins/backend/core/media-interface/interface.toml`
+**Network / Power Provider Contracts:**
+- NetworkManager - Default network provider module metadata exists for `mesh.network`.
+  - SDK/Client: Not implemented in repo source; module metadata at `config/modules/@mesh/networkmanager/package.json`.
+  - Auth: Not detected in manifest; future system access is expected to be capability-gated by interface/provider capabilities from `docs/module-system.md`.
+- UPower - Default power provider module metadata exists for `mesh.power`.
+  - SDK/Client: Not implemented in repo source; module metadata at `config/modules/@mesh/upower/package.json`.
+  - Auth: Not detected in manifest; future system access is expected to be capability-gated.
+- D-Bus - Architectural target for providers such as NetworkManager, UPower, MPRIS, or shared D-Bus helper libraries.
+  - SDK/Client: Not implemented as a Rust or Luau host API in current source; documented capability names include `dbus.system` and D-Bus helper library examples in `docs/module-system.md`, `docs/extensibility.md`, and `spec/pluggable-backend.md`.
+  - Auth: Planned capability identifiers such as `dbus.session` and `dbus.system`; no current D-Bus client crate detected in `Cargo.toml`.
 
-**Notifications:**
-- Mock — `packages/plugins/backend/core/mock-notifications/src/main.luau`
-  - Dev-only fake notification emitter; interface contract: `packages/plugins/backend/core/notifications-interface/interface.toml`
+**Module/Plugin Distribution Sources:**
+- MESH registry / HTTPS archive / Git / local path - Installation sources documented for package resolution.
+  - SDK/Client: Installer design in `docs/installation.md`; no current network client crate such as `reqwest`, `hyper`, or `ureq` detected in `Cargo.toml`.
+  - Auth: Signature/trust-tier design documented in `docs/installation.md` and `spec/pluggable-backend.md`; no implemented signing or credential storage detected in source.
+  - Current local graph: `config/package.json` and `modules/**` are loaded from disk by `crates/core/extension/plugin/src/package.rs`.
 
-**Brightness:**
-- Interface declared: `packages/plugins/backend/core/brightness-interface/interface.toml`
-- No live implementation plugin detected
+**External Web APIs:**
+- Web APIs are an allowed backend category in the module model.
+  - SDK/Client: Not implemented in current source; `net.http` is documented as a capability in `docs/module-system.md`, `docs/extensibility.md`, and `spec/pluggable-backend.md`.
+  - Auth: Not detected.
 
-**Theme Backend:**
-- `packages/plugins/backend/core/shell-theme/src/main.luau` — emits active theme metadata
+## Data Storage
 
-## Wayland Protocol Integrations
+**Databases:**
+- Not detected.
+  - Connection: Not applicable.
+  - Client: No SQLite, PostgreSQL, MySQL, Redis, or ORM crate detected in `Cargo.toml` or `crates/**/Cargo.toml`.
 
-**Layer Shell:**
-- `wlr-layer-shell-v1` — required compositor capability; used by all surface plugins for panel, launcher, quick-settings, etc.
-- Client: `smithay-client-toolkit` 0.19; `crates/core/ui/render/src/surface/bridge/wayland_surface.rs`
+**File Storage:**
+- Local filesystem configuration and modules.
+  - Root module graph: `config/package.json` in repo; default user root `~/.mesh/package.json` via `crates/core/extension/plugin/src/package.rs`.
+  - Module directories: repo `modules/`, `~/.mesh/modules`, and `/usr/share/mesh/modules` via `crates/core/foundation/config/src/lib.rs`.
+  - Shell config: `~/.config/mesh/config.toml` via `crates/core/foundation/config/src/lib.rs`.
+  - Settings: `config/settings-default.json`, `config/shell-settings.json`, optional `MESH_SETTINGS_PATH`, and fallback `~/.mesh/settings.json` via `crates/core/foundation/config/src/lib.rs`.
+  - Per-plugin overrides: XDG config path under `mesh/plugins/<scope>/<name>.json` via `crates/core/foundation/config/src/lib.rs`.
+  - Themes: `config/themes/*.json` and theme loading paths used by `mesh-core-theme`.
+  - Icons/assets: `config/icons.toml`, bundled Material SVG assets under `crates/core/ui/icon/assets/material/`, and XDG/system icon lookup in `crates/core/ui/icon/src/lib.rs`.
+  - Installation design storage: `~/.config/mesh/plugins.lock.json`, `~/.cache/mesh/packages/`, `/usr/share/mesh/plugins/`, and `~/.local/share/mesh/plugins/` documented in `docs/installation.md`.
 
-**Keyboard / Input:**
-- `xkbcommon` — keyboard event translation via `smithay-client-toolkit`'s xkbcommon feature
+**Caching:**
+- In-memory runtime caches/registries.
+  - Event channels use in-memory Tokio broadcast senders in `crates/core/foundation/events/src/lib.rs`.
+  - Interface/provider registry is in-memory in `crates/core/extension/service/src/lib.rs`.
+  - Icon registry uses a process-global `OnceLock<Mutex<IconRegistry>>` in `crates/core/ui/icon/src/lib.rs`.
+  - Installer/package cache path `~/.cache/mesh/packages/` is documented in `docs/installation.md` but no implemented downloader/cache manager is detected.
 
-**Dev Fallback:**
-- `minifb` (Wayland feature) — software dev window for testing without a compositor; `crates/core/ui/render/src/surface/bridge/dev_window.rs`
+## Authentication & Identity
 
-## Icon System
+**Auth Provider:**
+- Not detected.
+  - Implementation: No OAuth, OIDC, session, JWT, password, or external identity provider integration detected in source manifests or Rust dependencies.
 
-**XDG Icon Theme:**
-- Resolution: `crates/core/ui/icon/src/lib.rs` — searches `~/.local/share/icons`, `~/.icons`, `/usr/share/icons`, `/usr/share/pixmaps`
-- Cache: `static ICON_CACHE: OnceLock<Mutex<HashMap<(String, u32), Option<PathBuf>>>>`
-- Icon pack plugins: `packages/plugins/icon-packs/papirus/plugin.json` (Papirus icon pack declared)
-- Material icon assets bundled: `crates/core/ui/icon/assets/material/`
+**Capability Model:**
+- Custom capability-based plugin permission system.
+  - Implementation: Capability types in `crates/core/foundation/capability/Cargo.toml`; backend exec checks in `crates/core/runtime/scripting/src/backend.rs`; manifest capabilities in `modules/backend/pipewire-audio/package.json`, `modules/backend/pulseaudio-audio/module.json`, and `modules/frontend/navigation-bar/module.json`.
+  - Permission examples: `exec.wpctl`, `exec.pactl`, `exec.aplay`, `service.audio.read`, `service.audio.control`, `theme.read`, `locale.read`, and `shell.surface`.
+  - Install UX design: Standard/elevated/high capability tiers documented in `docs/extensibility.md` and `spec/pluggable-backend.md`.
 
-**SVG Rendering:**
-- `resvg` 0.44 — rasterizes SVG icons at paint time; `crates/core/ui/render/src/surface/icon.rs`
+**Package Identity:**
+- npm-style package names identify modules.
+  - Implementation: Top-level `name` in `package.json` manifests, with MESH fields under `mesh`, as documented in `docs/module-system.md`.
+  - Examples: `@mesh/local-config` in `config/package.json`; `@mesh/pipewire-audio` in `modules/backend/pipewire-audio/package.json`; `@mesh/panel` in `config/modules/@mesh/panel/package.json`.
 
-**PNG/JPEG Rendering:**
-- `image` 0.24 — decodes raster icons; static image cache in `crates/core/ui/render/src/surface/icon.rs`
+## Monitoring & Observability
 
-## IPC
+**Error Tracking:**
+- No external error tracking service detected.
 
-**Unix Socket:**
-- Path: `$XDG_RUNTIME_DIR/mesh-shell.sock` (overridden via `MESH_IPC_SOCKET`)
-- Protocol: newline-delimited text commands (e.g. `shell:open_launcher`, `shell:debug_overlay`)
-- Server: `crates/core/shell/src/shell/ipc.rs` — Tokio async Unix socket listener
-- Client: `mesh-shell ipc <command>` via `crates/core/tools/cli/src/main.rs`
+**Logs:**
+- `tracing` and `tracing-subscriber` provide application logging.
+  - CLI setup: `crates/tools/cli/src/main.rs` initializes `tracing_subscriber::fmt()` with `EnvFilter::try_from_default_env()`.
+  - LSP setup: `crates/tools/lsp/src/main.rs` defaults `RUST_LOG` to `mesh_tools_lsp=info`.
+  - Backend scripts: `mesh.log`, `mesh.log.info`, `mesh.log.warn`, `mesh.log.error`, and `mesh.log.debug` are injected by `crates/core/runtime/scripting/src/backend.rs`.
 
-## Font System
+**Diagnostics/Health:**
+- In-process diagnostics collector and debug overlay.
+  - Diagnostics: `crates/core/foundation/diagnostics/src/lib.rs` tracks health, degraded/error state, handler errors, missing icons, and backend lifecycle errors.
+  - Debug snapshot: `crates/core/shell/src/shell/mod.rs` builds plugin, interface, backend-runtime, health, and surface snapshots.
+  - Health design: `docs/health.md` defines plugin health states, missing dependency records, runtime reports, periodic re-checks, and health channels.
 
-**Font Database:**
-- `fontdb` 0.23 — builds font database from system font directories
-- `cosmic-text` 0.18 — shaped text layout; `crates/core/ui/render/src/surface/text.rs`
-- Custom font registration: `register_font_dir()` exported from `mesh-core-render`
+## CI/CD & Deployment
 
-## LSP Tooling
+**Hosting:**
+- Not detected.
+  - This is a local Linux desktop shell binary and module tree, not a hosted web service.
 
-**Language Server Protocol:**
-- `tower-lsp` 0.20 — LSP server framework for the `.mesh` file language server
-- Binary: `mesh-tools-lsp` (`crates/tools/lsp/`)
-- Provides: completions, hover, diagnostics for `.mesh` template, script, and style blocks
+**CI Pipeline:**
+- Not detected.
+  - No `.github/workflows`, `.gitlab-ci.yml`, CircleCI, or Buildkite files found.
 
-## Observability
-
-**Logging:**
-- `tracing` + `tracing-subscriber` — structured logging with env filter
-- Initialized in `crates/tools/cli/src/main.rs` via `tracing_subscriber::fmt().with_env_filter()`
-
-**Debug Overlay:**
-- In-process overlay painted over live surfaces: `crates/core/foundation/debug/src/lib.rs`
-- Toggled via `CoreRequest::ToggleDebugOverlay` / IPC command `shell:debug_overlay`
-
-**Diagnostics:**
-- `DiagnosticsCollector` in `crates/core/foundation/diagnostics/src/lib.rs`
-- Tracks per-plugin `HealthStatus` (Healthy / Degraded / Error), metrics (frame time, memory)
+**Distribution/Install Design:**
+- System and user module/plugin directories.
+  - System paths: `/usr/share/mesh/modules` in `crates/core/foundation/config/src/lib.rs`; `/usr/share/mesh/plugins/` documented in `docs/installation.md`.
+  - User paths: `~/.mesh/modules`, `~/.local/share/mesh/plugins/`, `~/.local/share/mesh/dev-plugins/`, and `~/.config/mesh/plugins.lock.json` documented in `docs/installation.md`.
+  - Current binary: `mesh-shell` from `crates/tools/cli/Cargo.toml`.
 
 ## Environment Configuration
 
 **Required env vars:**
-- None strictly required at runtime (all have defaults)
+- None strictly required for local repo defaults.
 
 **Optional env vars:**
-- `MESH_IPC_SOCKET` — custom IPC socket path
-- `RUST_LOG` — tracing log level filter
+- `MESH_HOME` - Override root module/config home in `crates/core/extension/plugin/src/package.rs` and `crates/core/foundation/config/src/lib.rs`.
+- `MESH_SETTINGS_PATH` - Override user settings JSON in `crates/core/foundation/config/src/lib.rs`.
+- `MESH_SETTINGS_DEFAULTS_PATH` - Override default settings JSON in `crates/core/foundation/config/src/lib.rs`.
+- `MESH_IPC_SOCKET` - Override Unix IPC socket path in `crates/core/shell/src/shell/mod.rs`.
+- `XDG_CONFIG_HOME` - Override XDG config root for `mesh/config.toml` and plugin overrides in `crates/core/foundation/config/src/lib.rs`.
+- `XDG_DATA_HOME` - Override XDG data root helper in `crates/core/foundation/config/src/lib.rs`.
+- `XDG_RUNTIME_DIR` - Preferred runtime directory for `mesh.sock` in `crates/core/shell/src/shell/mod.rs`.
+- `HOME` - Fallback base for `~/.mesh`, XDG paths, and package manifest discovery.
+- `UID` - Fallback Unix socket filename when `XDG_RUNTIME_DIR` is unavailable.
+- `RUST_LOG` - Runtime log filtering for CLI and LSP.
+- `LD_LIBRARY_PATH` - Set by the Nix dev shell in `flake.nix` for native Wayland libraries.
 
-**Config files (loaded at startup):**
-- `config/shell-settings.json` — active theme ID, locale; loaded by `load_shell_settings()`
-- `config/mesh-default-dark.json`, `config/mesh-default-light.json` — bundled theme token files
-- `packages/plugins/frontend/core/<name>/config/settings.json` — per-plugin user overrides
-- `packages/plugins/frontend/core/<name>/config/i18n/<locale>.json` — plugin translations
+**Secrets location:**
+- Not detected.
+  - `.env` files not found during scan.
+  - No credential, secret, private key, or package auth config files were read.
 
 ## Webhooks & Callbacks
 
 **Incoming:**
-- Unix socket IPC only (see IPC section above)
+- No HTTP webhook endpoints detected.
+- Local incoming Unix socket commands only, implemented in `crates/core/shell/src/shell/ipc.rs`.
 
 **Outgoing:**
-- None — MESH is a shell consumer, not a web service
+- No HTTP webhook clients detected.
+- Current outgoing integrations are local process executions from backend Luau scripts through `mesh.exec` in `crates/core/runtime/scripting/src/backend.rs`.
+- Planned outgoing package sources include registry, HTTPS archive, Git, and local path in `docs/installation.md`; no implemented HTTP/Git fetch client detected.
 
 ---
 
-*Integration audit: 2026-05-01*
+*Integration audit: 2026-05-06*

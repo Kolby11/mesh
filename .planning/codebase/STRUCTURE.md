@@ -1,280 +1,332 @@
 # Codebase Structure
 
-**Analysis Date:** 2026-05-01
+**Analysis Date:** 2026-05-06
 
 ## Directory Layout
 
-```
-mesh/                                   # Workspace root
-├── Cargo.toml                          # Workspace definition, shared deps, MSRV
-├── Cargo.lock                          # Committed lockfile
-├── flake.nix / flake.lock              # Nix dev environment
-├── CLAUDE.md                           # Primary AI context (loads docs/llm-context.md)
-├── docs/                               # Architecture docs, LLM context, specs
-│   └── llm-context.md                  # Crate map, data flows, task entry points
-├── config/                             # Shell-level config (shipped defaults)
-│   ├── shell-settings.json             # Active theme + locale settings
-│   ├── settings-default.json           # Fallback settings
-│   ├── mesh-default-dark.json          # Dark theme token file
-│   └── themes/                         # Additional theme token files
-│       ├── mesh-default-dark.json
-│       └── mesh-default-light.json
-├── crates/                             # All Rust crates
-│   ├── core/                           # Core runtime crates
-│   │   ├── shell/                      # mesh-core-shell: orchestrator
-│   │   ├── extension/
-│   │   │   ├── plugin/                 # mesh-core-plugin: manifest parsing
-│   │   │   └── service/                # mesh-core-service: interface registry
-│   │   ├── foundation/
-│   │   │   ├── capability/             # mesh-core-capability: permission model
-│   │   │   ├── config/                 # mesh-core-config: ShellConfig, ShellSettings
-│   │   │   ├── debug/                  # mesh-core-debug: DebugSnapshot, overlay state
-│   │   │   ├── diagnostics/            # mesh-core-diagnostics: health + metrics
-│   │   │   ├── events/                 # mesh-core-events: EventBus (tokio broadcast)
-│   │   │   ├── locale/                 # mesh-core-locale: LocaleEngine
-│   │   │   └── theme/                  # mesh-core-theme: ThemeEngine, token lookup
-│   │   ├── platform/
-│   │   │   └── wayland/                # mesh-core-wayland: ShellSurface trait, Layer, Edge
-│   │   ├── runtime/
-│   │   │   ├── backend/                # mesh-core-backend: spawn_backend_service()
-│   │   │   ├── host/                   # mesh-core-runtime: stub future sandbox host
-│   │   │   └── scripting/              # mesh-core-scripting: mlua Luau VM bridge
-│   │   └── ui/
-│   │       ├── component/              # mesh-core-component: .mesh file parser
-│   │       ├── elements/               # mesh-core-elements: element model, WidgetNode, layout
-│   │       ├── icon/                   # mesh-core-icon: XDG icon resolution + cache
-│   │       └── render/                 # mesh-core-render: painter, PixelBuffer, Wayland bridge
-│   └── tools/
-│       ├── cli/                        # mesh-tools-cli: mesh-shell binary
-│       └── lsp/                        # mesh-tools-lsp: .mesh language server
-├── packages/                           # Plugin ecosystem
-│   └── plugins/
-│       ├── frontend/
-│       │   ├── core/                   # Built-in surface + widget frontend plugins
-│       │   │   ├── panel/              # Top panel surface
-│       │   │   ├── launcher/           # App launcher (content_measured surface)
-│       │   │   ├── quick-settings/     # Quick settings drawer
-│       │   │   ├── notification-center/# Notification history
-│       │   │   ├── notification-feed/  # Notification feed widget
-│       │   │   ├── notification-sidebar/
-│       │   │   ├── volume-slider/      # Audio volume popover
-│       │   │   ├── volume-bar/
-│       │   │   ├── navigation-bar/     # Nav bar (uses components/ subdirectory)
-│       │   │   ├── base-surface/       # Dev sandbox surface
-│       │   │   ├── base-launcher-widget/
-│       │   │   └── base-sidebar-widget/
-│       │   └── examples/               # Example/demo frontend plugins
-│       │       ├── agenda-list/
-│       │       ├── calendar-card/
-│       │       ├── date-strip/
-│       │       ├── focus-timer/
-│       │       ├── habit-streaks/
-│       │       ├── status-rail/
-│       │       ├── weather-brief/
-│       │       └── workspace-hub/
-│       ├── backend/
-│       │   └── core/                   # Built-in service backend plugins (Luau)
-│       │       ├── pipewire-audio/     # Audio via PipeWire (wpctl)
-│       │       ├── pulseaudio-audio/   # Audio via PulseAudio (pactl)
-│       │       ├── mpris-media/        # Media via MPRIS (playerctl)
-│       │       ├── networkmanager-network/ # Network via nmcli
-│       │       ├── upower-power/       # Power/battery via upower
-│       │       ├── mock-notifications/ # Dev fake notifications
-│       │       ├── shell-theme/        # Theme metadata emitter
-│       │       ├── audio-interface/    # Interface contract for audio
-│       │       ├── network-interface/  # Interface contract for network
-│       │       ├── power-interface/    # Interface contract for power
-│       │       ├── media-interface/    # Interface contract for media
-│       │       ├── notifications-interface/
-│       │       └── brightness-interface/
-│       └── icon-packs/
-│           └── papirus/                # Papirus icon pack (plugin.json only, no assets)
-├── spec/                               # Feature specs and design documents
-└── tools/                              # Shell-level tooling scripts
+```text
+mesh/
+├── Cargo.toml                    # Rust workspace manifest for core crates and tools
+├── Cargo.lock                    # Rust dependency lockfile
+├── README.md                     # Project overview and package-system summary
+├── CLAUDE.md                     # Agent/developer guidance
+├── ARCHITECTURE_REFACTORING.md   # Architecture refactoring notes
+├── TEXT_RENDERING_TODO.md        # Text rendering work notes
+├── config/                       # Local runtime config, package graph, themes, catalog manifests
+│   ├── package.json              # Root installed-module graph
+│   ├── shell-settings.json       # User-facing shell settings used in repo/dev runs
+│   ├── settings-default.json     # Bundled default shell settings
+│   ├── icons.toml                # Icon configuration
+│   ├── themes/                   # Theme token JSON files
+│   └── modules/@mesh/*/          # Package-shaped bundled/catalog module manifests
+├── crates/                       # Rust workspace crates
+│   ├── core/extension/           # Module/plugin manifests and service contracts
+│   ├── core/foundation/          # Capability, config, diagnostics, events, locale, theme, debug
+│   ├── core/platform/            # Wayland platform abstraction
+│   ├── core/runtime/             # Luau runtime, backend runtime, host runtime
+│   ├── core/shell/               # Main shell orchestration and component host
+│   ├── core/ui/                  # Component parser, element model, icons, renderer
+│   └── tools/                    # CLI and LSP binaries
+├── docs/                         # Architecture, module-system, frontend, plugin, settings, theming docs
+├── modules/                      # Source modules loaded by `config/package.json`
+│   ├── backend/                  # Backend provider modules
+│   ├── frontend/                 # Frontend surface/widget modules
+│   └── interfaces/               # Interface contract TOML files
+├── spec/                         # Pluggable backend spec
+├── tools/                        # Miscellaneous repo tooling
+└── .planning/                    # GSD project planning and codebase maps
 ```
 
 ## Directory Purposes
 
-**`crates/core/shell/src/shell/`:**
-- Purpose: Shell orchestrator — the central coordinator
-- Key files:
-  - `mod.rs` (~1536 lines) — `Shell` struct, main event loop, plugin discovery, IPC handling
-  - `component.rs` — `FrontendSurfaceComponent` (one instance per surface plugin)
-  - `types.rs` — `CoreRequest`, `CoreEvent`, `ServiceEvent`, `ShellComponent` trait, `SurfaceId`
-  - `surface_layout.rs` — `surface_layout_from_manifest()`, `SurfaceLayoutSettings`, `SurfaceSizePolicy`
-  - `service.rs` — service name resolution helpers
-  - `ipc.rs` — Unix socket IPC server (Tokio async)
-  - `layout.rs` — surface positioning helpers
-  - `sounds.rs` — shell event sound playback
-  - `render/bridge/` — bridges to rendering layer
+**`crates/core/extension/plugin`:**
+- Purpose: Own module/package and compatibility manifest loading.
+- Contains: `Manifest`, legacy `plugin.json`/`mesh.toml` normalization, `RootPackageManifest`, `ModulePackageManifest`, `InstalledModuleGraph`.
+- Key files: `crates/core/extension/plugin/src/package.rs`, `crates/core/extension/plugin/src/manifest.rs`, `crates/core/extension/plugin/src/lifecycle.rs`.
 
-**`crates/core/ui/render/src/surface/`:**
-- Purpose: All software rendering: painter, pixel buffer, icon decode, text layout, Wayland/dev-window bridge
-- Key files:
-  - `painter.rs` — `FrontendRenderEngine`: walks `WidgetNode`, calls `LayoutEngine`, draws pixels
-  - `buffer.rs` — `PixelBuffer` (RGBA software framebuffer)
-  - `icon.rs` — `draw_icon_from_path()`, PNG decode, SVG rasterization via `resvg`
-  - `text.rs` — `SharedTextMeasurer`, `cosmic-text` integration, `register_font_dir()`
-  - `debug_overlay.rs` — `DebugOverlay` painter
-  - `bridge/wayland_surface.rs` — production Wayland layer-shell surface via smithay
-  - `bridge/dev_window.rs` — `minifb` dev window fallback
+**`crates/core/extension/service`:**
+- Purpose: Own interface contracts, interface/provider registry, and compatibility typed service registry.
+- Contains: TOML contract loader, semver parsing, provider resolution, catalog snapshots, legacy typed registry.
+- Key files: `crates/core/extension/service/src/contract.rs`, `crates/core/extension/service/src/interface.rs`, `crates/core/extension/service/src/registry.rs`.
 
-**`crates/core/ui/elements/src/`:**
-- Purpose: Shared UI intermediate representation — no rendering, no Wayland, no service knowledge
-- Key files:
-  - `element.rs` — `ElementKind` enum, `ElementTypeDef`, `ELEMENT_TYPE_DEFS` const array
-  - `tree.rs` — `WidgetNode`, `NodeId`, `ElementState`
-  - `layout.rs` — `LayoutEngine`, `LayoutRect`, `TextMeasurer` trait
-  - `style.rs` — `ComputedStyle`, `StyleResolver`, all CSS property types (`Color`, `Dimension`, `FlexDirection`, etc.)
-  - `events.rs` — `EventDispatcher`, `UiEvent`, `InputState`
-  - `accessibility.rs` — `AccessibilityTree`, `AccessibilityRole`, `AccessibilityState`
+**`crates/core/foundation`:**
+- Purpose: Shared foundation crates with narrow responsibilities.
+- Contains: `capability`, `config`, `debug`, `diagnostics`, `events`, `locale`, `theme`.
+- Key files: `crates/core/foundation/config/src/lib.rs`, `crates/core/foundation/capability/src/lib.rs`, `crates/core/foundation/theme/src/lib.rs`, `crates/core/foundation/locale/src/lib.rs`.
 
-**`crates/core/ui/component/src/`:**
-- Purpose: Parse `.mesh` files into typed AST; no runtime dependencies
-- Key files:
-  - `parser.rs` / `parser/` — top-level `parse_component()`, sub-parsers for template, script, styles, markup
-  - `template.rs` — `TemplateBlock`, `TemplateNode`, `TemplateElement`
-  - `style.rs` — `StyleBlock` type
-  - `lib.rs` — `ComponentFile`, `ComponentImport`, `ComponentImportTarget`
+**`crates/core/platform/wayland`:**
+- Purpose: Wayland surface/compositor abstraction.
+- Contains: Layer, edge, shell surface, stub surface, and platform types.
+- Key files: `crates/core/platform/wayland/src/lib.rs`.
 
-**`crates/core/runtime/scripting/src/`:**
-- Purpose: Luau VM bridge (mlua); host APIs; reactive state sync
-- Key files:
-  - `context.rs` — `ScriptContext`, `ScriptState`, `ScriptError`, `LocaleBoundState`, `PublishedEvent`
-  - `backend.rs` — `BackendScriptContext`, `BackendScriptError`
-  - `host_api.rs` — `mesh.*` Lua global implementations (`mesh.exec_shell`, `mesh.service.*`, etc.)
+**`crates/core/runtime/backend`:**
+- Purpose: Execute backend Luau provider scripts and bridge them to shell service events.
+- Contains: `BackendServiceCommand`, `BackendServiceUpdate`, `BackendServiceEvent`, `spawn_backend_service()`, poll/command dispatch.
+- Key files: `crates/core/runtime/backend/src/lib.rs`.
 
-**`crates/core/extension/plugin/src/`:**
-- Purpose: Manifest loading and lifecycle management
-- Key files:
-  - `manifest.rs` — `Manifest`, `PluginType`, `SurfaceLayoutSection`, JSON/TOML parsers
-  - `lifecycle.rs` — `PluginInstance`, `PluginState`
+**`crates/core/runtime/host`:**
+- Purpose: Model sandbox runtime tiers and generic plugin runtime configuration.
+- Contains: `SandboxConfig`, `ExecutionTier`, `PluginRuntime`.
+- Key files: `crates/core/runtime/host/src/lib.rs`.
 
-**`crates/core/extension/service/src/`:**
-- Purpose: Interface contract parsing and registry
-- Key files:
-  - `interface.rs` — `InterfaceRegistry`, `InterfaceProvider`, `InterfaceCatalog`, `canonical_interface_name()`
-  - `contract.rs` — `InterfaceContract`, `InterfaceMethod`, `InterfaceEvent`, `load_interface_contract()`
-  - `registry.rs` — `ServiceRegistry`, `ServiceEntry`
+**`crates/core/runtime/scripting`:**
+- Purpose: Host frontend/backend Luau contexts and install capability-gated host APIs.
+- Contains: `ScriptContext`, `BackendScriptContext`, `HostApiManifest`, interface proxies, `mesh.*` APIs.
+- Key files: `crates/core/runtime/scripting/src/context.rs`, `crates/core/runtime/scripting/src/backend.rs`, `crates/core/runtime/scripting/src/host_api.rs`.
 
-**`packages/plugins/frontend/core/<name>/`:**
-- Purpose: One complete frontend surface or widget plugin
-- Contains:
-  - `plugin.json` — id, type, capabilities, entrypoints, settings schema, surface_layout
-  - `src/main.mesh` — entrypoint `.mesh` component
-  - `src/components/` — sub-components extracted per the component encapsulation rule
-  - `config/settings.json` — user overrides (optional)
-  - `config/i18n/<locale>.json` — translations (optional)
+**`crates/core/shell`:**
+- Purpose: Main application runtime and orchestration layer.
+- Contains: `Shell`, component host, frontend catalog, IPC server, layout/input/render runtime, service routing, backend provider selection, diagnostics.
+- Key files: `crates/core/shell/src/lib.rs`, `crates/core/shell/src/shell/mod.rs`, `crates/core/shell/src/shell/component.rs`, `crates/core/shell/src/shell/component/catalog.rs`, `crates/core/shell/src/shell/service.rs`.
 
-**`packages/plugins/backend/core/<name>/`:**
-- Purpose: One Luau service backend plugin
-- Contains:
-  - `plugin.json` — id, type: "backend", provides interface, capabilities
-  - `src/main.luau` — Luau script with `init()`, `on_poll()`, `on_command_*()` handlers
+**`crates/core/ui/component`:**
+- Purpose: Parse `.mesh` single-file components into typed ASTs.
+- Contains: Parser modules for markup/script/style plus public component/template structs.
+- Key files: `crates/core/ui/component/src/lib.rs`, `crates/core/ui/component/src/parser.rs`, `crates/core/ui/component/src/parser/markup.rs`, `crates/core/ui/component/src/parser/script.rs`, `crates/core/ui/component/src/parser/styles.rs`.
 
-**`packages/plugins/backend/core/<name>-interface/`:**
-- Purpose: Interface contract declaration (no implementation)
-- Contains:
-  - `plugin.json` — id, type: "interface"
-  - `interface.toml` — methods, events, types, capability names
+**`crates/core/ui/elements`:**
+- Purpose: Represent runtime UI trees, layout, style, events, and accessibility primitives.
+- Contains: Element definitions, widget tree, layout engine, style resolver, event model.
+- Key files: `crates/core/ui/elements/src/lib.rs`, `crates/core/ui/elements/src/tree.rs`, `crates/core/ui/elements/src/layout.rs`, `crates/core/ui/elements/src/style.rs`.
+
+**`crates/core/ui/icon`:**
+- Purpose: Icon registry and bundled icon assets.
+- Contains: XDG icon support, fallback registry, icon config, material SVG assets.
+- Key files: `crates/core/ui/icon/src/lib.rs`, `crates/core/ui/icon/src/registry.rs`, `crates/core/ui/icon/src/config.rs`, `crates/core/ui/icon/assets/material/*.svg`.
+
+**`crates/core/ui/render`:**
+- Purpose: Compile frontend modules and paint widget trees to buffers/surfaces.
+- Contains: Frontend compiler, render engine, software painter, text/icon/surface bridges, accessibility/debug overlay.
+- Key files: `crates/core/ui/render/src/compile.rs`, `crates/core/ui/render/src/render.rs`, `crates/core/ui/render/src/surface/mod.rs`, `crates/core/ui/render/src/surface/bridge/wayland_surface.rs`.
+
+**`crates/tools/cli`:**
+- Purpose: Provide the `mesh-shell` command-line binary.
+- Contains: Start/list/services/debug/ipc/status/version/help commands.
+- Key files: `crates/tools/cli/src/main.rs`.
+
+**`crates/tools/lsp`:**
+- Purpose: Provide a language server for `.mesh` components.
+- Contains: Diagnostics, hover, analyzer, backend, plugin registry, knowledge tables.
+- Key files: `crates/tools/lsp/src/main.rs`, `crates/tools/lsp/src/lib.rs`, `crates/tools/lsp/src/analyzer/mod.rs`, `crates/tools/lsp/src/plugin_registry.rs`.
+
+**`modules/backend`:**
+- Purpose: Source backend provider modules used by the local root graph.
+- Contains: `pipewire-audio` package manifest and Luau source, `pulseaudio-audio` compatibility `module.json` and Luau source, placeholder/partial backend directories.
+- Key files: `modules/backend/pipewire-audio/package.json`, `modules/backend/pipewire-audio/src/main.luau`, `modules/backend/pulseaudio-audio/module.json`, `modules/backend/pulseaudio-audio/src/main.luau`.
+
+**`modules/frontend`:**
+- Purpose: Source frontend surface/widget modules used by local discovery and root graph.
+- Contains: `navigation-bar` surface module with settings, translations, components, `.mesh` entrypoint.
+- Key files: `modules/frontend/navigation-bar/module.json`, `modules/frontend/navigation-bar/src/main.mesh`, `modules/frontend/navigation-bar/src/components/*.mesh`, `modules/frontend/navigation-bar/config/settings.json`.
+
+**`modules/interfaces`:**
+- Purpose: Interface contract TOML files for service APIs.
+- Contains: Audio state fields, methods, events, types, capabilities.
+- Key files: `modules/interfaces/audio.toml`.
+
+**`config`:**
+- Purpose: Runtime config and bundled package/catalog data for local runs.
+- Contains: Root module graph, shell settings, default settings, themes, icon config, package-shaped catalog manifests.
+- Key files: `config/package.json`, `config/shell-settings.json`, `config/settings-default.json`, `config/themes/mesh-default-dark.json`, `config/themes/mesh-default-light.json`, `config/modules/@mesh/*/package.json`.
+
+**`docs`:**
+- Purpose: Human-facing architecture and authoring documentation.
+- Contains: Module system, extensibility, installation, health, frontend syntax, slots, theming, settings, plugin indexes.
+- Key files: `docs/module-system.md`, `docs/extensibility.md`, `docs/frontend/mesh-syntax.md`, `docs/settings/README.md`, `docs/theming/themes.md`, `docs/plugins/README.md`.
+
+**`spec`:**
+- Purpose: Deeper lifecycle/security/backend design references.
+- Contains: Pluggable backend specification.
+- Key files: `spec/pluggable-backend.md`.
+
+## Key File Locations
+
+**Entry Points:**
+- `crates/tools/cli/src/main.rs`: Binary entrypoint for `mesh-shell`.
+- `crates/core/shell/src/lib.rs`: Public shell crate exports.
+- `crates/core/shell/src/shell/mod.rs`: Main shell runtime entrypoint and event loop.
+- `crates/tools/lsp/src/main.rs`: LSP binary entrypoint.
+- `modules/frontend/navigation-bar/src/main.mesh`: Navigation bar surface entrypoint.
+- `modules/backend/pipewire-audio/src/main.luau`: PipeWire audio provider script entrypoint.
+- `modules/backend/pulseaudio-audio/src/main.luau`: PulseAudio audio provider script entrypoint.
+
+**Configuration:**
+- `Cargo.toml`: Workspace members, workspace package metadata, shared dependencies.
+- `config/package.json`: Root installed-module graph loaded by backend provider launch.
+- `config/shell-settings.json`: Repo-local shell settings path used by `default_settings_path()` when present.
+- `config/settings-default.json`: Default shell settings loaded before user overrides.
+- `config/icons.toml`: Icon configuration.
+- `config/themes/mesh-default-dark.json`: Dark theme tokens.
+- `config/themes/mesh-default-light.json`: Light theme tokens.
+- `modules/frontend/navigation-bar/config/settings.json`: Frontend surface settings for navigation bar.
+- `flake.nix`: Nix development shell/package setup.
+
+**Core Logic:**
+- `crates/core/extension/plugin/src/package.rs`: Target package/module graph model.
+- `crates/core/extension/plugin/src/manifest.rs`: Runtime manifest normalization and compatibility loaders.
+- `crates/core/extension/service/src/contract.rs`: Interface contract parser.
+- `crates/core/extension/service/src/interface.rs`: Interface catalog/registry.
+- `crates/core/runtime/scripting/src/context.rs`: Frontend Luau host, interface proxy, `require()` behavior.
+- `crates/core/runtime/scripting/src/backend.rs`: Backend Luau host behavior.
+- `crates/core/runtime/backend/src/lib.rs`: Backend service orchestration loop.
+- `crates/core/shell/src/shell/mod.rs`: Shell lifecycle and backend launch flow.
+- `crates/core/shell/src/shell/component.rs`: Frontend component runtime.
+- `crates/core/ui/render/src/compile.rs`: Frontend module compiler.
+- `crates/core/ui/component/src/parser.rs`: `.mesh` parser entrypoint.
+
+**Module System:**
+- `docs/module-system.md`: Authoritative target module/package architecture.
+- `config/package.json`: Active installed-module graph.
+- `config/modules/@mesh/pipewire-audio/package.json`: Package-shaped bundled/catalog provider manifest.
+- `config/modules/@mesh/pulseaudio-audio/package.json`: Package-shaped bundled/catalog provider manifest.
+- `config/modules/@mesh/panel/package.json`: Package-shaped bundled/catalog frontend manifest.
+- `config/modules/@mesh/quick-settings/package.json`: Package-shaped bundled/catalog frontend manifest.
+- `config/modules/@mesh/networkmanager/package.json`: Package-shaped bundled/catalog provider manifest.
+- `config/modules/@mesh/upower/package.json`: Package-shaped bundled/catalog provider manifest.
+- `config/modules/@mesh/shell-theme/package.json`: Package-shaped bundled/catalog resource module manifest.
+- `modules/backend/pipewire-audio/package.json`: Source backend package manifest used by `config/package.json`.
+- `modules/backend/pulseaudio-audio/module.json`: Compatibility backend manifest used by `config/package.json`.
+- `modules/frontend/navigation-bar/module.json`: Compatibility frontend manifest used by `config/package.json`.
+
+**Testing:**
+- Tests are colocated in Rust source files under `#[cfg(test)]`, especially `crates/core/extension/plugin/src/package.rs`, `crates/core/extension/plugin/src/manifest.rs`, `crates/core/extension/service/src/contract.rs`, `crates/core/runtime/scripting/src/context.rs`, `crates/core/runtime/backend/src/lib.rs`, and `crates/core/shell/src/shell/component/tests.rs`.
 
 ## Naming Conventions
 
-**Crates:**
-- Pattern: `mesh-core-<group>-<name>` (e.g. `mesh-core-ui-render` maps to dir `crates/core/ui/render/`)
-- Flat name via `[package] name = "mesh-core-render"` in `Cargo.toml`
+**Files:**
+- Rust source uses `snake_case.rs`: `crates/core/shell/src/shell/surface_layout.rs`, `crates/core/runtime/scripting/src/host_api.rs`.
+- Rust crate manifests are `Cargo.toml` at each crate root: `crates/core/shell/Cargo.toml`, `crates/tools/cli/Cargo.toml`.
+- Module manifests use `package.json` for the target package model: `modules/backend/pipewire-audio/package.json`, `config/modules/@mesh/panel/package.json`.
+- Compatibility module manifests use `module.json`: `modules/frontend/navigation-bar/module.json`, `modules/backend/pulseaudio-audio/module.json`.
+- Frontend components use kebab-case `.mesh`: `modules/frontend/navigation-bar/src/components/settings-button.mesh`.
+- Backend scripts use `src/main.luau`: `modules/backend/pipewire-audio/src/main.luau`.
+- Interface contracts use domain TOML names: `modules/interfaces/audio.toml`.
+- Theme files use kebab-case JSON names: `config/themes/mesh-default-dark.json`.
 
-**Plugin IDs:**
-- Pattern: `@mesh/<name>` (e.g. `@mesh/panel`, `@mesh/pipewire-audio`, `@mesh/audio-interface`)
+**Directories:**
+- Rust crates use domain grouping under `crates/core/{foundation,extension,runtime,shell,ui,platform}`.
+- Frontend modules use `modules/frontend/<module-name>/`.
+- Backend modules use `modules/backend/<provider-name>/`.
+- Frontend local components live under `src/components/` inside a module: `modules/frontend/navigation-bar/src/components/`.
+- Package-shaped catalog manifests use npm scope directories: `config/modules/@mesh/<module-name>/`.
+- Documentation groups by topic: `docs/frontend/`, `docs/plugins/`, `docs/settings/`, `docs/theming/`.
 
-**Plugin directories:**
-- kebab-case matching the plugin name suffix (e.g. `navigation-bar`, `pipewire-audio`)
+**Rust Symbols:**
+- Public types use PascalCase: `Shell`, `InstalledModuleGraph`, `ModulePackageManifest`, `ScriptContext`.
+- Functions and methods use snake_case: `load_installed_module_graph`, `spawn_backend_plugins`, `compile_frontend_plugin`.
+- Crates use hyphenated package names and underscore Rust imports: package `mesh-core-shell`, import `mesh_core_shell`.
 
-**`.mesh` files:**
-- kebab-case filenames (e.g. `main.mesh`, `battery-button.mesh`, `wifi-item.mesh`)
-
-**Component tags in templates:**
-- PascalCase (e.g. `<VolumeButton />`, `<BatteryWidget />`) — must be explicitly imported in `<script>`
-
-**Rust files:**
-- snake_case modules; types are PascalCase; functions snake_case
+**Module IDs And Interfaces:**
+- Module package IDs use npm scope form: `@mesh/navigation-bar`, `@mesh/pipewire-audio`, `@mesh/pulseaudio-audio`.
+- Interface IDs use dotted form: `mesh.audio`, `mesh.network`, `mesh.power`.
+- Root layout entrypoints use `<module-id>:<entrypoint-id>`: `@mesh/navigation-bar:main`.
+- Frontend service capabilities use `service.<name>.read` and `service.<name>.control`: `service.audio.read`, `service.audio.control`.
+- Backend host capabilities use generic host powers: `exec.wpctl`, `exec.pactl`, `exec.aplay`.
 
 ## Where to Add New Code
 
-**New frontend surface plugin:**
-- Create `packages/plugins/frontend/core/<name>/`
-- Add `plugin.json` with `"type": "surface"` and `surface_layout` section
-- Add `src/main.mesh` as entrypoint
-- Extract sub-components into `src/components/<component-name>.mesh`
-- User settings override: `config/settings.json`
-- Translations: `config/i18n/<locale>.json`
+**New Rust Core Capability Or Foundation Utility:**
+- Primary code: `crates/core/foundation/<new-crate>/src/lib.rs` or the relevant existing foundation crate such as `crates/core/foundation/capability/src/lib.rs`.
+- Workspace registration: `Cargo.toml` and the new crate `Cargo.toml`.
+- Tests: Colocated `#[cfg(test)]` module in the crate source file.
 
-**New frontend component (sub-component of a plugin):**
-- Add to `packages/plugins/frontend/core/<plugin-name>/src/components/<name>.mesh`
-- Import explicitly in the parent `.mesh` file's `<script>` block: `import Name from "./components/<name>.mesh"`
+**New Module Manifest Behavior:**
+- Primary code: `crates/core/extension/plugin/src/package.rs`.
+- Runtime compatibility mapping: `crates/core/extension/plugin/src/manifest.rs`.
+- Tests: Colocated tests in `crates/core/extension/plugin/src/package.rs` or `crates/core/extension/plugin/src/manifest.rs`.
+- Docs: `docs/module-system.md`.
 
-**New backend service plugin:**
-- Create `packages/plugins/backend/core/<name>/`
-- Add `plugin.json` with `"type": "backend"`, `"provides": [{"interface": "@mesh/<interface>"}]`
-- Add `src/main.luau` with `init()`, `on_poll()`, `on_command_*()` functions
-- Use `mesh.exec_shell()` for system calls — never add Rust service logic
+**New Interface Contract Feature:**
+- Primary code: `crates/core/extension/service/src/contract.rs` and `crates/core/extension/service/src/interface.rs`.
+- Interface data: `modules/interfaces/<domain>.toml` or an interface module package.
+- Tests: Colocated tests in `crates/core/extension/service/src/contract.rs`.
 
-**New interface contract:**
-- Create `packages/plugins/backend/core/<name>-interface/`
-- Add `plugin.json` with `"type": "interface"`
-- Add `interface.toml` declaring methods, events, types
+**New Backend Provider Module:**
+- Implementation: `modules/backend/<provider-name>/package.json` plus `modules/backend/<provider-name>/src/main.luau`.
+- Root graph entry: add `@scope/<provider-name>` to `config/package.json` under `mesh.modules`; select it under `mesh.providers` when it should be active.
+- Catalog/bundled manifest: add `config/modules/@mesh/<provider-name>/package.json` when the provider should be represented in bundled package metadata.
+- Contract: depend on or add an interface contract under `modules/interfaces/` or an interface module package.
 
-**New CSS property:**
-- Parse: `crates/core/ui/elements/src/style.rs`
-- Apply during paint: `crates/core/ui/render/src/surface/painter.rs`
+**New Frontend Surface Or Widget Module:**
+- Implementation: `modules/frontend/<module-name>/package.json` for target package shape, or `modules/frontend/<module-name>/module.json` only when compatibility with existing runtime fields is required.
+- Entrypoint: `modules/frontend/<module-name>/src/main.mesh`.
+- Local components: `modules/frontend/<module-name>/src/components/*.mesh`.
+- Settings: `modules/frontend/<module-name>/config/settings.json`.
+- Root graph entry: add to `config/package.json` under `mesh.modules`; select `mesh.layout.entrypoint` for a top-level layout when applicable.
 
-**New core element type:**
-- Register: `crates/core/ui/elements/src/element.rs` in `ELEMENT_TYPE_DEFS`
-- Paint: `crates/core/ui/render/src/surface/painter.rs`
-- LSP knowledge: `crates/tools/lsp/src/knowledge/tags.rs`
+**New `.mesh` Parser Or Renderer Capability:**
+- Parser changes: `crates/core/ui/component/src/parser.rs` and submodules under `crates/core/ui/component/src/parser/`.
+- Compiler changes: `crates/core/ui/render/src/compile.rs`.
+- Runtime/render changes: `crates/core/shell/src/shell/component.rs`, `crates/core/ui/elements/src/`, `crates/core/ui/render/src/`.
+- LSP updates: `crates/tools/lsp/src/knowledge/`, `crates/tools/lsp/src/analyzer/`, and `crates/tools/lsp/src/diagnostics.rs`.
 
-**New `CoreRequest` action:**
-- Add variant to `CoreRequest` enum: `crates/core/shell/src/shell/types.rs`
-- Add match arm in `handle_request()`: `crates/core/shell/src/shell/mod.rs`
+**New Shell Runtime Behavior:**
+- Lifecycle/event-loop behavior: `crates/core/shell/src/shell/mod.rs`.
+- Component-specific behavior: `crates/core/shell/src/shell/component.rs` or submodules under `crates/core/shell/src/shell/component/`.
+- Service command mapping: `crates/core/shell/src/shell/service.rs`.
+- IPC behavior: `crates/core/shell/src/shell/ipc.rs`.
 
-**New theme token:**
-- Add to `config/themes/mesh-default-dark.json` and `config/themes/mesh-default-light.json`
-- Reference in `.mesh` `<style>` blocks via `token(group.name)`
+**New CLI Command:**
+- Implementation: `crates/tools/cli/src/main.rs`.
+- Shell API support: `crates/core/shell/src/lib.rs` and `crates/core/shell/src/shell/mod.rs` when command needs runtime access.
 
-**New host API (`mesh.*` function for Luau):**
-- Add to `crates/core/runtime/scripting/src/host_api.rs`
-- Add capability gate if needed in `crates/core/foundation/capability/src/lib.rs`
-
-**Utilities / shared helpers:**
-- Foundation primitives: appropriate `crates/core/foundation/*/src/lib.rs`
-- UI helpers: `crates/core/ui/elements/src/` (if no runtime deps) or `crates/core/ui/render/src/` (if rendering)
+**Utilities:**
+- Shared Rust helpers: place near the owning crate, not in a global utility crate by default.
+- Shared frontend helpers: use or add Luau library modules once library resolution is implemented; package shape is documented in `docs/module-system.md`.
+- Documentation-only references: `docs/` topic directory matching the feature area.
 
 ## Special Directories
 
-**`crates/core/runtime/host/` (`mesh-core-runtime`):**
-- Purpose: Stub / future Luau sandbox host (not yet implemented)
-- Generated: No
-- Committed: Yes
-
-**`crates/core/ui/icon/assets/material/`:**
-- Purpose: Bundled Material icon assets for offline/fallback icon resolution
-- Generated: No (checked-in assets)
-- Committed: Yes
-
-**`packages/plugins/icon-packs/papirus/`:**
-- Purpose: Papirus icon pack plugin declaration (only `plugin.json` — actual icon files are installed system-wide)
-- Generated: No
-
-**`target/`:**
-- Purpose: Cargo build output
+**`.planning/`:**
+- Purpose: GSD project state, roadmap, phase artifacts, and codebase maps.
 - Generated: Yes
-- Committed: No (in `.gitignore`)
+- Committed: Project-dependent; codebase docs are written under `.planning/codebase/`.
 
 **`.claude/`:**
-- Purpose: GSD workflow tooling (agents, commands, hooks) for AI-assisted development
+- Purpose: Claude/GSD commands, agents, hooks, templates, workflows, local settings.
+- Generated: Yes
+- Committed: Project-dependent local automation.
+
+**`.agents/`:**
+- Purpose: Agent configuration area.
+- Generated: Yes
+- Committed: Project-dependent.
+
+**`.vscode/`:**
+- Purpose: Editor settings.
 - Generated: No
-- Committed: Yes (`.claude/agents/`, `.claude/commands/`, `.claude/get-shit-done/`)
+- Committed: Yes in this repo.
+
+**`target/`:**
+- Purpose: Cargo build output.
+- Generated: Yes
+- Committed: No
+
+**`modules/frontend/navigation-bar/node_modules/`:**
+- Purpose: Local package-manager dependencies for the navigation-bar module.
+- Generated: Yes
+- Committed: No
+
+**`modules/frontend/navigation-bar/dist/`:**
+- Purpose: Built frontend module output if generated by local tooling.
+- Generated: Yes
+- Committed: No
+
+**`config/modules/`:**
+- Purpose: Package-shaped bundled/catalog module manifests under `@mesh` scope.
+- Generated: No
+- Committed: Yes
+
+**`config/themes/`:**
+- Purpose: Theme token JSON files loaded by theme configuration and docs.
+- Generated: No
+- Committed: Yes
+
+**`crates/core/ui/icon/assets/`:**
+- Purpose: Bundled SVG icon assets.
+- Generated: No
+- Committed: Yes
 
 ---
 
-*Structure analysis: 2026-05-01*
+*Structure analysis: 2026-05-06*

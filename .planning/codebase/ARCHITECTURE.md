@@ -1,306 +1,285 @@
+<!-- refreshed: 2026-05-06 -->
 # Architecture
 
-**Analysis Date:** 2026-05-01
+**Analysis Date:** 2026-05-06
 
 ## System Overview
 
 ```text
-┌──────────────────────────────────────────────────────────────────────┐
-│                        mesh-tools-cli                                │
-│              `crates/tools/cli/src/main.rs`  (mesh-shell binary)     │
-└──────────────────────────────┬───────────────────────────────────────┘
-                               │
-┌──────────────────────────────▼───────────────────────────────────────┐
-│                        mesh-core-shell                               │
-│             `crates/core/shell/src/shell/mod.rs`                     │
-│  Shell struct: plugin host, event loop, surface orchestrator         │
-│  Owns: ComponentRuntime[], EventBus, ThemeEngine, LocaleEngine,      │
-│        InterfaceRegistry, ServiceRegistry, RenderEngine              │
-└─────┬─────────────┬──────────────────┬────────────────┬─────────────┘
-      │             │                  │                │
-      ▼             ▼                  ▼                ▼
-┌──────────┐ ┌───────────┐  ┌────────────────┐  ┌───────────────────┐
-│mesh-core │ │mesh-core  │  │mesh-core-render│  │mesh-core-backend  │
-│-service  │ │-plugin    │  │`ui/render/`    │  │`runtime/backend/` │
-│(interface│ │(manifest  │  │Compiles .mesh  │  │Luau backend poll  │
-│registry) │ │parsing)   │  │paints WidgetNode│  │loop + commands    │
-└──────────┘ └───────────┘  └───────┬────────┘  └────────┬──────────┘
-                                    │                    │
-                          ┌─────────▼─────────┐  ┌──────▼──────────┐
-                          │mesh-core-elements │  │mesh-core-       │
-                          │`ui/elements/`     │  │scripting        │
-                          │WidgetNode, layout,│  │`runtime/        │
-                          │style, element API │  │scripting/`      │
-                          └─────────┬─────────┘  │mlua Luau VM     │
-                                    │            └─────────────────┘
-                          ┌─────────▼─────────┐
-                          │mesh-core-component│
-                          │`ui/component/`    │
-                          │.mesh file parser  │
-                          └───────────────────┘
-
-Foundation crates (no knowledge of layers above):
-  mesh-core-theme, mesh-core-locale, mesh-core-config,
-  mesh-core-events, mesh-core-capability, mesh-core-diagnostics,
-  mesh-core-debug, mesh-core-wayland, mesh-core-icon, mesh-core-runtime(stub)
+┌─────────────────────────────────────────────────────────────┐
+│                     MESH Shell Process                       │
+│        `crates/tools/cli/src/main.rs` -> `Shell::run()`       │
+├──────────────────┬──────────────────┬───────────────────────┤
+│  Module Graph    │ Frontend Runtime │   Backend Runtime      │
+│ `config/package` │ `.mesh` surfaces │   Luau providers       │
+│ `plugin/package` │ `ui/render`      │   `runtime/backend`    │
+└────────┬─────────┴────────┬─────────┴──────────┬────────────┘
+         │                  │                     │
+         ▼                  ▼                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Generic Shell Orchestration Layer               │
+│ `crates/core/shell/src/shell/mod.rs`                         │
+│ config, discovery, interfaces, IPC, events, diagnostics, UI  │
+└────────┬──────────────────┬─────────────────────┬───────────┘
+         │                  │                     │
+         ▼                  ▼                     ▼
+┌────────────────┐  ┌────────────────────┐  ┌─────────────────┐
+│ Wayland/Render │  │ Interface Registry │  │ Installed Files │
+│ `ui/render`    │  │ `extension/service`│  │ `modules/`      │
+│ `platform`     │  │ `interfaces/*.toml`│  │ `config/`       │
+└────────────────┘  └────────────────────┘  └─────────────────┘
 ```
 
 ## Component Responsibilities
 
 | Component | Responsibility | File |
 |-----------|----------------|------|
-| `Shell` | Plugin discovery, surface lifecycle, event loop, IPC | `crates/core/shell/src/shell/mod.rs` |
-| `FrontendSurfaceComponent` | One surface plugin instance: tick, paint, input, settings | `crates/core/shell/src/shell/component.rs` |
-| `ShellComponent` trait | Contract all shell components must implement | `crates/core/shell/src/shell/types.rs` |
-| `CoreRequest` enum | All requests a component can make to the shell | `crates/core/shell/src/shell/types.rs` |
-| `CoreEvent` enum | Events the shell broadcasts to all components | `crates/core/shell/src/shell/types.rs` |
-| `ServiceEvent` enum | Service payload delivered to frontend components | `crates/core/shell/src/shell/types.rs` |
-| `RenderEngine` | Selects Wayland or dev-window bridge, presents `PixelBuffer` | `crates/core/ui/render/src/surface/mod.rs` |
-| `FrontendRenderEngine` | Thread-local painter; walks `WidgetNode` tree, draws pixels | `crates/core/ui/render/src/surface/painter.rs` |
-| `PixelBuffer` | RGBA software framebuffer | `crates/core/ui/render/src/surface/buffer.rs` |
-| `ScriptContext` | Frontend Luau VM instance: state, host API, interface proxies | `crates/core/runtime/scripting/src/context.rs` |
-| `BackendScriptContext` | Backend Luau VM: init(), on_poll(), on_command_*() | `crates/core/runtime/scripting/src/backend.rs` |
-| `WidgetNode` | Intermediate representation of one UI node in the tree | `crates/core/ui/elements/src/tree.rs` |
-| `ElementKind` / `ElementTypeDef` | Core element model (box, row, icon, text, button…) | `crates/core/ui/elements/src/element.rs` |
-| `StyleResolver` | Resolves CSS-like styles, applies theme tokens | `crates/core/ui/elements/src/style.rs` |
-| `LayoutEngine` | Flexbox-inspired layout computation | `crates/core/ui/elements/src/layout.rs` |
-| `ComponentFile` | Parsed `.mesh` single-file component AST | `crates/core/ui/component/src/lib.rs` |
-| `Manifest` | Normalized plugin manifest (from `plugin.json` or `mesh.toml`) | `crates/core/extension/plugin/src/manifest.rs` |
-| `InterfaceRegistry` | Tracks discovered interface contracts and providers | `crates/core/extension/service/src/interface.rs` |
-| `ThemeEngine` | Active theme + token lookup | `crates/core/foundation/theme/src/lib.rs` |
-| `LocaleEngine` | Active locale + translation lookup with fallback chain | `crates/core/foundation/locale/src/lib.rs` |
-| `EventBus` | Tokio broadcast channels for inter-plugin events | `crates/core/foundation/events/src/lib.rs` |
-| `DiagnosticsCollector` | Per-plugin health status, frame metrics | `crates/core/foundation/diagnostics/src/lib.rs` |
-| `spawn_backend_service` | Async task: Luau backend poll loop + command dispatch | `crates/core/runtime/backend/src/lib.rs` |
-| `mesh-tools-lsp` | Language server for `.mesh` files (completions, hover, diagnostics) | `crates/tools/lsp/src/` |
+| CLI entrypoint | Starts the shell, lists discovered modules/plugins, sends IPC commands, reports status. | `crates/tools/cli/src/main.rs` |
+| Shell orchestrator | Owns process lifecycle, discovery, frontend mounting, backend spawning, event loop, IPC, theme reload, locale reload, service state routing, diagnostics. | `crates/core/shell/src/shell/mod.rs` |
+| Package/module loader | Parses root installed-module graph and module `package.json` manifests, validates selected providers and layout entrypoints, indexes contributions. | `crates/core/extension/plugin/src/package.rs` |
+| Compatibility manifest loader | Normalizes `package.json`, `module.json`, `plugin.json`, and `mesh.toml` into `Manifest` for runtime discovery. | `crates/core/extension/plugin/src/manifest.rs` |
+| Interface contracts | Loads TOML service contracts into state fields, methods, events, types, and capability metadata. | `crates/core/extension/service/src/contract.rs` |
+| Interface registry | Registers discovered contracts/providers and resolves frontend `require()`/`mesh.service.use()` lookups. | `crates/core/extension/service/src/interface.rs` |
+| Backend runtime | Runs backend Luau scripts, calls `init()`, polls state, dispatches commands, emits service lifecycle/update events. | `crates/core/runtime/backend/src/lib.rs` |
+| Scripting runtime | Hosts frontend/backend Luau contexts, installs `mesh.*` host APIs, tracks service field reads, converts proxy method calls into published events. | `crates/core/runtime/scripting/src/context.rs` |
+| Frontend catalog | Compiles discovered frontend modules, validates component imports and slot composition, chooses top-level surfaces. | `crates/core/shell/src/shell/component/catalog.rs` |
+| Frontend component host | Mounts compiled `.mesh` components, maintains script state, applies service/theme/locale events, processes input, renders widget trees. | `crates/core/shell/src/shell/component.rs` |
+| Component parser | Parses `.mesh` single-file components into template/script/style/i18n AST structures. | `crates/core/ui/component/src/lib.rs` |
+| Renderer | Compiles frontend manifests, resolves local component imports, paints widget trees to buffers/surfaces. | `crates/core/ui/render/src/compile.rs` |
+| Configuration | Loads shell TOML config, JSON shell settings, default settings, discovery paths, per-plugin overrides. | `crates/core/foundation/config/src/lib.rs` |
 
 ## Pattern Overview
 
-**Overall:** Plugin-first layered architecture with a thin Rust wiring core.
+**Overall:** Modular shell runtime with package-shaped modules, contract-based service interfaces, and Luau-hosted frontend/backend behavior.
 
 **Key Characteristics:**
-- The Rust core is a wiring layer only — it discovers plugins, loads manifests, and routes events. All service-specific logic (audio, network, power, media) lives in Luau backend plugins.
-- Frontend plugins are compiled at startup into `WidgetNode` trees. The Luau `<script>` block runs in a real Luau VM (mlua); there is no hand-written interpreter.
-- Reactive state is tracked via `ScriptState::dirty`: any bare global assignment in a `<script>` block is automatically synced to the UI after each handler call.
-- All communication between backend plugins and frontend plugins flows through typed `ServiceEvent` payloads — never through shared Rust state.
-- Surface layout (anchor, layer, size, exclusive zone, keyboard mode) is declared in `plugin.json`, not in Rust match arms.
+- Use `package.json` with a top-level `mesh` section as the target module manifest shape. Root installed-module state lives in `config/package.json`; module manifests live under paths selected by `mesh.modulesDir` such as `modules/backend/pipewire-audio/package.json`.
+- Keep Rust core generic. Domain behavior such as audio state parsing belongs in backend modules such as `modules/backend/pipewire-audio/src/main.luau` and `modules/backend/pulseaudio-audio/src/main.luau`.
+- Route frontend/backend coupling through interface contracts such as `modules/interfaces/audio.toml`, not through direct frontend imports of backend module IDs.
+- Maintain compatibility with `module.json`, `plugin.json`, and `mesh.toml` through `crates/core/extension/plugin/src/manifest.rs` and `ModulePackageManifest::from_legacy_manifest()` in `crates/core/extension/plugin/src/package.rs`.
+- Run frontend surfaces as compiled `.mesh` single-file components and backend providers as Luau scripts with capability-gated host APIs.
 
 ## Layers
 
-**CLI Layer:**
-- Purpose: Parses CLI args, initializes tracing, starts `Shell::run()`
-- Location: `crates/tools/cli/src/`
-- Contains: `main.rs` with commands (`start`, `list`, `services`, `debug`, `ipc`, `status`, `version`)
-- Depends on: `mesh-core-shell`, `mesh-core-plugin`, `mesh-core-config`, `mesh-core-diagnostics`
+**Package And Module Graph:**
+- Purpose: Define which modules are installed, enabled, active for interfaces, and selected as layout entrypoints.
+- Location: `config/package.json`, `modules/**/package.json`, `modules/**/module.json`, `crates/core/extension/plugin/src/package.rs`.
+- Contains: Root graph (`mesh.schemaVersion`, `mesh.modulesDir`, `mesh.modules`, `mesh.providers`, `mesh.layout`) and module metadata (`mesh.kind`, `mesh.entrypoints`, `mesh.dependencies`, `mesh.implements`, `mesh.contributes`).
+- Depends on: JSON parsing, relative path validation, manifest normalization in `crates/core/extension/plugin/src/manifest.rs`.
+- Used by: Backend launch selection in `crates/core/shell/src/shell/mod.rs` and architecture/docs/runtime references.
 
-**Shell Orchestration Layer:**
-- Purpose: Plugin discovery, lifecycle management, event loop, surface state, IPC server
-- Location: `crates/core/shell/src/shell/`
-- Contains: `mod.rs` (main loop ~1536 lines), `component.rs`, `ipc.rs`, `layout.rs`, `service.rs`, `surface_layout.rs`, `types.rs`, `sounds.rs`, `render/`
-- Depends on: all other core crates
-- Rule: Must never implement service logic (no `wpctl`, no `pactl`, no `if service_name == "audio"` branches)
+**Discovery And Compatibility:**
+- Purpose: Recursively scan module/plugin directories and normalize supported manifest files into runtime `Manifest` values.
+- Location: `crates/core/shell/src/shell/mod.rs`, `crates/core/extension/plugin/src/manifest.rs`.
+- Contains: `Shell::discover_plugins()`, `Shell::scan_plugin_dir()`, `load_manifest()`, legacy JSON/TOML parsers.
+- Depends on: Discovery paths from `crates/core/foundation/config/src/lib.rs`.
+- Used by: Frontend catalog compilation, interface provider registration, backend launch candidate validation.
 
-**Render Layer:**
-- Purpose: Compiles `.mesh` plugins, walks `WidgetNode` trees, paints `PixelBuffer`, presents to Wayland or dev window
-- Location: `crates/core/ui/render/src/`
-- Contains: `lib.rs`, `compile.rs`, `render.rs`, `style.rs`, `tags.rs`, `expr.rs`, `accessibility.rs`, `surface/` (painter, buffer, icon, text, debug_overlay, bridge)
-- Depends on: `mesh-core-component`, `mesh-core-elements`, `mesh-core-icon`, `mesh-core-plugin`, `mesh-core-theme`, `mesh-core-wayland`
+**Interface And Service Contracts:**
+- Purpose: Define service state fields, mutating methods, events, types, and required/optional capabilities as data.
+- Location: `crates/core/extension/service/src/contract.rs`, `crates/core/extension/service/src/interface.rs`, `modules/interfaces/audio.toml`.
+- Contains: `InterfaceContract`, `InterfaceRegistry`, provider registration, version matching, canonical interface names.
+- Depends on: TOML contracts and manifest `interface`/`provides`/`implements` sections.
+- Used by: Frontend script proxy resolution, backend provider validation, service state shape warnings.
 
-**Element / IR Layer:**
-- Purpose: Core element model (`ElementKind`), `WidgetNode` IR, layout engine, style types, accessibility tree, event dispatcher — shared intermediate representation between rendering and scripting
-- Location: `crates/core/ui/elements/src/`
-- Contains: `element.rs`, `tree.rs`, `layout.rs`, `style.rs`, `events.rs`, `accessibility.rs`
-- Depends on: `mesh-core-component`, `mesh-core-theme`
-- Boundary: Does NOT depend on `mesh-core-service`, `mesh-core-scripting`, `mesh-core-wayland`, or `mesh-core-render`
+**Shell Orchestration:**
+- Purpose: Tie together config, module discovery, frontend mounting, backend runtime tasks, IPC, input, rendering, theme/locale reloads, diagnostics, and shutdown.
+- Location: `crates/core/shell/src/shell/mod.rs`.
+- Contains: `Shell`, backend runtime slots/statuses, latest service state cache, event loop, request draining, IPC socket selection.
+- Depends on: All core crates through `crates/core/shell/Cargo.toml`.
+- Used by: CLI `mesh-shell start` and tests under `crates/core/shell/src/shell/component/tests.rs`.
 
-**Component Parser Layer:**
-- Purpose: Parses `.mesh` single-file components into typed AST (`ComponentFile`)
-- Location: `crates/core/ui/component/src/`
-- Contains: `lib.rs`, `parser.rs`, `parser/` (template.rs, script.rs, styles.rs, markup.rs), `template.rs`, `style.rs`
-- Depends on: nothing from the MESH crate tree (pure parsing, no runtime dependencies)
+**Frontend Runtime:**
+- Purpose: Compile, mount, update, and render `.mesh` frontend modules.
+- Location: `crates/core/ui/component/src`, `crates/core/ui/render/src`, `crates/core/shell/src/shell/component*`.
+- Contains: Parser, compiler, local component import resolver, slot/catalog validation, `FrontendSurfaceComponent`, runtime tree, layout, input, animation, diagnostics, rendering.
+- Depends on: Plugin manifests, `mesh-core-elements`, theme, locale, scripting, service catalog.
+- Used by: Top-level surfaces from `modules/frontend/navigation-bar/module.json` and component files under `modules/frontend/navigation-bar/src/`.
 
-**Scripting Layer:**
-- Purpose: Embeds Luau VM via `mlua`; provides `ScriptContext` for frontend scripts and `BackendScriptContext` for backend scripts; implements `mesh.*` host API
-- Location: `crates/core/runtime/scripting/src/`
-- Contains: `lib.rs`, `context.rs`, `backend.rs`, `host_api.rs`
-- Depends on: `mesh-core-component`, `mesh-core-elements`, `mesh-core-theme`, `mesh-core-locale`, `mesh-core-config`, `mesh-core-events`, `mesh-core-capability`, `mesh-core-service`
+**Backend Runtime:**
+- Purpose: Execute backend Luau scripts as providers for interface state and methods.
+- Location: `crates/core/runtime/backend/src/lib.rs`, `crates/core/runtime/scripting/src/backend.rs`, backend modules under `modules/backend/`.
+- Contains: `spawn_backend_service()`, backend command/update events, poll loop, command dispatch, runtime failure handling.
+- Depends on: Active provider selection from `InstalledModuleGraph`, script source files, requested capabilities, backend settings.
+- Used by: Shell backend spawning and service update broadcasting.
 
-**Backend Runtime Layer:**
-- Purpose: Owns the async Luau backend poll loop: calls `init()`, then polls at the declared interval, dispatches commands, emits `BackendServiceUpdate`
-- Location: `crates/core/runtime/backend/src/lib.rs`
-- Contains: `spawn_backend_service()`, `BackendServiceCommand`, `BackendServiceUpdate`
-- Depends on: `mesh-core-scripting`
-
-**Extension Layer:**
-- Purpose: Manifest parsing (`Manifest`, `PluginType`, `PluginInstance`) and interface/service registry
-- Location: `crates/core/extension/plugin/src/`, `crates/core/extension/service/src/`
-- Contains: `manifest.rs`, `lifecycle.rs`, `lib.rs`; `contract.rs`, `interface.rs`, `registry.rs`
-
-**Foundation Layer:**
-- Purpose: Shared primitives with no knowledge of layers above
-- Location: `crates/core/foundation/*/src/`
-- Contains: `theme`, `locale`, `config`, `events`, `capability`, `diagnostics`, `debug`
+**Foundation And Platform:**
+- Purpose: Shared cross-cutting support for config, capability checks, diagnostics, events, theme, locale, icons, Wayland surfaces, and debug overlay data.
+- Location: `crates/core/foundation/*`, `crates/core/platform/wayland`, `crates/core/ui/icon`.
+- Contains: Small crates with focused APIs reused by shell/runtime/render crates.
+- Depends on: Workspace dependencies in `Cargo.toml`.
+- Used by: Most runtime layers.
 
 ## Data Flow
 
-### Shell Startup
+### Primary Shell Startup Path
 
-1. `main()` in `crates/tools/cli/src/main.rs` calls `Shell::new()` then `shell.run()`
-2. `Shell::run()` calls `shell.discover_plugins()` — scans `packages/plugins/`, `/usr/share/mesh`, `~/.local/share/mesh`
-3. For each frontend plugin: `compile_frontend_plugin()` in `crates/core/ui/render/src/compile.rs` → loads `plugin.json`, parses `.mesh` via `mesh-core-component`, builds `CompiledFrontendPlugin`
-4. `surface_layout_from_manifest()` in `crates/core/shell/src/shell/surface_layout.rs` reads `plugin.json` defaults; user `config/settings.json` overrides applied on top
-5. For each backend plugin: `spawn_backend_service()` in `crates/core/runtime/backend/src/lib.rs` launches a Tokio task running the Luau backend loop
-6. Shell enters the main Tokio event loop
+1. CLI command dispatch starts `Shell::new()` and `Shell::run()` (`crates/tools/cli/src/main.rs:22`, `crates/tools/cli/src/main.rs:33`).
+2. `Shell::new()` loads shell config, settings, theme, locale, discovery paths, diagnostics, render engine, and runtime state (`crates/core/shell/src/shell/mod.rs:183`).
+3. `Shell::run()` discovers manifests, loads themes, validates plugin dependencies, compiles frontend components, creates a Tokio runtime, spawns active backend providers, starts IPC, mounts surfaces, and enters the render/event loop (`crates/core/shell/src/shell/mod.rs:465`).
+4. `Shell::discover_plugins()` scans configured discovery paths and registers interface contracts and providers from normalized manifests (`crates/core/shell/src/shell/mod.rs:236`).
+5. `load_frontend_components()` builds a `FrontendCatalog` from discovered frontend manifests and registers top-level surfaces (`crates/core/shell/src/shell/mod.rs:697`, `crates/core/shell/src/shell/component/catalog.rs:23`).
+6. The event loop processes backend/service/IPC messages, component ticks, requests, rendering, Wayland flushing, and render-engine pumping (`crates/core/shell/src/shell/mod.rs:501`).
 
-### Surface Rendering (per frame)
+### Installed Module Graph Path
 
-1. `Shell` main loop calls `component.tick()` on each `ComponentRuntime`
-2. `FrontendSurfaceComponent::paint()` calls `ScriptContext` — evaluates Luau reactive state → builds `WidgetNode` tree via `build_widget_tree_from_component()`
-3. If `size_policy == ContentMeasured` (launcher): `measure_content_size()` uses manifest clamp bounds
-4. `paint_frontend_tree()` in `crates/core/ui/render/src/surface/mod.rs` walks the `WidgetNode` tree
-5. `FrontendRenderEngine` resolves styles (`StyleResolver`), computes layout (`LayoutEngine`), draws into `PixelBuffer`
-6. `RenderEngine::present()` commits `PixelBuffer` to Wayland via `PresentationBridge` → `wayland_surface.rs`
+1. `config/package.json` declares `@mesh/navigation-bar`, `@mesh/pipewire-audio`, `@mesh/pulseaudio-audio`, active provider `mesh.audio -> @mesh/pipewire-audio`, and layout entrypoint `@mesh/navigation-bar:main`.
+2. `spawn_backend_plugins()` loads `config/package.json` through `load_installed_module_graph()` before falling back to legacy backend discovery (`crates/core/shell/src/shell/mod.rs:1571`, `crates/core/extension/plugin/src/package.rs:1617`).
+3. `load_installed_module_graph()` resolves `mesh.modulesDir` relative to the root manifest and loads each module manifest from `modules/` (`crates/core/extension/plugin/src/package.rs:1620`).
+4. `InstalledModuleGraph::from_parts()` validates root entries against loaded module kinds, indexes enabled frontend requirements, interface declarations, backend providers, resource contributions, settings schemas, and layout contribution (`crates/core/extension/plugin/src/package.rs:1028`).
+5. Active provider selections are validated against installed enabled backend modules and their implemented interfaces (`crates/core/extension/plugin/src/package.rs:1128`).
+6. `backend_launch_candidates_from_graph()` chooses active providers, validates runtime manifests and required binaries, reads backend Luau entrypoints, and returns launch candidates plus lifecycle status records (`crates/core/shell/src/shell/mod.rs:1775`).
 
-### Service / Backend Event Flow
+### Frontend Service Consumption Flow
 
-```
-Backend Luau plugin (main.luau)
-  → mesh.service.emit({percent=75, muted=false})
-  → BackendScriptContext collects payload
-  → spawn_backend_service() sends BackendServiceUpdate on mpsc channel
-  → Shell receives ServiceEvent::Updated{service="audio", payload={...}}
-  → Shell sets state["audio"] on all frontend ScriptContexts
-  → Shell calls on_audio_update() (if declared) in each frontend script
-  → Frontend script writes reactive globals (icon_name = "audio-volume-high")
-  → ScriptState marked dirty
-  → Next paint rebuilds WidgetNode tree with updated globals
-  → Template {icon_name} renders updated value
-```
+1. A frontend `.mesh` file imports local components and/or calls `require("@mesh/audio@>=1.0")` or `mesh.service.use("mesh.audio")` in Luau (`modules/frontend/navigation-bar/src/main.mesh`, `docs/module-system.md`).
+2. `compile_frontend_plugin()` reads the `.mesh` entrypoint, recursively resolves local component imports, and validates standalone component scope (`crates/core/ui/render/src/compile.rs:48`).
+3. `ScriptContext::load_script_with_interface_imports()` installs host APIs, executes Luau, and syncs exported globals into reactive state (`crates/core/runtime/scripting/src/context.rs:268`).
+4. `require()` canonicalizes `@mesh/...` or `mesh.*` names, checks read capability, resolves the interface/provider, and creates a service proxy (`crates/core/runtime/scripting/src/context.rs:550`).
+5. Proxy state reads are served from the latest service payload table and recorded as tracked fields (`crates/core/runtime/scripting/src/context.rs:923`).
+6. Proxy method calls emit events such as `mesh.audio.set_volume` with capability metadata (`crates/core/runtime/scripting/src/context.rs:881`).
+7. Shell converts published events to `CoreRequest::ServiceCommand` only when the source has `service.<name>.control` (`crates/core/shell/src/shell/service.rs:113`).
 
-### Settings Flow
+### Backend Provider Flow
 
-```
-plugin.json settings.schema.surface.properties[field].default
-  ↓ (baseline) surface_layout_from_manifest() in shell/surface_layout.rs
-  ↓ + user overrides
-config/settings.json → load_frontend_plugin_settings()
-  ↓
-FrontendSurfaceComponent.surface_layout / settings_json
-  ↓
-ScriptContext state["settings"] ← Luau reads {settings.surface.anchor}
-```
+1. The installed module graph selects one active backend provider for an interface (`config/package.json`, `crates/core/extension/plugin/src/package.rs:1128`).
+2. `spawn_backend_candidate()` creates command/update channels, bridges backend runtime events into shell messages, and stores a backend runtime slot for the interface (`crates/core/shell/src/shell/mod.rs:1642`).
+3. `spawn_backend_service()` loads the backend Luau script, runs `init()`, emits `Started`, polls with `on_poll()`, and publishes changed state only when payloads differ (`crates/core/runtime/backend/src/lib.rs:40`).
+4. Service updates become `ShellMessage::Service`, then `ServiceEvent::Updated`, then are validated against interface contract state fields and cached by interface (`crates/core/shell/src/shell/mod.rs:1660`, `crates/core/shell/src/shell/mod.rs:796`).
+5. Cached service updates replay to components after mount, so frontends can initialize from backend state (`crates/core/shell/src/shell/mod.rs:851`).
+6. Service commands from frontends are routed back to the active backend command channel when capability checks pass (`crates/core/shell/src/shell/mod.rs`, `crates/core/runtime/backend/src/lib.rs`).
 
-### IPC Command Flow
-
-```
-mesh-shell ipc <command>  (crates/tools/cli/src/main.rs)
-  → Unix socket → crates/core/shell/src/shell/ipc.rs
-  → ShellMessage::Ipc(CoreRequest)
-  → Shell::handle_request() match arm
-  → May produce CoreRequest to components (ToggleSurface, SetTheme, etc.)
-```
+**State Management:**
+- Shell-level mutable state is stored in `Shell` fields in `crates/core/shell/src/shell/mod.rs`.
+- Frontend reactive state lives in each `ScriptContext` and component runtime state under `crates/core/shell/src/shell/component.rs`.
+- Backend state is exported from Luau globals such as `state` and snapshots emitted by `spawn_backend_service()` in `crates/core/runtime/backend/src/lib.rs`.
+- Latest public service state is cached per canonical interface in `latest_service_state` in `crates/core/shell/src/shell/mod.rs`.
+- User settings come from JSON/TOML files loaded by `crates/core/foundation/config/src/lib.rs`.
 
 ## Key Abstractions
 
-**`ShellComponent` trait:**
-- Purpose: Contract for all renderable surface/widget instances
-- Location: `crates/core/shell/src/shell/types.rs`
-- Methods: `mount()`, `tick()`, `paint()`, `handle_input()`, `handle_service_event()`, `handle_core_event()`, `theme_changed()`, `reload_source()`
+**Module Package:**
+- Purpose: Single installable unit for frontend, backend, interface, theme, icon pack, font pack, language pack, or Luau library.
+- Examples: `modules/backend/pipewire-audio/package.json`, `config/modules/@mesh/quick-settings/package.json`, `docs/module-system.md`.
+- Pattern: Standard npm-compatible top-level metadata with all MESH behavior under `mesh`.
 
-**`WidgetNode`:**
-- Purpose: The intermediate representation of one rendered UI node — tag, attributes, children, computed layout rect, style, element state
-- Location: `crates/core/ui/elements/src/tree.rs`
-- Pattern: Built fresh each frame from the component AST + current Luau state; not a persistent DOM
+**Installed Module Graph:**
+- Purpose: Runtime selection graph for enabled modules, active providers, resource contributions, frontend requirements, and selected layout.
+- Examples: `config/package.json`, `crates/core/extension/plugin/src/package.rs`.
+- Pattern: `RootPackageManifest` plus loaded `ModulePackageManifest` values create `InstalledModuleGraph`.
 
-**`Manifest`:**
-- Purpose: Normalized plugin descriptor regardless of source format (`plugin.json` or `mesh.toml`)
-- Location: `crates/core/extension/plugin/src/manifest.rs`
-- Key sections: `package`, `capabilities`, `entrypoints`, `settings`, `surface_layout`, `provides`, `dependencies`
+**Runtime Manifest:**
+- Purpose: Compatibility-normalized structure consumed by older runtime discovery and frontend/backend loading.
+- Examples: `crates/core/extension/plugin/src/manifest.rs`, `crates/core/extension/plugin/src/package.rs`.
+- Pattern: `ModulePackageManifest::into_runtime_manifest()` maps package modules into `Manifest`; `from_legacy_manifest()` maps legacy manifests into package modules.
 
-**`ComponentFile`:**
-- Purpose: Parsed AST of a `.mesh` single-file component
-- Location: `crates/core/ui/component/src/lib.rs`
-- Fields: `imports`, `template`, `script`, `style`, `i18n`
+**Interface Contract:**
+- Purpose: Data contract for service state, methods, events, types, and capabilities.
+- Examples: `modules/interfaces/audio.toml`, `crates/core/extension/service/src/contract.rs`.
+- Pattern: TOML contract loaded into `InterfaceContract` and registered in `InterfaceRegistry`.
 
-**`InterfaceRegistry` / `InterfaceContract`:**
-- Purpose: Maps interface IDs (`@mesh/audio`) to their contracts and active provider plugins
-- Location: `crates/core/extension/service/src/interface.rs`, `contract.rs`
-- Pattern: Contract is declared in `interface.toml`; provider is discovered from `plugin.json`'s `provides` field
+**Frontend Component:**
+- Purpose: `.mesh` single-file UI unit with template, Luau script, style, and imports.
+- Examples: `modules/frontend/navigation-bar/src/main.mesh`, `modules/frontend/navigation-bar/src/components/volume-button.mesh`.
+- Pattern: Parse with `mesh-core-component`, compile with `mesh-core-render`, execute script with `mesh-core-scripting`, render through `mesh-core-elements`.
 
-**`ScriptState`:**
-- Purpose: Reactive variable store for a frontend script; any bare global = reactive
-- Location: `crates/core/runtime/scripting/src/context.rs`
-- Pattern: After each Luau handler call, globals are synced back. `dirty` flag triggers tree rebuild.
+**Backend Provider:**
+- Purpose: Luau service adapter from a system source to a contract payload and command handlers.
+- Examples: `modules/backend/pipewire-audio/src/main.luau`, `modules/backend/pulseaudio-audio/src/main.luau`.
+- Pattern: `init()`, `on_poll()`, `on_command_<method>()`, exported `state`, capability-gated host APIs.
+
+**Capability Set:**
+- Purpose: Permission boundary for frontend service reads/commands and backend host APIs.
+- Examples: `crates/core/foundation/capability/src/lib.rs`, `modules/frontend/navigation-bar/module.json`, `modules/backend/pipewire-audio/package.json`.
+- Pattern: Manifest-required and optional capabilities are granted into runtime contexts and checked before host API or service command access.
 
 ## Entry Points
 
-**Shell binary:**
+**Shell CLI:**
 - Location: `crates/tools/cli/src/main.rs`
-- Triggers: `cargo run -p mesh-tools-cli --bin mesh-shell -- start`
-- Responsibilities: arg parsing, tracing init, `Shell::new()`, `shell.run()`
+- Triggers: `mesh-shell start`, `mesh-shell list`, `mesh-shell services`, `mesh-shell debug`, `mesh-shell ipc`, `mesh-shell status`.
+- Responsibilities: Initialize tracing, dispatch CLI commands, start `Shell::run()`, connect to IPC socket.
 
-**LSP binary:**
-- Location: `crates/tools/lsp/src/main.rs`
-- Triggers: Editor LSP client connects via stdio
-- Responsibilities: `.mesh` file completions, hover, diagnostics via `tower-lsp`
+**Shell Runtime:**
+- Location: `crates/core/shell/src/shell/mod.rs`
+- Triggers: `Shell::run()` from CLI or tests.
+- Responsibilities: Discover modules/plugins, compile UI, spawn backends, run IPC/event/render loop.
 
-**Backend plugin entry:**
-- Location: Luau `init()` function in `packages/plugins/backend/core/<name>/src/main.luau`
-- Triggers: Called once by `spawn_backend_service()` at shell startup
-- Responsibilities: `mesh.service.set_poll_interval()`, register any setup
+**Root Module Graph:**
+- Location: `config/package.json`
+- Triggers: `spawn_backend_plugins()` loads it from the workspace root.
+- Responsibilities: Select enabled modules, active providers, and layout entrypoint.
 
-**Frontend plugin entry:**
-- Location: `.mesh` file `<script>` block globals + `on_<service>_update()` handlers
-- Triggers: `FrontendSurfaceComponent::mount()` and each service event
+**Frontend Surface:**
+- Location: `modules/frontend/navigation-bar/module.json` and `modules/frontend/navigation-bar/src/main.mesh`
+- Triggers: Manifest discovery plus `FrontendCatalog::top_level_surfaces()`.
+- Responsibilities: Declare a top-level surface, capabilities, settings schema, layout policy, and `.mesh` entrypoint.
+
+**Backend Provider:**
+- Location: `modules/backend/pipewire-audio/package.json` and `modules/backend/pipewire-audio/src/main.luau`
+- Triggers: Active provider selection for `mesh.audio` in `config/package.json`.
+- Responsibilities: Provide audio state and command handlers using `wpctl`/`aplay`.
+
+**Interface Contract:**
+- Location: `modules/interfaces/audio.toml`
+- Triggers: Interface file scanning or interface module manifests.
+- Responsibilities: Define the `mesh.audio` contract.
 
 ## Architectural Constraints
 
-- **Threading:** Single Tokio runtime; backend plugins run as independent async tasks via `tokio::spawn`. Frontend rendering is synchronous (software rasterizer) on the shell's main thread. `FrontendRenderEngine` is `thread_local!`.
-- **Global state:** `ICON_CACHE` (`OnceLock<Mutex<HashMap>>`) in `crates/core/ui/icon/src/lib.rs`; `IMAGE_CACHE` in `crates/core/ui/render/src/surface/icon.rs`; `FRONTEND_RENDERER` (`thread_local! RefCell<FrontendRenderEngine>`) in `crates/core/ui/render/src/surface/mod.rs`
-- **No service logic in core:** `mesh-core-shell` must never spawn polling loops for specific services, call `wpctl`/`pactl`/`nmcli`, or branch on service names. This is the single most critical architectural rule.
-- **No display logic in core:** Core must never inject computed display fields (icon names, formatted labels, derived booleans) into service payloads. Frontend plugins compute display state from raw service payloads inside their own `<script>` blocks.
-- **Circular imports:** None detected. Dependency graph flows strictly downward (see Crate Map in docs/llm-context.md). `mesh-core-elements` has an explicit boundary comment preventing it from importing `mesh-core-service`, `mesh-core-scripting`, `mesh-core-wayland`, or `mesh-core-render`.
-- **Plugin loading order:** Dependency graph is validated before loading via `validate_plugin_dependency_graph()` in `mesh-core-plugin`
+- **Threading:** Shell rendering/input loop is synchronous in `Shell::run()` with a Tokio runtime used for backend tasks and IPC (`crates/core/shell/src/shell/mod.rs:474`). Backend providers run as Tokio tasks in `crates/core/runtime/backend/src/lib.rs`.
+- **Global state:** Runtime state is centralized in `Shell` fields in `crates/core/shell/src/shell/mod.rs`; frontend script state is per `ScriptContext`; backend script state is per `BackendScriptContext`. Environment-derived paths include `MESH_HOME`, `MESH_SETTINGS_PATH`, `MESH_IPC_SOCKET`, and XDG paths in `crates/core/extension/plugin/src/package.rs` and `crates/core/foundation/config/src/lib.rs`.
+- **Circular imports:** No circular Rust crate imports detected in `Cargo.toml`; component import cycles are tolerated by `compile_frontend_plugin()` through a `seen_local_paths`/ancestry guard in `crates/core/ui/render/src/compile.rs`.
+- **Manifest precedence:** Runtime discovery checks `module.json`, then `package.json`, then `plugin.json`, then `mesh.toml` in `crates/core/extension/plugin/src/manifest.rs`; installed-module loading checks `module.json`, then `package.json`, then `plugin.json` in `crates/core/extension/plugin/src/package.rs`.
+- **Module source split:** `config/package.json` points `mesh.modulesDir` to `../modules`; `config/modules/@mesh/*/package.json` holds package-shaped bundled/catalog manifests and is not loaded by the current root graph unless the root graph points at it.
+- **Provider multiplicity:** Multiple backend modules can implement an interface, but one active provider per interface is selected by `config/package.json` for runtime launch.
 
 ## Anti-Patterns
 
-### Service Logic in Rust Core
+### Frontend Imports Backend Module IDs
 
-**What happens:** A service-specific polling loop, command formatter, or system tool call (e.g. `wpctl`, `pactl`) is added to a Rust file under `crates/core/shell/`
-**Why it's wrong:** Violates the wiring-only rule; makes the shell non-extensible and couples Rust to specific system tools
-**Do this instead:** Add a `mesh.exec_shell()` host API primitive in `crates/core/runtime/scripting/src/host_api.rs` and implement the logic in a Luau backend plugin under `packages/plugins/backend/core/`
+**What happens:** A frontend script targets `@mesh/pipewire-audio` or `@mesh/pulseaudio-audio` directly.
+**Why it's wrong:** It bypasses provider selection in `config/package.json` and prevents users from swapping providers for `mesh.audio`.
+**Do this instead:** Require the interface contract, for example `require("@mesh/audio@>=1.0")` or `mesh.service.use("mesh.audio")`, as supported by `crates/core/runtime/scripting/src/context.rs`.
 
-### Display State Injection
+### Rust Core Owns Domain Service Logic
 
-**What happens:** Core computes `icon_name`, formatted labels, or derived booleans and injects them into the `ServiceEvent` payload before sending to frontend scripts
-**Why it's wrong:** Frontend plugins own their display state; injected fields create invisible coupling between core and every frontend
-**Do this instead:** Backend emits raw data (`percent`, `muted`). Frontend `<script>` block calls `audio.on_change(function() ... end)` and computes display state locally, writing to reactive globals
+**What happens:** Audio, power, network, media, or other domain-specific parsing/control is implemented in core shell/runtime crates.
+**Why it's wrong:** The module system expects backend modules to adapt system APIs into interface contracts while Rust remains generic.
+**Do this instead:** Put system-specific code in backend Luau modules such as `modules/backend/pipewire-audio/src/main.luau`; add generic host APIs in `crates/core/runtime/scripting/src/host_api.rs` when new capabilities are needed.
 
-### New Hand-Written Interpreters
+### Package Manifests Use Top-Level MESH Fields
 
-**What happens:** New string parsing / execution logic is added to Rust to "handle" Luau-like syntax or backend script patterns
-**Why it's wrong:** `mlua` already provides a real Luau VM; custom interpreters duplicate it and diverge in behavior
-**Do this instead:** Route all script execution through `ScriptContext` / `BackendScriptContext` in `crates/core/runtime/scripting/`
+**What happens:** New modules use top-level `type`, `id`, MESH dependency objects, capabilities, entrypoints, providers, settings, themes, or binary requirements.
+**Why it's wrong:** `package.json` is npm-compatible; standard package metadata stays top-level and MESH-specific behavior lives under `mesh`.
+**Do this instead:** Follow `modules/backend/pipewire-audio/package.json` and `docs/module-system.md`: use top-level `name`, `version`, `description`, `private`, and put `kind`, `entrypoints`, `dependencies`, `implements`, `contributes`, and `capabilities` under `mesh`.
+
+### Backend Launch Reads Only `mesh.provides`
+
+**What happens:** Provider-launch logic only enumerates `mesh.provides` even though target package manifests can declare providers with `mesh.implements`.
+**Why it's wrong:** `InstalledModuleGraph` indexes both `provides` and `implements`, but `backend_launch_candidates_from_graph()` reads `module.manifest.mesh.provides` for interface discovery and validation in `crates/core/shell/src/shell/mod.rs`.
+**Do this instead:** Use the `MeshModuleSection::implementations()` pattern from `crates/core/extension/plugin/src/package.rs` wherever runtime code needs all provider declarations.
 
 ## Error Handling
 
-**Strategy:** `thiserror`-derived typed errors at crate boundaries; `tracing::error!` / `tracing::warn!` for runtime errors that don't propagate (e.g. failed plugin paint). Plugin errors are isolated — one plugin failure does not crash the shell.
+**Strategy:** Convert low-level IO/parse/validation failures into typed errors for package/config/contract loading, then record runtime failures as diagnostics and backend lifecycle status records.
 
 **Patterns:**
-- `ScriptError` variants in `crates/core/runtime/scripting/src/context.rs` — covers Luau errors, capability denied, interface unavailable, timeout
-- `ComponentError` in `crates/core/shell/src/shell/types.rs` — wraps script errors with component context
-- `RenderError` in `crates/core/ui/render/src/surface/mod.rs` — Wayland connection and buffer allocation failures
-- `ParseError` in `crates/core/ui/component/src/parser.rs` — `.mesh` file parse failures
-- Backend plugin failures (failed `init()`, failed poll) are logged and the backend task exits; the shell continues
+- Package and graph failures use `PackageManifestError` in `crates/core/extension/plugin/src/package.rs`.
+- Shell startup failures use `ShellRunError` in `crates/core/shell/src/shell/mod.rs`.
+- Backend lifecycle failures become `BackendRuntimeStatusEntry` records and diagnostics in `crates/core/shell/src/shell/mod.rs`.
+- Backend script errors emit `InitFailed`, `PollFailed`, `Failed`, or `Stopped` from `crates/core/runtime/backend/src/lib.rs`.
+- Service state contract mismatches produce warnings and lifecycle diagnostics rather than immediate shell termination in `crates/core/shell/src/shell/mod.rs`.
 
 ## Cross-Cutting Concerns
 
-**Logging:** `tracing` macros throughout all crates; level controlled by `RUST_LOG` env var; initialized once in `crates/tools/cli/src/main.rs`
-**Theme tokens:** Resolved via `StyleResolver` at paint time; referenced in `.mesh` `<style>` blocks with `token(group.name)` syntax; token groups: `color`, `typography`, `spacing`, `radius`, `elevation`, `border`, `motion`, `shadow`, `shape`, `state`, `base16`
-**Capability checks:** Declared in `plugin.json` `capabilities.required`; enforced in `ScriptContext` via `CapabilitySet`; `ScriptError::CapabilityDenied` returned for unauthorized host API calls
-**Accessibility:** `AccessibilityTree` built alongside `WidgetNode` tree in `crates/core/ui/elements/src/accessibility.rs`; surface role declared in `plugin.json` `accessibility` section
-**Hot reload:** Source file watching in `ComponentRuntime`; `reload_source()` and `reload_plugin_settings()` on `ShellComponent` trait; triggered when modified timestamp changes in the shell event loop
+**Logging:** Uses `tracing` across shell, plugin loading, runtime, render, and CLI crates. CLI initializes `tracing_subscriber` in `crates/tools/cli/src/main.rs`.
+**Validation:** Package graph validation lives in `crates/core/extension/plugin/src/package.rs`; dependency graph validation lives in `crates/core/extension/plugin/src/manifest.rs`; interface contract parsing lives in `crates/core/extension/service/src/contract.rs`; service payload checks live in `crates/core/shell/src/shell/mod.rs`.
+**Authentication:** Not applicable. This local shell framework uses capabilities and environment/path boundaries rather than user identity auth.
+**Capabilities:** Capability declarations live in manifests and are enforced in `crates/core/runtime/scripting/src/context.rs` and `crates/core/shell/src/shell/service.rs`.
+**Settings:** Shell defaults and user overrides flow through `crates/core/foundation/config/src/lib.rs`; module-level settings schemas are declared in manifests such as `modules/frontend/navigation-bar/module.json` and `config/modules/@mesh/panel/package.json`.
+**Theming/Locale:** Theme and locale engines are shell-owned services exposed to components through state and capability checks in `crates/core/shell/src/shell/mod.rs` and `crates/core/runtime/scripting/src/context.rs`.
 
 ---
 
-*Architecture analysis: 2026-05-01*
+*Architecture analysis: 2026-05-06*
