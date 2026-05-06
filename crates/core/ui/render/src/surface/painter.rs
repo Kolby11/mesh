@@ -1,6 +1,6 @@
 use super::PixelBuffer;
 use super::icon;
-use super::text::TextRenderer;
+use super::text::{TextRenderer, TextSelectionGeometry};
 use mesh_core_elements::style::{Color, Display, Overflow, TextAlign, TextDirection, TextOverflow};
 use mesh_core_elements::tree::WidgetNode;
 
@@ -231,6 +231,31 @@ impl FrontendRenderEngine {
             } else {
                 style.text_align
             };
+
+        if let Some(selection) = selection_geometry(
+            &self.text_renderer,
+            node,
+            style,
+            &display_text,
+            effective_align,
+            inner_width,
+            scale,
+        ) {
+            render_selection_highlights(
+                &self.text_renderer,
+                buffer,
+                tx as i32,
+                ty as i32,
+                clip,
+                style,
+                &display_text,
+                effective_align,
+                inner_width,
+                scale,
+                selection,
+            );
+            return;
+        }
 
         self.text_renderer.render_clipped(
             &display_text,
@@ -863,6 +888,130 @@ fn truncate_with_ellipsis(
     ELLIPSIS.to_string()
 }
 
+fn selection_geometry(
+    renderer: &TextRenderer,
+    node: &WidgetNode,
+    style: &mesh_core_elements::style::ComputedStyle,
+    display_text: &str,
+    align: TextAlign,
+    inner_width: f32,
+    scale: f32,
+) -> Option<(TextSelectionGeometry, Color, Color)> {
+    if display_text.is_empty()
+        || style.text_overflow == TextOverflow::Ellipsis
+        || style.overflow_x != Overflow::Visible
+        || style.overflow_y != Overflow::Visible
+    {
+        return None;
+    }
+
+    let selection_background = node
+        .attributes
+        .get("_mesh_selection_background")
+        .and_then(|value| Color::from_hex(value))?;
+    let selection_foreground = node
+        .attributes
+        .get("_mesh_selection_foreground")
+        .and_then(|value| Color::from_hex(value))?;
+    let anchor_x = node
+        .attributes
+        .get("_mesh_selection_anchor_x")?
+        .parse::<f32>()
+        .ok()?;
+    let anchor_y = node
+        .attributes
+        .get("_mesh_selection_anchor_y")?
+        .parse::<f32>()
+        .ok()?;
+    let focus_x = node
+        .attributes
+        .get("_mesh_selection_focus_x")?
+        .parse::<f32>()
+        .ok()?;
+    let focus_y = node
+        .attributes
+        .get("_mesh_selection_focus_y")?
+        .parse::<f32>()
+        .ok()?;
+    let text_x = node_attr_f32(node, "_mesh_selection_text_x");
+    let text_y = node_attr_f32(node, "_mesh_selection_text_y");
+
+    let geometry = renderer.selection_geometry(
+        display_text,
+        &style.font_family,
+        style.font_size * scale,
+        style.font_weight,
+        style.line_height,
+        align,
+        Some(inner_width),
+        (anchor_x - text_x, anchor_y - text_y),
+        (focus_x - text_x, focus_y - text_y),
+    )?;
+
+    if geometry.highlights.is_empty() {
+        return None;
+    }
+
+    Some((geometry, selection_background, selection_foreground))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_selection_highlights(
+    renderer: &TextRenderer,
+    buffer: &mut PixelBuffer,
+    tx: i32,
+    ty: i32,
+    clip: ClipRect,
+    style: &mesh_core_elements::style::ComputedStyle,
+    display_text: &str,
+    align: TextAlign,
+    inner_width: f32,
+    scale: f32,
+    selection: (TextSelectionGeometry, Color, Color),
+) {
+    let (selection_geometry, selection_background, selection_foreground) = selection;
+
+    renderer.render_clipped(
+        display_text,
+        &style.font_family,
+        style.font_size * scale,
+        style.font_weight,
+        style.line_height,
+        align,
+        style.color,
+        buffer,
+        tx.max(0) as u32,
+        ty.max(0) as u32,
+        clip_to_tuple(clip),
+        Some(inner_width),
+    );
+
+    for highlight in &selection_geometry.highlights {
+        let rect = ClipRect {
+            x: tx + highlight.x.round() as i32,
+            y: ty + highlight.y.round() as i32,
+            width: highlight.width.ceil() as i32,
+            height: highlight.height.ceil() as i32,
+        };
+        let highlight_clip = intersect_clip(clip, rect);
+        fill_rect_clipped(buffer, rect, selection_background, highlight_clip);
+        renderer.render_clipped(
+            display_text,
+            &style.font_family,
+            style.font_size * scale,
+            style.font_weight,
+            style.line_height,
+            align,
+            selection_foreground,
+            buffer,
+            tx.max(0) as u32,
+            ty.max(0) as u32,
+            clip_to_tuple(highlight_clip),
+            Some(inner_width),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -875,6 +1024,26 @@ mod tests {
         node.computed_style.width = Dimension::Px(layout.width);
         node.computed_style.height = Dimension::Px(layout.height);
         node.computed_style.background_color = color;
+        node
+    }
+
+    fn text_node(text: &str, x: f32, y: f32, width: f32, height: f32, color: Color) -> WidgetNode {
+        let mut node = node(
+            "text",
+            LayoutRect {
+                x,
+                y,
+                width,
+                height,
+            },
+            Color::TRANSPARENT,
+        );
+        node.attributes.insert("content".into(), text.into());
+        node.attributes.insert("selectable".into(), "true".into());
+        node.computed_style.color = color;
+        node.computed_style.font_size = 14.0;
+        node.computed_style.line_height = 1.4;
+        node.computed_style.padding = Edges::zero();
         node
     }
 
@@ -983,5 +1152,133 @@ mod tests {
         FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
 
         assert_eq!(pixel(&buffer, 5, 5), Color::from_hex("#0000ff").unwrap());
+    }
+
+    #[test]
+    fn selection_paint_uses_selection_colors() {
+        let mut root = node(
+            "box",
+            LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 160.0,
+                height: 60.0,
+            },
+            Color::TRANSPARENT,
+        );
+        let mut text = text_node(
+            "selection proof text",
+            0.0,
+            0.0,
+            160.0,
+            60.0,
+            Color::from_hex("#111111").unwrap(),
+        );
+        text.attributes
+            .insert("_mesh_selection_background".into(), "#00ff00".into());
+        text.attributes
+            .insert("_mesh_selection_foreground".into(), "#ff00ff".into());
+        text.attributes
+            .insert("_mesh_selection_anchor_x".into(), "0.00".into());
+        text.attributes
+            .insert("_mesh_selection_anchor_y".into(), "0.00".into());
+        text.attributes
+            .insert("_mesh_selection_focus_x".into(), "1000.00".into());
+        text.attributes
+            .insert("_mesh_selection_focus_y".into(), "1000.00".into());
+        text.attributes
+            .insert("_mesh_selection_text_x".into(), "0.00".into());
+        text.attributes
+            .insert("_mesh_selection_text_y".into(), "0.00".into());
+        root.children = vec![text];
+
+        let mut buffer = PixelBuffer::new(180, 80);
+        FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+        let mut saw_selection_background = false;
+        let mut saw_selection_foreground = false;
+        for y in 0..buffer.height {
+            for x in 0..buffer.width {
+                let color = pixel(&buffer, x, y);
+                if color == Color::from_hex("#00ff00").unwrap() {
+                    saw_selection_background = true;
+                }
+                if color == Color::from_hex("#ff00ff").unwrap() {
+                    saw_selection_foreground = true;
+                }
+            }
+        }
+
+        assert!(saw_selection_background);
+        assert!(saw_selection_foreground);
+    }
+
+    #[test]
+    fn selection_paint_does_not_bleed_into_neighbors() {
+        let mut root = node(
+            "box",
+            LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 220.0,
+                height: 80.0,
+            },
+            Color::TRANSPARENT,
+        );
+        let mut selected = text_node(
+            "selected",
+            0.0,
+            0.0,
+            100.0,
+            40.0,
+            Color::from_hex("#111111").unwrap(),
+        );
+        selected
+            .attributes
+            .insert("_mesh_selection_background".into(), "#00ff00".into());
+        selected
+            .attributes
+            .insert("_mesh_selection_foreground".into(), "#ff00ff".into());
+        selected
+            .attributes
+            .insert("_mesh_selection_anchor_x".into(), "0.00".into());
+        selected
+            .attributes
+            .insert("_mesh_selection_anchor_y".into(), "0.00".into());
+        selected
+            .attributes
+            .insert("_mesh_selection_focus_x".into(), "1000.00".into());
+        selected
+            .attributes
+            .insert("_mesh_selection_focus_y".into(), "1000.00".into());
+        selected
+            .attributes
+            .insert("_mesh_selection_text_x".into(), "0.00".into());
+        selected
+            .attributes
+            .insert("_mesh_selection_text_y".into(), "0.00".into());
+
+        let neighbor = text_node(
+            "neighbor",
+            120.0,
+            0.0,
+            100.0,
+            40.0,
+            Color::from_hex("#111111").unwrap(),
+        );
+        root.children = vec![selected, neighbor];
+
+        let mut buffer = PixelBuffer::new(240, 80);
+        FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+        for y in 0..40 {
+            for x in 120..220 {
+                assert_ne!(
+                    pixel(&buffer, x, y),
+                    Color::from_hex("#00ff00").unwrap(),
+                    "selection background should stay inside the selected text node"
+                );
+            }
+        }
     }
 }

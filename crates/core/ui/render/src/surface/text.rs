@@ -2,12 +2,13 @@
 
 use super::PixelBuffer;
 use cosmic_text::{
-    Align, Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Style as CosmicStyle, SwashCache,
-    Weight, Wrap,
+    Align, Attrs, Buffer, Cursor, Family, FontSystem, Metrics, Shaping, Style as CosmicStyle,
+    SwashCache, Weight, Wrap,
 };
 use mesh_core_elements::Color;
 use mesh_core_elements::style::TextAlign;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::sync::Mutex;
 
 pub struct TextRenderer {
@@ -24,6 +25,22 @@ thread_local! {
 }
 
 pub struct SharedTextMeasurer;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextSelectionRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextSelectionGeometry {
+    pub start: Cursor,
+    pub end: Cursor,
+    pub selected_text: String,
+    pub highlights: Vec<TextSelectionRect>,
+}
 
 impl TextRenderer {
     pub fn new() -> Self {
@@ -190,6 +207,63 @@ impl TextRenderer {
 
         (measured_width, measured_height)
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn selection_geometry(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        max_width: Option<f32>,
+        anchor: (f32, f32),
+        focus: (f32, f32),
+    ) -> Option<TextSelectionGeometry> {
+        let mut engine = self.engine.lock().unwrap();
+        let (attrs, metrics, width, text_align) = text_config(
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            max_width,
+            align,
+        );
+
+        let mut cosmic = Buffer::new(&mut engine.font_system, metrics);
+        {
+            let mut cosmic_borrow = cosmic.borrow_with(&mut engine.font_system);
+            cosmic_borrow.set_wrap(wrap_for(max_width));
+            cosmic_borrow.set_size(width, None);
+            cosmic_borrow.set_text(text, &attrs, Shaping::Advanced, Some(text_align));
+        }
+
+        let anchor_cursor = cosmic.hit(anchor.0, anchor.1)?;
+        let focus_cursor = cosmic.hit(focus.0, focus.1)?;
+        let (start, end) = order_cursors(anchor_cursor, focus_cursor);
+        let selected_text = extract_selected_text(text, start, end);
+        let highlights = cosmic
+            .layout_runs()
+            .filter_map(|run| {
+                run.highlight(start, end)
+                    .map(|(x, width)| TextSelectionRect {
+                        x,
+                        y: run.line_top,
+                        width,
+                        height: run.line_height,
+                    })
+            })
+            .filter(|rect| rect.width > 0.0 && rect.height > 0.0)
+            .collect();
+
+        Some(TextSelectionGeometry {
+            start,
+            end,
+            selected_text,
+            highlights,
+        })
+    }
 }
 
 impl Default for TextRenderer {
@@ -295,4 +369,84 @@ fn wrap_for(max_width: Option<f32>) -> Wrap {
 
 fn cosmic_color(color: Color) -> cosmic_text::Color {
     cosmic_text::Color::rgba(color.r, color.g, color.b, color.a)
+}
+
+fn order_cursors(a: Cursor, b: Cursor) -> (Cursor, Cursor) {
+    match a.cmp(&b) {
+        Ordering::Greater => (b, a),
+        _ => (a, b),
+    }
+}
+
+fn extract_selected_text(text: &str, start: Cursor, end: Cursor) -> String {
+    if start == end {
+        return String::new();
+    }
+
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut output = String::new();
+
+    for line_index in start.line..=end.line {
+        let Some(line) = lines.get(line_index).copied() else {
+            break;
+        };
+        let line_start = if line_index == start.line {
+            start.index.min(line.len())
+        } else {
+            0
+        };
+        let line_end = if line_index == end.line {
+            end.index.min(line.len())
+        } else {
+            line.len()
+        };
+
+        if line_start <= line_end {
+            output.push_str(&line[line_start..line_end]);
+        }
+
+        if line_index != end.line {
+            output.push('\n');
+        }
+    }
+
+    output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selection_geometry_spans_wrapped_lines() {
+        let geometry = TextRenderer::new()
+            .selection_geometry(
+                "alpha beta gamma delta epsilon",
+                "Inter",
+                14.0,
+                400,
+                1.4,
+                TextAlign::Left,
+                Some(64.0),
+                (0.0, 0.0),
+                (1000.0, 1000.0),
+            )
+            .expect("geometry");
+
+        assert_eq!(geometry.selected_text, "alpha beta gamma delta epsilon");
+        assert!(
+            geometry.highlights.len() >= 2,
+            "wrapped text should produce multiple highlighted line rects"
+        );
+    }
+
+    #[test]
+    fn selection_geometry_preserves_utf8_boundaries() {
+        let utf8 = extract_selected_text(
+            "cafe\u{301} nai\u{308}ve",
+            Cursor::new(0, 0),
+            Cursor::new(0, "cafe\u{301} nai\u{308}ve".len()),
+        );
+        assert_eq!(utf8, "cafe\u{301} nai\u{308}ve");
+    }
 }

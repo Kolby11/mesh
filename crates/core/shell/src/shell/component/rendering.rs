@@ -106,6 +106,7 @@ impl FrontendSurfaceComponent {
             height as f32,
             Some(&measurer),
         );
+        self.annotate_selection_tree(&mut tree, theme);
 
         tree
     }
@@ -119,4 +120,86 @@ impl FrontendSurfaceComponent {
         self.dirty = true;
         true
     }
+
+    fn annotate_selection_tree(&self, tree: &mut WidgetNode, theme: &Theme) {
+        let Some(selection) = &self.selection else {
+            return;
+        };
+        let selection_background = theme
+            .token("color.selection-background")
+            .or_else(|| theme.token("color.primary"))
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "#6750A4".to_string());
+        let selection_foreground = theme
+            .token("color.selection-foreground")
+            .or_else(|| theme.token("color.on-primary"))
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "#FFFFFF".to_string());
+        annotate_selection_node(
+            tree,
+            selection,
+            &selection_background,
+            &selection_foreground,
+        );
+    }
+}
+
+fn annotate_selection_node(
+    node: &mut WidgetNode,
+    selection: &TextSelectionState,
+    selection_background: &str,
+    selection_foreground: &str,
+) -> bool {
+    let matches_selection = node
+        .attributes
+        .get("_mesh_key")
+        .is_some_and(|key| key == &selection.anchor.node_key)
+        && node.tag == "text"
+        && node
+            .attributes
+            .get("selectable")
+            .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1"));
+    if matches_selection {
+        node.attributes.insert(
+            "_mesh_selection_background".into(),
+            selection_background.to_string(),
+        );
+        node.attributes.insert(
+            "_mesh_selection_foreground".into(),
+            selection_foreground.to_string(),
+        );
+        node.attributes.insert(
+            "_mesh_selection_anchor_x".into(),
+            format!("{:.2}", selection.anchor.x),
+        );
+        node.attributes.insert(
+            "_mesh_selection_anchor_y".into(),
+            format!("{:.2}", selection.anchor.y),
+        );
+        node.attributes.insert(
+            "_mesh_selection_focus_x".into(),
+            format!("{:.2}", selection.focus.x),
+        );
+        node.attributes.insert(
+            "_mesh_selection_focus_y".into(),
+            format!("{:.2}", selection.focus.y),
+        );
+        node.attributes.insert(
+            "_mesh_selection_text_x".into(),
+            format!("{:.2}", node.layout.x + node.computed_style.padding.left),
+        );
+        node.attributes.insert(
+            "_mesh_selection_text_y".into(),
+            format!("{:.2}", node.layout.y + node.computed_style.padding.top),
+        );
+        return true;
+    }
+
+    for child in &mut node.children {
+        if annotate_selection_node(child, selection, selection_background, selection_foreground) {
+            return true;
+        }
+    }
+
+    false
 }
