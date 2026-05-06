@@ -13,7 +13,7 @@ pub use bridge::{LayerSurfaceConfig, WindowEvent, WindowKeyEvent};
 pub use buffer::PixelBuffer;
 pub use debug_overlay::DebugOverlay;
 pub use painter::FrontendRenderEngine;
-pub use text::SharedTextMeasurer;
+pub use text::{SharedTextMeasurer, TextRenderer};
 
 thread_local! {
     static FRONTEND_RENDERER: RefCell<FrontendRenderEngine> = RefCell::new(FrontendRenderEngine::new());

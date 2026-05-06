@@ -17,7 +17,7 @@ use mesh_core_service::{
     canonical_interface_name, load_interface_contract,
 };
 use mesh_core_theme::ThemeEngine;
-use mesh_core_wayland::{Layer, StubSurface};
+use mesh_core_wayland::{ClipboardWriter, Layer, StubSurface, WaylandClipboard};
 
 use std::collections::{HashMap, VecDeque};
 use std::env;
@@ -90,6 +90,7 @@ pub struct Shell {
     core: ShellCoreState,
     components: Vec<ComponentRuntime>,
     surfaces: HashMap<SurfaceId, StubSurface>,
+    clipboard: Box<dyn ClipboardWriter>,
     render_engine: RenderEngine,
     theme_watch: ThemeWatchState,
     settings_watch: SettingsWatchState,
@@ -241,6 +242,7 @@ impl Shell {
             core: ShellCoreState::default(),
             components: Vec::new(),
             surfaces: HashMap::new(),
+            clipboard: Box::new(WaylandClipboard::default()),
             render_engine: RenderEngine::select(),
             theme_watch,
             settings_watch,
@@ -1048,6 +1050,12 @@ impl Shell {
             }
             CoreRequest::PublishDiagnostics { message } => {
                 tracing::info!("diagnostic: {message}");
+                Ok(VecDeque::new())
+            }
+            CoreRequest::WriteClipboard { text } => {
+                if let Err(err) = self.clipboard.write_text(&text) {
+                    tracing::warn!(error = %err, "failed to write selection to clipboard");
+                }
                 Ok(VecDeque::new())
             }
             CoreRequest::ServiceCommand {
@@ -2290,6 +2298,7 @@ mod tests {
         ContractCapabilities, InterfaceContract, InterfaceMethod, contract::ContractStateField,
         parse_contract_version,
     };
+    use mesh_core_wayland::{ClipboardError, ClipboardWriter};
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
@@ -2577,6 +2586,17 @@ mod tests {
         }
     }
 
+    struct RecordingClipboard {
+        writes: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl ClipboardWriter for RecordingClipboard {
+        fn write_text(&mut self, text: &str) -> Result<(), ClipboardError> {
+            self.writes.lock().unwrap().push(text.to_string());
+            Ok(())
+        }
+    }
+
     #[test]
     fn latest_service_state_is_keyed_by_interface() {
         let mut shell = Shell::new();
@@ -2621,6 +2641,23 @@ mod tests {
             Some(CoreRequest::CycleDebugTab)
         ));
         assert!(shell_global_shortcut_request("c", true, false, false).is_none());
+    }
+
+    #[test]
+    fn selection_clipboard_shell_request_writes_text() {
+        let mut shell = Shell::new();
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        shell.clipboard = Box::new(RecordingClipboard {
+            writes: writes.clone(),
+        });
+
+        shell
+            .apply_request(CoreRequest::WriteClipboard {
+                text: "proof copy".into(),
+            })
+            .unwrap();
+
+        assert_eq!(writes.lock().unwrap().as_slice(), ["proof copy"]);
     }
 
     #[test]

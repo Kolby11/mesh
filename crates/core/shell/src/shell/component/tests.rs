@@ -1,7 +1,9 @@
 use super::*;
 use crate::shell::component::catalog::FrontendCatalogEntry;
+use crate::shell::{CoreRequest, KeyModifiers};
 use mesh_core_capability::Capability;
 use mesh_core_component::parse_component;
+use mesh_core_elements::style::Overflow;
 use mesh_core_elements::{Color, LayoutRect};
 use mesh_core_module::manifest::{
     CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
@@ -373,6 +375,28 @@ fn text_node(key: &str, x: f32, y: f32, width: f32, height: f32, selectable: boo
     node.layout.width = width;
     node.layout.height = height;
     node
+}
+
+fn count_selectable_text_nodes(node: &WidgetNode) -> usize {
+    let here = usize::from(
+        node.tag == "text"
+            && node
+                .attributes
+                .get("selectable")
+                .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1")),
+    );
+    here + node
+        .children
+        .iter()
+        .map(count_selectable_text_nodes)
+        .sum::<usize>()
+}
+
+fn contains_interactive_tags(node: &WidgetNode) -> bool {
+    matches!(
+        node.tag.as_str(),
+        "button" | "slider" | "switch" | "checkbox" | "input"
+    ) || node.children.iter().any(contains_interactive_tags)
 }
 
 fn child_with_attrs(tag: &str, attrs: &[(&str, &str)]) -> WidgetNode {
@@ -3767,5 +3791,126 @@ fn selection_boundaries_clear_when_surface_hides() {
     assert!(
         component.selection.is_none(),
         "surface hide should clear shell-owned selection state"
+    );
+}
+
+#[test]
+fn selection_clipboard_returns_visible_selected_text_for_ctrl_c() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    component.last_tree = Some(root_with(vec![text_node(
+        "root/0", 0.0, 0.0, 180.0, 40.0, true,
+    )]));
+    component.selection = Some(TextSelectionState {
+        anchor: TextSelectionPoint {
+            node_key: "root/0".into(),
+            x: 0.0,
+            y: 0.0,
+        },
+        focus: TextSelectionPoint {
+            node_key: "root/0".into(),
+            x: 1000.0,
+            y: 1000.0,
+        },
+    });
+
+    let theme = default_theme();
+    let requests = component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "c".into(),
+                modifiers: KeyModifiers {
+                    ctrl: true,
+                    shift: false,
+                    alt: false,
+                },
+            },
+        )
+        .unwrap();
+
+    assert_eq!(requests.len(), 1);
+    assert!(matches!(
+        &requests[0],
+        CoreRequest::WriteClipboard { text } if text == "Selectable text"
+    ));
+    assert!(
+        component.selection.is_some(),
+        "successful copy should leave the selection visible"
+    );
+}
+
+#[test]
+fn selection_clipboard_rejects_clipped_text_payloads() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let mut clipped = text_node("root/0", 0.0, 0.0, 80.0, 20.0, true);
+    clipped.computed_style.overflow_x = Overflow::Hidden;
+    component.last_tree = Some(root_with(vec![clipped]));
+    component.selection = Some(TextSelectionState {
+        anchor: TextSelectionPoint {
+            node_key: "root/0".into(),
+            x: 0.0,
+            y: 0.0,
+        },
+        focus: TextSelectionPoint {
+            node_key: "root/0".into(),
+            x: 1000.0,
+            y: 1000.0,
+        },
+    });
+
+    let theme = default_theme();
+    let requests = component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "c".into(),
+                modifiers: KeyModifiers {
+                    ctrl: true,
+                    shift: false,
+                    alt: false,
+                },
+            },
+        )
+        .unwrap();
+
+    assert!(
+        requests.is_empty(),
+        "Phase 10 should not copy hidden or clipped text"
+    );
+}
+
+#[test]
+fn selection_fixture_module_is_enabled_in_local_graph() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
+    let package = fs::read_to_string(root.join("config/package.json")).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&package).unwrap();
+    let module = &json["mesh"]["modules"]["@mesh/text-selection-proof"];
+    assert_eq!(module["kind"], "frontend");
+    assert_eq!(module["path"], "frontend/text-selection-proof");
+    assert_eq!(module["enabled"], true);
+}
+
+#[test]
+fn selection_fixture_module_compiles_to_one_selectable_text_target() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
+    let module_dir = root.join("modules/frontend/text-selection-proof");
+    let loaded = mesh_core_module::manifest::load_manifest(&module_dir).unwrap();
+    let compiled = compile_frontend_module(&loaded.manifest, &module_dir).unwrap();
+    let tree = compiled.build_preview_tree(&default_theme(), 360, 180);
+
+    assert_eq!(count_selectable_text_nodes(&tree), 1);
+    assert!(
+        !contains_interactive_tags(&tree),
+        "the proof fixture must stay passive and free of interactive controls"
     );
 }

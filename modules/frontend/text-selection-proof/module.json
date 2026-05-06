@@ -1,0 +1,103 @@
+{
+  "id": "@mesh/text-selection-proof",
+  "name": "Text Selection Proof",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "description": "Passive proof surface for selectable text and clipboard copy.",
+  "authors": [
+    "MESH Project"
+  ],
+  "compatibility": {
+    "mesh": ">=0.1.0",
+    "compositors": [
+      "wlr-layer-shell-v1"
+    ]
+  },
+  "capabilities": {
+    "required": [
+      "shell.surface",
+      "theme.read"
+    ]
+  },
+  "entrypoints": {
+    "main": "src/main.mesh"
+  },
+  "settings": {
+    "namespace": "@mesh/text-selection-proof",
+    "schema": {
+      "surface": {
+        "type": "object",
+        "description": "Placement and sizing for the selectable text proof surface.",
+        "properties": {
+          "anchor": {
+            "type": "enum",
+            "values": [
+              "top",
+              "bottom",
+              "left",
+              "right"
+            ],
+            "default": "right",
+            "description": "Screen edge this surface anchors to."
+          },
+          "layer": {
+            "type": "enum",
+            "values": [
+              "background",
+              "bottom",
+              "top",
+              "overlay"
+            ],
+            "default": "top",
+            "description": "Layer-shell stacking layer."
+          },
+          "width": {
+            "type": "integer",
+            "default": 360,
+            "min": 200,
+            "max": 7680,
+            "description": "Surface width in pixels."
+          },
+          "height": {
+            "type": "integer",
+            "default": 176,
+            "min": 120,
+            "max": 1080,
+            "description": "Surface height in pixels."
+          },
+          "exclusive_zone": {
+            "type": "integer",
+            "default": 0,
+            "min": 0,
+            "max": 256,
+            "description": "Reserved compositor space in pixels."
+          },
+          "keyboard_mode": {
+            "type": "enum",
+            "values": [
+              "none",
+              "exclusive",
+              "on_demand"
+            ],
+            "default": "none",
+            "description": "Keyboard interactivity policy for the surface."
+          },
+          "visible_on_start": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether this surface starts visible when Mesh boots."
+          }
+        }
+      }
+    }
+  },
+  "surface_layout": {
+    "size_policy": "fixed"
+  },
+  "accessibility": {
+    "role": "status",
+    "label": "Selectable text proof",
+    "description": "Passive proof surface for selectable shell copy"
+  }
+}

@@ -17,6 +17,11 @@
         "path": "frontend/audio-popover",
         "enabled": true
       },
+      "@mesh/text-selection-proof": {
+        "kind": "frontend",
+        "path": "frontend/text-selection-proof",
+        "enabled": true
+      },
       "@mesh/pipewire-audio": {
         "kind": "backend",
         "path": "backend/pipewire-audio",

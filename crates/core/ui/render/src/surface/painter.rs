@@ -1015,8 +1015,11 @@ fn render_selection_highlights(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compile_frontend_module;
     use mesh_core_elements::layout::LayoutRect;
     use mesh_core_elements::style::{Dimension, Edges};
+    use mesh_core_theme::default_theme;
+    use std::path::PathBuf;
 
     fn node(tag: &str, layout: LayoutRect, color: Color) -> WidgetNode {
         let mut node = WidgetNode::new(tag);
@@ -1280,5 +1283,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn selection_fixture_preview_tree_paints_nonempty_surface() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../..")
+            .canonicalize()
+            .unwrap();
+        let module_dir = root.join("modules/frontend/text-selection-proof");
+        let loaded = mesh_core_module::manifest::load_manifest(&module_dir).unwrap();
+        let compiled = compile_frontend_module(&loaded.manifest, &module_dir).unwrap();
+        let tree = compiled.build_preview_tree(&default_theme(), 360, 176);
+
+        let mut buffer = PixelBuffer::new(380, 196);
+        FrontendRenderEngine::new().render_tree(&tree, &mut buffer, 1.0);
+
+        let has_visible_pixels = buffer.data.chunks_exact(4).any(|px| px[3] != 0);
+        assert!(
+            has_visible_pixels,
+            "proof fixture should paint visible output"
+        );
     }
 }

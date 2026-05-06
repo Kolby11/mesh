@@ -40,6 +40,9 @@ pub enum CoreRequest {
         source_module_id: String,
         source_capabilities: CapabilitySet,
     },
+    WriteClipboard {
+        text: String,
+    },
     SetTheme {
         theme_id: String,
     },

@@ -2,6 +2,8 @@
 ///
 /// This crate abstracts over compositor-specific protocol extensions so that
 /// modules can create shell surfaces without knowing which compositor is running.
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 /// Screen edge for surface anchoring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +41,59 @@ pub trait ShellSurface {
     fn set_margin(&mut self, top: i32, right: i32, bottom: i32, left: i32);
     fn show(&mut self);
     fn hide(&mut self);
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ClipboardError {
+    #[error("clipboard write failed: {message}")]
+    WriteFailed { message: String },
+}
+
+pub trait ClipboardWriter: Send {
+    fn write_text(&mut self, text: &str) -> Result<(), ClipboardError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct WaylandClipboard {
+    command: String,
+}
+
+impl Default for WaylandClipboard {
+    fn default() -> Self {
+        Self {
+            command: "wl-copy".to_string(),
+        }
+    }
+}
+
+impl ClipboardWriter for WaylandClipboard {
+    fn write_text(&mut self, text: &str) -> Result<(), ClipboardError> {
+        let mut child = Command::new(&self.command)
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|source| ClipboardError::WriteFailed {
+                message: format!("failed to spawn {}: {source}", self.command),
+            })?;
+
+        if let Some(stdin) = child.stdin.as_mut() {
+            stdin
+                .write_all(text.as_bytes())
+                .map_err(|source| ClipboardError::WriteFailed {
+                    message: format!("failed to write clipboard payload: {source}"),
+                })?;
+        }
+
+        let status = child.wait().map_err(|source| ClipboardError::WriteFailed {
+            message: format!("failed waiting for {}: {source}", self.command),
+        })?;
+        if !status.success() {
+            return Err(ClipboardError::WriteFailed {
+                message: format!("{} exited with status {status}", self.command),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 /// Reports what the current compositor supports.
@@ -85,6 +140,22 @@ pub struct StubSurface {
     pub margin_right: i32,
     pub margin_bottom: i32,
     pub margin_left: i32,
+}
+
+#[derive(Debug, Default)]
+pub struct StubClipboard {
+    pub last_written: Option<String>,
+    pub fail_message: Option<String>,
+}
+
+impl ClipboardWriter for StubClipboard {
+    fn write_text(&mut self, text: &str) -> Result<(), ClipboardError> {
+        if let Some(message) = self.fail_message.clone() {
+            return Err(ClipboardError::WriteFailed { message });
+        }
+        self.last_written = Some(text.to_string());
+        Ok(())
+    }
 }
 
 impl Default for StubSurface {

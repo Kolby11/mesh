@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::style::{Overflow, TextAlign, TextDirection, TextOverflow};
 
 impl FrontendSurfaceComponent {
     fn selectable_text_target_key(&self, tree: &WidgetNode, x: f32, y: f32) -> Option<String> {
@@ -23,6 +24,63 @@ impl FrontendSurfaceComponent {
                         .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1"))
             })
         })
+    }
+
+    fn selection_copy_payload(&self, tree: &WidgetNode) -> Option<String> {
+        let selection = self.selection.as_ref()?;
+        let node = find_node_by_key(tree, &selection.anchor.node_key)?;
+        if node.tag != "text" {
+            return None;
+        }
+
+        let text = node
+            .attributes
+            .get("text")
+            .map(String::as_str)
+            .or_else(|| node.attributes.get("content").map(String::as_str))
+            .unwrap_or("");
+        if text.is_empty() {
+            return None;
+        }
+
+        let style = &node.computed_style;
+        if style.text_overflow == TextOverflow::Ellipsis
+            || style.overflow_x != Overflow::Visible
+            || style.overflow_y != Overflow::Visible
+        {
+            return None;
+        }
+
+        let inner_width = (node.layout.width - style.padding.horizontal()).max(0.0);
+        if inner_width <= 0.0 {
+            return None;
+        }
+
+        let text_align =
+            if style.text_direction == TextDirection::Rtl && style.text_align == TextAlign::Left {
+                TextAlign::Right
+            } else {
+                style.text_align
+            };
+        let text_x = node.layout.x + style.padding.left;
+        let text_y = node.layout.y + style.padding.top;
+        let geometry = TextRenderer::new().selection_geometry(
+            text,
+            &style.font_family,
+            style.font_size,
+            style.font_weight,
+            style.line_height,
+            text_align,
+            Some(inner_width),
+            (selection.anchor.x - text_x, selection.anchor.y - text_y),
+            (selection.focus.x - text_x, selection.focus.y - text_y),
+        )?;
+
+        if geometry.selected_text.is_empty() {
+            return None;
+        }
+
+        Some(geometry.selected_text)
     }
 
     pub(super) fn update_slider_from_position(
@@ -368,6 +426,7 @@ impl FrontendSurfaceComponent {
                     let accepts_char = find_node_by_key(&tree, &focused_key)
                         .is_some_and(|node| input_accepts_char(node, ch));
                     if is_input_key(&tree, &focused_key) && accepts_char {
+                        self.clear_selection();
                         let value = self.input_values.entry(focused_key.clone()).or_default();
                         value.push(ch);
                         let current = value.clone();
@@ -381,7 +440,13 @@ impl FrontendSurfaceComponent {
                     }
                 }
             }
-            ComponentInput::KeyPressed { key, modifiers: _ } => {
+            ComponentInput::KeyPressed { key, modifiers } => {
+                if modifiers.ctrl
+                    && key.eq_ignore_ascii_case("c")
+                    && let Some(text) = self.selection_copy_payload(&tree)
+                {
+                    return Ok(vec![CoreRequest::WriteClipboard { text }]);
+                }
                 if let Some(focused_key) = self.focused_key.clone() {
                     if is_input_key(&tree, &focused_key) {
                         self.clear_selection();

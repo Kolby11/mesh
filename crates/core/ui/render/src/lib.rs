@@ -19,8 +19,8 @@ pub use compile::{CompileFrontendError, compile_frontend_module, is_frontend_mod
 pub use render::build_widget_tree_from_component;
 pub use surface::{
     DebugOverlay, FrontendRenderEngine, LayerSurfaceConfig, PixelBuffer, RenderEngine, RenderError,
-    SharedTextMeasurer, WindowEvent, WindowKeyEvent, coalesce_pointer_moves, event_surface_id,
-    paint_frontend_tree, paint_frontend_tree_at,
+    SharedTextMeasurer, TextRenderer, WindowEvent, WindowKeyEvent, coalesce_pointer_moves,
+    event_surface_id, paint_frontend_tree, paint_frontend_tree_at,
 };
 pub use tags::UiTag;
 
