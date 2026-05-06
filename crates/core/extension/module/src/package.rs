@@ -1983,7 +1983,7 @@ mod tests {
         let graph =
             load_installed_module_graph(&workspace_root.join("config/package.json")).unwrap();
 
-        assert_eq!(graph.frontend_modules().len(), 1);
+        assert_eq!(graph.frontend_modules().len(), 3);
         assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
         assert_eq!(
             graph.active_provider("mesh.audio").unwrap().module_id,

@@ -105,14 +105,24 @@ fn audio_network_catalog() -> InterfaceCatalog {
         version: parse_contract_version("1.0").unwrap(),
         file_path: PathBuf::from("<test>"),
         state_fields: Vec::new(),
-        methods: vec![InterfaceMethod {
-            name: "set_wifi_enabled".into(),
-            args: vec![InterfaceArgument {
-                name: "enabled".into(),
-                arg_type: "bool".into(),
-            }],
-            returns: None,
-        }],
+        methods: vec![
+            InterfaceMethod {
+                name: "set_wifi_enabled".into(),
+                args: vec![InterfaceArgument {
+                    name: "enabled".into(),
+                    arg_type: "bool".into(),
+                }],
+                returns: None,
+            },
+            InterfaceMethod {
+                name: "connect".into(),
+                args: vec![InterfaceArgument {
+                    name: "connection_id".into(),
+                    arg_type: "string".into(),
+                }],
+                returns: None,
+            },
+        ],
         events: Vec::new(),
         types: HashMap::new(),
         capabilities: ContractCapabilities::default(),

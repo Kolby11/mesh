@@ -543,7 +543,16 @@ mod tests {
     use mlua::Table;
 
     fn bundled_backend_script(path: &str) -> String {
-        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let script_path = root.join(path);
+        let script_path = if script_path.exists() {
+            script_path
+        } else if let Some(suffix) = path.strip_prefix("../../../../packages/modules/backend/core/")
+        {
+            root.join("../../../../modules/backend").join(suffix)
+        } else {
+            script_path
+        };
         std::fs::read_to_string(script_path).unwrap()
     }
 

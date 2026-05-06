@@ -3328,23 +3328,14 @@ mod tests {
             graph.active_provider("mesh.audio").unwrap().module_id,
             "@mesh/pipewire-audio"
         );
-        assert_eq!(
-            graph.active_provider("mesh.network").unwrap().module_id,
-            "@mesh/networkmanager"
-        );
-        assert_eq!(
-            graph.active_provider("mesh.power").unwrap().module_id,
-            "@mesh/upower"
-        );
         assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
-        assert_eq!(
-            graph.backend_providers_for_interface("mesh.network").len(),
-            1
-        );
-        assert_eq!(graph.backend_providers_for_interface("mesh.power").len(), 1);
+        assert!(graph.active_provider("mesh.network").is_none());
+        assert!(graph.active_provider("mesh.power").is_none());
+        assert_eq!(graph.backend_providers_for_interface("mesh.network").len(), 0);
+        assert_eq!(graph.backend_providers_for_interface("mesh.power").len(), 0);
 
         let layout = graph.layout_entrypoint().unwrap();
-        assert_eq!(layout.module_id, "@mesh/panel");
+        assert_eq!(layout.module_id, "@mesh/navigation-bar");
         assert_eq!(layout.entrypoint_id, "main");
     }
 
@@ -3358,14 +3349,9 @@ mod tests {
         let (_pipewire_dir, pipewire) =
             module_instance("@mesh/pipewire-audio", Some("src/main.luau"));
         let (_pulse_dir, pulse) = module_instance("@mesh/pulseaudio-audio", Some("src/main.luau"));
-        let (_network_dir, network) =
-            module_instance("@mesh/networkmanager", Some("src/main.luau"));
-        let (_power_dir, power) = module_instance("@mesh/upower", Some("src/main.luau"));
         let modules = HashMap::from([
             ("@mesh/pipewire-audio".to_string(), pipewire),
             ("@mesh/pulseaudio-audio".to_string(), pulse),
-            ("@mesh/networkmanager".to_string(), network),
-            ("@mesh/upower".to_string(), power),
         ]);
 
         let (candidates, statuses) = backend_launch_candidates_from_graph(
@@ -3380,7 +3366,7 @@ mod tests {
                 .iter()
                 .all(|status| status.status != "invalid_manifest")
         );
-        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates.len(), 1);
         let audio = candidates
             .iter()
             .find(|candidate| candidate.interface == "mesh.audio")
@@ -3388,14 +3374,10 @@ mod tests {
         assert_eq!(audio.module_id, "@mesh/pipewire-audio");
         assert_eq!(audio.service_name, "audio");
         assert!(audio.entrypoint_path.ends_with("src/main.luau"));
-        assert!(candidates.iter().any(|candidate| {
-            candidate.interface == "mesh.network" && candidate.module_id == "@mesh/networkmanager"
-        }));
         assert!(
             candidates
                 .iter()
-                .any(|candidate| candidate.interface == "mesh.power"
-                    && candidate.module_id == "@mesh/upower")
+                .all(|candidate| candidate.interface == "mesh.audio")
         );
         assert!(
             !candidates

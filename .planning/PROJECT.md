@@ -24,12 +24,14 @@ The project now has a backend plugin MVP with:
 **Target features:**
 - Practical CSS coverage for common shell styling: box model, layout, typography, borders, overflow, visual states, selectors, tokens, and documented unsupported properties.
 - Container-size and interaction reactivity so components can restyle on surface/container changes, hover, focus, active, and related state transitions. ✓ Complete in Phase 9.
-- Selectable text with mouse drag highlighting and copy support.
+- Selectable text with mouse drag highlighting and copy support. ✓ Complete in Phase 10.
 - Keyboard navigation and shortcuts for focus movement, activation, and configured key-driven workflows.
 - Theme animation tokens and custom CSS animation support for shell-specific motion.
 - Navigation-bar migration that proves the new styling, reactivity, keyboard, selection, and animation behavior in an existing core surface.
 
 **Phase 9 complete (2026-05-05):** Container query invalidation, post-restyle layout synchronization, and state preservation through restyles are all implemented and tested. `FrontendSurfaceComponent` now tracks rendered dimensions, re-evaluates container queries on size changes, runs layout after every restyle, and prunes stale hover/focus/active targets — without losing script context, service state, or input values.
+
+**Phase 10 complete (2026-05-06):** MESH now supports opt-in single-node text selection, wrapped selection highlight rendering, explicit `Ctrl+C` clipboard writes for visible selected text, and a dedicated passive proof surface wired through the local frontend module graph.
 
 ## Next Milestone Goals
 
@@ -61,4 +63,4 @@ Target features included the central plugin package manifest, frontend-to-backen
 </details>
 
 ---
-*Last updated: 2026-05-05 after Phase 9 completion*
+*Last updated: 2026-05-06 after Phase 10 completion*

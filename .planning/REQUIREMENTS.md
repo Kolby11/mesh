@@ -21,10 +21,10 @@
 
 ### Text Selection
 
-- [ ] **TEXT-01**: Users can select rendered text by dragging across selectable text nodes with the mouse.
-- [ ] **TEXT-02**: Selected text is visibly highlighted using theme-aware selection foreground/background styling.
-- [ ] **TEXT-03**: Users can copy selected text to the clipboard with the standard copy shortcut.
-- [ ] **TEXT-04**: Text selection works within a single selectable text node, supports wrapped text inside that node, excludes clipped or ellipsized text, and preserves normal pointer interactions on buttons, sliders, and inputs.
+- [x] **TEXT-01**: Users can select rendered text by dragging across selectable text nodes with the mouse.
+- [x] **TEXT-02**: Selected text is visibly highlighted using theme-aware selection foreground/background styling.
+- [x] **TEXT-03**: Users can copy selected text to the clipboard with the standard copy shortcut.
+- [x] **TEXT-04**: Text selection works within a single selectable text node, supports wrapped text inside that node, excludes clipped or ellipsized text, and preserves normal pointer interactions on buttons, sliders, and inputs.
 
 ### Keyboard Navigation
 
@@ -84,10 +84,10 @@
 | REACT-02 | Phase 9 | Complete |
 | REACT-03 | Phase 9 | Complete |
 | REACT-04 | Phase 9 | Complete |
-| TEXT-01 | Phase 10 | Pending |
-| TEXT-02 | Phase 10 | Pending |
-| TEXT-03 | Phase 10 | Pending |
-| TEXT-04 | Phase 10 | Pending |
+| TEXT-01 | Phase 10 | Complete |
+| TEXT-02 | Phase 10 | Complete |
+| TEXT-03 | Phase 10 | Complete |
+| TEXT-04 | Phase 10 | Complete |
 | KEY-01 | Phase 11 | Pending |
 | KEY-02 | Phase 11 | Pending |
 | KEY-03 | Phase 11 | Pending |

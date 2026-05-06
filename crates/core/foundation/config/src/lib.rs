@@ -613,6 +613,6 @@ mod tests {
         assert!(path1.ends_with("mesh/modules/@mesh/system-panel.json"));
 
         let path2 = module_override_path("generic-module");
-        assert!(path2.ends_with("mesh/modules/generic-package.json"));
+        assert!(path2.ends_with("mesh/modules/generic-module.json"));
     }
 }

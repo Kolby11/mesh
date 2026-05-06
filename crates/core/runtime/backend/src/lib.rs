@@ -266,6 +266,12 @@ fn refresh_interval(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn bundled_backend_script_path(module_slug: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("../../../../modules/backend/{module_slug}/src/main.luau"))
+    }
 
     async fn next_update(
         rx: &mut mpsc::UnboundedReceiver<BackendServiceEvent>,
@@ -575,8 +581,7 @@ mod tests {
 
     #[tokio::test]
     async fn shell_theme_backend_runs_through_runtime_loop() {
-        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../packages/modules/backend/core/shell-theme/src/main.luau");
+        let script_path = bundled_backend_script_path("shell-theme");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (update_tx, mut update_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -758,8 +763,7 @@ mod tests {
     }
 
     async fn assert_bundled_command_handler_returns_result_table() {
-        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../packages/modules/backend/core/pipewire-audio/src/main.luau");
+        let script_path = bundled_backend_script_path("pipewire-audio");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -1125,8 +1129,7 @@ mod tests {
 
     #[tokio::test]
     async fn reference_media_backend_emits_initial_state() {
-        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../packages/modules/backend/core/reference-media/src/main.luau");
+        let script_path = bundled_backend_script_path("reference-media");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (update_tx, mut update_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -1185,8 +1188,7 @@ mod tests {
 
     #[tokio::test]
     async fn reference_media_backend_command_returns_result_and_updated_state() {
-        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../packages/modules/backend/core/reference-media/src/main.luau");
+        let script_path = bundled_backend_script_path("reference-media");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -1269,8 +1271,7 @@ mod tests {
 
     #[tokio::test]
     async fn reference_media_invalid_command_returns_module_scoped_failure() {
-        let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../packages/modules/backend/core/reference-media/src/main.luau");
+        let script_path = bundled_backend_script_path("reference-media");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
