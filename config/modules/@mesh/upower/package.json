@@ -1,0 +1,21 @@
+{
+  "name": "@mesh/upower",
+  "version": "0.1.0",
+  "description": "UPower power provider module.",
+  "repository": {
+    "type": "git",
+    "url": "https://example.invalid/mesh/upower.git"
+  },
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "implements": [
+      {
+        "interface": "mesh.power",
+        "provider": "upower",
+        "label": "UPower",
+        "priority": 100
+      }
+    ]
+  }
+}

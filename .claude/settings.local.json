@@ -38,7 +38,8 @@
       "Bash(git -C /home/kolby/projects/mesh status)",
       "Bash(git -C /home/kolby/projects/mesh log --oneline -5)",
       "Bash(git *)",
-      "Skill(gsd-discuss-phase)"
+      "Skill(gsd-discuss-phase)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

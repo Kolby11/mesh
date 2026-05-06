@@ -25,6 +25,12 @@ MESH is a platform for building desktop shell experiences with:
 
 Use these terms precisely in code, documentation, and architecture discussions:
 
+- **Module**: the target installable package unit for MESH. New packages use
+  `package.json` with a `mesh` section. `mesh.kind` describes the role
+  (`frontend`, `backend`, `interface`, `theme`, `icon-pack`, `font-pack`,
+  `language-pack`, or `library`). Older `module.json`,
+  `plugin.json`, and `mesh.toml` files are compatibility inputs during
+  migration, not the preferred authoring model.
 - **Element**: a base UI primitive exposed by MESH core, such as `box`,
   `row`, `button`, `icon`, `input`, `slider`, or `text`. Elements are the
   built-in building blocks with predefined runtime behavior, styling hooks,
@@ -40,10 +46,19 @@ Use these terms precisely in code, documentation, and architecture discussions:
   components. For example, an audio controls frontend plugin can contain
   separate components for a volume mixer, output selector, mute button, and
   device list.
+- **Interface**: a named, versioned contract distributed as an `interface`
+  module. Backends implement interfaces; frontends consume interfaces; the
+  core validates and routes calls without knowing service-specific behavior.
+- **Luau library module**: a package that contributes importable Luau helpers
+  for backend and frontend scripts. Libraries reduce repeated parsing,
+  polling, formatting, and result-shaping code, but they do not grant
+  capabilities by themselves.
 
 When modeling Lua or LSP APIs, prefer this hierarchy: core **elements** expose
 the base typed API; user **components** compose elements; **frontend plugins**
 package one or more components into a complete shell feature.
+
+For the target module/package direction, see `docs/module-system.md`.
 
 ## Main goals
 

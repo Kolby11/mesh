@@ -9,7 +9,35 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "backend",
-    "provides": [
+    "capabilities": {
+      "required": [
+        "exec.pactl",
+        "exec.aplay"
+      ]
+    },
+    "dependencies": {
+      "binaries": [
+        {
+          "name": "pactl",
+          "reason": "PulseAudio volume and mute control.",
+          "packages": {
+            "debian": "pulseaudio-utils",
+            "arch": "libpulse",
+            "fedora": "pulseaudio-utils"
+          }
+        },
+        {
+          "name": "aplay",
+          "reason": "Playback for shell sound effects.",
+          "packages": {
+            "debian": "alsa-utils",
+            "arch": "alsa-utils",
+            "fedora": "alsa-utils"
+          }
+        }
+      ]
+    },
+    "implements": [
       {
         "interface": "mesh.audio",
         "provider": "pulseaudio",

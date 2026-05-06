@@ -166,6 +166,19 @@ This separation keeps the ecosystem understandable and easier to maintain.
 
 Packages are the main delivery format for MESH.
 
+New modules should use an npm-compatible `package.json` as the manifest. Keep
+standard package metadata (`name`, `version`, `description`, `private`,
+`repository`, etc.) at the top level, and put all MESH-specific declarations
+under the `mesh` key. Do not use top-level npm-reserved fields such as `type`
+or `dependencies` for MESH concepts; editors and package managers apply the
+standard npm schema to those fields.
+
+MESH may use npm-compatible tooling and workspaces for local development or
+distribution transport, but npm is not the MESH module resolver. The shell
+still reads the `mesh` section of `package.json`, validates capabilities,
+resolves providers, checks native binaries, and manages enabled modules through
+the MESH package graph.
+
 Supported package types should include:
 
 - widgets

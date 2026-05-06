@@ -1440,6 +1440,7 @@ name = "mesh-tools-lsp"
 version = "0.1.0"
 dependencies = [
  "mesh-core-component",
+ "mesh-core-config",
  "mesh-core-elements",
  "mesh-core-plugin",
  "serde",

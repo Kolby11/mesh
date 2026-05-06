@@ -345,9 +345,21 @@ mod tests {
     fn lifecycle_error_record_keeps_latest_message() {
         let diagnostics = Diagnostics::new("@mesh/pipewire-audio");
 
-        assert!(diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "first message"));
-        assert!(!diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "second message"));
-        assert!(!diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "poll", "third message"));
+        assert!(diagnostics.record_lifecycle_error(
+            "@mesh/pipewire-audio",
+            "poll",
+            "first message"
+        ));
+        assert!(!diagnostics.record_lifecycle_error(
+            "@mesh/pipewire-audio",
+            "poll",
+            "second message"
+        ));
+        assert!(!diagnostics.record_lifecycle_error(
+            "@mesh/pipewire-audio",
+            "poll",
+            "third message"
+        ));
 
         let records = diagnostics.lifecycle_error_records();
         assert_eq!(records.len(), 1);

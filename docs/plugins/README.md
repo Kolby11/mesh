@@ -61,9 +61,14 @@ plugins/
 
 ## Plugin anatomy
 
-Every plugin has a `plugin.json` manifest at its root declaring identity,
-capabilities, dependencies, entrypoints, and its settings schema — see
-[`../installation.md`](../installation.md) for the full format. Frontend surfaces have a
+New modules should use `package.json` with MESH-specific declarations under
+the `mesh` key. The top level remains npm-compatible package metadata; use
+`mesh.kind`, `mesh.dependencies`, `mesh.capabilities`, `mesh.entrypoints`, and
+`mesh.contributes` for shell behavior. Legacy `plugin.json`, `module.json`,
+and `mesh.toml` manifests are still loadable during migration, but new
+examples should prefer `package.json`.
+
+Frontend surfaces have a
 `src/main.mesh` single-file component (`<template>`, `<script lang="luau">`,
 `<style>`, `<i18n>`). Backends have a `src/main.luau` entrypoint
 that registers an interface implementation with the interface registry.

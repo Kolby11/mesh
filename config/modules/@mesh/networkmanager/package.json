@@ -1,0 +1,21 @@
+{
+  "name": "@mesh/networkmanager",
+  "version": "0.1.0",
+  "description": "NetworkManager network provider module.",
+  "repository": {
+    "type": "git",
+    "url": "https://example.invalid/mesh/networkmanager.git"
+  },
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "implements": [
+      {
+        "interface": "mesh.network",
+        "provider": "networkmanager",
+        "label": "NetworkManager",
+        "priority": 100
+      }
+    ]
+  }
+}

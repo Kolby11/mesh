@@ -6,6 +6,9 @@ lifecycle spec see [`../spec/pluggable-backend.md`](../spec/pluggable-backend.md
 
 ## Contents
 
+- **[`module-system.md`](./module-system.md)** — target package/module model,
+  including npm-compatible `package.json` + `mesh`, backend/frontend workflow,
+  interface contracts, and shared Luau library modules.
 - **[`extensibility.md`](./extensibility.md)** — interface registry, contract
   packages, cross-language bindings, event channels, capability
   classification. The backbone of the extensibility story.

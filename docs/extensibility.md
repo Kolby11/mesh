@@ -170,7 +170,7 @@ required = ["service.thermal.read"]
 ```json
 {
   "type": "backend",
-  "provides": [
+  "implements": [
     {
       "interface": "alice.thermal",
       "version": "1.0",
@@ -339,10 +339,12 @@ every new service category through a core release.
 
 ## Capability enforcement
 
-The contract lists the capabilities required to *implement* and to *consume*
-the interface. The core checks both at registration and at lookup time. A
-frontend that lacks `service.thermal.read` cannot acquire the proxy, and a
-backend that lacks it cannot register an implementation.
+Capabilities describe host powers and interface access. Consumers request
+service capabilities such as `service.thermal.read` or
+`service.thermal.control` before they can acquire a proxy or publish commands.
+Providers declare the interface they implement with `implements`, then request
+the host powers their implementation needs, such as `exec.sensors`,
+`dbus.system`, or `net.http`.
 
 New capability names can be introduced by contract packages — the core
 treats capability identifiers as opaque strings, the same way D-Bus treats

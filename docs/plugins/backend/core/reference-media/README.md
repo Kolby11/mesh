@@ -86,7 +86,7 @@ Each handler reads the current payload with `mesh.service.payload()` so the comm
 
 For a new backend MVP provider, copy this structure:
 
-1. Declare the provider in `plugin.json` with `provides.interface` and `base_plugin`.
+1. Declare the provider in `package.json` with `mesh.implements[].interface` and `basePlugin`.
 2. Read plugin settings from `mesh.config()`.
 3. Export top-level `state = { ... }` with the interface's required fields.
 4. Use `init()` to log startup, set the poll interval, and prepare the first state snapshot.

@@ -161,6 +161,60 @@ audio-volume-muted = ["missing:nope", "material:audio-volume-muted", "material:v
     }
 
     #[test]
+    fn icon_config_resolves_freedesktop_theme_layout() {
+        let td = tempfile::tempdir().unwrap();
+        let theme = td.path().join("TestTheme");
+        let status = theme.join("scalable/status");
+        fs::create_dir_all(&status).unwrap();
+        fs::write(
+            theme.join("index.theme"),
+            r#"[Icon Theme]
+Name=Test Theme
+Comment=Test XDG theme
+Directories=scalable/status
+
+[scalable/status]
+Size=16
+Type=Scalable
+MinSize=1
+MaxSize=256
+Context=Status
+"#,
+        )
+        .unwrap();
+        write_svg(&status.join("network-wireless.svg"));
+
+        let config = IconConfig::from_toml_str(&format!(
+            r#"
+active_profile = "xdg"
+
+[[packs]]
+id = "test"
+root = "{}"
+theme = "TestTheme"
+
+[profiles.xdg.icons]
+network-wireless = ["test:network-wireless"]
+"#,
+            td.path().display()
+        ))
+        .unwrap();
+
+        let mut registry = IconRegistry::from_config(config).unwrap();
+        let result = registry.resolve("network-wireless", 24);
+
+        match result {
+            IconResolution::Found {
+                candidate, path, ..
+            } => {
+                assert_eq!(candidate, "test:network-wireless");
+                assert!(path.ends_with("TestTheme/scalable/status/network-wireless.svg"));
+            }
+            IconResolution::Missing { .. } => panic!("expected XDG theme icon to resolve"),
+        }
+    }
+
+    #[test]
     fn icon_profile_switch_invalidates_cache() {
         let td = tempfile::tempdir().unwrap();
         let rounded = td.path().join("rounded");

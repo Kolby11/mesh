@@ -15,7 +15,8 @@ pub struct IconConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct IconPackRoot {
     pub id: String,
-    pub root: PathBuf,
+    #[serde(default)]
+    pub root: Option<PathBuf>,
     #[serde(default = "default_hicolor")]
     pub theme: String,
 }
@@ -76,10 +77,19 @@ impl IconConfig {
                 name.into(),
                 assets
                     .into_iter()
-                    .map(|asset_name| IconCandidate {
-                        pack_id: "material".into(),
-                        asset_name: asset_name.into(),
-                        multicolor: false,
+                    .flat_map(|asset_name| {
+                        [
+                            IconCandidate {
+                                pack_id: "system".into(),
+                                asset_name: asset_name.into(),
+                                multicolor: false,
+                            },
+                            IconCandidate {
+                                pack_id: "material".into(),
+                                asset_name: asset_name.into(),
+                                multicolor: false,
+                            },
+                        ]
                     })
                     .collect(),
             );
@@ -87,11 +97,18 @@ impl IconConfig {
 
         let config = Self {
             active_profile: "material".into(),
-            packs: vec![IconPackRoot {
-                id: "material".into(),
-                root,
-                theme: "hicolor".into(),
-            }],
+            packs: vec![
+                IconPackRoot {
+                    id: "system".into(),
+                    root: None,
+                    theme: "hicolor".into(),
+                },
+                IconPackRoot {
+                    id: "material".into(),
+                    root: Some(root),
+                    theme: "hicolor".into(),
+                },
+            ],
             profiles: HashMap::from([("material".into(), profile)]),
         };
         config.validate()?;
@@ -114,8 +131,13 @@ impl IconConfig {
             if !pack_ids.insert(pack.id.clone()) {
                 bail!("duplicate pack id '{}'", pack.id);
             }
-            if pack.root.as_os_str().is_empty() {
-                bail!("pack '{}' root must not be empty", pack.id);
+            if let Some(root) = &pack.root {
+                if root.as_os_str().is_empty() {
+                    bail!("pack '{}' root must not be empty", pack.id);
+                }
+            }
+            if pack.theme.trim().is_empty() {
+                bail!("pack '{}' theme must not be empty", pack.id);
             }
         }
 

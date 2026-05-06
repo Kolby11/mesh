@@ -12,9 +12,8 @@ Audio backend implemented against **PipeWire**.
 
 Required:
 
-- `service.audio.read` — enumerate devices, read volumes and mute state
-- `service.audio.control` — change volume, mute, default output / input
-- `dbus.session` — PipeWire is queried via the session bus
+- `exec.wpctl` — call `wpctl` to read and mutate PipeWire state
+- `exec.aplay` — play shell sound effects through ALSA
 
 ## Responsibilities
 
@@ -25,6 +24,10 @@ Implements the methods declared by `mesh.audio`:
 - set default output / input
 - emit the contract's events (`DeviceChanged`, `VolumeChanged`, …) on the
   `mesh.audio/*` channels so subscribers (panel, quick-settings) can redraw
+
+The shell host only routes `mesh.audio` calls to this provider and enforces
+capabilities. All PipeWire-specific behavior stays in `src/main.luau` and is
+performed through `wpctl`.
 
 ## Selection
 

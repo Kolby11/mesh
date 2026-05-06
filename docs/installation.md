@@ -119,51 +119,42 @@ packaged, versioned, and replaceable on their own.
 
 ### Variant: backend plugin
 
-Backends add a `provides` block (and typically declare system dependencies):
+Backends add an `implements` block (and typically declare system dependencies):
 
 ```json
 {
-  "id":      "@mesh/pipewire-audio",
+  "name": "@mesh/pipewire-audio",
   "version": "0.1.0",
-  "type":    "backend",
-
-  "provides": [
-    {
-      "interface":    "mesh.audio",
-      "version":      "1.0",
-      "backend_name": "PipeWire",
-      "priority":     100,
-      "optional_capabilities": ["set_app_volume", "per_app_mute"]
-    }
-  ],
-
-  "extensions": [
-    {
-      "interface": "@mesh/pipewire-audio.extensions",
-      "version":   "0.1"
-    }
-  ],
-
-  "dependencies": {
-    "plugins": { "@mesh/audio-contract": ">=1.0.0, <2.0.0" },
-    "native_libs": [
-      { "name": "libdbus-1.so.3", "reason": "System D-Bus access." }
-    ],
-    "binaries": [
+  "mesh": {
+    "kind": "backend",
+    "capabilities": {
+      "required": ["exec.wpctl"]
+    },
+    "implements": [
       {
-        "name":    "pw-cli",
-        "version": ">=0.3",
-        "reason":  "PipeWire control.",
-        "packages": {
-          "debian": "pipewire",
-          "arch":   "pipewire",
-          "fedora": "pipewire"
-        }
+        "interface": "mesh.audio",
+        "version": "1.0",
+        "provider": "pipewire",
+        "priority": 100,
+        "optional_capabilities": ["set_app_volume", "per_app_mute"]
       }
-    ]
-  },
-
-  "entrypoints": { "main": "src/main.luau" }
+    ],
+    "dependencies": {
+      "modules": { "@mesh/audio-interface": ">=1.0.0, <2.0.0" },
+      "binaries": [
+        {
+          "name": "wpctl",
+          "reason": "PipeWire volume and mute control.",
+          "packages": {
+            "debian": "wireplumber",
+            "arch": "wireplumber",
+            "fedora": "wireplumber"
+          }
+        }
+      ]
+    },
+    "entrypoints": { "main": "src/main.luau" }
+  }
 }
 ```
 

@@ -9,7 +9,39 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "backend",
-    "provides": [
+    "capabilities": {
+      "required": [
+        "exec.wpctl",
+        "exec.aplay"
+      ]
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en"]
+    },
+    "dependencies": {
+      "binaries": [
+        {
+          "name": "wpctl",
+          "reason": "PipeWire volume and mute control.",
+          "packages": {
+            "debian": "wireplumber",
+            "arch": "wireplumber",
+            "fedora": "wireplumber"
+          }
+        },
+        {
+          "name": "aplay",
+          "reason": "Playback for shell sound effects.",
+          "packages": {
+            "debian": "alsa-utils",
+            "arch": "alsa-utils",
+            "fedora": "alsa-utils"
+          }
+        }
+      ]
+    },
+    "implements": [
       {
         "interface": "mesh.audio",
         "provider": "pipewire",

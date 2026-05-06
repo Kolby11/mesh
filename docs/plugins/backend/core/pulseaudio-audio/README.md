@@ -13,11 +13,12 @@ Audio backend implemented against **PulseAudio**. Acts as the fallback
 
 Required:
 
-- `service.audio.read`
-- `service.audio.control`
+- `exec.pactl` — call `pactl` to read and mutate PulseAudio state
+- `exec.aplay` — play shell sound effects through ALSA
 
-Unlike the PipeWire backend, no D-Bus capability is needed — PulseAudio is
-reached through its native socket protocol.
+No D-Bus capability is needed. The backend script talks to PulseAudio through
+`pactl`; the shell host only routes `mesh.audio` calls to the selected
+provider.
 
 ## Responsibilities
 

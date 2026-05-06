@@ -1,3 +1,4 @@
+use mesh_core_config::{default_config_path, load_config, resolve_discovery_paths};
 use mesh_core_plugin::manifest::{Manifest, PluginType, load_manifest};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -162,20 +163,10 @@ impl PluginRegistry {
 }
 
 fn search_paths(workspace_root: &Path) -> Vec<PathBuf> {
-    let mut paths = vec![workspace_root.join("packages/plugins")];
-
-    if let Some(home) = home_dir() {
-        paths.push(home.join(".local/share/mesh/plugins"));
-        paths.push(home.join(".local/share/mesh/dev-plugins"));
-    }
-
-    paths.push(PathBuf::from("/usr/share/mesh/plugins"));
-
-    paths
-}
-
-fn home_dir() -> Option<PathBuf> {
-    std::env::var("HOME").ok().map(PathBuf::from)
+    let configured_paths = load_config(&default_config_path())
+        .map(|config| config.shell.discovery_paths)
+        .unwrap_or_default();
+    resolve_discovery_paths(workspace_root, &configured_paths)
 }
 
 /// Analyze a backend Luau script to infer the service shape:

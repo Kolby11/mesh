@@ -48,22 +48,37 @@ safe: they target plugins individually.
 
 ## Plugin-bundled translations
 
-The simplest case: a plugin ships its own locales next to the manifest.
+The simplest case: a module declares the locales it supports in
+`package.json` and ships its own locale files next to the manifest.
 
 ```
 @mesh/launcher/
-  mesh.toml
+  package.json
   config/
     i18n/
       en.json
       sk.json
 ```
 
-```toml
-# mesh.toml
-[i18n]
-default_locale = "en"
-bundled = "config/i18n/"
+```json
+{
+  "name": "@mesh/launcher",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en", "sk"]
+    },
+    "contributes": {
+      "i18n": [
+        { "id": "en", "locale": "en", "path": "config/i18n/en.json" },
+        { "id": "sk", "locale": "sk", "path": "config/i18n/sk.json" }
+      ]
+    }
+  }
+}
 ```
 
 ```json

@@ -6,6 +6,7 @@
 use mlua::{Function, Lua, LuaSerdeExt, Value as LuaValue};
 use serde_json::Value as JsonValue;
 use std::collections::HashSet;
+use std::path::Path;
 use std::process::Command as StdCommand;
 use std::sync::{Arc, Mutex};
 
@@ -335,10 +336,22 @@ impl BackendScriptContext {
             })?,
         )?;
 
+        let capabilities = self.capabilities.clone();
+        let plugin_id = self.plugin_id.clone();
         mesh.set(
             "exec",
             self.lua
                 .create_function(move |lua, (program, args): (String, Vec<String>)| {
+                    if let Some(required) = missing_exec_capability(&capabilities, &program) {
+                        tracing::warn!(
+                            plugin_id = %plugin_id,
+                            program = %program,
+                            required_capability = %required,
+                            "denied backend exec"
+                        );
+                        return exec_denied_to_lua(lua, &program, &required);
+                    }
+
                     run_exec(&lua, &program, &args)
                 })?,
         )?;
@@ -403,6 +416,39 @@ fn run_exec(lua: &Lua, program: &str, args: &[String]) -> mlua::Result<LuaValue>
     exec_result_to_lua(lua, result)
 }
 
+fn missing_exec_capability(capabilities: &HashSet<String>, program: &str) -> Option<String> {
+    if capabilities.contains("exec.command") {
+        return None;
+    }
+
+    let required = exec_program_capability(program);
+    if capabilities.contains(&required) {
+        None
+    } else {
+        Some(required)
+    }
+}
+
+fn exec_program_capability(program: &str) -> String {
+    let binary = Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program);
+    format!("exec.{binary}")
+}
+
+fn exec_denied_to_lua(lua: &Lua, program: &str, required: &str) -> mlua::Result<LuaValue> {
+    exec_outcome_to_lua(
+        lua,
+        ExecOutcome {
+            success: false,
+            stdout: String::new(),
+            stderr: format!("denied mesh.exec(\"{program}\") without {required} or exec.command"),
+            code: None,
+        },
+    )
+}
+
 fn exec_result_to_lua(
     lua: &Lua,
     result: std::io::Result<std::process::Output>,
@@ -446,11 +492,12 @@ fn command_result_from_lua(
         return Ok(serde_json::json!({ "ok": true }));
     }
 
-    lua.from_value::<JsonValue>(value)
-        .map_err(|err| BackendScriptError::CommandResultConversionFailed {
+    lua.from_value::<JsonValue>(value).map_err(|err| {
+        BackendScriptError::CommandResultConversionFailed {
             plugin_id: plugin_id.to_string(),
             message: err.to_string(),
-        })
+        }
+    })
 }
 
 fn command_error_result(message: impl Into<String>) -> JsonValue {
@@ -873,7 +920,8 @@ mod tests {
 
     #[test]
     fn emit_json_accepts_explicit_string() {
-        let mut ctx = BackendScriptContext::new("@test/backend");
+        let mut ctx =
+            BackendScriptContext::new_with_capabilities("@test/backend", ["exec.printf".into()]);
         ctx.load_script(
             "function init()\nend\nfunction on_poll()\nlocal r = mesh.exec(\"printf\", {\"{\\\"available\\\":true,\\\"percent\\\":65}\"})\nmesh.service.emit_json(r.stdout)\nend",
         )
@@ -1097,7 +1145,8 @@ mod tests {
 
     #[test]
     fn exec_returns_structured_result() {
-        let mut ctx = BackendScriptContext::new("@test/backend");
+        let mut ctx =
+            BackendScriptContext::new_with_capabilities("@test/backend", ["exec.printf".into()]);
         ctx.load_script(
             "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ ok = result.success, stdout = result.stdout })\nend",
         )
@@ -1112,7 +1161,8 @@ mod tests {
 
     #[test]
     fn exec_accepts_program_and_args() {
-        let mut ctx = BackendScriptContext::new("@test/backend");
+        let mut ctx =
+            BackendScriptContext::new_with_capabilities("@test/backend", ["exec.printf".into()]);
         ctx.load_script(
             "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, code = result.code })\nend",
         )
@@ -1128,7 +1178,10 @@ mod tests {
 
     #[test]
     fn exec_rejects_single_string_command_form() {
-        let mut ctx = BackendScriptContext::new("@test/backend");
+        let mut ctx = BackendScriptContext::new_with_capabilities(
+            "@test/backend",
+            ["exec.printf hello".into()],
+        );
         ctx.load_script(
             "function init()\nend\nfunction on_poll()\nlocal ok = pcall(function()\nmesh.exec(\"printf hello\")\nend)\nmesh.service.emit({ rejected = not ok })\nend",
         )
@@ -1142,7 +1195,8 @@ mod tests {
 
     #[test]
     fn exec_missing_program_returns_failure_table() {
-        let mut ctx = BackendScriptContext::new("@test/backend");
+        let mut ctx =
+            BackendScriptContext::new_with_capabilities("@test/backend", ["exec.command".into()]);
         ctx.load_script(
             "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"__mesh_missing_command_for_test__\", {})\nmesh.service.emit({ success = result.success, stdout = result.stdout, stderr = result.stderr, code = result.code })\nend",
         )
@@ -1164,7 +1218,8 @@ mod tests {
 
     #[test]
     fn exec_nonzero_exit_returns_failure_table() {
-        let mut ctx = BackendScriptContext::new("@test/backend");
+        let mut ctx =
+            BackendScriptContext::new_with_capabilities("@test/backend", ["exec.sh".into()]);
         ctx.load_script(
             "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"sh\", {\"-c\", \"printf err >&2; exit 7\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, stderr = result.stderr, code = result.code })\nend",
         )
@@ -1177,6 +1232,27 @@ mod tests {
         assert_eq!(payload.get("stdout").and_then(|v| v.as_str()), Some(""));
         assert_eq!(payload.get("stderr").and_then(|v| v.as_str()), Some("err"));
         assert_eq!(payload.get("code").and_then(|v| v.as_i64()), Some(7));
+    }
+
+    #[test]
+    fn exec_without_program_capability_returns_denied_result() {
+        let mut ctx = BackendScriptContext::new("@test/backend");
+        ctx.load_script(
+            "function init()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ success = result.success, stderr = result.stderr, code = result.code })\nend",
+        )
+        .unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
+        assert_eq!(
+            payload.get("success").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert!(
+            payload
+                .get("stderr")
+                .and_then(|v| v.as_str())
+                .is_some_and(|stderr| stderr.contains("exec.printf"))
+        );
+        assert!(payload.get("code").is_none());
     }
 
     #[test]
@@ -1355,7 +1431,10 @@ mod tests {
             .run_command_with_result("bad-result", &serde_json::json!({}))
             .unwrap_err();
         assert!(
-            matches!(err, BackendScriptError::CommandResultConversionFailed { .. }),
+            matches!(
+                err,
+                BackendScriptError::CommandResultConversionFailed { .. }
+            ),
             "expected CommandResultConversionFailed, got {err:?}"
         );
         assert!(
@@ -1400,7 +1479,10 @@ mod tests {
                 .is_some_and(|m| m.contains("handler exploded")),
             "outcome.error should carry the message for lifecycle visibility"
         );
-        assert!(outcome.state.is_none(), "no state should be published on handler error");
+        assert!(
+            outcome.state.is_none(),
+            "no state should be published on handler error"
+        );
     }
 
     #[test]
@@ -1465,7 +1547,10 @@ mod tests {
             Some(true),
             "play command must return ok=true"
         );
-        assert!(outcome.error.is_none(), "play command must not carry an error");
+        assert!(
+            outcome.error.is_none(),
+            "play command must not carry an error"
+        );
         let state_after_play = outcome.state.as_ref().expect("play must update state");
         assert_eq!(
             state_after_play.get("state").and_then(|v| v.as_str()),

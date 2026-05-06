@@ -28,6 +28,7 @@ impl Capability {
             // High privilege
             "exec.command" | "shell.screenshot" | "dbus.system" | "net.socket" | "theme.write"
             | "locale.write" => PrivilegeLevel::High,
+            s if s.starts_with("exec.") && s != "exec.launch-app" => PrivilegeLevel::High,
 
             // Elevated privilege
             s if s.ends_with(".control") => PrivilegeLevel::Elevated,
@@ -142,6 +143,14 @@ mod tests {
         assert_eq!(
             Capability::new("exec.command").privilege_level(),
             PrivilegeLevel::High
+        );
+        assert_eq!(
+            Capability::new("exec.wpctl").privilege_level(),
+            PrivilegeLevel::High
+        );
+        assert_eq!(
+            Capability::new("exec.launch-app").privilege_level(),
+            PrivilegeLevel::Elevated
         );
     }
 

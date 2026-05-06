@@ -2,7 +2,7 @@ use mesh_core_elements::WidgetNode;
 use mesh_core_plugin::manifest::SurfaceLayoutSection;
 use std::collections::HashMap;
 
-// ScrollOffsetState is defined in component.rs but layout functions need it.
+// ScrollOffsetState belongs to the frontend component but layout functions need it.
 use super::component::ScrollOffsetState;
 
 pub(super) type ContentBounds = (f32, f32, f32, f32);

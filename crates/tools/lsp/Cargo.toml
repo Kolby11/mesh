@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 mesh-core-component = { workspace = true }
+mesh-core-config    = { workspace = true }
 mesh-core-elements  = { workspace = true }
 mesh-core-plugin    = { workspace = true }
 

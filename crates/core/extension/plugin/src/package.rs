@@ -1,4 +1,6 @@
-use crate::manifest::{self, DependencySpec, Manifest, ManifestSource, PluginType};
+use crate::manifest::{
+    self, CapabilitiesSection, DependencySpec, Manifest, ManifestSource, PluginType,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -67,7 +69,7 @@ pub fn themes_dir() -> Result<PathBuf, PackageManifestError> {
     Ok(mesh_home()?.join("themes"))
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RootPackageManifest {
     pub schema_version: u32,
@@ -85,13 +87,14 @@ pub struct RootPackageManifest {
 
 impl RootPackageManifest {
     pub fn from_json_str(input: &str) -> Result<Self, PackageManifestError> {
-        let parsed: Self =
+        let parsed: RootPackageJson =
             serde_json::from_str(input).map_err(|source| PackageManifestError::Json {
                 path: PathBuf::from("<inline>"),
                 source,
             })?;
-        parsed.validate()?;
-        Ok(parsed)
+        let manifest = parsed.into_manifest();
+        manifest.validate()?;
+        Ok(manifest)
     }
 
     pub fn from_path(path: &Path) -> Result<Self, PackageManifestError> {
@@ -99,13 +102,14 @@ impl RootPackageManifest {
             path: path.to_path_buf(),
             source,
         })?;
-        let parsed: Self =
+        let parsed: RootPackageJson =
             serde_json::from_str(&content).map_err(|source| PackageManifestError::Json {
                 path: path.to_path_buf(),
                 source,
             })?;
-        parsed.validate()?;
-        Ok(parsed)
+        let manifest = parsed.into_manifest();
+        manifest.validate()?;
+        Ok(manifest)
     }
 
     pub fn validate(&self) -> Result<(), PackageManifestError> {
@@ -115,7 +119,7 @@ impl RootPackageManifest {
                 self.schema_version
             )));
         }
-        validate_relative_path("modulesDir", &self.modules_dir)?;
+        validate_modules_dir(&self.modules_dir)?;
         for (module_id, entry) in &self.modules {
             if module_id.trim().is_empty() {
                 return Err(PackageManifestError::Validation(
@@ -132,6 +136,66 @@ impl RootPackageManifest {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RootPackageJson {
+    #[serde(default)]
+    schema_version: Option<u32>,
+    #[serde(default)]
+    modules_dir: Option<String>,
+    #[serde(default)]
+    modules: HashMap<String, InstalledModuleEntry>,
+    #[serde(default)]
+    providers: HashMap<String, String>,
+    #[serde(default)]
+    layout: Option<RootLayoutSelection>,
+    #[serde(default)]
+    theme: Option<RootThemeSelection>,
+    #[serde(default)]
+    mesh: Option<RootMeshSection>,
+}
+
+impl RootPackageJson {
+    fn into_manifest(self) -> RootPackageManifest {
+        if let Some(mesh) = self.mesh {
+            return RootPackageManifest {
+                schema_version: mesh.schema_version,
+                modules_dir: mesh.modules_dir,
+                modules: mesh.modules,
+                providers: mesh.providers,
+                layout: mesh.layout,
+                theme: mesh.theme,
+            };
+        }
+
+        RootPackageManifest {
+            schema_version: self.schema_version.unwrap_or(1),
+            modules_dir: self.modules_dir.unwrap_or_else(default_modules_dir),
+            modules: self.modules,
+            providers: self.providers,
+            layout: self.layout,
+            theme: self.theme,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RootMeshSection {
+    #[serde(default = "default_schema_version")]
+    schema_version: u32,
+    #[serde(default = "default_modules_dir")]
+    modules_dir: String,
+    #[serde(default)]
+    modules: HashMap<String, InstalledModuleEntry>,
+    #[serde(default)]
+    providers: HashMap<String, String>,
+    #[serde(default)]
+    layout: Option<RootLayoutSelection>,
+    #[serde(default)]
+    theme: Option<RootThemeSelection>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -244,6 +308,104 @@ impl ModulePackageManifest {
         self.mesh.validate()
     }
 
+    pub fn into_runtime_manifest(self) -> Manifest {
+        let mesh = self.mesh;
+        let settings =
+            mesh.contributes
+                .settings
+                .clone()
+                .map(|settings| manifest::SettingsSection {
+                    namespace: Some(settings.namespace),
+                    schema_path: None,
+                    inline_schema: Some(settings.schema),
+                });
+        let i18n = mesh
+            .contributes
+            .i18n
+            .first()
+            .map(|i18n| manifest::I18nSection {
+                default_locale: i18n.locale.clone(),
+                bundled: i18n.path.clone(),
+            });
+        let theme = mesh
+            .contributes
+            .themes
+            .first()
+            .map(|theme| manifest::ThemeSection {
+                tokens_used: Vec::new(),
+                base: None,
+                modes: theme.modes.clone(),
+                default_mode: theme.default_mode.clone(),
+                extends: None,
+            });
+        let assets = mesh
+            .contributes
+            .icons
+            .first()
+            .map(|icons| manifest::AssetsSection {
+                icons: Some(icons.path.clone()),
+            });
+        let provides = mesh
+            .implementations()
+            .cloned()
+            .into_iter()
+            .map(|provided| manifest::ProvidedInterface {
+                interface: provided.interface,
+                version: provided.version,
+                base_plugin: provided.base_plugin,
+                backend_name: provided.label.or(provided.provider),
+                priority: provided.priority,
+                optional_capabilities: Vec::new(),
+            })
+            .collect();
+        let interface = mesh.interface.clone().and_then(|interface| {
+            let version = interface.version?;
+            let file = interface.file?;
+            Some(manifest::InterfaceSection {
+                name: interface.name,
+                version,
+                file,
+                extends: interface.extends,
+            })
+        });
+
+        Manifest {
+            package: manifest::PackageSection {
+                id: self.name,
+                name: None,
+                version: self.version,
+                plugin_type: PluginType::from(mesh.kind),
+                api_version: mesh.api_version,
+                license: self.license,
+                description: self.description,
+                authors: Vec::new(),
+                repository: self.repository.map(|repository| repository.url),
+            },
+            compatibility: manifest::CompatibilitySection::default(),
+            dependencies: mesh.dependencies.into_manifest_dependencies(),
+            capabilities: mesh.capabilities,
+            entrypoints: manifest::EntrypointsSection {
+                main: mesh.entrypoints.main,
+                settings_ui: mesh.entrypoints.settings_ui,
+            },
+            accessibility: None,
+            settings,
+            i18n,
+            theme,
+            service: None,
+            provides,
+            interface,
+            extensions: Vec::new(),
+            exports: manifest::ExportsSection::default(),
+            provides_slots: HashMap::new(),
+            slot_contributions: HashMap::new(),
+            assets,
+            icon_requirements: manifest::IconRequirementsSection::default(),
+            translations: HashMap::new(),
+            surface_layout: None,
+        }
+    }
+
     fn from_legacy_manifest(manifest: Manifest) -> Self {
         let package = manifest.package.clone();
         let mut contributes = MeshContributes::default();
@@ -311,6 +473,21 @@ impl ModulePackageManifest {
             .into_iter()
             .map(MeshProvidesDeclaration::from)
             .collect();
+        let interface = manifest
+            .interface
+            .as_ref()
+            .map(|interface| MeshInterfaceDeclaration {
+                name: interface.name.clone(),
+                version: Some(interface.version.clone()),
+                file: Some(interface.file.clone()),
+                domain: interface.name.split('.').nth(1).map(str::to_string),
+                extends: interface.extends.clone(),
+                relationship: interface
+                    .extends
+                    .as_ref()
+                    .map(|_| InterfaceRelationship::Extension),
+                reason: None,
+            });
         let dependencies = MeshDependencies::from_manifest_dependencies(manifest.dependencies);
 
         Self {
@@ -325,12 +502,26 @@ impl ModulePackageManifest {
             mesh: MeshModuleSection {
                 api_version: package.api_version,
                 kind: ModuleKind::from(package.plugin_type),
+                capabilities: manifest.capabilities,
+                i18n: MeshI18nSupport {
+                    default_locale: manifest
+                        .i18n
+                        .as_ref()
+                        .map(|i18n| i18n.default_locale.clone()),
+                    supported_locales: manifest
+                        .i18n
+                        .as_ref()
+                        .map(|i18n| vec![i18n.default_locale.clone()])
+                        .unwrap_or_default(),
+                },
                 entrypoints: MeshEntrypoints {
                     main: manifest.entrypoints.main,
                     settings_ui: manifest.entrypoints.settings_ui,
                 },
                 dependencies,
                 provides,
+                implements: Vec::new(),
+                interface,
                 contributes,
                 experimental: serde_json::Value::Null,
             },
@@ -344,11 +535,19 @@ pub struct MeshModuleSection {
     pub api_version: String,
     pub kind: ModuleKind,
     #[serde(default)]
+    pub capabilities: CapabilitiesSection,
+    #[serde(default)]
+    pub i18n: MeshI18nSupport,
+    #[serde(default)]
     pub entrypoints: MeshEntrypoints,
     #[serde(default)]
     pub dependencies: MeshDependencies,
     #[serde(default)]
     pub provides: Vec<MeshProvidesDeclaration>,
+    #[serde(default)]
+    pub implements: Vec<MeshProvidesDeclaration>,
+    #[serde(default)]
+    pub interface: Option<MeshInterfaceDeclaration>,
     #[serde(default)]
     pub contributes: MeshContributes,
     #[serde(default)]
@@ -362,7 +561,74 @@ impl MeshModuleSection {
                 "mesh.apiVersion cannot be empty".into(),
             ));
         }
+        self.i18n.validate()?;
+        if self.kind == ModuleKind::Interface && self.interface.is_none() {
+            return Err(PackageManifestError::Validation(
+                "interface modules must declare mesh.interface".into(),
+            ));
+        }
+        if let Some(interface) = &self.interface {
+            interface.validate()?;
+            if self.kind == ModuleKind::Interface {
+                if interface.version.is_none() {
+                    return Err(PackageManifestError::Validation(
+                        "interface modules must declare mesh.interface.version".into(),
+                    ));
+                }
+                if interface.file.is_none() {
+                    return Err(PackageManifestError::Validation(
+                        "interface modules must declare mesh.interface.file".into(),
+                    ));
+                }
+            }
+        }
+        for provided in self.implementations() {
+            provided.validate()?;
+        }
         self.contributes.validate()
+    }
+
+    fn implementations(&self) -> impl Iterator<Item = &MeshProvidesDeclaration> {
+        self.provides.iter().chain(self.implements.iter())
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MeshI18nSupport {
+    #[serde(default, rename = "defaultLocale", alias = "default_locale")]
+    pub default_locale: Option<String>,
+    #[serde(default, rename = "supportedLocales", alias = "supported_locales")]
+    pub supported_locales: Vec<String>,
+}
+
+impl MeshI18nSupport {
+    fn validate(&self) -> Result<(), PackageManifestError> {
+        if let Some(default_locale) = &self.default_locale {
+            if default_locale.trim().is_empty() {
+                return Err(PackageManifestError::Validation(
+                    "mesh.i18n.defaultLocale cannot be empty".into(),
+                ));
+            }
+            if !self.supported_locales.is_empty()
+                && !self
+                    .supported_locales
+                    .iter()
+                    .any(|locale| locale == default_locale)
+            {
+                return Err(PackageManifestError::Validation(format!(
+                    "mesh.i18n.defaultLocale {default_locale} must be listed in supportedLocales"
+                )));
+            }
+        }
+
+        for locale in &self.supported_locales {
+            if locale.trim().is_empty() {
+                return Err(PackageManifestError::Validation(
+                    "mesh.i18n.supportedLocales cannot contain empty locales".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -376,6 +642,7 @@ pub enum ModuleKind {
     FontPack,
     LanguagePack,
     Interface,
+    Library,
 }
 
 impl From<PluginType> for ModuleKind {
@@ -387,6 +654,20 @@ impl From<PluginType> for ModuleKind {
             PluginType::IconPack => Self::IconPack,
             PluginType::LanguagePack => Self::LanguagePack,
             PluginType::Interface => Self::Interface,
+        }
+    }
+}
+
+impl From<ModuleKind> for PluginType {
+    fn from(kind: ModuleKind) -> Self {
+        match kind {
+            ModuleKind::Frontend => Self::Surface,
+            ModuleKind::Backend => Self::Backend,
+            ModuleKind::Theme => Self::Theme,
+            ModuleKind::IconPack => Self::IconPack,
+            ModuleKind::LanguagePack => Self::LanguagePack,
+            ModuleKind::Interface => Self::Interface,
+            ModuleKind::FontPack | ModuleKind::Library => Self::Widget,
         }
     }
 }
@@ -431,6 +712,8 @@ pub struct MeshDependencies {
     pub i18n: HashMap<String, String>,
     #[serde(default)]
     pub themes: HashMap<String, String>,
+    #[serde(default)]
+    pub binaries: Vec<manifest::BinaryDependency>,
 }
 
 impl MeshDependencies {
@@ -465,6 +748,37 @@ impl MeshDependencies {
             fonts,
             i18n,
             themes,
+            binaries: dependencies.binaries,
+        }
+    }
+
+    fn into_manifest_dependencies(self) -> manifest::DependenciesSection {
+        manifest::DependenciesSection {
+            plugins: self.modules,
+            interfaces: Vec::new(),
+            icon_packs: manifest::OptionalDependencyGroup {
+                required: self.icons.keys().cloned().collect(),
+                optional: Vec::new(),
+            },
+            language_packs: manifest::OptionalDependencyGroup {
+                required: self.i18n.keys().cloned().collect(),
+                optional: Vec::new(),
+            },
+            themes: manifest::OptionalDependencyGroup {
+                required: self.themes.keys().cloned().collect(),
+                optional: Vec::new(),
+            },
+            native_libs: Vec::new(),
+            binaries: self.binaries,
+            fonts: self
+                .fonts
+                .keys()
+                .cloned()
+                .map(|family| manifest::FontDependency {
+                    family,
+                    reason: None,
+                })
+                .collect(),
         }
     }
 }
@@ -473,6 +787,10 @@ impl MeshDependencies {
 pub struct MeshProvidesDeclaration {
     pub interface: String,
     #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default, rename = "basePlugin", alias = "base_plugin")]
+    pub base_plugin: Option<String>,
+    #[serde(default)]
     pub provider: Option<String>,
     #[serde(default)]
     pub label: Option<String>,
@@ -480,10 +798,99 @@ pub struct MeshProvidesDeclaration {
     pub priority: u32,
 }
 
+impl MeshProvidesDeclaration {
+    fn validate(&self) -> Result<(), PackageManifestError> {
+        if self.interface.trim().is_empty() {
+            return Err(PackageManifestError::Validation(
+                "mesh.provides interface cannot be empty".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MeshInterfaceDeclaration {
+    pub name: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub file: Option<String>,
+    #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub extends: Option<String>,
+    #[serde(default)]
+    pub relationship: Option<InterfaceRelationship>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+impl MeshInterfaceDeclaration {
+    fn validate(&self) -> Result<(), PackageManifestError> {
+        if self.name.trim().is_empty() {
+            return Err(PackageManifestError::Validation(
+                "mesh.interface.name cannot be empty".into(),
+            ));
+        }
+        if let Some(version) = &self.version
+            && version.trim().is_empty()
+        {
+            return Err(PackageManifestError::Validation(
+                "mesh.interface.version cannot be empty".into(),
+            ));
+        }
+        if let Some(file) = &self.file
+            && file.trim().is_empty()
+        {
+            return Err(PackageManifestError::Validation(
+                "mesh.interface.file cannot be empty".into(),
+            ));
+        }
+        if let Some(domain) = &self.domain
+            && domain.trim().is_empty()
+        {
+            return Err(PackageManifestError::Validation(
+                "mesh.interface.domain cannot be empty".into(),
+            ));
+        }
+        if let Some(extends) = &self.extends
+            && extends.trim().is_empty()
+        {
+            return Err(PackageManifestError::Validation(
+                "mesh.interface.extends cannot be empty".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn effective_relationship(&self) -> InterfaceRelationship {
+        self.relationship.unwrap_or_else(|| {
+            if self.extends.is_some() {
+                InterfaceRelationship::Extension
+            } else if self.name.starts_with("mesh.") {
+                InterfaceRelationship::Base
+            } else {
+                InterfaceRelationship::Independent
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InterfaceRelationship {
+    Base,
+    Extension,
+    Independent,
+}
+
 impl From<crate::manifest::ProvidedInterface> for MeshProvidesDeclaration {
     fn from(provided: crate::manifest::ProvidedInterface) -> Self {
         Self {
             interface: provided.interface,
+            version: provided.version,
+            base_plugin: provided.base_plugin,
             provider: provided.backend_name.clone(),
             label: provided.backend_name,
             priority: provided.priority,
@@ -505,6 +912,8 @@ pub struct MeshContributes {
     pub fonts: Vec<PathContribution>,
     #[serde(default)]
     pub i18n: Vec<I18nContribution>,
+    #[serde(default)]
+    pub libraries: Vec<LibraryContribution>,
 }
 
 impl MeshContributes {
@@ -525,6 +934,9 @@ impl MeshContributes {
         }
         for contribution in &self.i18n {
             validate_relative_path("i18n contribution", &contribution.path)?;
+        }
+        for contribution in &self.libraries {
+            contribution.validate()?;
         }
         Ok(())
     }
@@ -571,6 +983,23 @@ pub struct I18nContribution {
     pub path: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LibraryContribution {
+    pub namespace: String,
+    pub path: String,
+}
+
+impl LibraryContribution {
+    fn validate(&self) -> Result<(), PackageManifestError> {
+        if self.namespace.trim().is_empty() {
+            return Err(PackageManifestError::Validation(
+                "library namespace cannot be empty".into(),
+            ));
+        }
+        validate_relative_path("library contribution", &self.path)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LoadedModuleManifest {
     pub manifest: ModulePackageManifest,
@@ -590,6 +1019,8 @@ pub struct InstalledModuleGraph {
     backend_providers: HashMap<String, Vec<BackendProviderNode>>,
     active_providers: HashMap<String, String>,
     frontend_requirements: HashMap<String, FrontendRequirementSet>,
+    interface_declarations: HashMap<String, InterfaceDeclarationNode>,
+    interface_guidance: Vec<InterfaceGuidanceRecord>,
     contributions: ModuleContributionIndex,
     layout_entrypoint: Option<ResolvedLayoutEntrypoint>,
 }
@@ -616,6 +1047,7 @@ impl InstalledModuleGraph {
         let mut graph_modules = HashMap::new();
         let mut backend_providers: HashMap<String, Vec<BackendProviderNode>> = HashMap::new();
         let mut frontend_requirements = HashMap::new();
+        let mut interface_declarations = HashMap::new();
         let mut contributions = ModuleContributionIndex::default();
 
         for (module_id, entry) in &root.modules {
@@ -650,7 +1082,22 @@ impl InstalledModuleGraph {
                     );
                 }
 
-                for provided in &node.manifest.mesh.provides {
+                if entry.kind == ModuleKind::Interface
+                    && let Some(interface) = &node.manifest.mesh.interface
+                {
+                    let declaration = InterfaceDeclarationNode {
+                        module_id: module_id.clone(),
+                        name: interface.name.clone(),
+                        version: interface.version.clone(),
+                        domain: interface.domain.clone(),
+                        extends: interface.extends.clone(),
+                        relationship: interface.effective_relationship(),
+                        reason: interface.reason.clone(),
+                    };
+                    interface_declarations.insert(declaration.name.clone(), declaration);
+                }
+
+                for provided in node.manifest.mesh.implementations() {
                     let provider = BackendProviderNode {
                         module_id: module_id.clone(),
                         interface: provided.interface.clone(),
@@ -746,12 +1193,15 @@ impl InstalledModuleGraph {
             }
             None => None,
         };
+        let interface_guidance = build_interface_guidance(&interface_declarations);
 
         Ok(Self {
             modules: graph_modules,
             backend_providers,
             active_providers: root.providers,
             frontend_requirements,
+            interface_declarations,
+            interface_guidance,
             contributions,
             layout_entrypoint,
         })
@@ -783,6 +1233,10 @@ impl InstalledModuleGraph {
         self.modules_by_kind(ModuleKind::Backend)
     }
 
+    pub fn interface_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::Interface)
+    }
+
     pub fn theme_modules(&self) -> Vec<&InstalledModuleNode> {
         self.modules_by_kind(ModuleKind::Theme)
     }
@@ -799,8 +1253,20 @@ impl InstalledModuleGraph {
         self.modules_by_kind(ModuleKind::LanguagePack)
     }
 
+    pub fn library_modules(&self) -> Vec<&InstalledModuleNode> {
+        self.modules_by_kind(ModuleKind::Library)
+    }
+
     pub fn requirements_for_frontend(&self, module_id: &str) -> Option<&FrontendRequirementSet> {
         self.frontend_requirements.get(module_id)
+    }
+
+    pub fn declared_interface(&self, interface: &str) -> Option<&InterfaceDeclarationNode> {
+        self.interface_declarations.get(interface)
+    }
+
+    pub fn interface_guidance(&self) -> &[InterfaceGuidanceRecord] {
+        &self.interface_guidance
     }
 
     pub fn backend_providers_for_interface(&self, interface: &str) -> &[BackendProviderNode] {
@@ -861,6 +1327,10 @@ impl InstalledModuleGraph {
         &self.contributions.i18n
     }
 
+    pub fn contributed_libraries(&self) -> &[ContributedLibrary] {
+        &self.contributions.libraries
+    }
+
     pub fn settings_schemas(&self) -> &[ContributedSettingsSchema] {
         &self.contributions.settings
     }
@@ -882,6 +1352,83 @@ pub struct BackendProviderNode {
     pub provider: Option<String>,
     pub label: Option<String>,
     pub priority: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterfaceDeclarationNode {
+    pub module_id: String,
+    pub name: String,
+    pub version: Option<String>,
+    pub domain: Option<String>,
+    pub extends: Option<String>,
+    pub relationship: InterfaceRelationship,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterfaceGuidanceRecord {
+    pub module_id: String,
+    pub interface: String,
+    pub domain: String,
+    pub recommended_base: String,
+    pub status: String,
+    pub message: String,
+}
+
+fn build_interface_guidance(
+    declarations: &HashMap<String, InterfaceDeclarationNode>,
+) -> Vec<InterfaceGuidanceRecord> {
+    let mut base_by_domain: HashMap<String, String> = HashMap::new();
+    for declaration in declarations.values() {
+        if declaration.relationship != InterfaceRelationship::Base {
+            continue;
+        }
+        let Some(domain) = &declaration.domain else {
+            continue;
+        };
+        let replace = base_by_domain.get(domain).map_or(true, |current| {
+            !current.starts_with("mesh.") && declaration.name.starts_with("mesh.")
+        });
+        if replace {
+            base_by_domain.insert(domain.clone(), declaration.name.clone());
+        }
+    }
+
+    let mut guidance = Vec::new();
+    for declaration in declarations.values() {
+        if declaration.relationship != InterfaceRelationship::Independent
+            || declaration.extends.is_some()
+        {
+            continue;
+        }
+        let Some(domain) = &declaration.domain else {
+            continue;
+        };
+        let Some(base) = base_by_domain.get(domain) else {
+            continue;
+        };
+        if base == &declaration.name {
+            continue;
+        }
+        guidance.push(InterfaceGuidanceRecord {
+            module_id: declaration.module_id.clone(),
+            interface: declaration.name.clone(),
+            domain: domain.clone(),
+            recommended_base: base.clone(),
+            status: "consider_extending_base_interface".into(),
+            message: format!(
+                "interface {} is an independent {domain} interface; prefer extending {base} when it can share normal {domain} state or commands",
+                declaration.name
+            ),
+        });
+    }
+    guidance.sort_by(|a, b| {
+        a.domain
+            .cmp(&b.domain)
+            .then_with(|| a.interface.cmp(&b.interface))
+            .then_with(|| a.module_id.cmp(&b.module_id))
+    });
+    guidance
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -921,6 +1468,7 @@ pub struct ModuleContributionIndex {
     icons: Vec<ContributedPathResource>,
     fonts: Vec<ContributedPathResource>,
     i18n: Vec<ContributedI18n>,
+    libraries: Vec<ContributedLibrary>,
     settings: Vec<ContributedSettingsSchema>,
 }
 
@@ -969,6 +1517,14 @@ impl ModuleContributionIndex {
                 module_id: module_id.into(),
                 id: contribution.id.clone(),
                 locale: contribution.locale.clone(),
+                path: contribution.path.clone(),
+            });
+        }
+        for contribution in &manifest.mesh.contributes.libraries {
+            contribution.validate()?;
+            self.libraries.push(ContributedLibrary {
+                module_id: module_id.into(),
+                namespace: contribution.namespace.clone(),
                 path: contribution.path.clone(),
             });
         }
@@ -1044,6 +1600,13 @@ pub struct ContributedI18n {
     pub path: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedLibrary {
+    pub module_id: String,
+    pub namespace: String,
+    pub path: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContributedSettingsSchema {
     pub module_id: String,
@@ -1074,6 +1637,27 @@ pub fn load_installed_module_graph(
 pub fn load_module_manifest(
     module_dir: &Path,
 ) -> Result<LoadedModuleManifest, PackageManifestError> {
+    let module_json = module_dir.join("module.json");
+    if module_json.exists() {
+        let loaded = manifest::load_manifest(module_dir).map_err(|err| {
+            PackageManifestError::LegacyManifest {
+                path: module_dir.to_path_buf(),
+                message: err.to_string(),
+            }
+        })?;
+        let path = loaded.path.clone();
+        let manifest = ModulePackageManifest::from_legacy_manifest(loaded.manifest);
+        return Ok(LoadedModuleManifest {
+            manifest,
+            path,
+            source: match loaded.source {
+                ManifestSource::PluginJson | ManifestSource::MeshToml => {
+                    ModuleManifestSource::LegacyPluginJson
+                }
+            },
+        });
+    }
+
     let package_json = module_dir.join("package.json");
     if package_json.exists() {
         let manifest = ModulePackageManifest::from_path(&package_json)?;
@@ -1115,8 +1699,27 @@ fn default_modules_dir() -> String {
     "modules".into()
 }
 
+fn default_schema_version() -> u32 {
+    1
+}
+
 fn default_enabled() -> bool {
     true
+}
+
+fn validate_modules_dir(value: &str) -> Result<(), PackageManifestError> {
+    let path = Path::new(value);
+    if value.trim().is_empty() {
+        return Err(PackageManifestError::Validation(
+            "modulesDir cannot be empty".into(),
+        ));
+    }
+    if path.is_absolute() {
+        return Err(PackageManifestError::Validation(format!(
+            "modulesDir must be a relative path: {value}"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_relative_path(label: &str, value: &str) -> Result<(), PackageManifestError> {
@@ -1218,12 +1821,37 @@ mod tests {
     fn module_root_manifest_parses_minimal_package_json() {
         let content = r#"
 {
+  "name": "@mesh/local-config",
+  "version": "0.1.0",
+  "private": true,
+  "mesh": {
   "schemaVersion": 1,
   "modulesDir": "modules",
   "modules": {},
   "providers": {},
   "layout": { "entrypoint": "@mesh/panel:main" },
   "theme": { "active": "@mesh/default-theme", "mode": "dark" }
+  }
+}
+"#;
+        let manifest = RootPackageManifest::from_json_str(content).unwrap();
+        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.modules_dir, "modules");
+        assert_eq!(
+            manifest.layout.unwrap().entrypoint.as_str(),
+            "@mesh/panel:main"
+        );
+    }
+
+    #[test]
+    fn module_root_manifest_accepts_legacy_top_level_shape() {
+        let content = r#"
+{
+  "schemaVersion": 1,
+  "modulesDir": "modules",
+  "modules": {},
+  "providers": {},
+  "layout": { "entrypoint": "@mesh/panel:main" }
 }
 "#;
         let manifest = RootPackageManifest::from_json_str(content).unwrap();
@@ -1248,9 +1876,14 @@ mod tests {
   "mesh": {
     "apiVersion": "0.1",
     "kind": "backend",
+    "capabilities": { "required": ["exec.wpctl"] },
+    "i18n": { "defaultLocale": "en", "supportedLocales": ["en", "sk"] },
+    "dependencies": {
+      "binaries": [{ "name": "wpctl", "reason": "PipeWire control" }]
+    },
     "entrypoints": { "main": "src/main.luau" },
-    "provides": [
-      { "interface": "mesh.audio", "provider": "pipewire", "label": "PipeWire", "priority": 100 }
+    "implements": [
+      { "interface": "mesh.audio", "version": "1.0", "basePlugin": "@mesh/audio-interface", "provider": "pipewire", "label": "PipeWire", "priority": 100 }
     ]
   }
 }
@@ -1265,6 +1898,45 @@ mod tests {
         assert_eq!(
             manifest.repository.unwrap().url,
             "git+https://example.invalid/pipewire-audio.git"
+        );
+        assert_eq!(manifest.mesh.capabilities.required, vec!["exec.wpctl"]);
+        assert_eq!(manifest.mesh.dependencies.binaries[0].name, "wpctl");
+        assert_eq!(manifest.mesh.i18n.default_locale.as_deref(), Some("en"));
+        assert_eq!(manifest.mesh.i18n.supported_locales, vec!["en", "sk"]);
+        assert_eq!(
+            manifest.mesh.implements[0].base_plugin.as_deref(),
+            Some("@mesh/audio-interface")
+        );
+    }
+
+    #[test]
+    fn module_package_manifest_parses_interface_relationship_metadata() {
+        let content = r#"
+{
+  "name": "@alice/audio-streams-interface",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "alice.audio-streams",
+      "version": "1.0",
+      "file": "interface.toml",
+      "domain": "audio",
+      "extends": "mesh.audio",
+      "relationship": "extension"
+    }
+  }
+}
+"#;
+        let manifest = ModulePackageManifest::from_json_str(content).unwrap();
+        let interface = manifest.mesh.interface.unwrap();
+        assert_eq!(interface.name, "alice.audio-streams");
+        assert_eq!(interface.domain.as_deref(), Some("audio"));
+        assert_eq!(interface.extends.as_deref(), Some("mesh.audio"));
+        assert_eq!(
+            interface.relationship,
+            Some(InterfaceRelationship::Extension)
         );
     }
 
@@ -1313,12 +1985,12 @@ mod tests {
     }
 
     #[test]
-    fn module_manifest_loader_preserves_legacy_panel_entrypoint() {
+    fn module_manifest_loader_preserves_legacy_navigation_bar_entrypoint() {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../packages/plugins/frontend/core/panel");
+            .join("../../../../modules/frontend/navigation-bar");
         let loaded = load_module_manifest(&dir).unwrap();
         assert_eq!(loaded.source, ModuleManifestSource::LegacyPluginJson);
-        assert_eq!(loaded.manifest.name, "@mesh/panel");
+        assert_eq!(loaded.manifest.name, "@mesh/navigation-bar");
         assert_eq!(
             loaded.manifest.mesh.entrypoints.main.as_deref(),
             Some("src/main.mesh")
@@ -1331,14 +2003,14 @@ mod tests {
         let graph =
             load_installed_module_graph(&workspace_root.join("config/package.json")).unwrap();
 
-        assert_eq!(graph.frontend_modules().len(), 2);
+        assert_eq!(graph.frontend_modules().len(), 1);
         assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
         assert_eq!(
             graph.active_provider("mesh.audio").unwrap().module_id,
             "@mesh/pipewire-audio"
         );
         let layout = graph.layout_entrypoint().unwrap();
-        assert_eq!(layout.module_id, "@mesh/panel");
+        assert_eq!(layout.module_id, "@mesh/navigation-bar");
         assert_eq!(layout.entrypoint_id, "main");
     }
 
@@ -1359,9 +2031,13 @@ mod tests {
                 mesh: MeshModuleSection {
                     api_version: "0.1".into(),
                     kind,
+                    capabilities: CapabilitiesSection::default(),
+                    i18n: MeshI18nSupport::default(),
                     entrypoints: MeshEntrypoints::default(),
                     dependencies,
                     provides,
+                    implements: Vec::new(),
+                    interface: None,
                     contributes,
                     experimental: serde_json::Value::Null,
                 },
@@ -1413,6 +2089,7 @@ mod tests {
                 ("@mesh/icons", ModuleKind::IconPack),
                 ("@mesh/fonts", ModuleKind::FontPack),
                 ("@mesh/lang-en", ModuleKind::LanguagePack),
+                ("@mesh/backend-kit", ModuleKind::Library),
             ],
             &[],
             None,
@@ -1460,6 +2137,13 @@ mod tests {
                 vec![],
                 MeshContributes::default(),
             ),
+            loaded_module(
+                "@mesh/backend-kit",
+                ModuleKind::Library,
+                MeshDependencies::default(),
+                vec![],
+                MeshContributes::default(),
+            ),
         ];
 
         let graph = InstalledModuleGraph::from_parts(root, modules).unwrap();
@@ -1469,6 +2153,7 @@ mod tests {
         assert_eq!(graph.icon_modules().len(), 1);
         assert_eq!(graph.font_modules().len(), 1);
         assert_eq!(graph.language_modules().len(), 1);
+        assert_eq!(graph.library_modules().len(), 1);
     }
 
     #[test]
@@ -1485,6 +2170,8 @@ mod tests {
                 MeshDependencies::default(),
                 vec![MeshProvidesDeclaration {
                     interface: "mesh.audio".into(),
+                    version: None,
+                    base_plugin: None,
                     provider: Some("pipewire".into()),
                     label: Some("PipeWire".into()),
                     priority: 100,
@@ -1497,6 +2184,8 @@ mod tests {
                 MeshDependencies::default(),
                 vec![MeshProvidesDeclaration {
                     interface: "mesh.audio".into(),
+                    version: None,
+                    base_plugin: None,
                     provider: Some("pulseaudio".into()),
                     label: Some("PulseAudio".into()),
                     priority: 50,
@@ -1504,6 +2193,32 @@ mod tests {
                 MeshContributes::default(),
             ),
         ]
+    }
+
+    fn interface_module(
+        module_id: &str,
+        name: &str,
+        domain: &str,
+        relationship: InterfaceRelationship,
+        extends: Option<&str>,
+    ) -> LoadedModuleManifest {
+        let mut module = loaded_module(
+            module_id,
+            ModuleKind::Interface,
+            MeshDependencies::default(),
+            Vec::new(),
+            MeshContributes::default(),
+        );
+        module.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
+            name: name.into(),
+            version: Some("1.0".into()),
+            file: Some("interface.toml".into()),
+            domain: Some(domain.into()),
+            extends: extends.map(str::to_string),
+            relationship: Some(relationship),
+            reason: None,
+        });
+        module
     }
 
     #[test]
@@ -1554,6 +2269,85 @@ mod tests {
     }
 
     #[test]
+    fn installed_module_graph_records_interface_extension_guidance() {
+        let root = root_with_modules(
+            &[
+                ("@mesh/audio-interface", ModuleKind::Interface),
+                ("@alice/audio-mixer-interface", ModuleKind::Interface),
+            ],
+            &[],
+            None,
+        );
+        let graph = InstalledModuleGraph::from_parts(
+            root,
+            vec![
+                interface_module(
+                    "@mesh/audio-interface",
+                    "mesh.audio",
+                    "audio",
+                    InterfaceRelationship::Base,
+                    None,
+                ),
+                interface_module(
+                    "@alice/audio-mixer-interface",
+                    "alice.audio-mixer",
+                    "audio",
+                    InterfaceRelationship::Independent,
+                    None,
+                ),
+            ],
+        )
+        .unwrap();
+
+        let guidance = graph.interface_guidance();
+        assert_eq!(guidance.len(), 1);
+        assert_eq!(guidance[0].interface, "alice.audio-mixer");
+        assert_eq!(guidance[0].recommended_base, "mesh.audio");
+    }
+
+    #[test]
+    fn installed_module_graph_does_not_warn_for_declared_interface_extension() {
+        let root = root_with_modules(
+            &[
+                ("@mesh/audio-interface", ModuleKind::Interface),
+                ("@alice/audio-streams-interface", ModuleKind::Interface),
+            ],
+            &[],
+            None,
+        );
+        let graph = InstalledModuleGraph::from_parts(
+            root,
+            vec![
+                interface_module(
+                    "@mesh/audio-interface",
+                    "mesh.audio",
+                    "audio",
+                    InterfaceRelationship::Base,
+                    None,
+                ),
+                interface_module(
+                    "@alice/audio-streams-interface",
+                    "alice.audio-streams",
+                    "audio",
+                    InterfaceRelationship::Extension,
+                    Some("mesh.audio"),
+                ),
+            ],
+        )
+        .unwrap();
+
+        assert!(graph.interface_guidance().is_empty());
+        assert_eq!(
+            graph
+                .declared_interface("alice.audio-streams")
+                .unwrap()
+                .extends
+                .as_deref(),
+            Some("mesh.audio")
+        );
+    }
+
+    #[test]
     fn installed_module_graph_returns_explicit_active_provider() {
         let root = root_with_modules(
             &[
@@ -1594,6 +2388,8 @@ mod tests {
             MeshDependencies::default(),
             vec![MeshProvidesDeclaration {
                 interface: "mesh.network".into(),
+                version: None,
+                base_plugin: None,
                 provider: Some("networkmanager".into()),
                 label: Some("NetworkManager".into()),
                 priority: 100,
@@ -1679,6 +2475,64 @@ mod tests {
         assert_eq!(graph.contributed_icons().len(), 1);
         assert_eq!(graph.contributed_fonts().len(), 1);
         assert_eq!(graph.contributed_i18n().len(), 1);
+    }
+
+    #[test]
+    fn installed_module_graph_indexes_library_contributions() {
+        let contributes = MeshContributes {
+            libraries: vec![LibraryContribution {
+                namespace: "@mesh/backend-kit".into(),
+                path: "lib".into(),
+            }],
+            ..MeshContributes::default()
+        };
+        let root = root_with_modules(&[("@mesh/backend-kit", ModuleKind::Library)], &[], None);
+        let graph = InstalledModuleGraph::from_parts(
+            root,
+            vec![loaded_module(
+                "@mesh/backend-kit",
+                ModuleKind::Library,
+                MeshDependencies::default(),
+                vec![],
+                contributes,
+            )],
+        )
+        .unwrap();
+
+        assert_eq!(graph.library_modules().len(), 1);
+        assert_eq!(graph.contributed_libraries().len(), 1);
+        assert_eq!(
+            graph.contributed_libraries()[0],
+            ContributedLibrary {
+                module_id: "@mesh/backend-kit".into(),
+                namespace: "@mesh/backend-kit".into(),
+                path: "lib".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn installed_module_graph_rejects_library_path_escape() {
+        let contributes = MeshContributes {
+            libraries: vec![LibraryContribution {
+                namespace: "@mesh/backend-kit".into(),
+                path: "../lib".into(),
+            }],
+            ..MeshContributes::default()
+        };
+        let root = root_with_modules(&[("@mesh/backend-kit", ModuleKind::Library)], &[], None);
+        let result = InstalledModuleGraph::from_parts(
+            root,
+            vec![loaded_module(
+                "@mesh/backend-kit",
+                ModuleKind::Library,
+                MeshDependencies::default(),
+                vec![],
+                contributes,
+            )],
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]

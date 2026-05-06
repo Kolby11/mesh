@@ -493,7 +493,11 @@ where
     plugin_ids.sort();
 
     fn adjacency(manifest: &Manifest, known_plugins: &HashMap<String, &Manifest>) -> Vec<String> {
-        let mut neighbors = manifest.required_plugin_dependencies();
+        let mut neighbors: Vec<String> = manifest
+            .required_plugin_dependencies()
+            .into_iter()
+            .filter(|plugin_id| known_plugins.contains_key(plugin_id))
+            .collect();
         neighbors.extend(
             manifest
                 .slot_host_dependencies()
@@ -561,6 +565,16 @@ pub enum ManifestError {
 }
 
 pub fn load_manifest(plugin_dir: &Path) -> Result<LoadedManifest, ManifestError> {
+    let module_json_path = plugin_dir.join("module.json");
+    if module_json_path.exists() {
+        return load_plugin_json(&module_json_path);
+    }
+
+    let package_json_path = plugin_dir.join("package.json");
+    if package_json_path.exists() {
+        return load_package_json(&package_json_path);
+    }
+
     let plugin_json_path = plugin_dir.join("plugin.json");
     if plugin_json_path.exists() {
         return load_plugin_json(&plugin_json_path);
@@ -572,6 +586,17 @@ pub fn load_manifest(plugin_dir: &Path) -> Result<LoadedManifest, ManifestError>
     }
 
     Err(ManifestError::NotFound(plugin_dir.to_path_buf()))
+}
+
+fn load_package_json(path: &Path) -> Result<LoadedManifest, ManifestError> {
+    let content = std::fs::read_to_string(path)?;
+    let parsed: crate::package::ModulePackageManifest = serde_json::from_str(&content)?;
+
+    Ok(LoadedManifest {
+        manifest: parsed.into_runtime_manifest(),
+        path: path.to_path_buf(),
+        source: ManifestSource::PluginJson,
+    })
 }
 
 fn load_plugin_json(path: &Path) -> Result<LoadedManifest, ManifestError> {
@@ -1000,6 +1025,62 @@ main = "src/main.mesh"
             manifest.declared_provides()[0].base_plugin.as_deref(),
             Some("@mesh/audio-interface")
         );
+    }
+
+    #[test]
+    fn parses_package_json_module_manifest() {
+        let dir =
+            std::env::temp_dir().join(format!("mesh-package-json-module-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("package.json"),
+            r#"{
+  "name": "@mesh/pipewire-audio",
+  "version": "0.1.0",
+  "description": "PipeWire backend",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "capabilities": { "required": ["exec.wpctl"] },
+    "i18n": { "defaultLocale": "en", "supportedLocales": ["en", "sk"] },
+    "dependencies": {
+      "binaries": [{ "name": "wpctl", "reason": "PipeWire control" }]
+    },
+    "entrypoints": { "main": "src/main.luau" },
+    "provides": [
+      {
+        "interface": "mesh.audio",
+        "version": "1.0",
+        "basePlugin": "@mesh/audio-interface",
+        "provider": "pipewire",
+        "label": "PipeWire",
+        "priority": 100
+      }
+    ]
+  }
+}"#,
+        )
+        .unwrap();
+
+        let loaded = load_manifest(&dir).unwrap();
+        assert_eq!(loaded.path, dir.join("package.json"));
+        assert_eq!(loaded.manifest.package.id, "@mesh/pipewire-audio");
+        assert_eq!(loaded.manifest.package.plugin_type, PluginType::Backend);
+        assert_eq!(
+            loaded.manifest.entrypoints.main.as_deref(),
+            Some("src/main.luau")
+        );
+        assert_eq!(loaded.manifest.capabilities.required, vec!["exec.wpctl"]);
+        assert_eq!(loaded.manifest.dependencies.binaries[0].name, "wpctl");
+        assert_eq!(
+            loaded.manifest.declared_provides()[0]
+                .base_plugin
+                .as_deref(),
+            Some("@mesh/audio-interface")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

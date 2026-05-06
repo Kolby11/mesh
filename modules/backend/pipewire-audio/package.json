@@ -1,0 +1,55 @@
+{
+  "name": "@mesh/pipewire-audio",
+  "version": "0.1.0",
+  "description": "Audio backend using PipeWire",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "capabilities": {
+      "required": [
+        "exec.wpctl",
+        "exec.aplay"
+      ]
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en"]
+    },
+    "dependencies": {
+      "binaries": [
+        {
+          "name": "wpctl",
+          "reason": "PipeWire volume and mute control.",
+          "packages": {
+            "debian": "wireplumber",
+            "arch": "wireplumber",
+            "fedora": "wireplumber"
+          }
+        },
+        {
+          "name": "aplay",
+          "reason": "Playback for shell sound effects.",
+          "packages": {
+            "debian": "alsa-utils",
+            "arch": "alsa-utils",
+            "fedora": "alsa-utils"
+          }
+        }
+      ]
+    },
+    "entrypoints": {
+      "main": "src/main.luau"
+    },
+    "implements": [
+      {
+        "interface": "mesh.audio",
+        "version": "1.0",
+        "basePlugin": "@mesh/audio-interface",
+        "provider": "pipewire",
+        "label": "PipeWire",
+        "priority": 100
+      }
+    ]
+  }
+}

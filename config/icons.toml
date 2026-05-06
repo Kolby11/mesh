@@ -1,23 +1,27 @@
 active_profile = "material"
 
 [[packs]]
+id = "system"
+theme = "hicolor"
+
+[[packs]]
 id = "material"
 root = "crates/core/ui/icon/assets/material"
 theme = "hicolor"
 
 [profiles.material.icons]
-audio-volume-muted = ["material:audio-volume-muted", "material:volume-off"]
-audio-volume-low = ["material:audio-volume-low", "material:volume"]
-audio-volume-medium = ["material:audio-volume-medium", "material:volume"]
-audio-volume-high = ["material:audio-volume-high", "material:volume"]
-network-wireless = ["material:network-wireless", "material:wifi"]
-bluetooth = ["material:bluetooth"]
-settings = ["material:settings"]
-weather-clear-night = ["material:star", "material:warning"]
-weather-clear = ["material:star", "material:warning"]
-battery-empty = ["material:warning", "material:battery-80"]
-battery-caution = ["material:warning", "material:battery-80"]
-battery-low = ["material:battery-80", "material:warning"]
-battery-good = ["material:battery-80", "material:battery-full"]
-battery-full = ["material:battery-full"]
-missing-proof = ["material:no-such-icon"]
+audio-volume-muted = ["system:audio-volume-muted", "system:audio-volume-muted-symbolic", "system:audio-volume-muted-panel", "material:audio-volume-muted", "system:volume-off", "material:volume-off"]
+audio-volume-low = ["system:audio-volume-low", "system:audio-volume-low-symbolic", "material:audio-volume-low", "system:volume", "material:volume"]
+audio-volume-medium = ["system:audio-volume-medium", "system:audio-volume-medium-symbolic", "material:audio-volume-medium", "system:volume", "material:volume"]
+audio-volume-high = ["system:audio-volume-high", "system:audio-volume-high-symbolic", "material:audio-volume-high", "system:volume", "material:volume"]
+network-wireless = ["system:network-wireless", "system:network-wireless-symbolic", "material:network-wireless", "system:wifi", "material:wifi"]
+bluetooth = ["system:bluetooth", "system:bluetooth-symbolic", "material:bluetooth"]
+settings = ["system:preferences-system", "system:settings", "material:settings"]
+weather-clear-night = ["system:weather-clear-night", "system:weather-clear-night-symbolic", "material:star", "system:weather-clear", "material:warning"]
+weather-clear = ["system:weather-clear", "system:weather-clear-symbolic", "material:star", "material:warning"]
+battery-empty = ["system:battery-empty", "system:battery-empty-symbolic", "material:warning", "material:battery-80"]
+battery-caution = ["system:battery-caution", "system:battery-caution-symbolic", "system:battery-low", "material:warning", "material:battery-80"]
+battery-low = ["system:battery-low", "system:battery-low-symbolic", "material:battery-80", "material:warning"]
+battery-good = ["system:battery-good", "system:battery-good-symbolic", "system:battery", "material:battery-80", "material:battery-full"]
+battery-full = ["system:battery-full", "system:battery-full-symbolic", "system:battery", "material:battery-full"]
+missing-proof = ["system:no-such-icon", "material:no-such-icon"]

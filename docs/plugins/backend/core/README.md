@@ -19,20 +19,24 @@ ships an `interface.toml`. That contract declares:
 - `[[events]]` — typed interface event channels
 - `[types]` — shared types
 
-Providers implement that contract through a `provides` entry in `plugin.json`:
+Providers implement that contract through an `implements` entry in `package.json`.
+Legacy `plugin.json` manifests may still use `provides` during migration:
 
 ```json
 {
-  "type": "backend",
-  "provides": [
-    {
-      "interface": "mesh.audio",
-      "version": "1.0",
-      "base_plugin": "@mesh/audio-interface",
-      "backend_name": "PipeWire",
-      "priority": 100
-    }
-  ]
+  "mesh": {
+    "kind": "backend",
+    "implements": [
+      {
+        "interface": "mesh.audio",
+        "version": "1.0",
+        "basePlugin": "@mesh/audio-interface",
+        "provider": "pipewire",
+        "label": "PipeWire",
+        "priority": 100
+      }
+    ]
+  }
 }
 ```
 
@@ -87,6 +91,11 @@ and the `mesh.*` host API:
 - `mesh.service.payload()` returns the current command payload table
 - backend commands are implemented as `on_command_<name>()` functions
 - public provider state is exported through top-level `state = { ... }`
+
+`mesh.exec` is generic host plumbing. A backend must declare either
+`exec.command` or the specific binary capabilities it needs, such as
+`exec.wpctl` or `exec.pactl`; service capabilities like `service.audio.control`
+belong to consumers that call the interface.
 
 For a concrete MVP example, start with
 [`reference-media`](./reference-media/README.md). It is the bundled proof

@@ -901,7 +901,11 @@ mod tests {
             "unsupported command result must have ok=false"
         );
         assert!(
-            result.result.get("error").and_then(|v| v.as_str()).is_some(),
+            result
+                .result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .is_some(),
             "unsupported command result must carry an error field"
         );
 
@@ -1163,7 +1167,11 @@ mod tests {
             "initial state must reflect config seed_title"
         );
         assert!(
-            update.payload.get("state").and_then(|v| v.as_str()).is_some(),
+            update
+                .payload
+                .get("state")
+                .and_then(|v| v.as_str())
+                .is_some(),
             "initial state must include a playback state field"
         );
 
@@ -1212,11 +1220,8 @@ mod tests {
             .unwrap();
 
         // Collect CommandResult
-        let result = next_command_result(
-            &mut event_rx,
-            "play command should emit a CommandResult",
-        )
-        .await;
+        let result =
+            next_command_result(&mut event_rx, "play command should emit a CommandResult").await;
         assert_eq!(result.service, "media");
         assert_eq!(result.source_plugin, "@mesh/reference-media");
         assert_eq!(result.command, "play");
@@ -1246,11 +1251,8 @@ mod tests {
             })
             .unwrap();
 
-        let next_result = next_command_result(
-            &mut event_rx,
-            "next command should emit a CommandResult",
-        )
-        .await;
+        let next_result =
+            next_command_result(&mut event_rx, "next command should emit a CommandResult").await;
         assert_eq!(
             next_result.result.get("ok").and_then(|v| v.as_bool()),
             Some(true),
@@ -1321,7 +1323,11 @@ mod tests {
             "pause-when-not-playing must return ok=false"
         );
         assert!(
-            result.result.get("error").and_then(|v| v.as_str()).is_some(),
+            result
+                .result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .is_some(),
             "failed result must carry an error field attributable to @mesh/reference-media"
         );
 

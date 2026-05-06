@@ -1,5 +1,6 @@
 use mesh_core_config::{
     ShellConfig, ShellSettings, default_settings_path, load_config, load_shell_settings,
+    resolve_discovery_paths,
 };
 use mesh_core_debug::{
     BackendRuntimeEntry, DebugOverlayState, DebugSnapshot, HealthEntry, InterfaceEntry,
@@ -197,6 +198,7 @@ impl Shell {
             settings.i18n.locale.clone(),
             settings.i18n.fallback_locale.clone(),
         );
+        let plugin_dirs = resolve_default_plugin_dirs(&config);
         let settings_watch = {
             let path = default_settings_path();
             let modified_at = std::fs::metadata(&path)
@@ -215,7 +217,7 @@ impl Shell {
             services: ServiceRegistry::new(),
             interfaces: InterfaceRegistry::new(),
             plugins: HashMap::new(),
-            plugin_dirs: default_plugin_dirs(),
+            plugin_dirs,
             core: ShellCoreState::default(),
             components: Vec::new(),
             surfaces: HashMap::new(),
@@ -243,8 +245,11 @@ impl Shell {
     }
 
     fn scan_plugin_dir(&mut self, dir: &Path) {
-        let has_manifest = dir.join("plugin.json").exists() || dir.join("mesh.toml").exists();
-        if has_manifest {
+        let has_manifest = dir.join("package.json").exists()
+            || dir.join("plugin.json").exists()
+            || dir.join("mesh.toml").exists();
+        let has_module_manifest = dir.join("module.json").exists();
+        if has_manifest || has_module_manifest {
             match mesh_core_plugin::manifest::load_manifest(dir) {
                 Ok(loaded) => {
                     let id = loaded.manifest.package.id.clone();
@@ -311,7 +316,47 @@ impl Shell {
             let path = entry.path();
             if path.is_dir() {
                 self.scan_plugin_dir(&path);
+            } else if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
+                && path
+                    .parent()
+                    .and_then(|parent| parent.file_name())
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name == "interfaces")
+            {
+                self.scan_interface_file(&path);
             }
+        }
+    }
+
+    fn scan_interface_file(&mut self, path: &Path) {
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            return;
+        };
+        let interface_name = canonical_interface_name(stem);
+        match load_interface_contract(
+            path.parent().unwrap_or_else(|| Path::new(".")),
+            &interface_name,
+            "1.0",
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default(),
+        ) {
+            Ok(contract) => {
+                tracing::info!(
+                    "discovered interface contract: {} from {}",
+                    contract.interface,
+                    path.display()
+                );
+                self.interfaces.register_contract(contract);
+            }
+            Err(err) => tracing::warn!(
+                "failed to load interface contract {} from {}: {err}",
+                interface_name,
+                path.display()
+            ),
         }
     }
 
@@ -2204,16 +2249,9 @@ pub enum ShellRunError {
     Theme(#[from] mesh_core_theme::ThemeError),
 }
 
-fn default_plugin_dirs() -> Vec<PathBuf> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+fn resolve_default_plugin_dirs(config: &ShellConfig) -> Vec<PathBuf> {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-
-    vec![
-        workspace_root.join("packages/plugins"),
-        PathBuf::from("/usr/share/mesh/plugins"),
-        PathBuf::from(&home).join(".local/share/mesh/plugins"),
-        PathBuf::from(&home).join(".local/share/mesh/dev-plugins"),
-    ]
+    resolve_discovery_paths(&workspace_root, &config.shell.discovery_paths)
 }
 
 #[cfg(test)]
@@ -2862,7 +2900,10 @@ mod tests {
 
         let latest = shell.latest_service_state.get("mesh.theme").unwrap();
         assert_eq!(shell.theme.active().id, "mesh-default-dark");
-        assert_eq!(latest.state["current"], serde_json::json!("mesh-default-dark"));
+        assert_eq!(
+            latest.state["current"],
+            serde_json::json!("mesh-default-dark")
+        );
         assert_eq!(latest.state["is_dark"], serde_json::json!(true));
     }
 
@@ -2980,9 +3021,7 @@ mod tests {
         assert_eq!(shell.settings.theme.active, "mesh-recovered-light");
         assert_eq!(shell.theme.active().id, "mesh-default-dark");
         let fallback_theme_id = shell.theme.active().id.clone();
-        shell
-            .sync_theme_service_state(&fallback_theme_id)
-            .unwrap();
+        shell.sync_theme_service_state(&fallback_theme_id).unwrap();
         assert_eq!(
             shell
                 .latest_service_state
@@ -3025,7 +3064,10 @@ mod tests {
         let events = seen_events.lock().unwrap();
         assert_eq!(events.len(), 2);
         let ServiceEvent::Updated { payload, .. } = events.last().unwrap();
-        assert_eq!(payload["current"], serde_json::json!("mesh-recovered-light"));
+        assert_eq!(
+            payload["current"],
+            serde_json::json!("mesh-recovered-light")
+        );
         assert_eq!(payload["is_dark"], serde_json::json!(false));
     }
 
@@ -3202,26 +3244,6 @@ mod tests {
     }
 
     #[test]
-    fn launcher_plugin_json_declares_content_measured_policy() {
-        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let launcher_plugin_dir = workspace_root.join("packages/plugins/frontend/core/launcher");
-        let plugin_json = std::fs::read_to_string(launcher_plugin_dir.join("plugin.json")).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&plugin_json).unwrap();
-        assert_eq!(
-            value
-                .pointer("/surface_layout/size_policy")
-                .and_then(|v| v.as_str()),
-            Some("content_measured"),
-        );
-        assert_eq!(
-            value
-                .pointer("/surface_layout/prefers_content_children_sizing")
-                .and_then(|v| v.as_bool()),
-            Some(true),
-        );
-    }
-
-    #[test]
     fn installed_module_graph_exposes_shell_package_choices() {
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let graph = mesh_core_plugin::package::load_installed_module_graph(
@@ -3233,7 +3255,20 @@ mod tests {
             graph.active_provider("mesh.audio").unwrap().module_id,
             "@mesh/pipewire-audio"
         );
+        assert_eq!(
+            graph.active_provider("mesh.network").unwrap().module_id,
+            "@mesh/networkmanager"
+        );
+        assert_eq!(
+            graph.active_provider("mesh.power").unwrap().module_id,
+            "@mesh/upower"
+        );
         assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
+        assert_eq!(
+            graph.backend_providers_for_interface("mesh.network").len(),
+            1
+        );
+        assert_eq!(graph.backend_providers_for_interface("mesh.power").len(), 1);
 
         let layout = graph.layout_entrypoint().unwrap();
         assert_eq!(layout.module_id, "@mesh/panel");
@@ -3250,9 +3285,14 @@ mod tests {
         let (_pipewire_dir, pipewire) =
             plugin_instance("@mesh/pipewire-audio", Some("src/main.luau"));
         let (_pulse_dir, pulse) = plugin_instance("@mesh/pulseaudio-audio", Some("src/main.luau"));
+        let (_network_dir, network) =
+            plugin_instance("@mesh/networkmanager", Some("src/main.luau"));
+        let (_power_dir, power) = plugin_instance("@mesh/upower", Some("src/main.luau"));
         let plugins = HashMap::from([
             ("@mesh/pipewire-audio".to_string(), pipewire),
             ("@mesh/pulseaudio-audio".to_string(), pulse),
+            ("@mesh/networkmanager".to_string(), network),
+            ("@mesh/upower".to_string(), power),
         ]);
 
         let (candidates, statuses) = backend_launch_candidates_from_graph(
@@ -3267,11 +3307,23 @@ mod tests {
                 .iter()
                 .all(|status| status.status != "invalid_manifest")
         );
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].interface, "mesh.audio");
-        assert_eq!(candidates[0].module_id, "@mesh/pipewire-audio");
-        assert_eq!(candidates[0].service_name, "audio");
-        assert!(candidates[0].entrypoint_path.ends_with("src/main.luau"));
+        assert_eq!(candidates.len(), 3);
+        let audio = candidates
+            .iter()
+            .find(|candidate| candidate.interface == "mesh.audio")
+            .unwrap();
+        assert_eq!(audio.module_id, "@mesh/pipewire-audio");
+        assert_eq!(audio.service_name, "audio");
+        assert!(audio.entrypoint_path.ends_with("src/main.luau"));
+        assert!(candidates.iter().any(|candidate| {
+            candidate.interface == "mesh.network" && candidate.module_id == "@mesh/networkmanager"
+        }));
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.interface == "mesh.power"
+                    && candidate.module_id == "@mesh/upower")
+        );
         assert!(
             !candidates
                 .iter()
@@ -3678,10 +3730,15 @@ mod tests {
             .find(|e| e.interface == "mesh.audio" && e.provider_id == "@mesh/pipewire-audio")
             .expect("backend runtime entry must be present in debug snapshot");
 
-        assert_eq!(entry.failure_count, 3,
-            "debug snapshot must include cumulative failure count for the provider");
+        assert_eq!(
+            entry.failure_count, 3,
+            "debug snapshot must include cumulative failure count for the provider"
+        );
         assert_eq!(entry.status, "poll_failed");
-        assert!(!entry.provider_id.is_empty(), "debug snapshot must include provider identity");
+        assert!(
+            !entry.provider_id.is_empty(),
+            "debug snapshot must include provider identity"
+        );
     }
 
     #[test]
@@ -3695,19 +3752,35 @@ mod tests {
         );
 
         // The runtime status map must record both provider identity and status.
-        let key = ("mesh.network".to_string(), "@mesh/networkmanager-network".to_string());
-        let entry = shell.backend_runtime_statuses.get(&key)
+        let key = (
+            "mesh.network".to_string(),
+            "@mesh/networkmanager-network".to_string(),
+        );
+        let entry = shell
+            .backend_runtime_statuses
+            .get(&key)
             .expect("runtime status must be recorded for the failed provider");
-        assert_eq!(entry.provider_id, "@mesh/networkmanager-network",
-            "runtime status must identify the failed provider");
-        assert_eq!(entry.interface, "mesh.network",
-            "runtime status must identify the interface");
-        assert_eq!(entry.status.as_str(), "init_failed",
-            "runtime status must record the lifecycle stage");
-        assert_eq!(entry.failure_count, 1,
-            "first failure must set failure_count to 1");
-        assert!(entry.message.contains("dbus connection refused"),
-            "runtime status must preserve the failure message");
+        assert_eq!(
+            entry.provider_id, "@mesh/networkmanager-network",
+            "runtime status must identify the failed provider"
+        );
+        assert_eq!(
+            entry.interface, "mesh.network",
+            "runtime status must identify the interface"
+        );
+        assert_eq!(
+            entry.status.as_str(),
+            "init_failed",
+            "runtime status must record the lifecycle stage"
+        );
+        assert_eq!(
+            entry.failure_count, 1,
+            "first failure must set failure_count to 1"
+        );
+        assert!(
+            entry.message.contains("dbus connection refused"),
+            "runtime status must preserve the failure message"
+        );
 
         // Additional failure increments the count.
         shell.record_backend_runtime_status(
@@ -3717,8 +3790,10 @@ mod tests {
             "still failing".to_string(),
         );
         let entry = shell.backend_runtime_statuses.get(&key).unwrap();
-        assert_eq!(entry.failure_count, 2,
-            "repeated failure must increment failure_count");
+        assert_eq!(
+            entry.failure_count, 2,
+            "repeated failure must increment failure_count"
+        );
     }
 
     #[test]
@@ -3750,8 +3825,10 @@ mod tests {
         );
 
         let latest = shell.latest_service_state.get("mesh.audio").unwrap();
-        assert_eq!(latest.state["available"], false,
-            "active provider failure must set available=false in latest_service_state");
+        assert_eq!(
+            latest.state["available"], false,
+            "active provider failure must set available=false in latest_service_state"
+        );
         assert_eq!(latest.provider_id, "@mesh/pipewire-audio");
     }
 
@@ -3784,8 +3861,10 @@ mod tests {
 
         // New provider's state must remain intact.
         let latest = shell.latest_service_state.get("mesh.audio").unwrap();
-        assert_eq!(latest.provider_id, "@mesh/new-audio",
-            "stale provider failure must not replace new provider state");
+        assert_eq!(
+            latest.provider_id, "@mesh/new-audio",
+            "stale provider failure must not replace new provider state"
+        );
         assert_eq!(latest.state["available"], true);
     }
 

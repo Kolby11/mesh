@@ -80,6 +80,8 @@ impl Default for I18nSettings {
 pub struct ShellSection {
     #[serde(default = "default_surface")]
     pub default_surface: String,
+    #[serde(default)]
+    pub discovery_paths: Vec<String>,
 }
 
 fn default_surface() -> String {
@@ -102,8 +104,50 @@ impl Default for ShellSection {
     fn default() -> Self {
         Self {
             default_surface: default_surface(),
+            discovery_paths: Vec::new(),
         }
     }
+}
+
+pub fn resolve_discovery_paths(workspace_root: &Path, configured_paths: &[String]) -> Vec<PathBuf> {
+    let mut resolved = if configured_paths.is_empty() {
+        default_discovery_paths(workspace_root)
+    } else {
+        configured_paths
+            .iter()
+            .filter_map(|path| {
+                let trimmed = path.trim();
+                if trimmed.is_empty() {
+                    return None;
+                }
+                let candidate = PathBuf::from(trimmed);
+                Some(if candidate.is_absolute() {
+                    candidate
+                } else {
+                    workspace_root.join(candidate)
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+
+    resolved.dedup();
+    resolved
+}
+
+fn default_discovery_paths(workspace_root: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![workspace_root.join("modules")];
+
+    let mesh_home_modules = mesh_home_path().join("modules");
+    if mesh_home_modules != workspace_root.join("modules") {
+        paths.push(mesh_home_modules);
+    }
+
+    let system_modules = PathBuf::from("/usr/share/mesh/modules");
+    if system_modules != workspace_root.join("modules") {
+        paths.push(system_modules);
+    }
+
+    paths
 }
 
 /// Per-plugin configuration values.
