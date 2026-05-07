@@ -85,12 +85,24 @@ pub fn compile_frontend_module(
         source_path.display()
     );
 
+    // The entrypoint plus every locally-imported component's source path —
+    // dedup'd via `seen_local_paths`. This is what the hot-reload watcher
+    // mtimes so editing any constituent .mesh file triggers a recompile.
+    let mut watched_paths = Vec::with_capacity(seen_local_paths.len() + 1);
+    watched_paths.push(source_path.clone());
+    for path in &seen_local_paths {
+        if path != &source_path {
+            watched_paths.push(path.clone());
+        }
+    }
+
     Ok(CompiledFrontendModule {
         manifest: manifest.clone(),
         source_path,
         component,
         local_components,
         module_component_imports,
+        watched_paths,
     })
 }
 

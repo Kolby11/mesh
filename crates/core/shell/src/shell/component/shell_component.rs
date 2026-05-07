@@ -245,6 +245,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         Some(self.compiled.source_path.as_path())
     }
 
+    fn watched_source_paths(&self) -> Vec<PathBuf> {
+        self.compiled.watched_paths.clone()
+    }
+
     fn module_settings_path(&self) -> Option<&Path> {
         if self.module_settings_file.exists() {
             Some(self.module_settings_file.as_path())

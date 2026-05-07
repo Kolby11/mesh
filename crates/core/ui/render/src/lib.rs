@@ -94,6 +94,11 @@ pub struct CompiledFrontendModule {
     pub local_components: std::collections::HashMap<String, mesh_core_component::ComponentFile>,
     /// Explicit component module imports keyed by template alias.
     pub module_component_imports: std::collections::HashMap<String, String>,
+    /// On-disk paths of every `.mesh` source file that contributed to this
+    /// compilation — entrypoint plus every locally imported component. The
+    /// shell's hot-reload watcher mtimes each of these so editing any
+    /// component triggers a recompile, not just the entrypoint.
+    pub watched_paths: Vec<PathBuf>,
 }
 
 impl CompiledFrontendModule {
