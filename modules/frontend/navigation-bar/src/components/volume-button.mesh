@@ -1,17 +1,15 @@
 <template>
-  <row class="volume-widget" title="{audio_tooltip}">
-    <button
-      ref="volume-button"
-      class="volume-button"
-      onclick={onActivate}
-      onfocus={onfocus}
-      onblur={onblur}
-      title="{audio_tooltip}"
-      aria-label="{t('nav.open_audio')}"
-    >
-      <icon class="volume-glyph" name="{icon_name}" size="18" />
-    </button>
-  </row>
+  <button
+    ref="volume-button"
+    class="nav-button"
+    onclick={onActivate}
+    onfocus={onfocus}
+    onblur={onblur}
+    title="{audio_tooltip}"
+    aria-label="{t('nav.open_audio')}"
+  >
+    <icon class="nav-button-glyph" name="{icon_name}" size="18" />
+  </button>
 </template>
 
 <script lang="luau">
@@ -62,73 +60,77 @@ end
 </script>
 
 <style>
-.volume-widget {
-    width: 44px;
+.nav-button {
+    width: 40px;
     height: 40px;
     flex-shrink: 0;
     justify-content: center;
     align-items: center;
-    padding-block: token(spacing.xs);
-    padding-inline: token(spacing.xs);
-    gap: token(spacing.xs);
+    padding: token(spacing.xs);
     border-radius: token(radius.sm);
     background: token(color.surface-container);
-    color: token(color.on-surface);
-    transition: background-color 140ms ease-out, border-radius 140ms ease-out;
-}
-
-.volume-widget:hover {
-    background: token(color.secondary-container);
-    border-radius: token(radius.full);
-}
-
-.volume-widget:focus-visible {
-    background: token(color.tertiary-container);
-    border-radius: token(radius.full);
-}
-
-.volume-button {
-    width: 100%;
-    height: 32px;
-    flex-shrink: 0;
-    justify-content: center;
-    align-items: center;
-    padding-block: token(spacing.xs);
-    padding-inline: token(spacing.xs);
-    border-radius: token(radius.sm);
-    background: transparent;
     color: token(color.on-surface);
     border-width: 2px;
     border-style: solid;
     border-color: transparent;
-    transition: background-color 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out, border-radius 140ms ease-out;
+    text-wrap: none;
+    transition: background-color 180ms ease-out,
+                color 180ms ease-out,
+                border-color 180ms ease-out,
+                border-radius 220ms ease-out,
+                transform 180ms ease-out,
+                padding 180ms ease-out;
 }
 
-.volume-button:hover {
+.nav-button:hover {
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
     border-color: token(color.outline);
     border-radius: token(radius.full);
+    transform: scale(1.06);
 }
 
-.volume-button:focus {
+.nav-button:focus,
+.nav-button:focus-visible {
     background: token(color.tertiary-container);
     color: token(color.on-tertiary-container);
     border-color: token(color.primary);
+    border-radius: token(radius.full);
+    transform: scale(1.04);
 }
 
-.volume-button:focus-visible {
-    background: token(color.tertiary-container);
-    color: token(color.on-tertiary-container);
-    border-color: token(color.primary);
+.nav-button:active {
+    transform: scale(0.94);
+    border-radius: token(radius.full);
 }
 
-.volume-glyph {
-    width: 30px;
-    height: 28px;
+.nav-button-glyph {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
     justify-content: center;
     align-items: center;
     color: inherit;
+    --icon-fill: 0;
+    --icon-weight: 400;
+    transition: color 180ms ease-out, transform 200ms ease-out;
 }
 
+.nav-button:hover .nav-button-glyph {
+    transform: scale(1.08);
+    --icon-fill: 1;
+    --icon-weight: 500;
+}
+
+.nav-button:active .nav-button-glyph {
+    --icon-fill: 1;
+    --icon-weight: 600;
+}
+
+@container (max-width: 760px) {
+    .nav-button {
+        width: 40px;
+        padding: token(spacing.xs);
+    }
+}
 </style>

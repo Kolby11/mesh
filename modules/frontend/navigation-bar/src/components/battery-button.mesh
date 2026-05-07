@@ -109,11 +109,17 @@ end
     background: token(color.surface-container);
     color: token(color.on-surface);
     text-wrap: none;
+    transition: background-color 180ms ease-out,
+                color 180ms ease-out,
+                gap 200ms ease-out,
+                transform 180ms ease-out;
 }
 
 .battery-widget:hover {
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
+    gap: token(spacing.sm);
+    transform: scale(1.04);
 }
 
 .battery-glyph {
@@ -122,6 +128,11 @@ end
     justify-content: center;
     align-items: center;
     color: inherit;
+    transition: color 180ms ease-out, transform 200ms ease-out;
+}
+
+.battery-widget:hover .battery-glyph {
+    transform: scale(1.1);
 }
 
 .battery-value {

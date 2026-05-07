@@ -5,5 +5,8 @@
   "i18n": {
     "locale": "en",
     "fallback_locale": "en"
+  },
+  "icons": {
+    "default_pack": "@mesh/icons-material-symbols"
   }
 }

@@ -1,7 +1,8 @@
 use super::PixelBuffer;
 use image::imageops::FilterType;
 use mesh_core_elements::style::Color;
-use mesh_core_icon::{IconResolution, resolve_icon_result};
+use super::glyph::{GlyphAxes, draw_font_glyph};
+use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget, resolve_icon_result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -146,6 +147,9 @@ fn blend_icon_pixel(buffer: &mut PixelBuffer, x: i32, y: i32, color: Color) {
     buffer.blend_pixel(x as u32, y as u32, color, 255);
 }
 
+/// Draw the built-in "missing icon" glyph. Rasterizes the embedded SVG via
+/// resvg and tints it with the icon's text color, so it follows the same
+/// theming rules as a regular monochrome icon.
 pub fn draw_missing_icon_fallback(
     buffer: &mut PixelBuffer,
     dest_x: i32,
@@ -154,27 +158,44 @@ pub fn draw_missing_icon_fallback(
     dest_h: i32,
     tint: Color,
 ) {
-    let w = dest_w.max(1);
-    let h = dest_h.max(1);
-    let max_x = dest_x + w - 1;
-    let max_y = dest_y + h - 1;
+    let w = dest_w.max(1) as u32;
+    let h = dest_h.max(1) as u32;
 
-    for x in dest_x..=max_x {
-        blend_icon_pixel(buffer, x, dest_y, tint);
-        blend_icon_pixel(buffer, x, max_y, tint);
-    }
-    for y in dest_y..=max_y {
-        blend_icon_pixel(buffer, dest_x, y, tint);
-        blend_icon_pixel(buffer, max_x, y, tint);
-    }
+    let mut opt = resvg::usvg::Options::default();
+    let Ok(tree) = resvg::usvg::Tree::from_str(MISSING_ICON_SVG, &opt) else {
+        return;
+    };
+    opt.resources_dir = None;
+    let Some(mut pixmap) = resvg::tiny_skia::Pixmap::new(w, h) else {
+        return;
+    };
+    let scale_x = w as f32 / tree.size().width();
+    let scale_y = h as f32 / tree.size().height();
+    let transform = resvg::tiny_skia::Transform::from_scale(scale_x, scale_y);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
 
-    let mid_x = dest_x + w / 2;
-    let top = dest_y + (h / 4).max(1);
-    let mid_y = dest_y + h / 2;
-    for y in top..=mid_y {
-        blend_icon_pixel(buffer, mid_x, y, tint);
+    let data = pixmap.data();
+    for py in 0..h {
+        for px in 0..w {
+            let idx = (py * w + px) as usize * 4;
+            let alpha = data[idx + 3];
+            if alpha == 0 {
+                continue;
+            }
+            let color = Color {
+                r: tint.r,
+                g: tint.g,
+                b: tint.b,
+                a: alpha,
+            };
+            blend_icon_pixel(
+                buffer,
+                dest_x.saturating_add(px as i32),
+                dest_y.saturating_add(py as i32),
+                color,
+            );
+        }
     }
-    blend_icon_pixel(buffer, mid_x, dest_y + h.saturating_sub(3), tint);
 }
 
 pub fn draw_named_icon(
@@ -195,6 +216,35 @@ pub fn draw_named_icon(
         dest_w,
         dest_h,
         tint,
+    );
+}
+
+/// Draw a named icon using the calling module's icon bindings (preferred
+/// pack, declared mappings, user overrides) before falling back to shell-
+/// wide profile defaults and finally the built-in missing-icon glyph.
+/// `axes` carries CSS `--icon-*` values for variable-font axis settings;
+/// pass [`GlyphAxes::default()`] when no axis state is available.
+pub fn draw_named_icon_for_module(
+    buffer: &mut PixelBuffer,
+    module_id: &str,
+    name: &str,
+    size: u32,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+    axes: GlyphAxes,
+) {
+    draw_icon_resolution_with_axes(
+        buffer,
+        mesh_core_icon::resolve_icon_for_module(module_id, name, size),
+        dest_x,
+        dest_y,
+        dest_w,
+        dest_h,
+        tint,
+        axes,
     );
 }
 
@@ -230,12 +280,65 @@ fn draw_icon_resolution(
     dest_h: i32,
     tint: Color,
 ) {
+    draw_icon_resolution_with_axes(
+        buffer,
+        resolution,
+        dest_x,
+        dest_y,
+        dest_w,
+        dest_h,
+        tint,
+        GlyphAxes::default(),
+    );
+}
+
+/// Like `draw_icon_resolution` but lets the caller supply variable-font
+/// axis values (parsed from CSS `--icon-*` custom properties). Axes are
+/// silently ignored for file targets and for font targets whose pack
+/// doesn't declare support for the requested axis.
+pub fn draw_icon_resolution_with_axes(
+    buffer: &mut PixelBuffer,
+    resolution: IconResolution,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+    axes: GlyphAxes,
+) {
     match resolution {
         IconResolution::Found {
-            path, multicolor, ..
+            target: ResolvedTarget::File(path),
+            multicolor,
+            ..
         } => draw_icon_from_path_with_options(
             buffer, &path, dest_x, dest_y, dest_w, dest_h, tint, multicolor,
         ),
+        IconResolution::Found {
+            target:
+                ResolvedTarget::Glyph {
+                    font_path,
+                    codepoint,
+                    supported_axes,
+                },
+            ..
+        } => {
+            let drew = draw_font_glyph(
+                buffer,
+                &font_path,
+                codepoint,
+                supported_axes,
+                axes,
+                dest_x,
+                dest_y,
+                dest_w,
+                dest_h,
+                tint,
+            );
+            if !drew {
+                draw_missing_icon_fallback(buffer, dest_x, dest_y, dest_w, dest_h, tint);
+            }
+        }
         IconResolution::Missing { .. } => {
             draw_missing_icon_fallback(buffer, dest_x, dest_y, dest_w, dest_h, tint)
         }

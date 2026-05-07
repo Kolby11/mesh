@@ -24,6 +24,51 @@ pub struct ShellSettings {
     pub sounds: ShellSounds,
     #[serde(default)]
     pub keyboard: KeyboardSettings,
+    #[serde(default)]
+    pub icons: IconSettings,
+    /// Per-module user-side overrides (icons, etc.). Keyed by module id.
+    #[serde(default)]
+    pub modules: HashMap<String, ModuleSettingsOverrides>,
+}
+
+/// Shell-wide icon configuration. `default_pack` is the user's preferred
+/// icon-pack module id, implicitly prepended to every frontend's effective
+/// icon-pack chain (unless the frontend opts out via
+/// `icons.ignore_shell_default`).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct IconSettings {
+    #[serde(default)]
+    pub default_pack: Option<String>,
+}
+
+/// Per-module user-side overrides applied on top of values declared in the
+/// frontend's manifest.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct ModuleSettingsOverrides {
+    #[serde(default)]
+    pub icons: Option<ModuleIconOverrides>,
+}
+
+/// User-side per-module icon overrides.
+///
+/// `use_packs`, when set, **replaces** the frontend's declared
+/// `dependencies.icon_packs` for this module (the shell default is still
+/// prepended unless the frontend opted out).
+///
+/// `overrides` is a flat map of logical-name → pack-qualified target
+/// (`<pack-id>/<asset-name>`), prepended in front of every other
+/// resolution path for matching names.
+///
+/// `ignore_shell_default`, when `true`, also suppresses the shell-default
+/// pack from this module's effective chain.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct ModuleIconOverrides {
+    #[serde(default)]
+    pub use_packs: Option<Vec<String>>,
+    #[serde(default)]
+    pub overrides: HashMap<String, String>,
+    #[serde(default)]
+    pub ignore_shell_default: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -326,6 +371,14 @@ fn merge_shell_settings(base: &mut ShellSettings, overrides: ShellSettings) {
     base.i18n = overrides.i18n;
     base.sounds = overrides.sounds;
     base.keyboard = overrides.keyboard;
+    if overrides.icons != IconSettings::default() {
+        base.icons = overrides.icons;
+    }
+    if !overrides.modules.is_empty() {
+        for (id, module_overrides) in overrides.modules {
+            base.modules.insert(id, module_overrides);
+        }
+    }
 }
 
 /// Write a per-module overrides file under XDG config (~/..../mesh/modules/<scope>/<name>.json).

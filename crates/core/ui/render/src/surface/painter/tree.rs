@@ -13,13 +13,29 @@ impl FrontendRenderEngine {
         offset_x: f32,
         offset_y: f32,
     ) {
+        self.render_tree_at_for_module(root, buffer, scale, offset_x, offset_y, None);
+    }
+
+    /// Render variant that knows which module owns the tree, so icon
+    /// resolution can consult that module's bindings (preferred pack,
+    /// declared mappings, user overrides) before falling back to shell-wide
+    /// defaults.
+    pub fn render_tree_at_for_module(
+        &self,
+        root: &WidgetNode,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        offset_x: f32,
+        offset_y: f32,
+        module_id: Option<&str>,
+    ) {
         let clip = ClipRect {
             x: 0,
             y: 0,
             width: buffer.width as i32,
             height: buffer.height as i32,
         };
-        self.render_node(root, buffer, scale, offset_x, offset_y, clip);
+        self.render_node(root, buffer, scale, offset_x, offset_y, clip, module_id);
     }
 
     fn render_node(
@@ -30,6 +46,7 @@ impl FrontendRenderEngine {
         offset_x: f32,
         offset_y: f32,
         clip: ClipRect,
+        module_id: Option<&str>,
     ) {
         let style = &node.computed_style;
         if style.display == Display::None {
@@ -130,7 +147,7 @@ impl FrontendRenderEngine {
             "text" => self.render_text_node(node, buffer, scale, x, y, node_clip),
             "input" => self.render_input_node(node, buffer, scale, x, y, node_clip),
             "slider" => self.render_slider_node(node, buffer, scale, x, y, w, h, node_clip),
-            "icon" => self.render_icon_node(node, buffer, x, y, w, h, style.color),
+            "icon" => self.render_icon_node(node, buffer, x, y, w, h, style.color, module_id),
             _ => {}
         }
 
@@ -155,6 +172,7 @@ impl FrontendRenderEngine {
                 child_offset_x,
                 child_offset_y,
                 child_clip,
+                module_id,
             );
         }
 

@@ -15,6 +15,22 @@ impl Shell {
             tracing::warn!("failed to load shell settings, using defaults: {e}");
             ShellSettings::default()
         });
+
+        // Discover and register XDG icon themes installed on the system.
+        // Icon-pack binding modules reference them by name in their
+        // mapping targets (`<theme>/<icon-name>`). Failures are logged
+        // but non-fatal — hicolor fallback still works.
+        for pack in mesh_core_icon::discover_xdg_packs() {
+            let id = pack.id.clone();
+            match mesh_core_icon::register_default_pack(pack) {
+                Ok(true) => tracing::info!("registered XDG icon theme '{}'", id),
+                Ok(false) => tracing::debug!("XDG icon theme '{}' already registered", id),
+                Err(err) => {
+                    tracing::warn!("failed to register XDG icon theme '{}': {err}", id)
+                }
+            }
+        }
+        mesh_core_icon::set_default_shell_pack(settings.icons.default_pack.clone());
         let (theme, theme_watch) = load_active_theme(&settings);
         let locale = LocaleEngine::with_fallback_locale(
             settings.i18n.locale.clone(),
@@ -114,6 +130,15 @@ impl Shell {
                         loaded.source
                     );
                     register_module_icon_pack(&id, dir, loaded.manifest.assets.as_ref());
+                    register_icon_pack_module(&id, dir, loaded.manifest.icon_pack.as_ref());
+                    register_frontend_icon_bindings(
+                        &id,
+                        &loaded.manifest,
+                        self.settings
+                            .modules
+                            .get(&id)
+                            .and_then(|m| m.icons.as_ref()),
+                    );
                     self.modules.insert(
                         id,
                         ModuleInstance::new(

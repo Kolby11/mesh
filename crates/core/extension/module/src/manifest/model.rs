@@ -39,6 +39,10 @@ pub struct Manifest {
     #[serde(default)]
     pub assets: Option<AssetsSection>,
     #[serde(default)]
+    pub icons: Option<IconsSection>,
+    #[serde(default)]
+    pub icon_pack: Option<IconPackSection>,
+    #[serde(default)]
     pub icon_requirements: IconRequirementsSection,
     #[serde(default)]
     pub translations: HashMap<String, HashMap<String, String>>,
@@ -483,6 +487,104 @@ impl IconAssets {
             Self::Detailed(details) => &details.path,
         }
     }
+}
+
+/// Frontend-side icon configuration declared in `package.json`. Mappings
+/// belong in icon-pack modules — frontends only declare per-icon
+/// **overrides** (an author-side escape hatch for pinning a specific glyph
+/// regardless of the active icon-pack chain) and an opt-out flag for the
+/// shell's implicit default pack.
+///
+/// Override values use the `<pack-id>/<asset-name>` syntax shared with
+/// pack-qualified template names and shell user overrides.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IconsSection {
+    #[serde(default)]
+    pub overrides: HashMap<String, String>,
+    /// When `true`, the shell's `icons.default_pack` is **not** prepended
+    /// to this frontend's effective icon-pack chain. Frontends typically
+    /// leave this `false` so the user's chosen default applies.
+    #[serde(default)]
+    pub ignore_shell_default: bool,
+}
+
+impl IconsSection {
+    pub fn is_empty(&self) -> bool {
+        self.overrides.is_empty() && !self.ignore_shell_default
+    }
+}
+
+/// Icon-pack module section (`mesh.kind = "icon-pack"`). Contains only
+/// the mapping table and metadata — no icon assets are shipped.
+///
+/// `id` is the short alias used in pack-qualified syntax
+/// (`<pack-id>/<asset-name>`). Distinct from the full module id so the
+/// alias can be short and stable.
+///
+/// `requires` declares system assets the pack expects to resolve against.
+/// All version constraints are **soft** — a missing or older asset logs
+/// a warning at discovery time but never blocks loading.
+///
+/// `axes` declares which variable-font axes the underlying assets
+/// expose; the painter uses this to gate CSS `--icon-*` custom
+/// properties.
+///
+/// `mappings` is a flat 1:1 table from logical name to a target string
+/// of the form `<asset-pack>/<asset-name>` where `asset-pack` is either
+/// an XDG icon theme name installed on the system, an alias declared in
+/// `requires.fonts`, or an absolute file path.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IconPackSection {
+    pub id: String,
+    #[serde(default)]
+    pub requires: IconPackRequires,
+    #[serde(default)]
+    pub axes: IconPackAxes,
+    #[serde(default)]
+    pub mappings: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IconPackRequires {
+    #[serde(default)]
+    pub fonts: Vec<IconPackFontRequirement>,
+    #[serde(default)]
+    pub themes: Vec<IconPackThemeRequirement>,
+}
+
+/// One entry in an icon-pack's `requires.fonts` list. `alias` is the
+/// short name used in mapping targets (`<alias>/<glyph-name>`); `family`
+/// is the actual fontconfig family name to match against; `glyph_map`
+/// is a path inside the pack module pointing at a JSON codepoints file
+/// (or Google's `name codepoint` text format), used to translate glyph
+/// names to codepoints at render time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IconPackFontRequirement {
+    pub alias: String,
+    pub family: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub glyph_map: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IconPackThemeRequirement {
+    pub name: String,
+    #[serde(default)]
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct IconPackAxes {
+    #[serde(default)]
+    pub fill: bool,
+    #[serde(default)]
+    pub weight: bool,
+    #[serde(default)]
+    pub grade: bool,
+    #[serde(default)]
+    pub optical_size: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

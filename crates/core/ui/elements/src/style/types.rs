@@ -159,6 +159,16 @@ pub struct ComputedStyle {
     pub inset_right: Option<f32>,
     pub inset_bottom: Option<f32>,
     pub inset_left: Option<f32>,
+    /// Variable-font axis values for icon font packs (Material Symbols et
+    /// al.). Sourced from CSS custom properties `--icon-fill`,
+    /// `--icon-weight`, `--icon-grade`, `--icon-optical-size`. `None`
+    /// means "use the font's default for this axis"; `Some` overrides it.
+    /// Silently ignored when the resolved icon is a file (SVG/PNG) or
+    /// when the font pack doesn't expose the axis.
+    pub icon_fill: Option<f32>,
+    pub icon_weight: Option<f32>,
+    pub icon_grade: Option<f32>,
+    pub icon_optical_size: Option<f32>,
 }
 
 impl Default for ComputedStyle {
@@ -209,6 +219,10 @@ impl Default for ComputedStyle {
             inset_right: None,
             inset_bottom: None,
             inset_left: None,
+            icon_fill: None,
+            icon_weight: None,
+            icon_grade: None,
+            icon_optical_size: None,
         }
     }
 }
@@ -324,9 +338,21 @@ pub struct TransitionProperties {
     pub color: bool,
     pub width: bool,
     pub height: bool,
+    pub min_width: bool,
+    pub max_width: bool,
+    pub min_height: bool,
+    pub max_height: bool,
     pub padding: bool,
     pub margin: bool,
     pub transform: bool,
+    pub font_size: bool,
+    pub letter_spacing: bool,
+    pub line_height: bool,
+    pub gap: bool,
+    pub inset_top: bool,
+    pub inset_right: bool,
+    pub inset_bottom: bool,
+    pub inset_left: bool,
 }
 
 impl TransitionProperties {
@@ -345,9 +371,21 @@ impl TransitionProperties {
             color: true,
             width: true,
             height: true,
+            min_width: true,
+            max_width: true,
+            min_height: true,
+            max_height: true,
             padding: true,
             margin: true,
             transform: true,
+            font_size: true,
+            letter_spacing: true,
+            line_height: true,
+            gap: true,
+            inset_top: true,
+            inset_right: true,
+            inset_bottom: true,
+            inset_left: true,
         }
     }
 
@@ -393,6 +431,54 @@ impl TransitionProperties {
 
     pub fn animates_transform(self) -> bool {
         self.all || self.transform
+    }
+
+    pub fn animates_min_width(self) -> bool {
+        self.all || self.min_width
+    }
+
+    pub fn animates_max_width(self) -> bool {
+        self.all || self.max_width
+    }
+
+    pub fn animates_min_height(self) -> bool {
+        self.all || self.min_height
+    }
+
+    pub fn animates_max_height(self) -> bool {
+        self.all || self.max_height
+    }
+
+    pub fn animates_font_size(self) -> bool {
+        self.all || self.font_size
+    }
+
+    pub fn animates_letter_spacing(self) -> bool {
+        self.all || self.letter_spacing
+    }
+
+    pub fn animates_line_height(self) -> bool {
+        self.all || self.line_height
+    }
+
+    pub fn animates_gap(self) -> bool {
+        self.all || self.gap
+    }
+
+    pub fn animates_inset_top(self) -> bool {
+        self.all || self.inset_top
+    }
+
+    pub fn animates_inset_right(self) -> bool {
+        self.all || self.inset_right
+    }
+
+    pub fn animates_inset_bottom(self) -> bool {
+        self.all || self.inset_bottom
+    }
+
+    pub fn animates_inset_left(self) -> bool {
+        self.all || self.inset_left
     }
 }
 

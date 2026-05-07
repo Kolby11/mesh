@@ -1,13 +1,13 @@
 <template>
   <button
-    class="theme-button"
+    class="nav-button"
     onclick={onThemeToggle}
     onfocus={onfocus}
     onblur={onblur}
     title="{theme_tooltip}"
     aria-label="{theme_tooltip}"
   >
-    <icon class="theme-glyph" name="{theme_icon}" size="18" />
+    <icon class="nav-button-glyph" name="{theme_icon}" size="18" />
   </button>
 </template>
 
@@ -39,14 +39,13 @@ end
 </script>
 
 <style>
-.theme-button {
+.nav-button {
     width: 40px;
     height: 40px;
     flex-shrink: 0;
     justify-content: center;
     align-items: center;
-    padding-block: token(spacing.xs);
-    padding-inline: token(spacing.xs);
+    padding: token(spacing.xs);
     border-radius: token(radius.sm);
     background: token(color.surface-container);
     color: token(color.on-surface);
@@ -54,36 +53,54 @@ end
     border-style: solid;
     border-color: transparent;
     text-wrap: none;
-    transition: background-color 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out, border-radius 140ms ease-out;
+    transition: background-color 180ms ease-out,
+                color 180ms ease-out,
+                border-color 180ms ease-out,
+                border-radius 220ms ease-out,
+                transform 180ms ease-out,
+                padding 180ms ease-out;
 }
 
-.theme-button:hover {
+.nav-button:hover {
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
     border-color: token(color.outline);
     border-radius: token(radius.full);
+    transform: scale(1.06);
 }
 
-.theme-button:focus {
+.nav-button:focus,
+.nav-button:focus-visible {
     background: token(color.tertiary-container);
     color: token(color.on-tertiary-container);
     border-color: token(color.primary);
     border-radius: token(radius.full);
+    transform: scale(1.04);
 }
 
-.theme-button:focus-visible {
-    background: token(color.tertiary-container);
-    color: token(color.on-tertiary-container);
-    border-color: token(color.primary);
+.nav-button:active {
+    transform: scale(0.94);
     border-radius: token(radius.full);
 }
 
-.theme-glyph {
-    width: 28px;
-    height: 26px;
+.nav-button-glyph {
+    width: 24px;
+    height: 24px;
     flex-shrink: 0;
     justify-content: center;
     align-items: center;
     color: inherit;
+    transition: color 180ms ease-out, transform 200ms ease-out;
+}
+
+.nav-button:hover .nav-button-glyph {
+    transform: scale(1.08) rotate(15deg);
+}
+
+@container (max-width: 760px) {
+    .nav-button {
+        width: 40px;
+        padding: token(spacing.xs);
+    }
 }
 </style>

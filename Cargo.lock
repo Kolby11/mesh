@@ -1283,9 +1283,11 @@ dependencies = [
  "dirs",
  "icon",
  "serde",
+ "serde_json",
  "tempfile",
  "toml",
  "tracing",
+ "ttf-parser 0.21.1",
 ]
 
 [[package]]
@@ -1329,11 +1331,13 @@ dependencies = [
  "rustix 0.38.44",
  "serde_json",
  "smithay-client-toolkit",
+ "swash",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
  "wayland-client 0.31.14",
  "wayland-protocols-hyprland",
+ "zeno",
 ]
 
 [[package]]
@@ -2671,6 +2675,12 @@ dependencies = [
  "tracing-core",
  "tracing-log",
 ]
+
+[[package]]
+name = "ttf-parser"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c591d83f69777866b9126b24c6dd9a18351f177e49d625920d19f989fd31cf8"
 
 [[package]]
 name = "ttf-parser"

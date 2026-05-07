@@ -210,7 +210,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             None
         };
 
-        paint_frontend_tree_at(
+        paint_frontend_tree_at_for_module(
             &tree,
             buffer,
             1.0,
@@ -219,6 +219,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             tooltip
                 .as_ref()
                 .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
+            Some(self.compiled.manifest.package.id.as_str()),
         );
         self.last_tree = Some(tree);
         self.clear_runtime_dirty_states();

@@ -39,7 +39,17 @@
       "Bash(git -C /home/kolby/projects/mesh log --oneline -5)",
       "Bash(git *)",
       "Skill(gsd-discuss-phase)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/nxm1hyyqqf5f5h075q3v8hs3sxv3ny7z-libxkbcommon-1.8.1-dev/lib/pkgconfig cargo check -p mesh-core-shell)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/nxm1hyyqqf5f5h075q3v8hs3sxv3ny7z-libxkbcommon-1.8.1-dev/lib/pkgconfig cargo check --workspace)",
+      "Bash(pkg-config --list-all)",
+      "Bash(grep -n \"MeshModuleSection {\\\\|interface: None,\\\\|interface,$\" /home/kolby/projects/mesh/crates/core/extension/module/src/package/tests.rs)",
+      "Bash(grep *)",
+      "Bash(fc-list)",
+      "Bash(chmod +x /home/kolby/projects/mesh/modules/icon-packs/material-symbols/fetch-codepoints.sh)",
+      "Bash(/home/kolby/projects/mesh/modules/icon-packs/material-symbols/fetch-codepoints.sh)",
+      "Bash(fc-match -f '%{file}' 'Material Symbols Rounded')",
+      "Bash(fc-match -f '%{family} → %{file}\\\\n' 'Material Symbols Rounded')"
     ]
   }
 }

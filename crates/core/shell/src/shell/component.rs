@@ -49,7 +49,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mesh_core_render::{PixelBuffer, SharedTextMeasurer, TextRenderer, paint_frontend_tree_at};
+use mesh_core_render::{
+    PixelBuffer, SharedTextMeasurer, TextRenderer, paint_frontend_tree_at_for_module,
+};
 
 const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
 const TOOLTIP_OVERLAY_WIDTH: u32 = 260;

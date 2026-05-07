@@ -159,37 +159,16 @@ end
     border-width: 1px;
     border-style: solid;
     border-color: token(color.outline-variant);
+    transition: background-color 180ms ease-out,
+                border-color 180ms ease-out,
+                min-width 220ms ease-out;
 }
 
 .focus-diagnostic-label {
     color: token(color.on-surface);
     font-size: token(typography.size.xs);
     font-weight: 700;
-}
-
-button:hover {
-    background: token(color.secondary-container);
-    color: token(color.on-secondary-container);
-    border-color: token(color.outline);
-    border-radius: token(radius.full);
-}
-
-button:focus,
-button:focus-visible {
-    background: token(color.tertiary-container);
-    color: token(color.on-tertiary-container);
-    border-color: token(color.primary);
-    border-radius: token(radius.full);
-}
-
-.volume-widget:hover {
-    background: token(color.secondary-container);
-    border-radius: token(radius.full);
-}
-
-.volume-widget:focus-visible {
-    background: token(color.tertiary-container);
-    border-radius: token(radius.full);
+    transition: color 180ms ease-out, letter-spacing 200ms ease-out;
 }
 
 @container (max-width: 760px) {

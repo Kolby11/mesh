@@ -9,8 +9,10 @@ icon = "0.2"
 dirs = "4"
 anyhow = "1"
 serde = { workspace = true }
+serde_json = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
+ttf-parser = "0.21"
 
 [dev-dependencies]
 tempfile = "3"

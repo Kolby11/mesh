@@ -281,6 +281,8 @@ fn loaded_module(
                 implements: Vec::new(),
                 interface: None,
                 contributes,
+                icons: None,
+                icon_pack: None,
                 experimental: serde_json::Value::Null,
             },
         },

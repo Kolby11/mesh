@@ -19,6 +19,8 @@ fontdb = "0.23"
 image = "0.24"
 minifb = { version = "0.27", default-features = false, features = ["wayland"] }
 resvg = "0.44"
+swash = "0.2"
+zeno = "0.3"
 rustix = { version = "0.38", features = ["event", "fs", "mm", "shm"] }
 serde_json = { workspace = true }
 smithay-client-toolkit = { version = "0.19", default-features = false, features = [

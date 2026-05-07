@@ -239,6 +239,7 @@ impl FrontendRenderEngine {
         w: i32,
         h: i32,
         color: Color,
+        module_id: Option<&str>,
     ) {
         let src = node.attributes.get("src").map(|value| value.as_str());
         let name = node.attributes.get("name").map(|value| value.as_str());
@@ -248,10 +249,23 @@ impl FrontendRenderEngine {
             .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(w.max(h) as u32);
 
+        let style = &node.computed_style;
+        let axes = super::super::glyph::GlyphAxes {
+            fill: style.icon_fill,
+            weight: style.icon_weight,
+            grade: style.icon_grade,
+            optical_size: style.icon_optical_size,
+        };
+
         if let Some(src) = src {
             icon::draw_icon_from_path(buffer, std::path::Path::new(src), x, y, w, h, color);
         } else if let Some(name) = name {
-            icon::draw_named_icon(buffer, name, size, x, y, w, h, color);
+            match module_id {
+                Some(id) => icon::draw_named_icon_for_module(
+                    buffer, id, name, size, x, y, w, h, color, axes,
+                ),
+                None => icon::draw_named_icon(buffer, name, size, x, y, w, h, color),
+            }
         }
     }
 

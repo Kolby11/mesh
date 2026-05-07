@@ -22,6 +22,7 @@ pub use surface::{
     DebugOverlay, FrontendRenderEngine, LayerSurfaceConfig, PixelBuffer, RenderEngine, RenderError,
     SharedTextMeasurer, TextRenderer, WindowEvent, WindowKeyEvent, coalesce_pointer_moves,
     event_surface_id, paint_frontend_tree, paint_frontend_tree_at,
+    paint_frontend_tree_at_for_module,
 };
 pub use tags::UiTag;
 
@@ -381,6 +382,8 @@ mod tests {
             slot_contributions: Default::default(),
             surface_layout: None,
             assets: None,
+            icons: None,
+            icon_pack: None,
             icon_requirements: Default::default(),
             translations: Default::default(),
         };
@@ -471,6 +474,8 @@ mod tests {
             slot_contributions: Default::default(),
             surface_layout: None,
             assets: None,
+            icons: None,
+            icon_pack: None,
             icon_requirements: Default::default(),
             translations: Default::default(),
         };

@@ -580,6 +580,8 @@ mod tests {
             slot_contributions: Default::default(),
             surface_layout: None,
             assets: None,
+            icons: None,
+            icon_pack: None,
             icon_requirements: Default::default(),
             translations: Default::default(),
         }

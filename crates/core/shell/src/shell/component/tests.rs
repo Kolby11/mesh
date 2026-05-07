@@ -238,6 +238,8 @@ fn minimal_test_manifest(id: &str) -> Manifest {
         provides_slots: HashMap::new(),
         slot_contributions: HashMap::new(),
         assets: None,
+        icons: None,
+        icon_pack: None,
         icon_requirements: mesh_core_module::IconRequirementsSection::default(),
         translations: HashMap::new(),
         surface_layout: None,

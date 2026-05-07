@@ -152,6 +152,8 @@ impl ModulePackageManifest {
             provides_slots: HashMap::new(),
             slot_contributions: HashMap::new(),
             assets,
+            icons: mesh.icons,
+            icon_pack: mesh.icon_pack,
             icon_requirements: manifest::IconRequirementsSection::default(),
             translations: HashMap::new(),
             surface_layout: None,
@@ -241,6 +243,8 @@ impl ModulePackageManifest {
                 reason: None,
             });
         let dependencies = MeshDependencies::from_manifest_dependencies(manifest.dependencies);
+        let icons = manifest.icons.clone();
+        let icon_pack = manifest.icon_pack.clone();
 
         Self {
             name: package.id,
@@ -275,6 +279,8 @@ impl ModulePackageManifest {
                 implements: Vec::new(),
                 interface,
                 contributes,
+                icons,
+                icon_pack,
                 experimental: serde_json::Value::Null,
             },
         }
@@ -302,6 +308,10 @@ pub struct MeshModuleSection {
     pub interface: Option<MeshInterfaceDeclaration>,
     #[serde(default)]
     pub contributes: MeshContributes,
+    #[serde(default)]
+    pub icons: Option<manifest::IconsSection>,
+    #[serde(default)]
+    pub icon_pack: Option<manifest::IconPackSection>,
     #[serde(default)]
     pub experimental: serde_json::Value,
 }

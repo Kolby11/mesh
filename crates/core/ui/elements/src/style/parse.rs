@@ -246,6 +246,24 @@ pub(super) fn parse_transition_properties(value: &str) -> TransitionProperties {
             "padding" => properties.padding = true,
             "margin" => properties.margin = true,
             "transform" => properties.transform = true,
+            "min-width" => properties.min_width = true,
+            "max-width" => properties.max_width = true,
+            "min-height" => properties.min_height = true,
+            "max-height" => properties.max_height = true,
+            "font-size" => properties.font_size = true,
+            "letter-spacing" => properties.letter_spacing = true,
+            "line-height" => properties.line_height = true,
+            "gap" => properties.gap = true,
+            "top" => properties.inset_top = true,
+            "right" => properties.inset_right = true,
+            "bottom" => properties.inset_bottom = true,
+            "left" => properties.inset_left = true,
+            "inset" => {
+                properties.inset_top = true;
+                properties.inset_right = true;
+                properties.inset_bottom = true;
+                properties.inset_left = true;
+            }
             _ => {}
         }
     }
@@ -383,6 +401,24 @@ pub(super) fn parse_transition_shorthand(
                 "padding" => properties.padding = true,
                 "margin" => properties.margin = true,
                 "transform" => properties.transform = true,
+                "min-width" => properties.min_width = true,
+                "max-width" => properties.max_width = true,
+                "min-height" => properties.min_height = true,
+                "max-height" => properties.max_height = true,
+                "font-size" => properties.font_size = true,
+                "letter-spacing" => properties.letter_spacing = true,
+                "line-height" => properties.line_height = true,
+                "gap" => properties.gap = true,
+                "top" => properties.inset_top = true,
+                "right" => properties.inset_right = true,
+                "bottom" => properties.inset_bottom = true,
+                "left" => properties.inset_left = true,
+                "inset" => {
+                    properties.inset_top = true;
+                    properties.inset_right = true;
+                    properties.inset_bottom = true;
+                    properties.inset_left = true;
+                }
                 "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
                     if easing == TransitionEasing::EaseOut =>
                 {

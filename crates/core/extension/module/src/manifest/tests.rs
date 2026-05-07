@@ -184,6 +184,61 @@ fn parses_module_json_icon_requirements() {
     );
 }
 
+#[test]
+fn navigation_bar_declares_icon_pack_dependency() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../modules/frontend/navigation-bar");
+    let loaded = super::load_manifest(&dir).expect("navigation-bar manifest should load");
+    assert!(
+        loaded
+            .manifest
+            .dependencies
+            .icon_packs
+            .required
+            .iter()
+            .any(|id| id == "@mesh/icons-default"),
+        "navigation-bar should depend on @mesh/icons-default",
+    );
+    // Frontend no longer carries inline mappings — those live in the
+    // icon-pack module now.
+    assert!(loaded.manifest.icons.as_ref().map_or(true, |i| i.is_empty()));
+    assert!(loaded.manifest.icon_pack.is_none());
+}
+
+#[test]
+fn material_symbols_module_parses_with_font_requirement() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../modules/icon-packs/material-symbols");
+    let loaded = super::load_manifest(&dir).expect("material-symbols manifest should load");
+    let ip = loaded.manifest.icon_pack.expect("icon_pack section");
+    assert_eq!(ip.id, "material-rounded");
+    assert_eq!(ip.requires.fonts.len(), 1);
+    assert_eq!(ip.requires.fonts[0].family, "Material Symbols Rounded");
+    assert_eq!(ip.requires.fonts[0].alias, "ms");
+    assert!(ip.axes.fill);
+    assert_eq!(
+        ip.mappings.get("audio-volume-high").map(String::as_str),
+        Some("ms/volume_up")
+    );
+}
+
+#[test]
+fn icons_default_module_parses_as_icon_pack() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../modules/icon-packs/default");
+    let loaded = super::load_manifest(&dir).expect("icons-default manifest should load");
+    let icon_pack = loaded.manifest.icon_pack.expect("icon_pack section");
+    assert_eq!(icon_pack.id, "default");
+    assert_eq!(
+        icon_pack.mappings.get("audio-volume-high").map(String::as_str),
+        Some("hicolor/audio-volume-high")
+    );
+    assert_eq!(
+        icon_pack.mappings.get("settings").map(String::as_str),
+        Some("hicolor/preferences-system")
+    );
+}
+
 fn manifest_with_dependencies(
     id: &str,
     dependencies: &[(&str, bool)],
@@ -239,6 +294,8 @@ fn manifest_with_dependencies(
             .map(|slot_id| ((*slot_id).to_string(), vec![SlotContribution::default()]))
             .collect(),
         assets: None,
+        icons: None,
+        icon_pack: None,
         icon_requirements: IconRequirementsSection::default(),
         translations: HashMap::new(),
         surface_layout: None,

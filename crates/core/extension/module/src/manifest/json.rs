@@ -1,10 +1,10 @@
 use super::{
     AccessibilitySection, AssetsSection, BinaryDependency, CapabilitiesSection,
     CompatibilitySection, DependenciesSection, DependencySpec, EntrypointsSection, ExportsSection,
-    ExtensionSection, FontDependency, I18nSection, IconRequirementsSection, InterfaceDependency,
-    InterfaceSection, Manifest, ModuleType, NativeDependency, OptionalDependencyGroup,
-    PackageSection, ProvidedInterface, SettingsSection, SlotContribution, SlotDefinition,
-    SurfaceLayoutSection, ThemeSection,
+    ExtensionSection, FontDependency, I18nSection, IconPackSection, IconRequirementsSection,
+    IconsSection, InterfaceDependency, InterfaceSection, Manifest, ModuleType, NativeDependency,
+    OptionalDependencyGroup, PackageSection, ProvidedInterface, SettingsSection, SlotContribution,
+    SlotDefinition, SurfaceLayoutSection, ThemeSection,
 };
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -57,6 +57,10 @@ pub(super) struct JsonManifest {
     #[serde(default)]
     assets: Option<AssetsSection>,
     #[serde(default)]
+    icons: Option<IconsSection>,
+    #[serde(default)]
+    icon_pack: Option<IconPackSection>,
+    #[serde(default)]
     icon_requirements: IconRequirementsSection,
     #[serde(default)]
     translations: HashMap<String, HashMap<String, String>>,
@@ -94,6 +98,8 @@ impl JsonManifest {
             provides_slots: self.provides_slots,
             slot_contributions: self.slot_contributions,
             assets: self.assets,
+            icons: self.icons,
+            icon_pack: self.icon_pack,
             icon_requirements: self.icon_requirements,
             translations: self.translations,
             surface_layout: self.surface_layout,

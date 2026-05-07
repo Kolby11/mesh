@@ -19,9 +19,21 @@ pub(super) struct AnimatedVisualStyle {
     color: Color,
     width: Dimension,
     height: Dimension,
+    min_width: Option<f32>,
+    max_width: Option<f32>,
+    min_height: Option<f32>,
+    max_height: Option<f32>,
     padding: Edges,
     margin: Edges,
     transform: Transform2D,
+    font_size: f32,
+    letter_spacing: f32,
+    line_height: f32,
+    gap: f32,
+    inset_top: Option<f32>,
+    inset_right: Option<f32>,
+    inset_bottom: Option<f32>,
+    inset_left: Option<f32>,
 }
 
 impl AnimatedVisualStyle {
@@ -36,9 +48,21 @@ impl AnimatedVisualStyle {
             color: s.color,
             width: s.width,
             height: s.height,
+            min_width: s.min_width,
+            max_width: s.max_width,
+            min_height: s.min_height,
+            max_height: s.max_height,
             padding: s.padding,
             margin: s.margin,
             transform: s.transform,
+            font_size: s.font_size,
+            letter_spacing: s.letter_spacing,
+            line_height: s.line_height,
+            gap: s.gap,
+            inset_top: s.inset_top,
+            inset_right: s.inset_right,
+            inset_bottom: s.inset_bottom,
+            inset_left: s.inset_left,
         }
     }
 
@@ -52,9 +76,21 @@ impl AnimatedVisualStyle {
         s.color = self.color;
         s.width = self.width;
         s.height = self.height;
+        s.min_width = self.min_width;
+        s.max_width = self.max_width;
+        s.min_height = self.min_height;
+        s.max_height = self.max_height;
         s.padding = self.padding;
         s.margin = self.margin;
         s.transform = self.transform;
+        s.font_size = self.font_size;
+        s.letter_spacing = self.letter_spacing;
+        s.line_height = self.line_height;
+        s.gap = self.gap;
+        s.inset_top = self.inset_top;
+        s.inset_right = self.inset_right;
+        s.inset_bottom = self.inset_bottom;
+        s.inset_left = self.inset_left;
     }
 
     /// Per-field lerp. Edges/Corners/Color/f32 use the renderer's `Interpolate`.
@@ -70,9 +106,21 @@ impl AnimatedVisualStyle {
             color: self.color.lerp(target.color, progress),
             width: lerp_dimension(self.width, target.width, progress),
             height: lerp_dimension(self.height, target.height, progress),
+            min_width: lerp_option_f32(self.min_width, target.min_width, progress),
+            max_width: lerp_option_f32(self.max_width, target.max_width, progress),
+            min_height: lerp_option_f32(self.min_height, target.min_height, progress),
+            max_height: lerp_option_f32(self.max_height, target.max_height, progress),
             padding: self.padding.lerp(target.padding, progress),
             margin: self.margin.lerp(target.margin, progress),
             transform: self.transform.lerp(target.transform, progress),
+            font_size: self.font_size.lerp(target.font_size, progress),
+            letter_spacing: self.letter_spacing.lerp(target.letter_spacing, progress),
+            line_height: self.line_height.lerp(target.line_height, progress),
+            gap: self.gap.lerp(target.gap, progress),
+            inset_top: lerp_option_f32(self.inset_top, target.inset_top, progress),
+            inset_right: lerp_option_f32(self.inset_right, target.inset_right, progress),
+            inset_bottom: lerp_option_f32(self.inset_bottom, target.inset_bottom, progress),
+            inset_left: lerp_option_f32(self.inset_left, target.inset_left, progress),
         }
     }
 
@@ -102,9 +150,57 @@ impl AnimatedVisualStyle {
             color: pick(props.animates_color(), previous.color, desired.color),
             width: pick(props.animates_width(), previous.width, desired.width),
             height: pick(props.animates_height(), previous.height, desired.height),
+            min_width: pick(props.animates_min_width(), previous.min_width, desired.min_width),
+            max_width: pick(props.animates_max_width(), previous.max_width, desired.max_width),
+            min_height: pick(
+                props.animates_min_height(),
+                previous.min_height,
+                desired.min_height,
+            ),
+            max_height: pick(
+                props.animates_max_height(),
+                previous.max_height,
+                desired.max_height,
+            ),
             padding: pick(props.animates_padding(), previous.padding, desired.padding),
             margin: pick(props.animates_margin(), previous.margin, desired.margin),
             transform: pick(props.animates_transform(), previous.transform, desired.transform),
+            font_size: pick(
+                props.animates_font_size(),
+                previous.font_size,
+                desired.font_size,
+            ),
+            letter_spacing: pick(
+                props.animates_letter_spacing(),
+                previous.letter_spacing,
+                desired.letter_spacing,
+            ),
+            line_height: pick(
+                props.animates_line_height(),
+                previous.line_height,
+                desired.line_height,
+            ),
+            gap: pick(props.animates_gap(), previous.gap, desired.gap),
+            inset_top: pick(
+                props.animates_inset_top(),
+                previous.inset_top,
+                desired.inset_top,
+            ),
+            inset_right: pick(
+                props.animates_inset_right(),
+                previous.inset_right,
+                desired.inset_right,
+            ),
+            inset_bottom: pick(
+                props.animates_inset_bottom(),
+                previous.inset_bottom,
+                desired.inset_bottom,
+            ),
+            inset_left: pick(
+                props.animates_inset_left(),
+                previous.inset_left,
+                desired.inset_left,
+            ),
         }
     }
 }
@@ -228,7 +324,30 @@ impl FrontendSurfaceComponent {
                 || (props.animates_padding() && previous_displayed.padding != desired.padding)
                 || (props.animates_margin() && previous_displayed.margin != desired.margin)
                 || (props.animates_transform()
-                    && previous_displayed.transform != desired.transform));
+                    && previous_displayed.transform != desired.transform)
+                || (props.animates_min_width()
+                    && previous_displayed.min_width != desired.min_width)
+                || (props.animates_max_width()
+                    && previous_displayed.max_width != desired.max_width)
+                || (props.animates_min_height()
+                    && previous_displayed.min_height != desired.min_height)
+                || (props.animates_max_height()
+                    && previous_displayed.max_height != desired.max_height)
+                || (props.animates_font_size()
+                    && previous_displayed.font_size != desired.font_size)
+                || (props.animates_letter_spacing()
+                    && previous_displayed.letter_spacing != desired.letter_spacing)
+                || (props.animates_line_height()
+                    && previous_displayed.line_height != desired.line_height)
+                || (props.animates_gap() && previous_displayed.gap != desired.gap)
+                || (props.animates_inset_top()
+                    && previous_displayed.inset_top != desired.inset_top)
+                || (props.animates_inset_right()
+                    && previous_displayed.inset_right != desired.inset_right)
+                || (props.animates_inset_bottom()
+                    && previous_displayed.inset_bottom != desired.inset_bottom)
+                || (props.animates_inset_left()
+                    && previous_displayed.inset_left != desired.inset_left));
 
         if should_animate {
             let restart = self.style_animations.get(key).is_none_or(|animation| {
@@ -296,6 +415,17 @@ fn lerp_dimension(from: Dimension, to: Dimension, progress: f32) -> Dimension {
     match (from, to) {
         (Dimension::Px(a), Dimension::Px(b)) => Dimension::Px(a.lerp(b, progress)),
         (Dimension::Percent(a), Dimension::Percent(b)) => Dimension::Percent(a.lerp(b, progress)),
+        _ => to,
+    }
+}
+
+/// Interpolate between two `Option<f32>` values. When both sides are `Some`,
+/// lerp the inner values. Cross-variant transitions (`None` <-> `Some`) cannot
+/// be smoothed because there is no numeric value to lerp from, so they snap
+/// straight to the target — matching CSS behavior for unset constraints.
+fn lerp_option_f32(from: Option<f32>, to: Option<f32>, progress: f32) -> Option<f32> {
+    match (from, to) {
+        (Some(a), Some(b)) => Some(a.lerp(b, progress)),
         _ => to,
     }
 }

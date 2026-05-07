@@ -1,13 +1,13 @@
 <template>
   <button
-    class="settings-button"
+    class="nav-button"
     onclick={onSettingsClick}
     onfocus={onfocus}
     onblur={onblur}
     title="{t('nav.open_settings')}"
     aria-label="{t('nav.open_settings')}"
   >
-    <icon class="settings-glyph" name="settings" title="{t('nav.settings')}" size="18" />
+    <icon class="nav-button-glyph" name="settings" title="{t('nav.settings')}" size="18" />
   </button>
 </template>
 
@@ -18,14 +18,13 @@ end
 </script>
 
 <style>
-.settings-button {
-    width: 44px;
+.nav-button {
+    width: 40px;
     height: 40px;
     flex-shrink: 0;
     justify-content: center;
     align-items: center;
-    padding-block: token(spacing.xs);
-    padding-inline: token(spacing.xs);
+    padding: token(spacing.xs);
     border-radius: token(radius.sm);
     background: token(color.surface-container);
     color: token(color.on-surface);
@@ -33,44 +32,54 @@ end
     border-style: solid;
     border-color: transparent;
     text-wrap: none;
-    transition: background-color 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out, border-radius 140ms ease-out;
+    transition: background-color 180ms ease-out,
+                color 180ms ease-out,
+                border-color 180ms ease-out,
+                border-radius 220ms ease-out,
+                transform 180ms ease-out,
+                padding 180ms ease-out;
 }
 
-.settings-button:hover {
+.nav-button:hover {
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
     border-color: token(color.outline);
     border-radius: token(radius.full);
+    transform: scale(1.06);
 }
 
-.settings-button:focus {
+.nav-button:focus,
+.nav-button:focus-visible {
     background: token(color.tertiary-container);
     color: token(color.on-tertiary-container);
     border-color: token(color.primary);
     border-radius: token(radius.full);
+    transform: scale(1.04);
 }
 
-.settings-button:focus-visible {
-    background: token(color.tertiary-container);
-    color: token(color.on-tertiary-container);
-    border-color: token(color.primary);
+.nav-button:active {
+    transform: scale(0.94);
     border-radius: token(radius.full);
 }
 
-.settings-glyph {
-    width: 28px;
-    height: 26px;
+.nav-button-glyph {
+    width: 24px;
+    height: 24px;
     flex-shrink: 0;
     justify-content: center;
     align-items: center;
     color: inherit;
+    transition: color 180ms ease-out, transform 200ms ease-out;
+}
+
+.nav-button:hover .nav-button-glyph {
+    transform: scale(1.08);
 }
 
 @container (max-width: 760px) {
-    .settings-button {
-        width: 44px;
-        gap: 0;
-        padding-inline: token(spacing.xs);
+    .nav-button {
+        width: 40px;
+        padding: token(spacing.xs);
     }
 }
 </style>
