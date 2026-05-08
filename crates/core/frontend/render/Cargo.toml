@@ -1,0 +1,23 @@
+[package]
+name = "mesh-core-render"
+description = "Frontend component rendering and software painting for MESH"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-core-icon = { workspace = true }
+mesh-core-elements = { workspace = true }
+
+cosmic-text = "0.18"
+fontdb = "0.23"
+image = "0.24"
+resvg = "0.44"
+swash = "0.2"
+zeno = "0.3"
+
+[dev-dependencies]
+mesh-core-frontend = { workspace = true }
+mesh-core-module = { workspace = true }
+mesh-core-theme = { workspace = true }
+tempfile = "3"

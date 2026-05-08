@@ -1,0 +1,19 @@
+[package]
+name = "mesh-core-frontend"
+description = "Frontend module compilation, style resolution, and widget tree construction for MESH"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-core-component = { workspace = true }
+mesh-core-elements = { workspace = true }
+mesh-core-module = { workspace = true }
+mesh-core-theme = { workspace = true }
+
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

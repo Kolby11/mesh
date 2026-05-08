@@ -23,9 +23,9 @@ Functional now:
 - `.mesh` SFC parsing still happens in `crates/core/ui/component/src/parser.rs`.
 - `SourceTag` exists in `crates/core/ui/component/src/template.rs` and preserves
   source-level tag intent.
-- `UiTag` exists in `crates/core/ui/render/src/tags.rs`.
+- `UiTag` exists in `crates/core/frontend/compiler/src/tags.rs`.
 - Source tags are lowered through `lower_source_tag()` before `WidgetNode`
-  construction in `crates/core/ui/render/src/render.rs`.
+  construction in `crates/core/frontend/compiler/src/render.rs`.
 - Built-in template primitives are lowercase.
 - PascalCase references are reserved for explicitly imported custom components.
 - CSS is parsed with `lightningcss`.
@@ -84,11 +84,12 @@ Today the path is already close to a compiler pipeline:
 .mesh SFC source
   -> crates/core/ui/component/src/parser.rs::parse_component
   -> ComponentFile { template, script, style, ... }
-  -> crates/core/ui/render/src/lib.rs::build_widget_tree_from_component
+  -> crates/core/frontend/compiler/src/lib.rs::build_widget_tree_from_component
   -> WidgetNode tree
   -> mesh-core-elements StyleResolver / LayoutEngine
   -> mesh-core-shell surface runtime
-  -> mesh-core-render surface painter / presentation bridge
+  -> mesh-core-render surface painter
+  -> mesh-core-presentation surface backend
 ```
 
 The main transition pressure points are:
@@ -97,15 +98,15 @@ The main transition pressure points are:
   Current template AST stores raw tag strings and generic attributes.
 - `crates/core/ui/component/src/style.rs`
   Current style AST is intentionally small: simple selectors, declarations, container queries.
-- `crates/core/ui/render/src/lib.rs`
+- `crates/core/frontend/compiler/src/lib.rs`
   Compiles frontend modules and builds widget trees.
-- `crates/core/ui/render/src/tags.rs`
+- `crates/core/frontend/compiler/src/tags.rs`
   Lowers source-level `SourceTag` values to runtime `UiTag` primitives.
 - `crates/core/ui/elements/src/style.rs`
   Style resolution is fast because selector matching is shallow and property support is bounded.
 - `crates/core/ui/elements/src/layout.rs`
   Layout is a flexbox-like subset, not browser layout.
-- `crates/core/ui/render/src/surface/painter.rs`
+- `crates/core/frontend/render/src/surface/painter.rs`
   Rendering is by UI primitive tag, not by browser semantics.
 
 ## What should change conceptually
@@ -189,7 +190,7 @@ This preserves performance and avoids turning shell rendering into browser emula
 ### What to change
 
 The current system parses many HTML tags but normalizes them very late in
-`mesh-core-render/src/lib.rs`. That makes the runtime path easy, but it
+`crates/core/frontend/compiler/src/lib.rs`. That makes the runtime path easy, but it
 mixes author syntax with runtime semantics.
 
 Move tag lowering into an explicit phase:
@@ -341,7 +342,7 @@ Then another frontend module that declares the dependency can write:
 That behavior already fits the current composition path in this repo:
 
 - manifest helper: `crates/core/extension/module/src/manifest.rs`
-- compile-time reference collection: `crates/core/ui/render/src/lib.rs`
+- compile-time reference collection: `crates/core/frontend/compiler/src/lib.rs`
 - dependency/tag resolution: `crates/core/shell/src/shell/component.rs`
 
 So the planned UI XML system should preserve this and document it as a
@@ -455,12 +456,12 @@ Suggested changes:
   Add `SourceTag` and preserve the literal source tag.
 - `crates/core/ui/component/src/style.rs`
   Add a richer parsed selector/value model, separate from the supported runtime subset.
-- `crates/core/ui/render/src/lib.rs`
+- `crates/core/frontend/compiler/src/lib.rs`
   Replace ad-hoc `normalize_tag()` with a named lowering step.
 
 ### Phase 1: add a compile/lower stage
 
-Introduce a frontend compiler module, likely in `mesh-core-render`, that produces:
+Introduce a frontend compiler module in `mesh-core-frontend` that produces:
 
 - lowered template IR
 - lowered style IR
@@ -577,7 +578,7 @@ pub enum LoweredSelector {
 }
 ```
 
-### In `mesh-core-render`
+### In `mesh-core-frontend`
 
 Add a lowering boundary:
 
@@ -646,6 +647,7 @@ It should be:
 In this repo, the best place to introduce that boundary is between:
 
 - `crates/core/ui/component` as source parser
-- `crates/core/ui/render` as compiler/lowerer
+- `crates/core/frontend/compiler` as compiler/lowerer
+- `crates/core/frontend/render` as painter
 
 That keeps `mesh-core-elements` and `mesh-core-shell` small, predictable, and fast.

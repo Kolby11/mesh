@@ -1,0 +1,9 @@
+[package]
+name = "mesh-core-animation"
+description = "Animation timing, easing, interpolation, transition, and keyframe primitives for MESH"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-core-elements = { workspace = true }

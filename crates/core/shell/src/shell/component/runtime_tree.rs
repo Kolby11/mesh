@@ -4,13 +4,8 @@ use std::hash::{Hash, Hasher};
 use bitflags::bitflags;
 use mesh_core_elements::style::{Color, ComputedStyle, Corners, Dimension, Edges, Transform2D};
 use mesh_core_elements::{ElementState, LayoutRect, NodeId, WidgetNode, element_snapshot_json};
+use mesh_core_interaction::ScrollOffsetState;
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
-
-#[derive(Debug, Clone, Copy, Default)]
-pub(in crate::shell) struct ScrollOffsetState {
-    pub(in crate::shell) x: f32,
-    pub(in crate::shell) y: f32,
-}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct RetainedTreeDirtySummary {

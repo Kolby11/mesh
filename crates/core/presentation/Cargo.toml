@@ -1,0 +1,20 @@
+[package]
+name = "mesh-core-presentation"
+description = "Presentation backends and surface event plumbing for MESH"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-core-render = { workspace = true }
+mesh-core-wayland = { workspace = true }
+
+minifb = { version = "0.27", default-features = false, features = ["wayland"] }
+rustix = { version = "0.38", features = ["event", "fs", "mm", "shm"] }
+smithay-client-toolkit = { version = "0.19", default-features = false, features = [
+  "xkbcommon",
+] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+wayland-client = "0.31"
+wayland-protocols-hyprland = { version = "1.2.0", features = ["client"] }

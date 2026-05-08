@@ -331,7 +331,7 @@ to the existing text path.
   - Parse `font-family` values: detect `pack/role` shape vs.
     verbatim family name vs. logical role
   - Surface the resolved family name for the text renderer
-- `mesh-core-render/src/surface/text.rs`
+- `crates/core/frontend/render/src/surface/text.rs`
   - Consume the resolved family name from `ComputedStyle`
   - No changes to glyph rasterization (cosmic-text already handles
     fontconfig family lookup)

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use mesh_core_frontend::{CompiledFrontendModule, compile_frontend_module};
 use mesh_core_module::ModuleType;
 use mesh_core_module::lifecycle::ModuleInstance;
-use mesh_core_render::{CompiledFrontendModule, compile_frontend_module};
 
 use crate::shell::ShellRunError;
 
@@ -45,7 +45,7 @@ impl FrontendCatalog {
                 continue;
             };
 
-            if !mesh_core_render::is_frontend_module(&module.manifest) {
+            if !mesh_core_frontend::is_frontend_module(&module.manifest) {
                 continue;
             }
 

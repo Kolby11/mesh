@@ -341,7 +341,7 @@ impl FrontendSurfaceComponent {
             .as_ref()
             .map(|style| style.rules.as_slice())
             .unwrap_or(&[]);
-        let mut node = mesh_core_render::build_widget_tree_from_component(
+        let mut node = mesh_core_frontend::build_widget_tree_from_component(
             component,
             host,
             &theme,

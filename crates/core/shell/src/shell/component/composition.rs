@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use mesh_core_elements::WidgetNode;
+use mesh_core_frontend::FrontendCompositionResolver;
 use mesh_core_module::ModuleType;
-use mesh_core_render::FrontendCompositionResolver;
 
 use super::FrontendSurfaceComponent;
 

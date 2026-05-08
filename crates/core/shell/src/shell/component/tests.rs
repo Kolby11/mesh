@@ -1796,8 +1796,10 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
     let theme = default_theme();
-    let mut buffer = PixelBuffer::new(320, 80);
-    component.paint(&theme, 320, 80, &mut buffer).unwrap();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component.paint(&theme, width, height, &mut buffer).unwrap();
 
     let shortcut_requests = component
         .handle_input(
@@ -1855,8 +1857,10 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
     let theme = default_theme();
-    let mut buffer = PixelBuffer::new(320, 80);
-    component.paint(&theme, 320, 80, &mut buffer).unwrap();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component.paint(&theme, width, height, &mut buffer).unwrap();
 
     let tree = component
         .last_tree
@@ -1939,8 +1943,10 @@ fn navigation_bar_keyboard_activation_opens_volume_surface_on_real_surface() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
     let theme = default_theme();
-    let mut buffer = PixelBuffer::new(320, 80);
-    component.paint(&theme, 320, 80, &mut buffer).unwrap();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component.paint(&theme, width, height, &mut buffer).unwrap();
 
     let tree = component
         .last_tree
@@ -4889,8 +4895,10 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     component.visible = true;
 
     let theme = default_theme();
-    let mut buffer = PixelBuffer::new(320, 80);
-    component.paint(&theme, 320, 80, &mut buffer).unwrap();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component.paint(&theme, width, height, &mut buffer).unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -4927,7 +4935,7 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     );
 
     component
-        .handle_input(&theme, 320, 80, ComponentInput::PointerMove { x, y })
+        .handle_input(&theme, width, height, ComponentInput::PointerMove { x, y })
         .unwrap();
     assert!(
         component.hover_start.is_some(),
@@ -4936,8 +4944,8 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     component
         .handle_input(
             &theme,
-            320,
-            80,
+            width,
+            height,
             ComponentInput::PointerMove {
                 x: button_x,
                 y: button_y,
@@ -4947,7 +4955,7 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     let preserved_hover_start = std::time::Instant::now() - std::time::Duration::from_secs(1);
     component.hover_start = Some(preserved_hover_start);
     component
-        .handle_input(&theme, 320, 80, ComponentInput::PointerMove { x, y })
+        .handle_input(&theme, width, height, ComponentInput::PointerMove { x, y })
         .unwrap();
     assert_eq!(
         component.hover_start,
@@ -4958,8 +4966,8 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     component
         .handle_input(
             &theme,
-            320,
-            80,
+            width,
+            height,
             ComponentInput::PointerButton {
                 x,
                 y,

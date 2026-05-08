@@ -52,10 +52,21 @@ downward — lower crates know nothing about higher ones.
 
 ```
 mesh-tools-cli
-  └─ mesh-core-shell          ← shell orchestrator, owns the main event loop
-       ├─ mesh-core-render ← compiles .mesh frontend modules and paints WidgetNode trees
+  └─ mesh-core-shell          ← shell orchestrator, owns the main event loop and glues runtime/rendering
+       ├─ mesh-core-frontend ← frontend engine in crates/core/frontend/compiler; compiles .mesh modules and builds WidgetNode trees
        │    ├─ mesh-core-component     ← parser for .mesh single-file components
        │    └─ mesh-core-elements   ← core element model, layout engine, style resolver, WidgetNode
+       ├─ mesh-core-frontend-host ← frontend component host contract types
+       ├─ mesh-core-animation ← easing, transitions, interpolation, and keyframe playback
+       │    └─ mesh-core-elements   ← computed style value types used by animation
+       ├─ mesh-core-interaction ← widget-tree hit testing, focus traversal, and scroll helpers
+       │    └─ mesh-core-elements   ← WidgetNode and computed style data queried by interaction helpers
+       ├─ mesh-core-surface-config ← manifest/settings surface layout resolution
+       ├─ mesh-core-render ← render engine in crates/core/frontend/render; paints WidgetNode trees into PixelBuffer surfaces
+       │    ├─ mesh-core-elements   ← WidgetNode and computed style data consumed by the painter
+       │    └─ mesh-core-icon       ← icon pack resolution and glyph assets
+       ├─ mesh-core-presentation ← presentation backends in crates/core/presentation; owns windows/layer-shell surfaces and input events
+       │    └─ mesh-core-render       ← PixelBuffer handoff for presented frames
        ├─ mesh-core-backend   ← Luau backend module polling and command runtime
        │    └─ mesh-core-scripting     ← Luau host APIs and script state bridge
        ├─ mesh-core-service   ← interface/service registry (InterfaceRegistry)
@@ -68,17 +79,23 @@ mesh-tools-cli
        ├─ mesh-core-wayland   ← Wayland surface abstractions (ShellSurface, Layer)
        ├─ mesh-core-diagnostics ← DiagnosticsCollector, health reporting
        ├─ mesh-core-debug     ← DebugSnapshot, DebugOverlayState
-       └─ mesh-core-runtime   ← (stub) future Luau sandbox host
+       └─ mesh-core-runtime   ← sandbox policy metadata in crates/core/runtime/sandbox
 ```
 
 ### Key types per crate
 
 | Crate                 | Key types / files                                                                                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `mesh-core-shell`     | `Shell` in `shell/mod.rs` — module host and shell orchestrator; `FrontendSurfaceComponent`, `ShellComponent` trait, `CoreRequest`, `CoreEvent`   |
+| `mesh-core-shell`     | `Shell` in `shell/mod.rs` — module host, backend/service orchestrator, and event loop                                                            |
 | `mesh-core-module`    | `Manifest`, `ModuleType`, `SurfaceLayoutSection` in `manifest.rs`; `ModuleInstance` in `lifecycle.rs`                                            |
 | `mesh-core-component` | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>` blocks                                                                 |
-| `mesh-core-render`    | `CompiledFrontendModule`, `FrontendCompositionResolver`, `RenderEngine`, `PixelBuffer`, `SharedTextMeasurer`, `LayerSurfaceConfig`               |
+| `mesh-core-frontend`  | `CompiledFrontendModule`, `FrontendCompositionResolver`, `FrontendRenderMode`, `compile_frontend_module()`                                       |
+| `mesh-core-frontend-host` | `ShellComponent`, `CoreRequest`, `CoreEvent`, `ServiceEvent`, `ComponentInput`, `ComponentContext`, `ComponentError`, `SurfaceId`         |
+| `mesh-core-animation` | `Easing`, `Interpolate`, `AnimatableStyle`, `KeyframeRule`, `ActiveKeyframeAnimation`                                                            |
+| `mesh-core-interaction` | `find_node_path_at`, `find_focusable_at`, `collect_focus_traversal`, `annotate_overflow_tree`, `ScrollOffsetState`                             |
+| `mesh-core-surface-config` | `SurfaceLayoutSettings`, `SurfaceSizePolicy`, `load_frontend_module_settings()`                                                            |
+| `mesh-core-render`    | `PixelBuffer`, `FrontendRenderEngine`, `DebugOverlay`, `SharedTextMeasurer`, `TextRenderer`                                                      |
+| `mesh-core-presentation` | `PresentationEngine`, `PresentationError`, `WindowEvent`, `LayerSurfaceConfig`                                                                |
 | `mesh-core-backend`   | `spawn_backend_service`, `BackendServiceCommand`, `BackendServiceUpdate`                                                                         |
 | `mesh-core-scripting` | `ScriptContext`, `BackendScriptContext`, `ScriptState`, `LocaleBoundState`                                                                       |
 | `mesh-core-elements`  | `ElementKind`, `ElementTypeDef`, `ElementSnapshot`, `WidgetNode`, `LayoutRect`, `StyleContext`, `StyleResolver`, `VariableStore`, `ElementState` |
@@ -159,7 +176,7 @@ capabilities, manifests, and one or more components.
 
 1. `mesh-tools-cli` → `Shell::run()` in `mesh-core-shell/src/shell.rs`
 2. Shell discovers modules via `module_search_paths()` (workspace, `/usr/share/mesh`, `~/.local/share/mesh`)
-3. Each module dir is loaded from manifest metadata; frontend modules are compiled via `mesh-core-render`, backend modules are hosted by `mesh-core-backend`
+3. Each module dir is loaded from manifest metadata; frontend modules are compiled via `mesh-core-frontend`, backend modules are hosted by `mesh-core-backend`
 4. `FrontendSurfaceComponent::new()` is created per surface module:
    - reads `package.json` manifest → `surface_layout_from_manifest()` for layout defaults
    - reads `config/settings.json` → user overrides applied on top of manifest defaults
@@ -203,7 +220,7 @@ backend module (mesh.toml, provides = "mesh.audio")
 
 | Task                           | Where to start                                                                                                                   |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| Add a CSS property             | `mesh-core-elements/src/style.rs` (parse), `mesh-core-render/src/surface/painter.rs` (paint)                                     |
+| Add a CSS property             | `mesh-core-elements/src/style.rs` (parse), `crates/core/frontend/render/src/surface/painter.rs` (paint)                            |
 | Add a new surface module       | Create `packages/modules/frontend/core/<name>/`, `package.json` with `"type": "surface"`, `src/main.mesh`                        |
 | Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core-shell/src/shell.rs`; manifest's `surface_layout` section                          |
 | Add a service (backend module) | `packages/modules/backend/core/<name>/`, `package.json` + `src/main.luau`, implement the interface contract in the module script |
@@ -233,9 +250,9 @@ The full pipeline:
 <icon name="..."> in .mesh template
   → parser (mesh-core-component/src/parser.rs) — already works
   → WidgetNode { tag: "icon", attributes: { name, size } }
-  → painter (mesh-core-render/src/surface/painter.rs:138) — reads name/src/size attrs
+  → painter (crates/core/frontend/render/src/surface/painter.rs:138) — reads name/src/size attrs
   → resolve_icon_path(name, size) in mesh-core-icon/src/lib.rs — BROKEN (see fix 1)
-  → draw_icon_from_path(buffer, path, ...) in mesh-core-render/src/surface/icon.rs — BROKEN for SVG (see fix 2)
+  → draw_icon_from_path(buffer, path, ...) in crates/core/frontend/render/src/surface/icon.rs — BROKEN for SVG (see fix 2)
 ```
 
 ### Fix 1 — XDG icon resolution (`crates/core/ui/icon/src/lib.rs`)
@@ -259,10 +276,10 @@ The fixed resolver must:
 
 Prefer PNG over SVG when both exist at the requested size; prefer SVG (scalable) when no PNG matches the size exactly. Return `None` if nothing is found — do not panic or log a warning on every miss.
 
-### Fix 2 — SVG rasterization (`crates/core/ui/render/src/surface/icon.rs`)
+### Fix 2 — SVG rasterization (`crates/core/frontend/render/src/surface/icon.rs`)
 
 The `"svg"` match arm is an empty TODO. To fix it:
-1. Add `resvg = "0.44"` to `crates/core/ui/render/Cargo.toml`
+1. Add `resvg = "0.44"` to `crates/core/frontend/render/Cargo.toml`
 2. In the `"svg"` arm:
    ```rust
    "svg" => {
@@ -300,7 +317,7 @@ The `"svg"` match arm is an empty TODO. To fix it:
    ```
    `resvg` re-exports `usvg` and `tiny_skia`, so no extra dependencies are needed beyond `resvg`.
 
-### Fix 3 — Remove the purple placeholder (`crates/core/ui/render/src/style.rs`)
+### Fix 3 — Remove the purple placeholder (`crates/core/frontend/compiler/src/style.rs`)
 
 Find the `"icon"` arm in `default_style_for_tag()` (around line 1128). It currently sets `background_color = #7f67be` and `border_radius = 9`. This purple box is a debug placeholder — it masks broken icons by always showing something.
 
@@ -317,7 +334,7 @@ Replace with:
 
 Size defaults remain (18px) because without a `size` attribute the painter uses `w.max(h)` which needs to be non-zero.
 
-### Fix 4 — Add decoded image caching (`crates/core/ui/render/src/surface/icon.rs`)
+### Fix 4 — Add decoded image caching (`crates/core/frontend/render/src/surface/icon.rs`)
 
 `draw_icon_from_path` currently calls `image::open(path)` on every paint frame. With a 250ms poll interval, this runs ~4 times per second per icon. Add a static cache:
 

@@ -1,0 +1,12 @@
+[package]
+name = "mesh-core-runtime"
+description = "Shared module sandbox policy types for MESH runtimes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-core-capability = { workspace = true }
+
+thiserror = { workspace = true }
+tracing = { workspace = true }

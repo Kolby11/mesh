@@ -1,10 +1,3 @@
-use super::layout::{
-    annotate_overflow_tree, collect_focus_traversal, find_click_handler, find_event_handler,
-    find_focusable_at, find_node_bounds_by_key, find_node_by_key, find_node_path_at,
-    find_scrollable_at, find_tooltip_by_key, find_tooltip_text_by_key, is_input_key, is_slider_key,
-    measure_content_size, namespace_event_handlers, next_focus_target, parse_namespaced_handler,
-    scroll_limits,
-};
 use super::service::{apply_service_update, script_events_to_requests, seed_service_state};
 use super::surface_layout::{
     SurfaceLayoutSettings, SurfaceSizePolicy, load_frontend_module_settings,
@@ -12,6 +5,13 @@ use super::surface_layout::{
 use super::types::{
     ComponentContext, ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent,
     CoreRequest, KeyModifiers, ServiceEvent, ShellComponent, TabFocusTarget,
+};
+use mesh_core_interaction::{
+    annotate_overflow_tree, collect_focus_traversal, find_click_handler, find_event_handler,
+    find_focusable_at, find_node_bounds_by_key, find_node_by_key, find_node_path_at,
+    find_scrollable_at, find_tooltip_by_key, find_tooltip_text_by_key, is_input_key, is_slider_key,
+    measure_content_size, namespace_event_handlers, next_focus_target, parse_namespaced_handler,
+    scroll_limits,
 };
 mod animation;
 mod catalog;
@@ -26,7 +26,7 @@ mod shell_component;
 
 use animation::StyleAnimation;
 pub(in crate::shell) use catalog::FrontendCatalog;
-pub(in crate::shell) use runtime_tree::ScrollOffsetState;
+pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 use runtime_tree::{
     RetainedWidgetTree, annotate_runtime_tree, collect_all_keys, collect_element_metrics,
     input_accepts_char,
@@ -37,10 +37,10 @@ use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::{
     LayoutEngine, StyleContext, StyleResolver, VariableStore, WidgetNode, element_snapshot_json,
 };
-use mesh_core_locale::LocaleEngine;
-use mesh_core_render::{
+use mesh_core_frontend::{
     CompiledFrontendModule, FrontendRenderMode, compile_frontend_module, root_accessibility_role,
 };
+use mesh_core_locale::LocaleEngine;
 use mesh_core_scripting::{LocaleBoundState, ScriptContext, ScriptInterfaceImport};
 use mesh_core_theme::{Theme, default_theme};
 use mesh_core_wayland::{Edge, KeyboardMode, ShellSurface};
@@ -208,9 +208,8 @@ pub(super) struct FrontendSurfaceComponent {
     /// immediately re-show it from stale state.
     portal_hidden_bindings: RefCell<HashMap<String, String>>,
     style_animations: HashMap<String, StyleAnimation>,
-    keyframe_animations:
-        HashMap<String, mesh_core_render::animation::keyframes::ActiveKeyframeAnimation>,
-    keyframe_rules: HashMap<String, mesh_core_render::animation::keyframes::KeyframeRule>,
+    keyframe_animations: HashMap<String, mesh_core_animation::keyframes::ActiveKeyframeAnimation>,
+    keyframe_rules: HashMap<String, mesh_core_animation::keyframes::KeyframeRule>,
     has_active_keyframe_animation: bool,
     profiling_enabled: bool,
     profiling_records: Vec<ComponentProfilingRecord>,

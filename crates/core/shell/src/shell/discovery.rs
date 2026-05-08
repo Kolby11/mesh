@@ -62,7 +62,7 @@ impl Shell {
             components: Vec::new(),
             surfaces: HashMap::new(),
             clipboard: Box::new(WaylandClipboard::default()),
-            render_engine: RenderEngine::select(),
+            presentation_engine: PresentationEngine::select(),
             theme_watch,
             settings_watch,
             debug: DebugOverlayState::default(),

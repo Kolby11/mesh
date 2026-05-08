@@ -3,7 +3,6 @@ use super::{
     InterfaceProvider, InterfaceRegistry, KeyModifiers, ServiceCommandMsg, ServiceEvent, Shell,
     TabFocusTarget, backend_launch_candidates_from_graph, component_key_pressed_input,
     component_key_released_input,
-    layout::measure_content_size,
     service::{apply_service_update, seed_service_state, service_name_from_interface},
     shell_global_shortcut_request,
     surface_layout::{SurfaceSizePolicy, load_active_theme, load_frontend_module_settings},
@@ -11,6 +10,7 @@ use super::{
 use mesh_core_config::ShellConfig;
 use mesh_core_debug::{ProfilingBackendStage, ProfilingStage};
 use mesh_core_elements::{LayoutRect, VariableStore, WidgetNode};
+use mesh_core_interaction::measure_content_size;
 use mesh_core_module::ModuleInstance;
 use mesh_core_module::manifest::{
     CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
@@ -29,7 +29,7 @@ use mesh_core_service::{
 use mesh_core_wayland::{ClipboardError, ClipboardWriter};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::runtime::Runtime;
@@ -3098,6 +3098,79 @@ fn service_update_accepts_canonical_interface_name() {
 fn normalizes_service_names_from_interfaces() {
     assert_eq!(service_name_from_interface("mesh.audio"), "audio");
     assert_eq!(service_name_from_interface("audio"), "audio");
+}
+
+#[test]
+fn core_crate_boundaries_do_not_regress() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+
+    let frontend = manifest_dependencies(&root.join("crates/core/frontend/compiler/Cargo.toml"));
+    assert!(!frontend.contains("mesh-core-shell"));
+    assert!(!frontend.contains("mesh-core-render"));
+    assert!(!frontend.contains("mesh-core-presentation"));
+
+    let frontend_host = manifest_dependencies(&root.join("crates/core/frontend/host/Cargo.toml"));
+    assert!(frontend_host.contains("mesh-core-render"));
+    assert!(frontend_host.contains("mesh-core-wayland"));
+    assert!(!frontend_host.contains("mesh-core-shell"));
+    assert!(!frontend_host.contains("mesh-core-frontend"));
+    assert!(!frontend_host.contains("mesh-core-presentation"));
+
+    let animation = manifest_dependencies(&root.join("crates/core/ui/animation/Cargo.toml"));
+    assert!(animation.contains("mesh-core-elements"));
+    assert!(!animation.contains("mesh-core-shell"));
+    assert!(!animation.contains("mesh-core-frontend"));
+    assert!(!animation.contains("mesh-core-render"));
+
+    let interaction = manifest_dependencies(&root.join("crates/core/ui/interaction/Cargo.toml"));
+    assert!(interaction.contains("mesh-core-elements"));
+    assert!(!interaction.contains("mesh-core-shell"));
+    assert!(!interaction.contains("mesh-core-render"));
+    assert!(!interaction.contains("mesh-core-presentation"));
+
+    let render = manifest_dependencies(&root.join("crates/core/frontend/render/Cargo.toml"));
+    assert!(render.contains("mesh-core-elements"));
+    assert!(render.contains("mesh-core-icon"));
+    assert!(!render.contains("mesh-core-shell"));
+    assert!(!render.contains("mesh-core-frontend"));
+    assert!(!render.contains("mesh-core-presentation"));
+
+    let presentation = manifest_dependencies(&root.join("crates/core/presentation/Cargo.toml"));
+    assert!(presentation.contains("mesh-core-render"));
+    assert!(presentation.contains("mesh-core-wayland"));
+    assert!(!presentation.contains("mesh-core-shell"));
+    assert!(!presentation.contains("mesh-core-frontend"));
+
+    let surface_config = manifest_dependencies(&root.join("crates/core/surface-config/Cargo.toml"));
+    assert!(surface_config.contains("mesh-core-module"));
+    assert!(surface_config.contains("mesh-core-wayland"));
+    assert!(!surface_config.contains("mesh-core-shell"));
+    assert!(!surface_config.contains("mesh-core-render"));
+}
+
+fn manifest_dependencies(path: &Path) -> String {
+    let manifest = std::fs::read_to_string(path).expect("read crate manifest");
+    manifest_section(&manifest, "[dependencies]")
+}
+
+fn manifest_section(manifest: &str, section: &str) -> String {
+    let mut output = String::new();
+    let mut in_section = false;
+    for line in manifest.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            if in_section {
+                break;
+            }
+            in_section = trimmed == section;
+            continue;
+        }
+        if in_section {
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+    output
 }
 
 fn unique_test_file(prefix: &str) -> PathBuf {

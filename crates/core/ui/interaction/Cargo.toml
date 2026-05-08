@@ -1,0 +1,10 @@
+[package]
+name = "mesh-core-interaction"
+description = "Widget tree hit testing, focus traversal, and scroll interaction helpers for MESH"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-core-elements = { workspace = true }
+mesh-core-module = { workspace = true }

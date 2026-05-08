@@ -10,13 +10,19 @@ members = [
     "crates/core/foundation/locale",
     "crates/core/foundation/diagnostics",
     "crates/core/platform/wayland",
-    "crates/core/runtime/host",
+    "crates/core/runtime/sandbox",
     "crates/core/extension/service",
     "crates/core/ui/component",
     "crates/core/ui/elements",
     "crates/core/ui/icon",
+    "crates/core/ui/animation",
+    "crates/core/ui/interaction",
     "crates/core/runtime/scripting",
-    "crates/core/ui/render",
+    "crates/core/frontend/host",
+    "crates/core/frontend/compiler",
+    "crates/core/surface-config",
+    "crates/core/frontend/render",
+    "crates/core/presentation",
     "crates/core/runtime/backend",
     "crates/tools/cli",
     "crates/core/foundation/debug",
@@ -39,13 +45,19 @@ mesh-core-theme = { path = "crates/core/foundation/theme" }
 mesh-core-locale = { path = "crates/core/foundation/locale" }
 mesh-core-diagnostics = { path = "crates/core/foundation/diagnostics" }
 mesh-core-wayland = { path = "crates/core/platform/wayland" }
-mesh-core-runtime = { path = "crates/core/runtime/host" }
+mesh-core-runtime = { path = "crates/core/runtime/sandbox" }
 mesh-core-service = { path = "crates/core/extension/service" }
 mesh-core-component = { path = "crates/core/ui/component" }
 mesh-core-elements = { path = "crates/core/ui/elements" }
 mesh-core-icon = { path = "crates/core/ui/icon" }
+mesh-core-animation = { path = "crates/core/ui/animation" }
+mesh-core-interaction = { path = "crates/core/ui/interaction" }
 mesh-core-scripting = { path = "crates/core/runtime/scripting" }
-mesh-core-render = { path = "crates/core/ui/render" }
+mesh-core-frontend-host = { path = "crates/core/frontend/host" }
+mesh-core-frontend = { path = "crates/core/frontend/compiler" }
+mesh-core-surface-config = { path = "crates/core/surface-config" }
+mesh-core-render = { path = "crates/core/frontend/render" }
+mesh-core-presentation = { path = "crates/core/presentation" }
 mesh-core-backend = { path = "crates/core/runtime/backend" }
 mesh-core-debug = { path = "crates/core/foundation/debug" }
 

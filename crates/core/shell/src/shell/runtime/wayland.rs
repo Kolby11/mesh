@@ -2,7 +2,7 @@ use super::super::*;
 
 impl Shell {
     pub(in crate::shell) fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
-        let events = coalesce_pointer_moves(self.render_engine.poll_events());
+        let events = coalesce_pointer_moves(self.presentation_engine.poll_events());
         for event in events {
             let input_started = self.profiling_enabled().then(std::time::Instant::now);
             let trigger_kind = profiling_trigger_for_event(&event);
@@ -52,7 +52,7 @@ impl Shell {
             };
             let _ = surface;
             let surface_size = fixed_surface_size
-                .or(self.render_engine.surface_size(&runtime_surface_id)?)
+                .or(self.presentation_engine.surface_size(&runtime_surface_id)?)
                 .unwrap_or((1, 1));
 
             if let WindowEvent::Key {

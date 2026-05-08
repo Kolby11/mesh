@@ -421,10 +421,10 @@ for implementation:
     pack-qualified → dependency chain → hicolor → missing)
   - Resolution cache, glyph cache invalidation hooks
   - Built-in missing-icon SVG
-- `mesh-core-render/src/surface/icon.rs`
+- `crates/core/frontend/render/src/surface/icon.rs`
   - Branch on resolved target kind (file vs. font glyph)
   - Variable-axis pass-through to glyph rasterizer
-- `mesh-core-render/src/surface/glyph.rs`
+- `crates/core/frontend/render/src/surface/glyph.rs`
   - swash-based glyph rasterizer
 - `mesh-core-elements/src/style/`
   - Parse `--icon-*` custom properties; expose on `ComputedStyle`

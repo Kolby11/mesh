@@ -1,0 +1,464 @@
+use super::*;
+
+impl CompositorHandler for State {
+    fn scale_factor_changed(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _new_factor: i32,
+    ) {
+    }
+
+    fn transform_changed(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _new_transform: wl_output::Transform,
+    ) {
+    }
+
+    fn frame(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _time: u32,
+    ) {
+    }
+
+    fn surface_enter(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _output: &wl_output::WlOutput,
+    ) {
+    }
+
+    fn surface_leave(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _output: &wl_output::WlOutput,
+    ) {
+    }
+}
+
+impl OutputHandler for State {
+    fn output_state(&mut self) -> &mut OutputState {
+        &mut self.output_state
+    }
+
+    fn new_output(&mut self, _c: &Connection, _q: &QueueHandle<Self>, _o: wl_output::WlOutput) {}
+
+    fn update_output(&mut self, _c: &Connection, _q: &QueueHandle<Self>, _o: wl_output::WlOutput) {}
+
+    fn output_destroyed(
+        &mut self,
+        _c: &Connection,
+        _q: &QueueHandle<Self>,
+        _o: wl_output::WlOutput,
+    ) {
+    }
+}
+
+impl ShmHandler for State {
+    fn shm_state(&mut self) -> &mut Shm {
+        &mut self.shm
+    }
+}
+
+impl LayerShellHandler for State {
+    fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, layer: &LayerSurface) {
+        let id = self
+            .surfaces
+            .iter()
+            .find(|(_, entry)| entry.layer_surface.wl_surface() == layer.wl_surface())
+            .map(|(id, _)| id.clone());
+        if let Some(id) = id {
+            self.surfaces.remove(&id);
+        }
+    }
+
+    fn configure(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        layer: &LayerSurface,
+        configure: LayerSurfaceConfigure,
+        _serial: u32,
+    ) {
+        let entry = self
+            .surfaces
+            .values_mut()
+            .find(|entry| entry.layer_surface.wl_surface() == layer.wl_surface());
+        if let Some(entry) = entry {
+            let (w, h) = configure.new_size;
+            if w > 0 {
+                entry.width = w;
+            }
+            if h > 0 {
+                entry.height = h;
+            }
+            entry.configured = true;
+        }
+    }
+}
+
+impl SeatHandler for State {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.seat_state
+    }
+
+    fn new_seat(&mut self, _c: &Connection, _q: &QueueHandle<Self>, _s: wl_seat::WlSeat) {}
+
+    fn new_capability(
+        &mut self,
+        _conn: &Connection,
+        qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: SeatCapability,
+    ) {
+        self.activation_seat = Some(seat.clone());
+        if capability == SeatCapability::Pointer && self.pointer.is_none() {
+            if let Ok(ptr) = self.seat_state.get_pointer(qh, &seat) {
+                tracing::debug!("[hover] layer_shell: pointer capability acquired");
+                self.pointer = Some(ptr);
+            }
+        }
+        if capability == SeatCapability::Keyboard && self.keyboard.is_none() {
+            if let Ok(kbd) = self.seat_state.get_keyboard(qh, &seat, None) {
+                self.keyboard = Some(kbd);
+            }
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        _c: &Connection,
+        _q: &QueueHandle<Self>,
+        _s: wl_seat::WlSeat,
+        capability: SeatCapability,
+    ) {
+        if capability == SeatCapability::Pointer {
+            if let Some(pointer) = self.pointer.take() {
+                pointer.release();
+            }
+        }
+        if capability == SeatCapability::Keyboard {
+            if let Some(keyboard) = self.keyboard.take() {
+                keyboard.release();
+            }
+        }
+    }
+
+    fn remove_seat(&mut self, _c: &Connection, _q: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        if self.activation_seat.as_ref() == Some(&seat) {
+            self.activation_seat = None;
+        }
+    }
+}
+
+impl PointerHandler for State {
+    fn pointer_frame(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _pointer: &wl_pointer::WlPointer,
+        events: &[PointerEvent],
+    ) {
+        for event in events {
+            let surface_id = match self.surface_id_for_wl_surface(&event.surface) {
+                Some(id) => id,
+                None => continue,
+            };
+            match event.kind {
+                PointerEventKind::Enter { .. } => {
+                    tracing::debug!("[hover] layer_shell: pointer enter surface_id={surface_id}");
+                    self.pointer_focus = Some(surface_id.clone());
+                }
+                PointerEventKind::Leave { .. } => {
+                    tracing::debug!("[hover] layer_shell: pointer leave surface_id={surface_id}");
+                    if self.pointer_focus.as_deref() == Some(&surface_id) {
+                        self.pointer_focus = None;
+                    }
+                }
+                PointerEventKind::Motion { .. } => {
+                    let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+                    tracing::trace!(
+                        "[hover] layer_shell: pointer motion surface_id={surface_id} x={x:.1} y={y:.1}"
+                    );
+                    self.events
+                        .push(DevWindowEvent::PointerMove { surface_id, x, y });
+                }
+                PointerEventKind::Press { button, .. } => {
+                    if button == 0x110 {
+                        self.request_surface_focus(&surface_id, event);
+                        let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+                        tracing::debug!(
+                            "[hover] layer_shell: pointer press surface_id={surface_id} x={x:.1} y={y:.1}"
+                        );
+                        self.events.push(DevWindowEvent::PointerButton {
+                            surface_id,
+                            x,
+                            y,
+                            pressed: true,
+                        });
+                    }
+                }
+                PointerEventKind::Release { button, .. } => {
+                    if button == 0x110 {
+                        let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+                        tracing::debug!(
+                            "[hover] layer_shell: pointer release surface_id={surface_id} x={x:.1} y={y:.1}"
+                        );
+                        self.events.push(DevWindowEvent::PointerButton {
+                            surface_id,
+                            x,
+                            y,
+                            pressed: false,
+                        });
+                    }
+                }
+                PointerEventKind::Axis {
+                    horizontal,
+                    vertical,
+                    ..
+                } => {
+                    let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+                    let dx = -horizontal.absolute as f32;
+                    let dy = -vertical.absolute as f32;
+                    if dx.abs() > f32::EPSILON || dy.abs() > f32::EPSILON {
+                        self.events.push(DevWindowEvent::Scroll {
+                            surface_id,
+                            x,
+                            y,
+                            dx,
+                            dy,
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl ActivationHandler for State {
+    type RequestData = RequestData;
+
+    fn new_token(&mut self, token: String, data: &Self::RequestData) {
+        let Some(activation) = self.activation_state.as_ref() else {
+            return;
+        };
+        let Some(surface) = data.surface.as_ref() else {
+            return;
+        };
+        tracing::debug!("[focus] layer_shell: activating surface via xdg-activation");
+        activation.activate::<State>(surface, token);
+    }
+}
+
+impl Dispatch<HyprlandFocusGrabManagerV1, GlobalData, State> for State {
+    fn event(
+        _: &mut State,
+        _: &HyprlandFocusGrabManagerV1,
+        _: hyprland_focus_grab_manager_v1::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        unreachable!("hyprland_focus_grab_manager_v1 has no events");
+    }
+}
+
+impl Dispatch<HyprlandFocusGrabV1, (), State> for State {
+    fn event(
+        state: &mut State,
+        _: &HyprlandFocusGrabV1,
+        event: hyprland_focus_grab_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        if let hyprland_focus_grab_v1::Event::Cleared = event {
+            tracing::debug!("[focus] layer_shell: compositor cleared focus grab");
+            if let Some(surface_id) = state.focus_grab_surface_id.take() {
+                state.reapply_surface_config(&surface_id);
+            }
+        }
+    }
+}
+
+impl KeyboardHandler for State {
+    fn enter(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        surface: &wl_surface::WlSurface,
+        _serial: u32,
+        _raw: &[u32],
+        _keysyms: &[Keysym],
+    ) {
+        let focused = self.surface_id_for_wl_surface(surface);
+        if self.keyboard_focus != focused {
+            self.keyboard_repeat = None;
+        }
+        self.keyboard_focus = focused;
+    }
+
+    fn leave(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _surface: &wl_surface::WlSurface,
+        _serial: u32,
+    ) {
+        self.keyboard_focus = None;
+        self.keyboard_repeat = None;
+    }
+
+    fn press_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        event: KeyEvent,
+    ) {
+        let Some(surface_id) = self.keyboard_focus.clone() else {
+            return;
+        };
+        let name = keysym_name(event.keysym);
+        let mods = KeyMods {
+            ctrl: self.keyboard_mods.ctrl,
+            shift: self.keyboard_mods.shift,
+            alt: self.keyboard_mods.alt,
+        };
+        self.events.push(DevWindowEvent::Key {
+            surface_id: surface_id.clone(),
+            event: DevWindowKeyEvent::Pressed(name.clone(), mods.clone()),
+        });
+        let ch = event
+            .utf8
+            .as_deref()
+            .and_then(|s| s.chars().next())
+            .filter(|ch| !ch.is_control());
+        if let Some(ch) = ch {
+            self.events.push(DevWindowEvent::Char {
+                surface_id: surface_id.clone(),
+                ch,
+            });
+        }
+        self.schedule_keyboard_repeat(surface_id, name, mods, ch);
+    }
+
+    fn release_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        event: KeyEvent,
+    ) {
+        let Some(surface_id) = self.keyboard_focus.clone() else {
+            return;
+        };
+        let name = keysym_name(event.keysym);
+        self.clear_keyboard_repeat_for_key(&name);
+        self.events.push(DevWindowEvent::Key {
+            surface_id,
+            event: DevWindowKeyEvent::Released(name),
+        });
+    }
+
+    fn update_modifiers(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        modifiers: Modifiers,
+        _layout: u32,
+    ) {
+        self.keyboard_mods = modifiers;
+        let mods = KeyMods {
+            ctrl: self.keyboard_mods.ctrl,
+            shift: self.keyboard_mods.shift,
+            alt: self.keyboard_mods.alt,
+        };
+        if let Some(repeat) = self.keyboard_repeat.as_mut() {
+            repeat.mods = mods;
+        }
+    }
+
+    fn update_repeat_info(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        info: RepeatInfo,
+    ) {
+        self.keyboard_repeat_info = info;
+        if matches!(info, RepeatInfo::Disable) {
+            self.keyboard_repeat = None;
+        }
+    }
+}
+
+fn keysym_name(sym: Keysym) -> String {
+    sym.name()
+        .map(normalize_keysym_name)
+        .unwrap_or_else(|| format!("{:#x}", sym.raw()))
+}
+
+fn normalize_keysym_name(name: &str) -> String {
+    // `xkeysym::Keysym::name()` returns Rust-constant identifiers like `XK_Tab`.
+    // Strip the prefix so downstream key matching sees the bare xkbcommon name.
+    let name = name.strip_prefix("XK_").unwrap_or(name);
+    match name {
+        "Return" | "KP_Enter" => "Enter".into(),
+        "space" | "KP_Space" => "Space".into(),
+        "Tab" | "ISO_Left_Tab" => "Tab".into(),
+        "BackSpace" => "Backspace".into(),
+        "Left" | "KP_Left" => "ArrowLeft".into(),
+        "Right" | "KP_Right" => "ArrowRight".into(),
+        "Up" | "KP_Up" => "ArrowUp".into(),
+        "Down" | "KP_Down" => "ArrowDown".into(),
+        "Prior" => "PageUp".into(),
+        "Next" => "PageDown".into(),
+        "Escape" => "Esc".into(),
+        other => other.to_string(),
+    }
+}
+
+delegate_activation!(State);
+delegate_compositor!(State);
+delegate_output!(State);
+delegate_shm!(State);
+delegate_layer!(State);
+delegate_seat!(State);
+delegate_pointer!(State);
+delegate_keyboard!(State);
+delegate_registry!(State);
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_keysym_name;
+
+    #[test]
+    fn normalize_keysym_name_maps_common_xkb_names_to_shell_names() {
+        assert_eq!(normalize_keysym_name("Return"), "Enter");
+        assert_eq!(normalize_keysym_name("space"), "Space");
+        assert_eq!(normalize_keysym_name("ISO_Left_Tab"), "Tab");
+        assert_eq!(normalize_keysym_name("BackSpace"), "Backspace");
+        assert_eq!(normalize_keysym_name("Left"), "ArrowLeft");
+        assert_eq!(normalize_keysym_name("Right"), "ArrowRight");
+        assert_eq!(normalize_keysym_name("Up"), "ArrowUp");
+        assert_eq!(normalize_keysym_name("Down"), "ArrowDown");
+    }
+}

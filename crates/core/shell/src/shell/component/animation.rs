@@ -2,19 +2,19 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::shell::component::ComponentDirtyFlags;
-use mesh_core_component::style as component_style;
-use mesh_core_elements::{
-    Corners, Dimension, Edges, StyleResolver, Transform2D, TransitionEasing, TransitionStyle,
-    WidgetNode,
-    style::{AnimationPlayState, Color},
-};
-use mesh_core_render::animation::{
+use mesh_core_animation::{
     Interpolate,
     keyframes::{
         ActiveKeyframeAnimation, KeyframeRegistry, KeyframeRule as RenderKeyframeRule,
         KeyframeStop as RenderKeyframeStop,
     },
     transition::AnimatableStyle,
+};
+use mesh_core_component::style as component_style;
+use mesh_core_elements::{
+    Corners, Dimension, Edges, StyleResolver, Transform2D, TransitionEasing, TransitionStyle,
+    WidgetNode,
+    style::{AnimationPlayState, Color},
 };
 
 use super::FrontendSurfaceComponent;
@@ -601,8 +601,8 @@ fn collect_visual_styles_into(
 }
 
 fn apply_easing(easing: TransitionEasing, t: f32) -> f32 {
-    let renderer_easing: mesh_core_render::animation::Easing = easing.into();
-    mesh_core_render::animation::apply_easing(renderer_easing, t)
+    let renderer_easing: mesh_core_animation::Easing = easing.into();
+    mesh_core_animation::apply_easing(renderer_easing, t)
 }
 
 /// Interpolate between two `Dimension` values when the variants match.

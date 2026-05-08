@@ -1,5 +1,5 @@
 use super::super::*;
-use mesh_core_render::surface::LayerSurfaceSizePolicy;
+use mesh_core_presentation::LayerSurfaceSizePolicy;
 
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
@@ -13,7 +13,7 @@ impl Shell {
                     .get(&surface_id)
                     .ok_or_else(|| ShellRunError::MissingSurface(surface_id.clone()))?;
                 if surface.width == 0 || surface.height == 0 {
-                    self.render_engine.surface_size(&surface_id)?
+                    self.presentation_engine.surface_size(&surface_id)?
                 } else {
                     Some((surface.width.max(1), surface.height.max(1)))
                 }
@@ -90,14 +90,14 @@ impl Shell {
                         margin_left: 0,
                     }
                 };
-                self.render_engine.configure(&surface_id, cfg);
+                self.presentation_engine.configure(&surface_id, cfg);
 
                 if !visible {
                     break PixelBuffer::new(1, 1);
                 }
 
                 let configured_size = if surface.width == 0 || surface.height == 0 {
-                    self.render_engine.surface_size(&surface_id)?
+                    self.presentation_engine.surface_size(&surface_id)?
                 } else {
                     None
                 };
@@ -164,14 +164,14 @@ impl Shell {
             }
 
             let present_started = self.profiling_enabled().then(std::time::Instant::now);
-            self.render_engine
+            self.presentation_engine
                 .present(
                     &surface_id,
                     self.components[index].component.id(),
                     visible,
                     &buffer,
                 )
-                .map_err(ShellRunError::Render)?;
+                .map_err(ShellRunError::Presentation)?;
             if let Some(started) = present_started {
                 self.record_surface_profiling_stage(
                     &surface_id,

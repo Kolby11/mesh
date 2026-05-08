@@ -32,7 +32,6 @@ mod backend;
 mod component;
 mod discovery;
 mod ipc;
-mod layout;
 mod runtime;
 mod service;
 mod sounds;
@@ -44,10 +43,11 @@ use backend::{BackendLaunchCandidate, backend_launch_candidates_from_graph};
 use backend::{BackendRuntimeStatus, BackendRuntimeStatusEntry};
 use ipc::spawn_ipc_server;
 use mesh_core_backend::{BackendServiceEvent, spawn_backend_service};
-use mesh_core_render::{
-    DebugOverlay, LayerSurfaceConfig, PixelBuffer, RenderEngine, WindowEvent, WindowKeyEvent,
-    coalesce_pointer_moves, event_surface_id,
+use mesh_core_presentation::{
+    LayerSurfaceConfig, PresentationEngine, WindowEvent, WindowKeyEvent, coalesce_pointer_moves,
+    event_surface_id,
 };
+use mesh_core_render::{DebugOverlay, PixelBuffer};
 use sounds::{SoundKind, play_shell_sound};
 use surface_layout::{default_surface_visibility, load_active_theme};
 use types::{
@@ -371,7 +371,7 @@ pub struct Shell {
     components: Vec<ComponentRuntime>,
     surfaces: HashMap<SurfaceId, StubSurface>,
     clipboard: Box<dyn ClipboardWriter>,
-    render_engine: RenderEngine,
+    presentation_engine: PresentationEngine,
     theme_watch: ThemeWatchState,
     settings_watch: SettingsWatchState,
     debug: DebugOverlayState,
@@ -426,7 +426,7 @@ pub enum ShellRunError {
     #[error("failed to compile frontend module '{module_id}': {source}")]
     FrontendCompile {
         module_id: String,
-        source: mesh_core_render::CompileFrontendError,
+        source: mesh_core_frontend::CompileFrontendError,
     },
 
     #[error(transparent)]
@@ -439,7 +439,7 @@ pub enum ShellRunError {
     MissingSurface(String),
 
     #[error(transparent)]
-    Render(#[from] mesh_core_render::RenderError),
+    Presentation(#[from] mesh_core_presentation::PresentationError),
 
     #[error("failed to initialize ipc socket at {path}: {source}")]
     IpcInit {

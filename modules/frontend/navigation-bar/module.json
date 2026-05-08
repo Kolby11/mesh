@@ -29,7 +29,7 @@
     },
     "icon_packs": {
       "required": [
-        "@mesh/icons-default"
+        "system"
       ]
     }
   },
