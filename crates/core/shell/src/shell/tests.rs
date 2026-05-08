@@ -1342,6 +1342,82 @@ fn profiling_backend_poll_update_ignores_stale_backend_messages() {
 }
 
 #[test]
+fn profiling_state_publish_delivery_attributes_accepted_service_updates() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    let seen_events = Arc::new(Mutex::new(Vec::new()));
+    shell
+        .components
+        .push(super::types::ComponentRuntime::new(Box::new(
+            RecordingComponent::new(seen_events.clone()),
+        )));
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 40.0 }),
+        ))
+        .unwrap();
+
+    assert_eq!(seen_events.lock().unwrap().len(), 1);
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    let backend = profiling
+        .backends
+        .iter()
+        .find(|backend| {
+            backend.interface == "mesh.audio" && backend.provider_id == "@mesh/pipewire-audio"
+        })
+        .expect("accepted service updates should record backend publish/delivery profiling");
+    let stage = backend
+        .stages
+        .iter()
+        .find(|stage| stage.stage == ProfilingBackendStage::StatePublishDelivery)
+        .expect("publish/delivery stage should be recorded for accepted service updates");
+    assert_eq!(stage.sample_count, 1);
+    assert!(
+        stage
+            .recent_samples
+            .iter()
+            .all(|sample| sample.trigger_kind.as_deref() == Some("broadcast_service_event"))
+    );
+}
+
+#[test]
+fn profiling_state_publish_delivery_ignores_stale_service_updates() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/old-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+    let (new_slot, _new_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/new-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), new_slot);
+
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/old-audio",
+            serde_json::json!({ "available": true, "percent": 12.0 }),
+        ))
+        .unwrap();
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    assert!(
+        profiling.backends.is_empty(),
+        "stale service updates must not create publish/delivery samples"
+    );
+}
+
+#[test]
 fn terminal_provider_update_does_not_replace_latest_state_or_reach_components() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();

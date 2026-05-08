@@ -157,10 +157,7 @@ impl ProfilingRuntimeState {
             .map(|(surface_id, surface)| ProfilingSurfaceSnapshot {
                 surface_id: surface_id.clone(),
                 module_id: surface.module_id.clone(),
-                stages: surface
-                    .scope
-                    .snapshot()
-                    .stages,
+                stages: surface.scope.snapshot().stages,
                 redraw_count: surface.scope.redraw_count,
                 total_surface_render_time_micros: surface.scope.total_surface_render_time_micros,
             })
@@ -170,15 +167,17 @@ impl ProfilingRuntimeState {
         let backends = self
             .backends
             .iter()
-            .map(|((interface, provider_id), backend)| ProfilingBackendSnapshot {
-                interface: interface.clone(),
-                provider_id: provider_id.clone(),
-                stages: backend
-                    .stages
-                    .iter()
-                    .map(|(stage, summary)| summary.snapshot(*stage))
-                    .collect(),
-            })
+            .map(
+                |((interface, provider_id), backend)| ProfilingBackendSnapshot {
+                    interface: interface.clone(),
+                    provider_id: provider_id.clone(),
+                    stages: backend
+                        .stages
+                        .iter()
+                        .map(|(stage, summary)| summary.snapshot(*stage))
+                        .collect(),
+                },
+            )
             .collect();
 
         ProfilingSnapshot {
@@ -373,10 +372,21 @@ impl Shell {
         if !self.profiling_enabled() {
             return;
         }
-        self.profiling.record_backend_stage(
+        self.profiling
+            .record_backend_stage(interface, provider_id, stage, duration, trigger_kind);
+    }
+
+    pub(crate) fn record_backend_state_publish_delivery(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        duration: Duration,
+        trigger_kind: Option<&str>,
+    ) {
+        self.record_backend_profiling_stage(
             interface,
             provider_id,
-            stage,
+            ProfilingBackendStage::StatePublishDelivery,
             duration,
             trigger_kind,
         );

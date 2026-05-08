@@ -5,10 +5,30 @@ impl Shell {
         &mut self,
         event: ServiceEvent,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let profiling_started = self
+            .profiling_enabled()
+            .then_some(std::time::Instant::now());
         if !self.record_latest_service_state(&event) {
             return Ok(VecDeque::new());
         }
-        self.deliver_service_event(&event)
+        let requests = self.deliver_service_event(&event)?;
+        if let (
+            Some(started),
+            ServiceEvent::Updated {
+                service,
+                source_module,
+                ..
+            },
+        ) = (profiling_started, &event)
+        {
+            self.record_backend_state_publish_delivery(
+                &canonical_interface_name(service),
+                source_module,
+                started.elapsed(),
+                Some("broadcast_service_event"),
+            );
+        }
+        Ok(requests)
     }
 
     pub(in crate::shell) fn record_latest_service_state(&mut self, event: &ServiceEvent) -> bool {
