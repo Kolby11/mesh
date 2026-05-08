@@ -63,7 +63,11 @@ impl Shell {
         &mut self,
         request: CoreRequest,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        match request {
+        let trigger_kind = profiling_trigger_for_request(&request);
+        let profiling_started = self
+            .profiling_enabled()
+            .then(std::time::Instant::now);
+        let result = match request {
             CoreRequest::PositionSurface {
                 surface_id,
                 margin_top,
@@ -206,7 +210,17 @@ impl Shell {
                 self.core.shutting_down = true;
                 Ok(VecDeque::new())
             }
+        };
+        if let Some(started) = profiling_started
+            && result.is_ok()
+        {
+            self.record_shell_profiling_stage(
+                mesh_core_debug::ProfilingStage::RuntimeUpdateHandling,
+                started.elapsed(),
+                Some(trigger_kind),
+            );
         }
+        result
     }
 
     pub(in crate::shell) fn dispatch_service_command(
@@ -475,5 +489,24 @@ impl Shell {
             surface_id,
             visible,
         })
+    }
+}
+
+fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
+    match request {
+        CoreRequest::PositionSurface { .. } => "position_surface",
+        CoreRequest::ToggleSurface { .. } => "toggle_surface",
+        CoreRequest::ShowSurface { .. } => "show_surface",
+        CoreRequest::HideSurface { .. } => "hide_surface",
+        CoreRequest::PublishDiagnostics { .. } => "publish_diagnostics",
+        CoreRequest::ServiceCommand { .. } => "service_command",
+        CoreRequest::WriteClipboard { .. } => "write_clipboard",
+        CoreRequest::SetTheme { .. } => "set_theme",
+        CoreRequest::ActivatePopover { .. } => "activate_popover",
+        CoreRequest::TransferTabFocus { .. } => "transfer_tab_focus",
+        CoreRequest::ToggleDebugOverlay => "toggle_debug_overlay",
+        CoreRequest::ToggleDebugProfiling => "toggle_debug_profiling",
+        CoreRequest::CycleDebugTab => "cycle_debug_tab",
+        CoreRequest::Shutdown => "shutdown",
     }
 }

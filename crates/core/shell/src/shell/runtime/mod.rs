@@ -54,6 +54,14 @@ impl Shell {
             self.dispatch_wayland()?;
 
             while let Ok(message) = rx.try_recv() {
+                let message_started = self
+                    .profiling_enabled()
+                    .then(std::time::Instant::now);
+                let trigger_kind = match &message {
+                    ShellMessage::Service(_) => "service_event",
+                    ShellMessage::BackendLifecycle { .. } => "backend_lifecycle",
+                    ShellMessage::Ipc(_) => "ipc",
+                };
                 match message {
                     ShellMessage::Service(event) => {
                         pending.extend(self.broadcast_service_event(event)?);
@@ -74,6 +82,13 @@ impl Shell {
                     ShellMessage::Ipc(request) => {
                         pending.push_back(request);
                     }
+                }
+                if let Some(started) = message_started {
+                    self.record_shell_profiling_stage(
+                        mesh_core_debug::ProfilingStage::RuntimeUpdateHandling,
+                        started.elapsed(),
+                        Some(trigger_kind),
+                    );
                 }
             }
 

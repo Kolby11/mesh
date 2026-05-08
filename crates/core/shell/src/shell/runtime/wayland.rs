@@ -4,6 +4,10 @@ impl Shell {
     pub(in crate::shell) fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
         let events = coalesce_pointer_moves(self.render_engine.poll_events());
         for event in events {
+            let input_started = self
+                .profiling_enabled()
+                .then(std::time::Instant::now);
+            let trigger_kind = profiling_trigger_for_event(&event);
             tracing::trace!(
                 "[hover] dispatch_wayland: got event {:?}",
                 std::mem::discriminant(&event)
@@ -129,6 +133,13 @@ impl Shell {
                 let mut pending = VecDeque::from([request]);
                 self.drain_requests(&mut pending)?;
             }
+            if let Some(started) = input_started {
+                self.record_shell_profiling_stage(
+                    mesh_core_debug::ProfilingStage::InputHandling,
+                    started.elapsed(),
+                    Some(trigger_kind),
+                );
+            }
         }
 
         Ok(())
@@ -149,5 +160,15 @@ impl Shell {
             );
         }
         Ok(())
+    }
+}
+
+fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
+    match event {
+        WindowEvent::PointerMove { .. } => "pointer_move",
+        WindowEvent::PointerButton { .. } => "pointer_button",
+        WindowEvent::Scroll { .. } => "scroll",
+        WindowEvent::Key { .. } => "key",
+        WindowEvent::Char { .. } => "char",
     }
 }

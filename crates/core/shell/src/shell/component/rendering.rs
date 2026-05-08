@@ -1,6 +1,23 @@
 use super::*;
 
 impl FrontendSurfaceComponent {
+    fn record_profiling_stage(
+        &mut self,
+        stage: mesh_core_debug::ProfilingStage,
+        started_at: std::time::Instant,
+        trigger_kind: Option<&str>,
+    ) {
+        if !self.profiling_enabled {
+            return;
+        }
+        self.profiling_records.push(ComponentProfilingRecord {
+            stage,
+            duration: started_at.elapsed(),
+            module_id: Some(self.compiled.manifest.package.id.clone()),
+            trigger_kind: trigger_kind.map(str::to_string),
+        });
+    }
+
     fn module_restyle_rules(&self) -> Vec<mesh_core_component::style::StyleRule> {
         let mut rules = Vec::new();
 
@@ -82,6 +99,7 @@ impl FrontendSurfaceComponent {
             stack.push(self.id().to_string());
         }
         let measurer = SharedTextMeasurer;
+        let tree_build_started = std::time::Instant::now();
         let mut tree = self.compiled.build_tree_with_state(
             theme,
             width,
@@ -91,6 +109,11 @@ impl FrontendSurfaceComponent {
             self.id(),
             Some(self),
             Some(&measurer),
+        );
+        self.record_profiling_stage(
+            mesh_core_debug::ProfilingStage::TreeBuild,
+            tree_build_started,
+            Some("rebuild"),
         );
         self.render_stack.borrow_mut().clear();
         annotate_runtime_tree(
@@ -114,17 +137,29 @@ impl FrontendSurfaceComponent {
             container_width: width as f32,
             container_height: height as f32,
         };
+        let restyle_started = std::time::Instant::now();
         resolver.restyle_subtree(&mut tree, &restyle_rules, context);
+        self.record_profiling_stage(
+            mesh_core_debug::ProfilingStage::StyleRestyle,
+            restyle_started,
+            Some("rebuild"),
+        );
         self.record_runtime_style_diagnostics(&tree, &restyle_rules, &resolver, context);
 
         // Recompute layout after restyle so that pseudo-state and container-query style
         // changes (display:none, width, height, etc.) are reflected in final layout
         // bounds before hit-testing, accessibility publishing, and paint.
+        let layout_started = std::time::Instant::now();
         LayoutEngine::compute_with_measurer(
             &mut tree,
             width as f32,
             height as f32,
             Some(&measurer),
+        );
+        self.record_profiling_stage(
+            mesh_core_debug::ProfilingStage::Layout,
+            layout_started,
+            Some("rebuild"),
         );
         self.annotate_selection_tree(&mut tree, theme);
 

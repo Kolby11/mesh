@@ -270,6 +270,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             None
         };
 
+        let paint_started = std::time::Instant::now();
         paint_frontend_tree_at_for_module(
             &tree,
             buffer,
@@ -281,6 +282,14 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
             Some(self.compiled.manifest.package.id.as_str()),
         );
+        if self.profiling_enabled {
+            self.profiling_records.push(ComponentProfilingRecord {
+                stage: mesh_core_debug::ProfilingStage::Paint,
+                duration: paint_started.elapsed(),
+                module_id: Some(self.compiled.manifest.package.id.clone()),
+                trigger_kind: Some("rebuild".to_string()),
+            });
+        }
         self.last_tree = Some(tree);
         self.clear_runtime_dirty_states();
 
@@ -406,6 +415,17 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn allows_shrink_to_fit(&self) -> bool {
         self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured
+    }
+
+    fn set_profiling_enabled(&mut self, enabled: bool) {
+        self.profiling_enabled = enabled;
+        if !enabled {
+            self.profiling_records.clear();
+        }
+    }
+
+    fn take_profiling_records(&mut self) -> Vec<ComponentProfilingRecord> {
+        std::mem::take(&mut self.profiling_records)
     }
 
     fn receive_focus_transfer(
