@@ -77,7 +77,9 @@ impl Shell {
             active_surfaces,
             profiling: self.debug.profiling_enabled.then(|| {
                 let mut profiling = self.profiling.snapshot(self.debug.profiling_session_id);
-                profiling.surfaces.sort_by(|a, b| a.surface_id.cmp(&b.surface_id));
+                profiling
+                    .surfaces
+                    .sort_by(|a, b| a.surface_id.cmp(&b.surface_id));
                 profiling.backends.sort_by(|a, b| {
                     a.interface
                         .cmp(&b.interface)

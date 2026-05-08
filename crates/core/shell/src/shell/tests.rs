@@ -574,7 +574,9 @@ fn debug_snapshot_backfills_mesh_debug_service_state() {
 fn debug_overlay_toggle_does_not_enable_profiling_in_mesh_debug_payload() {
     let mut shell = Shell::new();
 
-    shell.apply_request(CoreRequest::ToggleDebugOverlay).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugOverlay)
+        .unwrap();
     shell.build_debug_snapshot();
     let latest = shell
         .latest_service_state
@@ -591,7 +593,9 @@ fn debug_overlay_toggle_does_not_enable_profiling_in_mesh_debug_payload() {
 fn debug_overlay_toggle_controls_mesh_debug_inspector_visibility_without_enabling_profiling() {
     let mut shell = Shell::new();
 
-    shell.apply_request(CoreRequest::ToggleDebugOverlay).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugOverlay)
+        .unwrap();
 
     let inspector = shell
         .core
@@ -602,7 +606,9 @@ fn debug_overlay_toggle_controls_mesh_debug_inspector_visibility_without_enablin
     assert!(inspector.visible);
     assert!(!shell.debug.profiling_enabled);
 
-    shell.apply_request(CoreRequest::ToggleDebugOverlay).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugOverlay)
+        .unwrap();
 
     let inspector = shell
         .core
@@ -1199,12 +1205,10 @@ fn profiling_snapshot_backfills_surface_module_id_after_empty_stage_metadata() {
         .expect("worked surfaces must retain their canonical surface key");
     assert_eq!(surface.module_id.as_deref(), Some("@mesh/audio-popover"));
     assert!(
-        surface
-            .stages
+        surface.stages.iter().any(|stage| stage
+            .recent_samples
             .iter()
-            .any(|stage| stage.recent_samples.iter().all(|sample| {
-                sample.surface_id.as_deref() == Some("@mesh/audio-popover")
-            })),
+            .all(|sample| { sample.surface_id.as_deref() == Some("@mesh/audio-popover") })),
         "surface samples must retain explicit surface keys while module ids recover"
     );
 }

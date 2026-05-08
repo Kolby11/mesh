@@ -492,7 +492,7 @@ impl LayerShellBackend {
 
 pub(super) fn apply_config(layer_surface: &LayerSurface, cfg: &LayerSurfaceConfig) {
     layer_surface.set_layer(map_layer(cfg.layer));
-    layer_surface.set_anchor(map_anchor(cfg.edge));
+    layer_surface.set_anchor(map_anchor(cfg));
     layer_surface.set_exclusive_zone(cfg.exclusive_zone);
     layer_surface.set_keyboard_interactivity(map_keyboard(cfg.keyboard_mode));
     layer_surface.set_size(cfg.width, cfg.height);
@@ -513,13 +513,18 @@ fn map_layer(layer: MeshLayer) -> Layer {
     }
 }
 
-fn map_anchor(edge: Option<Edge>) -> Anchor {
-    match edge {
+fn map_anchor(cfg: &LayerSurfaceConfig) -> Anchor {
+    match cfg.edge {
         // Treat a single edge as a normal shell placement, not a centered popup.
         // Top/bottom bars stretch across the output width, and left/right rails
         // pin to the top corner instead of floating in the vertical center.
+        // If a left/right rail requests `height == 0`, layer-shell expects it
+        // to be anchored to both top and bottom so the compositor can stretch
+        // it vertically across the output.
         Some(Edge::Top) => Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
         Some(Edge::Bottom) => Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+        Some(Edge::Left) if cfg.height == 0 => Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT,
+        Some(Edge::Right) if cfg.height == 0 => Anchor::TOP | Anchor::BOTTOM | Anchor::RIGHT,
         Some(Edge::Left) => Anchor::TOP | Anchor::LEFT,
         Some(Edge::Right) => Anchor::TOP | Anchor::RIGHT,
         None => Anchor::empty(),

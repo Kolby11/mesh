@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Performance Instrumentation and Responsiveness
-status: completed
-stopped_at: Phase 16 context gathered
-last_updated: "2026-05-08T18:07:11.616Z"
-last_activity: 2026-05-08 -- Phase 15 marked complete
+status: ready_to_plan
+stopped_at: Phase 17 ready to plan
+last_updated: "2026-05-08T19:20:00Z"
+last_activity: 2026-05-08 -- Phase 16 marked complete after Wayland inspector anchor fix
 progress:
   total_phases: 5
-  completed_phases: 2
-  total_plans: 8
+  completed_phases: 3
+  total_plans: 12
   completed_plans: 8
-  percent: 100
+  percent: 60
 ---
 
 # State: MESH v1.3
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-08)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 15 complete; ready for Phase 16 planning
+**Current focus:** Phase 17 — canonical-benchmark-scenarios-and-proof-flows
 
 ## Current Position
 
-Phase: 15 — COMPLETE
-Plan: 4 of 4 complete
-Status: Phase 15 complete
-Last activity: 2026-05-08 -- Phase 15 marked complete
+Phase: 17
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-05-08 -- Phase 16 marked complete after Wayland inspector anchor fix
 
 ## Decisions
 
