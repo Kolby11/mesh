@@ -35,7 +35,7 @@ impl FrontendSurfaceComponent {
                         self.pointer_down_key = None;
                         self.active_slider_key = None;
                         self.begin_text_selection(selection_key, x, y);
-                        self.dirty = true;
+                        self.invalidate_paint();
                         return Ok(requests);
                     }
 
@@ -77,7 +77,7 @@ impl FrontendSurfaceComponent {
                             }
                         }
 
-                        self.dirty = true;
+                        self.invalidate_interaction_restyle();
                         if !requests.is_empty() {
                             return Ok(requests);
                         }
@@ -85,7 +85,7 @@ impl FrontendSurfaceComponent {
                         let requests = self.set_focus_target(&tree, None, false)?;
                         self.pointer_down_key = None;
                         self.active_slider_key = None;
-                        self.dirty = true;
+                        self.invalidate_interaction_restyle();
                         if !requests.is_empty() {
                             return Ok(requests);
                         }
@@ -106,7 +106,7 @@ impl FrontendSurfaceComponent {
                     self.end_text_selection_drag();
 
                     if self.selection.is_some() && self.pointer_down_key.is_none() {
-                        self.dirty = true;
+                        self.invalidate_paint();
                         return Ok(requests);
                     }
 
@@ -122,7 +122,7 @@ impl FrontendSurfaceComponent {
                     }
                     self.pointer_down_key = None;
                     self.active_slider_key = None;
-                    self.dirty = true;
+                    self.invalidate_interaction_restyle();
                     if !requests.is_empty() {
                         return Ok(requests);
                     }
@@ -140,7 +140,7 @@ impl FrontendSurfaceComponent {
                             &[serde_json::json!(value)],
                         )?);
                     }
-                    self.dirty = true;
+                    self.invalidate_interaction_restyle();
                     if !requests.is_empty() {
                         return Ok(requests);
                     }
@@ -148,7 +148,7 @@ impl FrontendSurfaceComponent {
 
                 if self.selection.is_some() {
                     self.update_text_selection_focus(x, y);
-                    self.dirty = true;
+                    self.invalidate_paint();
                 }
 
                 // Update hover state for CSS :hover and the tooltip system.
@@ -186,7 +186,10 @@ impl FrontendSurfaceComponent {
                     } else {
                         self.hover_start = next_tooltip.map(|_| std::time::Instant::now());
                     }
-                    self.dirty = true;
+                    // Hover changes don't mutate script state — flag the surface
+                    // for a style-only repaint so paint() can reuse the cached
+                    // widget tree instead of re-running Luau scripts.
+                    self.invalidate_interaction_restyle();
                 }
             }
             ComponentInput::Scroll { x, y, dx, dy } => {
@@ -201,7 +204,9 @@ impl FrontendSurfaceComponent {
                         {
                             current.x = next_x;
                             current.y = next_y;
-                            self.dirty = true;
+                            self.invalidate(
+                                ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS,
+                            );
                         }
                     }
                 }
@@ -215,7 +220,7 @@ impl FrontendSurfaceComponent {
                         let value = self.input_values.entry(focused_key.clone()).or_default();
                         value.push(ch);
                         let current = value.clone();
-                        self.dirty = true;
+                        self.invalidate_text_state();
                         return self.call_node_handler(
                             &tree,
                             &focused_key,
@@ -229,13 +234,13 @@ impl FrontendSurfaceComponent {
                 let keyboard_settings = self.current_keyboard_settings();
                 if matches!(key.as_str(), "Tab") && !modifiers.ctrl && !modifiers.alt {
                     self.clear_selection();
-                    self.dirty = true;
+                    self.invalidate_interaction_restyle();
                     return self.handle_tab_with_cross_surface(&tree, modifiers.shift);
                 }
                 if matches!(key.as_str(), "Escape") && !modifiers.ctrl && !modifiers.alt {
                     if let Some(requests) = self.handle_escape_with_cross_surface()? {
                         self.clear_selection();
-                        self.dirty = true;
+                        self.invalidate_interaction_restyle();
                         return Ok(requests);
                     }
                 }
@@ -267,7 +272,7 @@ impl FrontendSurfaceComponent {
                             "Backspace" => {
                                 value.pop();
                                 let current = value.clone();
-                                self.dirty = true;
+                                self.invalidate_text_state();
                                 requests.extend(self.call_node_handler(
                                     &tree,
                                     &focused_key,
@@ -297,7 +302,7 @@ impl FrontendSurfaceComponent {
                         };
                         if let Some(value) = self.slider_step_value(&tree, &focused_key, delta) {
                             self.slider_values.insert(focused_key.clone(), value);
-                            self.dirty = true;
+                            self.invalidate_interaction_restyle();
                             requests.extend(self.call_node_handler(
                                 &tree,
                                 &focused_key,
@@ -350,7 +355,7 @@ impl FrontendSurfaceComponent {
                     {
                         self.clear_selection();
                         let value = self.toggle_checked_value(&tree, &focused_key);
-                        self.dirty = true;
+                        self.invalidate_interaction_restyle();
                         requests.extend(self.call_node_handler(
                             &tree,
                             &focused_key,

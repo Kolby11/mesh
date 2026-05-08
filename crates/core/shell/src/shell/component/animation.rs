@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use crate::shell::component::ComponentDirtyFlags;
 use mesh_core_component::style as component_style;
 use mesh_core_elements::{
     Corners, Dimension, Edges, StyleResolver, Transform2D, TransitionEasing, TransitionStyle,
@@ -271,12 +272,24 @@ impl StyleAnimation {
 }
 
 impl FrontendSurfaceComponent {
+    #[cfg(test)]
     pub(super) fn apply_style_animations(&mut self, tree: &mut WidgetNode) {
-        let previous_styles = self
-            .last_tree
+        let previous_styles = self.previous_visual_styles();
+        self.apply_style_animations_with_previous(tree, &previous_styles);
+    }
+
+    pub(super) fn previous_visual_styles(&self) -> HashMap<String, AnimatedVisualStyle> {
+        self.last_tree
             .as_ref()
             .map(collect_visual_styles)
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    pub(super) fn apply_style_animations_with_previous(
+        &mut self,
+        tree: &mut WidgetNode,
+        previous_styles: &HashMap<String, AnimatedVisualStyle>,
+    ) {
         let now = Instant::now();
         let mut live_keys = HashSet::new();
         let mut live_keyframe_keys = HashSet::new();
@@ -287,7 +300,7 @@ impl FrontendSurfaceComponent {
 
         self.apply_style_animations_to_node(
             tree,
-            &previous_styles,
+            previous_styles,
             &resolver,
             now,
             &mut live_keys,
@@ -305,7 +318,10 @@ impl FrontendSurfaceComponent {
         self.has_active_keyframe_animation = has_active_keyframe_animation;
 
         if has_active_animation || has_active_keyframe_animation {
-            self.dirty = true;
+            // Animations only mutate style/layout, never script state — keep
+            // the cheap restyle-only path engaged so we don't drag the Luau
+            // tree-build into every animation tick.
+            self.invalidate_style_path(ComponentDirtyFlags::STYLE_RELAYOUT);
         }
     }
 

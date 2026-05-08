@@ -28,7 +28,8 @@ use animation::StyleAnimation;
 pub(in crate::shell) use catalog::FrontendCatalog;
 pub(in crate::shell) use runtime_tree::ScrollOffsetState;
 use runtime_tree::{
-    annotate_runtime_tree, collect_all_keys, collect_element_metrics, input_accepts_char,
+    RetainedWidgetTree, annotate_runtime_tree, collect_all_keys, collect_element_metrics,
+    input_accepts_char,
 };
 
 use mesh_core_capability::{Capability, CapabilitySet};
@@ -56,6 +57,62 @@ use mesh_core_render::{
 const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
 const TOOLTIP_OVERLAY_WIDTH: u32 = 260;
 const TOOLTIP_OVERLAY_HEIGHT: u32 = 96;
+
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    pub(super) struct ComponentDirtyFlags: u16 {
+        const SCRIPT = 1 << 0;
+        const STATE = 1 << 1;
+        const STYLE = 1 << 2;
+        const LAYOUT = 1 << 3;
+        const PAINT = 1 << 4;
+        const TEXT = 1 << 5;
+        const ACCESSIBILITY = 1 << 6;
+        const METRICS = 1 << 7;
+        const SURFACE_CONFIG = 1 << 8;
+    }
+}
+
+impl ComponentDirtyFlags {
+    pub(super) const TREE_REBUILD: Self = Self::SCRIPT
+        .union(Self::STATE)
+        .union(Self::STYLE)
+        .union(Self::LAYOUT)
+        .union(Self::PAINT)
+        .union(Self::TEXT)
+        .union(Self::ACCESSIBILITY)
+        .union(Self::METRICS);
+
+    pub(super) const STYLE_RELAYOUT: Self = Self::STYLE
+        .union(Self::LAYOUT)
+        .union(Self::PAINT)
+        .union(Self::ACCESSIBILITY)
+        .union(Self::METRICS);
+
+    pub(super) const TEXT_RELAYOUT: Self = Self::STATE
+        .union(Self::TEXT)
+        .union(Self::STYLE)
+        .union(Self::LAYOUT)
+        .union(Self::PAINT)
+        .union(Self::ACCESSIBILITY)
+        .union(Self::METRICS);
+
+    pub(super) const INTERACTION_RESTYLE: Self = Self::STATE
+        .union(Self::STYLE)
+        .union(Self::LAYOUT)
+        .union(Self::PAINT)
+        .union(Self::ACCESSIBILITY)
+        .union(Self::METRICS);
+
+    pub(super) const SURFACE_RECONFIGURE: Self = Self::SURFACE_CONFIG
+        .union(Self::LAYOUT)
+        .union(Self::PAINT)
+        .union(Self::METRICS);
+
+    pub(super) fn requires_tree_rebuild(self) -> bool {
+        self.intersects(Self::SCRIPT | Self::TEXT)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct TextSelectionPoint {
@@ -86,6 +143,14 @@ pub(super) struct FrontendSurfaceComponent {
     pub(super) frontend_catalog: FrontendCatalog,
     pub(super) visible: bool,
     dirty: bool,
+    /// Set when only appearance changed (e.g. hover) without script-state
+    /// changes. Triggers a paint via `wants_render`, but lets `paint` skip the
+    /// expensive Luau-driven `build_tree_with_state` and reuse the previously
+    /// built widget tree, only re-annotating hover/focus state and re-running
+    /// restyle + layout. Cleared on render alongside `dirty`.
+    style_only_dirty: bool,
+    dirty_types: ComponentDirtyFlags,
+    last_dirty_types: ComponentDirtyFlags,
     last_service_update: Option<String>,
     focused_key: Option<String>,
     focus_visible_key: Option<String>,
@@ -130,6 +195,7 @@ pub(super) struct FrontendSurfaceComponent {
     locale: LocaleEngine,
     interface_catalog: mesh_core_service::InterfaceCatalog,
     last_tree: Option<WidgetNode>,
+    retained_tree: RetainedWidgetTree,
     diagnostics: Option<Diagnostics>,
     /// Desired visibility for surface portals (`<ImportedSurface hidden={...} />`).
     /// Updated during build_tree; compared to last_surface_states in tick().
@@ -148,6 +214,11 @@ pub(super) struct FrontendSurfaceComponent {
     has_active_keyframe_animation: bool,
     profiling_enabled: bool,
     profiling_records: Vec<ComponentProfilingRecord>,
+    /// Cached aggregate of restyle rules collected from `compiled.component`
+    /// and every entry in `compiled.local_components`. Populated lazily on the
+    /// first restyle and invalidated whenever the compiled module is replaced
+    /// (source reload). Avoids allocating + cloning every StyleRule per paint.
+    cached_restyle_rules: Option<Vec<mesh_core_component::style::StyleRule>>,
 }
 
 #[derive(Debug)]
@@ -176,6 +247,9 @@ impl FrontendSurfaceComponent {
             frontend_catalog,
             visible: settings_state.layout.visible_on_start,
             dirty: true,
+            style_only_dirty: false,
+            dirty_types: ComponentDirtyFlags::TREE_REBUILD | ComponentDirtyFlags::SURFACE_CONFIG,
+            last_dirty_types: ComponentDirtyFlags::empty(),
             last_service_update: None,
             focused_key: None,
             focus_visible_key: None,
@@ -204,6 +278,7 @@ impl FrontendSurfaceComponent {
             locale: LocaleEngine::new("en"),
             interface_catalog,
             last_tree: None,
+            retained_tree: RetainedWidgetTree::default(),
             diagnostics: None,
             pending_surface_states: RefCell::new(HashMap::new()),
             last_surface_states: HashMap::new(),
@@ -214,7 +289,61 @@ impl FrontendSurfaceComponent {
             has_active_keyframe_animation: false,
             profiling_enabled: false,
             profiling_records: Vec::new(),
+            cached_restyle_rules: None,
         }
+    }
+
+    pub(super) fn invalidate(&mut self, flags: ComponentDirtyFlags) {
+        self.dirty_types |= flags;
+        self.dirty = true;
+    }
+
+    pub(super) fn invalidate_style_path(&mut self, flags: ComponentDirtyFlags) {
+        self.dirty_types |= flags;
+        self.style_only_dirty = true;
+    }
+
+    pub(super) fn invalidate_script_state(&mut self) {
+        self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
+    }
+
+    pub(super) fn invalidate_interaction_restyle(&mut self) {
+        self.invalidate_style_path(ComponentDirtyFlags::INTERACTION_RESTYLE);
+    }
+
+    pub(super) fn invalidate_text_state(&mut self) {
+        self.invalidate(ComponentDirtyFlags::TEXT_RELAYOUT);
+    }
+
+    pub(super) fn invalidate_paint(&mut self) {
+        self.invalidate_style_path(ComponentDirtyFlags::PAINT);
+    }
+
+    pub(super) fn invalidate_surface_config(&mut self) {
+        self.invalidate(ComponentDirtyFlags::SURFACE_RECONFIGURE);
+    }
+
+    pub(super) fn take_dirty_for_paint(
+        &mut self,
+    ) -> (bool, bool, ComponentDirtyFlags, ComponentDirtyFlags) {
+        let legacy_dirty = self.dirty && self.dirty_types.is_empty();
+        let legacy_style_only = self.style_only_dirty && self.dirty_types.is_empty();
+        let flags = self.dirty_types;
+        let requires_tree_rebuild = legacy_dirty || flags.requires_tree_rebuild();
+        let can_use_retained_path =
+            !requires_tree_rebuild && (legacy_style_only || !flags.is_empty());
+
+        self.last_dirty_types = flags;
+        self.dirty_types = ComponentDirtyFlags::empty();
+        self.dirty = false;
+        self.style_only_dirty = false;
+
+        (
+            requires_tree_rebuild,
+            can_use_retained_path,
+            flags,
+            self.last_dirty_types,
+        )
     }
 }
 

@@ -1388,6 +1388,7 @@ dependencies = [
 name = "mesh-core-shell"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.11.1",
  "mesh-core-backend",
  "mesh-core-capability",
  "mesh-core-component",
@@ -1406,6 +1407,7 @@ dependencies = [
  "mesh-core-theme",
  "mesh-core-wayland",
  "serde_json",
+ "slotmap",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

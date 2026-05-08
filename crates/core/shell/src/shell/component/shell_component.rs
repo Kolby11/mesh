@@ -20,7 +20,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.record_declared_missing_icon_diagnostics();
         self.init_root_runtime()?;
         self.render_hooks_pending = true;
-        self.dirty = true;
+        self.invalidate_script_state();
         Ok(vec![CoreRequest::PublishDiagnostics {
             message: format!(
                 "mounted frontend component '{}' from {}",
@@ -65,13 +65,14 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.last_surface_states
                         .insert(surface_id.clone(), *visible);
                     self.pending_surface_states.borrow_mut().remove(surface_id);
-                    if let Some(binding) = self
+                    let binding = self
                         .portal_hidden_bindings
                         .borrow()
                         .get(surface_id)
-                        .cloned()
-                    {
+                        .cloned();
+                    if let Some(binding) = binding {
                         let component_id = self.id().to_string();
+                        let mut state_dirty = false;
                         if let Some(runtime) = self.runtimes.lock().unwrap().get_mut(&component_id)
                         {
                             runtime
@@ -81,7 +82,10 @@ impl ShellComponent for FrontendSurfaceComponent {
                                     component_id: component_id.clone(),
                                     source,
                                 })?;
-                            self.dirty = true;
+                            state_dirty = true;
+                        }
+                        if state_dirty {
+                            self.invalidate_script_state();
                         }
                     }
                 }
@@ -100,7 +104,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 } else if !was_visible && self.surface_layout.keyboard_mode != KeyboardMode::None {
                     self.pending_auto_focus = true;
                 }
-                self.dirty = true;
+                self.invalidate_surface_config();
             }
         }
         Ok(Vec::new())
@@ -116,34 +120,41 @@ impl ShellComponent for FrontendSurfaceComponent {
             payload,
         } = event;
         self.last_service_update = Some(format!("{service}:{source_module}"));
-        for runtime in self.runtimes.lock().unwrap().values_mut() {
-            let service_name = crate::shell::service::service_name_from_interface(service);
-            let required = format!("service.{service_name}.read");
-            let has_read = runtime
-                .script_ctx
-                .capabilities
-                .is_granted(&Capability::new(&required));
-            let previous = runtime.script_ctx.state().get(&service_name);
-            let tracked_fields = runtime.script_ctx.tracked_fields_for_service(&service_name);
-            apply_service_update(
-                runtime.script_ctx.state_mut(),
-                has_read,
-                service,
-                source_module,
-                payload.clone(),
-            );
-            let state_changed = runtime.script_ctx.state().is_dirty();
-            if has_read {
-                runtime
+        let mut needs_rebuild = false;
+        {
+            let mut runtimes = self.runtimes.lock().unwrap();
+            for runtime in runtimes.values_mut() {
+                let service_name = crate::shell::service::service_name_from_interface(service);
+                let required = format!("service.{service_name}.read");
+                let has_read = runtime
                     .script_ctx
-                    .apply_service_payload(&service_name, payload);
+                    .capabilities
+                    .is_granted(&Capability::new(&required));
+                let previous = runtime.script_ctx.state().get(&service_name);
+                let tracked_fields = runtime.script_ctx.tracked_fields_for_service(&service_name);
+                apply_service_update(
+                    runtime.script_ctx.state_mut(),
+                    has_read,
+                    service,
+                    source_module,
+                    payload.clone(),
+                );
+                let state_changed = runtime.script_ctx.state().is_dirty();
+                if has_read {
+                    runtime
+                        .script_ctx
+                        .apply_service_payload(&service_name, payload);
+                }
+                let tracked_fields_changed = has_read
+                    && tracked_service_fields_changed(previous.as_ref(), payload, &tracked_fields);
+                if state_changed || tracked_fields_changed {
+                    needs_rebuild = true;
+                }
             }
-            let tracked_fields_changed = has_read
-                && tracked_service_fields_changed(previous.as_ref(), payload, &tracked_fields);
-            if state_changed || tracked_fields_changed {
-                self.render_hooks_pending = true;
-                self.dirty = true;
-            }
+        }
+        if needs_rebuild {
+            self.render_hooks_pending = true;
+            self.invalidate_script_state();
         }
         Ok(Vec::new())
     }
@@ -151,8 +162,8 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
         // Trigger a repaint once the tooltip delay has elapsed so the tooltip appears.
         if let Some(start) = self.hover_start {
-            if start.elapsed() >= TOOLTIP_DELAY && !self.dirty {
-                self.dirty = true;
+            if start.elapsed() >= TOOLTIP_DELAY && !self.dirty && !self.style_only_dirty {
+                self.invalidate_paint();
             }
         }
 
@@ -174,7 +185,10 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn wants_render(&self) -> bool {
-        self.dirty || !self.style_animations.is_empty() || self.has_active_keyframe_animation
+        self.dirty
+            || self.style_only_dirty
+            || !self.style_animations.is_empty()
+            || self.has_active_keyframe_animation
     }
 
     fn surface_size_changed(&mut self, width: u32, height: u32) -> bool {
@@ -212,7 +226,6 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .unwrap_or_default()
         );
 
-        self.dirty = false;
         Ok(())
     }
 
@@ -223,6 +236,11 @@ impl ShellComponent for FrontendSurfaceComponent {
         height: u32,
         buffer: &mut PixelBuffer,
     ) -> Result<(), ComponentError> {
+        // Capture and clear dirty flags up front. paint is the work-doer; if
+        // anything during paint (measured_size change, active animation) needs
+        // another frame, it sets a flag again and wants_render picks it up.
+        let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
+            self.take_dirty_for_paint();
         let (requested_width, requested_height) = self.requested_layout_size();
         let content_width = if requested_width == 0 {
             width.max(1)
@@ -235,10 +253,42 @@ impl ShellComponent for FrontendSurfaceComponent {
             requested_height.max(1)
         };
         self.observe_surface_size(content_width, content_height);
-        let mut tree = self.build_tree(theme, content_width, content_height);
+        let use_retained_style_path = !requires_tree_rebuild
+            && can_use_retained_path
+            && self.last_tree.is_some()
+            && !self.render_hooks_pending;
+        let previous_visual_styles = if use_retained_style_path {
+            self.previous_visual_styles()
+        } else {
+            Default::default()
+        };
+        // Fast path: when only appearance changed (e.g. hover) and a previous
+        // tree is cached, skip the Luau-driven tree build and mutate the
+        // retained tree instead of cloning it.
+        let mut tree = if use_retained_style_path {
+            match self.restyle_retained_tree(theme, content_width, content_height) {
+                Some(t) => t,
+                None => self.build_tree(theme, content_width, content_height),
+            }
+        } else {
+            self.build_tree(theme, content_width, content_height)
+        };
         self.prune_stale_interaction_targets(&tree);
         self.apply_pending_auto_focus(&tree);
-        self.apply_style_animations(&mut tree);
+        self.apply_style_animations_with_previous(&mut tree, &previous_visual_styles);
+        self.retained_tree.update(&tree);
+        tracing::trace!(
+            "retained widget tree '{}' generation={} dirty={:?}",
+            self.id(),
+            self.retained_tree.generation(),
+            self.retained_tree.last_dirty()
+        );
+        tracing::trace!(
+            "component '{}' invalidation={:?} retained_path={}",
+            self.id(),
+            dirty_types,
+            use_retained_style_path
+        );
         if self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured {
             let surface_layout_manifest = self.compiled.manifest.surface_layout.as_ref();
             let measured_size = measure_content_size(
@@ -249,7 +299,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             );
             if self.measured_size != Some(measured_size) {
                 self.measured_size = Some(measured_size);
-                self.dirty = true;
+                self.invalidate_surface_config();
             }
         }
         self.publish_element_metrics(&tree);
@@ -297,7 +347,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn theme_changed(&mut self) -> Result<(), ComponentError> {
-        self.dirty = true;
+        self.invalidate_style_path(ComponentDirtyFlags::STYLE_RELAYOUT | ComponentDirtyFlags::TEXT);
         Ok(())
     }
 
@@ -306,7 +356,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.runtimes.lock().unwrap().clear();
         self.init_root_runtime()?;
         self.render_hooks_pending = true;
-        self.dirty = true;
+        self.invalidate_script_state();
         Ok(())
     }
 
@@ -351,7 +401,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             .and_then(|l| l.as_str())
         else {
             if layout_changed || settings_changed {
-                self.dirty = true;
+                self.invalidate_surface_config();
             }
             return Ok(layout_changed || settings_changed);
         };
@@ -366,7 +416,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
 
         if layout_changed || settings_changed {
-            self.dirty = true;
+            self.invalidate_surface_config();
         }
         Ok(layout_changed || settings_changed)
     }
@@ -388,7 +438,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.runtimes.lock().unwrap().clear();
         self.init_root_runtime()?;
         self.render_hooks_pending = true;
-        self.dirty = true;
+        self.invalidate_script_state();
+        // Style rules may have changed in the recompiled module.
+        self.cached_restyle_rules = None;
         Ok(true)
     }
 
@@ -410,7 +462,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.surface_layout.edge = Edge::Left;
         self.surface_layout.margin_top = margin_top;
         self.surface_layout.margin_left = margin_left;
-        self.dirty = true;
+        self.invalidate_surface_config();
     }
 
     fn allows_shrink_to_fit(&self) -> bool {
@@ -459,6 +511,6 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn set_keyboard_mode_override(&mut self, mode: Option<KeyboardMode>) {
         self.keyboard_mode_override = mode;
-        self.dirty = true;
+        self.invalidate_surface_config();
     }
 }

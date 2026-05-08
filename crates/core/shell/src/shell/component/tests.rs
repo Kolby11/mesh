@@ -50,6 +50,58 @@ fn service_update_marks_component_dirty_only_when_tracked_fields_change() {
     ));
 }
 
+#[test]
+fn typed_invalidations_distinguish_restyle_from_script_rebuild() {
+    let mut component = test_frontend_component("<template><button /></template>");
+
+    component.dirty = false;
+    component.style_only_dirty = false;
+    component.dirty_types = ComponentDirtyFlags::empty();
+
+    component.invalidate_interaction_restyle();
+    assert!(component.wants_render());
+
+    let (requires_tree_rebuild, can_use_retained_path, flags, _) = component.take_dirty_for_paint();
+    assert!(!requires_tree_rebuild);
+    assert!(can_use_retained_path);
+    assert!(flags.contains(ComponentDirtyFlags::STYLE));
+    assert!(flags.contains(ComponentDirtyFlags::LAYOUT));
+    assert!(flags.contains(ComponentDirtyFlags::PAINT));
+    assert!(flags.contains(ComponentDirtyFlags::ACCESSIBILITY));
+    assert!(flags.contains(ComponentDirtyFlags::METRICS));
+
+    component.invalidate_script_state();
+    let (requires_tree_rebuild, can_use_retained_path, flags, _) = component.take_dirty_for_paint();
+    assert!(requires_tree_rebuild);
+    assert!(!can_use_retained_path);
+    assert!(flags.contains(ComponentDirtyFlags::SCRIPT));
+    assert!(flags.contains(ComponentDirtyFlags::STATE));
+}
+
+#[test]
+fn typed_invalidations_cover_text_metrics_and_surface_configuration() {
+    let mut component = test_frontend_component("<template><input value=\"\" /></template>");
+
+    component.dirty = false;
+    component.style_only_dirty = false;
+    component.dirty_types = ComponentDirtyFlags::empty();
+
+    component.invalidate_text_state();
+    let (requires_tree_rebuild, _, flags, _) = component.take_dirty_for_paint();
+    assert!(requires_tree_rebuild);
+    assert!(flags.contains(ComponentDirtyFlags::TEXT));
+    assert!(flags.contains(ComponentDirtyFlags::METRICS));
+    assert!(flags.contains(ComponentDirtyFlags::ACCESSIBILITY));
+
+    component.invalidate_surface_config();
+    let (requires_tree_rebuild, can_use_retained_path, flags, _) = component.take_dirty_for_paint();
+    assert!(!requires_tree_rebuild);
+    assert!(can_use_retained_path);
+    assert!(flags.contains(ComponentDirtyFlags::SURFACE_CONFIG));
+    assert!(flags.contains(ComponentDirtyFlags::LAYOUT));
+    assert!(flags.contains(ComponentDirtyFlags::METRICS));
+}
+
 // ---------- helpers shared by the three integration tests below ----------
 
 fn audio_network_catalog() -> InterfaceCatalog {
@@ -5126,7 +5178,11 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
     component.paint(&theme, 360, 640, &mut buffer).unwrap();
     let overview_text = rendered_text(&component);
     assert!(overview_text.iter().any(|line| line == "Overview"));
-    assert!(overview_text.iter().any(|line| line == "No recent samples yet"));
+    assert!(
+        overview_text
+            .iter()
+            .any(|line| line == "No recent samples yet")
+    );
 
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
@@ -5149,7 +5205,11 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
     component.paint(&theme, 360, 640, &mut buffer).unwrap();
     let backend_text = rendered_text(&component);
     assert!(backend_text.iter().any(|line| line == "Backend services"));
-    assert!(backend_text.iter().any(|line| line == "No backend samples yet"));
+    assert!(
+        backend_text
+            .iter()
+            .any(|line| line == "No backend samples yet")
+    );
 
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])

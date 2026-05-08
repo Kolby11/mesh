@@ -25,6 +25,10 @@ lifecycle spec see [`../spec/pluggable-backend.md`](../spec/pluggable-backend.md
   - [`frontend/html-css-transition.md`](./frontend/html-css-transition.md) — transition sketch for a Qt-style UI XML vocabulary and bounded CSS profile over the current MESH UI/runtime pipeline.
   - [`frontend/slots.md`](./frontend/slots.md) — slot points for extending
     surfaces without forking them.
+- **Performance**
+  - [`performance-roadmap.md`](./performance-roadmap.md) — retained rendering,
+    dirty invalidation, damage tracking, text/glyph caching, and GPU sequencing
+    needed to approach Qt-like performance.
 - **Theming & localization**
   - [`theming/themes.md`](./theming/themes.md) — theme tokens, component
     defaults, module-owned theme subtrees, modes, hot-swap.

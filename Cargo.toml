@@ -57,3 +57,5 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["full"] }
+bitflags = "2.11.1"
+slotmap = "1.1.1"

@@ -15,6 +15,7 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn call_render_hooks(&mut self) {
+        let mut state_dirty = false;
         let mut runtimes = self.runtimes.lock().unwrap();
         for runtime in runtimes.values_mut() {
             if !runtime.script_ctx.has_handler("onRender") {
@@ -43,8 +44,12 @@ impl FrontendSurfaceComponent {
             Self::drain_script_diagnostics(&self.diagnostics, runtime);
 
             if runtime.script_ctx.state().is_dirty() {
-                self.dirty = true;
+                state_dirty = true;
             }
+        }
+        drop(runtimes);
+        if state_dirty {
+            self.invalidate_script_state();
         }
     }
 
@@ -448,12 +453,13 @@ impl FrontendSurfaceComponent {
             return Ok(Vec::new());
         }
         Self::drain_script_diagnostics(&self.diagnostics, runtime);
-        if runtime.script_ctx.state().is_dirty() {
-            self.dirty = true;
+        let state_dirty = runtime.script_ctx.state().is_dirty();
+        let events = script_events_to_requests(runtime.script_ctx.drain_published_events());
+        drop(runtimes);
+        if state_dirty {
+            self.invalidate_script_state();
         }
 
-        Ok(script_events_to_requests(
-            runtime.script_ctx.drain_published_events(),
-        ))
+        Ok(events)
     }
 }

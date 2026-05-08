@@ -161,19 +161,42 @@ impl FrontendRenderEngine {
             clip
         };
 
-        let mut child_order: Vec<usize> = (0..node.children.len()).collect();
-        child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
+        // The vast majority of parents don't use z-index — every child has the
+        // same value (typically 0). Detect that case and iterate in natural
+        // order to avoid the Vec allocation + O(n log n) sort per parent per
+        // paint frame. Only fall back to sorting when at least one child has a
+        // differing z-index.
+        let needs_sort = node
+            .children
+            .windows(2)
+            .any(|pair| pair[0].computed_style.z_index != pair[1].computed_style.z_index);
 
-        for index in child_order {
-            self.render_node(
-                &node.children[index],
-                buffer,
-                scale,
-                child_offset_x,
-                child_offset_y,
-                child_clip,
-                module_id,
-            );
+        if needs_sort {
+            let mut child_order: Vec<usize> = (0..node.children.len()).collect();
+            child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
+            for index in child_order {
+                self.render_node(
+                    &node.children[index],
+                    buffer,
+                    scale,
+                    child_offset_x,
+                    child_offset_y,
+                    child_clip,
+                    module_id,
+                );
+            }
+        } else {
+            for child in &node.children {
+                self.render_node(
+                    child,
+                    buffer,
+                    scale,
+                    child_offset_x,
+                    child_offset_y,
+                    child_clip,
+                    module_id,
+                );
+            }
         }
 
         self.render_scrollbars(node, buffer, scale, bounds, clip);

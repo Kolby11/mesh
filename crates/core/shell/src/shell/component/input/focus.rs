@@ -161,7 +161,7 @@ impl FrontendSurfaceComponent {
         if let Some(key) = new_key {
             self.focused_key = Some(key.clone());
             self.focus_visible_key = Some(key);
-            self.dirty = true;
+            self.invalidate_interaction_restyle();
         }
         self.return_focus = return_focus;
         self.close_on_focus_leave = close_on_focus_leave;
@@ -173,7 +173,7 @@ impl FrontendSurfaceComponent {
     pub(in crate::shell::component) fn clear_focus_for_transfer(&mut self) {
         self.focused_key = None;
         self.focus_visible_key = None;
-        self.dirty = true;
+        self.invalidate_interaction_restyle();
     }
 
     /// Escape inside a surface with a recorded `return_focus` (i.e. a
