@@ -132,7 +132,7 @@ Items accepted at `v1.1` close:
 
 ## Pending Todos
 
-(None)
+- Create unified package and module manifest phase — captured 2026-05-08; separate future phase for package/module manifest structure, module management, icon pack installation, and interface declarations.
 
 ## Artifact Index
 
