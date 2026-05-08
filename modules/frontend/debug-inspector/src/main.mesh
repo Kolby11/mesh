@@ -17,85 +17,127 @@
           <text class="profiling-badge">{profiling_badge}</text>
         </row>
         <text class="profiling-copy">{profiling_copy}</text>
-        <button class="profiling-toggle" onclick={onToggleProfiling} aria-label="{profiling_button_label}">
-          <text class="profiling-toggle-text">{profiling_button_text}</text>
-        </button>
       </column>
 
-      <row class="view-nav">
-        <button class="view-pill" onclick={showOverview}>
-          <text class="view-pill-text">Overview</text>
-        </button>
-        <button class="view-pill" onclick={showSurfaces}>
-          <text class="view-pill-text">Surfaces</text>
-        </button>
-        <button class="view-pill" onclick={showBackend}>
-          <text class="view-pill-text">Backend</text>
-        </button>
-        <button class="view-pill" onclick={showBenchmark}>
-          <text class="view-pill-text">Benchmark</text>
-        </button>
-      </row>
+      <ViewTabs
+        onOverview={showOverview}
+        onSurfaces={showSurfaces}
+        onBackendServices={showBackendServices}
+        onBenchmark={showBenchmark}
+        overview_indicator_hidden={overview_indicator_hidden}
+        surfaces_indicator_hidden={surfaces_indicator_hidden}
+        backend_services_indicator_hidden={backend_services_indicator_hidden}
+        benchmark_indicator_hidden={benchmark_indicator_hidden}
+      />
 
       <column class="inspector-body">
-        <column class="view-section" hidden={overview_hidden}>
-          <text class="section-title">Overview</text>
-          <text class="section-copy">{overview_copy}</text>
-          <column class="metric-group">
-            <row class="metric-row">
-              <text class="metric-label">Overlay visibility</text>
-              <text class="metric-value">{overlay_value}</text>
-            </row>
-            <row class="metric-row">
-              <text class="metric-label">Live session</text>
-              <text class="metric-value">{session_value}</text>
-            </row>
-            <row class="metric-row">
-              <text class="metric-label">Known modules</text>
-              <text class="metric-value">{module_count}</text>
-            </row>
-          </column>
-        </column>
+        <OverviewView
+          hidden={overview_hidden}
+          state_title={overview_state_title}
+          state_copy={overview_state_copy}
+          off_hidden={overview_off_hidden}
+          warming_hidden={overview_warming_hidden}
+          idle_hidden={overview_idle_hidden}
+          session_value={session_value}
+          overlay_value={overlay_value}
+          module_count={module_count}
+          active_surface_count={active_surface_count}
+          backend_count={backend_count}
+          shell_stage_label={shell_stage_label}
+          shell_render_label={shell_render_label}
+          onToggleProfiling={onToggleProfiling}
+          profiling_button_label={profiling_button_label}
+          profiling_button_text={profiling_button_text}
+        />
 
-        <column class="view-section" hidden={surfaces_hidden}>
-          <text class="section-title">Surfaces</text>
-          <text class="section-copy">{surfaces_copy}</text>
-          <column class="metric-group">
-            <row class="metric-row">
-              <text class="metric-label">Active surfaces</text>
-              <text class="metric-value">{active_surface_count}</text>
-            </row>
-            <row class="metric-row">
-              <text class="metric-label">Current focus</text>
-              <text class="metric-value">{surface_focus_value}</text>
-            </row>
-          </column>
-        </column>
+        <SurfacesView
+          hidden={surfaces_hidden}
+          state_copy={surfaces_state_copy}
+          empty_hidden={surfaces_empty_hidden}
+          row1_hidden={surface_row_1_hidden}
+          row1_surface_id={surface_row_1_surface_id}
+          row1_module_id={surface_row_1_module_id}
+          row1_stage_label={surface_row_1_stage_label}
+          row1_render_label={surface_row_1_render_label}
+          row1_redraw_label={surface_row_1_redraw_label}
+          row2_hidden={surface_row_2_hidden}
+          row2_surface_id={surface_row_2_surface_id}
+          row2_module_id={surface_row_2_module_id}
+          row2_stage_label={surface_row_2_stage_label}
+          row2_render_label={surface_row_2_render_label}
+          row2_redraw_label={surface_row_2_redraw_label}
+          row3_hidden={surface_row_3_hidden}
+          row3_surface_id={surface_row_3_surface_id}
+          row3_module_id={surface_row_3_module_id}
+          row3_stage_label={surface_row_3_stage_label}
+          row3_render_label={surface_row_3_render_label}
+          row3_redraw_label={surface_row_3_redraw_label}
+        />
 
-        <column class="view-section" hidden={backend_hidden}>
-          <text class="section-title">Backend</text>
-          <text class="section-copy">{backend_copy}</text>
-          <column class="metric-group">
-            <row class="metric-row">
-              <text class="metric-label">Runtime entries</text>
-              <text class="metric-value">{backend_count}</text>
-            </row>
-            <row class="metric-row">
-              <text class="metric-label">Interfaces</text>
-              <text class="metric-value">{interface_count}</text>
-            </row>
-          </column>
-        </column>
+        <BackendServicesView
+          hidden={backend_hidden}
+          state_copy={backend_state_copy}
+          empty_hidden={backend_empty_hidden}
+          row1_hidden={backend_row_1_hidden}
+          row1_interface={backend_row_1_interface}
+          row1_provider_id={backend_row_1_provider_id}
+          row1_runtime_label={backend_row_1_runtime_label}
+          row1_poll_update={backend_row_1_poll_update}
+          row1_command_handling={backend_row_1_command_handling}
+          row1_state_publish_delivery={backend_row_1_state_publish_delivery}
+          row2_hidden={backend_row_2_hidden}
+          row2_interface={backend_row_2_interface}
+          row2_provider_id={backend_row_2_provider_id}
+          row2_runtime_label={backend_row_2_runtime_label}
+          row2_poll_update={backend_row_2_poll_update}
+          row2_command_handling={backend_row_2_command_handling}
+          row2_state_publish_delivery={backend_row_2_state_publish_delivery}
+          row3_hidden={backend_row_3_hidden}
+          row3_interface={backend_row_3_interface}
+          row3_provider_id={backend_row_3_provider_id}
+          row3_runtime_label={backend_row_3_runtime_label}
+          row3_poll_update={backend_row_3_poll_update}
+          row3_command_handling={backend_row_3_command_handling}
+          row3_state_publish_delivery={backend_row_3_state_publish_delivery}
+        />
 
-        <column class="view-section" hidden={benchmark_hidden}>
-          <text class="section-title">Benchmark</text>
-          <text class="section-copy">Phase 16 reserves these benchmark cards for repeatable interaction proofs in Phase 17.</text>
+        <column class="benchmark-view" hidden={benchmark_hidden}>
+          <text class="section-title">Benchmark / Interaction</text>
+          <text class="section-copy">
+            Phase 16 reserves benchmark cards as scaffolding for repeatable interaction proofs in
+            Phase 17.
+          </text>
           <column class="benchmark-stack">
-            <box class="benchmark-card"><text class="benchmark-card-text">Hover latency and restyle impact</text></box>
-            <box class="benchmark-card"><text class="benchmark-card-text">Surface open and close response</text></box>
-            <box class="benchmark-card"><text class="benchmark-card-text">Pointer-driven slider or drag updates</text></box>
-            <box class="benchmark-card"><text class="benchmark-card-text">Keyboard traversal and focus movement</text></box>
-            <box class="benchmark-card"><text class="benchmark-card-text">Backend-driven publish to visible update</text></box>
+            <box class="benchmark-card">
+              <column class="benchmark-card-copy">
+                <text class="benchmark-card-title">Hover</text>
+                <text class="benchmark-card-text">Measures hover latency and restyle impact.</text>
+              </column>
+            </box>
+            <box class="benchmark-card">
+              <column class="benchmark-card-copy">
+                <text class="benchmark-card-title">Surface open / close</text>
+                <text class="benchmark-card-text">Measures response from shell action to visible panel change.</text>
+              </column>
+            </box>
+            <box class="benchmark-card">
+              <column class="benchmark-card-copy">
+                <text class="benchmark-card-title">Pointer-driven update</text>
+                <text class="benchmark-card-text">Measures slider or drag interaction cost while the shell repaints.</text>
+              </column>
+            </box>
+            <box class="benchmark-card">
+              <column class="benchmark-card-copy">
+                <text class="benchmark-card-title">Keyboard traversal</text>
+                <text class="benchmark-card-text">Measures focus movement and keyboard-driven surface updates.</text>
+              </column>
+            </box>
+            <box class="benchmark-card">
+              <column class="benchmark-card-copy">
+                <text class="benchmark-card-title">Backend-driven update</text>
+                <text class="benchmark-card-text">Measures provider stage cost together with the resulting frontend work.</text>
+              </column>
+            </box>
           </column>
         </column>
       </column>
@@ -104,31 +146,89 @@
 </template>
 
 <script lang="luau">
+import BackendServicesView from "./components/backend-services-view.mesh"
+import OverviewView from "./components/overview-view.mesh"
+import SurfacesView from "./components/surfaces-view.mesh"
+import ViewTabs from "./components/view-tabs.mesh"
+
 local debug_ok, debug_service = pcall(require, "@mesh/debug@>=1.0")
 if not debug_ok then debug_service = nil end
 
+active_view = "overview"
 overview_hidden = false
 surfaces_hidden = true
 backend_hidden = true
 benchmark_hidden = true
-
+overview_indicator_hidden = false
+surfaces_indicator_hidden = true
+backend_services_indicator_hidden = true
+benchmark_indicator_hidden = true
 session_status = "Debug overlay connected"
 profiling_badge = "Idle"
 profiling_copy = "Profiling stays off until you explicitly start it."
 profiling_button_text = "Start profiling"
 profiling_button_label = "Start debug profiling"
 
-overview_copy = "Shell-wide status and sample readiness remain visible here while the live inspector wiring lands."
-surfaces_copy = "Per-surface timing rollups and redraw comparisons will render here without changing the right-panel workflow."
-backend_copy = "Backend runtime health and provider stage attribution stay grouped here for live service inspection."
-
-overlay_value = "Hidden"
+overview_state_kind = "off"
+overview_off_hidden = false
+overview_warming_hidden = true
+overview_idle_hidden = true
+overview_state_title = "Profiling is off"
+overview_state_copy = "Enable profiling to collect rolling shell, surface, and backend timings."
 session_value = "Session 0"
+overlay_value = "Hidden"
 module_count = "0"
 active_surface_count = "0"
-surface_focus_value = "No active surface data"
 backend_count = "0"
-interface_count = "0"
+shell_stage_label = "No recent samples yet"
+shell_render_label = "Total surface render: --"
+
+surfaces_state_copy = "Surface timing rows stay visible even when no recent work has been recorded."
+surfaces_empty = true
+surfaces_empty_hidden = false
+surface_row_1_hidden = true
+surface_row_1_surface_id = ""
+surface_row_1_module_id = ""
+surface_row_1_stage_label = ""
+surface_row_1_render_label = ""
+surface_row_1_redraw_label = ""
+surface_row_2_hidden = true
+surface_row_2_surface_id = ""
+surface_row_2_module_id = ""
+surface_row_2_stage_label = ""
+surface_row_2_render_label = ""
+surface_row_2_redraw_label = ""
+surface_row_3_hidden = true
+surface_row_3_surface_id = ""
+surface_row_3_module_id = ""
+surface_row_3_stage_label = ""
+surface_row_3_render_label = ""
+surface_row_3_redraw_label = ""
+
+backend_state_copy = "Runtime health and stage timing stay separated even when providers are idle."
+backend_empty = true
+backend_empty_hidden = false
+backend_row_1_hidden = true
+backend_row_1_interface = ""
+backend_row_1_provider_id = ""
+backend_row_1_runtime_label = ""
+backend_row_1_poll_update = ""
+backend_row_1_command_handling = ""
+backend_row_1_state_publish_delivery = ""
+backend_row_2_hidden = true
+backend_row_2_interface = ""
+backend_row_2_provider_id = ""
+backend_row_2_runtime_label = ""
+backend_row_2_poll_update = ""
+backend_row_2_command_handling = ""
+backend_row_2_state_publish_delivery = ""
+backend_row_3_hidden = true
+backend_row_3_interface = ""
+backend_row_3_provider_id = ""
+backend_row_3_runtime_label = ""
+backend_row_3_poll_update = ""
+backend_row_3_command_handling = ""
+backend_row_3_state_publish_delivery = ""
 
 local function count_list(value)
     if type(value) == "table" then
@@ -137,27 +237,182 @@ local function count_list(value)
     return "0"
 end
 
-local function set_active_view(view)
-    overview_hidden = view ~= "overview"
-    surfaces_hidden = view ~= "surfaces"
-    backend_hidden = view ~= "backend"
-    benchmark_hidden = view ~= "benchmark"
+local function sync_view_state()
+    overview_hidden = active_view ~= "overview"
+    surfaces_hidden = active_view ~= "surfaces"
+    backend_hidden = active_view ~= "backend_services"
+    benchmark_hidden = active_view ~= "benchmark"
+    overview_indicator_hidden = active_view ~= "overview"
+    surfaces_indicator_hidden = active_view ~= "surfaces"
+    backend_services_indicator_hidden = active_view ~= "backend_services"
+    benchmark_indicator_hidden = active_view ~= "benchmark"
+end
+
+local function sync_overview_state_flags()
+    overview_off_hidden = overview_state_kind ~= "off"
+    overview_warming_hidden = overview_state_kind ~= "warming"
+    overview_idle_hidden = overview_state_kind ~= "idle"
+end
+
+local function list_size(value)
+    if type(value) == "table" then
+        return #value
+    end
+    return 0
+end
+
+local function micros_label(value)
+    local numeric = tonumber(value) or 0
+    return string.format("%dus", math.floor(numeric + 0.5))
+end
+
+local function stage_total_label(summary)
+    if type(summary) ~= "table" then
+        return "No recent samples yet"
+    end
+    local total = tonumber(summary.total_micros) or 0
+    local count = tonumber(summary.sample_count) or 0
+    return string.format("%s across %d samples", micros_label(total), count)
+end
+
+local function first_stage_label(stages)
+    if type(stages) ~= "table" or #stages == 0 then
+        return "No recent samples yet"
+    end
+    local summary = stages[1]
+    local stage_name = tostring(summary.stage or "stage")
+    return string.format("%s: %s", stage_name, stage_total_label(summary))
+end
+
+local function find_stage(stages, stage_name)
+    if type(stages) ~= "table" then
+        return nil
+    end
+    for _, summary in ipairs(stages) do
+        if tostring(summary.stage or "") == stage_name then
+            return summary
+        end
+    end
+    return nil
+end
+
+local function surface_slot(slot, snapshot)
+    if slot == 1 then
+        surface_row_1_hidden = snapshot == nil
+        if snapshot == nil then return end
+        surface_row_1_surface_id = tostring(snapshot.surface_id or "unknown-surface")
+        surface_row_1_module_id = string.format("Module %s", tostring(snapshot.module_id or "unknown"))
+        surface_row_1_stage_label = first_stage_label(snapshot.stages)
+        surface_row_1_render_label = string.format(
+            "Total render %s",
+            micros_label(snapshot.total_surface_render_time_micros)
+        )
+        surface_row_1_redraw_label = string.format("Redraws %s", tostring(snapshot.redraw_count or 0))
+        return
+    end
+    if slot == 2 then
+        surface_row_2_hidden = snapshot == nil
+        if snapshot == nil then return end
+        surface_row_2_surface_id = tostring(snapshot.surface_id or "unknown-surface")
+        surface_row_2_module_id = string.format("Module %s", tostring(snapshot.module_id or "unknown"))
+        surface_row_2_stage_label = first_stage_label(snapshot.stages)
+        surface_row_2_render_label = string.format(
+            "Total render %s",
+            micros_label(snapshot.total_surface_render_time_micros)
+        )
+        surface_row_2_redraw_label = string.format("Redraws %s", tostring(snapshot.redraw_count or 0))
+        return
+    end
+    surface_row_3_hidden = snapshot == nil
+    if snapshot == nil then return end
+    surface_row_3_surface_id = tostring(snapshot.surface_id or "unknown-surface")
+    surface_row_3_module_id = string.format("Module %s", tostring(snapshot.module_id or "unknown"))
+    surface_row_3_stage_label = first_stage_label(snapshot.stages)
+    surface_row_3_render_label = string.format(
+        "Total render %s",
+        micros_label(snapshot.total_surface_render_time_micros)
+    )
+    surface_row_3_redraw_label = string.format("Redraws %s", tostring(snapshot.redraw_count or 0))
+end
+
+local function runtime_label(interface_name, runtimes)
+    if type(runtimes) ~= "table" then
+        return "No runtime health entry"
+    end
+    for _, runtime in ipairs(runtimes) do
+        if tostring(runtime.interface or "") == interface_name then
+            local status = tostring(runtime.status or "unknown")
+            local message = tostring(runtime.message or "No runtime detail")
+            return string.format("%s: %s", status, message)
+        end
+    end
+    return "No runtime health entry"
+end
+
+local function backend_slot(slot, snapshot, runtimes)
+    local target_interface = ""
+    local target_provider = ""
+    local target_runtime = ""
+    local target_poll = ""
+    local target_command = ""
+    local target_publish = ""
+
+    if snapshot ~= nil then
+        target_interface = tostring(snapshot.interface or "unknown")
+        target_provider = tostring(snapshot.provider_id or "unknown")
+        target_runtime = runtime_label(target_interface, runtimes)
+        target_poll = stage_total_label(find_stage(snapshot.stages, "poll_update"))
+        target_command = stage_total_label(find_stage(snapshot.stages, "command_handling"))
+        target_publish = stage_total_label(find_stage(snapshot.stages, "state_publish_delivery"))
+    end
+
+    if slot == 1 then
+        backend_row_1_hidden = snapshot == nil
+        backend_row_1_interface = target_interface
+        backend_row_1_provider_id = target_provider
+        backend_row_1_runtime_label = target_runtime
+        backend_row_1_poll_update = target_poll
+        backend_row_1_command_handling = target_command
+        backend_row_1_state_publish_delivery = target_publish
+        return
+    end
+    if slot == 2 then
+        backend_row_2_hidden = snapshot == nil
+        backend_row_2_interface = target_interface
+        backend_row_2_provider_id = target_provider
+        backend_row_2_runtime_label = target_runtime
+        backend_row_2_poll_update = target_poll
+        backend_row_2_command_handling = target_command
+        backend_row_2_state_publish_delivery = target_publish
+        return
+    end
+    backend_row_3_hidden = snapshot == nil
+    backend_row_3_interface = target_interface
+    backend_row_3_provider_id = target_provider
+    backend_row_3_runtime_label = target_runtime
+    backend_row_3_poll_update = target_poll
+    backend_row_3_command_handling = target_command
+    backend_row_3_state_publish_delivery = target_publish
 end
 
 function showOverview()
-    set_active_view("overview")
+    active_view = "overview"
+    sync_view_state()
 end
 
 function showSurfaces()
-    set_active_view("surfaces")
+    active_view = "surfaces"
+    sync_view_state()
 end
 
-function showBackend()
-    set_active_view("backend")
+function showBackendServices()
+    active_view = "backend_services"
+    sync_view_state()
 end
 
 function showBenchmark()
-    set_active_view("benchmark")
+    active_view = "benchmark"
+    sync_view_state()
 end
 
 function onCloseInspector()
@@ -173,29 +428,32 @@ function onRender()
         session_status = "Debug service unavailable"
         profiling_badge = "Unavailable"
         profiling_copy = "The shell debug service has not been published yet."
+        overview_state_kind = "off"
+        overview_state_title = "Profiling is off"
+        overview_state_copy = "Enable profiling to collect rolling shell, surface, and backend timings."
         overlay_value = "Unavailable"
         session_value = "Session --"
         module_count = "0"
         active_surface_count = "0"
-        surface_focus_value = "No active surface data"
         backend_count = "0"
-        interface_count = "0"
+        shell_stage_label = "No recent samples yet"
+        shell_render_label = "Total surface render: --"
+        surfaces_empty = true
+        surfaces_empty_hidden = false
+        backend_empty = true
+        backend_empty_hidden = false
+        surface_slot(1, nil)
+        surface_slot(2, nil)
+        surface_slot(3, nil)
+        backend_slot(1, nil, nil)
+        backend_slot(2, nil, nil)
+        backend_slot(3, nil, nil)
         return
     end
 
-    if debug_service.profiling_enabled then
-        profiling_badge = "Live"
-        profiling_copy = "Profiling is collecting rolling samples through the existing debug path."
-        profiling_button_text = "Stop profiling"
-        profiling_button_label = "Stop debug profiling"
-        session_status = "Profiling is active"
-    else
-        profiling_badge = "Idle"
-        profiling_copy = "Profiling stays off until you explicitly start it."
-        profiling_button_text = "Start profiling"
-        profiling_button_label = "Start debug profiling"
-        session_status = "Inspector open without profiling"
-    end
+    local profiling = debug_service.profiling
+    local surface_samples = nil
+    local backend_samples = nil
 
     if debug_service.overlay_enabled then
         overlay_value = "Visible"
@@ -207,13 +465,68 @@ function onRender()
     module_count = count_list(debug_service.modules)
     active_surface_count = count_list(debug_service.active_surfaces)
     backend_count = count_list(debug_service.backend_runtimes)
-    interface_count = count_list(debug_service.interfaces)
 
-    if type(debug_service.active_surfaces) == "table" and #debug_service.active_surfaces > 0 then
-        surface_focus_value = tostring(debug_service.active_surfaces[1])
+    if debug_service.profiling_enabled then
+        profiling_badge = "Live"
+        profiling_copy = "Profiling is collecting rolling samples through the existing debug path."
+        profiling_button_text = "Stop profiling"
+        profiling_button_label = "Stop debug profiling"
+
+        if type(profiling) == "table" then
+            session_status = "Profiling is live"
+            overview_state_kind = "live"
+            overview_state_title = "Recent samples available"
+            overview_state_copy = "Live shell, surface, and backend summaries are updating in this panel."
+            shell_stage_label = first_stage_label(profiling.shell and profiling.shell.stages)
+            shell_render_label = string.format(
+                "Total surface render: %s",
+                micros_label(profiling.shell and profiling.shell.total_surface_render_time_micros)
+            )
+            surface_samples = profiling.surfaces
+            backend_samples = profiling.backends
+
+            if list_size(profiling.shell and profiling.shell.stages) == 0 then
+                overview_state_kind = "idle"
+                overview_state_title = "No recent samples yet"
+                overview_state_copy = "Profiling is live but no recent timings have been captured yet."
+            end
+        else
+            session_status = "Profiling is live but still collecting samples"
+            overview_state_kind = "warming"
+            overview_state_title = "Profiling is live but still collecting samples"
+            overview_state_copy = "Interact with the shell to move from warm-up into rolling summaries."
+            shell_stage_label = "collecting samples"
+            shell_render_label = "Total surface render: warming up"
+        end
     else
-        surface_focus_value = "No active surface data"
+        profiling_badge = "Idle"
+        profiling_copy = "Profiling stays off until you explicitly start it."
+        profiling_button_text = "Start profiling"
+        profiling_button_label = "Start debug profiling"
+        session_status = "Inspector open without profiling"
+        overview_state_kind = "off"
+        overview_state_title = "Profiling is off"
+        overview_state_copy = "Enable profiling to collect rolling shell, surface, and backend timings."
+        shell_stage_label = "No recent samples yet"
+        shell_render_label = "Total surface render: --"
     end
+
+    surfaces_empty = list_size(surface_samples) == 0
+    surfaces_empty_hidden = not surfaces_empty
+    backend_empty = list_size(backend_samples) == 0
+    backend_empty_hidden = not backend_empty
+    surfaces_state_copy = "Compare per-surface timing and redraw activity without leaving the right-side panel."
+    backend_state_copy = "Runtime health and stage timing stay separated so lifecycle issues do not read like performance cost."
+    sync_view_state()
+    sync_overview_state_flags()
+
+    surface_slot(1, surface_samples and surface_samples[1] or nil)
+    surface_slot(2, surface_samples and surface_samples[2] or nil)
+    surface_slot(3, surface_samples and surface_samples[3] or nil)
+
+    backend_slot(1, backend_samples and backend_samples[1] or nil, debug_service.backend_runtimes)
+    backend_slot(2, backend_samples and backend_samples[2] or nil, debug_service.backend_runtimes)
+    backend_slot(3, backend_samples and backend_samples[3] or nil, debug_service.backend_runtimes)
 end
 </script>
 
@@ -261,43 +574,52 @@ end
 }
 
 .header-close {
-    min-width: 68px;
+    min-width: 64px;
     height: 32px;
+    padding-inline: token(spacing.sm);
     justify-content: center;
     align-items: center;
-    border-radius: token(radius.md);
-    background: token(color.secondary-container);
-    color: token(color.on-secondary-container);
-}
-
-.header-close-text {
-    font-size: token(typography.size.xs);
-    font-weight: 600;
-}
-
-.profiling-zone {
-    gap: token(spacing.sm);
-    padding: token(spacing.sm);
     border-radius: token(radius.md);
     background: token(color.surface-container);
 }
 
+.header-close-text {
+    font-size: token(typography.size.sm);
+    font-weight: 600;
+    color: token(color.on-surface);
+}
+
+.profiling-zone {
+    gap: token(spacing.xs);
+    padding: token(spacing.md);
+    border-radius: token(radius.md);
+    background: token(color.surface-container-low);
+    border-width: 1px;
+    border-style: solid;
+    border-color: token(color.outline-variant);
+}
+
 .profiling-head {
     width: 100%;
+    justify-content: space-between;
     align-items: center;
     gap: token(spacing.sm);
 }
 
 .profiling-title {
-    flex-grow: 1;
     font-size: token(typography.size.sm);
     font-weight: 700;
+    color: token(color.on-surface);
 }
 
 .profiling-badge {
+    padding-inline: token(spacing.sm);
+    padding-block: token(spacing.xs);
+    border-radius: token(radius.full);
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
     font-size: token(typography.size.xs);
     font-weight: 700;
-    color: token(color.primary);
 }
 
 .profiling-copy {
@@ -305,49 +627,14 @@ end
     color: token(color.on-surface-variant);
 }
 
-.profiling-toggle {
-    width: 100%;
-    height: 36px;
-    justify-content: center;
-    align-items: center;
-    border-radius: token(radius.md);
-    background: token(color.primary-container);
-    color: token(color.on-primary-container);
-}
-
-.profiling-toggle-text {
-    font-size: token(typography.size.sm);
-    font-weight: 700;
-}
-
-.view-nav {
-    width: 100%;
-    gap: token(spacing.xs);
-    flex-wrap: wrap;
-}
-
-.view-pill {
-    height: 34px;
-    padding-inline: token(spacing.sm);
-    justify-content: center;
-    align-items: center;
-    border-radius: token(radius.full);
-    background: token(color.secondary-container);
-    color: token(color.on-secondary-container);
-}
-
-.view-pill-text {
-    font-size: token(typography.size.xs);
-    font-weight: 700;
-}
-
 .inspector-body {
+    width: 100%;
     flex-grow: 1;
     gap: token(spacing.md);
 }
 
-.view-section {
-    gap: token(spacing.sm);
+.benchmark-view {
+    gap: token(spacing.md);
 }
 
 .section-title {
@@ -361,41 +648,28 @@ end
     color: token(color.on-surface-variant);
 }
 
-.metric-group {
-    gap: token(spacing.xs);
-    padding: token(spacing.sm);
-    border-radius: token(radius.md);
-    background: token(color.surface-container-low);
-}
-
-.metric-row {
-    width: 100%;
-    justify-content: space-between;
-    align-items: center;
-    gap: token(spacing.sm);
-}
-
-.metric-label {
-    font-size: token(typography.size.xs);
-    color: token(color.on-surface-variant);
-}
-
-.metric-value {
-    font-size: token(typography.size.sm);
-    font-weight: 700;
-    color: token(color.on-surface);
-    text-align: right;
-}
-
 .benchmark-stack {
-    gap: token(spacing.xs);
+    gap: token(spacing.sm);
 }
 
 .benchmark-card {
     width: 100%;
-    padding: token(spacing.sm);
+    padding: token(spacing.md);
     border-radius: token(radius.md);
-    background: token(color.surface-container-low);
+    background: token(color.surface-container);
+    border-width: 1px;
+    border-style: solid;
+    border-color: token(color.outline-variant);
+}
+
+.benchmark-card-copy {
+    gap: token(spacing.xs);
+}
+
+.benchmark-card-title {
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+    color: token(color.on-surface);
 }
 
 .benchmark-card-text {

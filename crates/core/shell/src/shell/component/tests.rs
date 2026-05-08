@@ -169,6 +169,29 @@ fn audio_network_power_catalog() -> InterfaceCatalog {
     catalog
 }
 
+fn debug_catalog() -> InterfaceCatalog {
+    let mut catalog = InterfaceCatalog::default();
+    catalog.register_contract(InterfaceContract {
+        interface: "mesh.debug".into(),
+        version: parse_contract_version("1.0").unwrap(),
+        file_path: PathBuf::from("<test>"),
+        state_fields: Vec::new(),
+        methods: Vec::new(),
+        events: Vec::new(),
+        types: HashMap::new(),
+        capabilities: ContractCapabilities::default(),
+    });
+    catalog.register_provider(InterfaceProvider {
+        interface: "mesh.debug".into(),
+        version: Some("1.0".into()),
+        base_module: Some("@mesh/debug".into()),
+        provider_module: "@mesh/core-debug".into(),
+        backend_name: "Shell".into(),
+        priority: 100,
+    });
+    catalog
+}
+
 fn make_audio_ctx() -> ScriptContext {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("service.audio.read"));
@@ -342,12 +365,16 @@ fn real_frontend_module_component(
         .unwrap();
     let navigation_dir = root.join("modules/frontend/navigation-bar");
     let audio_popover_dir = root.join("modules/frontend/audio-popover");
+    let debug_inspector_dir = root.join("modules/frontend/debug-inspector");
 
     let navigation_manifest = mesh_core_module::manifest::load_manifest(&navigation_dir)
         .expect("navigation manifest")
         .manifest;
     let audio_popover_manifest = mesh_core_module::manifest::load_manifest(&audio_popover_dir)
         .expect("audio manifest")
+        .manifest;
+    let debug_inspector_manifest = mesh_core_module::manifest::load_manifest(&debug_inspector_dir)
+        .expect("debug inspector manifest")
         .manifest;
 
     let navigation_compiled = CompiledFrontendModule {
@@ -426,6 +453,51 @@ fn real_frontend_module_component(
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
     };
+    let debug_inspector_compiled = CompiledFrontendModule {
+        manifest: debug_inspector_manifest,
+        source_path: debug_inspector_dir.join("src/main.mesh"),
+        component: parse_component(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/debug-inspector/src/main.mesh"
+        )))
+        .unwrap(),
+        local_components: HashMap::from([
+            (
+                "ViewTabs".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/debug-inspector/src/components/view-tabs.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
+                "OverviewView".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/debug-inspector/src/components/overview-view.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
+                "SurfacesView".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/debug-inspector/src/components/surfaces-view.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
+                "BackendServicesView".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/debug-inspector/src/components/backend-services-view.mesh"
+                )))
+                .unwrap(),
+            ),
+        ]),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
 
     let catalog = FrontendCatalog {
         modules: HashMap::from([
@@ -443,12 +515,21 @@ fn real_frontend_module_component(
                     compiled: audio_popover_compiled.clone(),
                 },
             ),
+            (
+                "@mesh/debug-inspector".into(),
+                FrontendCatalogEntry {
+                    module_dir: debug_inspector_dir.clone(),
+                    compiled: debug_inspector_compiled.clone(),
+                },
+            ),
         ]),
         slot_contributions: HashMap::new(),
     };
 
     let (compiled, module_dir) = if module_id == "@mesh/audio-popover" {
         (audio_popover_compiled, audio_popover_dir)
+    } else if module_id == "@mesh/debug-inspector" {
+        (debug_inspector_compiled, debug_inspector_dir)
     } else {
         (navigation_compiled, navigation_dir)
     };
@@ -485,6 +566,13 @@ fn runtime_bool(component: &FrontendSurfaceComponent, name: &str) -> bool {
     runtime_value(component, name)
         .and_then(|value| value.as_bool())
         .unwrap_or_else(|| panic!("expected boolean runtime value for {name}"))
+}
+
+fn rendered_text(component: &FrontendSurfaceComponent) -> Vec<String> {
+    let tree = component.last_tree.as_ref().expect("rendered widget tree");
+    let mut output = Vec::new();
+    collect_text_content(tree, &mut output);
+    output
 }
 
 fn event_node(
@@ -4954,6 +5042,263 @@ fn real_core_surfaces_reject_legacy_service_callback_api_in_shipped_surfaces() {
     for (name, source) in sources {
         assert_no_legacy_service_callbacks(name, source);
     }
+}
+
+#[test]
+fn debug_inspector_overview_renders_profiling_off_state_on_real_surface() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "profiling_enabled": false,
+                "profiling_session_id": 3,
+                "active_view": "overview",
+                "modules": [{ "id": "@mesh/debug-inspector" }],
+                "interfaces": [],
+                "backend_runtimes": [],
+                "active_surfaces": ["@mesh/debug-inspector"],
+                "profiling": serde_json::Value::Null
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(360, 640);
+    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|line| line == "Debug Inspector"));
+    assert!(text.iter().any(|line| line == "Profiling is off"));
+    assert!(text.iter().any(|line| line.contains("Enable profiling")));
+    assert!(text.iter().any(|line| line == "Start profiling"));
+    assert!(
+        runtime_value(&component, "active_view")
+            .and_then(|value| value.as_str().map(str::to_string))
+            .as_deref()
+            == Some("overview")
+    );
+}
+
+#[test]
+fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(360, 640);
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "profiling_enabled": true,
+                "profiling_session_id": 4,
+                "active_view": "overview",
+                "modules": [],
+                "interfaces": [],
+                "backend_runtimes": [],
+                "active_surfaces": [],
+                "profiling": {
+                    "session_id": 4,
+                    "shell": {
+                        "stages": [],
+                        "redraw_count": 0,
+                        "total_surface_render_time_micros": 0
+                    },
+                    "surfaces": [],
+                    "backends": []
+                }
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
+        .unwrap();
+    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+
+    let empty_text = rendered_text(&component);
+    assert!(empty_text.iter().any(|line| line == "Surfaces"));
+    assert!(
+        empty_text
+            .iter()
+            .any(|line| line == "No recent surface activity")
+    );
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "profiling_enabled": true,
+                "profiling_session_id": 4,
+                "active_view": "overview",
+                "modules": [],
+                "interfaces": [],
+                "backend_runtimes": [],
+                "active_surfaces": ["@mesh/navigation-bar"],
+                "profiling": {
+                    "session_id": 4,
+                    "shell": {
+                        "stages": [{
+                            "stage": "paint",
+                            "sample_count": 2,
+                            "total_micros": 42,
+                            "max_micros": 24,
+                            "recent_samples": []
+                        }],
+                        "redraw_count": 2,
+                        "total_surface_render_time_micros": 128
+                    },
+                    "surfaces": [{
+                        "surface_id": "@mesh/navigation-bar",
+                        "module_id": "@mesh/navigation-bar",
+                        "stages": [{
+                            "stage": "paint",
+                            "sample_count": 2,
+                            "total_micros": 42,
+                            "max_micros": 24,
+                            "recent_samples": []
+                        }],
+                        "redraw_count": 2,
+                        "total_surface_render_time_micros": 128
+                    }],
+                    "backends": []
+                }
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+
+    let live_text = rendered_text(&component);
+    assert!(live_text.iter().any(|line| line == "@mesh/navigation-bar"));
+    assert!(
+        live_text
+            .iter()
+            .any(|line| line.contains("paint: 42us across 2 samples"))
+    );
+    assert!(
+        live_text
+            .iter()
+            .any(|line| line.contains("Total render 128us"))
+    );
+}
+
+#[test]
+fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_stages() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "profiling_enabled": true,
+                "profiling_session_id": 7,
+                "active_view": "overview",
+                "modules": [],
+                "interfaces": [],
+                "backend_runtimes": [{
+                    "interface": "mesh.audio",
+                    "provider_id": "@mesh/pipewire-audio",
+                    "status": "running",
+                    "message": "Polling steadily",
+                    "failure_count": 0
+                }],
+                "active_surfaces": [],
+                "profiling": {
+                    "session_id": 7,
+                    "shell": {
+                        "stages": [{
+                            "stage": "paint",
+                            "sample_count": 1,
+                            "total_micros": 10,
+                            "max_micros": 10,
+                            "recent_samples": []
+                        }],
+                        "redraw_count": 1,
+                        "total_surface_render_time_micros": 10
+                    },
+                    "surfaces": [],
+                    "backends": [{
+                        "interface": "mesh.audio",
+                        "provider_id": "@mesh/pipewire-audio",
+                        "stages": [
+                            {
+                                "stage": "poll_update",
+                                "sample_count": 3,
+                                "total_micros": 90,
+                                "max_micros": 40,
+                                "recent_samples": []
+                            },
+                            {
+                                "stage": "command_handling",
+                                "sample_count": 1,
+                                "total_micros": 25,
+                                "max_micros": 25,
+                                "recent_samples": []
+                            },
+                            {
+                                "stage": "state_publish_delivery",
+                                "sample_count": 2,
+                                "total_micros": 30,
+                                "max_micros": 18,
+                                "recent_samples": []
+                            }
+                        ]
+                    }]
+                }
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(360, 640);
+    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/debug-inspector::showBackendServices",
+            &[],
+        )
+        .unwrap();
+    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|line| line == "Backend services"));
+    assert!(text.iter().any(|line| line == "Runtime health"));
+    assert!(text.iter().any(|line| line == "Timing stages"));
+    assert!(
+        text.iter()
+            .any(|line| line.contains("running: Polling steadily"))
+    );
+    assert!(text.iter().any(|line| line.contains("poll_update")));
+    assert!(
+        text.iter()
+            .any(|line| line.contains("90us across 3 samples"))
+    );
+    assert!(text.iter().any(|line| line.contains("command_handling")));
+    assert!(
+        text.iter()
+            .any(|line| line.contains("25us across 1 samples"))
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("state_publish_delivery"))
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("30us across 2 samples"))
+    );
+    assert!(
+        runtime_value(&component, "active_view")
+            .and_then(|value| value.as_str().map(str::to_string))
+            .as_deref()
+            == Some("backend_services")
+    );
 }
 
 // ---- 09-03: post-restyle synchronization tests ----

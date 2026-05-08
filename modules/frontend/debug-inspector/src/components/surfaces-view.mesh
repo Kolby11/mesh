@@ -1,0 +1,92 @@
+<template>
+  <column class="surfaces-view">
+    <text class="section-title">Surfaces</text>
+    <text class="section-copy">{state_copy}</text>
+
+    <box class="empty-card" hidden={empty_hidden}>
+      <column class="empty-copy">
+        <text class="empty-title">No recent surface activity</text>
+        <text class="empty-text">Surfaces stay listed here once recent work has been recorded.</text>
+      </column>
+    </box>
+
+    <column class="surface-list">
+      <box class="surface-card" hidden={row1_hidden}>
+        <column class="surface-copy">
+          <text class="surface-title">{row1_surface_id}</text>
+          <text class="surface-meta">{row1_module_id}</text>
+          <text class="surface-metric">{row1_stage_label}</text>
+          <text class="surface-metric">{row1_render_label}</text>
+          <text class="surface-metric">{row1_redraw_label}</text>
+        </column>
+      </box>
+
+      <box class="surface-card" hidden={row2_hidden}>
+        <column class="surface-copy">
+          <text class="surface-title">{row2_surface_id}</text>
+          <text class="surface-meta">{row2_module_id}</text>
+          <text class="surface-metric">{row2_stage_label}</text>
+          <text class="surface-metric">{row2_render_label}</text>
+          <text class="surface-metric">{row2_redraw_label}</text>
+        </column>
+      </box>
+
+      <box class="surface-card" hidden={row3_hidden}>
+        <column class="surface-copy">
+          <text class="surface-title">{row3_surface_id}</text>
+          <text class="surface-meta">{row3_module_id}</text>
+          <text class="surface-metric">{row3_stage_label}</text>
+          <text class="surface-metric">{row3_render_label}</text>
+          <text class="surface-metric">{row3_redraw_label}</text>
+        </column>
+      </box>
+    </column>
+  </column>
+</template>
+
+<script lang="luau">
+</script>
+
+<style>
+.surfaces-view,
+.surface-list {
+    gap: token(spacing.md);
+}
+
+.section-title {
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+    color: token(color.on-surface);
+}
+
+.section-copy,
+.empty-text,
+.surface-meta,
+.surface-metric {
+    font-size: token(typography.size.xs);
+    color: token(color.on-surface-variant);
+}
+
+.empty-card,
+.surface-card {
+    width: 100%;
+    padding: token(spacing.md);
+    border-radius: token(radius.md);
+    background: token(color.surface-container);
+    border-width: 1px;
+    border-style: solid;
+    border-color: token(color.outline-variant);
+}
+
+.empty-copy,
+.surface-copy {
+    gap: token(spacing.xs);
+}
+
+.empty-title,
+.surface-title {
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+    color: token(color.on-surface);
+}
+</style>

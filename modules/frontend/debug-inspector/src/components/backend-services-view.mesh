@@ -1,0 +1,97 @@
+<template>
+  <column class="backend-view">
+    <text class="section-title">Backend services</text>
+    <text class="section-copy">{state_copy}</text>
+
+    <box class="empty-card" hidden={empty_hidden}>
+      <column class="empty-copy">
+        <text class="empty-title">No backend samples yet</text>
+        <text class="empty-text">Runtime health still appears separately once providers report live timing stages.</text>
+      </column>
+    </box>
+
+    <column class="backend-list">
+      <box class="backend-card" hidden={row1_hidden}>
+        <column class="backend-copy">
+          <text class="backend-title">{row1_interface}</text>
+          <text class="backend-meta">{row1_provider_id}</text>
+          <text class="section-subtitle">Runtime health</text>
+          <text class="backend-metric">{row1_runtime_label}</text>
+          <text class="section-subtitle">Timing stages</text>
+          <text class="backend-metric">poll_update: {row1_poll_update}</text>
+          <text class="backend-metric">command_handling: {row1_command_handling}</text>
+          <text class="backend-metric">state_publish_delivery: {row1_state_publish_delivery}</text>
+        </column>
+      </box>
+
+      <box class="backend-card" hidden={row2_hidden}>
+        <column class="backend-copy">
+          <text class="backend-title">{row2_interface}</text>
+          <text class="backend-meta">{row2_provider_id}</text>
+          <text class="section-subtitle">Runtime health</text>
+          <text class="backend-metric">{row2_runtime_label}</text>
+          <text class="section-subtitle">Timing stages</text>
+          <text class="backend-metric">poll_update: {row2_poll_update}</text>
+          <text class="backend-metric">command_handling: {row2_command_handling}</text>
+          <text class="backend-metric">state_publish_delivery: {row2_state_publish_delivery}</text>
+        </column>
+      </box>
+
+      <box class="backend-card" hidden={row3_hidden}>
+        <column class="backend-copy">
+          <text class="backend-title">{row3_interface}</text>
+          <text class="backend-meta">{row3_provider_id}</text>
+          <text class="section-subtitle">Runtime health</text>
+          <text class="backend-metric">{row3_runtime_label}</text>
+          <text class="section-subtitle">Timing stages</text>
+          <text class="backend-metric">poll_update: {row3_poll_update}</text>
+          <text class="backend-metric">command_handling: {row3_command_handling}</text>
+          <text class="backend-metric">state_publish_delivery: {row3_state_publish_delivery}</text>
+        </column>
+      </box>
+    </column>
+  </column>
+</template>
+
+<script lang="luau">
+</script>
+
+<style>
+.backend-view,
+.backend-list {
+    gap: token(spacing.md);
+}
+
+.section-title,
+.section-subtitle,
+.empty-title,
+.backend-title {
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+    color: token(color.on-surface);
+}
+
+.section-copy,
+.empty-text,
+.backend-meta,
+.backend-metric {
+    font-size: token(typography.size.xs);
+    color: token(color.on-surface-variant);
+}
+
+.empty-card,
+.backend-card {
+    width: 100%;
+    padding: token(spacing.md);
+    border-radius: token(radius.md);
+    background: token(color.surface-container);
+    border-width: 1px;
+    border-style: solid;
+    border-color: token(color.outline-variant);
+}
+
+.empty-copy,
+.backend-copy {
+    gap: token(spacing.xs);
+}
+</style>

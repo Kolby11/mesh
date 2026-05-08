@@ -1,0 +1,150 @@
+<template>
+  <column class="overview-view">
+    <text class="section-title">Overview</text>
+
+    <box class="state-card" hidden={off_hidden}>
+      <column class="state-copy">
+        <text class="state-title">Profiling is off</text>
+        <text class="state-text">{state_copy}</text>
+      </column>
+    </box>
+
+    <box class="state-card" hidden={warming_hidden}>
+      <column class="state-copy">
+        <text class="state-title">Profiling is live but still collecting samples</text>
+        <text class="state-text">The shell is collecting samples and still collecting samples for the first live summary.</text>
+      </column>
+    </box>
+
+    <box class="state-card" hidden={idle_hidden}>
+      <column class="state-copy">
+        <text class="state-title">No recent samples yet</text>
+        <text class="state-text">{state_copy}</text>
+      </column>
+    </box>
+
+    <box class="summary-card">
+      <column class="summary-copy">
+        <text class="summary-title">{state_title}</text>
+        <text class="summary-text">{state_copy}</text>
+      </column>
+    </box>
+
+    <button class="profiling-toggle" onclick={onToggleProfiling} aria-label="{profiling_button_label}">
+      <text class="profiling-toggle-text">{profiling_button_text}</text>
+    </button>
+
+    <column class="metric-group">
+      <row class="metric-row">
+        <text class="metric-label">Overlay visibility</text>
+        <text class="metric-value">{overlay_value}</text>
+      </row>
+      <row class="metric-row">
+        <text class="metric-label">Live session</text>
+        <text class="metric-value">{session_value}</text>
+      </row>
+      <row class="metric-row">
+        <text class="metric-label">Known modules</text>
+        <text class="metric-value">{module_count}</text>
+      </row>
+      <row class="metric-row">
+        <text class="metric-label">Active surfaces</text>
+        <text class="metric-value">{active_surface_count}</text>
+      </row>
+      <row class="metric-row">
+        <text class="metric-label">Runtime entries</text>
+        <text class="metric-value">{backend_count}</text>
+      </row>
+    </column>
+
+    <column class="metric-group">
+      <text class="metric-group-title">Shell timing</text>
+      <text class="metric-summary">{shell_stage_label}</text>
+      <text class="metric-summary">{shell_render_label}</text>
+    </column>
+  </column>
+</template>
+
+<script lang="luau">
+</script>
+
+<style>
+.overview-view {
+    gap: token(spacing.md);
+}
+
+.section-title {
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+    color: token(color.on-surface);
+}
+
+.state-card,
+.summary-card,
+.metric-group {
+    width: 100%;
+    padding: token(spacing.md);
+    border-radius: token(radius.md);
+    background: token(color.surface-container);
+    border-width: 1px;
+    border-style: solid;
+    border-color: token(color.outline-variant);
+}
+
+.state-copy,
+.summary-copy {
+    gap: token(spacing.xs);
+}
+
+.state-title,
+.summary-title,
+.metric-group-title {
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+    color: token(color.on-surface);
+}
+
+.state-text,
+.summary-text,
+.metric-summary {
+    font-size: token(typography.size.xs);
+    color: token(color.on-surface-variant);
+}
+
+.profiling-toggle {
+    width: 100%;
+    min-height: 36px;
+    justify-content: center;
+    align-items: center;
+    border-radius: token(radius.md);
+    background: token(color.primary);
+}
+
+.profiling-toggle-text {
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+    color: token(color.on-primary);
+}
+
+.metric-group {
+    gap: token(spacing.sm);
+}
+
+.metric-row {
+    width: 100%;
+    justify-content: space-between;
+    align-items: center;
+    gap: token(spacing.sm);
+}
+
+.metric-label {
+    font-size: token(typography.size.xs);
+    color: token(color.on-surface-variant);
+}
+
+.metric-value {
+    font-size: token(typography.size.xs);
+    font-weight: 700;
+    color: token(color.on-surface);
+}
+</style>
