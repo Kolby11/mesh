@@ -38,15 +38,24 @@
 
 ## v1.2 Rendering System Upgrade
 
-**Status:** active
+**Status:** shipped
 **Started:** 2026-05-05
+**Archived:** 2026-05-08
 
 **Goal:** Make MESH frontend rendering expressive and interactive enough for distinctive shell UI without turning the renderer into a full browser engine.
 
-**Target scope:**
-- Practical CSS coverage for common shell styling
-- Container-size and interaction-state reactivity
-- Selectable rendered text with copy support
-- Keyboard navigation and configurable shortcuts
-- Theme animation tokens and custom CSS animations
-- Navigation-bar migration as the proof surface
+**Delivered:**
+- Practical CSS coverage with diagnostics, shorthands, token resolution, and author docs
+- Container-size and interaction-state reactivity without losing runtime or service state
+- Selectable rendered text with copy support and theme-owned highlight rendering
+- Keyboard navigation, focus-visible behavior, and configurable shortcuts on shipped surfaces
+- Theme animation tokens and constrained CSS animation playback with diagnostics
+- Navigation-bar migration as the milestone proof surface
+
+**Stats:** 6 phases, 26 plans, 26 requirements shipped
+
+**Deferred at close:** 4 acknowledged items recorded in `.planning/STATE.md`
+
+**Archive artifacts:**
+- `.planning/milestones/v1.2-ROADMAP.md`
+- `.planning/milestones/v1.2-REQUIREMENTS.md`

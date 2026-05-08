@@ -112,9 +112,6 @@ Conceptually, component files may use blocks like:
 - `<template>`
 - `<script lang="luau">`
 - `<style>`
-- `<schema>`
-- `<i18n>`
-- `<meta>`
 
 This keeps structure, logic, and styling close together while still supporting validation and compilation.
 

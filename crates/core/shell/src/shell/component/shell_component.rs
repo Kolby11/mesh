@@ -64,9 +64,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 if portal_tracks || self.last_surface_states.contains_key(surface_id) {
                     self.last_surface_states
                         .insert(surface_id.clone(), *visible);
-                    self.pending_surface_states
-                        .borrow_mut()
-                        .remove(surface_id);
+                    self.pending_surface_states.borrow_mut().remove(surface_id);
                     if let Some(binding) = self
                         .portal_hidden_bindings
                         .borrow()
@@ -74,8 +72,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                         .cloned()
                     {
                         let component_id = self.id().to_string();
-                        if let Some(runtime) =
-                            self.runtimes.lock().unwrap().get_mut(&component_id)
+                        if let Some(runtime) = self.runtimes.lock().unwrap().get_mut(&component_id)
                         {
                             runtime
                                 .script_ctx
@@ -405,6 +402,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.surface_layout.margin_top = margin_top;
         self.surface_layout.margin_left = margin_left;
         self.dirty = true;
+    }
+
+    fn allows_shrink_to_fit(&self) -> bool {
+        self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured
     }
 
     fn receive_focus_transfer(

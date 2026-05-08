@@ -154,14 +154,8 @@ impl CompiledFrontendModule {
             if let Some(role) = accessibility.role.as_deref() {
                 root.accessibility.role = accessibility::parse_accessibility_role(role);
             }
-            root.accessibility.label = accessibility
-                .label
-                .clone()
-                .or_else(|| self.manifest.package.name.clone());
-            root.accessibility.description = accessibility
-                .description
-                .clone()
-                .or_else(|| self.manifest.package.description.clone());
+            root.accessibility.label = accessibility.label.clone();
+            root.accessibility.description = accessibility.description.clone();
         }
 
         let resolver = StyleResolver::new(theme);

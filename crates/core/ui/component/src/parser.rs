@@ -1,7 +1,6 @@
 /// Parser for `.mesh` single-file components.
 ///
 /// Splits the source into top-level blocks (`<template>`, `<script>`, `<style>`,
-/// `<i18n>`) then parses each block with parser libraries.
 mod markup;
 mod script;
 mod styles;
@@ -192,14 +191,6 @@ button {
     padding: 8px;
 }
 </style>
-
-<i18n>
-[en]
-greeting = "Hello"
-
-[fr]
-greeting = "Bonjour"
-</i18n>
 "#;
         let file = parse_component(source).unwrap();
 

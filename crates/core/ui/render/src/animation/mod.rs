@@ -4,13 +4,9 @@
 //! between frames: easing curves, value interpolation, transition controllers,
 //! affine transforms, box shadows, and `@keyframes` playback.
 //!
-//! Today the only working piece is the `transition`-based interpolation that
-//! lives in `mesh-core-shell` (`shell/component/animation.rs`). That logic
-//! will migrate here so the shell only needs to feed the animator a tree and
-//! a timestamp; it will not own the math.
-//!
-//! The submodules below are skeletons. Each one carries a short outline of
-//! what it has to do and the integration points it touches.
+//! Phase 12 moves the interpolation and keyframe math here so the shell can
+//! treat renderer animation playback as a reusable primitive instead of owning
+//! timing logic itself.
 
 pub mod box_shadow;
 pub mod easing;

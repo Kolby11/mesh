@@ -1,4 +1,5 @@
 use super::super::*;
+use mesh_core_render::surface::LayerSurfaceSizePolicy;
 
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
@@ -44,6 +45,11 @@ impl Shell {
                     LayerSurfaceConfig {
                         edge: surface.edge,
                         layer: surface.layer.unwrap_or(Layer::Top),
+                        size_policy: if runtime.component.allows_shrink_to_fit() {
+                            LayerSurfaceSizePolicy::Flexible
+                        } else {
+                            LayerSurfaceSizePolicy::Fixed
+                        },
                         width: surface.width,
                         height: surface.height,
                         exclusive_zone: surface.exclusive_zone,
@@ -58,6 +64,7 @@ impl Shell {
                     LayerSurfaceConfig {
                         edge: surface.edge,
                         layer: surface.layer.unwrap_or(Layer::Top),
+                        size_policy: LayerSurfaceSizePolicy::Fixed,
                         width: 1,
                         height: 1,
                         exclusive_zone: 0,

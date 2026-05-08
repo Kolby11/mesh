@@ -188,6 +188,8 @@
     "animation.curves.bezier.standard-decelerate": "cubic-bezier(0.0, 0.0, 0, 1.0)",
     "animation.curves.bezier.standard-accelerate": "cubic-bezier(0.3, 0.0, 1, 1.0)",
     "animation.curves.bezier.emphasized": "cubic-bezier(0.2, 0.0, 0, 1.0)",
+    "animation.default.border-radius": "border-radius token(animation.duration.fast) token(animation.curves.bezier.standard)",
+    "animation.default.opacity": "opacity token(animation.duration.short) token(animation.curves.bezier.standard)",
     "animation.scale.hover": 1.02,
     "animation.scale.press": 0.98,
     "animation.opacity.disabled": 0.38,

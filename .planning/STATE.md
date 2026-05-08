@@ -2,33 +2,33 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Rendering System Upgrade
-status: executing
-stopped_at: Phase 12 context gathered
-last_updated: "2026-05-08T11:16:04.780Z"
-last_activity: 2026-05-08 -- Phase 12 planning complete
+status: between_milestones
+stopped_at: v1.2 milestone archived
+last_updated: "2026-05-08T16:20:00.000Z"
+last_activity: 2026-05-08 -- v1.2 milestone archived; ready for next milestone
 progress:
-  total_phases: 6
-  completed_phases: 4
-  total_plans: 21
-  completed_plans: 16
-  percent: 76
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # State: MESH v1.2
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-05)
+See: `.planning/PROJECT.md` (updated 2026-05-08)
 
 **Core value:** A plugin author can style and animate distinctive shell UI with practical CSS-like primitives while MESH keeps rendering predictable and lightweight.
-**Current focus:** Phase 12 — theme-animation-tokens-and-css-animations
+**Current focus:** Between milestones
 
 ## Current Position
 
-Phase: 12 (theme-animation-tokens-and-css-animations) — READY TO EXECUTE
-Plan: 0 of 5
-Status: Ready to execute
-Last activity: 2026-05-08 -- Phase 12 planning complete
+Phase: None
+Plan: None
+Status: Between milestones
+Last activity: 2026-05-08 -- v1.2 milestone archived
 
 ## Decisions
 
@@ -105,9 +105,9 @@ Last activity: 2026-05-08 -- Phase 12 planning complete
 
 ## Session
 
-Last session: 2026-05-08T11:05:19.013Z
-Stopped At: Phase 12 context gathered
-Resume File: .planning/phases/12-theme-animation-tokens-and-css-animations/12-CONTEXT.md
+Last session: 2026-05-08T16:20:00.000Z
+Stopped At: v1.2 milestone archived
+Resume File: None
 
 ## Accumulated Context
 
@@ -126,6 +126,15 @@ Items accepted at `v1.1` close:
 | validation | Live PipeWire or PulseAudio backend startup remains manual-only confirmation | deferred |
 | verification | Obsolete `latest_service_events` note still needs retirement from archived validation metadata | deferred |
 
+Items acknowledged and deferred at `v1.2` close on 2026-05-08:
+
+| Category | Item | Status |
+|----------|------|--------|
+| todo | 2026-05-08-create-unified-package-and-module-manifest-phase.md | deferred |
+| uat | Phase 11 / 11-HUMAN-UAT.md | partial |
+| verification | Phase 11 / 11-VERIFICATION.md | human_needed |
+| planning | v1.2 requirements checkbox and traceability drift for KEY-01 through KEY-04 and ANIM-01 through ANIM-05 despite completed phases | deferred |
+
 ## Blockers
 
 (None)
@@ -139,10 +148,10 @@ Items accepted at `v1.1` close:
 | Artifact | Path |
 |----------|------|
 | Project context | `.planning/PROJECT.md` |
-| Requirements | `.planning/REQUIREMENTS.md` |
+| Requirements archive | `.planning/milestones/v1.2-REQUIREMENTS.md` |
 | Roadmap | `.planning/ROADMAP.md` |
 | State | `.planning/STATE.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-06 after Phase 10 completion*
+*State updated: 2026-05-08 after v1.2 milestone completion*

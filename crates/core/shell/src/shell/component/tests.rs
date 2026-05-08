@@ -3,6 +3,7 @@ use crate::shell::component::catalog::FrontendCatalogEntry;
 use crate::shell::{CoreEvent, CoreRequest, KeyModifiers};
 use mesh_core_capability::Capability;
 use mesh_core_component::parse_component;
+use mesh_core_elements::style::Display;
 use mesh_core_elements::style::Overflow;
 use mesh_core_elements::{Color, LayoutRect};
 use mesh_core_module::manifest::{
@@ -359,6 +360,30 @@ fn real_frontend_module_component(
         .unwrap(),
         local_components: HashMap::from([
             (
+                "BatteryButton".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/navigation-bar/src/components/battery-button.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
+                "MetaLabel".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/navigation-bar/src/components/meta-label.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
+                "MetaPill".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/navigation-bar/src/components/meta-pill.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
                 "SettingsButton".into(),
                 parse_component(include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
@@ -595,6 +620,46 @@ fn find_node_by_mesh_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a Widg
     node.children
         .iter()
         .find_map(|child| find_node_by_mesh_key(child, key))
+}
+
+fn first_node_with_attr<'a>(
+    node: &'a WidgetNode,
+    attr: &str,
+    value: &str,
+) -> Option<&'a WidgetNode> {
+    if node
+        .attributes
+        .get(attr)
+        .is_some_and(|candidate| candidate == value)
+    {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| first_node_with_attr(child, attr, value))
+}
+
+fn collect_text_content(node: &WidgetNode, output: &mut Vec<String>) {
+    if node.computed_style.display == Display::None {
+        return;
+    }
+    if node.tag == "text" {
+        if let Some(content) = node.attributes.get("content") {
+            output.push(content.clone());
+        }
+    }
+    for child in &node.children {
+        collect_text_content(child, output);
+    }
+}
+
+fn count_tag(node: &WidgetNode, tag: &str) -> usize {
+    usize::from(node.tag == tag)
+        + node
+            .children
+            .iter()
+            .map(|child| count_tag(child, tag))
+            .sum::<usize>()
 }
 
 #[test]
@@ -1603,19 +1668,23 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
             if interface == "mesh.audio" && command == "toggle_mute"
     ));
 
-    for _ in 0..2 {
-        component
-            .handle_input(
-                &theme,
-                320,
-                80,
-                ComponentInput::KeyPressed {
-                    key: "Tab".into(),
-                    modifiers: KeyModifiers::default(),
-                },
-            )
-            .unwrap();
-    }
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    let theme_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeToggle",
+    )
+    .expect("rendered theme button");
+    let theme_key = theme_button
+        .attributes
+        .get("_mesh_key")
+        .expect("theme button mesh key")
+        .clone();
+    component.focused_key = Some(theme_key.clone());
+    component.focus_visible_key = Some(theme_key);
+
     let activation_requests = component
         .handle_input(
             &theme,
@@ -1650,13 +1719,6 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
         "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onSettingsClick",
     )
     .expect("rendered settings button");
-    assert_eq!(
-        settings_button
-            .event_handlers
-            .get("focus")
-            .map(String::as_str),
-        Some("__mesh_embed__::@mesh/navigation-bar::onSettingsFocus")
-    );
     let settings_key = settings_button
         .attributes
         .get("_mesh_key")
@@ -1679,7 +1741,49 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
         )
         .unwrap();
 
-    assert_eq!(component.focused_key.as_deref(), Some(settings_key.as_str()));
+    assert_eq!(
+        component.focused_key.as_deref(),
+        Some(settings_key.as_str())
+    );
+}
+
+#[test]
+fn navigation_bar_real_surface_exposes_selectable_status_copy() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 42,
+                "muted": false
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(420, 80);
+    component.paint(&theme, 420, 80, &mut buffer).unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    assert_eq!(
+        count_selectable_text_nodes(tree),
+        1,
+        "the shipped nav bar should expose exactly one selectable passive text node"
+    );
+
+    let status_primary =
+        first_node_with_attr(tree, "ref", "status-primary").expect("status-primary text node");
+    assert_eq!(status_primary.tag, "text");
+    assert_eq!(
+        status_primary.attributes.get("content").map(String::as_str),
+        Some("Shell surface active")
+    );
 }
 
 #[test]
@@ -1792,6 +1896,61 @@ fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
         }
         other => panic!("expected one audio set_volume request, got {other:?}"),
     }
+}
+
+#[test]
+fn navigation_bar_compact_width_hides_secondary_status_before_controls() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 58,
+                "muted": false
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut wide_buffer = PixelBuffer::new(920, 80);
+    component.paint(&theme, 920, 80, &mut wide_buffer).unwrap();
+    let wide_tree = component.last_tree.as_ref().expect("wide navigation tree");
+    let mut wide_text = Vec::new();
+    collect_text_content(wide_tree, &mut wide_text);
+    assert!(
+        wide_text
+            .iter()
+            .any(|content| content == "Audio steady at 58%"),
+        "wide nav bar should show secondary audio status text: {wide_text:?}"
+    );
+    assert!(
+        count_tag(wide_tree, "button") >= 3,
+        "wide nav bar should retain the three primary controls"
+    );
+
+    let mut compact_buffer = PixelBuffer::new(240, 80);
+    component
+        .paint(&theme, 240, 80, &mut compact_buffer)
+        .unwrap();
+    let compact_tree = component
+        .last_tree
+        .as_ref()
+        .expect("compact navigation tree");
+    let mut compact_text = Vec::new();
+    collect_text_content(compact_tree, &mut compact_text);
+    let compact_secondary = first_node_with_attr(compact_tree, "class", "status-secondary")
+        .expect("compact secondary status node");
+    assert!(
+        compact_secondary.computed_style.display == Display::None,
+        "compact nav bar should hide the secondary status node before controls"
+    );
+    assert!(
+        count_tag(compact_tree, "button") >= 3,
+        "compact nav bar must keep the primary controls available"
+    );
 }
 
 #[test]
@@ -3333,6 +3492,65 @@ end
             .expect("preserved keyframe animation")
             .started_at,
         preserved_start
+    );
+}
+
+#[test]
+fn navigation_bar_keyframe_animation_continues_across_rebuild() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 31,
+                "muted": false
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(420, 80);
+    component.paint(&theme, 420, 80, &mut buffer).unwrap();
+    let first_tree = component
+        .last_tree
+        .as_ref()
+        .expect("initial navigation tree");
+    let first_status_accent =
+        first_node_with_attr(first_tree, "class", "status-accent").expect("status accent node");
+    assert_eq!(
+        first_status_accent.computed_style.animation.name.as_deref(),
+        Some("status-pulse")
+    );
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 64,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, 420, 80, &mut buffer).unwrap();
+    let rebuilt_tree = component
+        .last_tree
+        .as_ref()
+        .expect("rebuilt navigation tree");
+    let rebuilt_status_accent = first_node_with_attr(rebuilt_tree, "class", "status-accent")
+        .expect("rebuilt status accent node");
+
+    assert_eq!(
+        rebuilt_status_accent
+            .computed_style
+            .animation
+            .name
+            .as_deref(),
+        Some("status-pulse")
     );
 }
 

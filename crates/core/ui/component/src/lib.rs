@@ -8,7 +8,6 @@ pub mod style;
 /// <template>  — XHTML-like markup
 /// <script>    — Luau logic
 /// <style>     — CSS-like styling with theme token references
-/// <i18n>      — Translations keyed by locale
 /// ```
 ///
 /// This crate parses these blocks into a typed AST. It has no runtime

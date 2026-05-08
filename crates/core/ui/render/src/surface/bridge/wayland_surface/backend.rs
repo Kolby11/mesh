@@ -1,10 +1,17 @@
 use super::*;
 
 /// Configuration passed from the shell before each present.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerSurfaceSizePolicy {
+    Fixed,
+    Flexible,
+}
+
 #[derive(Debug, Clone)]
 pub struct LayerSurfaceConfig {
     pub edge: Option<Edge>,
     pub layer: MeshLayer,
+    pub size_policy: LayerSurfaceSizePolicy,
     pub width: u32,
     pub height: u32,
     pub exclusive_zone: i32,
@@ -21,6 +28,7 @@ impl Default for LayerSurfaceConfig {
         Self {
             edge: Some(Edge::Top),
             layer: MeshLayer::Top,
+            size_policy: LayerSurfaceSizePolicy::Fixed,
             width: 0,
             height: 0,
             exclusive_zone: 0,
@@ -174,6 +182,7 @@ impl LayerShellBackend {
 
     /// Apply a surface's desired config. Creates the layer surface lazily on first call.
     pub fn configure(&mut self, surface_id: &str, cfg: LayerSurfaceConfig) {
+        let cfg = self.clamp_surface_config(cfg);
         let qh = self.state.qh.clone();
         let effective_keyboard_mode = self
             .state
@@ -205,6 +214,76 @@ impl LayerShellBackend {
                 }
             }
         }
+    }
+
+    fn clamp_surface_config(&self, mut cfg: LayerSurfaceConfig) -> LayerSurfaceConfig {
+        let Some((output_width, output_height)) = self.output_logical_size() else {
+            return cfg;
+        };
+
+        if cfg.width == 0 || cfg.height == 0 {
+            return cfg;
+        }
+
+        let max_width = output_width.max(1);
+        let max_height = output_height.max(1);
+
+        if cfg.size_policy == LayerSurfaceSizePolicy::Flexible {
+            cfg.width = cfg.width.min(max_width);
+            cfg.height = cfg.height.min(max_height);
+        } else {
+            cfg.width = cfg.width.min(max_width);
+            cfg.height = cfg.height.min(max_height);
+        }
+
+        match cfg.edge {
+            Some(Edge::Left) | None => {
+                let max_left = max_width.saturating_sub(cfg.width) as i32;
+                let max_top = max_height.saturating_sub(cfg.height) as i32;
+                cfg.margin_left = cfg.margin_left.clamp(0, max_left.max(0));
+                cfg.margin_top = cfg.margin_top.clamp(0, max_top.max(0));
+            }
+            Some(Edge::Right) => {
+                let max_right = max_width.saturating_sub(cfg.width) as i32;
+                let max_top = max_height.saturating_sub(cfg.height) as i32;
+                cfg.margin_right = cfg.margin_right.clamp(0, max_right.max(0));
+                cfg.margin_top = cfg.margin_top.clamp(0, max_top.max(0));
+            }
+            Some(Edge::Top) => {
+                let max_left = max_width.saturating_sub(cfg.width) as i32;
+                cfg.margin_left = cfg.margin_left.clamp(0, max_left.max(0));
+            }
+            Some(Edge::Bottom) => {
+                let max_left = max_width.saturating_sub(cfg.width) as i32;
+                let max_bottom = max_height.saturating_sub(cfg.height) as i32;
+                cfg.margin_left = cfg.margin_left.clamp(0, max_left.max(0));
+                cfg.margin_bottom = cfg.margin_bottom.clamp(0, max_bottom.max(0));
+            }
+        }
+
+        cfg
+    }
+
+    fn output_logical_size(&self) -> Option<(u32, u32)> {
+        self.state
+            .output_state
+            .outputs()
+            .into_iter()
+            .find_map(|output| self.state.output_state.info(&output))
+            .and_then(|info| {
+                info.logical_size
+                    .or_else(|| {
+                        info.modes
+                            .iter()
+                            .find(|mode| mode.current)
+                            .map(|mode| (mode.dimensions.0 as i32, mode.dimensions.1 as i32))
+                    })
+                    .and_then(|(width, height)| {
+                        let width = u32::try_from(width).ok()?;
+                        let height = u32::try_from(height).ok()?;
+                        Some((width, height))
+                    })
+            })
     }
 
     pub fn present(

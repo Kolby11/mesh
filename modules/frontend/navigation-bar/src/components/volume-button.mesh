@@ -3,8 +3,6 @@
     ref="volume-button"
     class="nav-button"
     onclick={onActivate}
-    onfocus={onfocus}
-    onblur={onblur}
     title="{audio_tooltip}"
     aria-label="{t('nav.open_audio')}"
   >
@@ -72,12 +70,12 @@ end
     border-style: solid;
     border-color: transparent;
     text-wrap: none;
-    transition: background-color 180ms ease-out,
-                color 180ms ease-out,
-                border-color 180ms ease-out,
-                border-radius 220ms ease-out,
-                transform 180ms ease-out,
-                padding 180ms ease-out;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-radius token(animation.duration.fast) token(animation.curves.bezier.standard),
+                transform token(animation.duration.short) token(animation.curves.bezier.standard),
+                padding token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
 .nav-button:hover {
@@ -111,7 +109,8 @@ end
     color: inherit;
     --icon-fill: 0;
     --icon-weight: 400;
-    transition: color 180ms ease-out, transform 200ms ease-out;
+    transition: color token(animation.duration.short) token(animation.curves.bezier.standard),
+                transform token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
 .nav-button:hover .nav-button-glyph {
@@ -125,7 +124,7 @@ end
     --icon-weight: 600;
 }
 
-@container (max-width: 760px) {
+@container (max-width: 720px) {
     .nav-button {
         width: 40px;
         padding: token(spacing.xs);

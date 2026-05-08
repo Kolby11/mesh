@@ -109,10 +109,10 @@ end
     background: token(color.surface-container);
     color: token(color.on-surface);
     text-wrap: none;
-    transition: background-color 180ms ease-out,
-                color 180ms ease-out,
-                gap 200ms ease-out,
-                transform 180ms ease-out;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard),
+                gap token(animation.duration.short) token(animation.curves.bezier.standard),
+                transform token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
 .battery-widget:hover {
@@ -128,7 +128,8 @@ end
     justify-content: center;
     align-items: center;
     color: inherit;
-    transition: color 180ms ease-out, transform 200ms ease-out;
+    transition: color token(animation.duration.short) token(animation.curves.bezier.standard),
+                transform token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
 .battery-widget:hover .battery-glyph {
@@ -141,7 +142,7 @@ end
     font-weight: 700;
 }
 
-@container (max-width: 760px) {
+@container (max-width: 720px) {
     .battery-value {
         display: none;
     }

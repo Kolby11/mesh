@@ -270,6 +270,9 @@ pub trait ShellComponent: Send {
     /// Switches to top-left anchor and sets margins so the surface appears
     /// at (margin_left, margin_top) in screen coordinates.
     fn apply_position(&mut self, _margin_top: i32, _margin_left: i32) {}
+    fn allows_shrink_to_fit(&self) -> bool {
+        false
+    }
 }
 
 pub(super) struct ComponentRuntime {

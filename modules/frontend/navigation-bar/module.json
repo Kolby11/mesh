@@ -130,8 +130,6 @@
     "size_policy": "fixed"
   },
   "accessibility": {
-    "role": "toolbar",
-    "label": "Navigation bar",
-    "description": "Top-level navigation bar surface"
+    "role": "toolbar"
   }
 }

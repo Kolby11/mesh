@@ -77,7 +77,7 @@ mesh-tools-cli
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `mesh-core-shell`     | `Shell` in `shell/mod.rs` — module host and shell orchestrator; `FrontendSurfaceComponent`, `ShellComponent` trait, `CoreRequest`, `CoreEvent`   |
 | `mesh-core-module`    | `Manifest`, `ModuleType`, `SurfaceLayoutSection` in `manifest.rs`; `ModuleInstance` in `lifecycle.rs`                                            |
-| `mesh-core-component` | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>`, and `<i18n>` blocks                                                   |
+| `mesh-core-component` | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>` blocks                                                                 |
 | `mesh-core-render`    | `CompiledFrontendModule`, `FrontendCompositionResolver`, `RenderEngine`, `PixelBuffer`, `SharedTextMeasurer`, `LayerSurfaceConfig`               |
 | `mesh-core-backend`   | `spawn_backend_service`, `BackendServiceCommand`, `BackendServiceUpdate`                                                                         |
 | `mesh-core-scripting` | `ScriptContext`, `BackendScriptContext`, `ScriptState`, `LocaleBoundState`                                                                       |
@@ -142,7 +142,6 @@ Surface layout defaults live in `package.json`, **not** in Rust. `mesh-core-shel
 <template>   ← XHTML-like markup with core elements, {expressions}, and component tags
 <script lang="luau">   ← Luau scripting (state, lifecycle, event handlers)
 <style>      ← CSS-like styling with token() references and @container queries
-<i18n>       ← bundled translations (optional)
 ```
 
 Components are reusable authoring units. They should be made from MESH core
@@ -210,7 +209,6 @@ backend module (mesh.toml, provides = "mesh.audio")
 | Add a service (backend module) | `packages/modules/backend/core/<name>/`, `package.json` + `src/main.luau`, implement the interface contract in the module script |
 | Add a new CoreRequest action   | `CoreRequest` enum + match arm in `handle_request()` in `mesh-core-shell/src/shell.rs`                                           |
 | Add a theme token              | `mesh-core-theme/src/lib.rs`, default theme JSON, then reference with `token(group.name)` in `.mesh`                             |
-| Add localization               | Module's `<i18n>` block or `config/i18n/<locale>.json`; `LocaleEngine` in `mesh-core-locale`                                     |
 | Debug rendering                | `ToggleDebugOverlay` / `CoreRequest::CycleDebugTab`; see `mesh-core-debug/src/lib.rs`                                            |
 | Module manifest parsing        | `mesh-core-module/src/manifest.rs` — `JsonManifest`, `TomlManifest`, `into_manifest()`                                           |
 | Fix icons                      | See "Icon System" section below — four specific files need changes                                                               |

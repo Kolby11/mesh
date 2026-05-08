@@ -1,21 +1,39 @@
 <template>
-  <row class="nav-shell">
-    <box class="meta">
-        <SettingsButton onfocus={onSettingsFocus} onblur={onNavControlBlur} />
+  <stack class="nav-root">
+    <row class="nav-shell">
+      <column class="status-cluster">
+        <row class="status-head">
+          <text ref="status-primary" class="status-primary" selectable="true">{primary_status}</text>
+          <box class="status-accent">
+            <MetaPill />
+          </box>
+        </row>
+        <column class="status-copy">
+          <row ref="status-secondary" class="status-secondary-row">
+            <MetaLabel />
+            <text class="status-secondary">{secondary_status}</text>
+            <BatteryButton />
+          </row>
+        </column>
+      </column>
+      <spacer class="nav-spacer" />
+      <row ref="control-cluster" class="control-cluster">
         <VolumeButton
           onActivate={onToggleAudioSurface}
-          onfocus={onVolumeFocus}
-          onblur={onNavControlBlur}
         />
-        <ThemeButton onfocus={onThemeFocus} onblur={onNavControlBlur} />
-    </box>
+        <ThemeButton />
+        <SettingsButton />
+      </row>
+    </row>
     <AudioPopover hidden={audio_surface_hidden} />
-  </row>
+  </stack>
 </template>
 
 <script lang="luau">
 import AudioPopover from "@mesh/audio-popover"
+import BatteryButton from "./components/battery-button.mesh"
 import MetaLabel from "./components/meta-label.mesh"
+import MetaPill from "./components/meta-pill.mesh"
 import SettingsButton from "./components/settings-button.mesh"
 import VolumeButton from "./components/volume-button.mesh"
 import ThemeButton from "./components/theme-button.mesh"
@@ -25,6 +43,28 @@ if not audio_ok then audio = nil end
 
 audio_surface_id = "@mesh/audio-popover"
 audio_surface_hidden = true
+primary_status = "Shell surface active"
+secondary_status = "Audio service offline"
+
+local function clamp_percent(value)
+    local percent = math.floor(tonumber(value) or 0)
+    if percent < 0 then percent = 0 end
+    if percent > 100 then percent = 100 end
+    return percent
+end
+
+function onRender()
+    if audio_ok and audio and audio.available ~= false then
+        local percent = clamp_percent(audio.percent)
+        if audio.muted then
+            secondary_status = string.format("Audio muted at %d%%", percent)
+        else
+            secondary_status = string.format("Audio steady at %d%%", percent)
+        end
+    else
+        secondary_status = "Audio service offline"
+    end
+end
 
 function onToggleAudioSurface(event)
     local position = event.current_target.position or {}
@@ -58,123 +98,136 @@ end
 </script>
 
 <style>
-.nav-shell {
-    --nav-surface: token(color.surface);
+.nav-root {
     width: 100%;
     height: 100%;
-    justify-content: start;
-    align-items: center;
-    padding-inline: token(spacing.lg);
-    background: var(--nav-surface);
-    color: token(color.on-surface);
-    transition: background-color 150ms ease-out;
 }
 
-.brand {
+.nav-shell {
+    width: 100%;
+    height: 100%;
+    container-type: inline-size;
+    justify-content: start;
+    align-items: center;
+    gap: token(spacing.lg);
+    padding-inline: token(spacing.lg);
+    background: token(color.surface);
+    color: token(color.on-surface);
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard),
+                gap token(animation.duration.short) token(animation.curves.bezier.standard);
+}
+
+.status-cluster {
+    justify-content: center;
+    gap: 2px;
+}
+
+.status-copy {
+    gap: 2px;
+}
+
+.status-head {
     align-items: center;
     gap: token(spacing.sm);
 }
 
-.brand-mark {
-    width: 42px;
-    height: 42px;
-    justify-content: center;
-    align-items: center;
-    border-radius: token(radius.md);
-    background: token(color.primary-container);
+.nav-spacer {
+    flex-grow: 1;
 }
 
-.brand-mark-text {
-    color: token(color.on-primary-container);
-    font-weight: 800;
-    font-size: token(typography.size.lg);
-}
-
-.brand-copy {
-    gap: 2px;
-}
-
-.eyebrow {
-    color: token(color.on-surface-variant);
-    font-size: token(typography.size.xs);
-}
-
-.brand-name {
+.status-primary {
+    color: token(color.on-surface);
     font-size: token(typography.size.md);
     font-weight: 700;
+    text-wrap: none;
 }
 
-.links {
-    flex-grow: 1;
-    justify-content: center;
+.status-secondary-row {
     align-items: center;
     gap: token(spacing.xs);
+    min-width: 0;
+    transition: gap token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
-.link {
-    padding-block: token(spacing.sm);
-    padding-inline: token(spacing.md);
-    border-radius: token(radius.full);
-    background: token(color.surface-container);
-}
-
-.active {
-    background: token(color.secondary-container);
-}
-
-.link-text {
-    color: token(color.on-surface);
+.status-secondary {
+    color: token(color.on-surface-variant);
     font-size: token(typography.size.sm);
-    font-weight: 600;
+    font-weight: 500;
+    text-wrap: none;
 }
 
-.meta {
-    width: 100%;
-    justify-content: start;
+.status-accent {
+    flex-shrink: 0;
+    animation-name: status-pulse;
+    animation-duration: token(animation.duration.long);
+    animation-timing-function: token(animation.curves.bezier.standard);
+    animation-delay: 0ms;
+    animation-iteration-count: 2;
+    animation-direction: alternate;
+    animation-fill-mode: both;
+}
+
+.control-cluster {
+    flex-shrink: 0;
     align-items: center;
     gap: token(spacing.xs);
+    justify-content: end;
 }
 
-.focus-diagnostic {
-    min-width: 172px;
-    height: 36px;
-    justify-content: center;
-    align-items: center;
-    padding-inline: token(spacing.md);
-    border-radius: token(radius.full);
-    background: token(color.surface-container-high);
-    border-width: 1px;
-    border-style: solid;
-    border-color: token(color.outline-variant);
-    transition: background-color 180ms ease-out,
-                border-color 180ms ease-out,
-                min-width 220ms ease-out;
-}
-
-.focus-diagnostic-label {
-    color: token(color.on-surface);
-    font-size: token(typography.size.xs);
-    font-weight: 700;
-    transition: color 180ms ease-out, letter-spacing 200ms ease-out;
-}
-
-@container (max-width: 760px) {
-    .brand-copy {
-        display: none;
+@keyframes status-pulse {
+    0% {
+        opacity: 0.86;
+        transform: scale(1);
     }
 
-    .links {
-        justify-content: end;
+    55% {
+        opacity: 1;
+        transform: scale(1.03);
+    }
+
+    100% {
+        opacity: 0.92;
+        transform: scale(1);
+    }
+}
+
+@container (max-width: 860px) {
+    .nav-shell {
+        gap: token(spacing.md);
+    }
+
+    .status-secondary {
+        max-width: 180px;
+    }
+}
+
+@container (max-width: 720px) {
+    .nav-shell {
+        gap: token(spacing.sm);
+        padding-inline: token(spacing.md);
+    }
+
+    .status-secondary-row {
         gap: token(spacing.xs);
     }
 
-    .link {
-        padding-inline: token(spacing.sm);
+    .status-secondary {
+        display: none;
+    }
+}
+
+@container (max-width: 560px) {
+    .status-head {
+        gap: token(spacing.xs);
     }
 
-    .focus-diagnostic {
-        min-width: 148px;
-        padding-inline: token(spacing.sm);
+    .status-accent {
+        display: none;
+    }
+
+    .status-primary {
+        font-size: token(typography.size.sm);
     }
 }
 </style>

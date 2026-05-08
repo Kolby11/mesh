@@ -10,15 +10,12 @@ hardcoded code path.
 
 ## Model
 
-1. **Modules own their strings.** A module's `<i18n>` block (or a bundled
-   `i18n/<locale>.json`) is the baseline for every locale that module
-   supports.
-2. **Language packs layer on top.** A language pack is a module that
+1. **Language packs layer on top.** A language pack is a module that
    provides translations *for other modules*. Multiple packs can be active
    at once.
-3. **The user picks a locale + fallback chain.** Missing keys walk the
+2. **The user picks a locale + fallback chain.** Missing keys walk the
    chain.
-4. **Lookups go through `mesh.locale`.** Surfaces, widgets, and services
+3. **Lookups go through `mesh.locale`.** Surfaces, widgets, and services
    resolve keys through the interface registry — so localization is
    extensible the same way services and icons are.
 
@@ -250,7 +247,6 @@ mesh locale active                     # current locale + chain
 mesh locale set <code>                 # switch primary locale
 mesh locale which <module> <key>       # which pack/layer supplied the string
 mesh locale missing <module>           # keys the module declares but no locale satisfies
-mesh locale extract <module>           # dump keys from a module's <i18n> for translators
 ```
 
 `mesh locale extract` is the translator's entry point — it produces a

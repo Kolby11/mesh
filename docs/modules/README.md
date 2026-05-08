@@ -80,7 +80,7 @@ examples should prefer `package.json`.
 
 Frontend surfaces have a
 `src/main.mesh` single-file component (`<template>`, `<script lang="luau">`,
-`<style>`, `<i18n>`). Backends have a `src/main.luau` entrypoint
+`<style>`). Backends have a `src/main.luau` entrypoint
 that registers an interface implementation with the interface registry.
 Interface packages ship an `interface.toml` declaration instead of an
 executable entrypoint.

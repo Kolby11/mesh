@@ -4,7 +4,7 @@ mod wayland_surface;
 use super::{PixelBuffer, RenderError};
 
 pub use dev_window::{DevWindowEvent as WindowEvent, DevWindowKeyEvent as WindowKeyEvent};
-pub use wayland_surface::LayerSurfaceConfig;
+pub use wayland_surface::{LayerSurfaceConfig, LayerSurfaceSizePolicy};
 
 use dev_window::DevWindowBackend;
 use wayland_surface::LayerShellBackend;

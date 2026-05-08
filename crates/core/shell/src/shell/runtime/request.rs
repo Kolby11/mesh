@@ -141,10 +141,8 @@ impl Shell {
                         true
                     })
                     .unwrap_or(false);
-                let target_runtime_found = self
-                    .components
-                    .iter()
-                    .any(|r| r.surface_id == surface_id);
+                let target_runtime_found =
+                    self.components.iter().any(|r| r.surface_id == surface_id);
                 tracing::info!(
                     "apply_request ActivatePopover trigger_runtime_found={trigger_runtime_found} target_runtime_found={target_runtime_found}"
                 );

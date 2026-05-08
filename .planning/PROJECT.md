@@ -17,27 +17,22 @@ The project now has a backend plugin MVP with:
 - Generic service state and command routing without service-specific Rust branches
 - A reference backend plugin plus automated proof coverage and backend author docs
 
-## Current Milestone: v1.2 Rendering System Upgrade
+`v1.2` shipped on 2026-05-08.
 
-**Goal:** Make MESH frontend rendering expressive and interactive enough for distinctive shell UI without turning the renderer into a full browser engine.
+The project now also has a rendering-system upgrade with:
 
-**Target features:**
-- Practical CSS coverage for common shell styling: box model, layout, typography, borders, overflow, visual states, selectors, tokens, and documented unsupported properties.
-- Container-size and interaction reactivity so components can restyle on surface/container changes, hover, focus, active, and related state transitions. ✓ Complete in Phase 9.
-- Selectable text with mouse drag highlighting and copy support. ✓ Complete in Phase 10.
-- Keyboard navigation and shortcuts for focus movement, activation, and configured key-driven workflows.
-- Theme animation tokens and custom CSS animation support for shell-specific motion.
-- Navigation-bar migration that proves the new styling, reactivity, keyboard, selection, and animation behavior in an existing core surface.
+- Practical CSS-like styling support with diagnostics, shorthands, token resolution, and author documentation
+- Container-size and interaction-state restyling that keeps layout, paint, hit-testing, and accessibility state synchronized
+- Selectable rendered text with theme-owned highlight colors and explicit copy routing
+- Shell-owned keyboard focus traversal, focus-visible styling, and shortcut handling
+- Theme animation tokens and constrained CSS animation playback for supported visual properties
+- A richer shipped navigation bar that proves the milestone on a real shell surface
 
-**Phase 9 complete (2026-05-05):** Container query invalidation, post-restyle layout synchronization, and state preservation through restyles are all implemented and tested. `FrontendSurfaceComponent` now tracks rendered dimensions, re-evaluates container queries on size changes, runs layout after every restyle, and prunes stale hover/focus/active targets — without losing script context, service state, or input values.
+## Next Milestone Framing
 
-**Phase 10 complete (2026-05-06):** MESH now supports opt-in single-node text selection, wrapped selection highlight rendering, explicit `Ctrl+C` clipboard writes for visible selected text, and a dedicated passive proof surface wired through the local frontend module graph.
-
-## Next Milestone Goals
-
-- Use the rendering upgrade to make plugin authoring feel closer to normal CSS while preserving MESH-specific limits.
-- Treat navigation-bar migration as the milestone proof instead of leaving new renderer capabilities as isolated engine tests.
-- Keep deferred `v1.1` validation cleanup visible as backlog, but do not mix it into the rendering milestone scope.
+- Decide the next milestone after closeout rather than carrying forward stale `v1.2` planning text.
+- Keep deferred validation and human-verification debt visible, but separate it from the next milestone's product goal.
+- Build on the shipped styling, keyboard, selection, and animation foundation instead of reopening browser-engine scope.
 
 ## Key Decisions
 
@@ -52,9 +47,15 @@ The project now has a backend plugin MVP with:
 | MESH renderer should support practical shell CSS, not full web compatibility | Plugin authors need expressive styling without inheriting browser-engine scope | Decided in v1.2 |
 
 <details>
-<summary>Archived v1.1 milestone framing</summary>
+<summary>Archived milestone framing</summary>
 
 ## Previous Milestone Framing
+
+### v1.2 Rendering System Upgrade
+
+The `v1.2` milestone centered on making MESH rendering expressive enough for distinctive shell UI without turning the renderer into a browser engine. It focused on practical CSS coverage, container and interaction reactivity, text selection and copy, keyboard navigation, animation support, and the navigation bar as the proof surface.
+
+### v1.1 Backend Plugin MVP
 
 The `v1.1` milestone centered on making backend plugins stable enough for MVP by first introducing a unified shell-owned plugin package manifest, then using it to drive backend lifecycle, provider selection, host APIs, service contracts, and diagnostics.
 
@@ -63,4 +64,4 @@ Target features included the central plugin package manifest, frontend-to-backen
 </details>
 
 ---
-*Last updated: 2026-05-06 after Phase 10 completion*
+*Last updated: 2026-05-08 after v1.2 milestone completion*

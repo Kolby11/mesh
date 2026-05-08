@@ -145,9 +145,6 @@ Conceptual blocks:
 - `<template>`
 - `<script lang="luau">`
 - `<style>`
-- `<schema>`
-- `<i18n>`
-- `<meta>`
 
 ## Core package types
 

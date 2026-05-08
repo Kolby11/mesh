@@ -20,10 +20,6 @@ primitives.
 <style>
 /* CSS goes here */
 </style>
-
-<i18n>
-  <!-- translation keys -->
-</i18n>
 ```
 
 Only `<template>` is required. All other blocks are optional.
@@ -232,7 +228,7 @@ end
 - `selectable="true"` opts a `text` node into passive pointer selection.
 - Selection is currently bounded to that text node. MESH does not yet support document-style selection that spans multiple text nodes or containers.
 - `Ctrl+C` copies the current selection when the surface is receiving keyboard input.
-- Use this for status copy, proof surfaces, and read-only text. It does not make the element editable.
+- Use this for status copy, proof surfaces, and read-only text such as the shipped navigation-bar status line. It does not make the element editable.
 
 ```xml
 <text class="status-copy" selectable="true">
@@ -400,6 +396,11 @@ Keyframes are percentage-only:
   100% { opacity: 1; }
 }
 ```
+
+`from` and `to` aliases are rejected in this first release, and keyframe stop
+values must stay literal rather than using `token(...)` or `var(...)`. Theme
+tokens belong on the animation shorthand itself, for example
+`animation: pulse token(animation.duration.fast) token(animation.curves.bezier.standard)`.
 
 ---
 

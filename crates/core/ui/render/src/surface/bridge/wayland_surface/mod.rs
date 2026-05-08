@@ -8,7 +8,7 @@ mod backend;
 mod handlers;
 mod state;
 
-pub use backend::{LayerShellBackend, LayerSurfaceConfig};
+pub use backend::{LayerShellBackend, LayerSurfaceConfig, LayerSurfaceSizePolicy};
 
 use super::super::{PixelBuffer, RenderError};
 use super::dev_window::{DevWindowEvent, DevWindowKeyEvent};

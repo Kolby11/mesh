@@ -2,8 +2,6 @@
   <button
     class="nav-button"
     onclick={onThemeToggle}
-    onfocus={onfocus}
-    onblur={onblur}
     title="{theme_tooltip}"
     aria-label="{theme_tooltip}"
   >
@@ -53,12 +51,12 @@ end
     border-style: solid;
     border-color: transparent;
     text-wrap: none;
-    transition: background-color 180ms ease-out,
-                color 180ms ease-out,
-                border-color 180ms ease-out,
-                border-radius 220ms ease-out,
-                transform 180ms ease-out,
-                padding 180ms ease-out;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-radius token(animation.duration.fast) token(animation.curves.bezier.standard),
+                transform token(animation.duration.short) token(animation.curves.bezier.standard),
+                padding token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
 .nav-button:hover {
@@ -90,14 +88,15 @@ end
     justify-content: center;
     align-items: center;
     color: inherit;
-    transition: color 180ms ease-out, transform 200ms ease-out;
+    transition: color token(animation.duration.short) token(animation.curves.bezier.standard),
+                transform token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
 .nav-button:hover .nav-button-glyph {
     transform: scale(1.08) rotate(15deg);
 }
 
-@container (max-width: 760px) {
+@container (max-width: 720px) {
     .nav-button {
         width: 40px;
         padding: token(spacing.xs);

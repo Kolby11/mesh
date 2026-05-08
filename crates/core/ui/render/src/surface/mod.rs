@@ -10,7 +10,7 @@ pub mod bridge;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-pub use bridge::{LayerSurfaceConfig, WindowEvent, WindowKeyEvent};
+pub use bridge::{LayerSurfaceConfig, LayerSurfaceSizePolicy, WindowEvent, WindowKeyEvent};
 pub use buffer::PixelBuffer;
 pub use debug_overlay::DebugOverlay;
 pub use glyph::GlyphAxes;

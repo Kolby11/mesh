@@ -123,6 +123,7 @@ Theme files keep root tokens under `tokens`, root component defaults under
 
     "animation.duration.fast": 90.0,
     "animation.curves.bezier.standard": "cubic-bezier(0.2, 0.0, 0, 1.0)",
+    "animation.default.border-radius": "border-radius token(animation.duration.fast) token(animation.curves.bezier.standard)",
 
     "icon.size.md": "16px",
     "icon.weight": 400,
@@ -173,6 +174,13 @@ Groups are the prefixes (`color`, `spacing`, `typography`, `radius`,
 `elevation`, `animation`, `shadow`, `icon`). A theme may introduce new groups;
 consumers asking for an unknown token get `nil` and are expected to handle
 it. The core reserves no group names — theme authors can extend freely.
+
+Within the `animation` group, primitive values and default recipes stay
+separate. Primitive tokens such as `animation.duration.fast` and
+`animation.curves.bezier.standard` provide reusable numbers and easing curves.
+Recipe tokens such as `animation.default.border-radius` bundle a full property
+animation contract and must keep explicit `token(...)` references in the value
+so authors can see which primitives the recipe composes.
 
 ### Component Defaults
 

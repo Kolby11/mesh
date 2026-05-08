@@ -90,14 +90,23 @@ fn find_node_path_at_offset(
 
 /// Extract tooltip text from a node's attributes and accessibility metadata.
 pub(in crate::shell) fn node_tooltip_text(node: &WidgetNode) -> Option<String> {
-    node.attributes
+    let text = node
+        .attributes
         .get("title")
         .cloned()
         .or_else(|| node.attributes.get("aria-label").cloned())
         .or_else(|| node.attributes.get("description").cloned())
         .or_else(|| node.attributes.get("aria-description").cloned())
         .or_else(|| node.accessibility.label.clone())
-        .or_else(|| node.accessibility.description.clone())
+        .or_else(|| node.accessibility.description.clone());
+
+    text.and_then(|value| {
+        if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    })
 }
 
 /// Find tooltip text for a specific node key in the tree.
