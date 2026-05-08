@@ -17,3 +17,14 @@ Variable state management and and binding for components
 Clean up the backend modules and interfaces, right now interfaces are separate from the backend, we should check our options and consider moving the interface into the module itself
 
 Remove the icon assts from the core/ui. The icons should be installed into a folder outside the core
+
+# Separate milestons
+
+- GPU rendering
+- i18n configurations
+- package manager
+- lsp / extension
+- unify configurations to use .json configuration
+- Improve Icon packs
+- Keyboard control with custom keybinds
+- 

@@ -123,14 +123,11 @@ impl From<RawTheme> for Theme {
             .collect();
 
         for animation_name in legacy_animation_keys {
-            let legacy_key =
-                format!("{LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX}{animation_name}");
+            let legacy_key = format!("{LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX}{animation_name}");
             let Some(TokenValue::String(value)) = tokens.remove(&legacy_key) else {
                 continue;
             };
-            base_defaults
-                .entry(animation_name)
-                .or_insert(value);
+            base_defaults.entry(animation_name).or_insert(value);
         }
 
         for (name, value) in raw.default_shell_animations {
@@ -273,8 +270,10 @@ pub fn load_theme_from_path(path: &Path) -> Result<Theme, ThemeError> {
 }
 
 fn embedded_default_theme() -> Theme {
-    parse_theme(include_str!("../../../../../config/themes/mesh-default-dark.json"))
-        .expect("embedded default theme json must be valid")
+    parse_theme(include_str!(
+        "../../../../../config/themes/mesh-default-dark.json"
+    ))
+    .expect("embedded default theme json must be valid")
 }
 
 fn mesh_home_path() -> PathBuf {
@@ -329,7 +328,9 @@ mod tests {
         .expect("theme parses");
 
         assert_eq!(
-            theme.token("@mesh/weather.weather.color.sunny").map(ToString::to_string),
+            theme
+                .token("@mesh/weather.weather.color.sunny")
+                .map(ToString::to_string),
             Some("#f6b73c".into())
         );
         assert!(theme.token("weather.color.sunny").is_none());

@@ -1,5 +1,28 @@
 # MESH Milestones
 
+## v1.3 Performance Instrumentation and Responsiveness
+
+**Status:** active
+**Started:** 2026-05-08
+
+**Goal:** Make shell responsiveness measurable on real interaction paths by adding a debug-only live profiler, a `.mesh`-rendered inspector, canonical benchmark scenarios, and a bounded optimization pass driven by those measurements.
+
+**Planned scope:**
+- Profiling runtime model and stage timing hooks
+- Per-surface and per-backend-provider/stage attribution
+- Debug-overlay profiling mode with live inspector views
+- Canonical benchmark flows for hover, open/close, slider drag, keyboard traversal, and backend-driven updates
+- At least one demonstrated before/after responsiveness improvement
+
+**Planned phases:** 14-18
+
+**Active artifacts:**
+- `.planning/PROJECT.md`
+- `.planning/REQUIREMENTS.md`
+- `.planning/ROADMAP.md`
+- `.planning/STATE.md`
+- `.planning/research/v1.3-performance-instrumentation-and-responsiveness.md`
+
 ## v1.0 Scripting API Stabilization
 
 **Status:** archived by reset

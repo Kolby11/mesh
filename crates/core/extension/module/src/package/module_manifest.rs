@@ -79,19 +79,19 @@ impl ModulePackageManifest {
                 default_locale: i18n.locale.clone(),
                 bundled: i18n.path.clone(),
             });
-        let contributed_theme = mesh
-            .contributes
-            .themes
-            .first()
-            .map(|theme| manifest::ThemeSection {
-                tokens: HashMap::new(),
-                defaults: manifest::ThemeDefaultsSection::default(),
-                tokens_used: Vec::new(),
-                base: None,
-                modes: theme.modes.clone(),
-                default_mode: theme.default_mode.clone(),
-                extends: None,
-            });
+        let contributed_theme =
+            mesh.contributes
+                .themes
+                .first()
+                .map(|theme| manifest::ThemeSection {
+                    tokens: HashMap::new(),
+                    defaults: manifest::ThemeDefaultsSection::default(),
+                    tokens_used: Vec::new(),
+                    base: None,
+                    modes: theme.modes.clone(),
+                    default_mode: theme.default_mode.clone(),
+                    extends: None,
+                });
         let assets = mesh
             .contributes
             .icons

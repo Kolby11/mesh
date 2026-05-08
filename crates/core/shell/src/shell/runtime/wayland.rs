@@ -4,9 +4,7 @@ impl Shell {
     pub(in crate::shell) fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
         let events = coalesce_pointer_moves(self.render_engine.poll_events());
         for event in events {
-            let input_started = self
-                .profiling_enabled()
-                .then(std::time::Instant::now);
+            let input_started = self.profiling_enabled().then(std::time::Instant::now);
             let trigger_kind = profiling_trigger_for_event(&event);
             tracing::trace!(
                 "[hover] dispatch_wayland: got event {:?}",
