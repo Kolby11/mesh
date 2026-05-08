@@ -678,6 +678,55 @@ fn profiling_stage_surface_records_roll_up_into_shell_summary() {
 }
 
 #[test]
+fn profiling_surface_snapshot_preserves_surface_and_module_identity_with_comparable_totals() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::Layout,
+        std::time::Duration::from_micros(45),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::Paint,
+        std::time::Duration::from_micros(30),
+        Some("rebuild"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    let surface = profiling
+        .surfaces
+        .iter()
+        .find(|surface| surface.surface_id == "@mesh/navigation-bar")
+        .expect("worked surfaces must be keyed by surface_id");
+    let shell_stages: std::collections::HashMap<_, _> = profiling
+        .shell
+        .stages
+        .iter()
+        .map(|stage| (stage.stage, stage.total_micros))
+        .collect();
+    let surface_stages: std::collections::HashMap<_, _> = surface
+        .stages
+        .iter()
+        .map(|stage| (stage.stage, stage.total_micros))
+        .collect();
+
+    assert_eq!(surface.surface_id, "@mesh/navigation-bar");
+    assert_eq!(surface.module_id.as_deref(), Some("@mesh/navigation-bar"));
+    assert_eq!(shell_stages.get(&ProfilingStage::Layout), Some(&45));
+    assert_eq!(surface_stages.get(&ProfilingStage::Layout), Some(&45));
+    assert_eq!(shell_stages.get(&ProfilingStage::Paint), Some(&30));
+    assert_eq!(surface_stages.get(&ProfilingStage::Paint), Some(&30));
+}
+
+#[test]
 fn profiling_disabled_runtime_stage_helpers_remain_inert() {
     let mut shell = Shell::new();
 
@@ -710,6 +759,60 @@ fn profiling_disabled_runtime_stage_helpers_remain_inert() {
     assert!(
         snapshot.profiling.is_none(),
         "profiling-disabled helpers must not fabricate shell or surface snapshots"
+    );
+}
+
+#[test]
+fn profiling_disabled_backend_paths_do_not_fabricate_snapshots() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+    let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let mut pending = std::collections::VecDeque::new();
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.audio.control",
+    ));
+
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::BackendServiceUpdate {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/pipewire-audio".to_string(),
+                event: service_update(
+                    "mesh.audio",
+                    "@mesh/pipewire-audio",
+                    serde_json::json!({ "available": true, "percent": 44.0 }),
+                ),
+            },
+        )
+        .unwrap();
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 45.0 }),
+        ))
+        .unwrap();
+
+    let result = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_volume",
+        &serde_json::json!({ "volume": 0.4 }),
+        "@mesh/panel",
+        &capabilities,
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(true));
+    assert_eq!(rx.try_recv().unwrap().command, "set_volume");
+    assert!(
+        shell.build_debug_snapshot().profiling.is_none(),
+        "profiling-disabled backend attribution paths must stay silent"
     );
 }
 
@@ -797,6 +900,77 @@ fn profiling_snapshot_tracks_bounded_backend_samples_by_provider() {
             .iter()
             .any(|stage| stage.stage == ProfilingBackendStage::StatePublishDelivery)
     );
+}
+
+#[test]
+fn profiling_snapshot_groups_backend_stage_proof_under_expected_provider_identity() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+    let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let mut pending = std::collections::VecDeque::new();
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.audio.control",
+    ));
+
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::BackendServiceUpdate {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/pipewire-audio".to_string(),
+                event: service_update(
+                    "mesh.audio",
+                    "@mesh/pipewire-audio",
+                    serde_json::json!({ "available": true, "percent": 44.0 }),
+                ),
+            },
+        )
+        .unwrap();
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 45.0 }),
+        ))
+        .unwrap();
+
+    let result = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_volume",
+        &serde_json::json!({ "volume": 0.4 }),
+        "@mesh/panel",
+        &capabilities,
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(true));
+    assert_eq!(rx.try_recv().unwrap().command, "set_volume");
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    let backend = profiling
+        .backends
+        .iter()
+        .find(|backend| {
+            backend.interface == "mesh.audio" && backend.provider_id == "@mesh/pipewire-audio"
+        })
+        .expect("backend stages should stay grouped under the accepted provider identity");
+    let stages: std::collections::HashSet<_> =
+        backend.stages.iter().map(|stage| stage.stage).collect();
+
+    assert_eq!(backend.interface, "mesh.audio");
+    assert_eq!(backend.provider_id, "@mesh/pipewire-audio");
+    assert!(stages.contains(&ProfilingBackendStage::PollUpdate));
+    assert!(stages.contains(&ProfilingBackendStage::CommandHandling));
+    assert!(stages.contains(&ProfilingBackendStage::StatePublishDelivery));
 }
 
 #[test]
