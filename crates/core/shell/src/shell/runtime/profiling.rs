@@ -1,3 +1,4 @@
+use crate::shell::Shell;
 use mesh_core_debug::{
     ProfilingSample, ProfilingScopeSnapshot, ProfilingSnapshot, ProfilingStage,
     ProfilingStageSummary, ProfilingSurfaceSnapshot,
@@ -224,5 +225,52 @@ impl ProfilingRuntimeState {
         };
         self.next_sample_order = self.next_sample_order.saturating_add(1);
         sample
+    }
+}
+
+impl Shell {
+    pub(crate) fn profiling_enabled(&self) -> bool {
+        self.debug.profiling_enabled
+    }
+
+    pub(crate) fn record_shell_profiling_stage(
+        &mut self,
+        stage: ProfilingStage,
+        duration: Duration,
+        trigger_kind: Option<&str>,
+    ) {
+        if !self.profiling_enabled() {
+            return;
+        }
+        self.profiling
+            .record_shell_stage(stage, duration, trigger_kind);
+    }
+
+    pub(crate) fn record_surface_profiling_stage(
+        &mut self,
+        surface_id: &str,
+        module_id: Option<&str>,
+        stage: ProfilingStage,
+        duration: Duration,
+        trigger_kind: Option<&str>,
+    ) {
+        if !self.profiling_enabled() {
+            return;
+        }
+        self.profiling
+            .record_surface_stage(surface_id, module_id, stage, duration, trigger_kind);
+    }
+
+    pub(crate) fn record_surface_redraw(
+        &mut self,
+        surface_id: &str,
+        module_id: Option<&str>,
+        trigger_kind: Option<&str>,
+    ) {
+        if !self.profiling_enabled() {
+            return;
+        }
+        self.profiling
+            .record_surface_redraw(surface_id, module_id, trigger_kind);
     }
 }

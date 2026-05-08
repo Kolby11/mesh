@@ -10,8 +10,8 @@ use super::surface_layout::{
     SurfaceLayoutSettings, SurfaceSizePolicy, load_frontend_module_settings,
 };
 use super::types::{
-    ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, KeyModifiers,
-    ServiceEvent, ShellComponent, TabFocusTarget,
+    ComponentContext, ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent,
+    CoreRequest, KeyModifiers, ServiceEvent, ShellComponent, TabFocusTarget,
 };
 mod animation;
 mod catalog;
@@ -146,6 +146,8 @@ pub(super) struct FrontendSurfaceComponent {
         HashMap<String, mesh_core_render::animation::keyframes::ActiveKeyframeAnimation>,
     keyframe_rules: HashMap<String, mesh_core_render::animation::keyframes::KeyframeRule>,
     has_active_keyframe_animation: bool,
+    profiling_enabled: bool,
+    profiling_records: Vec<ComponentProfilingRecord>,
 }
 
 #[derive(Debug)]
@@ -210,6 +212,8 @@ impl FrontendSurfaceComponent {
             keyframe_animations: HashMap::new(),
             keyframe_rules: HashMap::new(),
             has_active_keyframe_animation: false,
+            profiling_enabled: false,
+            profiling_records: Vec::new(),
         }
     }
 }

@@ -609,6 +609,196 @@ fn profiling_snapshot_tracks_bounded_surface_samples_and_redraw_counts() {
 }
 
 #[test]
+fn profiling_stage_surface_records_roll_up_into_shell_summary() {
+    let mut shell = Shell::new();
+    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::TreeBuild,
+        std::time::Duration::from_micros(30),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::Layout,
+        std::time::Duration::from_micros(45),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::PresentCommit,
+        std::time::Duration::from_micros(12),
+        Some("present"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+
+    let shell_stages: std::collections::HashMap<_, _> = profiling
+        .shell
+        .stages
+        .iter()
+        .map(|stage| (stage.stage, stage.total_micros))
+        .collect();
+    assert_eq!(shell_stages.get(&ProfilingStage::TreeBuild), Some(&30));
+    assert_eq!(shell_stages.get(&ProfilingStage::Layout), Some(&45));
+    assert_eq!(shell_stages.get(&ProfilingStage::PresentCommit), Some(&12));
+}
+
+#[test]
+fn profiling_disabled_runtime_stage_helpers_remain_inert() {
+    let mut shell = Shell::new();
+
+    shell.record_shell_profiling_stage(
+        ProfilingStage::InputHandling,
+        std::time::Duration::from_micros(10),
+        Some("key"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::Paint,
+        std::time::Duration::from_micros(20),
+        Some("rebuild"),
+    );
+    shell.record_surface_redraw(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        Some("present"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    assert!(
+        snapshot.profiling.is_none(),
+        "profiling-disabled helpers must not fabricate shell or surface snapshots"
+    );
+}
+
+#[test]
+fn profiling_snapshot_includes_required_shell_stage_buckets() {
+    let mut shell = Shell::new();
+    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+
+    shell.record_shell_profiling_stage(
+        ProfilingStage::InputHandling,
+        std::time::Duration::from_micros(11),
+        Some("key"),
+    );
+    shell.record_shell_profiling_stage(
+        ProfilingStage::RuntimeUpdateHandling,
+        std::time::Duration::from_micros(12),
+        Some("service_event"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::TreeBuild,
+        std::time::Duration::from_micros(13),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::StyleRestyle,
+        std::time::Duration::from_micros(14),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::Layout,
+        std::time::Duration::from_micros(15),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::Paint,
+        std::time::Duration::from_micros(16),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::PresentCommit,
+        std::time::Duration::from_micros(17),
+        Some("present"),
+    );
+    shell.record_surface_redraw(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        Some("present"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::TotalSurfaceRender,
+        std::time::Duration::from_micros(18),
+        Some("rebuild"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    let stages: std::collections::HashSet<_> =
+        profiling.shell.stages.iter().map(|stage| stage.stage).collect();
+
+    assert!(stages.contains(&ProfilingStage::InputHandling));
+    assert!(stages.contains(&ProfilingStage::RuntimeUpdateHandling));
+    assert!(stages.contains(&ProfilingStage::TreeBuild));
+    assert!(stages.contains(&ProfilingStage::StyleRestyle));
+    assert!(stages.contains(&ProfilingStage::Layout));
+    assert!(stages.contains(&ProfilingStage::Paint));
+    assert!(stages.contains(&ProfilingStage::PresentCommit));
+    assert!(stages.contains(&ProfilingStage::RedrawCount));
+    assert!(stages.contains(&ProfilingStage::TotalSurfaceRender));
+}
+
+#[test]
+fn profiling_snapshot_uses_surface_id_as_canonical_key_and_skips_unworked_surfaces() {
+    let mut shell = Shell::new();
+    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    shell.record_shell_profiling_stage(
+        ProfilingStage::InputHandling,
+        std::time::Duration::from_micros(9),
+        Some("key"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    assert!(
+        profiling.surfaces.is_empty(),
+        "shell-only work must not fabricate per-surface summaries"
+    );
+
+    shell.record_surface_profiling_stage(
+        "@mesh/audio-popover",
+        Some("@mesh/audio-popover"),
+        ProfilingStage::Paint,
+        std::time::Duration::from_micros(22),
+        Some("rebuild"),
+    );
+    shell.record_surface_redraw(
+        "@mesh/audio-popover",
+        Some("@mesh/audio-popover"),
+        Some("present"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    let surface = profiling
+        .surfaces
+        .iter()
+        .find(|surface| surface.surface_id == "@mesh/audio-popover")
+        .expect("worked surfaces must use surface_id as the canonical key");
+    assert_eq!(surface.module_id.as_deref(), Some("@mesh/audio-popover"));
+    assert_eq!(surface.redraw_count, 1);
+}
+
+#[test]
 fn keyboard_shortcuts_shell_global_shortcuts_still_win() {
     assert!(matches!(
         shell_global_shortcut_request("d", true, true, false),

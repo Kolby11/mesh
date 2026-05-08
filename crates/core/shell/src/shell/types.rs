@@ -1,4 +1,5 @@
 use mesh_core_capability::CapabilitySet;
+use mesh_core_debug::ProfilingStage;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::WidgetNode;
 use mesh_core_locale::LocaleEngine;
@@ -8,7 +9,7 @@ use mesh_core_theme::Theme;
 use mesh_core_wayland::{KeyboardMode, ShellSurface};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 pub type SurfaceId = String;
 
@@ -167,6 +168,14 @@ pub struct KeyModifiers {
     pub alt: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct ComponentProfilingRecord {
+    pub stage: ProfilingStage,
+    pub duration: Duration,
+    pub module_id: Option<String>,
+    pub trigger_kind: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ComponentError {
     #[error("component '{component_id}' failed: {message}")]
@@ -244,6 +253,10 @@ pub trait ShellComponent: Send {
     /// shadowing the configured value from the manifest until cleared.
     /// Used during cross-surface Tab transfer.
     fn set_keyboard_mode_override(&mut self, _mode: Option<KeyboardMode>) {}
+    fn set_profiling_enabled(&mut self, _enabled: bool) {}
+    fn take_profiling_records(&mut self) -> Vec<ComponentProfilingRecord> {
+        Vec::new()
+    }
     fn source_path(&self) -> Option<&Path> {
         None
     }
