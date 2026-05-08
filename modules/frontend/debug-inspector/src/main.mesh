@@ -1,0 +1,405 @@
+<template>
+  <box class="inspector-shell">
+    <column class="inspector-root">
+      <row class="inspector-header">
+        <column class="header-copy">
+          <text class="inspector-title">Debug Inspector</text>
+          <text class="inspector-status">{session_status}</text>
+        </column>
+        <button class="header-close" onclick={onCloseInspector} aria-label="Close debug inspector">
+          <text class="header-close-text">Close</text>
+        </button>
+      </row>
+
+      <column class="profiling-zone">
+        <row class="profiling-head">
+          <text class="profiling-title">Profiling</text>
+          <text class="profiling-badge">{profiling_badge}</text>
+        </row>
+        <text class="profiling-copy">{profiling_copy}</text>
+        <button class="profiling-toggle" onclick={onToggleProfiling} aria-label="{profiling_button_label}">
+          <text class="profiling-toggle-text">{profiling_button_text}</text>
+        </button>
+      </column>
+
+      <row class="view-nav">
+        <button class="view-pill" onclick={showOverview}>
+          <text class="view-pill-text">Overview</text>
+        </button>
+        <button class="view-pill" onclick={showSurfaces}>
+          <text class="view-pill-text">Surfaces</text>
+        </button>
+        <button class="view-pill" onclick={showBackend}>
+          <text class="view-pill-text">Backend</text>
+        </button>
+        <button class="view-pill" onclick={showBenchmark}>
+          <text class="view-pill-text">Benchmark</text>
+        </button>
+      </row>
+
+      <column class="inspector-body">
+        <column class="view-section" hidden={overview_hidden}>
+          <text class="section-title">Overview</text>
+          <text class="section-copy">{overview_copy}</text>
+          <column class="metric-group">
+            <row class="metric-row">
+              <text class="metric-label">Overlay visibility</text>
+              <text class="metric-value">{overlay_value}</text>
+            </row>
+            <row class="metric-row">
+              <text class="metric-label">Live session</text>
+              <text class="metric-value">{session_value}</text>
+            </row>
+            <row class="metric-row">
+              <text class="metric-label">Known modules</text>
+              <text class="metric-value">{module_count}</text>
+            </row>
+          </column>
+        </column>
+
+        <column class="view-section" hidden={surfaces_hidden}>
+          <text class="section-title">Surfaces</text>
+          <text class="section-copy">{surfaces_copy}</text>
+          <column class="metric-group">
+            <row class="metric-row">
+              <text class="metric-label">Active surfaces</text>
+              <text class="metric-value">{active_surface_count}</text>
+            </row>
+            <row class="metric-row">
+              <text class="metric-label">Current focus</text>
+              <text class="metric-value">{surface_focus_value}</text>
+            </row>
+          </column>
+        </column>
+
+        <column class="view-section" hidden={backend_hidden}>
+          <text class="section-title">Backend</text>
+          <text class="section-copy">{backend_copy}</text>
+          <column class="metric-group">
+            <row class="metric-row">
+              <text class="metric-label">Runtime entries</text>
+              <text class="metric-value">{backend_count}</text>
+            </row>
+            <row class="metric-row">
+              <text class="metric-label">Interfaces</text>
+              <text class="metric-value">{interface_count}</text>
+            </row>
+          </column>
+        </column>
+
+        <column class="view-section" hidden={benchmark_hidden}>
+          <text class="section-title">Benchmark</text>
+          <text class="section-copy">Phase 16 reserves these benchmark cards for repeatable interaction proofs in Phase 17.</text>
+          <column class="benchmark-stack">
+            <box class="benchmark-card"><text class="benchmark-card-text">Hover latency and restyle impact</text></box>
+            <box class="benchmark-card"><text class="benchmark-card-text">Surface open and close response</text></box>
+            <box class="benchmark-card"><text class="benchmark-card-text">Pointer-driven slider or drag updates</text></box>
+            <box class="benchmark-card"><text class="benchmark-card-text">Keyboard traversal and focus movement</text></box>
+            <box class="benchmark-card"><text class="benchmark-card-text">Backend-driven publish to visible update</text></box>
+          </column>
+        </column>
+      </column>
+    </column>
+  </box>
+</template>
+
+<script lang="luau">
+local debug_ok, debug_service = pcall(require, "@mesh/debug@>=1.0")
+if not debug_ok then debug_service = nil end
+
+overview_hidden = false
+surfaces_hidden = true
+backend_hidden = true
+benchmark_hidden = true
+
+session_status = "Debug overlay connected"
+profiling_badge = "Idle"
+profiling_copy = "Profiling stays off until you explicitly start it."
+profiling_button_text = "Start profiling"
+profiling_button_label = "Start debug profiling"
+
+overview_copy = "Shell-wide status and sample readiness remain visible here while the live inspector wiring lands."
+surfaces_copy = "Per-surface timing rollups and redraw comparisons will render here without changing the right-panel workflow."
+backend_copy = "Backend runtime health and provider stage attribution stay grouped here for live service inspection."
+
+overlay_value = "Hidden"
+session_value = "Session 0"
+module_count = "0"
+active_surface_count = "0"
+surface_focus_value = "No active surface data"
+backend_count = "0"
+interface_count = "0"
+
+local function count_list(value)
+    if type(value) == "table" then
+        return tostring(#value)
+    end
+    return "0"
+end
+
+local function set_active_view(view)
+    overview_hidden = view ~= "overview"
+    surfaces_hidden = view ~= "surfaces"
+    backend_hidden = view ~= "backend"
+    benchmark_hidden = view ~= "benchmark"
+end
+
+function showOverview()
+    set_active_view("overview")
+end
+
+function showSurfaces()
+    set_active_view("surfaces")
+end
+
+function showBackend()
+    set_active_view("backend")
+end
+
+function showBenchmark()
+    set_active_view("benchmark")
+end
+
+function onCloseInspector()
+    mesh.events.publish("shell.toggle-debug-overlay", {})
+end
+
+function onToggleProfiling()
+    mesh.events.publish("shell.toggle-debug-profiling", {})
+end
+
+function onRender()
+    if not debug_ok or not debug_service then
+        session_status = "Debug service unavailable"
+        profiling_badge = "Unavailable"
+        profiling_copy = "The shell debug service has not been published yet."
+        overlay_value = "Unavailable"
+        session_value = "Session --"
+        module_count = "0"
+        active_surface_count = "0"
+        surface_focus_value = "No active surface data"
+        backend_count = "0"
+        interface_count = "0"
+        return
+    end
+
+    if debug_service.profiling_enabled then
+        profiling_badge = "Live"
+        profiling_copy = "Profiling is collecting rolling samples through the existing debug path."
+        profiling_button_text = "Stop profiling"
+        profiling_button_label = "Stop debug profiling"
+        session_status = "Profiling is active"
+    else
+        profiling_badge = "Idle"
+        profiling_copy = "Profiling stays off until you explicitly start it."
+        profiling_button_text = "Start profiling"
+        profiling_button_label = "Start debug profiling"
+        session_status = "Inspector open without profiling"
+    end
+
+    if debug_service.overlay_enabled then
+        overlay_value = "Visible"
+    else
+        overlay_value = "Hidden"
+    end
+
+    session_value = string.format("Session %s", tostring(debug_service.profiling_session_id or 0))
+    module_count = count_list(debug_service.modules)
+    active_surface_count = count_list(debug_service.active_surfaces)
+    backend_count = count_list(debug_service.backend_runtimes)
+    interface_count = count_list(debug_service.interfaces)
+
+    if type(debug_service.active_surfaces) == "table" and #debug_service.active_surfaces > 0 then
+        surface_focus_value = tostring(debug_service.active_surfaces[1])
+    else
+        surface_focus_value = "No active surface data"
+    end
+end
+</script>
+
+<style>
+.inspector-shell {
+    width: 100%;
+    height: 100%;
+    padding: token(spacing.sm);
+    background: transparent;
+}
+
+.inspector-root {
+    width: 100%;
+    height: 100%;
+    gap: token(spacing.md);
+    padding: token(spacing.md);
+    border-radius: token(radius.lg);
+    background: token(color.surface);
+    color: token(color.on-surface);
+    border-width: 1px;
+    border-style: solid;
+    border-color: token(color.outline-variant);
+}
+
+.inspector-header {
+    width: 100%;
+    align-items: start;
+    gap: token(spacing.sm);
+}
+
+.header-copy {
+    flex-grow: 1;
+    gap: 2px;
+}
+
+.inspector-title {
+    font-size: token(typography.size.md);
+    font-weight: 700;
+    color: token(color.on-surface);
+}
+
+.inspector-status {
+    font-size: token(typography.size.xs);
+    color: token(color.on-surface-variant);
+}
+
+.header-close {
+    min-width: 68px;
+    height: 32px;
+    justify-content: center;
+    align-items: center;
+    border-radius: token(radius.md);
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
+}
+
+.header-close-text {
+    font-size: token(typography.size.xs);
+    font-weight: 600;
+}
+
+.profiling-zone {
+    gap: token(spacing.sm);
+    padding: token(spacing.sm);
+    border-radius: token(radius.md);
+    background: token(color.surface-container);
+}
+
+.profiling-head {
+    width: 100%;
+    align-items: center;
+    gap: token(spacing.sm);
+}
+
+.profiling-title {
+    flex-grow: 1;
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+}
+
+.profiling-badge {
+    font-size: token(typography.size.xs);
+    font-weight: 700;
+    color: token(color.primary);
+}
+
+.profiling-copy {
+    font-size: token(typography.size.xs);
+    color: token(color.on-surface-variant);
+}
+
+.profiling-toggle {
+    width: 100%;
+    height: 36px;
+    justify-content: center;
+    align-items: center;
+    border-radius: token(radius.md);
+    background: token(color.primary-container);
+    color: token(color.on-primary-container);
+}
+
+.profiling-toggle-text {
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+}
+
+.view-nav {
+    width: 100%;
+    gap: token(spacing.xs);
+    flex-wrap: wrap;
+}
+
+.view-pill {
+    height: 34px;
+    padding-inline: token(spacing.sm);
+    justify-content: center;
+    align-items: center;
+    border-radius: token(radius.full);
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
+}
+
+.view-pill-text {
+    font-size: token(typography.size.xs);
+    font-weight: 700;
+}
+
+.inspector-body {
+    flex-grow: 1;
+    gap: token(spacing.md);
+}
+
+.view-section {
+    gap: token(spacing.sm);
+}
+
+.section-title {
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+    color: token(color.on-surface);
+}
+
+.section-copy {
+    font-size: token(typography.size.xs);
+    color: token(color.on-surface-variant);
+}
+
+.metric-group {
+    gap: token(spacing.xs);
+    padding: token(spacing.sm);
+    border-radius: token(radius.md);
+    background: token(color.surface-container-low);
+}
+
+.metric-row {
+    width: 100%;
+    justify-content: space-between;
+    align-items: center;
+    gap: token(spacing.sm);
+}
+
+.metric-label {
+    font-size: token(typography.size.xs);
+    color: token(color.on-surface-variant);
+}
+
+.metric-value {
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+    color: token(color.on-surface);
+    text-align: right;
+}
+
+.benchmark-stack {
+    gap: token(spacing.xs);
+}
+
+.benchmark-card {
+    width: 100%;
+    padding: token(spacing.sm);
+    border-radius: token(radius.md);
+    background: token(color.surface-container-low);
+}
+
+.benchmark-card-text {
+    font-size: token(typography.size.xs);
+    color: token(color.on-surface-variant);
+}
+</style>
