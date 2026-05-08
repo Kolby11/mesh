@@ -125,18 +125,33 @@ impl Shell {
                 trigger_key,
                 focus,
             } => {
-                if let Some(runtime) = self
+                tracing::info!(
+                    "apply_request ActivatePopover surface_id={surface_id} trigger_surface={trigger_surface} trigger_key={trigger_key} focus={focus}"
+                );
+                let trigger_runtime_found = self
                     .components
                     .iter_mut()
                     .find(|r| r.surface_id == trigger_surface)
-                {
-                    if !trigger_key.is_empty() {
-                        runtime
-                            .component
-                            .register_popover_trigger(trigger_key.clone(), surface_id.clone());
-                    }
-                }
+                    .map(|runtime| {
+                        if !trigger_key.is_empty() {
+                            runtime
+                                .component
+                                .register_popover_trigger(trigger_key.clone(), surface_id.clone());
+                        }
+                        true
+                    })
+                    .unwrap_or(false);
+                let target_runtime_found = self
+                    .components
+                    .iter()
+                    .any(|r| r.surface_id == surface_id);
+                tracing::info!(
+                    "apply_request ActivatePopover trigger_runtime_found={trigger_runtime_found} target_runtime_found={target_runtime_found}"
+                );
                 let mut emitted = VecDeque::new();
+                emitted.push_back(CoreRequest::ShowSurface {
+                    surface_id: surface_id.clone(),
+                });
                 if focus && !trigger_surface.is_empty() && !trigger_key.is_empty() {
                     emitted.push_back(CoreRequest::TransferTabFocus {
                         from_surface: trigger_surface.clone(),
@@ -146,15 +161,7 @@ impl Shell {
                         target_closes_on_leave: true,
                         close_source: None,
                     });
-                } else {
-                    emitted.push_back(CoreRequest::ShowSurface {
-                        surface_id: surface_id.clone(),
-                    });
-                    return Ok(emitted);
                 }
-                emitted.push_back(CoreRequest::ShowSurface {
-                    surface_id: surface_id.clone(),
-                });
                 Ok(emitted)
             }
             CoreRequest::TransferTabFocus {
@@ -313,6 +320,9 @@ impl Shell {
         target_closes_on_leave: bool,
         close_source: Option<SurfaceId>,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        tracing::info!(
+            "apply_transfer_tab_focus from={from_surface} to={to_surface} return_target={return_target:?} target_closes_on_leave={target_closes_on_leave} close_source={close_source:?}"
+        );
         if let Some(runtime) = self
             .components
             .iter_mut()
@@ -359,6 +369,7 @@ impl Shell {
             false
         };
 
+        tracing::info!("apply_transfer_tab_focus target_found={target_found} to={to_surface}");
         if !target_found {
             return Ok(VecDeque::new());
         }
@@ -440,6 +451,7 @@ impl Shell {
         surface_id: SurfaceId,
         visible: bool,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        tracing::info!("set_surface_visibility surface_id={surface_id} visible={visible}");
         self.core
             .surfaces
             .entry(surface_id.clone())

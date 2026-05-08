@@ -3,7 +3,7 @@
     <box class="meta">
         <SettingsButton onfocus={onSettingsFocus} onblur={onNavControlBlur} />
         <VolumeButton
-          onActivate={audio_surface_handler}
+          onActivate={onToggleAudioSurface}
           onfocus={onVolumeFocus}
           onblur={onNavControlBlur}
         />
@@ -25,7 +25,6 @@ if not audio_ok then audio = nil end
 
 audio_surface_id = "@mesh/audio-popover"
 audio_surface_hidden = true
-audio_surface_handler = "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface"
 
 function onToggleAudioSurface(event)
     local position = event.current_target.position or {}
@@ -41,17 +40,13 @@ function onToggleAudioSurface(event)
         })
         -- Register the trigger so Tab from the volume button transfers
         -- focus into the popover, and Shift+Tab from inside returns here.
-        pcall(function()
-            mesh.popover.activate(audio_surface_id, event, { focus = true })
-        end)
+        mesh.popover.activate(audio_surface_id, event, { focus = true })
     else
         audio_surface_hidden = true
         mesh.events.publish("shell.hide-surface", {
             surface_id = audio_surface_id
         })
-        pcall(function()
-            mesh.popover.hide(audio_surface_id)
-        end)
+        mesh.popover.hide(audio_surface_id)
     end
 end
 

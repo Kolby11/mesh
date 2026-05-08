@@ -405,6 +405,10 @@ impl ScriptContext {
                             "trigger_key": trigger_key,
                             "focus": focus,
                         });
+                        tracing::info!(
+                            "{} called mesh.popover.activate target={} trigger_surface={} trigger_key={} focus={}",
+                            module_id_for_popover, surface_id, trigger_surface, trigger_key, focus
+                        );
                         published_events_for_popover
                             .lock()
                             .unwrap()

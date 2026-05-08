@@ -55,8 +55,6 @@ function onRender()
     update_audio_copy(percent, muted)
 end
 
-function onActivate()
-end
 </script>
 
 <style>

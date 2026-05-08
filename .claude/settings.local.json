@@ -63,7 +63,14 @@
       "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-backend coalesce)",
       "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo build --workspace)",
       "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-backend --lib)",
-      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo build -p mesh-core-shell)"
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo build -p mesh-core-shell)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-shell shipped_navigation_volume_button --no-fail-fast)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-shell navigation_bar_keyboard_activation)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-shell)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-shell --lib shipped_navigation_volume activate_popover leaving_popover navigation_bar_keyboard navigation_volume)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-shell --lib -- shipped_navigation_volume activate_popover leaving_popover navigation_bar_keyboard navigation_volume)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo build -p mesh-core-scripting)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-shell --lib -- popover navigation_volume navigation_bar_keyboard)"
     ]
   }
 }

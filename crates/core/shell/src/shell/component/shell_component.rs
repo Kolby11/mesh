@@ -44,30 +44,48 @@ impl ShellComponent for FrontendSurfaceComponent {
                     .retain(|_, target| target != surface_id);
             }
             // Sync portal bookkeeping when an OTHER surface's visibility
-            // changes (e.g. shell hides a popover via Tab transfer): the
-            // trigger surface's Lua may still think the popover is open,
-            // so a click would emit a redundant Hide. Updating
-            // last_surface_states forces a real diff on the next click.
-            if surface_id != self.surface_id() && self.last_surface_states.contains_key(surface_id)
-            {
-                self.last_surface_states
-                    .insert(surface_id.clone(), *visible);
-                if let Some(binding) = self
+            // changes. This handles two cases:
+            //   1. Shell hides a popover via Tab transfer — the trigger
+            //      surface's Lua may still think the popover is open, so
+            //      a click would emit a redundant Hide.
+            //   2. Surface shown via a non-portal path (mesh.popover.activate)
+            //      bypassing tick()'s bookkeeping — the next tick would
+            //      otherwise re-emit a stale HideSurface from the previous
+            //      paint's pending_surface_states.
+            // Update last_surface_states whenever this component owns a
+            // portal binding for the surface (not just when the key was
+            // already present), and clear any stale pending state so the
+            // next tick's diff is honest.
+            if surface_id != self.surface_id() {
+                let portal_tracks = self
                     .portal_hidden_bindings
                     .borrow()
-                    .get(surface_id)
-                    .cloned()
-                {
-                    let component_id = self.id().to_string();
-                    if let Some(runtime) = self.runtimes.lock().unwrap().get_mut(&component_id) {
-                        runtime
-                            .script_ctx
-                            .set_global_state(&binding, serde_json::json!(!*visible))
-                            .map_err(|source| ComponentError::Script {
-                                component_id: component_id.clone(),
-                                source,
-                            })?;
-                        self.dirty = true;
+                    .contains_key(surface_id);
+                if portal_tracks || self.last_surface_states.contains_key(surface_id) {
+                    self.last_surface_states
+                        .insert(surface_id.clone(), *visible);
+                    self.pending_surface_states
+                        .borrow_mut()
+                        .remove(surface_id);
+                    if let Some(binding) = self
+                        .portal_hidden_bindings
+                        .borrow()
+                        .get(surface_id)
+                        .cloned()
+                    {
+                        let component_id = self.id().to_string();
+                        if let Some(runtime) =
+                            self.runtimes.lock().unwrap().get_mut(&component_id)
+                        {
+                            runtime
+                                .script_ctx
+                                .set_global_state(&binding, serde_json::json!(!*visible))
+                                .map_err(|source| ComponentError::Script {
+                                    component_id: component_id.clone(),
+                                    source,
+                                })?;
+                            self.dirty = true;
+                        }
                     }
                 }
             }

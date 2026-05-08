@@ -4114,7 +4114,7 @@ end
         r#"
 <template>
   <row>
-    <VolumeButton onActivate={audio_surface_handler} />
+    <VolumeButton onActivate={onToggleAudioSurface} />
     <AudioPopover hidden={audio_surface_hidden} />
   </row>
 </template>
@@ -4125,7 +4125,6 @@ import VolumeButton from "./components/volume-button.mesh"
 
 audio_surface_id = "@mesh/audio-popover"
 audio_surface_hidden = true
-audio_surface_handler = "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface"
 
 function onToggleAudioSurface(event)
     local position = event.current_target.position or {}
@@ -4304,7 +4303,7 @@ end
         r#"
 <template>
   <row>
-    <VolumeButton onActivate={audio_surface_handler} />
+    <VolumeButton onActivate={onToggleAudioSurface} />
     <AudioPopover hidden={audio_surface_hidden} />
   </row>
 </template>
@@ -4315,7 +4314,6 @@ import VolumeButton from "./components/volume-button.mesh"
 
 audio_surface_id = "@mesh/audio-popover"
 audio_surface_hidden = true
-audio_surface_handler = "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface"
 
 function onToggleAudioSurface(event)
     local position = event.current_target.position or {}
@@ -4619,7 +4617,7 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ShowSurface { surface_id } if surface_id == "@mesh/audio-popover"
+            CoreRequest::ActivatePopover { surface_id, .. } if surface_id == "@mesh/audio-popover"
         )),
         "clicking directly on the icon should bubble to the button click handler: {requests:?}"
     );
