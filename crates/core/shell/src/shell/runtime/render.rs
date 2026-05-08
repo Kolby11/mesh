@@ -3,7 +3,7 @@ use mesh_core_render::surface::LayerSurfaceSizePolicy;
 
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
-        let debug_snapshot = self.debug.enabled.then(|| self.build_debug_snapshot());
+        let _debug_snapshot = self.debug.enabled.then(|| self.build_debug_snapshot());
 
         for index in 0..self.components.len() {
             let surface_id = self.components[index].surface_id.clone();
@@ -156,15 +156,11 @@ impl Shell {
                 );
             }
 
-            if visible && let Some(snapshot) = &debug_snapshot {
-                if self.debug.show_layout_bounds {
-                    if let Some(tree) = self.components[index].component.last_widget_tree() {
-                        self.debug_overlay
-                            .paint_layout_bounds(tree, &mut buffer, 1.0);
-                    }
+            if visible && self.debug.show_layout_bounds {
+                if let Some(tree) = self.components[index].component.last_widget_tree() {
+                    self.debug_overlay
+                        .paint_layout_bounds(tree, &mut buffer, 1.0);
                 }
-                self.debug_overlay
-                    .paint_panel(snapshot, self.debug.active_tab, &mut buffer, 1.0);
             }
 
             let present_started = self.profiling_enabled().then(std::time::Instant::now);

@@ -8,6 +8,7 @@ use mesh_core_debug::ProfilingBackendStage;
 /// visual position is rendered from cursor state independently of this
 /// throttle, so dragging stays smooth.
 const COMMAND_THROTTLE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
+const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 
 impl Shell {
     pub(in crate::shell) fn claim_keyboard_focus_for_surface(&mut self, surface_id: &str) {
@@ -187,7 +188,10 @@ impl Shell {
                     "debug overlay: {}",
                     if self.debug.enabled { "on" } else { "off" }
                 );
-                Ok(VecDeque::new())
+                self.set_surface_visibility(
+                    DEBUG_INSPECTOR_SURFACE_ID.to_string(),
+                    self.debug.enabled,
+                )
             }
             CoreRequest::ToggleDebugProfiling => {
                 let enabled = self.debug.toggle_profiling();
@@ -501,6 +505,9 @@ impl Shell {
         visible: bool,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         tracing::info!("set_surface_visibility surface_id={surface_id} visible={visible}");
+        if surface_id == DEBUG_INSPECTOR_SURFACE_ID {
+            self.debug.enabled = visible;
+        }
         self.core
             .surfaces
             .entry(surface_id.clone())

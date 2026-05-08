@@ -588,6 +588,33 @@ fn debug_overlay_toggle_does_not_enable_profiling_in_mesh_debug_payload() {
 }
 
 #[test]
+fn debug_overlay_toggle_controls_mesh_debug_inspector_visibility_without_enabling_profiling() {
+    let mut shell = Shell::new();
+
+    shell.apply_request(CoreRequest::ToggleDebugOverlay).unwrap();
+
+    let inspector = shell
+        .core
+        .surfaces
+        .get("@mesh/debug-inspector")
+        .expect("debug inspector surface should be tracked when overlay toggles on");
+    assert!(shell.debug.enabled);
+    assert!(inspector.visible);
+    assert!(!shell.debug.profiling_enabled);
+
+    shell.apply_request(CoreRequest::ToggleDebugOverlay).unwrap();
+
+    let inspector = shell
+        .core
+        .surfaces
+        .get("@mesh/debug-inspector")
+        .expect("debug inspector surface state should remain addressable");
+    assert!(!shell.debug.enabled);
+    assert!(!inspector.visible);
+    assert!(!shell.debug.profiling_enabled);
+}
+
+#[test]
 fn profiling_session_reset_discards_previous_samples() {
     let mut shell = Shell::new();
 
@@ -2375,6 +2402,22 @@ fn installed_module_graph_exposes_shell_package_choices() {
     let layout = graph.layout_entrypoint().unwrap();
     assert_eq!(layout.module_id, "@mesh/navigation-bar");
     assert_eq!(layout.entrypoint_id, "main");
+}
+
+#[test]
+fn load_frontend_components_keeps_shell_shipped_debug_inspector_even_when_not_in_package_graph() {
+    let mut shell = Shell::new();
+    shell.discover_modules();
+    shell.resolve_modules().unwrap();
+    shell.load_frontend_components().unwrap();
+
+    assert!(
+        shell
+            .components
+            .iter()
+            .any(|runtime| runtime.surface_id == "@mesh/debug-inspector"),
+        "built-in debug inspector should load as a shell surface even when absent from config/package.json"
+    );
 }
 
 #[test]

@@ -1,6 +1,8 @@
 use super::component::{FrontendCatalog, FrontendSurfaceComponent};
 use super::*;
 
+const BUILTIN_DEBUG_INSPECTOR_ID: &str = "@mesh/debug-inspector";
+
 impl Shell {
     pub fn new() -> Self {
         let config_path = mesh_core_config::default_config_path();
@@ -261,13 +263,15 @@ impl Shell {
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let graph_path = workspace_root.join("config/package.json");
         match load_installed_module_graph(&graph_path) {
-            Ok(graph) => Some(
-                graph
+            Ok(graph) => {
+                let mut enabled = graph
                     .frontend_modules()
                     .into_iter()
                     .map(|module| module.id.clone())
-                    .collect(),
-            ),
+                    .collect::<HashSet<_>>();
+                enabled.insert(BUILTIN_DEBUG_INSPECTOR_ID.to_string());
+                Some(enabled)
+            }
             Err(err) => {
                 tracing::warn!(
                     "failed to load installed module graph from {}; using legacy frontend discovery: {err}",
