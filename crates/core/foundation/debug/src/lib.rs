@@ -14,6 +14,37 @@ pub struct DebugSnapshot {
     pub profiling: Option<ProfilingSnapshot>,
 }
 
+pub const DEBUG_INTERFACE: &str = "mesh.debug";
+pub const DEBUG_SOURCE_MODULE_ID: &str = "@mesh/core-debug";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DebugInspectorView {
+    #[default]
+    Overview,
+    Surfaces,
+    BackendServices,
+    Benchmark,
+}
+
+impl DebugInspectorView {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Overview => "overview",
+            Self::Surfaces => "surfaces",
+            Self::BackendServices => "backend_services",
+            Self::Benchmark => "benchmark",
+        }
+    }
+
+    pub fn from_legacy_tab(tab: DebugTab) -> Self {
+        match tab {
+            DebugTab::Modules => Self::Overview,
+            DebugTab::Interfaces => Self::Surfaces,
+            DebugTab::Health => Self::BackendServices,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ProfilingSnapshot {
     pub session_id: u64,
@@ -174,6 +205,7 @@ pub struct DebugOverlayState {
     pub enabled: bool,
     pub show_layout_bounds: bool,
     pub active_tab: DebugTab,
+    pub active_view: DebugInspectorView,
     pub profiling_enabled: bool,
     pub profiling_session_id: u64,
 }
@@ -189,6 +221,7 @@ impl DebugOverlayState {
             DebugTab::Interfaces => DebugTab::Health,
             DebugTab::Health => DebugTab::Modules,
         };
+        self.active_view = DebugInspectorView::from_legacy_tab(self.active_tab);
     }
 
     pub fn toggle_profiling(&mut self) -> bool {
