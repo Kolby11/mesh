@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::shell::types::TabFocusTarget;
+use mesh_core_debug::ProfilingBackendStage;
 
 /// One main-loop tick (~60 Hz). Coalescable commands fire on the leading
 /// edge; further calls within the interval park as `pending` and are
@@ -64,9 +65,7 @@ impl Shell {
         request: CoreRequest,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let trigger_kind = profiling_trigger_for_request(&request);
-        let profiling_started = self
-            .profiling_enabled()
-            .then(std::time::Instant::now);
+        let profiling_started = self.profiling_enabled().then(std::time::Instant::now);
         let result = match request {
             CoreRequest::PositionSurface {
                 surface_id,
@@ -196,10 +195,7 @@ impl Shell {
                     self.profiling
                         .reset_for_new_session(self.debug.profiling_session_id);
                 }
-                tracing::debug!(
-                    "debug profiling: {}",
-                    if enabled { "on" } else { "off" }
-                );
+                tracing::debug!("debug profiling: {}", if enabled { "on" } else { "off" });
                 Ok(VecDeque::new())
             }
             CoreRequest::CycleDebugTab => {
@@ -267,7 +263,7 @@ impl Shell {
             });
         }
 
-        if let Some(tx) = self.service_handlers.get(interface) {
+        if self.service_handlers.contains_key(interface) {
             let coalesce = self.service_command_is_coalescable(interface, command);
             if coalesce {
                 let key = (interface.to_string(), command.to_string());
@@ -284,13 +280,14 @@ impl Shell {
                             pending: None,
                         },
                     );
-                    match tx.send(ServiceCommandMsg {
-                        command: command.to_string(),
-                        payload: payload.clone(),
-                        coalesce,
-                    }) {
-                        Ok(()) => serde_json::json!({ "ok": true, "queued": true }),
-                        Err(_) => serde_json::json!({
+                    match self.send_service_command_message(interface, command, payload, coalesce) {
+                        Some(Ok(())) => serde_json::json!({ "ok": true, "queued": true }),
+                        Some(Err(())) => serde_json::json!({
+                            "ok": false,
+                            "error": "service_unavailable",
+                            "status": "service_unavailable",
+                        }),
+                        None => serde_json::json!({
                             "ok": false,
                             "error": "service_unavailable",
                             "status": "service_unavailable",
@@ -308,13 +305,14 @@ impl Shell {
                     serde_json::json!({ "ok": true, "queued": true, "throttled": true })
                 }
             } else {
-                match tx.send(ServiceCommandMsg {
-                    command: command.to_string(),
-                    payload: payload.clone(),
-                    coalesce,
-                }) {
-                    Ok(()) => serde_json::json!({ "ok": true, "queued": true }),
-                    Err(_) => serde_json::json!({
+                match self.send_service_command_message(interface, command, payload, coalesce) {
+                    Some(Ok(())) => serde_json::json!({ "ok": true, "queued": true }),
+                    Some(Err(())) => serde_json::json!({
+                        "ok": false,
+                        "error": "service_unavailable",
+                        "status": "service_unavailable",
+                    }),
+                    None => serde_json::json!({
                         "ok": false,
                         "error": "service_unavailable",
                         "status": "service_unavailable",
@@ -329,6 +327,39 @@ impl Shell {
                 "status": "service_unavailable",
             })
         }
+    }
+
+    fn send_service_command_message(
+        &mut self,
+        interface: &str,
+        command: &str,
+        payload: &serde_json::Value,
+        coalesce: bool,
+    ) -> Option<Result<(), ()>> {
+        let tx = self.service_handlers.get(interface).cloned()?;
+        let active_provider_id = self
+            .backend_runtimes
+            .get(interface)
+            .map(|slot| slot.provider_id.clone());
+        let profiling_started = (self.profiling_enabled() && active_provider_id.is_some())
+            .then(std::time::Instant::now);
+        let result = tx
+            .send(ServiceCommandMsg {
+                command: command.to_string(),
+                payload: payload.clone(),
+                coalesce,
+            })
+            .map_err(|_| ());
+        if let (Some(provider_id), Some(started)) = (active_provider_id, profiling_started) {
+            self.record_backend_profiling_stage(
+                interface,
+                &provider_id,
+                ProfilingBackendStage::CommandHandling,
+                started.elapsed(),
+                Some("service_command"),
+            );
+        }
+        Some(result)
     }
 
     /// Apply a cross-surface tab focus transfer. Clears focus on the
@@ -448,13 +479,7 @@ impl Shell {
             }
         }
         for (interface, command, payload) in to_send {
-            if let Some(tx) = self.service_handlers.get(&interface) {
-                let _ = tx.send(ServiceCommandMsg {
-                    command,
-                    payload,
-                    coalesce: true,
-                });
-            }
+            let _ = self.send_service_command_message(&interface, &command, &payload, true);
         }
         for key in to_remove {
             self.command_throttle.remove(&key);

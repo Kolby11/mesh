@@ -1818,6 +1818,86 @@ fn closed_service_command_channel_returns_unavailable_result() {
 }
 
 #[test]
+fn profiling_service_command_attributes_active_provider_dispatch() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+    let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.audio.control",
+    ));
+
+    let result = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_volume",
+        &serde_json::json!({ "volume": 0.4 }),
+        "@mesh/panel",
+        &capabilities,
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(true));
+    assert_eq!(
+        rx.try_recv().unwrap().command,
+        "set_volume",
+        "the existing command dispatch path must stay intact"
+    );
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    let backend = profiling
+        .backends
+        .iter()
+        .find(|backend| {
+            backend.interface == "mesh.audio" && backend.provider_id == "@mesh/pipewire-audio"
+        })
+        .expect("active provider dispatch should be attributed");
+    let stage = backend
+        .stages
+        .iter()
+        .find(|stage| stage.stage == ProfilingBackendStage::CommandHandling)
+        .expect("command-handling stage should be recorded");
+    assert_eq!(stage.sample_count, 1);
+}
+
+#[test]
+fn profiling_service_command_stays_silent_when_disabled() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+    let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.audio.control",
+    ));
+
+    let result = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_volume",
+        &serde_json::json!({ "volume": 0.2 }),
+        "@mesh/panel",
+        &capabilities,
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(true));
+    assert_eq!(rx.try_recv().unwrap().command, "set_volume");
+    assert!(
+        shell.build_debug_snapshot().profiling.is_none(),
+        "command attribution must stay inert while profiling is disabled"
+    );
+}
+
+#[test]
 fn launcher_content_size_ignores_root_surface_bounds() {
     let mut root = node("root", 0.0, 0.0, 640.0, 360.0);
     root.children.push(node("column", 12.0, 12.0, 336.0, 332.0));
