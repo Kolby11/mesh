@@ -539,12 +539,52 @@ fn debug_profiling_request_toggles_independent_session_state() {
 
 #[test]
 fn debug_snapshot_omits_profiling_payload_when_disabled() {
-    let shell = Shell::new();
+    let mut shell = Shell::new();
     let snapshot = shell.build_debug_snapshot();
     assert!(
         snapshot.profiling.is_none(),
         "profiling payload must be absent while profiling is disabled"
     );
+}
+
+#[test]
+fn debug_snapshot_backfills_mesh_debug_service_state() {
+    let mut shell = Shell::new();
+    shell.debug.enabled = true;
+
+    let snapshot = shell.build_debug_snapshot();
+    let latest = shell
+        .latest_service_state
+        .get(mesh_core_debug::DEBUG_INTERFACE)
+        .expect("mesh.debug service state should be backfilled from debug snapshots");
+
+    assert_eq!(latest.provider_id, mesh_core_debug::DEBUG_SOURCE_MODULE_ID);
+    assert_eq!(latest.state["overlay_enabled"], serde_json::json!(true));
+    assert_eq!(latest.state["profiling_enabled"], serde_json::json!(false));
+    assert_eq!(latest.state["profiling_session_id"], serde_json::json!(0));
+    assert_eq!(latest.state["active_view"], serde_json::json!("overview"));
+    assert_eq!(
+        latest.state["active_surfaces"],
+        serde_json::json!(snapshot.active_surfaces)
+    );
+    assert!(latest.state["profiling"].is_null());
+}
+
+#[test]
+fn debug_overlay_toggle_does_not_enable_profiling_in_mesh_debug_payload() {
+    let mut shell = Shell::new();
+
+    shell.apply_request(CoreRequest::ToggleDebugOverlay).unwrap();
+    shell.build_debug_snapshot();
+    let latest = shell
+        .latest_service_state
+        .get(mesh_core_debug::DEBUG_INTERFACE)
+        .expect("mesh.debug state should exist after snapshot generation");
+
+    assert_eq!(latest.state["overlay_enabled"], serde_json::json!(true));
+    assert_eq!(latest.state["profiling_enabled"], serde_json::json!(false));
+    assert_eq!(latest.state["profiling_session_id"], serde_json::json!(0));
+    assert!(latest.state["profiling"].is_null());
 }
 
 #[test]

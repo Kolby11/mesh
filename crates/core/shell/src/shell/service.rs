@@ -116,6 +116,8 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                 .map(|id| CoreRequest::SetTheme {
                     theme_id: id.to_string(),
                 }),
+            "shell.toggle-debug-overlay" => Some(CoreRequest::ToggleDebugOverlay),
+            "shell.toggle-debug-profiling" => Some(CoreRequest::ToggleDebugProfiling),
             other => other.rfind('.').map(|pos| {
                 let interface = other[..pos].to_string();
                 let command = other[pos + 1..].to_string();
@@ -279,5 +281,32 @@ mod tests {
             }
             other => panic!("expected denied diagnostic request, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn script_events_to_requests_maps_debug_control_events() {
+        let requests = script_events_to_requests(vec![
+            PublishedEvent {
+                channel: "shell.toggle-debug-overlay".into(),
+                payload: serde_json::json!({}),
+                source_module_id: "@mesh/debug-inspector".into(),
+                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+            },
+            PublishedEvent {
+                channel: "shell.toggle-debug-profiling".into(),
+                payload: serde_json::json!({}),
+                source_module_id: "@mesh/debug-inspector".into(),
+                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+            },
+        ]);
+
+        assert!(matches!(
+            requests.first(),
+            Some(CoreRequest::ToggleDebugOverlay)
+        ));
+        assert!(matches!(
+            requests.get(1),
+            Some(CoreRequest::ToggleDebugProfiling)
+        ));
     }
 }
