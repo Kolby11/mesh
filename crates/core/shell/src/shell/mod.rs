@@ -383,6 +383,7 @@ pub struct Shell {
     backend_runtime_statuses: HashMap<(String, String), BackendRuntimeStatusEntry>,
     latest_service_state: HashMap<String, LatestServiceState>,
     command_throttle: HashMap<(String, String), CommandThrottleState>,
+    profiling: runtime::profiling::ProfilingRuntimeState,
 }
 
 #[derive(Debug, Clone)]

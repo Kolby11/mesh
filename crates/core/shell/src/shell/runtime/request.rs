@@ -188,6 +188,10 @@ impl Shell {
             }
             CoreRequest::ToggleDebugProfiling => {
                 let enabled = self.debug.toggle_profiling();
+                if enabled {
+                    self.profiling
+                        .reset_for_new_session(self.debug.profiling_session_id);
+                }
                 tracing::debug!(
                     "debug profiling: {}",
                     if enabled { "on" } else { "off" }

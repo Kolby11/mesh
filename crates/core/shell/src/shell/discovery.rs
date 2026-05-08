@@ -72,6 +72,7 @@ impl Shell {
             backend_runtime_statuses: HashMap::new(),
             latest_service_state: HashMap::new(),
             command_throttle: HashMap::new(),
+            profiling: runtime::profiling::ProfilingRuntimeState::default(),
         }
     }
 

@@ -75,7 +75,10 @@ impl Shell {
             backend_runtimes,
             health,
             active_surfaces,
-            profiling: None,
+            profiling: self
+                .debug
+                .profiling_enabled
+                .then(|| self.profiling.snapshot(self.debug.profiling_session_id)),
         }
     }
 }

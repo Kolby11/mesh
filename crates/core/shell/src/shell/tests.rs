@@ -9,6 +9,7 @@ use super::{
     surface_layout::{SurfaceSizePolicy, load_active_theme, load_frontend_module_settings},
 };
 use mesh_core_config::ShellConfig;
+use mesh_core_debug::ProfilingStage;
 use mesh_core_elements::{LayoutRect, VariableStore, WidgetNode};
 use mesh_core_module::ModuleInstance;
 use mesh_core_module::manifest::{
@@ -537,6 +538,73 @@ fn debug_snapshot_omits_profiling_payload_when_disabled() {
     assert!(
         snapshot.profiling.is_none(),
         "profiling payload must be absent while profiling is disabled"
+    );
+}
+
+#[test]
+fn profiling_session_reset_discards_previous_samples() {
+    let mut shell = Shell::new();
+
+    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    shell.profiling.record_shell_stage(
+        ProfilingStage::RuntimeUpdateHandling,
+        std::time::Duration::from_micros(25),
+        Some("service_update"),
+    );
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    assert_eq!(profiling.session_id, 1);
+    assert_eq!(profiling.shell.stages.len(), 1);
+
+    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+
+    let reset_snapshot = shell.build_debug_snapshot();
+    let profiling = reset_snapshot
+        .profiling
+        .expect("profiling should be enabled after the second toggle");
+    assert_eq!(profiling.session_id, 2);
+    assert!(
+        profiling.shell.stages.is_empty(),
+        "enabling a fresh profiling session must clear previous samples"
+    );
+}
+
+#[test]
+fn profiling_snapshot_tracks_bounded_surface_samples_and_redraw_counts() {
+    let mut shell = Shell::new();
+    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+
+    shell.profiling.record_surface_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::TotalSurfaceRender,
+        std::time::Duration::from_micros(120),
+        Some("rebuild"),
+    );
+    shell.profiling.record_surface_redraw(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        Some("rebuild"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    let surface = profiling
+        .surfaces
+        .iter()
+        .find(|surface| surface.surface_id == "@mesh/navigation-bar")
+        .expect("surface snapshot should be recorded when work occurs");
+
+    assert_eq!(surface.module_id.as_deref(), Some("@mesh/navigation-bar"));
+    assert_eq!(surface.redraw_count, 1);
+    assert_eq!(surface.total_surface_render_time_micros, 120);
+    assert!(
+        surface
+            .stages
+            .iter()
+            .any(|stage| stage.stage == ProfilingStage::TotalSurfaceRender),
+        "surface summaries must expose total surface render timing as a first-class stage"
     );
 }
 

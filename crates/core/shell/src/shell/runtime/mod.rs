@@ -1,6 +1,7 @@
 use super::*;
 
 mod debug;
+pub(crate) mod profiling;
 mod reload;
 mod render;
 mod request;
