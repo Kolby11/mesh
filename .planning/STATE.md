@@ -4,14 +4,14 @@ milestone: v1.2
 milestone_name: Rendering System Upgrade
 status: executing
 stopped_at: Phase 12 context gathered
-last_updated: "2026-05-08T11:05:19.027Z"
-last_activity: 2026-05-06 -- Phase 11 execution started
+last_updated: "2026-05-08T11:16:04.780Z"
+last_activity: 2026-05-08 -- Phase 12 planning complete
 progress:
   total_phases: 6
   completed_phases: 4
-  total_plans: 16
+  total_plans: 21
   completed_plans: 16
-  percent: 100
+  percent: 76
 ---
 
 # State: MESH v1.2
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-05)
 
 **Core value:** A plugin author can style and animate distinctive shell UI with practical CSS-like primitives while MESH keeps rendering predictable and lightweight.
-**Current focus:** Phase 11 — keyboard-navigation-and-shortcuts
+**Current focus:** Phase 12 — theme-animation-tokens-and-css-animations
 
 ## Current Position
 
-Phase: 11 (keyboard-navigation-and-shortcuts) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 11
-Last activity: 2026-05-06 -- Phase 11 execution started
+Phase: 12 (theme-animation-tokens-and-css-animations) — READY TO EXECUTE
+Plan: 0 of 5
+Status: Ready to execute
+Last activity: 2026-05-08 -- Phase 12 planning complete
 
 ## Decisions
 
