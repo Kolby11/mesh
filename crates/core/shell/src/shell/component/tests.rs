@@ -494,6 +494,14 @@ fn real_frontend_module_component(
                 )))
                 .unwrap(),
             ),
+            (
+                "BenchmarkView".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/debug-inspector/src/components/benchmark-view.mesh"
+                )))
+                .unwrap(),
+            ),
         ]),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
@@ -5080,6 +5088,96 @@ fn debug_inspector_overview_renders_profiling_off_state_on_real_surface() {
             .as_deref()
             == Some("overview")
     );
+}
+
+#[test]
+fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_surface() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(360, 640);
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "profiling_enabled": true,
+                "profiling_session_id": 9,
+                "active_view": "overview",
+                "modules": [{ "id": "@mesh/debug-inspector" }],
+                "interfaces": [],
+                "backend_runtimes": [],
+                "active_surfaces": [],
+                "profiling": {
+                    "session_id": 9,
+                    "shell": {
+                        "stages": [],
+                        "redraw_count": 0,
+                        "total_surface_render_time_micros": 0
+                    },
+                    "surfaces": [],
+                    "backends": []
+                }
+            }),
+        })
+        .unwrap();
+
+    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    let overview_text = rendered_text(&component);
+    assert!(overview_text.iter().any(|line| line == "Overview"));
+    assert!(overview_text.iter().any(|line| line == "No recent samples yet"));
+
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
+        .unwrap();
+    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    let surfaces_text = rendered_text(&component);
+    assert!(surfaces_text.iter().any(|line| line == "Surfaces"));
+    assert!(
+        surfaces_text
+            .iter()
+            .any(|line| line == "No recent surface activity")
+    );
+
+    component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/debug-inspector::showBackendServices",
+            &[],
+        )
+        .unwrap();
+    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    let backend_text = rendered_text(&component);
+    assert!(backend_text.iter().any(|line| line == "Backend services"));
+    assert!(backend_text.iter().any(|line| line == "No backend samples yet"));
+
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
+        .unwrap();
+    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    let benchmark_text = rendered_text(&component);
+    assert!(
+        benchmark_text
+            .iter()
+            .any(|line| line == "Benchmark / Interaction")
+    );
+    assert!(
+        benchmark_text
+            .iter()
+            .any(|line| line.contains("Phase 17 adds repeatable benchmark flows"))
+    );
+    for label in [
+        "Hover",
+        "Surface open/close",
+        "Pointer-driven update",
+        "Keyboard traversal",
+        "Backend-driven update",
+    ] {
+        assert!(
+            benchmark_text.iter().any(|line| line == label),
+            "benchmark scaffold should render {label}"
+        );
+    }
 }
 
 #[test]

@@ -101,45 +101,7 @@
           row3_state_publish_delivery={backend_row_3_state_publish_delivery}
         />
 
-        <column class="benchmark-view" hidden={benchmark_hidden}>
-          <text class="section-title">Benchmark / Interaction</text>
-          <text class="section-copy">
-            Phase 16 reserves benchmark cards as scaffolding for repeatable interaction proofs in
-            Phase 17.
-          </text>
-          <column class="benchmark-stack">
-            <box class="benchmark-card">
-              <column class="benchmark-card-copy">
-                <text class="benchmark-card-title">Hover</text>
-                <text class="benchmark-card-text">Measures hover latency and restyle impact.</text>
-              </column>
-            </box>
-            <box class="benchmark-card">
-              <column class="benchmark-card-copy">
-                <text class="benchmark-card-title">Surface open / close</text>
-                <text class="benchmark-card-text">Measures response from shell action to visible panel change.</text>
-              </column>
-            </box>
-            <box class="benchmark-card">
-              <column class="benchmark-card-copy">
-                <text class="benchmark-card-title">Pointer-driven update</text>
-                <text class="benchmark-card-text">Measures slider or drag interaction cost while the shell repaints.</text>
-              </column>
-            </box>
-            <box class="benchmark-card">
-              <column class="benchmark-card-copy">
-                <text class="benchmark-card-title">Keyboard traversal</text>
-                <text class="benchmark-card-text">Measures focus movement and keyboard-driven surface updates.</text>
-              </column>
-            </box>
-            <box class="benchmark-card">
-              <column class="benchmark-card-copy">
-                <text class="benchmark-card-title">Backend-driven update</text>
-                <text class="benchmark-card-text">Measures provider stage cost together with the resulting frontend work.</text>
-              </column>
-            </box>
-          </column>
-        </column>
+        <BenchmarkView hidden={benchmark_hidden} />
       </column>
     </column>
   </box>
@@ -147,6 +109,7 @@
 
 <script lang="luau">
 import BackendServicesView from "./components/backend-services-view.mesh"
+import BenchmarkView from "./components/benchmark-view.mesh"
 import OverviewView from "./components/overview-view.mesh"
 import SurfacesView from "./components/surfaces-view.mesh"
 import ViewTabs from "./components/view-tabs.mesh"

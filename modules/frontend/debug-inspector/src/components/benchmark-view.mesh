@@ -1,0 +1,52 @@
+<template>
+  <column class="benchmark-view" hidden={hidden}>
+    <text class="section-title">Benchmark / Interaction</text>
+    <text class="section-copy">
+      Phase 17 adds repeatable benchmark flows. Phase 16 keeps this view scaffold-only so the
+      interaction categories are visible without adding runnable launch controls.
+    </text>
+    <column class="benchmark-stack">
+      <box class="benchmark-card">
+        <column class="benchmark-card-copy">
+          <text class="benchmark-card-title">Hover</text>
+          <text class="benchmark-card-text">
+            Phase 17 measures hover latency, restyle cost, and the visible response path.
+          </text>
+        </column>
+      </box>
+      <box class="benchmark-card">
+        <column class="benchmark-card-copy">
+          <text class="benchmark-card-title">Surface open/close</text>
+          <text class="benchmark-card-text">
+            Phase 17 measures time from shell action to the opened or closed surface settling.
+          </text>
+        </column>
+      </box>
+      <box class="benchmark-card">
+        <column class="benchmark-card-copy">
+          <text class="benchmark-card-title">Pointer-driven update</text>
+          <text class="benchmark-card-text">
+            Phase 17 measures drag and slider updates while repaint and layout work stay live.
+          </text>
+        </column>
+      </box>
+      <box class="benchmark-card">
+        <column class="benchmark-card-copy">
+          <text class="benchmark-card-title">Keyboard traversal</text>
+          <text class="benchmark-card-text">
+            Phase 17 measures focus movement, input handling, and keyboard-driven UI updates.
+          </text>
+        </column>
+      </box>
+      <box class="benchmark-card">
+        <column class="benchmark-card-copy">
+          <text class="benchmark-card-title">Backend-driven update</text>
+          <text class="benchmark-card-text">
+            Phase 17 measures provider-stage timing together with the resulting frontend render
+            cost.
+          </text>
+        </column>
+      </box>
+    </column>
+  </column>
+</template>
