@@ -136,7 +136,7 @@ The `mesh.kind` value describes the module's main role:
 | `interface`     | Declares a named contract, types, methods, events, and shared settings. |
 | `backend`       | Provides one or more interfaces.                                        |
 | `frontend`      | Contributes `.mesh` UI entrypoints, widgets, surfaces, or settings UI.  |
-| `theme`         | Contributes token files.                                                |
+| `theme`         | Contributes root theme tokens, component defaults, and mode files.      |
 | `icon-pack`     | Contributes icons, usually as a multi-active `mesh.icons` provider.     |
 | `font-pack`     | Contributes fonts.                                                      |
 | `language-pack` | Contributes translations.                                               |
@@ -384,6 +384,81 @@ Rules:
 - Keep display derivation in the frontend script.
 - Use libraries for formatting and common UI behavior.
 - Publish shell events with `mesh.events`; mutate services with proxy methods.
+
+### Frontend Theme Contributions
+
+Frontend modules may declare a `mesh.theme` block in their manifest. This is
+the module-owned theme contribution that Mesh validates and installs under the
+active theme file's `modules.<module-id>` subtree.
+
+Example:
+
+```json
+{
+  "name": "@mesh/weather",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "theme": {
+      "tokens": {
+        "weather.color.sunny": "#F6B73C",
+        "weather.color.rainy": "#5B8DEF"
+      },
+      "defaults": {
+        "components": {
+          "base": {
+            "transition": "background-color token(animation.duration.fast) token(animation.curves.bezier.standard)"
+          },
+          "button": {
+            "border-radius": "token(radius.md)"
+          },
+          "weather-chip": {
+            "background": "token(@mesh/weather.weather.color.sunny)"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Rules:
+
+- `mesh.theme.tokens` defines module-owned token defaults.
+- `mesh.theme.defaults.components.base` is subtree-scoped to that module.
+- `mesh.theme.defaults.components.button` overrides the core primitive inside
+  that module subtree only.
+- custom component keys such as `weather-chip` are module-local component
+  defaults.
+- module contributions are not theme-variant-specific in v1.
+- invalid token names, invalid style properties, or unresolved explicit token
+  references block installation.
+
+Cross-module token usage must be explicit:
+
+```css
+background: token(@mesh/weather.weather.color.sunny);
+```
+
+On installation, Mesh writes the contribution into the active authored theme
+file under:
+
+```json
+{
+  "modules": {
+    "@mesh/weather": {
+      "tokens": {},
+      "defaults": {
+        "components": {}
+      }
+    }
+  }
+}
+```
+
+On uninstall, Mesh removes that subtree. Any remaining references from other
+modules become unresolved token warnings until they are fixed or removed.
 
 ## Luau Library Modules
 

@@ -137,19 +137,24 @@ impl Shell {
                     }
                 }
                 let mut emitted = VecDeque::new();
-                emitted.push_back(CoreRequest::ShowSurface {
-                    surface_id: surface_id.clone(),
-                });
                 if focus && !trigger_surface.is_empty() && !trigger_key.is_empty() {
                     emitted.push_back(CoreRequest::TransferTabFocus {
                         from_surface: trigger_surface.clone(),
-                        to_surface: surface_id,
+                        to_surface: surface_id.clone(),
                         target: TabFocusTarget::First,
                         return_target: Some((trigger_surface, trigger_key)),
                         target_closes_on_leave: true,
                         close_source: None,
                     });
+                } else {
+                    emitted.push_back(CoreRequest::ShowSurface {
+                        surface_id: surface_id.clone(),
+                    });
+                    return Ok(emitted);
                 }
+                emitted.push_back(CoreRequest::ShowSurface {
+                    surface_id: surface_id.clone(),
+                });
                 Ok(emitted)
             }
             CoreRequest::TransferTabFocus {

@@ -4,6 +4,7 @@
 #[derive(Debug, Clone)]
 pub struct StyleBlock {
     pub rules: Vec<StyleRule>,
+    pub keyframes: Vec<KeyframeRule>,
 }
 
 /// A single style rule: selector + declarations.
@@ -129,6 +130,20 @@ pub struct Declaration {
     pub value: StyleValue,
 }
 
+/// A named `@keyframes` rule parsed from a style block.
+#[derive(Debug, Clone)]
+pub struct KeyframeRule {
+    pub name: String,
+    pub stops: Vec<KeyframeStop>,
+}
+
+/// A single percentage stop within a keyframe rule.
+#[derive(Debug, Clone)]
+pub struct KeyframeStop {
+    pub offset: f32,
+    pub declarations: Vec<Declaration>,
+}
+
 /// A style value that may reference theme tokens.
 #[derive(Debug, Clone)]
 pub enum StyleValue {
@@ -138,4 +153,62 @@ pub enum StyleValue {
     Token(String),
     /// A variable reference: `var(--custom-prop)`.
     Var(String),
+}
+
+pub fn is_transition_safe_keyframe_property(property: &str) -> bool {
+    matches!(
+        property,
+        "background"
+            | "background-color"
+            | "border-color"
+            | "border-radius"
+            | "border-top-left-radius"
+            | "border-top-right-radius"
+            | "border-bottom-right-radius"
+            | "border-bottom-left-radius"
+            | "border-width"
+            | "border-top-width"
+            | "border-right-width"
+            | "border-bottom-width"
+            | "border-left-width"
+            | "color"
+            | "opacity"
+            | "width"
+            | "height"
+            | "min-width"
+            | "max-width"
+            | "min-height"
+            | "max-height"
+            | "padding"
+            | "padding-top"
+            | "padding-right"
+            | "padding-bottom"
+            | "padding-left"
+            | "padding-x"
+            | "padding-y"
+            | "padding-inline"
+            | "padding-block"
+            | "margin"
+            | "margin-top"
+            | "margin-right"
+            | "margin-bottom"
+            | "margin-left"
+            | "margin-x"
+            | "margin-y"
+            | "margin-inline"
+            | "margin-block"
+            | "transform"
+            | "font-size"
+            | "letter-spacing"
+            | "line-height"
+            | "gap"
+            | "row-gap"
+            | "column-gap"
+            | "gap-x"
+            | "inset"
+            | "top"
+            | "right"
+            | "bottom"
+            | "left"
+    )
 }

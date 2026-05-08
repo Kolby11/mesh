@@ -1,7 +1,7 @@
 use super::parse::*;
 use super::*;
 use crate::tree::ElementState;
-use mesh_core_component::style::{Selector, StyleRule, StyleValue};
+use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use mesh_core_theme::{Theme, TokenValue};
 use std::collections::HashMap;
 
@@ -24,21 +24,66 @@ impl<'a> StyleResolver<'a> {
         value: &StyleValue,
         variables: &HashMap<String, StyleValue>,
     ) -> String {
+        self.resolve_value_with_variables_mode(value, variables, false)
+    }
+
+    fn resolve_value_with_variables_mode(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+        strict_animation_tokens: bool,
+    ) -> String {
         match value {
-            StyleValue::Literal(s) => resolve_embedded_tokens(s, self.theme),
+            StyleValue::Literal(s) => {
+                resolve_embedded_tokens(s, self.theme, strict_animation_tokens).unwrap_or_default()
+            }
             StyleValue::Token(name) => match self.theme.token(name) {
                 Some(TokenValue::String(s)) => s.clone(),
                 Some(TokenValue::Number(n)) => format!("{n}"),
                 Some(TokenValue::Bool(b)) => format!("{b}"),
                 None => {
+                    if strict_animation_tokens && name.starts_with("animation.") {
+                        return String::new();
+                    }
                     tracing::warn!("unresolved theme token: {name}");
                     String::new()
                 }
             },
             StyleValue::Var(name) => variables
                 .get(name)
-                .map(|value| self.resolve_value_with_variables(value, variables))
+                .map(|value| {
+                    self.resolve_value_with_variables_mode(
+                        value,
+                        variables,
+                        strict_animation_tokens,
+                    )
+                })
                 .unwrap_or_default(),
+        }
+    }
+
+    fn validate_animation_value_with_variables(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+    ) -> Result<(), String> {
+        match value {
+            StyleValue::Literal(value) => {
+                if let Some(name) = find_unresolved_animation_token(value, self.theme) {
+                    return Err(name);
+                }
+                Ok(())
+            }
+            StyleValue::Token(name) => {
+                if name.starts_with("animation.") && self.theme.token(name).is_none() {
+                    return Err(name.clone());
+                }
+                Ok(())
+            }
+            StyleValue::Var(name) => variables
+                .get(name)
+                .map(|value| self.validate_animation_value_with_variables(value, variables))
+                .unwrap_or(Ok(())),
         }
     }
 
@@ -87,6 +132,22 @@ impl<'a> StyleResolver<'a> {
             .0
     }
 
+    pub fn resolve_node_style_for_module(
+        &self,
+        rules: &[StyleRule],
+        tag: &str,
+        classes: &[String],
+        id: Option<&str>,
+        context: StyleContext,
+        state: ElementState,
+        module_id: Option<&str>,
+    ) -> ComputedStyle {
+        self.resolve_node_style_with_diagnostics_for_module(
+            rules, tag, classes, id, context, state, module_id,
+        )
+        .0
+    }
+
     pub fn resolve_node_style_with_diagnostics(
         &self,
         rules: &[StyleRule],
@@ -96,6 +157,21 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
         state: ElementState,
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
+        self.resolve_node_style_with_diagnostics_for_module(
+            rules, tag, classes, id, context, state, None,
+        )
+    }
+
+    pub fn resolve_node_style_with_diagnostics_for_module(
+        &self,
+        rules: &[StyleRule],
+        tag: &str,
+        classes: &[String],
+        id: Option<&str>,
+        context: StyleContext,
+        state: ElementState,
+        module_id: Option<&str>,
+    ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
         let mut style = ComputedStyle::default();
         let mut diagnostics = Vec::new();
         let mut variables = HashMap::new();
@@ -104,39 +180,51 @@ impl<'a> StyleResolver<'a> {
             style.direction = FlexDirection::Column;
         }
 
+        self.apply_theme_component_defaults(
+            &mut style,
+            tag,
+            module_id,
+            &mut diagnostics,
+            &mut variables,
+        );
+
         for rule in rules {
             if rule_matches(rule, tag, classes, id, context, state) {
                 for decl in &rule.declarations {
-                    if decl.property.starts_with("--") {
-                        variables.insert(decl.property.clone(), decl.value.clone());
-                        continue;
-                    }
-                    if !is_supported_css_property(&decl.property) {
-                        diagnostics.push(StyleDiagnostic {
-                            property: decl.property.clone(),
-                            selector: Some(selector_to_diagnostic_string(&rule.selector)),
-                            message: format!("unsupported CSS property '{}'", decl.property),
-                        });
-                        continue;
-                    }
-                    if let StyleValue::Var(name) = &decl.value
-                        && !variables.contains_key(name)
-                    {
-                        diagnostics.push(StyleDiagnostic {
-                            property: decl.property.clone(),
-                            selector: Some(selector_to_diagnostic_string(&rule.selector)),
-                            message: format!(
-                                "unsupported CSS variable reference '{name}' for property '{}'",
-                                decl.property
-                            ),
-                        });
-                    }
-                    apply_declaration(&mut style, &decl.property, &decl.value, self, &variables);
+                    self.apply_declaration_with_diagnostics(
+                        &mut style,
+                        decl,
+                        Some(selector_to_diagnostic_string(&rule.selector)),
+                        &mut diagnostics,
+                        &mut variables,
+                    );
                 }
             }
         }
 
         (style, diagnostics)
+    }
+
+    pub fn apply_declarations_with_diagnostics(
+        &self,
+        style: &mut ComputedStyle,
+        declarations: &[mesh_core_component::style::Declaration],
+        selector: Option<&str>,
+    ) -> Vec<StyleDiagnostic> {
+        let mut diagnostics = Vec::new();
+        let mut variables = HashMap::new();
+
+        for decl in declarations {
+            self.apply_declaration_with_diagnostics(
+                style,
+                decl,
+                selector.map(str::to_string),
+                &mut diagnostics,
+                &mut variables,
+            );
+        }
+
+        diagnostics
     }
 
     pub fn restyle_subtree(
@@ -186,6 +274,125 @@ impl<'a> StyleResolver<'a> {
             self.restyle_subtree(child, rules, context);
         }
         node.children = restyled;
+    }
+
+    fn apply_theme_component_defaults(
+        &self,
+        style: &mut ComputedStyle,
+        tag: &str,
+        module_id: Option<&str>,
+        diagnostics: &mut Vec<StyleDiagnostic>,
+        variables: &mut HashMap<String, StyleValue>,
+    ) {
+        if let Some(defaults) = self.theme.component_defaults("base") {
+            self.apply_theme_defaults_map(style, "base", defaults, diagnostics, variables);
+        }
+        if let Some(defaults) = self.theme.component_defaults(tag) {
+            self.apply_theme_defaults_map(style, tag, defaults, diagnostics, variables);
+        }
+        if let Some(module_id) = module_id {
+            if let Some(defaults) = self.theme.module_component_defaults(module_id, "base") {
+                self.apply_theme_defaults_map(style, "base", defaults, diagnostics, variables);
+            }
+            if let Some(defaults) = self.theme.module_component_defaults(module_id, tag) {
+                self.apply_theme_defaults_map(style, tag, defaults, diagnostics, variables);
+            }
+        }
+    }
+
+    fn apply_theme_defaults_map(
+        &self,
+        style: &mut ComputedStyle,
+        component_name: &str,
+        defaults: &mesh_core_theme::ComponentDefaults,
+        diagnostics: &mut Vec<StyleDiagnostic>,
+        variables: &mut HashMap<String, StyleValue>,
+    ) {
+        for (property, value) in defaults {
+            let declaration = Declaration {
+                property: property.clone(),
+                value: classify_theme_style_value(value),
+            };
+            self.apply_declaration_with_diagnostics(
+                style,
+                &declaration,
+                Some(format!("@theme:{component_name}")),
+                diagnostics,
+                variables,
+            );
+        }
+    }
+
+    fn apply_declaration_with_diagnostics(
+        &self,
+        style: &mut ComputedStyle,
+        decl: &Declaration,
+        selector: Option<String>,
+        diagnostics: &mut Vec<StyleDiagnostic>,
+        variables: &mut HashMap<String, StyleValue>,
+    ) {
+        if decl.property.starts_with("--") {
+            variables.insert(decl.property.clone(), decl.value.clone());
+            return;
+        }
+        if !is_supported_css_property(&decl.property) {
+            diagnostics.push(StyleDiagnostic {
+                property: decl.property.clone(),
+                selector,
+                message: format!("unsupported CSS property '{}'", decl.property),
+            });
+            return;
+        }
+        if let StyleValue::Var(name) = &decl.value
+            && !variables.contains_key(name)
+        {
+            diagnostics.push(StyleDiagnostic {
+                property: decl.property.clone(),
+                selector: selector.clone(),
+                message: format!(
+                    "unsupported CSS variable reference '{name}' for property '{}'",
+                    decl.property
+                ),
+            });
+        }
+        if is_strict_animation_property(&decl.property) {
+            if let Err(token_name) =
+                self.validate_animation_value_with_variables(&decl.value, variables)
+            {
+                diagnostics.push(StyleDiagnostic {
+                    property: decl.property.clone(),
+                    selector,
+                    message: format!("unresolved animation token reference '{token_name}'"),
+                });
+                return;
+            }
+        }
+        apply_declaration(style, &decl.property, &decl.value, self, variables);
+    }
+}
+
+fn is_strict_animation_property(property: &str) -> bool {
+    matches!(
+        property,
+        "transition"
+            | "transition-duration"
+            | "transition-delay"
+            | "transition-timing-function"
+            | "animation"
+            | "animation-duration"
+            | "animation-delay"
+            | "animation-timing-function"
+    )
+}
+
+fn classify_theme_style_value(value: &str) -> StyleValue {
+    let value = value.trim();
+    if value.starts_with("token(") && value.ends_with(')') {
+        StyleValue::Token(value[6..value.len() - 1].trim().to_string())
+    } else if value.starts_with("var(") && value.ends_with(')') {
+        StyleValue::Var(value[4..value.len() - 1].trim().to_string())
+    } else {
+        StyleValue::Literal(value.to_string())
     }
 }
 
@@ -691,7 +898,11 @@ fn selector_to_diagnostic_string(selector: &Selector) -> String {
     }
 }
 
-fn resolve_embedded_tokens(value: &str, theme: &Theme) -> String {
+fn resolve_embedded_tokens(
+    value: &str,
+    theme: &Theme,
+    strict_animation_tokens: bool,
+) -> Result<String, String> {
     let mut output = String::with_capacity(value.len());
     let mut rest = value;
 
@@ -700,7 +911,7 @@ fn resolve_embedded_tokens(value: &str, theme: &Theme) -> String {
         let token_start = start + "token(".len();
         let Some(end) = rest[token_start..].find(')') else {
             output.push_str(&rest[start..]);
-            return output;
+            return Ok(output);
         };
 
         let name = rest[token_start..token_start + end].trim();
@@ -708,11 +919,32 @@ fn resolve_embedded_tokens(value: &str, theme: &Theme) -> String {
             Some(TokenValue::String(s)) => output.push_str(s),
             Some(TokenValue::Number(n)) => output.push_str(&format!("{n}")),
             Some(TokenValue::Bool(b)) => output.push_str(&format!("{b}")),
-            None => tracing::warn!("unresolved theme token: {name}"),
+            None => {
+                if strict_animation_tokens && name.starts_with("animation.") {
+                    return Err(name.to_string());
+                }
+                tracing::warn!("unresolved theme token: {name}");
+            }
         }
         rest = &rest[token_start + end + 1..];
     }
 
     output.push_str(rest);
-    output
+    Ok(output)
+}
+
+fn find_unresolved_animation_token(value: &str, theme: &Theme) -> Option<String> {
+    let mut rest = value;
+
+    while let Some(start) = rest.find("token(") {
+        let token_start = start + "token(".len();
+        let end = rest[token_start..].find(')')?;
+        let name = rest[token_start..token_start + end].trim();
+        if name.starts_with("animation.") && theme.token(name).is_none() {
+            return Some(name.to_string());
+        }
+        rest = &rest[token_start + end + 1..];
+    }
+
+    None
 }

@@ -407,6 +407,7 @@ mod tests {
             component: module,
             local_components: Default::default(),
             module_component_imports: Default::default(),
+            watched_paths: Vec::new(),
         };
         let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&store));
         let texts = collect_text_content(&tree);
@@ -490,6 +491,7 @@ mod tests {
             component,
             local_components: Default::default(),
             module_component_imports: Default::default(),
+            watched_paths: Vec::new(),
         }
     }
 

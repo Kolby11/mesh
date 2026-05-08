@@ -483,7 +483,7 @@ pub(super) fn parse_animation_shorthand(value: &str) -> AnimationStyle {
     let mut time_count = 0;
 
     for token in first_comma_item(value).split_whitespace() {
-        if looks_like_time(token) {
+        if looks_like_explicit_time(token) {
             let ms = parse_time_ms(token);
             if time_count == 0 {
                 animation.duration_ms = ms;
@@ -513,6 +513,16 @@ pub(super) fn parse_animation_shorthand(value: &str) -> AnimationStyle {
     }
 
     animation
+}
+
+fn looks_like_explicit_time(token: &str) -> bool {
+    let token = token.trim();
+    token
+        .strip_suffix("ms")
+        .is_some_and(|rest| rest.trim().parse::<f32>().is_ok())
+        || token
+            .strip_suffix('s')
+            .is_some_and(|rest| rest.trim().parse::<f32>().is_ok())
 }
 
 pub(super) fn parse_time_ms(value: &str) -> u32 {

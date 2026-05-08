@@ -130,7 +130,31 @@ mod tests {
         }
         assert!(is_supported_css_property("--local-token"));
         assert!(!is_supported_css_property("grid-template-columns"));
-        assert!(!is_supported_css_property("transform"));
+        assert!(is_supported_css_property("transform"));
+    }
+
+    #[test]
+    fn keyframe_property_helper_accepts_transition_safe_properties() {
+        for property in [
+            "opacity",
+            "transform",
+            "border-radius",
+            "padding",
+            "font-size",
+            "inset",
+        ] {
+            assert!(is_transition_safe_keyframe_property(property), "{property}");
+        }
+    }
+
+    #[test]
+    fn keyframe_property_helper_rejects_unsupported_properties() {
+        for property in ["filter", "box-shadow", "grid-template-columns", "display"] {
+            assert!(
+                !is_transition_safe_keyframe_property(property),
+                "{property}"
+            );
+        }
     }
 
     #[test]
@@ -162,6 +186,63 @@ mod tests {
             diagnostics[0]
                 .message
                 .contains("unsupported CSS property 'grid-template-columns'")
+        );
+    }
+
+    #[test]
+    fn animation_token_duration_resolves_from_theme() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "animation-duration".to_string(),
+                value: StyleValue::Token("animation.duration.fast".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let (style, diagnostics) = resolver.resolve_node_style_with_diagnostics(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(style.animation.duration_ms, 90);
+    }
+
+    #[test]
+    fn invalid_animation_token_produces_diagnostic_and_skips_declaration() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "animation-duration".to_string(),
+                value: StyleValue::Token("animation.duration.fastest".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let (style, diagnostics) = resolver.resolve_node_style_with_diagnostics(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.animation.duration_ms, 0);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("animation.duration.fastest")
         );
     }
 
@@ -203,6 +284,95 @@ mod tests {
                 a: 255
             }
         );
+    }
+
+    #[test]
+    fn module_component_defaults_are_subtree_scoped() {
+        let mut theme = mesh_core_theme::Theme {
+            id: "scoped".into(),
+            name: "Scoped".into(),
+            tokens: std::collections::HashMap::from([
+                (
+                    "color.on-background".into(),
+                    mesh_core_theme::TokenValue::String("#112233".into()),
+                ),
+                (
+                    "animation.duration.short".into(),
+                    mesh_core_theme::TokenValue::Number(150.0),
+                ),
+                (
+                    "animation.curves.bezier.standard".into(),
+                    mesh_core_theme::TokenValue::String("ease".into()),
+                ),
+            ]),
+            defaults: mesh_core_theme::ThemeDefaults {
+                components: std::collections::HashMap::from([(
+                    "base".into(),
+                    std::collections::HashMap::from([(
+                        "color".into(),
+                        "token(color.on-background)".into(),
+                    )]),
+                )]),
+            },
+            modules: std::collections::HashMap::new(),
+        };
+        theme.modules.insert(
+            "@mesh/weather".into(),
+            mesh_core_theme::ThemeModule {
+                tokens: std::collections::HashMap::from([(
+                    "weather.color.sunny".into(),
+                    mesh_core_theme::TokenValue::String("#f6b73c".into()),
+                )]),
+                defaults: mesh_core_theme::ThemeDefaults {
+                    components: std::collections::HashMap::from([
+                        (
+                            "base".into(),
+                            std::collections::HashMap::from([(
+                                "transition".into(),
+                                "background-color token(animation.duration.short) token(animation.curves.bezier.standard)"
+                                    .into(),
+                            )]),
+                        ),
+                        (
+                            "button".into(),
+                            std::collections::HashMap::from([(
+                                "background".into(),
+                                "token(@mesh/weather.weather.color.sunny)".into(),
+                            )]),
+                        ),
+                    ]),
+                },
+            },
+        );
+
+        let resolver = StyleResolver::new(&theme);
+
+        let outside = resolver.resolve_node_style_for_module(
+            &[],
+            "button",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+            None,
+        );
+        assert_eq!(outside.color, Color::from_hex("#112233").unwrap());
+        assert_eq!(outside.background_color, Color::TRANSPARENT);
+        assert_eq!(outside.transition.duration_ms, 0);
+
+        let inside = resolver.resolve_node_style_for_module(
+            &[],
+            "button",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+            Some("@mesh/weather"),
+        );
+        assert_eq!(inside.color, Color::from_hex("#112233").unwrap());
+        assert_eq!(inside.background_color, Color::from_hex("#f6b73c").unwrap());
+        assert_eq!(inside.transition.duration_ms, 150);
+        assert!(inside.transition.properties.animates_background_color());
     }
 
     #[test]

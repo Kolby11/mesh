@@ -16,6 +16,7 @@ use mesh_core_service::{
 };
 use std::fs;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 #[test]
 fn service_update_marks_component_dirty_only_when_tracked_fields_change() {
@@ -1602,7 +1603,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
             if interface == "mesh.audio" && command == "toggle_mute"
     ));
 
-    for _ in 0..3 {
+    for _ in 0..2 {
         component
             .handle_input(
                 &theme,
@@ -1634,19 +1635,6 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
 
 #[test]
 fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
-    fn find_settings_button(node: &WidgetNode) -> Option<&WidgetNode> {
-        if node.tag == "button"
-            && node.attributes.get("class").is_some_and(|class| {
-                class
-                    .split_whitespace()
-                    .any(|name| name == "settings-button")
-            })
-        {
-            return Some(node);
-        }
-        node.children.iter().find_map(find_settings_button)
-    }
-
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
     let theme = default_theme();
@@ -1657,7 +1645,11 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
         .last_tree
         .as_ref()
         .expect("rendered navigation tree");
-    let settings_button = find_settings_button(tree).expect("rendered settings button");
+    let settings_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar/local:SettingsButton::onSettingsClick",
+    )
+    .expect("rendered settings button");
     assert_eq!(
         settings_button
             .event_handlers
@@ -1665,8 +1657,15 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
             .map(String::as_str),
         Some("__mesh_embed__::@mesh/navigation-bar::onSettingsFocus")
     );
-    let x = settings_button.layout.x + settings_button.layout.width / 2.0;
-    let y = settings_button.layout.y + settings_button.layout.height / 2.0;
+    let settings_key = settings_button
+        .attributes
+        .get("_mesh_key")
+        .expect("settings button mesh key")
+        .clone();
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, &settings_key, 0.0, 0.0).expect("settings bounds");
+    let x = (left + right) * 0.5;
+    let y = (top + bottom) * 0.5;
     component
         .handle_input(
             &theme,
@@ -1680,10 +1679,54 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
         )
         .unwrap();
 
-    assert!(component.focused_key.is_some());
-    assert_ne!(
-        runtime_value(&component, "keyboard_diag_label"),
-        Some(serde_json::Value::String("kbd: no control focus".into()))
+    assert_eq!(component.focused_key.as_deref(), Some(settings_key.as_str()));
+}
+
+#[test]
+fn navigation_bar_keyboard_activation_opens_volume_surface_on_real_surface() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 80);
+    component.paint(&theme, 320, 80, &mut buffer).unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    let volume_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+    )
+    .expect("rendered volume button");
+    let volume_key = volume_button
+        .attributes
+        .get("_mesh_key")
+        .expect("volume button mesh key")
+        .clone();
+
+    component.focused_key = Some(volume_key.clone());
+    component.focus_visible_key = Some(volume_key);
+
+    let requests = component
+        .handle_input(
+            &theme,
+            320,
+            80,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ActivatePopover { surface_id, focus, .. }
+                if surface_id == "@mesh/audio-popover" && *focus
+        )),
+        "Enter on the focused volume button should activate the audio popover: {requests:?}"
     );
 }
 
@@ -3238,6 +3281,266 @@ end
     assert!(!component.wants_render());
 }
 
+#[test]
+fn keyframe_animation_continues_across_rebuild() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <button class="panel" onclick={onClick}>{label}</button>
+</template>
+
+<script lang="luau">
+label = "Ready"
+
+function onClick()
+    label = "Updated"
+end
+</script>
+
+<style>
+.panel {
+  animation: pulse 1000ms linear infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 48);
+    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+
+    let key = "root/0::pulse".to_string();
+    let preserved_start = Instant::now()
+        .checked_sub(Duration::from_millis(400))
+        .expect("monotonic instant subtraction");
+    component
+        .keyframe_animations
+        .get_mut(&key)
+        .expect("active keyframe animation")
+        .started_at = preserved_start;
+
+    component.call_namespaced_handler("onClick", &[]).unwrap();
+    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+
+    assert_eq!(
+        component
+            .keyframe_animations
+            .get(&key)
+            .expect("preserved keyframe animation")
+            .started_at,
+        preserved_start
+    );
+}
+
+#[test]
+fn keyframe_animation_finite_completion_stops_render_requests() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <box class="panel" />
+</template>
+
+<style>
+.panel {
+  animation: pulse 50ms linear 1 forwards;
+}
+
+@keyframes pulse {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, 120, 40, &mut buffer).unwrap();
+    assert!(component.wants_render());
+
+    let key = "root/0::pulse".to_string();
+    component
+        .keyframe_animations
+        .get_mut(&key)
+        .expect("active finite keyframe animation")
+        .started_at = Instant::now()
+        .checked_sub(Duration::from_millis(200))
+        .expect("monotonic instant subtraction");
+    component.dirty = false;
+    component.paint(&theme, 120, 40, &mut buffer).unwrap();
+    component.dirty = false;
+
+    assert!(!component.wants_render());
+}
+
+#[test]
+fn keyframe_animation_name_change_restarts_timeline() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <button class="panel">Pulse</button>
+</template>
+
+<style>
+.panel {
+  animation-name: pulse-a;
+  animation-duration: 1000ms;
+}
+
+@keyframes pulse-a {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes pulse-b {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 48);
+    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+
+    let original_start = Instant::now()
+        .checked_sub(Duration::from_millis(400))
+        .expect("monotonic instant subtraction");
+    component
+        .keyframe_animations
+        .get_mut("root/0::pulse-a")
+        .expect("initial keyframe animation")
+        .started_at = original_start;
+
+    let mut tree = component.build_tree(&theme, 160, 48);
+    tree.children[0].computed_style.animation.name = Some("pulse-b".into());
+    component.apply_style_animations(&mut tree);
+    component.last_tree = Some(tree);
+
+    assert!(
+        !component
+            .keyframe_animations
+            .contains_key("root/0::pulse-a")
+    );
+    assert!(
+        component
+            .keyframe_animations
+            .contains_key("root/0::pulse-b")
+    );
+    assert_ne!(
+        component
+            .keyframe_animations
+            .get("root/0::pulse-b")
+            .expect("replacement keyframe animation")
+            .started_at,
+        original_start
+    );
+}
+
+#[test]
+fn keyframe_animation_infinite_keeps_render_requests_active() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <box class="panel" />
+</template>
+
+<style>
+.panel {
+  animation: pulse 50ms linear infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, 120, 40, &mut buffer).unwrap();
+
+    component
+        .keyframe_animations
+        .get_mut("root/0::pulse")
+        .expect("active infinite keyframe animation")
+        .started_at = Instant::now()
+        .checked_sub(Duration::from_millis(200))
+        .expect("monotonic instant subtraction");
+    component.dirty = false;
+    component.paint(&theme, 120, 40, &mut buffer).unwrap();
+    component.dirty = false;
+
+    assert!(component.wants_render());
+}
+
+#[test]
+fn keyframe_animation_missing_name_records_diagnostic() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <box class="panel" />
+</template>
+
+<style>
+.panel {
+  animation-name: pulse-missing;
+  animation-duration: 120ms;
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, 120, 40, &mut buffer).unwrap();
+
+    let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
+    assert_eq!(diagnostics.error_count(), 1);
+    assert!(matches!(
+        diagnostics.health(),
+        mesh_core_diagnostics::HealthStatus::Error(message)
+            if message.contains("unresolved animation 'pulse-missing'")
+    ));
+}
+
+#[test]
+fn animation_token_runtime_diagnostic_reaches_component() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <box class="panel" />
+</template>
+
+<style>
+.panel {
+  animation-name: pulse;
+  animation-duration: token(animation.duration.fastest);
+}
+
+@keyframes pulse {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, 120, 40, &mut buffer).unwrap();
+
+    let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
+    assert!(diagnostics.error_count() >= 1);
+    assert!(matches!(
+        diagnostics.health(),
+        mesh_core_diagnostics::HealthStatus::Error(message)
+            if message.contains("animation.duration.fastest")
+    ));
+}
+
 // ---------- integration test 1: proxy field reads reach render state ----
 
 /// Proves that a bundled-style frontend (panel or quick-settings) reading
@@ -4197,16 +4500,9 @@ fn shipped_navigation_volume_button_publishes_immediate_audio_popover_show() {
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ShowSurface { surface_id } if surface_id == "@mesh/audio-popover"
-        )),
-        "click should publish an immediate audio popover show request: {requests:?}"
-    );
-    assert!(
-        requests.iter().any(|request| matches!(
-            request,
             CoreRequest::ActivatePopover { surface_id, .. } if surface_id == "@mesh/audio-popover"
         )),
-        "click should still register popover focus transfer: {requests:?}"
+        "click should register popover activation through the shell request path: {requests:?}"
     );
     assert!(!runtime_bool(&component, "audio_surface_hidden"));
 }

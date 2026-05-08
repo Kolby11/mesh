@@ -26,8 +26,8 @@ lifecycle spec see [`../spec/pluggable-backend.md`](../spec/pluggable-backend.md
   - [`frontend/slots.md`](./frontend/slots.md) — slot points for extending
     surfaces without forking them.
 - **Theming & localization**
-  - [`theming/themes.md`](./theming/themes.md) — token-based theming with
-    inheritance, modes, hot-swap.
+  - [`theming/themes.md`](./theming/themes.md) — theme tokens, component
+    defaults, module-owned theme subtrees, modes, hot-swap.
   - [`theming/icons.md`](./theming/icons.md) — icon packs, fallback chain,
     Material-3-style variable axes.
   - [`theming/locales.md`](./theming/locales.md) — module-bundled

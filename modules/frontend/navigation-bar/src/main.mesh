@@ -8,9 +8,6 @@
           onblur={onNavControlBlur}
         />
         <ThemeButton onfocus={onThemeFocus} onblur={onNavControlBlur} />
-        <box class="focus-diagnostic">
-            <text class="focus-diagnostic-label">{keyboard_diag_label}</text>
-        </box>
     </box>
     <AudioPopover hidden={audio_surface_hidden} />
   </row>
@@ -29,7 +26,6 @@ if not audio_ok then audio = nil end
 audio_surface_id = "@mesh/audio-popover"
 audio_surface_hidden = true
 audio_surface_handler = "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface"
-keyboard_diag_label = "kbd: no control focus"
 
 function onToggleAudioSurface(event)
     local position = event.current_target.position or {}
@@ -42,9 +38,6 @@ function onToggleAudioSurface(event)
             surface_id = audio_surface_id,
             margin_top = margin_top,
             margin_left = margin_left
-        })
-        mesh.events.publish("shell.show-surface", {
-            surface_id = audio_surface_id
         })
         -- Register the trigger so Tab from the volume button transfers
         -- focus into the popover, and Shift+Tab from inside returns here.
@@ -66,22 +59,6 @@ function onMuteShortcut()
     if audio_ok and audio and audio.available ~= false then
         audio.toggle_mute()
     end
-end
-
-function onSettingsFocus()
-    keyboard_diag_label = "kbd: settings focused"
-end
-
-function onVolumeFocus()
-    keyboard_diag_label = "kbd: volume focused"
-end
-
-function onThemeFocus()
-    keyboard_diag_label = "kbd: theme focused"
-end
-
-function onNavControlBlur()
-    keyboard_diag_label = "kbd: no control focus"
 end
 </script>
 

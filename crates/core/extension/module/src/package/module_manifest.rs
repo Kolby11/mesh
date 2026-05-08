@@ -79,11 +79,13 @@ impl ModulePackageManifest {
                 default_locale: i18n.locale.clone(),
                 bundled: i18n.path.clone(),
             });
-        let theme = mesh
+        let contributed_theme = mesh
             .contributes
             .themes
             .first()
             .map(|theme| manifest::ThemeSection {
+                tokens: HashMap::new(),
+                defaults: manifest::ThemeDefaultsSection::default(),
                 tokens_used: Vec::new(),
                 base: None,
                 modes: theme.modes.clone(),
@@ -121,6 +123,8 @@ impl ModulePackageManifest {
             })
         });
 
+        let manifest_theme = mesh.theme.clone().or(contributed_theme);
+
         Manifest {
             package: manifest::PackageSection {
                 id: self.name,
@@ -143,7 +147,7 @@ impl ModulePackageManifest {
             accessibility: None,
             settings,
             i18n,
-            theme,
+            theme: manifest_theme,
             service: None,
             provides,
             interface,
@@ -278,6 +282,7 @@ impl ModulePackageManifest {
                 provides,
                 implements: Vec::new(),
                 interface,
+                theme: None,
                 contributes,
                 icons,
                 icon_pack,
@@ -306,6 +311,8 @@ pub struct MeshModuleSection {
     pub implements: Vec<MeshProvidesDeclaration>,
     #[serde(default)]
     pub interface: Option<MeshInterfaceDeclaration>,
+    #[serde(default)]
+    pub theme: Option<manifest::ThemeSection>,
     #[serde(default)]
     pub contributes: MeshContributes,
     #[serde(default)]
@@ -343,6 +350,14 @@ impl MeshModuleSection {
                     ));
                 }
             }
+        }
+        if let Some(theme) = &self.theme {
+            if self.kind != ModuleKind::Frontend {
+                return Err(PackageManifestError::Validation(
+                    "mesh.theme is only supported for frontend modules".into(),
+                ));
+            }
+            theme.validate().map_err(PackageManifestError::Validation)?;
         }
         for provided in self.implementations() {
             provided.validate()?;

@@ -111,6 +111,10 @@ pub fn is_supported_css_property(property: &str) -> bool {
     property.starts_with("--") || SUPPORTED_CSS_PROPERTIES.contains(&property)
 }
 
+pub fn is_transition_safe_keyframe_property(property: &str) -> bool {
+    mesh_core_component::style::is_transition_safe_keyframe_property(property)
+}
+
 /// Fully resolved style for a widget node.
 #[derive(Debug, Clone)]
 pub struct ComputedStyle {

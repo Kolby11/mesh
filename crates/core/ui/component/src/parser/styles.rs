@@ -1,4 +1,7 @@
-use crate::style::{ContainerQuery, Declaration, Selector, StyleBlock, StyleRule, StyleValue};
+use crate::style::{
+    ContainerQuery, Declaration, KeyframeRule, KeyframeStop, Selector, StyleBlock, StyleRule,
+    StyleValue, is_transition_safe_keyframe_property,
+};
 use cssparser::{Parser, ParserInput, ToCss as CssParserToCss, Token};
 use lightningcss::{
     media_query::{
@@ -6,7 +9,11 @@ use lightningcss::{
         QueryFeature as LightningQueryFeature,
     },
     rules::container::{ContainerCondition, ContainerSizeFeature, ContainerSizeFeatureId},
-    rules::{CssRule as LightningCssRule, style::StyleRule as LightningStyleRule},
+    rules::{
+        CssRule as LightningCssRule,
+        keyframes::{KeyframeSelector, KeyframesName},
+        style::StyleRule as LightningStyleRule,
+    },
     stylesheet::{ParserOptions as CssParserOptions, PrinterOptions, StyleSheet},
     traits::ToCss as LightningToCss,
 };
@@ -25,14 +32,16 @@ pub(super) fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
     .map_err(map_lightning_error)?;
 
     let mut rules = Vec::new();
-    lower_css_rules(&stylesheet.rules.0, None, &mut rules)?;
-    Ok(StyleBlock { rules })
+    let mut keyframes = Vec::new();
+    lower_css_rules(&stylesheet.rules.0, None, &mut rules, &mut keyframes)?;
+    Ok(StyleBlock { rules, keyframes })
 }
 
 fn lower_css_rules(
     source_rules: &[LightningCssRule<'_>],
     inherited_query: Option<ContainerQuery>,
     rules: &mut Vec<StyleRule>,
+    keyframes: &mut Vec<KeyframeRule>,
 ) -> Result<(), ParseError> {
     for rule in source_rules {
         match rule {
@@ -44,7 +53,10 @@ fn lower_css_rules(
                 let combined_query = inherited_query
                     .map(|existing| existing.intersect(query))
                     .or(Some(query));
-                lower_css_rules(&container_rule.rules.0, combined_query, rules)?;
+                lower_css_rules(&container_rule.rules.0, combined_query, rules, keyframes)?;
+            }
+            LightningCssRule::Keyframes(keyframes_rule) => {
+                keyframes.push(lower_keyframes_rule(keyframes_rule)?);
             }
             LightningCssRule::Ignored => {}
             other => {
@@ -56,6 +68,100 @@ fn lower_css_rules(
         }
     }
 
+    Ok(())
+}
+
+fn lower_keyframes_rule(
+    source_rule: &lightningcss::rules::keyframes::KeyframesRule<'_>,
+) -> Result<KeyframeRule, ParseError> {
+    let name = lower_keyframe_name(&source_rule.name);
+    let mut stops = Vec::new();
+
+    for keyframe in &source_rule.keyframes {
+        let declarations = lower_keyframe_declarations(&name, &keyframe.declarations)?;
+        if declarations.is_empty() {
+            continue;
+        }
+
+        for selector in &keyframe.selectors {
+            let offset = lower_keyframe_selector(selector)?;
+            stops.push(KeyframeStop {
+                offset,
+                declarations: declarations.clone(),
+            });
+        }
+    }
+
+    if stops.is_empty() {
+        return Err(ParseError::InvalidStyle {
+            message: format!("keyframes '{name}' has no supported animatable properties"),
+            line: 0,
+        });
+    }
+
+    stops.sort_by(|left, right| left.offset.total_cmp(&right.offset));
+    Ok(KeyframeRule { name, stops })
+}
+
+fn lower_keyframe_name(name: &KeyframesName<'_>) -> String {
+    match name {
+        KeyframesName::Ident(ident) => ident.0.to_string(),
+        KeyframesName::Custom(name) => name.to_string(),
+    }
+}
+
+fn lower_keyframe_selector(selector: &KeyframeSelector) -> Result<f32, ParseError> {
+    match selector {
+        KeyframeSelector::Percentage(value) => Ok(value.0.clamp(0.0, 1.0)),
+        KeyframeSelector::From | KeyframeSelector::To => Err(ParseError::InvalidStyle {
+            message: "from/to keyframe aliases are not supported".into(),
+            line: 0,
+        }),
+        KeyframeSelector::TimelineRangePercentage(_) => Err(ParseError::InvalidStyle {
+            message: "timeline-range keyframe selectors are not supported".into(),
+            line: 0,
+        }),
+    }
+}
+
+fn lower_keyframe_declarations(
+    rule_name: &str,
+    source_block: &lightningcss::declaration::DeclarationBlock<'_>,
+) -> Result<Vec<Declaration>, ParseError> {
+    let mut declarations = Vec::new();
+
+    for property in &source_block.declarations {
+        let declaration = lower_property(property)?;
+        validate_keyframe_declaration(rule_name, &declaration)?;
+        declarations.push(declaration);
+    }
+    for property in &source_block.important_declarations {
+        let declaration = lower_property(property)?;
+        validate_keyframe_declaration(rule_name, &declaration)?;
+        declarations.push(declaration);
+    }
+
+    Ok(declarations)
+}
+
+fn validate_keyframe_declaration(
+    rule_name: &str,
+    declaration: &Declaration,
+) -> Result<(), ParseError> {
+    if contains_keyframe_value_reference(&declaration.value) {
+        return Err(ParseError::InvalidStyle {
+            message: format!(
+                "keyframes '{rule_name}' cannot use token() or var() references in stop values"
+            ),
+            line: 0,
+        });
+    }
+    if !is_transition_safe_keyframe_property(&declaration.property) {
+        return Err(ParseError::InvalidStyle {
+            message: format!("unsupported keyframe property '{}'", declaration.property),
+            line: 0,
+        });
+    }
     Ok(())
 }
 
@@ -420,5 +526,12 @@ fn classify_style_value(value: &str) -> StyleValue {
         StyleValue::Var(value[4..value.len() - 1].trim().to_string())
     } else {
         StyleValue::Literal(value.to_string())
+    }
+}
+
+fn contains_keyframe_value_reference(value: &StyleValue) -> bool {
+    match value {
+        StyleValue::Token(_) | StyleValue::Var(_) => true,
+        StyleValue::Literal(value) => value.contains("token(") || value.contains("var("),
     }
 }

@@ -197,6 +197,80 @@ fn module_package_manifest_rejects_empty_git_origin_url() {
 }
 
 #[test]
+fn module_package_manifest_parses_frontend_theme_contributions() {
+    let content = r##"
+{
+  "name": "@mesh/weather",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "theme": {
+      "tokens": {
+        "weather.color.sunny": "#f6b73c"
+      },
+      "defaults": {
+        "components": {
+          "base": {
+            "transition": "background-color token(animation.duration.short) token(animation.curves.bezier.standard)"
+          },
+          "button": {
+            "background": "token(@mesh/weather.weather.color.sunny)"
+          }
+        }
+      }
+    }
+  }
+}
+"##;
+    let manifest = ModulePackageManifest::from_json_str(content).unwrap();
+    let theme = manifest.mesh.theme.as_ref().expect("mesh.theme section");
+    assert_eq!(
+        theme
+            .tokens
+            .get("weather.color.sunny")
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("#f6b73c")
+    );
+    assert_eq!(
+        theme.defaults.components["button"]["background"],
+        "token(@mesh/weather.weather.color.sunny)"
+    );
+
+    let runtime = manifest.into_runtime_manifest();
+    let runtime_theme = runtime.theme.expect("runtime theme");
+    assert_eq!(
+        runtime_theme
+            .tokens
+            .get("weather.color.sunny")
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("#f6b73c")
+    );
+}
+
+#[test]
+fn module_package_manifest_rejects_non_frontend_theme_contributions() {
+    let content = r##"
+{
+  "name": "@mesh/bad-theme-backend",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "theme": {
+      "tokens": {
+        "bad.color.token": "#000000"
+      }
+    }
+  }
+}
+"##;
+    assert!(ModulePackageManifest::from_json_str(content).is_err());
+}
+
+#[test]
 fn module_manifest_loader_prefers_package_json_over_module_json() {
     let dir = temp_dir("module-precedence");
     fs::write(
@@ -245,7 +319,7 @@ fn installed_module_graph_loads_repo_package_fixture() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let graph = load_installed_module_graph(&workspace_root.join("config/package.json")).unwrap();
 
-    assert_eq!(graph.frontend_modules().len(), 3);
+    assert_eq!(graph.frontend_modules().len(), 2);
     assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
     assert_eq!(
         graph.active_provider("mesh.audio").unwrap().module_id,
@@ -283,6 +357,7 @@ fn loaded_module(
                 contributes,
                 icons: None,
                 icon_pack: None,
+                theme: None,
                 experimental: serde_json::Value::Null,
             },
         },

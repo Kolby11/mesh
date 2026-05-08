@@ -4,8 +4,9 @@ use super::{
     ExtensionSection, FontDependency, I18nSection, IconPackSection, IconRequirementsSection,
     IconsSection, InterfaceDependency, InterfaceSection, Manifest, ModuleType, NativeDependency,
     OptionalDependencyGroup, PackageSection, ProvidedInterface, SettingsSection, SlotContribution,
-    SlotDefinition, SurfaceLayoutSection, ThemeSection,
+    SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
 };
+use mesh_core_theme::TokenValue;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -178,6 +179,10 @@ impl JsonI18nSection {
 #[derive(Debug, Clone, Deserialize)]
 struct JsonThemeSection {
     #[serde(default)]
+    tokens: HashMap<String, TokenValue>,
+    #[serde(default)]
+    defaults: ThemeDefaultsSection,
+    #[serde(default)]
     tokens_used: Vec<String>,
     #[serde(default)]
     base: Option<String>,
@@ -192,6 +197,8 @@ struct JsonThemeSection {
 impl JsonThemeSection {
     fn into_theme(self) -> ThemeSection {
         ThemeSection {
+            tokens: self.tokens,
+            defaults: self.defaults,
             tokens_used: self.tokens_used,
             base: self.base,
             modes: self.modes,

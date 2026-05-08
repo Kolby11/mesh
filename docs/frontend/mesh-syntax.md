@@ -345,7 +345,9 @@ frontend script.
 Write the supported MESH practical shell CSS subset. See
 [`docs/css-coverage.md`](../css-coverage.md) for the complete property and
 unsupported-feature contract. Use `token()` to reference theme design tokens
-and local `var(...)` values for supported declarations:
+and local `var(...)` values for supported declarations. Root theme tokens use
+plain names such as `token(color.surface)`. Cross-module token reads must be
+explicit, for example `token(@mesh/weather.weather.color.sunny)`:
 
 ```css
 <style>
@@ -358,7 +360,8 @@ and local `var(...)` values for supported declarations:
     display: flex;
     flex: 1 1 auto;
     overflow: hidden;
-    transition: background-color 150ms ease-out;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard);
+    animation: pulse token(animation.duration.fast) token(animation.curves.bezier.standard);
 }
 
 .chip {
@@ -385,6 +388,18 @@ Transitions currently interpolate `background-color`, `border-color`,
 standard easing keywords plus `cubic-bezier(...)`. `transform` parses
 `translate(...)`, `scale(...)`, and `rotate(...)`, but only translation is
 painted and hit-tested today.
+
+Theme-driven component defaults resolve before local stylesheet rules. The
+effective order is documented in [`../theming/themes.md`](../theming/themes.md).
+
+Keyframes are percentage-only:
+
+```css
+@keyframes pulse {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+```
 
 ---
 

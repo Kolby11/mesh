@@ -133,7 +133,7 @@ mod tests {
     use super::*;
     use crate::{
         ComponentImportTarget, ScriptLang,
-        style::{ContainerQuery, Selector, StyleValue},
+        style::{ContainerQuery, Selector, StyleValue, is_transition_safe_keyframe_property},
         template::{AttributeValue, TemplateNode},
     };
 
@@ -254,6 +254,7 @@ box {
         assert!(matches!(&decls[1].value, StyleValue::Token(v) if v == "spacing.md"));
         assert!(matches!(&decls[2].value, StyleValue::Var(v) if v == "--bg"));
         assert!(style.rules[0].container_query.is_none());
+        assert!(style.keyframes.is_empty());
     }
 
     #[test]
@@ -314,18 +315,116 @@ box {
     }
 
     #[test]
-    fn unsupported_keyframes_rule_reports_at_rule_name() {
+    fn keyframe_property_helper_accepts_transition_safe_properties() {
+        for property in [
+            "opacity",
+            "transform",
+            "border-radius",
+            "padding",
+            "font-size",
+            "inset",
+        ] {
+            assert!(is_transition_safe_keyframe_property(property), "{property}");
+        }
+    }
+
+    #[test]
+    fn keyframe_property_helper_rejects_unsupported_properties() {
+        for property in ["filter", "box-shadow", "grid-template-columns", "display"] {
+            assert!(
+                !is_transition_safe_keyframe_property(property),
+                "{property}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_percentage_keyframes() {
+        let source = r#"
+<style>
+@keyframes pulse {
+    0% { opacity: 0; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+</style>
+"#;
+        let file = parse_component(source).unwrap();
+        let style = file.style.unwrap();
+        assert_eq!(style.keyframes.len(), 1);
+        assert_eq!(style.keyframes[0].name, "pulse");
+        assert_eq!(style.keyframes[0].stops.len(), 3);
+        assert_eq!(style.keyframes[0].stops[0].offset, 0.0);
+        assert_eq!(style.keyframes[0].stops[1].offset, 0.5);
+        assert_eq!(style.keyframes[0].stops[2].offset, 1.0);
+    }
+
+    #[test]
+    fn reject_from_keyframe_alias() {
         let source = r#"
 <style>
 @keyframes pulse {
     from { opacity: 0; }
+    100% { opacity: 1; }
+}
+</style>
+"#;
+        let err = parse_component(source).unwrap_err().to_string();
+        assert!(
+            err.contains("from/to keyframe aliases are not supported"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn reject_to_keyframe_alias() {
+        let source = r#"
+<style>
+@keyframes pulse {
+    0% { opacity: 0; }
     to { opacity: 1; }
 }
 </style>
 "#;
         let err = parse_component(source).unwrap_err().to_string();
-        // Phase 12 owns custom keyframe scheduling; Phase 8 only accepts animation declarations.
-        assert!(err.contains("unsupported at-rule '@keyframes'"), "{err}");
+        assert!(
+            err.contains("from/to keyframe aliases are not supported"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn reject_unsupported_keyframe_property() {
+        let source = r#"
+<style>
+@keyframes pulse {
+    0% { filter: blur(4px); }
+    100% { opacity: 1; }
+}
+</style>
+"#;
+        let err = parse_component(source).unwrap_err().to_string();
+        assert!(
+            err.contains("unsupported keyframe property 'filter'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn reject_non_runnable_keyframes() {
+        let source = r#"
+<style>
+@keyframes pulse {
+    0% { }
+    100% { }
+}
+</style>
+"#;
+        let err = parse_component(source).unwrap_err().to_string();
+        assert!(
+            err.contains("keyframes 'pulse' has no supported animatable properties"),
+            "{err}"
+        );
     }
 
     #[test]

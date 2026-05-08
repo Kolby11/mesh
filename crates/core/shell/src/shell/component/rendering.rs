@@ -115,6 +115,7 @@ impl FrontendSurfaceComponent {
             container_height: height as f32,
         };
         resolver.restyle_subtree(&mut tree, &restyle_rules, context);
+        self.record_runtime_style_diagnostics(&tree, &restyle_rules, &resolver, context);
 
         // Recompute layout after restyle so that pseudo-state and container-query style
         // changes (display:none, width, height, etc.) are reflected in final layout
@@ -160,6 +161,47 @@ impl FrontendSurfaceComponent {
             &selection_background,
             &selection_foreground,
         );
+    }
+
+    fn record_runtime_style_diagnostics(
+        &self,
+        tree: &WidgetNode,
+        rules: &[mesh_core_component::style::StyleRule],
+        resolver: &StyleResolver,
+        context: StyleContext,
+    ) {
+        self.record_runtime_style_diagnostics_for_node(tree, rules, resolver, context);
+    }
+
+    fn record_runtime_style_diagnostics_for_node(
+        &self,
+        node: &WidgetNode,
+        rules: &[mesh_core_component::style::StyleRule],
+        resolver: &StyleResolver,
+        context: StyleContext,
+    ) {
+        let classes: Vec<String> = node
+            .attributes
+            .get("class")
+            .map(|value| value.split_whitespace().map(str::to_owned).collect())
+            .unwrap_or_default();
+        let id = node.attributes.get("id").map(|value| value.as_str());
+        let module_id = node.attributes.get("_mesh_module_id").map(String::as_str);
+        let (_style, diagnostics) = resolver.resolve_node_style_with_diagnostics_for_module(
+            rules, &node.tag, &classes, id, context, node.state, module_id,
+        );
+
+        for diagnostic in diagnostics {
+            if diagnostic.message.contains("animation.")
+                || diagnostic.property.starts_with("animation")
+            {
+                self.record_runtime_animation_diagnostic(diagnostic.message);
+            }
+        }
+
+        for child in &node.children {
+            self.record_runtime_style_diagnostics_for_node(child, rules, resolver, context);
+        }
     }
 }
 

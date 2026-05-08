@@ -45,7 +45,8 @@ Shorthands are practical shell shorthands rather than complete browser-compatibl
     flex-direction: column;
     gap: 6px;
     overflow: hidden;
-    transition: background-color 150ms ease-out, border-color 150ms ease-out;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-color token(animation.duration.short) token(animation.curves.bezier.standard);
     animation: pulse 250ms ease-in-out 50ms 2 alternate both paused;
 }
 ```
@@ -74,6 +75,32 @@ translation is painted and inverted for hit-testing today; scale and rotation
 flow through style resolution and transition state but still render as
 identity until the non-axis-aligned paint path lands.
 
+## Keyframes
+
+`@keyframes` is supported as percentage-only keyframes over the same
+transition-safe visual property set listed above.
+
+- Stops must use numeric percentages such as `0%`, `50%`, and `100%`.
+- `from` and `to` aliases are rejected.
+- Unsupported keyframe properties reject the entire keyframes rule.
+- Keyframe stop values do not support `token(...)` or `var(...)` in this release.
+- Animation declarations may reference theme tokens such as
+  `token(animation.duration.fast)` and `token(animation.curves.bezier.standard)`.
+
+Example:
+
+```css
+.pulse {
+    animation: pulse 180ms token(animation.curves.bezier.standard) 0ms 2 alternate both;
+}
+
+@keyframes pulse {
+    0% { opacity: 0; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+```
+
 ## Tokens And Variables
 
 `token(...)` is first-class and resolves against the active MESH theme. It works as a full declaration value and inside practical literals such as `border: 1px solid token(color.outline)`.
@@ -100,8 +127,6 @@ MESH does not implement CSS Grid, floats, multicolumn layout, full media queries
 
 Full transform rendering is still out of scope for the current raster path.
 Only translation is visually applied today.
-
-`@keyframes` remains unsupported until Phase 12. Animation declarations are accepted as metadata only so Phase 12 can add custom keyframe scheduling and interpolation without changing author-facing declaration names.
 
 ## Engine Boundary
 

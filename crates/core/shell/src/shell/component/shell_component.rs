@@ -159,7 +159,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn wants_render(&self) -> bool {
-        self.dirty || !self.style_animations.is_empty()
+        self.dirty || !self.style_animations.is_empty() || self.has_active_keyframe_animation
     }
 
     fn surface_size_changed(&mut self, width: u32, height: u32) -> bool {

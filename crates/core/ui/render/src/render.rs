@@ -95,10 +95,13 @@ pub fn build_widget_tree_from_component(
             })
             .collect();
         let mut container = WidgetNode::new("box");
+        attach_module_id(&mut container, &host_manifest.package.id);
         container.children = children;
         container
     } else {
-        WidgetNode::new("box")
+        let mut container = WidgetNode::new("box");
+        attach_module_id(&mut container, &host_manifest.package.id);
+        container
     }
 }
 
@@ -138,6 +141,7 @@ pub(crate) fn build_widget_node(
         ),
         TemplateNode::Text(text) => {
             let mut node = WidgetNode::new("text");
+            attach_module_id(&mut node, &manifest.package.id);
             node.attributes
                 .insert("content".into(), text.content.clone());
             node.computed_style = text_style();
@@ -152,6 +156,7 @@ pub(crate) fn build_widget_node(
         }
         TemplateNode::Expr(expr) => {
             let mut node = WidgetNode::new("text");
+            attach_module_id(&mut node, &manifest.package.id);
             let content = state
                 .map(|store| eval_expr(&expr.expression, store))
                 .unwrap_or_else(|| format!("{{ {} }}", expr.expression));
@@ -180,6 +185,7 @@ pub(crate) fn build_widget_node(
                 &if_node.else_children
             };
             let mut node = WidgetNode::new("column");
+            attach_module_id(&mut node, &manifest.package.id);
             node.computed_style = container_style("column");
             let child_context = child_style_context(&node.computed_style, container_context);
             node.children = active_children
@@ -209,6 +215,7 @@ pub(crate) fn build_widget_node(
         }
         TemplateNode::For(for_node) => {
             let mut node = WidgetNode::new("column");
+            attach_module_id(&mut node, &manifest.package.id);
             node.computed_style = container_style("column");
             let child_context = child_style_context(&node.computed_style, container_context);
 
@@ -261,6 +268,7 @@ pub(crate) fn build_widget_node(
             };
 
             let mut node = WidgetNode::new(tag);
+            attach_module_id(&mut node, &manifest.package.id);
             node.attributes.insert(
                 "slot".into(),
                 slot.name.clone().unwrap_or_else(|| "default".into()),
@@ -315,15 +323,17 @@ fn build_element_node(
         inherited_style_mask(rules, &tag, &classes, id.as_deref(), container_context);
 
     let mut node = WidgetNode::new(tag.clone());
+    attach_module_id(&mut node, &manifest.package.id);
     node.attributes = attributes;
     node.event_handlers = event_handlers;
-    node.computed_style = resolver.resolve_node_style(
+    node.computed_style = resolver.resolve_node_style_for_module(
         rules,
         &tag,
         &classes,
         id.as_deref(),
         container_context,
         Default::default(),
+        Some(&manifest.package.id),
     );
     merge_missing_defaults(&tag, &mut node.computed_style);
     if let Some(parent_style) = parent_style {
@@ -454,6 +464,11 @@ fn build_component_ref(
     node.attributes
         .insert("component".into(), component.name.clone());
     node
+}
+
+fn attach_module_id(node: &mut WidgetNode, module_id: &str) {
+    node.attributes
+        .insert("_mesh_module_id".into(), module_id.to_string());
 }
 
 pub(crate) fn parse_attributes(

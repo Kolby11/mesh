@@ -1,4 +1,6 @@
 use mesh_core_capability::Capability;
+use mesh_core_elements::style::is_supported_css_property;
+use mesh_core_theme::TokenValue;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -111,6 +113,48 @@ impl Manifest {
             .as_ref()
             .map(|component| component.tag.as_str())
     }
+}
+
+fn validate_theme_token_key(token_name: &str) -> Result<(), String> {
+    if token_name.trim().is_empty() {
+        return Err("mesh.theme.tokens cannot contain empty names".into());
+    }
+    if !token_name.contains('.') {
+        return Err(format!(
+            "mesh.theme.tokens entry '{token_name}' must use a dotted namespace"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_theme_value_references(value: &str) -> Result<(), String> {
+    let mut rest = value;
+    while let Some(start) = rest.find("token(") {
+        let token_start = start + "token(".len();
+        let token_end = rest[token_start..]
+            .find(')')
+            .map(|offset| token_start + offset)
+            .ok_or_else(|| format!("invalid token() reference in '{value}'"))?;
+        let token_name = rest[token_start..token_end].trim();
+        if token_name.is_empty() {
+            return Err(format!("empty token() reference in '{value}'"));
+        }
+        if let Some(module_ref) = token_name.strip_prefix('@') {
+            let Some((module_id, owned_token)) = module_ref.split_once('.') else {
+                return Err(format!(
+                    "explicit module token reference '{token_name}' must use <module-id>.<token-name>"
+                ));
+            };
+            if module_id.trim().is_empty() || owned_token.trim().is_empty() {
+                return Err(format!(
+                    "explicit module token reference '{token_name}' must use <module-id>.<token-name>"
+                ));
+            }
+        }
+        rest = &rest[token_end + 1..];
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -352,6 +396,10 @@ pub struct I18nSection {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThemeSection {
     #[serde(default)]
+    pub tokens: HashMap<String, TokenValue>,
+    #[serde(default)]
+    pub defaults: ThemeDefaultsSection,
+    #[serde(default)]
     pub tokens_used: Vec<String>,
     #[serde(default)]
     pub base: Option<String>,
@@ -361,6 +409,36 @@ pub struct ThemeSection {
     pub default_mode: Option<String>,
     #[serde(default)]
     pub extends: Option<String>,
+}
+
+impl ThemeSection {
+    pub fn validate(&self) -> Result<(), String> {
+        for token_name in self.tokens.keys() {
+            validate_theme_token_key(token_name)?;
+        }
+
+        for (component_name, defaults) in &self.defaults.components {
+            if component_name.trim().is_empty() {
+                return Err("mesh.theme.defaults.components keys cannot be empty".into());
+            }
+            for (property, value) in defaults {
+                if !is_supported_css_property(property) {
+                    return Err(format!(
+                        "mesh.theme.defaults.components.{component_name} uses unsupported CSS property '{property}'"
+                    ));
+                }
+                validate_theme_value_references(value)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ThemeDefaultsSection {
+    #[serde(default)]
+    pub components: HashMap<String, HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

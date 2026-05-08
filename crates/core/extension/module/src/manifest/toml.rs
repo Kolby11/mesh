@@ -3,8 +3,9 @@ use super::{
     DependenciesSection, DependencySpec, EntrypointsSection, ExportsSection, ExtensionSection,
     I18nSection, IconPackSection, IconRequirementsSection, IconsSection, InterfaceSection,
     Manifest, PackageSection, ProvidedInterface, ServiceSection, SettingsSection, SlotContribution,
-    SlotDefinition, SurfaceLayoutSection, ThemeSection,
+    SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
 };
+use mesh_core_theme::TokenValue;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -130,6 +131,10 @@ impl TomlI18nSection {
 #[derive(Debug, Clone, Deserialize)]
 struct TomlThemeSection {
     #[serde(default)]
+    tokens: HashMap<String, TokenValue>,
+    #[serde(default)]
+    defaults: ThemeDefaultsSection,
+    #[serde(default)]
     tokens_used: Vec<String>,
     #[serde(default)]
     base: Option<String>,
@@ -144,6 +149,8 @@ struct TomlThemeSection {
 impl TomlThemeSection {
     fn into_theme(self) -> ThemeSection {
         ThemeSection {
+            tokens: self.tokens,
+            defaults: self.defaults,
             tokens_used: self.tokens_used,
             base: self.base,
             modes: self.modes,

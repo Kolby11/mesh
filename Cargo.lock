@@ -1305,6 +1305,8 @@ name = "mesh-core-module"
 version = "0.1.0"
 dependencies = [
  "mesh-core-capability",
+ "mesh-core-elements",
+ "mesh-core-theme",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

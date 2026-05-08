@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+const LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX: &str = "animation.default.";
+
+pub type ComponentDefaults = HashMap<String, String>;
+
 /// A resolved theme token value.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -26,6 +30,20 @@ impl std::fmt::Display for TokenValue {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ThemeDefaults {
+    #[serde(default)]
+    pub components: HashMap<String, ComponentDefaults>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ThemeModule {
+    #[serde(default)]
+    pub tokens: HashMap<String, TokenValue>,
+    #[serde(default)]
+    pub defaults: ThemeDefaults,
+}
+
 /// A complete theme definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Theme {
@@ -33,12 +51,22 @@ pub struct Theme {
     pub name: String,
     #[serde(default)]
     pub tokens: HashMap<String, TokenValue>,
+    #[serde(default)]
+    pub defaults: ThemeDefaults,
+    #[serde(default)]
+    pub modules: HashMap<String, ThemeModule>,
 }
 
 impl Theme {
     /// Look up a single token by dotted name (e.g. "color.primary").
     pub fn token(&self, name: &str) -> Option<&TokenValue> {
-        self.tokens.get(name)
+        match split_explicit_module_token(name) {
+            Some((module_id, token_name)) => self
+                .modules
+                .get(module_id)
+                .and_then(|module| module.tokens.get(token_name)),
+            None => self.tokens.get(name),
+        }
     }
 
     /// Return all tokens in a group (e.g. "color" returns "color.primary", "color.surface", etc.).
@@ -49,6 +77,77 @@ impl Theme {
             .filter(|(k, _)| k.starts_with(&prefix))
             .map(|(k, v)| (k.as_str(), v))
             .collect()
+    }
+
+    pub fn component_defaults(&self, component: &str) -> Option<&ComponentDefaults> {
+        self.defaults.components.get(component)
+    }
+
+    pub fn module_component_defaults(
+        &self,
+        module_id: &str,
+        component: &str,
+    ) -> Option<&ComponentDefaults> {
+        self.modules
+            .get(module_id)
+            .and_then(|module| module.defaults.components.get(component))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct RawTheme {
+    id: String,
+    name: String,
+    #[serde(default)]
+    tokens: HashMap<String, TokenValue>,
+    #[serde(default)]
+    defaults: ThemeDefaults,
+    #[serde(default)]
+    modules: HashMap<String, ThemeModule>,
+    #[serde(default)]
+    default_shell_animations: HashMap<String, String>,
+}
+
+impl From<RawTheme> for Theme {
+    fn from(raw: RawTheme) -> Self {
+        let mut tokens = raw.tokens;
+        let mut defaults = raw.defaults;
+        let mut base_defaults = defaults.components.remove("base").unwrap_or_default();
+
+        let legacy_animation_keys: Vec<String> = tokens
+            .keys()
+            .filter_map(|key| {
+                key.strip_prefix(LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX)
+                    .map(str::to_owned)
+            })
+            .collect();
+
+        for animation_name in legacy_animation_keys {
+            let legacy_key =
+                format!("{LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX}{animation_name}");
+            let Some(TokenValue::String(value)) = tokens.remove(&legacy_key) else {
+                continue;
+            };
+            base_defaults
+                .entry(animation_name)
+                .or_insert(value);
+        }
+
+        for (name, value) in raw.default_shell_animations {
+            base_defaults.entry(name).or_insert(value);
+        }
+
+        if !base_defaults.is_empty() {
+            defaults.components.insert("base".into(), base_defaults);
+        }
+
+        Self {
+            id: raw.id,
+            name: raw.name,
+            tokens,
+            defaults,
+            modules: raw.modules,
+        }
     }
 }
 
@@ -167,17 +266,15 @@ pub fn load_theme_from_path(path: &Path) -> Result<Theme, ThemeError> {
         path: path.to_path_buf(),
         source,
     })?;
-    serde_json::from_str(&content).map_err(|source| ThemeError::Parse {
+    parse_theme(&content).map_err(|source| ThemeError::Parse {
         path: path.to_path_buf(),
         source,
     })
 }
 
 fn embedded_default_theme() -> Theme {
-    serde_json::from_str(include_str!(
-        "../../../../../config/themes/mesh-default-dark.json"
-    ))
-    .expect("embedded default theme json must be valid")
+    parse_theme(include_str!("../../../../../config/themes/mesh-default-dark.json"))
+        .expect("embedded default theme json must be valid")
 }
 
 fn mesh_home_path() -> PathBuf {
@@ -189,4 +286,108 @@ fn mesh_home_path() -> PathBuf {
 
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".mesh")
+}
+
+fn parse_theme(content: &str) -> Result<Theme, serde_json::Error> {
+    serde_json::from_str::<RawTheme>(content).map(Theme::from)
+}
+
+fn split_explicit_module_token(name: &str) -> Option<(&str, &str)> {
+    if !name.starts_with('@') {
+        return None;
+    }
+
+    let (module_id, token_name) = name.split_once('.')?;
+    if module_id.is_empty() || token_name.is_empty() {
+        return None;
+    }
+    Some((module_id, token_name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_module_token_lookup_reads_module_subtree() {
+        let theme = parse_theme(
+            r##"{
+              "id": "scoped",
+              "name": "Scoped",
+              "tokens": {
+                "color.primary": "#000000"
+              },
+              "modules": {
+                "@mesh/weather": {
+                  "tokens": {
+                    "weather.color.sunny": "#f6b73c"
+                  }
+                }
+              }
+            }"##,
+        )
+        .expect("theme parses");
+
+        assert_eq!(
+            theme.token("@mesh/weather.weather.color.sunny").map(ToString::to_string),
+            Some("#f6b73c".into())
+        );
+        assert!(theme.token("weather.color.sunny").is_none());
+    }
+
+    #[test]
+    fn legacy_default_shell_animation_tokens_are_extracted_into_base_component_defaults() {
+        let theme = parse_theme(
+            r##"{
+              "id": "legacy",
+              "name": "Legacy",
+              "tokens": {
+                "color.primary": "#000000",
+                "animation.duration.fast": 90.0,
+                "animation.default.hover": "all 90ms ease-out"
+              }
+            }"##,
+        )
+        .expect("legacy theme parses");
+
+        assert!(theme.token("animation.default.hover").is_none());
+        assert_eq!(
+            theme
+                .component_defaults("base")
+                .and_then(|defaults| defaults.get("hover"))
+                .map(String::as_str),
+            Some("all 90ms ease-out")
+        );
+        assert!(theme.token("animation.duration.fast").is_some());
+    }
+
+    #[test]
+    fn explicit_base_component_defaults_are_preserved() {
+        let theme = parse_theme(
+            r##"{
+              "id": "separated",
+              "name": "Separated",
+              "tokens": {
+                "animation.duration.fast": 90.0
+              },
+              "defaults": {
+                "components": {
+                  "base": {
+                    "transition": "all token(animation.duration.fast) ease-out"
+                  }
+                }
+              }
+            }"##,
+        )
+        .expect("separated theme parses");
+
+        assert_eq!(
+            theme
+                .component_defaults("base")
+                .and_then(|defaults| defaults.get("transition"))
+                .map(String::as_str),
+            Some("all token(animation.duration.fast) ease-out")
+        );
+        assert!(theme.token("animation.default.hover").is_none());
+    }
 }

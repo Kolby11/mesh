@@ -142,6 +142,10 @@ pub(super) struct FrontendSurfaceComponent {
     /// immediately re-show it from stale state.
     portal_hidden_bindings: RefCell<HashMap<String, String>>,
     style_animations: HashMap<String, StyleAnimation>,
+    keyframe_animations:
+        HashMap<String, mesh_core_render::animation::keyframes::ActiveKeyframeAnimation>,
+    keyframe_rules: HashMap<String, mesh_core_render::animation::keyframes::KeyframeRule>,
+    has_active_keyframe_animation: bool,
 }
 
 #[derive(Debug)]
@@ -203,6 +207,9 @@ impl FrontendSurfaceComponent {
             last_surface_states: HashMap::new(),
             portal_hidden_bindings: RefCell::new(HashMap::new()),
             style_animations: HashMap::new(),
+            keyframe_animations: HashMap::new(),
+            keyframe_rules: HashMap::new(),
+            has_active_keyframe_animation: false,
         }
     }
 }

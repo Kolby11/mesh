@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 mesh-core-capability = { workspace = true }
+mesh-core-elements = { workspace = true }
+mesh-core-theme = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
