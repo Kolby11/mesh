@@ -71,11 +71,11 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | PROF-01 | Phase 16 | Pending |
-| PROF-02 | Phase 14 | Pending |
-| PROF-03 | Phase 14 | Pending |
-| TIME-01 | Phase 14 | Pending |
+| PROF-02 | Phase 14 | Complete |
+| PROF-03 | Phase 14 | Complete |
+| TIME-01 | Phase 14 | Complete |
 | TIME-02 | Phase 15 | Pending |
-| TIME-03 | Phase 14 | Pending |
+| TIME-03 | Phase 14 | Complete |
 | BACK-01 | Phase 15 | Pending |
 | BACK-02 | Phase 15 | Pending |
 | BACK-03 | Phase 17 | Pending |

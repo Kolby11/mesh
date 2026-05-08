@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Performance Instrumentation and Responsiveness
 status: ready_to_plan
-stopped_at: Phase 14 context gathered
-last_updated: "2026-05-08T16:37:13.743Z"
-last_activity: 2026-05-08 -- Phase 14 execution started
+stopped_at: Phase 15 ready to plan
+last_updated: "2026-05-08T17:25:00Z"
+last_activity: 2026-05-08 -- Phase 14 completed; Phase 15 ready to plan
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 4
-  completed_plans: 0
+  completed_plans: 4
   percent: 20
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-08)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 14 — profiling-data-model-and-timing-hooks
+**Current focus:** Phase 15 — backend-and-surface-attribution
 
 ## Current Position
 
 Phase: 15
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-05-08
+Last activity: 2026-05-08 -- Phase 14 completed; Phase 15 ready to plan
 
 ## Decisions
 
@@ -108,9 +108,9 @@ Last activity: 2026-05-08
 
 ## Session
 
-Last session: 2026-05-08T16:27:52.847Z
-Stopped At: Phase 14 context gathered
-Resume File: .planning/phases/14-profiling-data-model-and-timing-hooks/14-CONTEXT.md
+Last session: 2026-05-08T17:25:00Z
+Stopped At: Phase 15 ready to plan
+Resume File: .planning/ROADMAP.md
 
 ## Accumulated Context
 
