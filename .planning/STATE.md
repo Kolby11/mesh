@@ -1,34 +1,34 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: Rendering System Upgrade
-status: between_milestones
-stopped_at: v1.2 milestone archived
-last_updated: "2026-05-08T16:20:00.000Z"
-last_activity: 2026-05-08 -- v1.2 milestone archived; ready for next milestone
+milestone: v1.3
+milestone_name: Performance Instrumentation and Responsiveness
+status: executing
+stopped_at: Phase 14 context gathered
+last_updated: "2026-05-08T16:35:13.701Z"
+last_activity: 2026-05-08 -- Phase 14 planning complete
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
-  total_plans: 0
+  total_plans: 4
   completed_plans: 0
   percent: 0
 ---
 
-# State: MESH v1.2
+# State: MESH v1.3
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-05-08)
 
-**Core value:** A plugin author can style and animate distinctive shell UI with practical CSS-like primitives while MESH keeps rendering predictable and lightweight.
-**Current focus:** Between milestones
+**Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
+**Current focus:** Phase 14 milestone planning and profiling requirements definition
 
 ## Current Position
 
-Phase: None
-Plan: None
-Status: Between milestones
-Last activity: 2026-05-08 -- v1.2 milestone archived
+Phase: Not started (defining requirements)
+Plan: -
+Status: Ready to execute
+Last activity: 2026-05-08 -- Phase 14 planning complete
 
 ## Decisions
 
@@ -72,6 +72,9 @@ Last activity: 2026-05-08 -- v1.2 milestone archived
 - [Phase 10]: Interactive control labels, clipped or ellipsized text, and nested cross-node selection are deferred beyond the first Phase 10 release.
 - [Phase 10]: Selection colors are shell/theme-owned through dedicated `color.selection-background` and `color.selection-foreground` tokens.
 - [Phase 10]: Standard copy behavior routes through explicit `Ctrl+C` handling only when a Phase 10 selection exists.
+- [v1.3]: Profiling is debug-only and should extend the existing debug overlay/debug command path instead of adding end-user settings.
+- [v1.3]: Performance acceptance is based on canonical shipped interaction benchmarks, not qualitative impressions or synthetic aggregate metrics alone.
+- [v1.3]: The first profiling inspector is live and rolling, not a full trace capture/replay system.
 
 ## Performance Metrics
 
@@ -105,9 +108,9 @@ Last activity: 2026-05-08 -- v1.2 milestone archived
 
 ## Session
 
-Last session: 2026-05-08T16:20:00.000Z
-Stopped At: v1.2 milestone archived
-Resume File: None
+Last session: 2026-05-08T16:27:52.847Z
+Stopped At: Phase 14 context gathered
+Resume File: .planning/phases/14-profiling-data-model-and-timing-hooks/14-CONTEXT.md
 
 ## Accumulated Context
 
@@ -148,10 +151,11 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | Artifact | Path |
 |----------|------|
 | Project context | `.planning/PROJECT.md` |
-| Requirements archive | `.planning/milestones/v1.2-REQUIREMENTS.md` |
+| Active requirements | `.planning/REQUIREMENTS.md` |
 | Roadmap | `.planning/ROADMAP.md` |
 | State | `.planning/STATE.md` |
+| Research | `.planning/research/v1.3-performance-instrumentation-and-responsiveness.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-08 after v1.2 milestone completion*
+*State updated: 2026-05-08 after starting milestone v1.3*
