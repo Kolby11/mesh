@@ -27,9 +27,7 @@ impl Shell {
                 continue;
             }
 
-            let total_render_started = self
-                .profiling_enabled()
-                .then(std::time::Instant::now);
+            let total_render_started = self.profiling_enabled().then(std::time::Instant::now);
             let profiling_enabled = self.profiling_enabled();
             let mut rerender_attempts = 0;
             let mut component_stage_records = Vec::new();
@@ -144,9 +142,14 @@ impl Shell {
                 });
 
             for record in component_stage_records {
+                let module_id = record
+                    .module_id
+                    .as_deref()
+                    .filter(|id| !id.is_empty())
+                    .or(Some(component_id.as_str()));
                 self.record_surface_profiling_stage(
                     &surface_id,
-                    record.module_id.as_deref().or(Some(component_id.as_str())),
+                    module_id,
                     record.stage,
                     record.duration,
                     record.trigger_kind.as_deref(),
@@ -164,9 +167,7 @@ impl Shell {
                     .paint_panel(snapshot, self.debug.active_tab, &mut buffer, 1.0);
             }
 
-            let present_started = self
-                .profiling_enabled()
-                .then(std::time::Instant::now);
+            let present_started = self.profiling_enabled().then(std::time::Instant::now);
             self.render_engine
                 .present(
                     &surface_id,
@@ -185,7 +186,11 @@ impl Shell {
                 );
             }
             if visible {
-                self.record_surface_redraw(&surface_id, Some(component_id.as_str()), Some("present"));
+                self.record_surface_redraw(
+                    &surface_id,
+                    Some(component_id.as_str()),
+                    Some("present"),
+                );
             }
             if let Some(started) = total_render_started {
                 self.record_surface_profiling_stage(

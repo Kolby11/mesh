@@ -75,10 +75,16 @@ impl Shell {
             backend_runtimes,
             health,
             active_surfaces,
-            profiling: self
-                .debug
-                .profiling_enabled
-                .then(|| self.profiling.snapshot(self.debug.profiling_session_id)),
+            profiling: self.debug.profiling_enabled.then(|| {
+                let mut profiling = self.profiling.snapshot(self.debug.profiling_session_id);
+                profiling.surfaces.sort_by(|a, b| a.surface_id.cmp(&b.surface_id));
+                profiling.backends.sort_by(|a, b| {
+                    a.interface
+                        .cmp(&b.interface)
+                        .then_with(|| a.provider_id.cmp(&b.provider_id))
+                });
+                profiling
+            }),
         }
     }
 }

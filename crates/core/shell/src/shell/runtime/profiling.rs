@@ -206,6 +206,7 @@ impl ProfilingRuntimeState {
         duration: Duration,
         trigger_kind: Option<&str>,
     ) {
+        let module_id = module_id.filter(|id| !id.is_empty());
         let sample = self.make_sample(
             stage,
             duration,
@@ -253,6 +254,7 @@ impl ProfilingRuntimeState {
         module_id: Option<&str>,
         trigger_kind: Option<&str>,
     ) {
+        let module_id = module_id.filter(|id| !id.is_empty());
         let sample = self.make_sample(
             ProfilingStage::RedrawCount,
             Duration::from_micros(1),

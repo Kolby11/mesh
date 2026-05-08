@@ -928,6 +928,133 @@ fn profiling_snapshot_uses_surface_id_as_canonical_key_and_skips_unworked_surfac
 }
 
 #[test]
+fn profiling_snapshot_backfills_surface_module_id_after_empty_stage_metadata() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+
+    shell.record_surface_profiling_stage(
+        "@mesh/audio-popover",
+        Some(""),
+        ProfilingStage::Paint,
+        std::time::Duration::from_micros(22),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/audio-popover",
+        Some("@mesh/audio-popover"),
+        ProfilingStage::PresentCommit,
+        std::time::Duration::from_micros(9),
+        Some("present"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    let surface = profiling
+        .surfaces
+        .iter()
+        .find(|surface| surface.surface_id == "@mesh/audio-popover")
+        .expect("worked surfaces must retain their canonical surface key");
+    assert_eq!(surface.module_id.as_deref(), Some("@mesh/audio-popover"));
+    assert!(
+        surface
+            .stages
+            .iter()
+            .any(|stage| stage.recent_samples.iter().all(|sample| {
+                sample.surface_id.as_deref() == Some("@mesh/audio-popover")
+            })),
+        "surface samples must retain explicit surface keys while module ids recover"
+    );
+}
+
+#[test]
+fn debug_snapshot_orders_backend_and_surface_profiling_deterministically() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+
+    shell.record_surface_profiling_stage(
+        "@mesh/z-popover",
+        Some("@mesh/z-popover"),
+        ProfilingStage::Paint,
+        std::time::Duration::from_micros(30),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/a-panel",
+        Some("@mesh/a-panel"),
+        ProfilingStage::Layout,
+        std::time::Duration::from_micros(12),
+        Some("rebuild"),
+    );
+    shell.record_backend_profiling_stage(
+        "mesh.network",
+        "@mesh/networkmanager",
+        ProfilingBackendStage::PollUpdate,
+        std::time::Duration::from_micros(25),
+        Some("service_update"),
+    );
+    shell.record_backend_state_publish_delivery(
+        "mesh.audio",
+        "@mesh/pipewire-audio",
+        std::time::Duration::from_micros(18),
+        Some("broadcast_service_event"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+
+    assert_eq!(
+        profiling
+            .surfaces
+            .iter()
+            .map(|surface| surface.surface_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["@mesh/a-panel", "@mesh/z-popover"]
+    );
+    assert_eq!(
+        profiling
+            .backends
+            .iter()
+            .map(|backend| (backend.interface.as_str(), backend.provider_id.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("mesh.audio", "@mesh/pipewire-audio"),
+            ("mesh.network", "@mesh/networkmanager"),
+        ]
+    );
+    assert_eq!(
+        profiling
+            .shell
+            .stages
+            .iter()
+            .find(|stage| stage.stage == ProfilingStage::Paint)
+            .map(|stage| stage.total_micros),
+        Some(30)
+    );
+    assert_eq!(
+        profiling
+            .surfaces
+            .iter()
+            .find(|surface| surface.surface_id == "@mesh/a-panel")
+            .and_then(|surface| surface.module_id.as_deref()),
+        Some("@mesh/a-panel")
+    );
+    assert!(
+        profiling.backends.iter().any(|backend| {
+            backend.interface == "mesh.audio"
+                && backend
+                    .stages
+                    .iter()
+                    .any(|stage| stage.stage == ProfilingBackendStage::StatePublishDelivery)
+        }),
+        "backend summaries must coexist beside shell and per-surface totals in one snapshot"
+    );
+}
+
+#[test]
 fn keyboard_shortcuts_shell_global_shortcuts_still_win() {
     assert!(matches!(
         shell_global_shortcut_request("d", true, true, false),
