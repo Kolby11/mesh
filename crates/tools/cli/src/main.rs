@@ -15,7 +15,7 @@ fn main() {
         Some("start") | None => cmd_start(),
         Some("list") => cmd_list(),
         Some("services") => cmd_services(),
-        Some("debug") => cmd_debug(),
+        Some("debug") => cmd_debug(&args[2..]),
         Some("ipc") => cmd_ipc(&args[2..]),
         Some("ipc-socket-path") => cmd_ipc_socket_path(),
         Some("status") => cmd_status(),
@@ -115,8 +115,17 @@ fn cmd_status() {
     println!("locale: {}", shell.locale.current());
 }
 
-fn cmd_debug() {
-    send_ipc_command("shell:debug_overlay");
+fn cmd_debug(args: &[String]) {
+    match args.first().map(String::as_str) {
+        Some("profiling") => send_ipc_command("shell:debug_profiling"),
+        Some("tab") => send_ipc_command("shell:debug_cycle_tab"),
+        Some(other) => {
+            eprintln!("unknown debug command: {other}");
+            eprintln!("usage: mesh-shell debug [profiling|tab]");
+            std::process::exit(1);
+        }
+        None => send_ipc_command("shell:debug_overlay"),
+    }
 }
 
 fn send_ipc_command(command: &str) {
@@ -204,6 +213,7 @@ fn cmd_help() {
     println!("  list      List discovered modules");
     println!("  services  List available service backends");
     println!("  debug     Toggle the debug overlay on the running shell");
+    println!("            subcommands: profiling, tab");
     println!("  ipc       Send an IPC command to the running shell");
     println!("  ipc-socket-path  Print the shell IPC socket path");
     println!("  status    Show shell status");

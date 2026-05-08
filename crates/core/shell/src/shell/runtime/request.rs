@@ -186,6 +186,14 @@ impl Shell {
                 );
                 Ok(VecDeque::new())
             }
+            CoreRequest::ToggleDebugProfiling => {
+                let enabled = self.debug.toggle_profiling();
+                tracing::debug!(
+                    "debug profiling: {}",
+                    if enabled { "on" } else { "off" }
+                );
+                Ok(VecDeque::new())
+            }
             CoreRequest::CycleDebugTab => {
                 self.debug.cycle_tab();
                 Ok(VecDeque::new())

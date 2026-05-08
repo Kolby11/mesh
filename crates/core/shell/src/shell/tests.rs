@@ -506,6 +506,41 @@ fn selection_input_contract_debug_shortcuts_remain_global() {
 }
 
 #[test]
+fn debug_profiling_request_toggles_independent_session_state() {
+    let mut shell = Shell::new();
+
+    assert!(!shell.debug.profiling_enabled);
+    assert_eq!(shell.debug.profiling_session_id, 0);
+
+    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    assert!(shell.debug.profiling_enabled);
+    assert_eq!(shell.debug.profiling_session_id, 1);
+
+    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    assert!(!shell.debug.profiling_enabled);
+    assert_eq!(
+        shell.debug.profiling_session_id, 1,
+        "disabling profiling should not fabricate a new session"
+    );
+
+    shell.apply_request(CoreRequest::ToggleDebugOverlay).unwrap();
+    assert!(
+        !shell.debug.profiling_enabled,
+        "debug overlay visibility must remain independent from profiling state"
+    );
+}
+
+#[test]
+fn debug_snapshot_omits_profiling_payload_when_disabled() {
+    let shell = Shell::new();
+    let snapshot = shell.build_debug_snapshot();
+    assert!(
+        snapshot.profiling.is_none(),
+        "profiling payload must be absent while profiling is disabled"
+    );
+}
+
+#[test]
 fn keyboard_shortcuts_shell_global_shortcuts_still_win() {
     assert!(matches!(
         shell_global_shortcut_request("d", true, true, false),

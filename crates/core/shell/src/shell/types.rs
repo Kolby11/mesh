@@ -82,6 +82,7 @@ pub enum CoreRequest {
         close_source: Option<SurfaceId>,
     },
     ToggleDebugOverlay,
+    ToggleDebugProfiling,
     CycleDebugTab,
     Shutdown,
 }

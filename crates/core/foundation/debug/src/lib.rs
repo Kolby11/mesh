@@ -11,6 +11,80 @@ pub struct DebugSnapshot {
     pub backend_runtimes: Vec<BackendRuntimeEntry>,
     pub health: Vec<HealthEntry>,
     pub active_surfaces: Vec<String>,
+    pub profiling: Option<ProfilingSnapshot>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProfilingSnapshot {
+    pub session_id: u64,
+    pub shell: ProfilingScopeSnapshot,
+    pub surfaces: Vec<ProfilingSurfaceSnapshot>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProfilingScopeSnapshot {
+    pub stages: Vec<ProfilingStageSummary>,
+    pub redraw_count: u64,
+    pub total_surface_render_time_micros: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProfilingSurfaceSnapshot {
+    pub surface_id: String,
+    pub module_id: Option<String>,
+    pub stages: Vec<ProfilingStageSummary>,
+    pub redraw_count: u64,
+    pub total_surface_render_time_micros: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProfilingStageSummary {
+    pub stage: ProfilingStage,
+    pub sample_count: u64,
+    pub total_micros: u64,
+    pub max_micros: u64,
+    pub recent_samples: Vec<ProfilingSample>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProfilingSample {
+    pub stage: ProfilingStage,
+    pub order: u64,
+    pub duration_micros: u64,
+    pub surface_id: Option<String>,
+    pub module_id: Option<String>,
+    pub redraw_count: Option<u32>,
+    pub trigger_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ProfilingStage {
+    InputHandling,
+    RuntimeUpdateHandling,
+    TreeBuild,
+    StyleRestyle,
+    Layout,
+    Paint,
+    PresentCommit,
+    RedrawCount,
+    #[default]
+    TotalSurfaceRender,
+}
+
+impl ProfilingStage {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::InputHandling => "input_handling",
+            Self::RuntimeUpdateHandling => "runtime_update_handling",
+            Self::TreeBuild => "tree_build",
+            Self::StyleRestyle => "style_restyle",
+            Self::Layout => "layout",
+            Self::Paint => "paint",
+            Self::PresentCommit => "present_commit",
+            Self::RedrawCount => "redraw_count",
+            Self::TotalSurfaceRender => "total_surface_render",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +131,8 @@ pub struct DebugOverlayState {
     pub enabled: bool,
     pub show_layout_bounds: bool,
     pub active_tab: DebugTab,
+    pub profiling_enabled: bool,
+    pub profiling_session_id: u64,
 }
 
 impl DebugOverlayState {
@@ -70,6 +146,14 @@ impl DebugOverlayState {
             DebugTab::Interfaces => DebugTab::Health,
             DebugTab::Health => DebugTab::Modules,
         };
+    }
+
+    pub fn toggle_profiling(&mut self) -> bool {
+        self.profiling_enabled = !self.profiling_enabled;
+        if self.profiling_enabled {
+            self.profiling_session_id = self.profiling_session_id.saturating_add(1);
+        }
+        self.profiling_enabled
     }
 }
 

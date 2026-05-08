@@ -75,6 +75,7 @@ impl Shell {
             backend_runtimes,
             health,
             active_surfaces,
+            profiling: None,
         }
     }
 }
