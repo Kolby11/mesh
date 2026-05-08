@@ -19,6 +19,7 @@ pub struct ProfilingSnapshot {
     pub session_id: u64,
     pub shell: ProfilingScopeSnapshot,
     pub surfaces: Vec<ProfilingSurfaceSnapshot>,
+    pub backends: Vec<ProfilingBackendSnapshot>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -47,6 +48,30 @@ pub struct ProfilingStageSummary {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct ProfilingBackendSnapshot {
+    pub interface: String,
+    pub provider_id: String,
+    pub stages: Vec<ProfilingBackendStageSummary>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProfilingBackendStageSummary {
+    pub stage: ProfilingBackendStage,
+    pub sample_count: u64,
+    pub total_micros: u64,
+    pub max_micros: u64,
+    pub recent_samples: Vec<ProfilingBackendSample>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProfilingBackendSample {
+    pub stage: ProfilingBackendStage,
+    pub order: u64,
+    pub duration_micros: u64,
+    pub trigger_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct ProfilingSample {
     pub stage: ProfilingStage,
     pub order: u64,
@@ -55,6 +80,24 @@ pub struct ProfilingSample {
     pub module_id: Option<String>,
     pub redraw_count: Option<u32>,
     pub trigger_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ProfilingBackendStage {
+    PollUpdate,
+    CommandHandling,
+    #[default]
+    StatePublishDelivery,
+}
+
+impl ProfilingBackendStage {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PollUpdate => "poll_update",
+            Self::CommandHandling => "command_handling",
+            Self::StatePublishDelivery => "state_publish_delivery",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
