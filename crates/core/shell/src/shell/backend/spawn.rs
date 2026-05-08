@@ -99,11 +99,15 @@ impl Shell {
                 match event {
                     BackendServiceEvent::Update(update) => {
                         if shell_tx
-                            .send(ShellMessage::Service(ServiceEvent::Updated {
-                                service: update.service,
-                                source_module: update.source_module,
-                                payload: update.payload,
-                            }))
+                            .send(ShellMessage::BackendServiceUpdate {
+                                interface: bridge_interface.clone(),
+                                provider_id: bridge_provider_id.clone(),
+                                event: ServiceEvent::Updated {
+                                    service: update.service,
+                                    source_module: update.source_module,
+                                    payload: update.payload,
+                                },
+                            })
                             .is_err()
                         {
                             break;

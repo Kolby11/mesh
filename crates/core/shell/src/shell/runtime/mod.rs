@@ -54,42 +54,7 @@ impl Shell {
             self.dispatch_wayland()?;
 
             while let Ok(message) = rx.try_recv() {
-                let message_started = self
-                    .profiling_enabled()
-                    .then(std::time::Instant::now);
-                let trigger_kind = match &message {
-                    ShellMessage::Service(_) => "service_event",
-                    ShellMessage::BackendLifecycle { .. } => "backend_lifecycle",
-                    ShellMessage::Ipc(_) => "ipc",
-                };
-                match message {
-                    ShellMessage::Service(event) => {
-                        pending.extend(self.broadcast_service_event(event)?);
-                    }
-                    ShellMessage::BackendLifecycle {
-                        interface,
-                        provider_id,
-                        stage,
-                        status,
-                        message,
-                    } => self.handle_backend_lifecycle(
-                        interface,
-                        provider_id,
-                        stage,
-                        status,
-                        message,
-                    ),
-                    ShellMessage::Ipc(request) => {
-                        pending.push_back(request);
-                    }
-                }
-                if let Some(started) = message_started {
-                    self.record_shell_profiling_stage(
-                        mesh_core_debug::ProfilingStage::RuntimeUpdateHandling,
-                        started.elapsed(),
-                        Some(trigger_kind),
-                    );
-                }
+                self.handle_shell_message(&mut pending, message)?;
             }
 
             pending.extend(self.tick_components()?);
@@ -106,6 +71,62 @@ impl Shell {
         self.drain_requests(&mut shutdown_requests)?;
         let _ = std::fs::remove_file(&ipc_socket_path);
         tracing::info!("shell event loop stopped");
+        Ok(())
+    }
+
+    pub(in crate::shell) fn handle_shell_message(
+        &mut self,
+        pending: &mut VecDeque<CoreRequest>,
+        message: ShellMessage,
+    ) -> Result<(), ShellRunError> {
+        let message_started = self.profiling_enabled().then(std::time::Instant::now);
+        let trigger_kind = match &message {
+            ShellMessage::Service(_) => "service_event",
+            ShellMessage::BackendServiceUpdate { .. } => "backend_service_update",
+            ShellMessage::BackendLifecycle { .. } => "backend_lifecycle",
+            ShellMessage::Ipc(_) => "ipc",
+        };
+        match message {
+            ShellMessage::Service(event) => {
+                pending.extend(self.broadcast_service_event(event)?);
+            }
+            ShellMessage::BackendServiceUpdate {
+                interface,
+                provider_id,
+                event,
+            } => {
+                let profiling_started = self.profiling_enabled().then(std::time::Instant::now);
+                if self.record_latest_service_state(&event) {
+                    pending.extend(self.deliver_service_event(&event)?);
+                    if let Some(started) = profiling_started {
+                        self.record_backend_profiling_stage(
+                            &interface,
+                            &provider_id,
+                            mesh_core_debug::ProfilingBackendStage::PollUpdate,
+                            started.elapsed(),
+                            Some("service_update"),
+                        );
+                    }
+                }
+            }
+            ShellMessage::BackendLifecycle {
+                interface,
+                provider_id,
+                stage,
+                status,
+                message,
+            } => self.handle_backend_lifecycle(interface, provider_id, stage, status, message),
+            ShellMessage::Ipc(request) => {
+                pending.push_back(request);
+            }
+        }
+        if let Some(started) = message_started {
+            self.record_shell_profiling_stage(
+                mesh_core_debug::ProfilingStage::RuntimeUpdateHandling,
+                started.elapsed(),
+                Some(trigger_kind),
+            );
+        }
         Ok(())
     }
 }

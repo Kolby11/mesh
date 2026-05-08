@@ -513,18 +513,24 @@ fn debug_profiling_request_toggles_independent_session_state() {
     assert!(!shell.debug.profiling_enabled);
     assert_eq!(shell.debug.profiling_session_id, 0);
 
-    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
     assert!(shell.debug.profiling_enabled);
     assert_eq!(shell.debug.profiling_session_id, 1);
 
-    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
     assert!(!shell.debug.profiling_enabled);
     assert_eq!(
         shell.debug.profiling_session_id, 1,
         "disabling profiling should not fabricate a new session"
     );
 
-    shell.apply_request(CoreRequest::ToggleDebugOverlay).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugOverlay)
+        .unwrap();
     assert!(
         !shell.debug.profiling_enabled,
         "debug overlay visibility must remain independent from profiling state"
@@ -545,7 +551,9 @@ fn debug_snapshot_omits_profiling_payload_when_disabled() {
 fn profiling_session_reset_discards_previous_samples() {
     let mut shell = Shell::new();
 
-    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
     shell.profiling.record_shell_stage(
         ProfilingStage::RuntimeUpdateHandling,
         std::time::Duration::from_micros(25),
@@ -564,8 +572,12 @@ fn profiling_session_reset_discards_previous_samples() {
     assert_eq!(profiling.shell.stages.len(), 1);
     assert_eq!(profiling.backends.len(), 1);
 
-    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
-    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
 
     let reset_snapshot = shell.build_debug_snapshot();
     let profiling = reset_snapshot
@@ -585,7 +597,9 @@ fn profiling_session_reset_discards_previous_samples() {
 #[test]
 fn profiling_snapshot_tracks_bounded_surface_samples_and_redraw_counts() {
     let mut shell = Shell::new();
-    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
 
     shell.profiling.record_surface_stage(
         "@mesh/navigation-bar",
@@ -623,7 +637,9 @@ fn profiling_snapshot_tracks_bounded_surface_samples_and_redraw_counts() {
 #[test]
 fn profiling_stage_surface_records_roll_up_into_shell_summary() {
     let mut shell = Shell::new();
-    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
 
     shell.record_surface_profiling_stage(
         "@mesh/navigation-bar",
@@ -700,7 +716,9 @@ fn profiling_disabled_runtime_stage_helpers_remain_inert() {
 #[test]
 fn profiling_snapshot_tracks_bounded_backend_samples_by_provider() {
     let mut shell = Shell::new();
-    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
 
     for index in 0..20 {
         shell.record_backend_profiling_stage(
@@ -741,9 +759,7 @@ fn profiling_snapshot_tracks_bounded_backend_samples_by_provider() {
     let audio_backend = profiling
         .backends
         .iter()
-        .find(|backend| {
-            backend.interface == "mesh.audio" && backend.provider_id == "@mesh/pulse"
-        })
+        .find(|backend| backend.interface == "mesh.audio" && backend.provider_id == "@mesh/pulse")
         .expect("backend profiling should be keyed by interface and provider");
 
     let poll_update = audio_backend
@@ -755,7 +771,10 @@ fn profiling_snapshot_tracks_bounded_backend_samples_by_provider() {
     assert_eq!(poll_update.max_micros, 29);
     assert_eq!(poll_update.recent_samples.len(), 16);
     assert_eq!(
-        poll_update.recent_samples.first().map(|sample| sample.order),
+        poll_update
+            .recent_samples
+            .first()
+            .map(|sample| sample.order),
         Some(4),
         "backend recent samples should retain only the newest bounded window"
     );
@@ -783,7 +802,9 @@ fn profiling_snapshot_tracks_bounded_backend_samples_by_provider() {
 #[test]
 fn profiling_snapshot_includes_required_shell_stage_buckets() {
     let mut shell = Shell::new();
-    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
 
     shell.record_shell_profiling_stage(
         ProfilingStage::InputHandling,
@@ -845,8 +866,12 @@ fn profiling_snapshot_includes_required_shell_stage_buckets() {
 
     let snapshot = shell.build_debug_snapshot();
     let profiling = snapshot.profiling.expect("profiling should be enabled");
-    let stages: std::collections::HashSet<_> =
-        profiling.shell.stages.iter().map(|stage| stage.stage).collect();
+    let stages: std::collections::HashSet<_> = profiling
+        .shell
+        .stages
+        .iter()
+        .map(|stage| stage.stage)
+        .collect();
 
     assert!(stages.contains(&ProfilingStage::InputHandling));
     assert!(stages.contains(&ProfilingStage::RuntimeUpdateHandling));
@@ -862,7 +887,9 @@ fn profiling_snapshot_includes_required_shell_stage_buckets() {
 #[test]
 fn profiling_snapshot_uses_surface_id_as_canonical_key_and_skips_unworked_surfaces() {
     let mut shell = Shell::new();
-    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
     shell.record_shell_profiling_stage(
         ProfilingStage::InputHandling,
         std::time::Duration::from_micros(9),
@@ -1225,6 +1252,93 @@ fn stale_provider_update_does_not_reach_components() {
     } = events.last().unwrap();
     assert_eq!(source_module, "@mesh/pulseaudio-audio");
     assert_eq!(payload["percent"], serde_json::json!(55.0));
+}
+
+#[test]
+fn profiling_backend_poll_update_attributes_accepted_backend_messages() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let mut pending = std::collections::VecDeque::new();
+
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::BackendServiceUpdate {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/pipewire-audio".to_string(),
+                event: service_update(
+                    "mesh.audio",
+                    "@mesh/pipewire-audio",
+                    serde_json::json!({ "available": true, "percent": 44.0 }),
+                ),
+            },
+        )
+        .unwrap();
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    let backend = profiling
+        .backends
+        .iter()
+        .find(|backend| {
+            backend.interface == "mesh.audio" && backend.provider_id == "@mesh/pipewire-audio"
+        })
+        .expect("accepted backend updates should record provider-attributed profiling");
+    let stage = backend
+        .stages
+        .iter()
+        .find(|stage| stage.stage == ProfilingBackendStage::PollUpdate)
+        .expect("poll/update stage should be recorded for accepted backend work");
+    assert_eq!(stage.sample_count, 1);
+    assert_eq!(
+        shell
+            .latest_service_state
+            .get("mesh.audio")
+            .unwrap()
+            .provider_id,
+        "@mesh/pipewire-audio"
+    );
+}
+
+#[test]
+fn profiling_backend_poll_update_ignores_stale_backend_messages() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/old-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+    let (new_slot, _new_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/new-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), new_slot);
+    let mut pending = std::collections::VecDeque::new();
+
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::BackendServiceUpdate {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/old-audio".to_string(),
+                event: service_update(
+                    "mesh.audio",
+                    "@mesh/old-audio",
+                    serde_json::json!({ "available": true, "percent": 12.0 }),
+                ),
+            },
+        )
+        .unwrap();
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    assert!(
+        profiling.backends.is_empty(),
+        "stale backend updates must not create poll/update samples"
+    );
 }
 
 #[test]

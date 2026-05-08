@@ -8,16 +8,7 @@ impl Shell {
         if !self.record_latest_service_state(&event) {
             return Ok(VecDeque::new());
         }
-        let mut requests = VecDeque::new();
-        for runtime in &mut self.components {
-            requests.extend(
-                runtime
-                    .component
-                    .handle_service_event(&event)
-                    .map_err(ShellRunError::Component)?,
-            );
-        }
-        Ok(requests)
+        self.deliver_service_event(&event)
     }
 
     pub(in crate::shell) fn record_latest_service_state(&mut self, event: &ServiceEvent) -> bool {
@@ -68,6 +59,22 @@ impl Shell {
             },
         );
         true
+    }
+
+    pub(in crate::shell) fn deliver_service_event(
+        &mut self,
+        event: &ServiceEvent,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let mut requests = VecDeque::new();
+        for runtime in &mut self.components {
+            requests.extend(
+                runtime
+                    .component
+                    .handle_service_event(event)
+                    .map_err(ShellRunError::Component)?,
+            );
+        }
+        Ok(requests)
     }
 
     fn validate_service_state_shape(
