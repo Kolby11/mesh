@@ -35,7 +35,190 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn pointer_focus_visible_for_key(&self, tree: &WidgetNode, key: &str) -> bool {
-        find_node_by_key(tree, key).is_some_and(|node| node.tag == "input")
+        // Native focusable widgets that benefit from a focus indicator after
+        // a pointer click: input (typing), slider (arrow keys), checkbox /
+        // switch (Space toggle). Buttons activate immediately on click so a
+        // focus ring is noise rather than help.
+        find_node_by_key(tree, key).is_some_and(|node| {
+            matches!(
+                node.tag.as_str(),
+                "input" | "slider" | "checkbox" | "switch"
+            )
+        })
+    }
+
+    /// Tab handling that knows about cross-surface focus transfer:
+    /// - If the focused element declares `popover_target="X"` and X is a
+    ///   visible surface, forward Tab transfers focus into X's first
+    ///   tabbable and records the trigger as the return target. Shift+Tab
+    ///   stays in-surface (you Tab *out* via end-of-chain wrap, not by
+    ///   shifting back from the trigger).
+    /// - If this surface has a `return_focus` set (it was entered via
+    ///   transfer) and the in-surface Tab would wrap around, transfer
+    ///   focus back to the return target instead and close this surface.
+    /// - Otherwise: ordinary in-surface advance.
+    pub(super) fn handle_tab_with_cross_surface(
+        &mut self,
+        tree: &WidgetNode,
+        backward: bool,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let traversal = collect_focus_traversal(tree);
+        let current = self.focused_key.clone();
+
+        // Forward Tab on a key that triggered an open popover → transfer
+        // into that popover. The mapping is registered when the click
+        // handler called `mesh.popover.activate(...)`; normally activation
+        // focuses immediately, but this still supports focus=false.
+        if !backward {
+            if let Some(focused) = current.as_deref() {
+                if let Some(target) = self.triggered_popovers.get(focused).cloned() {
+                    return Ok(vec![CoreRequest::TransferTabFocus {
+                        from_surface: self.surface_id().to_string(),
+                        to_surface: target,
+                        target: TabFocusTarget::First,
+                        return_target: Some((self.surface_id().to_string(), focused.to_string())),
+                        target_closes_on_leave: true,
+                        close_source: None,
+                    }]);
+                }
+            }
+        }
+
+        // End-of-chain wrap inside a popover with a return target → transfer back + close.
+        if let Some(return_focus) = self.return_focus.clone() {
+            if !traversal.is_empty() {
+                let at_boundary = match (current.as_deref(), backward) {
+                    (Some(key), false) => traversal.last().map(String::as_str) == Some(key),
+                    (Some(key), true) => traversal.first().map(String::as_str) == Some(key),
+                    (None, _) => false,
+                };
+                if at_boundary {
+                    let (return_surface, return_key) = return_focus;
+                    let target = if backward {
+                        // Shift+Tab leaves a popover by landing on the
+                        // trigger itself, so the user can shift+tab
+                        // again to keep going backward through the
+                        // navbar. Forward Tab skips past the trigger.
+                        TabFocusTarget::AtKey(return_key)
+                    } else {
+                        TabFocusTarget::AfterKey(return_key)
+                    };
+                    let close = if self.close_on_focus_leave {
+                        Some(self.surface_id().to_string())
+                    } else {
+                        None
+                    };
+                    return Ok(vec![CoreRequest::TransferTabFocus {
+                        from_surface: self.surface_id().to_string(),
+                        to_surface: return_surface,
+                        target,
+                        return_target: None,
+                        target_closes_on_leave: false,
+                        close_source: close,
+                    }]);
+                }
+            }
+        }
+
+        self.advance_keyboard_focus(tree, backward)
+    }
+
+    /// Apply a focus transfer received from the shell (cross-surface Tab).
+    /// `target` selects which key in this surface receives focus; the
+    /// `return_focus`/`close_on_focus_leave` flags govern what happens on
+    /// the next Tab/Shift+Tab leave. Called from the shell's
+    /// `TransferTabFocus` request handler. The component must already have
+    /// painted at least once (otherwise tree traversal is empty); for
+    /// freshly-shown surfaces, the shell pairs this with a paint pass.
+    pub(in crate::shell::component) fn apply_focus_transfer(
+        &mut self,
+        tree: &WidgetNode,
+        target: &super::super::TabFocusTarget,
+        return_focus: Option<(String, String)>,
+        close_on_focus_leave: bool,
+    ) {
+        let traversal = collect_focus_traversal(tree);
+        let new_key = match target {
+            super::super::TabFocusTarget::First => traversal.first().cloned(),
+            super::super::TabFocusTarget::Last => traversal.last().cloned(),
+            super::super::TabFocusTarget::AfterKey(anchor) => {
+                let pos = traversal.iter().position(|k| k == anchor);
+                match pos {
+                    // Wrap to first if anchor was the last entry.
+                    Some(i) if i + 1 < traversal.len() => Some(traversal[i + 1].clone()),
+                    Some(_) => traversal.first().cloned(),
+                    None => traversal.first().cloned(),
+                }
+            }
+            super::super::TabFocusTarget::AtKey(anchor) => {
+                if traversal.iter().any(|k| k == anchor) {
+                    Some(anchor.clone())
+                } else {
+                    traversal.first().cloned()
+                }
+            }
+        };
+        if let Some(key) = new_key {
+            self.focused_key = Some(key.clone());
+            self.focus_visible_key = Some(key);
+            self.dirty = true;
+        }
+        self.return_focus = return_focus;
+        self.close_on_focus_leave = close_on_focus_leave;
+    }
+
+    /// Clear focus state on a surface that just lost focus to another
+    /// surface. Called from the shell's `TransferTabFocus` handler on the
+    /// source side.
+    pub(in crate::shell::component) fn clear_focus_for_transfer(&mut self) {
+        self.focused_key = None;
+        self.focus_visible_key = None;
+        self.dirty = true;
+    }
+
+    /// Escape inside a surface with a recorded `return_focus` (i.e. a
+    /// popover entered via Tab from another surface) closes the popover
+    /// and lands focus back on the trigger element. Returns `Ok(None)` for
+    /// surfaces that aren't popovers — the caller falls back to whatever
+    /// the script-defined Escape handler does.
+    pub(super) fn handle_escape_with_cross_surface(
+        &mut self,
+    ) -> Result<Option<Vec<CoreRequest>>, ComponentError> {
+        let Some((return_surface, return_key)) = self.return_focus.clone() else {
+            return Ok(None);
+        };
+        let close = if self.close_on_focus_leave {
+            Some(self.surface_id().to_string())
+        } else {
+            None
+        };
+        Ok(Some(vec![CoreRequest::TransferTabFocus {
+            from_surface: self.surface_id().to_string(),
+            to_surface: return_surface,
+            target: TabFocusTarget::AtKey(return_key),
+            return_target: None,
+            target_closes_on_leave: false,
+            close_source: close,
+        }]))
+    }
+
+    /// If `pending_auto_focus` is set (a popover just became visible), seed
+    /// `focused_key` with the first tabbable element so keyboard works
+    /// immediately, with no need to click into the surface first. No-op if
+    /// nothing is tabbable or if focus was already established (e.g. the
+    /// user clicked something in the same paint frame).
+    pub(in crate::shell::component) fn apply_pending_auto_focus(&mut self, tree: &WidgetNode) {
+        if !self.pending_auto_focus {
+            return;
+        }
+        self.pending_auto_focus = false;
+        if self.focused_key.is_some() {
+            return;
+        }
+        if let Some(first) = next_focus_target(tree, None, false) {
+            self.focused_key = Some(first.clone());
+            self.focus_visible_key = Some(first);
+        }
     }
 
     pub(super) fn normalized_focused_key(&mut self, tree: &WidgetNode) -> Option<String> {

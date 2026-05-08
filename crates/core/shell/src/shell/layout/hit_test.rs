@@ -1,6 +1,9 @@
 use super::*;
 
-pub(in crate::shell) fn find_node_by_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetNode> {
+pub(in crate::shell) fn find_node_by_key<'a>(
+    node: &'a WidgetNode,
+    key: &str,
+) -> Option<&'a WidgetNode> {
     if node
         .attributes
         .get("_mesh_key")
@@ -44,7 +47,11 @@ pub(in crate::shell) fn find_node_bounds_by_key(
 }
 
 /// Return the root-to-deepest key path under the cursor, regardless of type.
-pub(in crate::shell) fn find_node_path_at(node: &WidgetNode, x: f32, y: f32) -> Option<Vec<String>> {
+pub(in crate::shell) fn find_node_path_at(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+) -> Option<Vec<String>> {
     find_node_path_at_offset(node, x, y, 0.0, 0.0)
 }
 
@@ -95,15 +102,43 @@ pub(in crate::shell) fn node_tooltip_text(node: &WidgetNode) -> Option<String> {
 
 /// Find tooltip text for a specific node key in the tree.
 pub(in crate::shell) fn find_tooltip_text_by_key(node: &WidgetNode, key: &str) -> Option<String> {
+    find_tooltip_by_key(node, key).map(|(_, text)| text)
+}
+
+/// Find the tooltip owner key and text for a specific node key in the tree.
+pub(in crate::shell) fn find_tooltip_by_key(
+    node: &WidgetNode,
+    key: &str,
+) -> Option<(String, String)> {
+    find_tooltip_by_key_with_inherited(node, key, None).flatten()
+}
+
+fn find_tooltip_by_key_with_inherited(
+    node: &WidgetNode,
+    key: &str,
+    inherited: Option<(String, String)>,
+) -> Option<Option<(String, String)>> {
+    let inherited = node_tooltip_owner_text(node).or(inherited);
     if node.attributes.get("_mesh_key").is_some_and(|k| k == key) {
-        return node_tooltip_text(node);
+        return Some(inherited);
     }
     for child in &node.children {
-        if let Some(text) = find_tooltip_text_by_key(child, key) {
+        if let Some(text) = find_tooltip_by_key_with_inherited(child, key, inherited.clone()) {
             return Some(text);
         }
     }
     None
+}
+
+fn node_tooltip_owner_text(node: &WidgetNode) -> Option<(String, String)> {
+    node_tooltip_text(node).map(|text| {
+        let owner = node
+            .attributes
+            .get("_mesh_key")
+            .cloned()
+            .unwrap_or_else(|| format!("anonymous-tooltip-owner:{:p}", node));
+        (owner, text)
+    })
 }
 
 pub(in crate::shell) fn is_input_key(tree: &WidgetNode, key: &str) -> bool {

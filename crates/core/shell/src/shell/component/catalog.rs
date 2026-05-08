@@ -155,6 +155,17 @@ impl FrontendCatalog {
         entries
     }
 
+    pub(in crate::shell) fn top_level_surfaces_filtered(
+        &self,
+        enabled_frontends: Option<&std::collections::HashSet<String>>,
+    ) -> Vec<FrontendCatalogEntry> {
+        let mut entries = self.top_level_surfaces();
+        if let Some(enabled_frontends) = enabled_frontends {
+            entries.retain(|entry| enabled_frontends.contains(&entry.compiled.manifest.package.id));
+        }
+        entries
+    }
+
     fn validate_component_module_import(
         &self,
         host: &mesh_core_module::Manifest,

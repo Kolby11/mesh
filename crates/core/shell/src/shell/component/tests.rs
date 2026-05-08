@@ -1,6 +1,6 @@
 use super::*;
 use crate::shell::component::catalog::FrontendCatalogEntry;
-use crate::shell::{CoreRequest, KeyModifiers};
+use crate::shell::{CoreEvent, CoreRequest, KeyModifiers};
 use mesh_core_capability::Capability;
 use mesh_core_component::parse_component;
 use mesh_core_elements::style::Overflow;
@@ -71,21 +71,25 @@ fn audio_network_catalog() -> InterfaceCatalog {
                     },
                 ],
                 returns: None,
+                coalesce: false,
             },
             InterfaceMethod {
                 name: "volume_up".into(),
                 args: Vec::new(),
                 returns: None,
+                coalesce: false,
             },
             InterfaceMethod {
                 name: "volume_down".into(),
                 args: Vec::new(),
                 returns: None,
+                coalesce: false,
             },
             InterfaceMethod {
                 name: "toggle_mute".into(),
                 args: Vec::new(),
                 returns: None,
+                coalesce: false,
             },
         ],
         events: Vec::new(),
@@ -113,6 +117,7 @@ fn audio_network_catalog() -> InterfaceCatalog {
                     arg_type: "bool".into(),
                 }],
                 returns: None,
+                coalesce: false,
             },
             InterfaceMethod {
                 name: "connect".into(),
@@ -121,6 +126,7 @@ fn audio_network_catalog() -> InterfaceCatalog {
                     arg_type: "string".into(),
                 }],
                 returns: None,
+                coalesce: false,
             },
         ],
         events: Vec::new(),
@@ -265,6 +271,7 @@ fn test_frontend_component_with_required_icons(
         component: parse_component(source).unwrap(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::new(),
@@ -304,6 +311,7 @@ fn test_frontend_component_with_catalog(
         component: parse_component(source).unwrap(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::new(),
@@ -378,6 +386,7 @@ fn real_frontend_module_component(
             "AudioPopover".into(),
             "@mesh/audio-popover".into(),
         )]),
+        watched_paths: Vec::new(),
     };
     let audio_popover_compiled = CompiledFrontendModule {
         manifest: audio_popover_manifest,
@@ -389,6 +398,7 @@ fn real_frontend_module_component(
         .unwrap(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
     };
 
     let catalog = FrontendCatalog {
@@ -551,6 +561,22 @@ fn first_node_by_tag<'a>(node: &'a WidgetNode, tag: &str) -> Option<&'a WidgetNo
     node.children
         .iter()
         .find_map(|child| first_node_by_tag(child, tag))
+}
+
+fn first_node_with_click_handler<'a>(
+    node: &'a WidgetNode,
+    handler: &str,
+) -> Option<&'a WidgetNode> {
+    if node
+        .event_handlers
+        .get("click")
+        .is_some_and(|candidate| candidate == handler)
+    {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| first_node_with_click_handler(child, handler))
 }
 
 fn node_by_mesh_key<'a>(node: &'a WidgetNode, key: &str) -> &'a WidgetNode {
@@ -3835,6 +3861,7 @@ end
             "AudioPopover".into(),
             "@mesh/audio-popover".into(),
         )]),
+        watched_paths: Vec::new(),
     };
     let popover_compiled = CompiledFrontendModule {
         manifest: popover_manifest,
@@ -3842,6 +3869,7 @@ end
         component: popover_component,
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::from([
@@ -3934,6 +3962,24 @@ end
             panic!("expected audio popover show request from portal visibility, got {other:?}")
         }
     }
+
+    component
+        .handle_core_event(&CoreEvent::SurfaceVisibilityChanged {
+            surface_id: "@mesh/audio-popover".into(),
+            visible: false,
+        })
+        .unwrap();
+    assert!(
+        runtime_bool(&component, "audio_surface_hidden"),
+        "keyboard-driven popover hide must sync the portal owner script state"
+    );
+
+    component.paint(&theme, 220, 80, &mut buffer).unwrap();
+    let requests = component.tick().unwrap();
+    assert!(
+        requests.is_empty(),
+        "synced portal state must not immediately re-show the keyboard-hidden popover"
+    );
 }
 
 #[test]
@@ -4005,6 +4051,7 @@ end
             "AudioPopover".into(),
             "@mesh/audio-popover".into(),
         )]),
+        watched_paths: Vec::new(),
     };
     let popover_compiled = CompiledFrontendModule {
         manifest: popover_manifest,
@@ -4012,6 +4059,7 @@ end
         component: popover_component,
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::from([
@@ -4095,6 +4143,190 @@ end
             panic!("expected audio popover hide request from portal visibility, got {other:?}")
         }
     }
+}
+
+#[test]
+fn shipped_navigation_volume_button_publishes_immediate_audio_popover_show() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    component.visible = true;
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 80);
+    component.paint(&theme, 320, 80, &mut buffer).unwrap();
+    let handler = "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface";
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation bar");
+    let button = first_node_with_click_handler(tree, handler).expect("volume button");
+    let click_handler = button.event_handlers.get("click").unwrap().clone();
+
+    let requests = component
+        .call_namespaced_handler(
+            &click_handler,
+            &[serde_json::json!({
+                "surface": {
+                    "id": "@mesh/navigation-bar"
+                },
+                "current": {
+                    "key": button.attributes.get("_mesh_key").cloned().unwrap_or_default()
+                },
+                "current_target": {
+                    "key": button.attributes.get("_mesh_key").cloned().unwrap_or_default(),
+                    "position": {
+                        "margin_left": 32,
+                        "margin_bottom": 40
+                    }
+                }
+            })],
+        )
+        .unwrap();
+
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::PositionSurface {
+                surface_id,
+                margin_top: 48,
+                margin_left: 32
+            } if surface_id == "@mesh/audio-popover"
+        )),
+        "click should position the audio popover before showing it: {requests:?}"
+    );
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ShowSurface { surface_id } if surface_id == "@mesh/audio-popover"
+        )),
+        "click should publish an immediate audio popover show request: {requests:?}"
+    );
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ActivatePopover { surface_id, .. } if surface_id == "@mesh/audio-popover"
+        )),
+        "click should still register popover focus transfer: {requests:?}"
+    );
+    assert!(!runtime_bool(&component, "audio_surface_hidden"));
+}
+
+#[test]
+fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.visible = true;
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 80);
+    component.paint(&theme, 320, 80, &mut buffer).unwrap();
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation bar");
+    let button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+    )
+    .expect("volume button");
+    let button_key = button
+        .attributes
+        .get("_mesh_key")
+        .expect("button mesh key")
+        .clone();
+    let icon = first_node_by_tag(button, "icon").expect("volume icon");
+    let icon_key = icon
+        .attributes
+        .get("_mesh_key")
+        .expect("icon mesh key")
+        .clone();
+    let (button_left, button_top, _button_right, _button_bottom) =
+        find_node_bounds_by_key(tree, &button_key, 0.0, 0.0).expect("button bounds");
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, &icon_key, 0.0, 0.0).expect("icon bounds");
+    let button_x = button_left + 1.0;
+    let button_y = button_top + 1.0;
+    let x = (left + right) * 0.5;
+    let y = (top + bottom) * 0.5;
+
+    assert_eq!(
+        find_tooltip_text_by_key(tree, &icon_key).as_deref(),
+        Some("Volume unavailable"),
+        "tooltip lookup should inherit the button title when hovering the icon"
+    );
+
+    component
+        .handle_input(&theme, 320, 80, ComponentInput::PointerMove { x, y })
+        .unwrap();
+    assert!(
+        component.hover_start.is_some(),
+        "hovering the icon should start the inherited button tooltip timer"
+    );
+    component
+        .handle_input(
+            &theme,
+            320,
+            80,
+            ComponentInput::PointerMove {
+                x: button_x,
+                y: button_y,
+            },
+        )
+        .unwrap();
+    let preserved_hover_start = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    component.hover_start = Some(preserved_hover_start);
+    component
+        .handle_input(&theme, 320, 80, ComponentInput::PointerMove { x, y })
+        .unwrap();
+    assert_eq!(
+        component.hover_start,
+        Some(preserved_hover_start),
+        "moving from a tooltip owner to a descendant inheriting the same tooltip should not restart the tooltip"
+    );
+
+    component
+        .handle_input(
+            &theme,
+            320,
+            80,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    let requests = component
+        .handle_input(
+            &theme,
+            320,
+            80,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: false,
+            },
+        )
+        .unwrap();
+
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ShowSurface { surface_id } if surface_id == "@mesh/audio-popover"
+        )),
+        "clicking directly on the icon should bubble to the button click handler: {requests:?}"
+    );
 }
 
 #[test]
@@ -5127,7 +5359,7 @@ fn selection_clipboard_rejects_clipped_text_payloads() {
 }
 
 #[test]
-fn selection_fixture_module_is_enabled_in_local_graph() {
+fn selection_fixture_module_is_disabled_in_local_graph() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
         .canonicalize()
@@ -5137,7 +5369,7 @@ fn selection_fixture_module_is_enabled_in_local_graph() {
     let module = &json["mesh"]["modules"]["@mesh/text-selection-proof"];
     assert_eq!(module["kind"], "frontend");
     assert_eq!(module["path"], "frontend/text-selection-proof");
-    assert_eq!(module["enabled"], true);
+    assert_eq!(module["enabled"], false);
 }
 
 #[test]

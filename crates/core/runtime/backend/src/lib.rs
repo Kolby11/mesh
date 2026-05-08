@@ -1,5 +1,6 @@
 use mesh_core_scripting::{BackendScriptContext, BackendScriptError};
 use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -10,6 +11,37 @@ const MIN_POLL_INTERVAL_MS: u64 = 50;
 pub struct BackendServiceCommand {
     pub command: String,
     pub payload: serde_json::Value,
+    /// When true, this command is an idempotent setter — if the receiver
+    /// finds queued duplicates of the same name, only the latest payload is
+    /// executed. The dispatcher sets this from the interface contract.
+    pub coalesce: bool,
+}
+
+/// Drain pending commands from the queue, then drop earlier instances of any
+/// command marked `coalesce` when a later same-named instance is also present.
+/// Non-coalescable commands and commands that appear only once pass through
+/// unchanged, preserving original order.
+fn coalesce_command_batch(batch: Vec<BackendServiceCommand>) -> Vec<BackendServiceCommand> {
+    if batch.len() < 2 {
+        return batch;
+    }
+    let mut latest_index: HashMap<String, usize> = HashMap::new();
+    for (index, msg) in batch.iter().enumerate() {
+        if msg.coalesce {
+            latest_index.insert(msg.command.clone(), index);
+        }
+    }
+    if latest_index.is_empty() {
+        return batch;
+    }
+    batch
+        .into_iter()
+        .enumerate()
+        .filter(|(index, msg)| {
+            !msg.coalesce || latest_index.get(&msg.command).copied() == Some(*index)
+        })
+        .map(|(_, msg)| msg)
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -158,55 +190,66 @@ pub async fn spawn_backend_service(
                 }
             }
             cmd = cmd_rx.recv() => {
-                let Some(msg) = cmd else { break };
-                match ctx.run_command_with_result(&msg.command, &msg.payload) {
-                    Ok(outcome) => {
-                        refresh_interval(&ctx, &mut interval_ms, &mut tick);
-                        if tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
-                            service: service_name.clone(),
-                            source_module: module_id.clone(),
-                            command: msg.command.clone(),
-                            result: outcome.result,
-                        })).is_err() {
-                            break;
+                let Some(first) = cmd else { break };
+                let mut batch = vec![first];
+                while let Ok(next) = cmd_rx.try_recv() {
+                    batch.push(next);
+                }
+                let batch = coalesce_command_batch(batch);
+                let mut stop = false;
+                for msg in batch {
+                    match ctx.run_command_with_result(&msg.command, &msg.payload) {
+                        Ok(outcome) => {
+                            refresh_interval(&ctx, &mut interval_ms, &mut tick);
+                            if tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
+                                service: service_name.clone(),
+                                source_module: module_id.clone(),
+                                command: msg.command.clone(),
+                                result: outcome.result,
+                            })).is_err() {
+                                stop = true;
+                                break;
+                            }
+                            if let Some(message) = outcome.error {
+                                let _ = tx.send(BackendServiceEvent::Failed {
+                                    service: service_name.clone(),
+                                    source_module: module_id.clone(),
+                                    stage: "command".to_string(),
+                                    message,
+                                });
+                            }
+                            if let Some(payload) = outcome.state {
+                                if !publish_changed_update(
+                                    &tx,
+                                    &service_name,
+                                    &module_id,
+                                    &mut last_payload,
+                                    payload,
+                                ) {
+                                    stop = true;
+                                    break;
+                                }
+                            }
                         }
-                        if let Some(message) = outcome.error {
+                        Err(err) => {
+                            let stage = match &err {
+                                BackendScriptError::SnapshotFailed { .. } => "snapshot",
+                                BackendScriptError::CommandResultConversionFailed { .. } => {
+                                    "command-result"
+                                }
+                                _ => "command",
+                            };
                             let _ = tx.send(BackendServiceEvent::Failed {
                                 service: service_name.clone(),
                                 source_module: module_id.clone(),
-                                stage: "command".to_string(),
-                                message,
+                                stage: stage.to_string(),
+                                message: err.to_string(),
                             });
+                            refresh_interval(&ctx, &mut interval_ms, &mut tick);
                         }
-                        if let Some(payload) = outcome.state {
-                            if !publish_changed_update(
-                                &tx,
-                                &service_name,
-                                &module_id,
-                                &mut last_payload,
-                                payload,
-                            ) {
-                                break;
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        let stage = match &err {
-                            BackendScriptError::SnapshotFailed { .. } => "snapshot",
-                            BackendScriptError::CommandResultConversionFailed { .. } => {
-                                "command-result"
-                            }
-                            _ => "command",
-                        };
-                        let _ = tx.send(BackendServiceEvent::Failed {
-                            service: service_name.clone(),
-                            source_module: module_id.clone(),
-                            stage: stage.to_string(),
-                            message: err.to_string(),
-                        });
-                        refresh_interval(&ctx, &mut interval_ms, &mut tick);
                     }
                 }
+                if stop { break; }
             }
         }
     }
@@ -267,6 +310,59 @@ fn refresh_interval(
 mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
+
+    fn cmd(name: &str, value: i64, coalesce: bool) -> BackendServiceCommand {
+        BackendServiceCommand {
+            command: name.to_string(),
+            payload: serde_json::json!({ "v": value }),
+            coalesce,
+        }
+    }
+
+    #[test]
+    fn coalesce_drops_earlier_duplicates_keeps_latest_payload() {
+        let batch = vec![
+            cmd("set_volume", 10, true),
+            cmd("set_volume", 20, true),
+            cmd("set_volume", 30, true),
+        ];
+        let out = coalesce_command_batch(batch);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].command, "set_volume");
+        assert_eq!(out[0].payload, serde_json::json!({ "v": 30 }));
+    }
+
+    #[test]
+    fn coalesce_preserves_non_coalescable_commands_in_order() {
+        let batch = vec![
+            cmd("volume_up", 0, false),
+            cmd("volume_up", 0, false),
+            cmd("volume_up", 0, false),
+        ];
+        let out = coalesce_command_batch(batch);
+        assert_eq!(out.len(), 3);
+    }
+
+    #[test]
+    fn coalesce_preserves_order_around_dropped_duplicates() {
+        let batch = vec![
+            cmd("set_volume", 10, true),
+            cmd("toggle_mute", 0, false),
+            cmd("set_volume", 20, true),
+            cmd("set_volume", 30, true),
+        ];
+        let out = coalesce_command_batch(batch);
+        let names: Vec<_> = out.iter().map(|c| c.command.as_str()).collect();
+        assert_eq!(names, vec!["toggle_mute", "set_volume"]);
+        assert_eq!(out[1].payload, serde_json::json!({ "v": 30 }));
+    }
+
+    #[test]
+    fn coalesce_does_not_collapse_distinct_coalescable_commands() {
+        let batch = vec![cmd("set_volume", 50, true), cmd("set_muted", 1, true)];
+        let out = coalesce_command_batch(batch);
+        assert_eq!(out.len(), 2);
+    }
 
     fn bundled_backend_script_path(module_slug: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
@@ -449,6 +545,7 @@ mod tests {
             .send(BackendServiceCommand {
                 command: "set-volume".to_string(),
                 payload: serde_json::json!({ "percent": 77 }),
+                coalesce: false,
             })
             .unwrap();
 
@@ -548,6 +645,7 @@ mod tests {
             .send(BackendServiceCommand {
                 command: "fast".to_string(),
                 payload: serde_json::json!({}),
+                coalesce: false,
             })
             .unwrap();
 
@@ -611,6 +709,7 @@ mod tests {
             .send(BackendServiceCommand {
                 command: "set-current".to_string(),
                 payload: serde_json::json!({ "theme_id": "mesh-default-light" }),
+                coalesce: false,
             })
             .unwrap();
 
@@ -663,6 +762,7 @@ mod tests {
                     "device_id": "default",
                     "volume": 0.42
                 }),
+                coalesce: false,
             })
             .unwrap();
 
@@ -710,6 +810,7 @@ mod tests {
             .send(BackendServiceCommand {
                 command: "fail".to_string(),
                 payload: serde_json::json!({}),
+                coalesce: false,
             })
             .unwrap();
 
@@ -783,6 +884,7 @@ mod tests {
             .send(BackendServiceCommand {
                 command: "play-sound".to_string(),
                 payload: serde_json::json!({ "path": "../blocked.wav" }),
+                coalesce: false,
             })
             .unwrap();
 
@@ -843,6 +945,7 @@ mod tests {
             .send(BackendServiceCommand {
                 command: "ping".to_string(),
                 payload: serde_json::json!({}),
+                coalesce: false,
             })
             .unwrap();
 
@@ -889,6 +992,7 @@ mod tests {
             .send(BackendServiceCommand {
                 command: "nonexistent-command".to_string(),
                 payload: serde_json::json!({}),
+                coalesce: false,
             })
             .unwrap();
 
@@ -966,6 +1070,7 @@ mod tests {
             .send(BackendServiceCommand {
                 command: "bad-state".to_string(),
                 payload: serde_json::json!({}),
+                coalesce: false,
             })
             .unwrap();
 
@@ -1021,6 +1126,7 @@ mod tests {
             .send(BackendServiceCommand {
                 command: "fail".to_string(),
                 payload: serde_json::json!({}),
+                coalesce: false,
             })
             .unwrap();
 
@@ -1219,6 +1325,7 @@ mod tests {
             .send(BackendServiceCommand {
                 command: "play".to_string(),
                 payload: serde_json::json!({ "player_id": "default" }),
+                coalesce: false,
             })
             .unwrap();
 
@@ -1251,6 +1358,7 @@ mod tests {
             .send(BackendServiceCommand {
                 command: "next".to_string(),
                 payload: serde_json::json!({ "player_id": "default" }),
+                coalesce: false,
             })
             .unwrap();
 
@@ -1303,6 +1411,7 @@ mod tests {
             .send(BackendServiceCommand {
                 command: "pause".to_string(),
                 payload: serde_json::json!({ "player_id": "default" }),
+                coalesce: false,
             })
             .unwrap();
 

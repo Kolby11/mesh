@@ -160,6 +160,8 @@ impl LayerShellBackend {
             pointer_focus: None,
             keyboard_focus: None,
             keyboard_mods: Modifiers::default(),
+            keyboard_repeat_info: RepeatInfo::Disable,
+            keyboard_repeat: None,
             events: Vec::new(),
         };
 
@@ -288,6 +290,7 @@ impl LayerShellBackend {
 
     pub fn poll_events(&mut self) -> Vec<DevWindowEvent> {
         let _ = self.dispatch_available();
+        self.state.push_due_keyboard_repeats();
         let events = std::mem::take(&mut self.state.events);
         if !events.is_empty() {
             tracing::trace!(

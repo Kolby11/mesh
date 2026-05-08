@@ -228,12 +228,7 @@ impl IconRegistry {
         resolution
     }
 
-    fn resolve_uncached(
-        &self,
-        module_id: &str,
-        semantic_name: &str,
-        size: u32,
-    ) -> IconResolution {
+    fn resolve_uncached(&self, module_id: &str, semantic_name: &str, size: u32) -> IconResolution {
         let mut tried = Vec::new();
         let frontend = self.frontends.get(module_id);
 
@@ -267,7 +262,9 @@ impl IconRegistry {
 
         // 4. Effective dependency chain
         if let Some(frontend) = frontend {
-            for pack_module_id in frontend.effective_chain(self.shell_default_pack_module.as_deref()) {
+            for pack_module_id in
+                frontend.effective_chain(self.shell_default_pack_module.as_deref())
+            {
                 let Some(pack_id) = self.pack_id_by_module.get(&pack_module_id) else {
                     continue;
                 };
@@ -310,7 +307,13 @@ impl IconRegistry {
     ) -> Option<IconResolution> {
         let pack = self.icon_packs.get(pack_id)?;
         let target = pack.mappings.get(logical_name)?;
-        self.try_target(target, semantic_name, size, tried, &format!("pack:{pack_id}"))
+        self.try_target(
+            target,
+            semantic_name,
+            size,
+            tried,
+            &format!("pack:{pack_id}"),
+        )
     }
 
     /// Resolve an `<asset-pack>/<asset-name>` (or bare path) target into

@@ -84,10 +84,7 @@ pub fn resolve_icon_for_module(module_id: &str, name: &str, size: u32) -> IconRe
 /// default registry. Called by the shell after composing the effective
 /// pack chain (frontend deps + user `use_packs` override + shell
 /// default).
-pub fn set_default_frontend_bindings(
-    module_id: impl Into<String>,
-    bindings: FrontendIconBindings,
-) {
+pub fn set_default_frontend_bindings(module_id: impl Into<String>, bindings: FrontendIconBindings) {
     default_registry()
         .lock()
         .unwrap()
@@ -107,7 +104,10 @@ pub fn set_default_icon_pack(bindings: IconPackBindings) {
 }
 
 pub fn remove_default_icon_pack(module_id: &str) {
-    default_registry().lock().unwrap().remove_icon_pack(module_id);
+    default_registry()
+        .lock()
+        .unwrap()
+        .remove_icon_pack(module_id);
 }
 
 /// Set the user's chosen shell-default icon-pack module id.

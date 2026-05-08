@@ -32,21 +32,25 @@ fn audio_catalog() -> InterfaceCatalog {
                     },
                 ],
                 returns: Some("Result".into()),
+                coalesce: false,
             },
             InterfaceMethod {
                 name: "volume_up".into(),
                 args: Vec::new(),
                 returns: None,
+                coalesce: false,
             },
             InterfaceMethod {
                 name: "volume_down".into(),
                 args: Vec::new(),
                 returns: None,
+                coalesce: false,
             },
             InterfaceMethod {
                 name: "toggle_mute".into(),
                 args: Vec::new(),
                 returns: None,
+                coalesce: false,
             },
             InterfaceMethod {
                 name: "set_muted".into(),
@@ -61,6 +65,7 @@ fn audio_catalog() -> InterfaceCatalog {
                     },
                 ],
                 returns: Some("Result".into()),
+                coalesce: false,
             },
         ],
         events: Vec::new(),
@@ -745,6 +750,38 @@ end
             serde_json::json!({ "device_id": "default", "volume": 0.5 })
         );
     }
+}
+
+#[test]
+fn popover_activate_publishes_focus_option_and_trigger_target() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@test/nav", caps).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    mesh.popover.activate("@test/popover", {
+        surface = { id = "@test/nav" },
+        current = { key = "volume-button" }
+    }, { focus = false })
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    let published = ctx.drain_published_events();
+    assert_eq!(published.len(), 1);
+    assert_eq!(published[0].channel, "shell.activate-popover");
+    assert_eq!(
+        published[0].payload,
+        serde_json::json!({
+            "surface_id": "@test/popover",
+            "trigger_surface": "@test/nav",
+            "trigger_key": "volume-button",
+            "focus": false,
+        })
+    );
 }
 
 #[test]

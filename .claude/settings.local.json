@@ -55,7 +55,15 @@
       "Bash(head -455 /home/kolby/projects/mesh/crates/core/shell/src/shell/mod.rs)",
       "Bash(printf '\\\\n#[cfg\\(test\\)]\\\\nmod tests;\\\\n')",
       "Bash(mv /tmp/mod_head.rs /home/kolby/projects/mesh/crates/core/shell/src/shell/mod.rs)",
-      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo check -p mesh-core-shell --tests)"
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo check -p mesh-core-shell --tests)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo check -p mesh-core-backend)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo check -p mesh-core-backend --tests)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo check --workspace --tests)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-backend)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-backend coalesce)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo build --workspace)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-backend --lib)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo build -p mesh-core-shell)"
     ]
   }
 }

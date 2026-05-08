@@ -1,5 +1,36 @@
-use super::*;
 use super::backend::{SurfaceEntry, apply_config};
+use super::*;
+
+const MAX_REPEAT_EVENTS_PER_POLL: usize = 64;
+
+pub(super) struct KeyboardRepeatState {
+    pub(super) surface_id: String,
+    pub(super) key: String,
+    pub(super) mods: super::super::dev_window::KeyMods,
+    pub(super) ch: Option<char>,
+    pub(super) next_at: Instant,
+    pub(super) interval: Duration,
+}
+
+impl KeyboardRepeatState {
+    fn push_due_events(&mut self, now: Instant, events: &mut Vec<DevWindowEvent>) {
+        let mut emitted = 0;
+        while self.next_at <= now && emitted < MAX_REPEAT_EVENTS_PER_POLL {
+            events.push(DevWindowEvent::Key {
+                surface_id: self.surface_id.clone(),
+                event: DevWindowKeyEvent::Pressed(self.key.clone(), self.mods.clone()),
+            });
+            if let Some(ch) = self.ch {
+                events.push(DevWindowEvent::Char {
+                    surface_id: self.surface_id.clone(),
+                    ch,
+                });
+            }
+            self.next_at += self.interval;
+            emitted += 1;
+        }
+    }
+}
 
 pub(super) struct State {
     pub(super) registry_state: RegistryState,
@@ -21,10 +52,56 @@ pub(super) struct State {
     pub(super) pointer_focus: Option<String>,
     pub(super) keyboard_focus: Option<String>,
     pub(super) keyboard_mods: Modifiers,
+    pub(super) keyboard_repeat_info: RepeatInfo,
+    pub(super) keyboard_repeat: Option<KeyboardRepeatState>,
     pub(super) events: Vec<DevWindowEvent>,
 }
 
 impl State {
+    pub(super) fn schedule_keyboard_repeat(
+        &mut self,
+        surface_id: String,
+        key: String,
+        mods: super::super::dev_window::KeyMods,
+        ch: Option<char>,
+    ) {
+        if is_non_repeating_key(&key) {
+            self.keyboard_repeat = None;
+            return;
+        }
+
+        let RepeatInfo::Repeat { rate, delay } = self.keyboard_repeat_info else {
+            self.keyboard_repeat = None;
+            return;
+        };
+        let interval = Duration::from_micros((1_000_000 / rate.get() as u64).max(1));
+        self.keyboard_repeat = Some(KeyboardRepeatState {
+            surface_id,
+            key,
+            mods,
+            ch,
+            next_at: Instant::now() + Duration::from_millis(delay as u64),
+            interval,
+        });
+    }
+
+    pub(super) fn clear_keyboard_repeat_for_key(&mut self, key: &str) {
+        if self
+            .keyboard_repeat
+            .as_ref()
+            .is_some_and(|repeat| repeat.key == key)
+        {
+            self.keyboard_repeat = None;
+        }
+    }
+
+    pub(super) fn push_due_keyboard_repeats(&mut self) {
+        let Some(repeat) = self.keyboard_repeat.as_mut() else {
+            return;
+        };
+        repeat.push_due_events(Instant::now(), &mut self.events);
+    }
+
     pub(super) fn effective_keyboard_mode_for(
         &self,
         surface_id: &str,
@@ -171,6 +248,20 @@ impl State {
             .find(|(_, entry)| entry.layer_surface.wl_surface() == surface)
             .map(|(surface_id, _)| surface_id.clone())
     }
+}
+
+fn is_non_repeating_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    key.contains("shift")
+        || key.contains("control")
+        || key == "ctrl"
+        || key.contains("alt")
+        || key.contains("super")
+        || key.contains("meta")
+        || key == "capslock"
+        || key == "numlock"
+        || key == "scrolllock"
+        || key == "escape"
 }
 
 impl ProvidesRegistryState for State {

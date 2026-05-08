@@ -25,7 +25,7 @@ use smithay_client_toolkit::{
     registry_handlers,
     seat::{
         Capability as SeatCapability, SeatHandler, SeatState,
-        keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers},
+        keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RepeatInfo},
         pointer::{PointerEvent, PointerEventKind, PointerHandler},
     },
     shell::{
@@ -40,6 +40,7 @@ use smithay_client_toolkit::{
 use state::State;
 use std::collections::HashMap;
 use std::io::ErrorKind;
+use std::time::{Duration, Instant};
 use wayland_client::{
     Connection, Dispatch, EventQueue, QueueHandle,
     backend::WaylandError,

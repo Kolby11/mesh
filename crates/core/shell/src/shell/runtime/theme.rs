@@ -84,6 +84,7 @@ impl Shell {
             let _ = tx.send(ServiceCommandMsg {
                 command: "set-current".to_string(),
                 payload: payload.clone(),
+                coalesce: true,
             });
         }
         self.broadcast_service_event(ServiceEvent::Updated {

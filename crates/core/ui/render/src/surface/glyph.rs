@@ -11,8 +11,8 @@ use mesh_core_icon::SupportedAxes;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::scale::image::Content;
+use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::Format;
 use swash::{FontRef, GlyphId};
 

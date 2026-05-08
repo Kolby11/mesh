@@ -38,5 +38,6 @@ pub(super) fn play_shell_sound(
     let _ = handler.send(ServiceCommandMsg {
         command: "play-sound".to_string(),
         payload: serde_json::json!({ "path": path }),
+        coalesce: false,
     });
 }

@@ -658,20 +658,16 @@ fn apply_declaration(
             style.inset_left = Some(edges.left);
         }
         "--icon-fill" => {
-            style.icon_fill =
-                Some(resolver.resolve_number_with_variables(value, variables))
+            style.icon_fill = Some(resolver.resolve_number_with_variables(value, variables))
         }
         "--icon-weight" => {
-            style.icon_weight =
-                Some(resolver.resolve_number_with_variables(value, variables))
+            style.icon_weight = Some(resolver.resolve_number_with_variables(value, variables))
         }
         "--icon-grade" => {
-            style.icon_grade =
-                Some(resolver.resolve_number_with_variables(value, variables))
+            style.icon_grade = Some(resolver.resolve_number_with_variables(value, variables))
         }
         "--icon-optical-size" => {
-            style.icon_optical_size =
-                Some(resolver.resolve_number_with_variables(value, variables))
+            style.icon_optical_size = Some(resolver.resolve_number_with_variables(value, variables))
         }
         _ if property.starts_with("--") => {}
         _ => {

@@ -78,6 +78,7 @@ impl Shell {
 
             pending.extend(self.tick_components()?);
             self.drain_requests(&mut pending)?;
+            self.flush_throttled_commands();
             self.render_components()?;
             self.flush_wayland()?;
             self.render_engine.pump();

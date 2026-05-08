@@ -65,8 +65,7 @@ impl FrontendIconBindings {
     /// looks each up to find its `IconPackBindings`.
     pub fn effective_chain(&self, shell_default: Option<&str>) -> Vec<String> {
         let mut chain = Vec::new();
-        let suppress_default =
-            self.ignore_shell_default_frontend || self.ignore_shell_default_user;
+        let suppress_default = self.ignore_shell_default_frontend || self.ignore_shell_default_user;
         if !suppress_default {
             if let Some(default_id) = shell_default {
                 if !default_id.is_empty() {
@@ -144,7 +143,10 @@ mod tests {
     #[test]
     fn parse_target_splits_pack_and_name() {
         assert_eq!(parse_target("lucide/home"), Some(("lucide", "home")));
-        assert_eq!(parse_target("hicolor/audio-volume-high"), Some(("hicolor", "audio-volume-high")));
+        assert_eq!(
+            parse_target("hicolor/audio-volume-high"),
+            Some(("hicolor", "audio-volume-high"))
+        );
     }
 
     #[test]

@@ -56,7 +56,10 @@ impl FrontendSurfaceComponent {
             height.saturating_add(tooltip_extra_height),
         );
         surface.set_exclusive_zone(self.surface_layout.exclusive_zone);
-        surface.set_keyboard_interactivity(self.surface_layout.keyboard_mode);
+        surface.set_keyboard_interactivity(
+            self.keyboard_mode_override
+                .unwrap_or(self.surface_layout.keyboard_mode),
+        );
         surface.set_margin(
             self.surface_layout.margin_top,
             self.surface_layout.margin_right,

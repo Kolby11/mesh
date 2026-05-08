@@ -4,7 +4,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-pub fn find_icon_in_pack(pack: &IconPackRoot, asset_name: &str, size: u32) -> Option<ResolvedTarget> {
+pub fn find_icon_in_pack(
+    pack: &IconPackRoot,
+    asset_name: &str,
+    size: u32,
+) -> Option<ResolvedTarget> {
     if let IconPackKind::Font {
         font_file,
         glyph_map,

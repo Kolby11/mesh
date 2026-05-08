@@ -36,10 +36,54 @@ impl ShellComponent for FrontendSurfaceComponent {
             visible,
         } = event
         {
+            // Any surface hiding may have been a popover triggered from
+            // this surface — drop its registration so a stale Tab doesn't
+            // try to re-enter it.
+            if !visible && surface_id != self.surface_id() {
+                self.triggered_popovers
+                    .retain(|_, target| target != surface_id);
+            }
+            // Sync portal bookkeeping when an OTHER surface's visibility
+            // changes (e.g. shell hides a popover via Tab transfer): the
+            // trigger surface's Lua may still think the popover is open,
+            // so a click would emit a redundant Hide. Updating
+            // last_surface_states forces a real diff on the next click.
+            if surface_id != self.surface_id() && self.last_surface_states.contains_key(surface_id)
+            {
+                self.last_surface_states
+                    .insert(surface_id.clone(), *visible);
+                if let Some(binding) = self
+                    .portal_hidden_bindings
+                    .borrow()
+                    .get(surface_id)
+                    .cloned()
+                {
+                    let component_id = self.id().to_string();
+                    if let Some(runtime) = self.runtimes.lock().unwrap().get_mut(&component_id) {
+                        runtime
+                            .script_ctx
+                            .set_global_state(&binding, serde_json::json!(!*visible))
+                            .map_err(|source| ComponentError::Script {
+                                component_id: component_id.clone(),
+                                source,
+                            })?;
+                        self.dirty = true;
+                    }
+                }
+            }
             if surface_id == self.surface_id() {
+                let was_visible = self.visible;
                 self.visible = *visible;
                 if !visible {
                     self.clear_selection();
+                    self.focused_key = None;
+                    self.focus_visible_key = None;
+                    self.pending_auto_focus = false;
+                    self.return_focus = None;
+                    self.close_on_focus_leave = false;
+                    self.keyboard_mode_override = None;
+                } else if !was_visible && self.surface_layout.keyboard_mode != KeyboardMode::None {
+                    self.pending_auto_focus = true;
                 }
                 self.dirty = true;
             }
@@ -178,6 +222,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.observe_surface_size(content_width, content_height);
         let mut tree = self.build_tree(theme, content_width, content_height);
         self.prune_stale_interaction_targets(&tree);
+        self.apply_pending_auto_focus(&tree);
         self.apply_style_animations(&mut tree);
         if self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured {
             let surface_layout_manifest = self.compiled.manifest.surface_layout.as_ref();
@@ -341,6 +386,40 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.surface_layout.edge = Edge::Left;
         self.surface_layout.margin_top = margin_top;
         self.surface_layout.margin_left = margin_left;
+        self.dirty = true;
+    }
+
+    fn receive_focus_transfer(
+        &mut self,
+        target: &TabFocusTarget,
+        return_focus: Option<(String, String)>,
+        close_on_focus_leave: bool,
+    ) {
+        if let Some(tree) = self.last_tree.clone() {
+            self.apply_focus_transfer(&tree, target, return_focus, close_on_focus_leave);
+        } else {
+            // No tree yet — defer via pending_auto_focus and keep return target.
+            self.pending_auto_focus = true;
+            self.return_focus = return_focus;
+            self.close_on_focus_leave = close_on_focus_leave;
+        }
+    }
+
+    fn release_focus_for_transfer(&mut self) {
+        self.clear_focus_for_transfer();
+    }
+
+    fn register_popover_trigger(&mut self, trigger_key: String, popover_surface: String) {
+        self.triggered_popovers.insert(trigger_key, popover_surface);
+    }
+
+    fn unregister_popover_trigger(&mut self, popover_surface: &str) {
+        self.triggered_popovers
+            .retain(|_, surface| surface != popover_surface);
+    }
+
+    fn set_keyboard_mode_override(&mut self, mode: Option<KeyboardMode>) {
+        self.keyboard_mode_override = mode;
         self.dirty = true;
     }
 }

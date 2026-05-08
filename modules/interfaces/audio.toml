@@ -29,6 +29,7 @@ args = [
   { name = "volume", type = "float" }
 ]
 returns = "Result"
+coalesce = true
 
 [[methods]]
 name = "set_muted"
@@ -37,6 +38,7 @@ args = [
   { name = "muted", type = "boolean" }
 ]
 returns = "Result"
+coalesce = true
 
 [[methods]]
 name = "volume_up"

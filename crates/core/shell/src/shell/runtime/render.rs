@@ -61,7 +61,10 @@ impl Shell {
                         width: 1,
                         height: 1,
                         exclusive_zone: 0,
-                        keyboard_mode: surface.keyboard_mode,
+                        // Hidden surfaces never want keyboard — even if the
+                        // configured mode is exclusive, we don't want to
+                        // steal input while the popover is collapsed to 1×1.
+                        keyboard_mode: mesh_core_wayland::KeyboardMode::None,
                         namespace: runtime.surface_id.clone(),
                         margin_top: 0,
                         margin_right: 0,
@@ -127,7 +130,12 @@ impl Shell {
             }
 
             self.render_engine
-                .present(&runtime.surface_id, runtime.component.id(), visible, &buffer)
+                .present(
+                    &runtime.surface_id,
+                    runtime.component.id(),
+                    visible,
+                    &buffer,
+                )
                 .map_err(ShellRunError::Render)?;
         }
         Ok(())

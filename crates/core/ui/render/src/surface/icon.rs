@@ -1,7 +1,7 @@
 use super::PixelBuffer;
+use super::glyph::{GlyphAxes, draw_font_glyph};
 use image::imageops::FilterType;
 use mesh_core_elements::style::Color;
-use super::glyph::{GlyphAxes, draw_font_glyph};
 use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget, resolve_icon_result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

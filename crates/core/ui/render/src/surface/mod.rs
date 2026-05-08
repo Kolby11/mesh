@@ -12,8 +12,8 @@ use std::collections::HashMap;
 
 pub use bridge::{LayerSurfaceConfig, WindowEvent, WindowKeyEvent};
 pub use buffer::PixelBuffer;
-pub use glyph::GlyphAxes;
 pub use debug_overlay::DebugOverlay;
+pub use glyph::GlyphAxes;
 pub use painter::FrontendRenderEngine;
 pub use text::{SharedTextMeasurer, TextRenderer};
 

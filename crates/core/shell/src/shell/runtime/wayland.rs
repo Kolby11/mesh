@@ -8,12 +8,33 @@ impl Shell {
                 "[hover] dispatch_wayland: got event {:?}",
                 std::mem::discriminant(&event)
             );
-            let surface_id = event_surface_id(&event);
+            let physical_surface_id = event_surface_id(&event).to_string();
+            let is_keyboard_event =
+                matches!(&event, WindowEvent::Key { .. } | WindowEvent::Char { .. });
+            let route_surface_id = if is_keyboard_event {
+                self.keyboard_focus_surface
+                    .as_ref()
+                    .filter(|surface_id| {
+                        self.core
+                            .surfaces
+                            .get(*surface_id)
+                            .map(|state| state.visible)
+                            .unwrap_or(true)
+                            && self
+                                .components
+                                .iter()
+                                .any(|runtime| runtime.surface_id == **surface_id)
+                    })
+                    .cloned()
+                    .unwrap_or_else(|| physical_surface_id.clone())
+            } else {
+                physical_surface_id
+            };
 
             let Some(index) = self
                 .components
                 .iter()
-                .position(|runtime| runtime.surface_id == *surface_id)
+                .position(|runtime| runtime.surface_id == route_surface_id)
             else {
                 continue;
             };
@@ -47,6 +68,19 @@ impl Shell {
             }
 
             let input = match event {
+                WindowEvent::PointerButton {
+                    x,
+                    y,
+                    pressed: true,
+                    ..
+                } => {
+                    self.claim_keyboard_focus_for_surface(&runtime_surface_id);
+                    ComponentInput::PointerButton {
+                        x,
+                        y,
+                        pressed: true,
+                    }
+                }
                 WindowEvent::PointerMove { x, y, .. } => ComponentInput::PointerMove { x, y },
                 WindowEvent::PointerButton { x, y, pressed, .. } => {
                     ComponentInput::PointerButton { x, y, pressed }

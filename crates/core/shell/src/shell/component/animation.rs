@@ -101,7 +101,9 @@ impl AnimatedVisualStyle {
             border_radius: self.border_radius.lerp(target.border_radius, progress),
             border_width: self.border_width.lerp(target.border_width, progress),
             opacity: self.opacity.lerp(target.opacity, progress),
-            background_color: self.background_color.lerp(target.background_color, progress),
+            background_color: self
+                .background_color
+                .lerp(target.background_color, progress),
             border_color: self.border_color.lerp(target.border_color, progress),
             color: self.color.lerp(target.color, progress),
             width: lerp_dimension(self.width, target.width, progress),
@@ -134,8 +136,16 @@ impl AnimatedVisualStyle {
         props: mesh_core_elements::TransitionProperties,
     ) -> Self {
         Self {
-            border_radius: pick(props.animates_border_radius(), previous.border_radius, desired.border_radius),
-            border_width: pick(props.animates_border_width(), previous.border_width, desired.border_width),
+            border_radius: pick(
+                props.animates_border_radius(),
+                previous.border_radius,
+                desired.border_radius,
+            ),
+            border_width: pick(
+                props.animates_border_width(),
+                previous.border_width,
+                desired.border_width,
+            ),
             opacity: pick(props.animates_opacity(), previous.opacity, desired.opacity),
             background_color: pick(
                 props.animates_background_color(),
@@ -150,8 +160,16 @@ impl AnimatedVisualStyle {
             color: pick(props.animates_color(), previous.color, desired.color),
             width: pick(props.animates_width(), previous.width, desired.width),
             height: pick(props.animates_height(), previous.height, desired.height),
-            min_width: pick(props.animates_min_width(), previous.min_width, desired.min_width),
-            max_width: pick(props.animates_max_width(), previous.max_width, desired.max_width),
+            min_width: pick(
+                props.animates_min_width(),
+                previous.min_width,
+                desired.min_width,
+            ),
+            max_width: pick(
+                props.animates_max_width(),
+                previous.max_width,
+                desired.max_width,
+            ),
             min_height: pick(
                 props.animates_min_height(),
                 previous.min_height,
@@ -164,7 +182,11 @@ impl AnimatedVisualStyle {
             ),
             padding: pick(props.animates_padding(), previous.padding, desired.padding),
             margin: pick(props.animates_margin(), previous.margin, desired.margin),
-            transform: pick(props.animates_transform(), previous.transform, desired.transform),
+            transform: pick(
+                props.animates_transform(),
+                previous.transform,
+                desired.transform,
+            ),
             font_size: pick(
                 props.animates_font_size(),
                 previous.font_size,
@@ -429,4 +451,3 @@ fn lerp_option_f32(from: Option<f32>, to: Option<f32>, progress: f32) -> Option<
         _ => to,
     }
 }
-

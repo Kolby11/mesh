@@ -1,5 +1,5 @@
-use super::*;
 use super::component::{FrontendCatalog, FrontendSurfaceComponent};
+use super::*;
 
 impl Shell {
     pub fn new() -> Self {
@@ -66,10 +66,12 @@ impl Shell {
             debug: DebugOverlayState::default(),
             debug_overlay: DebugOverlay::new(),
             active_key_modifiers: KeyModifiers::default(),
+            keyboard_focus_surface: None,
             service_handlers: HashMap::new(),
             backend_runtimes: HashMap::new(),
             backend_runtime_statuses: HashMap::new(),
             latest_service_state: HashMap::new(),
+            command_throttle: HashMap::new(),
         }
     }
 
@@ -241,7 +243,8 @@ impl Shell {
         }
 
         let frontend_catalog = FrontendCatalog::from_modules(&self.modules)?;
-        for entry in frontend_catalog.top_level_surfaces() {
+        let enabled_frontends = self.installed_enabled_frontend_ids();
+        for entry in frontend_catalog.top_level_surfaces_filtered(enabled_frontends.as_ref()) {
             self.register_component(Box::new(FrontendSurfaceComponent::new(
                 entry.compiled,
                 entry.module_dir,
@@ -253,7 +256,28 @@ impl Shell {
         Ok(())
     }
 
-    fn register_component(&mut self, component: Box<dyn ShellComponent>) {
+    fn installed_enabled_frontend_ids(&self) -> Option<HashSet<String>> {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let graph_path = workspace_root.join("config/package.json");
+        match load_installed_module_graph(&graph_path) {
+            Ok(graph) => Some(
+                graph
+                    .frontend_modules()
+                    .into_iter()
+                    .map(|module| module.id.clone())
+                    .collect(),
+            ),
+            Err(err) => {
+                tracing::warn!(
+                    "failed to load installed module graph from {}; using legacy frontend discovery: {err}",
+                    graph_path.display()
+                );
+                None
+            }
+        }
+    }
+
+    pub(super) fn register_component(&mut self, component: Box<dyn ShellComponent>) {
         let surface_id = component.surface_id().to_string();
         let initial_visibility = component
             .initial_visibility()

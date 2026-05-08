@@ -7,13 +7,13 @@ mod focus;
 mod hit_test;
 mod scroll;
 
-pub(in crate::shell) use focus::{find_focusable_at, next_focus_target};
+pub(in crate::shell) use focus::{collect_focus_traversal, find_focusable_at, next_focus_target};
+pub(in crate::shell) use hit_test::find_click_handler;
 pub(in crate::shell) use hit_test::{
     find_event_handler, find_node_bounds_by_key, find_node_by_key, find_node_path_at,
-    find_tooltip_text_by_key, is_input_key, is_slider_key, namespace_event_handlers,
-    node_tooltip_text, parse_namespaced_handler,
+    find_tooltip_by_key, find_tooltip_text_by_key, is_input_key, is_slider_key,
+    namespace_event_handlers, parse_namespaced_handler,
 };
-pub(in crate::shell) use hit_test::find_click_handler;
 pub(in crate::shell) use scroll::{
     annotate_overflow_tree, find_scrollable_at, measure_content_size, scroll_limits,
 };
@@ -35,7 +35,10 @@ pub(in crate::shell) fn union_bounds(
     }
 }
 
-pub(in crate::shell) fn intersect_bounds(a: ContentBounds, b: ContentBounds) -> Option<ContentBounds> {
+pub(in crate::shell) fn intersect_bounds(
+    a: ContentBounds,
+    b: ContentBounds,
+) -> Option<ContentBounds> {
     let left = a.0.max(b.0);
     let top = a.1.max(b.1);
     let right = a.2.min(b.2);

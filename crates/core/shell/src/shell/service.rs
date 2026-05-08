@@ -90,6 +90,25 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                     margin_left,
                 })
             }
+            "shell.activate-popover" => {
+                let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
+                let trigger_surface = event
+                    .payload
+                    .get("trigger_surface")
+                    .and_then(|v| v.as_str())?;
+                let trigger_key = event.payload.get("trigger_key").and_then(|v| v.as_str())?;
+                let focus = event
+                    .payload
+                    .get("focus")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                Some(CoreRequest::ActivatePopover {
+                    surface_id: surface_id.to_string(),
+                    trigger_surface: trigger_surface.to_string(),
+                    trigger_key: trigger_key.to_string(),
+                    focus,
+                })
+            }
             "shell.set-theme" => event
                 .payload
                 .get("theme_id")
@@ -208,6 +227,38 @@ mod tests {
                 );
             }
             other => panic!("expected network ServiceCommand, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn script_events_to_requests_maps_popover_focus_option() {
+        let requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "shell.activate-popover".into(),
+            payload: serde_json::json!({
+                "surface_id": "@mesh/audio-popover",
+                "trigger_surface": "@mesh/navigation-bar",
+                "trigger_key": "volume-button",
+                "focus": false,
+            }),
+            source_module_id: "@mesh/navigation-bar".into(),
+            source_capabilities: mesh_core_capability::CapabilitySet::new(),
+        }]);
+
+        match requests.as_slice() {
+            [
+                CoreRequest::ActivatePopover {
+                    surface_id,
+                    trigger_surface,
+                    trigger_key,
+                    focus,
+                },
+            ] => {
+                assert_eq!(surface_id, "@mesh/audio-popover");
+                assert_eq!(trigger_surface, "@mesh/navigation-bar");
+                assert_eq!(trigger_key, "volume-button");
+                assert!(!focus);
+            }
+            other => panic!("expected ActivatePopover request, got {other:?}"),
         }
     }
 

@@ -19,7 +19,7 @@ use mesh_core_service::{
 use mesh_core_theme::ThemeEngine;
 use mesh_core_wayland::{ClipboardWriter, Layer, StubSurface, WaylandClipboard};
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -28,8 +28,8 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
 
-mod component;
 mod backend;
+mod component;
 mod discovery;
 mod ipc;
 mod layout;
@@ -39,9 +39,9 @@ mod sounds;
 mod surface_layout;
 mod types;
 
-use backend::{BackendRuntimeStatus, BackendRuntimeStatusEntry};
 #[cfg(test)]
 use backend::{BackendLaunchCandidate, backend_launch_candidates_from_graph};
+use backend::{BackendRuntimeStatus, BackendRuntimeStatusEntry};
 use ipc::spawn_ipc_server;
 use mesh_core_backend::{BackendServiceEvent, spawn_backend_service};
 use mesh_core_render::{
@@ -50,13 +50,13 @@ use mesh_core_render::{
 };
 use sounds::{SoundKind, play_shell_sound};
 use surface_layout::{default_surface_visibility, load_active_theme};
+use types::{
+    CommandThrottleState, ComponentRuntime, LatestServiceState, ServiceCommandMsg,
+    SettingsWatchState, ShellCoreState, ShellMessage, SurfaceState, ThemeWatchState,
+};
 pub use types::{
     ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, KeyModifiers,
-    ServiceEvent, ShellComponent, SurfaceId,
-};
-use types::{
-    ComponentRuntime, LatestServiceState, ServiceCommandMsg, SettingsWatchState, ShellCoreState,
-    ShellMessage, SurfaceState, ThemeWatchState,
+    ServiceEvent, ShellComponent, SurfaceId, TabFocusTarget,
 };
 
 use service::{service_command_control_capability, service_name_from_interface};
@@ -377,10 +377,12 @@ pub struct Shell {
     debug: DebugOverlayState,
     debug_overlay: DebugOverlay,
     active_key_modifiers: KeyModifiers,
+    keyboard_focus_surface: Option<SurfaceId>,
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,
     backend_runtime_statuses: HashMap<(String, String), BackendRuntimeStatusEntry>,
     latest_service_state: HashMap<String, LatestServiceState>,
+    command_throttle: HashMap<(String, String), CommandThrottleState>,
 }
 
 #[derive(Debug, Clone)]
@@ -452,7 +454,6 @@ fn resolve_default_module_dirs(config: &ShellConfig) -> Vec<PathBuf> {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
     resolve_discovery_paths(&workspace_root, &config.shell.discovery_paths)
 }
-
 
 #[cfg(test)]
 mod tests;

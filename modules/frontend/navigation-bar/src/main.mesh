@@ -37,14 +37,29 @@ function onToggleAudioSurface(event)
     local margin_top = (tonumber(position.margin_bottom) or 0) + 8
 
     if audio_surface_hidden then
+        audio_surface_hidden = false
         mesh.events.publish("shell.position-surface", {
             surface_id = audio_surface_id,
             margin_top = margin_top,
             margin_left = margin_left
         })
+        mesh.events.publish("shell.show-surface", {
+            surface_id = audio_surface_id
+        })
+        -- Register the trigger so Tab from the volume button transfers
+        -- focus into the popover, and Shift+Tab from inside returns here.
+        pcall(function()
+            mesh.popover.activate(audio_surface_id, event, { focus = true })
+        end)
+    else
+        audio_surface_hidden = true
+        mesh.events.publish("shell.hide-surface", {
+            surface_id = audio_surface_id
+        })
+        pcall(function()
+            mesh.popover.hide(audio_surface_id)
+        end)
     end
-
-    audio_surface_hidden = not audio_surface_hidden
 end
 
 function onMuteShortcut()

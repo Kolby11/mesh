@@ -242,6 +242,7 @@ mod tests {
                 name: "volume_up".into(),
                 args: Vec::new(),
                 returns: None,
+                coalesce: false,
             }],
             events: vec![InterfaceEvent {
                 name: "VolumeChanged".into(),

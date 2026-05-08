@@ -5,7 +5,7 @@ use mesh_core_locale::LocaleEngine;
 use mesh_core_render::PixelBuffer;
 use mesh_core_scripting::ScriptError;
 use mesh_core_theme::Theme;
-use mesh_core_wayland::ShellSurface;
+use mesh_core_wayland::{KeyboardMode, ShellSurface};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -46,9 +46,59 @@ pub enum CoreRequest {
     SetTheme {
         theme_id: String,
     },
+    /// Transfer keyboard focus across surfaces. Used for popover Tab flow:
+    /// a button in surface A with `popover_target="X"` opens popover X and
+    /// (on Tab) hands focus into X's first tabbable. Tab past X's last
+    /// element (or Shift+Tab past its first) returns focus to A's element
+    /// after/at the trigger and closes X if `close_source` is set.
+    /// Show a surface as a popover triggered by a specific element. The
+    /// shell records `(trigger_surface, trigger_key)` on the trigger's
+    /// component so Tab from that key transfers focus into the popover.
+    /// When `focus` is true, activation also immediately transfers focus
+    /// into the popover and records the trigger as the return target.
+    /// Origin: the Lua helper `mesh.popover.activate(surface_id, event,
+    /// { focus = true })`.
+    ActivatePopover {
+        surface_id: SurfaceId,
+        trigger_surface: SurfaceId,
+        trigger_key: String,
+        /// If true, activation immediately inserts the popover into the
+        /// keyboard focus chain and records the trigger as its return target.
+        focus: bool,
+    },
+    TransferTabFocus {
+        from_surface: SurfaceId,
+        to_surface: SurfaceId,
+        target: TabFocusTarget,
+        /// When focus enters a popover, the trigger location is recorded
+        /// here so the popover knows where to send focus back on exit.
+        return_target: Option<(SurfaceId, String)>,
+        /// True on entry into a popover that should hide itself when Tab/
+        /// Shift+Tab leaves its chain. The shell stamps this as the
+        /// target's `close_on_focus_leave` flag.
+        target_closes_on_leave: bool,
+        /// Surface to hide as part of *this* transfer (typically the
+        /// popover the user is leaving). Translates into a HideSurface.
+        close_source: Option<SurfaceId>,
+    },
     ToggleDebugOverlay,
     CycleDebugTab,
     Shutdown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TabFocusTarget {
+    /// First tabbable in the target surface's tree.
+    First,
+    /// Last tabbable in the target surface's tree.
+    Last,
+    /// The named key itself (used when Shift+Tab leaves a popover and
+    /// lands on the trigger button).
+    AtKey(String),
+    /// Tabbable that immediately follows `key` in the target surface's
+    /// tree order (used when forward Tab leaves a popover and skips past
+    /// the trigger).
+    AfterKey(String),
 }
 
 #[derive(Debug, Clone)]
@@ -170,6 +220,29 @@ pub trait ShellComponent: Send {
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         Ok(Vec::new())
     }
+    /// Receive a cross-surface Tab focus transfer initiated from another
+    /// component. The default implementation is a no-op so non-frontend
+    /// components (e.g. test stubs) can ignore this.
+    fn receive_focus_transfer(
+        &mut self,
+        _target: &TabFocusTarget,
+        _return_focus: Option<(SurfaceId, String)>,
+        _close_on_focus_leave: bool,
+    ) {
+    }
+    /// Drop focus state on a component that just transferred focus away.
+    fn release_focus_for_transfer(&mut self) {}
+    /// Record that `trigger_key` in this component's surface activated
+    /// the popover at `popover_surface`. Tab forward on that key will
+    /// transfer focus into the popover.
+    fn register_popover_trigger(&mut self, _trigger_key: String, _popover_surface: SurfaceId) {}
+    /// Drop a previously-registered popover trigger when the popover
+    /// hides (so a stale Tab doesn't try to re-enter a closed surface).
+    fn unregister_popover_trigger(&mut self, _popover_surface: &str) {}
+    /// Override the surface's effective keyboard_mode at runtime,
+    /// shadowing the configured value from the manifest until cleared.
+    /// Used during cross-surface Tab transfer.
+    fn set_keyboard_mode_override(&mut self, _mode: Option<KeyboardMode>) {}
     fn source_path(&self) -> Option<&Path> {
         None
     }
@@ -237,6 +310,16 @@ impl ComponentRuntime {
 }
 
 pub(super) type ServiceCommandMsg = mesh_core_backend::BackendServiceCommand;
+
+/// Per-(interface, command) leading+trailing throttle state for coalescable
+/// service commands. Leading edge fires immediately; subsequent calls within
+/// the interval park as `pending` (last-wins) and are flushed by the main
+/// loop on the next tick after the interval elapses.
+#[derive(Debug, Clone)]
+pub(super) struct CommandThrottleState {
+    pub(super) last_send: std::time::Instant,
+    pub(super) pending: Option<serde_json::Value>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct LatestServiceState {

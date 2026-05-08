@@ -20,7 +20,7 @@
       "@mesh/text-selection-proof": {
         "kind": "frontend",
         "path": "frontend/text-selection-proof",
-        "enabled": true
+        "enabled": false
       },
       "@mesh/pipewire-audio": {
         "kind": "backend",

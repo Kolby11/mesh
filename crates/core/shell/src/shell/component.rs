@@ -1,8 +1,8 @@
 use super::layout::{
-    annotate_overflow_tree, find_click_handler, find_event_handler, find_focusable_at,
-    find_node_bounds_by_key, find_node_by_key, find_node_path_at, find_scrollable_at,
-    find_tooltip_text_by_key, is_input_key, is_slider_key, measure_content_size,
-    namespace_event_handlers, next_focus_target, node_tooltip_text, parse_namespaced_handler,
+    annotate_overflow_tree, collect_focus_traversal, find_click_handler, find_event_handler,
+    find_focusable_at, find_node_bounds_by_key, find_node_by_key, find_node_path_at,
+    find_scrollable_at, find_tooltip_by_key, find_tooltip_text_by_key, is_input_key, is_slider_key,
+    measure_content_size, namespace_event_handlers, next_focus_target, parse_namespaced_handler,
     scroll_limits,
 };
 use super::service::{apply_service_update, script_events_to_requests, seed_service_state};
@@ -11,7 +11,7 @@ use super::surface_layout::{
 };
 use super::types::{
     ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, KeyModifiers,
-    ServiceEvent, ShellComponent,
+    ServiceEvent, ShellComponent, TabFocusTarget,
 };
 mod animation;
 mod catalog;
@@ -42,7 +42,7 @@ use mesh_core_render::{
 };
 use mesh_core_scripting::{LocaleBoundState, ScriptContext, ScriptInterfaceImport};
 use mesh_core_theme::{Theme, default_theme};
-use mesh_core_wayland::{Edge, ShellSurface};
+use mesh_core_wayland::{Edge, KeyboardMode, ShellSurface};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -77,6 +77,12 @@ pub(super) struct FrontendSurfaceComponent {
     module_settings_file: PathBuf,
     settings_json: serde_json::Value,
     pub(super) surface_layout: SurfaceLayoutSettings,
+    /// Runtime override for `surface_layout.keyboard_mode`. Used during
+    /// cross-surface Tab transfer to force `Exclusive` on the popover
+    /// (compositors don't reliably switch `OnDemand` mid-flight). `None`
+    /// means use the configured value from the manifest. Cleared when the
+    /// surface hides.
+    pub(super) keyboard_mode_override: Option<KeyboardMode>,
     pub(super) frontend_catalog: FrontendCatalog,
     pub(super) visible: bool,
     dirty: bool,
@@ -85,6 +91,26 @@ pub(super) struct FrontendSurfaceComponent {
     focus_visible_key: Option<String>,
     pointer_down_key: Option<String>,
     active_slider_key: Option<String>,
+    /// When a surface with keyboard interactivity transitions visible→true,
+    /// this flag tells the next paint to seed focus on the first tabbable
+    /// element. Lets a popover work with keyboard immediately after opening
+    /// without the user needing to click inside it first.
+    pending_auto_focus: bool,
+    /// Set when focus is transferred INTO this surface from another via Tab.
+    /// `(surface_id, key)` of the trigger element to return to when Tab/
+    /// Shift+Tab leaves this surface's chain. None for top-level surfaces
+    /// (panels, navbar) that own the start of a focus chain.
+    pub(super) return_focus: Option<(String, String)>,
+    /// Set when this surface should be hidden after Tab/Shift+Tab leaves
+    /// its chain. True for popovers transferred-into; false for stable
+    /// surfaces. Reset whenever `return_focus` is reset.
+    pub(super) close_on_focus_leave: bool,
+    /// `trigger_key → popover_surface_id` for popovers activated *from*
+    /// this surface. Populated by the shell when `mesh.popover.activate`
+    /// runs. Tab forward on a trigger key transfers focus into the
+    /// matching popover when activation did not already focus it; the
+    /// entry is dropped when the popover hides.
+    pub(super) triggered_popovers: HashMap<String, String>,
     selection: Option<TextSelectionState>,
     input_values: HashMap<String, String>,
     slider_values: HashMap<String, f32>,
@@ -110,6 +136,11 @@ pub(super) struct FrontendSurfaceComponent {
     pending_surface_states: RefCell<HashMap<String, bool>>,
     /// Last visibility state emitted for each surface portal, to avoid redundant requests.
     last_surface_states: HashMap<String, bool>,
+    /// `surface_id -> state variable` for portals declared as
+    /// `<ImportedSurface hidden={some_state} />`. Used when the shell hides
+    /// a popover through keyboard navigation so the owner script does not
+    /// immediately re-show it from stale state.
+    portal_hidden_bindings: RefCell<HashMap<String, String>>,
     style_animations: HashMap<String, StyleAnimation>,
 }
 
@@ -135,6 +166,7 @@ impl FrontendSurfaceComponent {
             module_settings_file,
             settings_json: settings_state.raw,
             surface_layout: settings_state.layout.clone(),
+            keyboard_mode_override: None,
             frontend_catalog,
             visible: settings_state.layout.visible_on_start,
             dirty: true,
@@ -143,6 +175,11 @@ impl FrontendSurfaceComponent {
             focus_visible_key: None,
             pointer_down_key: None,
             active_slider_key: None,
+            pending_auto_focus: settings_state.layout.visible_on_start
+                && settings_state.layout.keyboard_mode != KeyboardMode::None,
+            return_focus: None,
+            close_on_focus_leave: false,
+            triggered_popovers: HashMap::new(),
             selection: None,
             input_values: HashMap::new(),
             slider_values: HashMap::new(),
@@ -164,6 +201,7 @@ impl FrontendSurfaceComponent {
             diagnostics: None,
             pending_surface_states: RefCell::new(HashMap::new()),
             last_surface_states: HashMap::new(),
+            portal_hidden_bindings: RefCell::new(HashMap::new()),
             style_animations: HashMap::new(),
         }
     }

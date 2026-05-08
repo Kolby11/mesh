@@ -93,7 +93,10 @@ impl IconConfig {
             ("network-wireless", vec!["network-wireless", "wifi"]),
             ("bluetooth", vec!["bluetooth"]),
             ("settings", vec!["preferences-system", "settings"]),
-            ("weather-clear-night", vec!["weather-clear-night", "weather-clear"]),
+            (
+                "weather-clear-night",
+                vec!["weather-clear-night", "weather-clear"],
+            ),
             ("weather-clear", vec!["weather-clear"]),
             ("battery-empty", vec!["battery-empty", "battery-low"]),
             ("battery-caution", vec!["battery-caution", "battery-low"]),

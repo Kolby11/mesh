@@ -97,8 +97,8 @@
               "exclusive",
               "on_demand"
             ],
-            "default": "none",
-            "description": "Keyboard interactivity policy for the surface."
+            "default": "on_demand",
+            "description": "Keyboard interactivity policy for the surface. The popover contains focusable controls (slider, buttons), so it requests keyboard on click and releases it when the user clicks away."
           },
           "visible_on_start": {
             "type": "boolean",

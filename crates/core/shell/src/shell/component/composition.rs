@@ -20,6 +20,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             if entry.compiled.local_components.contains_key(alias) {
                 let props_json: HashMap<String, serde_json::Value> = props
                     .iter()
+                    .filter(|(key, _)| !key.starts_with("__mesh_binding_"))
                     .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
                     .collect();
                 let instance_key = format!("{host_instance_key}/local:{alias}");
@@ -55,6 +56,14 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 .get("hidden")
                 .map(|v| v == "true" || v == "True")
                 .unwrap_or(false);
+            if let Some(binding) = props
+                .get("__mesh_binding_hidden")
+                .and_then(|binding| simple_state_binding(binding))
+            {
+                self.portal_hidden_bindings
+                    .borrow_mut()
+                    .insert(module_id.clone(), binding);
+            }
             self.pending_surface_states
                 .borrow_mut()
                 .insert(module_id, !hidden);
@@ -63,6 +72,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
 
         let props_json: HashMap<String, serde_json::Value> = props
             .iter()
+            .filter(|(key, _)| !key.starts_with("__mesh_binding_"))
             .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
             .collect();
         let instance_key = format!("{host_instance_key}/import:{alias}");
@@ -138,4 +148,17 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
 
         nodes
     }
+}
+
+fn simple_state_binding(binding: &str) -> Option<String> {
+    let trimmed = binding.trim();
+    if trimmed.is_empty()
+        || !trimmed
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        || trimmed.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
 }

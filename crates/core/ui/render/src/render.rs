@@ -417,6 +417,8 @@ fn build_component_ref(
                 attr.name.clone(),
                 resolve_component_prop_handler_value(state, host_instance_key, handler),
             );
+        } else if let AttributeValue::Binding(binding) = &attr.value {
+            props.insert(format!("__mesh_binding_{}", attr.name), binding.clone());
         }
     }
     if let Some(composition) = composition {

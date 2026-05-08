@@ -201,7 +201,13 @@ fn navigation_bar_declares_icon_pack_dependency() {
     );
     // Frontend no longer carries inline mappings — those live in the
     // icon-pack module now.
-    assert!(loaded.manifest.icons.as_ref().map_or(true, |i| i.is_empty()));
+    assert!(
+        loaded
+            .manifest
+            .icons
+            .as_ref()
+            .map_or(true, |i| i.is_empty())
+    );
     assert!(loaded.manifest.icon_pack.is_none());
 }
 
@@ -230,7 +236,10 @@ fn icons_default_module_parses_as_icon_pack() {
     let icon_pack = loaded.manifest.icon_pack.expect("icon_pack section");
     assert_eq!(icon_pack.id, "default");
     assert_eq!(
-        icon_pack.mappings.get("audio-volume-high").map(String::as_str),
+        icon_pack
+            .mappings
+            .get("audio-volume-high")
+            .map(String::as_str),
         Some("hicolor/audio-volume-high")
     );
     assert_eq!(

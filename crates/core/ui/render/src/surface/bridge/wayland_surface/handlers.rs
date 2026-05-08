@@ -54,13 +54,7 @@ impl OutputHandler for State {
 
     fn new_output(&mut self, _c: &Connection, _q: &QueueHandle<Self>, _o: wl_output::WlOutput) {}
 
-    fn update_output(
-        &mut self,
-        _c: &Connection,
-        _q: &QueueHandle<Self>,
-        _o: wl_output::WlOutput,
-    ) {
-    }
+    fn update_output(&mut self, _c: &Connection, _q: &QueueHandle<Self>, _o: wl_output::WlOutput) {}
 
     fn output_destroyed(
         &mut self,
@@ -309,7 +303,11 @@ impl KeyboardHandler for State {
         _raw: &[u32],
         _keysyms: &[Keysym],
     ) {
-        self.keyboard_focus = self.surface_id_for_wl_surface(surface);
+        let focused = self.surface_id_for_wl_surface(surface);
+        if self.keyboard_focus != focused {
+            self.keyboard_repeat = None;
+        }
+        self.keyboard_focus = focused;
     }
 
     fn leave(
@@ -321,6 +319,7 @@ impl KeyboardHandler for State {
         _serial: u32,
     ) {
         self.keyboard_focus = None;
+        self.keyboard_repeat = None;
     }
 
     fn press_key(
@@ -342,16 +341,20 @@ impl KeyboardHandler for State {
         };
         self.events.push(DevWindowEvent::Key {
             surface_id: surface_id.clone(),
-            event: DevWindowKeyEvent::Pressed(name, mods),
+            event: DevWindowKeyEvent::Pressed(name.clone(), mods.clone()),
         });
-        if let Some(ch) = event
+        let ch = event
             .utf8
             .as_deref()
             .and_then(|s| s.chars().next())
-            .filter(|ch| !ch.is_control())
-        {
-            self.events.push(DevWindowEvent::Char { surface_id, ch });
+            .filter(|ch| !ch.is_control());
+        if let Some(ch) = ch {
+            self.events.push(DevWindowEvent::Char {
+                surface_id: surface_id.clone(),
+                ch,
+            });
         }
+        self.schedule_keyboard_repeat(surface_id, name, mods, ch);
     }
 
     fn release_key(
@@ -366,6 +369,7 @@ impl KeyboardHandler for State {
             return;
         };
         let name = keysym_name(event.keysym);
+        self.clear_keyboard_repeat_for_key(&name);
         self.events.push(DevWindowEvent::Key {
             surface_id,
             event: DevWindowKeyEvent::Released(name),
@@ -382,6 +386,27 @@ impl KeyboardHandler for State {
         _layout: u32,
     ) {
         self.keyboard_mods = modifiers;
+        let mods = super::super::dev_window::KeyMods {
+            ctrl: self.keyboard_mods.ctrl,
+            shift: self.keyboard_mods.shift,
+            alt: self.keyboard_mods.alt,
+        };
+        if let Some(repeat) = self.keyboard_repeat.as_mut() {
+            repeat.mods = mods;
+        }
+    }
+
+    fn update_repeat_info(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        info: RepeatInfo,
+    ) {
+        self.keyboard_repeat_info = info;
+        if matches!(info, RepeatInfo::Disable) {
+            self.keyboard_repeat = None;
+        }
     }
 }
 

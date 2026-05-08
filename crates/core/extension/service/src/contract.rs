@@ -34,6 +34,12 @@ pub struct InterfaceMethod {
     pub name: String,
     pub args: Vec<InterfaceArgument>,
     pub returns: Option<String>,
+    /// When true, repeated invocations of this method on a backend's command
+    /// queue are coalesced — only the most recent payload is executed and
+    /// older queued instances are dropped. Right for idempotent setters
+    /// (set_volume, set_muted) where intermediate values are stale; wrong for
+    /// relative/accumulating commands (volume_up, increment).
+    pub coalesce: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +132,7 @@ pub fn load_interface_contract(
                     })
                     .collect(),
                 returns: method.returns,
+                coalesce: method.coalesce,
             })
             .collect(),
         events: parsed
@@ -216,6 +223,8 @@ struct ContractMethodToml {
     args: Vec<ContractFieldToml>,
     #[serde(default)]
     returns: Option<String>,
+    #[serde(default)]
+    coalesce: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

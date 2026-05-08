@@ -162,14 +162,30 @@ impl FrontendSurfaceComponent {
                     self.hovered_key
                 );
                 if new_key != self.hovered_key || new_path != self.hovered_path {
+                    let previous_tooltip = self
+                        .hovered_key
+                        .as_ref()
+                        .and_then(|key| find_tooltip_by_key(&tree, key));
+                    let next_tooltip = new_key
+                        .as_ref()
+                        .and_then(|key| find_tooltip_by_key(&tree, key));
+                    let same_tooltip_owner = previous_tooltip
+                        .as_ref()
+                        .zip(next_tooltip.as_ref())
+                        .is_some_and(|((previous_owner, _), (next_owner, _))| {
+                            previous_owner == next_owner
+                        });
                     self.hovered_key = new_key.clone();
                     self.hovered_path = new_path;
-                    // Only start the tooltip timer when hovering a node with tooltip content.
-                    self.hover_start = new_key
-                        .as_ref()
-                        .and_then(|k| find_node_by_key(&tree, k))
-                        .and_then(|n| node_tooltip_text(n))
-                        .map(|_| std::time::Instant::now());
+                    // Preserve an already-running tooltip when moving between a
+                    // tooltip owner and descendants that inherit that tooltip.
+                    if same_tooltip_owner {
+                        if self.hover_start.is_none() {
+                            self.hover_start = Some(std::time::Instant::now());
+                        }
+                    } else {
+                        self.hover_start = next_tooltip.map(|_| std::time::Instant::now());
+                    }
                     self.dirty = true;
                 }
             }
@@ -214,7 +230,14 @@ impl FrontendSurfaceComponent {
                 if matches!(key.as_str(), "Tab") && !modifiers.ctrl && !modifiers.alt {
                     self.clear_selection();
                     self.dirty = true;
-                    return self.advance_keyboard_focus(&tree, modifiers.shift);
+                    return self.handle_tab_with_cross_surface(&tree, modifiers.shift);
+                }
+                if matches!(key.as_str(), "Escape") && !modifiers.ctrl && !modifiers.alt {
+                    if let Some(requests) = self.handle_escape_with_cross_surface()? {
+                        self.clear_selection();
+                        self.dirty = true;
+                        return Ok(requests);
+                    }
                 }
                 if modifiers.ctrl
                     && key.eq_ignore_ascii_case("c")
