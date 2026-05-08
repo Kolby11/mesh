@@ -1,7 +1,8 @@
 use crate::shell::Shell;
 use mesh_core_debug::{
-    ProfilingSample, ProfilingScopeSnapshot, ProfilingSnapshot, ProfilingStage,
-    ProfilingStageSummary, ProfilingSurfaceSnapshot,
+    ProfilingBackendSample, ProfilingBackendSnapshot, ProfilingBackendStage,
+    ProfilingBackendStageSummary, ProfilingSample, ProfilingScopeSnapshot, ProfilingSnapshot,
+    ProfilingStage, ProfilingStageSummary, ProfilingSurfaceSnapshot,
 };
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::time::Duration;
@@ -82,6 +83,41 @@ struct SurfaceAccumulator {
     scope: ScopeAccumulator,
 }
 
+#[derive(Debug, Default)]
+struct BackendStageAccumulator {
+    sample_count: u64,
+    total_micros: u64,
+    max_micros: u64,
+    recent_samples: VecDeque<ProfilingBackendSample>,
+}
+
+impl BackendStageAccumulator {
+    fn record(&mut self, sample: ProfilingBackendSample, recent_capacity: usize) {
+        self.sample_count = self.sample_count.saturating_add(1);
+        self.total_micros = self.total_micros.saturating_add(sample.duration_micros);
+        self.max_micros = self.max_micros.max(sample.duration_micros);
+        if self.recent_samples.len() >= recent_capacity {
+            self.recent_samples.pop_front();
+        }
+        self.recent_samples.push_back(sample);
+    }
+
+    fn snapshot(&self, stage: ProfilingBackendStage) -> ProfilingBackendStageSummary {
+        ProfilingBackendStageSummary {
+            stage,
+            sample_count: self.sample_count,
+            total_micros: self.total_micros,
+            max_micros: self.max_micros,
+            recent_samples: self.recent_samples.iter().cloned().collect(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct BackendAccumulator {
+    stages: BTreeMap<ProfilingBackendStage, BackendStageAccumulator>,
+}
+
 #[derive(Debug)]
 pub(crate) struct ProfilingRuntimeState {
     session_id: u64,
@@ -89,6 +125,7 @@ pub(crate) struct ProfilingRuntimeState {
     recent_capacity: usize,
     shell: ScopeAccumulator,
     surfaces: HashMap<String, SurfaceAccumulator>,
+    backends: BTreeMap<(String, String), BackendAccumulator>,
 }
 
 impl Default for ProfilingRuntimeState {
@@ -99,6 +136,7 @@ impl Default for ProfilingRuntimeState {
             recent_capacity: DEFAULT_RECENT_CAPACITY,
             shell: ScopeAccumulator::default(),
             surfaces: HashMap::new(),
+            backends: BTreeMap::new(),
         }
     }
 }
@@ -109,6 +147,7 @@ impl ProfilingRuntimeState {
         self.next_sample_order = 0;
         self.shell = ScopeAccumulator::default();
         self.surfaces.clear();
+        self.backends.clear();
     }
 
     pub(crate) fn snapshot(&self, session_id: u64) -> ProfilingSnapshot {
@@ -128,10 +167,25 @@ impl ProfilingRuntimeState {
             .collect();
         surfaces.sort_by(|a, b| a.surface_id.cmp(&b.surface_id));
 
+        let backends = self
+            .backends
+            .iter()
+            .map(|((interface, provider_id), backend)| ProfilingBackendSnapshot {
+                interface: interface.clone(),
+                provider_id: provider_id.clone(),
+                stages: backend
+                    .stages
+                    .iter()
+                    .map(|(stage, summary)| summary.snapshot(*stage))
+                    .collect(),
+            })
+            .collect();
+
         ProfilingSnapshot {
             session_id: session_id.max(self.session_id),
             shell: self.shell.snapshot(),
             surfaces,
+            backends,
         }
     }
 
@@ -174,6 +228,24 @@ impl ProfilingRuntimeState {
             surface.module_id = module_id.map(str::to_string);
         }
         surface.scope.record_stage(sample, self.recent_capacity);
+    }
+
+    pub(crate) fn record_backend_stage(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        stage: ProfilingBackendStage,
+        duration: Duration,
+        trigger_kind: Option<&str>,
+    ) {
+        let sample = self.make_backend_sample(stage, duration, trigger_kind);
+        self.backends
+            .entry((interface.to_string(), provider_id.to_string()))
+            .or_default()
+            .stages
+            .entry(stage)
+            .or_default()
+            .record(sample, self.recent_capacity);
     }
 
     pub(crate) fn record_surface_redraw(
@@ -226,6 +298,22 @@ impl ProfilingRuntimeState {
         self.next_sample_order = self.next_sample_order.saturating_add(1);
         sample
     }
+
+    fn make_backend_sample(
+        &mut self,
+        stage: ProfilingBackendStage,
+        duration: Duration,
+        trigger_kind: Option<&str>,
+    ) -> ProfilingBackendSample {
+        let sample = ProfilingBackendSample {
+            stage,
+            order: self.next_sample_order,
+            duration_micros: duration.as_micros().min(u128::from(u64::MAX)) as u64,
+            trigger_kind: trigger_kind.map(str::to_string),
+        };
+        self.next_sample_order = self.next_sample_order.saturating_add(1);
+        sample
+    }
 }
 
 impl Shell {
@@ -272,5 +360,25 @@ impl Shell {
         }
         self.profiling
             .record_surface_redraw(surface_id, module_id, trigger_kind);
+    }
+
+    pub(crate) fn record_backend_profiling_stage(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        stage: ProfilingBackendStage,
+        duration: Duration,
+        trigger_kind: Option<&str>,
+    ) {
+        if !self.profiling_enabled() {
+            return;
+        }
+        self.profiling.record_backend_stage(
+            interface,
+            provider_id,
+            stage,
+            duration,
+            trigger_kind,
+        );
     }
 }

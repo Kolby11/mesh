@@ -9,7 +9,7 @@ use super::{
     surface_layout::{SurfaceSizePolicy, load_active_theme, load_frontend_module_settings},
 };
 use mesh_core_config::ShellConfig;
-use mesh_core_debug::ProfilingStage;
+use mesh_core_debug::{ProfilingBackendStage, ProfilingStage};
 use mesh_core_elements::{LayoutRect, VariableStore, WidgetNode};
 use mesh_core_module::ModuleInstance;
 use mesh_core_module::manifest::{
@@ -551,10 +551,18 @@ fn profiling_session_reset_discards_previous_samples() {
         std::time::Duration::from_micros(25),
         Some("service_update"),
     );
+    shell.record_backend_profiling_stage(
+        "mesh.audio",
+        "@mesh/pulse",
+        ProfilingBackendStage::PollUpdate,
+        std::time::Duration::from_micros(9),
+        Some("service_update"),
+    );
     let snapshot = shell.build_debug_snapshot();
     let profiling = snapshot.profiling.expect("profiling should be enabled");
     assert_eq!(profiling.session_id, 1);
     assert_eq!(profiling.shell.stages.len(), 1);
+    assert_eq!(profiling.backends.len(), 1);
 
     shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
     shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
@@ -567,6 +575,10 @@ fn profiling_session_reset_discards_previous_samples() {
     assert!(
         profiling.shell.stages.is_empty(),
         "enabling a fresh profiling session must clear previous samples"
+    );
+    assert!(
+        profiling.backends.is_empty(),
+        "enabling a fresh profiling session must also clear backend samples"
     );
 }
 
@@ -670,11 +682,101 @@ fn profiling_disabled_runtime_stage_helpers_remain_inert() {
         Some("@mesh/navigation-bar"),
         Some("present"),
     );
+    shell.record_backend_profiling_stage(
+        "mesh.audio",
+        "@mesh/pulse",
+        ProfilingBackendStage::CommandHandling,
+        std::time::Duration::from_micros(8),
+        Some("service_command"),
+    );
 
     let snapshot = shell.build_debug_snapshot();
     assert!(
         snapshot.profiling.is_none(),
         "profiling-disabled helpers must not fabricate shell or surface snapshots"
+    );
+}
+
+#[test]
+fn profiling_snapshot_tracks_bounded_backend_samples_by_provider() {
+    let mut shell = Shell::new();
+    shell.apply_request(CoreRequest::ToggleDebugProfiling).unwrap();
+
+    for index in 0..20 {
+        shell.record_backend_profiling_stage(
+            "mesh.audio",
+            "@mesh/pulse",
+            ProfilingBackendStage::PollUpdate,
+            std::time::Duration::from_micros(10 + index),
+            Some("service_update"),
+        );
+    }
+    shell.record_backend_profiling_stage(
+        "mesh.audio",
+        "@mesh/pulse",
+        ProfilingBackendStage::CommandHandling,
+        std::time::Duration::from_micros(44),
+        Some("service_command"),
+    );
+    shell.record_backend_profiling_stage(
+        "mesh.audio",
+        "@mesh/pulse",
+        ProfilingBackendStage::StatePublishDelivery,
+        std::time::Duration::from_micros(55),
+        Some("service_publish"),
+    );
+    shell.record_backend_profiling_stage(
+        "mesh.network",
+        "@mesh/networkmanager",
+        ProfilingBackendStage::PollUpdate,
+        std::time::Duration::from_micros(33),
+        Some("service_update"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+
+    assert_eq!(profiling.backends.len(), 2);
+
+    let audio_backend = profiling
+        .backends
+        .iter()
+        .find(|backend| {
+            backend.interface == "mesh.audio" && backend.provider_id == "@mesh/pulse"
+        })
+        .expect("backend profiling should be keyed by interface and provider");
+
+    let poll_update = audio_backend
+        .stages
+        .iter()
+        .find(|stage| stage.stage == ProfilingBackendStage::PollUpdate)
+        .expect("poll/update stage should be captured");
+    assert_eq!(poll_update.sample_count, 20);
+    assert_eq!(poll_update.max_micros, 29);
+    assert_eq!(poll_update.recent_samples.len(), 16);
+    assert_eq!(
+        poll_update.recent_samples.first().map(|sample| sample.order),
+        Some(4),
+        "backend recent samples should retain only the newest bounded window"
+    );
+    assert!(
+        poll_update
+            .recent_samples
+            .iter()
+            .all(|sample| sample.stage == ProfilingBackendStage::PollUpdate)
+    );
+
+    assert!(
+        audio_backend
+            .stages
+            .iter()
+            .any(|stage| stage.stage == ProfilingBackendStage::CommandHandling)
+    );
+    assert!(
+        audio_backend
+            .stages
+            .iter()
+            .any(|stage| stage.stage == ProfilingBackendStage::StatePublishDelivery)
     );
 }
 
