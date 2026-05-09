@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Performance Instrumentation and Responsiveness
 status: executing
-stopped_at: Phase 17 planned
-last_updated: "2026-05-09T07:40:22.217Z"
-last_activity: 2026-05-09 -- Phase 17 planning complete
+stopped_at: Completed 17-01-PLAN.md
+last_updated: "2026-05-09T07:58:37.558Z"
+last_activity: 2026-05-09
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 16
-  completed_plans: 12
-  percent: 75
+  completed_plans: 13
+  percent: 81
 ---
 
 # State: MESH v1.3
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-08)
 
 ## Current Position
 
-Phase: 17
-Plan: Not started
+Phase: 17 (canonical-benchmark-scenarios-and-proof-flows) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-05-09 -- Phase 17 planning complete
+Last activity: 2026-05-09
 
 ## Decisions
 
@@ -75,6 +75,8 @@ Last activity: 2026-05-09 -- Phase 17 planning complete
 - [v1.3]: Profiling is debug-only and should extend the existing debug overlay/debug command path instead of adding end-user settings.
 - [v1.3]: Performance acceptance is based on canonical shipped interaction benchmarks, not qualitative impressions or synthetic aggregate metrics alone.
 - [v1.3]: The first profiling inspector is live and rolling, not a full trace capture/replay system.
+- [Phase 17]: Benchmark rows derive from live rolling profiling snapshots only; no history, trace export, or persistence was added.
+- [Phase 17]: Profiling-disabled benchmark rows remain visible but inert with Profiling off status and profiling payload stays null.
 
 ## Performance Metrics
 
@@ -105,12 +107,13 @@ Last activity: 2026-05-09 -- Phase 17 planning complete
 | Phase 09 P01 | 5min | 2 tasks | 2 files |
 | Phase 10 P01 | 8 min | 2 tasks | 9 files |
 | Phase 10 P02 | 9 min | 2 tasks | 4 files |
+| Phase 17 P01 | 6min | 3 tasks | 3 files |
 
 ## Session
 
-Last session: 2026-05-09T07:40:22.207Z
-Stopped At: Phase 17 planned
-Resume File: .planning/phases/17-canonical-benchmark-scenarios-and-proof-flows/17-01-PLAN.md
+Last session: 2026-05-09T07:58:37.071Z
+Stopped At: Completed 17-01-PLAN.md
+Resume File: None
 
 ## Accumulated Context
 

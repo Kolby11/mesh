@@ -31,11 +31,11 @@
 
 ### Benchmark Scenarios
 
-- [ ] **BENCH-01**: The shell exposes a repeatable hover benchmark scenario that reports input, hover/restyle, and render timing buckets.
-- [ ] **BENCH-02**: The shell exposes a repeatable surface open/close scenario that reports total surface render cost and redraw activity.
-- [ ] **BENCH-03**: The shell exposes a repeatable slider drag or other pointer-driven update scenario that reports input-to-visible-response timing.
-- [ ] **BENCH-04**: The shell exposes a repeatable keyboard traversal scenario that reports focus/input/render timing.
-- [ ] **BENCH-05**: The shell exposes a repeatable backend-driven state update scenario that reports backend stage timing plus resulting frontend render cost.
+- [x] **BENCH-01**: The shell exposes a repeatable hover benchmark scenario that reports input, hover/restyle, and render timing buckets.
+- [x] **BENCH-02**: The shell exposes a repeatable surface open/close scenario that reports total surface render cost and redraw activity.
+- [x] **BENCH-03**: The shell exposes a repeatable slider drag or other pointer-driven update scenario that reports input-to-visible-response timing.
+- [x] **BENCH-04**: The shell exposes a repeatable keyboard traversal scenario that reports focus/input/render timing.
+- [x] **BENCH-05**: The shell exposes a repeatable backend-driven state update scenario that reports backend stage timing plus resulting frontend render cost.
 
 ### Optimization Outcomes
 
@@ -82,11 +82,11 @@
 | INSP-01 | Phase 16 | Pending |
 | INSP-02 | Phase 16 | Pending |
 | INSP-03 | Phase 16 | Pending |
-| BENCH-01 | Phase 17 | Pending |
-| BENCH-02 | Phase 17 | Pending |
-| BENCH-03 | Phase 17 | Pending |
-| BENCH-04 | Phase 17 | Pending |
-| BENCH-05 | Phase 17 | Pending |
+| BENCH-01 | Phase 17 | Complete |
+| BENCH-02 | Phase 17 | Complete |
+| BENCH-03 | Phase 17 | Complete |
+| BENCH-04 | Phase 17 | Complete |
+| BENCH-05 | Phase 17 | Complete |
 | OPT-01 | Phase 18 | Pending |
 | OPT-02 | Phase 18 | Pending |
 | OPT-03 | Phase 18 | Pending |
