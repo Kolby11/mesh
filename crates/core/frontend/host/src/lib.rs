@@ -145,6 +145,9 @@ pub enum CoreRequest {
     },
     ToggleDebugOverlay,
     ToggleDebugProfiling,
+    RunDebugBenchmark {
+        scenario_id: String,
+    },
     CycleDebugTab,
     Shutdown,
 }

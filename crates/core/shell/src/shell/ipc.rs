@@ -98,6 +98,11 @@ fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
             surface_id: surface_id.to_string(),
         });
     }
+    if let Some(scenario_id) = command.strip_prefix("shell:debug_benchmark:") {
+        return Some(CoreRequest::RunDebugBenchmark {
+            scenario_id: scenario_id.to_string(),
+        });
+    }
     match command {
         "shell:debug_overlay" => Some(CoreRequest::ToggleDebugOverlay),
         "shell:debug_profiling" => Some(CoreRequest::ToggleDebugProfiling),

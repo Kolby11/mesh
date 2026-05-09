@@ -118,6 +118,18 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                 }),
             "shell.toggle-debug-overlay" => Some(CoreRequest::ToggleDebugOverlay),
             "shell.toggle-debug-profiling" => Some(CoreRequest::ToggleDebugProfiling),
+            "shell.run-debug-benchmark" => {
+                match event.payload.get("scenario_id").and_then(|v| v.as_str()) {
+                    Some(scenario_id) if !scenario_id.is_empty() => {
+                        Some(CoreRequest::RunDebugBenchmark {
+                            scenario_id: scenario_id.to_string(),
+                        })
+                    }
+                    _ => Some(CoreRequest::PublishDiagnostics {
+                        message: "debug benchmark request missing scenario_id".to_string(),
+                    }),
+                }
+            }
             other => other.rfind('.').map(|pos| {
                 let interface = other[..pos].to_string();
                 let command = other[pos + 1..].to_string();

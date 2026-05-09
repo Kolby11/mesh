@@ -202,6 +202,10 @@ impl Shell {
                 tracing::debug!("debug profiling: {}", if enabled { "on" } else { "off" });
                 Ok(VecDeque::new())
             }
+            CoreRequest::RunDebugBenchmark { scenario_id } => {
+                tracing::info!("diagnostic: unknown debug benchmark scenario: {scenario_id}");
+                Ok(VecDeque::new())
+            }
             CoreRequest::CycleDebugTab => {
                 self.debug.cycle_tab();
                 Ok(VecDeque::new())
@@ -538,6 +542,7 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::TransferTabFocus { .. } => "transfer_tab_focus",
         CoreRequest::ToggleDebugOverlay => "toggle_debug_overlay",
         CoreRequest::ToggleDebugProfiling => "toggle_debug_profiling",
+        CoreRequest::RunDebugBenchmark { .. } => "run_debug_benchmark",
         CoreRequest::CycleDebugTab => "cycle_debug_tab",
         CoreRequest::Shutdown => "shutdown",
     }
