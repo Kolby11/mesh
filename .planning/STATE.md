@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Performance Instrumentation and Responsiveness
 status: planning
-stopped_at: Phase 17 context gathered
-last_updated: "2026-05-09T07:26:20.662Z"
+stopped_at: Phase 17 UI-SPEC approved
+last_updated: "2026-05-09T07:32:39.909Z"
 last_activity: 2026-05-08 -- Phase 16 marked complete after Wayland inspector anchor fix
 progress:
   total_phases: 5
@@ -108,9 +108,9 @@ Last activity: 2026-05-08 -- Phase 16 marked complete after Wayland inspector an
 
 ## Session
 
-Last session: 2026-05-09T07:26:20.646Z
-Stopped At: Phase 17 context gathered
-Resume File: .planning/phases/17-canonical-benchmark-scenarios-and-proof-flows/17-CONTEXT.md
+Last session: 2026-05-09T07:32:39.898Z
+Stopped At: Phase 17 UI-SPEC approved
+Resume File: .planning/phases/17-canonical-benchmark-scenarios-and-proof-flows/17-UI-SPEC.md
 
 ## Accumulated Context
 
