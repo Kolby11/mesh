@@ -11,6 +11,7 @@ pub struct DebugSnapshot {
     pub backend_runtimes: Vec<BackendRuntimeEntry>,
     pub health: Vec<HealthEntry>,
     pub active_surfaces: Vec<String>,
+    pub benchmarks: DebugBenchmarkSnapshot,
     pub profiling: Option<ProfilingSnapshot>,
 }
 
@@ -41,6 +42,76 @@ impl DebugInspectorView {
             DebugTab::Modules => Self::Overview,
             DebugTab::Interfaces => Self::Surfaces,
             DebugTab::Health => Self::BackendServices,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DebugBenchmarkSnapshot {
+    pub scenarios: Vec<BenchmarkScenarioSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BenchmarkScenarioSnapshot {
+    pub id: BenchmarkScenarioId,
+    pub label: String,
+    pub target: String,
+    pub status: BenchmarkScenarioStatus,
+    pub primary_metric: String,
+    pub secondary_metric: String,
+    pub hint: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum BenchmarkScenarioId {
+    Hover,
+    SurfaceOpenClose,
+    PointerUpdate,
+    KeyboardTraversal,
+    BackendUpdate,
+}
+
+impl BenchmarkScenarioId {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Hover => "hover",
+            Self::SurfaceOpenClose => "surface_open_close",
+            Self::PointerUpdate => "pointer_update",
+            Self::KeyboardTraversal => "keyboard_traversal",
+            Self::BackendUpdate => "backend_update",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Hover => "Hover",
+            Self::SurfaceOpenClose => "Surface open/close",
+            Self::PointerUpdate => "Pointer-driven update",
+            Self::KeyboardTraversal => "Keyboard traversal",
+            Self::BackendUpdate => "Backend-driven update",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum BenchmarkScenarioStatus {
+    ProfilingOff,
+    Ready,
+    WaitingForSamples,
+    Complete,
+    Unavailable,
+    Skipped,
+}
+
+impl BenchmarkScenarioStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ProfilingOff => "Profiling off",
+            Self::Ready => "Ready",
+            Self::WaitingForSamples => "Waiting for samples",
+            Self::Complete => "Complete",
+            Self::Unavailable => "Unavailable",
+            Self::Skipped => "Skipped",
         }
     }
 }

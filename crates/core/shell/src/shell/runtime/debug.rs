@@ -75,6 +75,7 @@ impl Shell {
             backend_runtimes,
             health,
             active_surfaces,
+            benchmarks: mesh_core_debug::DebugBenchmarkSnapshot::default(),
             profiling: self.debug.profiling_enabled.then(|| {
                 let mut profiling = self.profiling.snapshot(self.debug.profiling_session_id);
                 profiling
