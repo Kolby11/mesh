@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Performance Instrumentation and Responsiveness
-status: planning
-stopped_at: Phase 17 UI-SPEC approved
-last_updated: "2026-05-09T07:32:39.909Z"
-last_activity: 2026-05-08 -- Phase 16 marked complete after Wayland inspector anchor fix
+status: executing
+stopped_at: Phase 17 planned
+last_updated: "2026-05-09T07:40:22.217Z"
+last_activity: 2026-05-09 -- Phase 17 planning complete
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 12
+  total_plans: 16
   completed_plans: 12
-  percent: 100
+  percent: 75
 ---
 
 # State: MESH v1.3
@@ -27,8 +27,8 @@ See: `.planning/PROJECT.md` (updated 2026-05-08)
 
 Phase: 17
 Plan: Not started
-Status: Ready to plan
-Last activity: 2026-05-08 -- Phase 16 marked complete after Wayland inspector anchor fix
+Status: Ready to execute
+Last activity: 2026-05-09 -- Phase 17 planning complete
 
 ## Decisions
 
@@ -108,9 +108,9 @@ Last activity: 2026-05-08 -- Phase 16 marked complete after Wayland inspector an
 
 ## Session
 
-Last session: 2026-05-09T07:32:39.898Z
-Stopped At: Phase 17 UI-SPEC approved
-Resume File: .planning/phases/17-canonical-benchmark-scenarios-and-proof-flows/17-UI-SPEC.md
+Last session: 2026-05-09T07:40:22.207Z
+Stopped At: Phase 17 planned
+Resume File: .planning/phases/17-canonical-benchmark-scenarios-and-proof-flows/17-01-PLAN.md
 
 ## Accumulated Context
 
