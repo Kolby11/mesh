@@ -413,7 +413,8 @@ fn backend_update_benchmark_metrics(
             "No frontend surface render samples yet".to_string(),
             "Start the backend provider and run this scenario while profiling is live".to_string(),
         ),
-        (Some(_), None, _) | (None, _, _) => waiting_for_backend_samples(),
+        (Some(_), None, frontend) => waiting_for_backend_samples(frontend),
+        (None, _, frontend) => waiting_for_backend_samples(frontend),
         (_, _, Some(_)) | (_, _, None) => waiting_for_surface_samples(),
     }
 }
@@ -449,7 +450,9 @@ fn backend_update_runtime_available(
         .any(|entry| entry.interface == "mesh.audio" && entry.provider_id == "@mesh/pipewire-audio")
 }
 
-fn waiting_for_backend_samples() -> (
+fn waiting_for_backend_samples(
+    frontend: Option<&mesh_core_debug::ProfilingSurfaceSnapshot>,
+) -> (
     mesh_core_debug::BenchmarkScenarioStatus,
     String,
     String,
@@ -458,7 +461,15 @@ fn waiting_for_backend_samples() -> (
     (
         mesh_core_debug::BenchmarkScenarioStatus::WaitingForSamples,
         "No backend provider samples yet".to_string(),
-        "No frontend surface render samples yet".to_string(),
+        frontend
+            .filter(|surface| surface.total_surface_render_time_micros > 0)
+            .map(|surface| {
+                format!(
+                    "frontend total_surface_render: {}us",
+                    surface.total_surface_render_time_micros
+                )
+            })
+            .unwrap_or_else(|| "No frontend surface render samples yet".to_string()),
         "Run the backend-driven scenario while profiling is live".to_string(),
     )
 }

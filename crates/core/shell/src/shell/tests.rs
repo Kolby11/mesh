@@ -670,6 +670,170 @@ fn benchmark_payload_serializes_targets_statuses_and_metrics() {
 }
 
 #[test]
+fn benchmark_backend_update_correlates_backend_stage_with_surface_render_cost() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+
+    shell.record_backend_profiling_stage(
+        "mesh.audio",
+        "@mesh/pipewire-audio",
+        ProfilingBackendStage::StatePublishDelivery,
+        std::time::Duration::from_micros(31),
+        Some("broadcast_service_event"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::TotalSurfaceRender,
+        std::time::Duration::from_micros(45),
+        Some("service_update"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let backend_update = snapshot
+        .benchmarks
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.id.id() == "backend_update")
+        .expect("backend_update benchmark row should exist");
+
+    assert_eq!(
+        backend_update.status,
+        mesh_core_debug::BenchmarkScenarioStatus::Complete
+    );
+    assert_eq!(backend_update.target, "mesh.audio -> @mesh/pipewire-audio");
+    assert!(backend_update.primary_metric.contains("mesh.audio"));
+    assert!(
+        backend_update
+            .primary_metric
+            .contains("@mesh/pipewire-audio")
+    );
+    assert!(
+        backend_update
+            .primary_metric
+            .contains("state_publish_delivery")
+    );
+    assert!(
+        backend_update
+            .secondary_metric
+            .contains("total_surface_render")
+    );
+    assert!(backend_update.secondary_metric.contains("45us"));
+
+    let latest = shell
+        .latest_service_state
+        .get(mesh_core_debug::DEBUG_INTERFACE)
+        .expect("mesh.debug service state should include benchmark payload");
+    let scenarios = latest.state["benchmarks"]["scenarios"]
+        .as_array()
+        .expect("benchmarks.scenarios should serialize as an array");
+    let payload = scenarios
+        .iter()
+        .find(|scenario| scenario["id"] == serde_json::json!("backend_update"))
+        .expect("backend_update payload should serialize");
+    assert_eq!(payload["status"], serde_json::json!("Complete"));
+    assert_eq!(
+        payload["target"],
+        serde_json::json!("mesh.audio -> @mesh/pipewire-audio")
+    );
+    assert!(
+        payload["primary_metric"]
+            .as_str()
+            .unwrap()
+            .contains("state_publish_delivery")
+    );
+    assert!(
+        payload["secondary_metric"]
+            .as_str()
+            .unwrap()
+            .contains("frontend total_surface_render")
+    );
+}
+
+#[test]
+fn benchmark_backend_update_waits_when_surface_cost_is_missing() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+
+    shell.record_backend_profiling_stage(
+        "mesh.audio",
+        "@mesh/pipewire-audio",
+        ProfilingBackendStage::CommandHandling,
+        std::time::Duration::from_micros(27),
+        Some("service_command"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let backend_update = snapshot
+        .benchmarks
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.id.id() == "backend_update")
+        .expect("backend_update benchmark row should exist");
+
+    assert_eq!(
+        backend_update.status,
+        mesh_core_debug::BenchmarkScenarioStatus::WaitingForSamples
+    );
+    assert_eq!(
+        backend_update.primary_metric,
+        "Backend provider timing captured"
+    );
+    assert_eq!(
+        backend_update.secondary_metric,
+        "No frontend surface render samples yet"
+    );
+}
+
+#[test]
+fn benchmark_backend_update_waits_when_backend_stage_is_missing() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    shell.record_backend_runtime_status(
+        "mesh.audio".to_string(),
+        "@mesh/pipewire-audio".to_string(),
+        BackendRuntimeStatus::Running,
+        "backend runtime started".to_string(),
+    );
+
+    shell.record_surface_profiling_stage(
+        "@mesh/audio-popover",
+        Some("@mesh/audio-popover"),
+        ProfilingStage::TotalSurfaceRender,
+        std::time::Duration::from_micros(53),
+        Some("service_update"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let backend_update = snapshot
+        .benchmarks
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.id.id() == "backend_update")
+        .expect("backend_update benchmark row should exist");
+
+    assert_eq!(
+        backend_update.status,
+        mesh_core_debug::BenchmarkScenarioStatus::WaitingForSamples
+    );
+    assert_eq!(backend_update.target, "mesh.audio -> @mesh/pipewire-audio");
+    assert_eq!(
+        backend_update.primary_metric,
+        "No backend provider samples yet"
+    );
+    assert_eq!(
+        backend_update.secondary_metric,
+        "frontend total_surface_render: 53us"
+    );
+}
+
+#[test]
 fn benchmark_service_event_maps_to_run_request() {
     let requests = script_events_to_requests(vec![PublishedEvent {
         channel: "shell.run-debug-benchmark".into(),
