@@ -34,7 +34,7 @@ impl Shell {
             let profiling_enabled = self.profiling_enabled();
             let mut rerender_attempts = 0;
             let mut component_stage_records = Vec::new();
-            let mut component_id = String::new();
+            let component_id = self.components[index].component.id().to_string();
             let mut buffer = loop {
                 let surface = self
                     .surfaces
@@ -47,7 +47,6 @@ impl Shell {
                     .component
                     .render(surface)
                     .map_err(ShellRunError::Component)?;
-                component_id = self.components[index].component.id().to_string();
 
                 let visible = self
                     .core

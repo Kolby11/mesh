@@ -571,12 +571,12 @@ local function surface_slot(slot, snapshot)
     surface_row_3_redraw_label = string.format("Redraws %s", tostring(snapshot.redraw_count or 0))
 end
 
-local function runtime_label(interface_name, runtimes)
+local function runtime_label(interface_name, provider_id, runtimes)
     if type(runtimes) ~= "table" then
         return "No runtime health entry"
     end
     for _, runtime in ipairs(runtimes) do
-        if tostring(runtime.interface or "") == interface_name then
+        if tostring(runtime.interface or "") == interface_name and tostring(runtime.provider_id or "") == provider_id then
             local status = tostring(runtime.status or "unknown")
             local message = tostring(runtime.message or "No runtime detail")
             return string.format("%s: %s", status, message)
@@ -596,7 +596,7 @@ local function backend_slot(slot, snapshot, runtimes)
     if snapshot ~= nil then
         target_interface = tostring(snapshot.interface or "unknown")
         target_provider = tostring(snapshot.provider_id or "unknown")
-        target_runtime = runtime_label(target_interface, runtimes)
+        target_runtime = runtime_label(target_interface, target_provider, runtimes)
         target_poll = stage_total_label(find_stage(snapshot.stages, "poll_update"))
         target_command = stage_total_label(find_stage(snapshot.stages, "command_handling"))
         target_publish = stage_total_label(find_stage(snapshot.stages, "state_publish_delivery"))

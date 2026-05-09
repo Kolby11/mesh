@@ -6,6 +6,8 @@ use tokio::net::UnixListener;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
+const MAX_IPC_COMMAND_BYTES: usize = 4096;
+
 pub(super) fn spawn_ipc_server(
     runtime: &Runtime,
     socket_path: PathBuf,
@@ -65,16 +67,14 @@ async fn handle_ipc_client(
 ) -> Result<(), std::io::Error> {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
-    let mut line = String::new();
 
-    loop {
-        line.clear();
-        let read = reader.read_line(&mut line).await?;
-        if read == 0 {
+    while let Some(command) = read_ipc_command(&mut reader).await? {
+        let Some(command) = command else {
+            writer.write_all(b"error command-too-long\n").await?;
             break;
-        }
+        };
 
-        let command = line.trim();
+        let command = command.trim();
         if command.is_empty() {
             continue;
         }
@@ -95,6 +95,41 @@ async fn handle_ipc_client(
     }
 
     Ok(())
+}
+
+async fn read_ipc_command<R: tokio::io::AsyncRead + Unpin>(
+    reader: &mut BufReader<R>,
+) -> Result<Option<Option<String>>, std::io::Error> {
+    let mut line = Vec::new();
+
+    loop {
+        let (consumed, done, too_long) = {
+            let available = reader.fill_buf().await?;
+            if available.is_empty() {
+                if line.is_empty() {
+                    return Ok(None);
+                }
+                return Ok(Some(Some(String::from_utf8_lossy(&line).into_owned())));
+            }
+
+            let newline = available.iter().position(|byte| *byte == b'\n');
+            let take = newline.map(|pos| pos + 1).unwrap_or(available.len());
+            let payload_len = newline.unwrap_or(take);
+            let too_long = line.len().saturating_add(payload_len) > MAX_IPC_COMMAND_BYTES;
+            if !too_long {
+                line.extend_from_slice(&available[..payload_len]);
+            }
+            (take, newline.is_some(), too_long)
+        };
+
+        reader.consume(consumed);
+        if too_long {
+            return Ok(Some(None));
+        }
+        if done {
+            return Ok(Some(Some(String::from_utf8_lossy(&line).into_owned())));
+        }
+    }
 }
 
 pub(super) fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
@@ -140,6 +175,7 @@ fn is_private_tmp_ipc_dir(path: &std::path::Path) -> bool {
 mod tests {
     use super::*;
     use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn ipc_server_refuses_to_replace_non_socket_path() {
@@ -166,5 +202,24 @@ mod tests {
         let metadata = std::fs::symlink_metadata(socket_path).unwrap();
         assert!(metadata.file_type().is_socket());
         assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn ipc_client_rejects_oversized_command_line() {
+        let runtime = Runtime::new().unwrap();
+        runtime.block_on(async {
+            let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let task = tokio::spawn(handle_ipc_client(server, tx));
+
+            let mut payload = vec![b'x'; MAX_IPC_COMMAND_BYTES + 1];
+            payload.push(b'\n');
+            client.write_all(&payload).await.unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).await.unwrap();
+            task.await.unwrap().unwrap();
+
+            assert_eq!(response, "error command-too-long\n");
+        });
     }
 }

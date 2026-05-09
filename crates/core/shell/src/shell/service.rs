@@ -74,16 +74,8 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                 }),
             "shell.position-surface" => {
                 let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
-                let margin_top = event
-                    .payload
-                    .get("margin_top")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0) as i32;
-                let margin_left = event
-                    .payload
-                    .get("margin_left")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0) as i32;
+                let margin_top = payload_i32(&event.payload, "margin_top").unwrap_or(0);
+                let margin_left = payload_i32(&event.payload, "margin_left").unwrap_or(0);
                 Some(CoreRequest::PositionSurface {
                     surface_id: surface_id.to_string(),
                     margin_top,
@@ -159,6 +151,13 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
             }),
         })
         .collect()
+}
+
+fn payload_i32(payload: &serde_json::Value, key: &str) -> Option<i32> {
+    payload
+        .get(key)
+        .and_then(|value| value.as_i64())
+        .and_then(|value| i32::try_from(value).ok())
 }
 
 #[cfg(test)]
@@ -320,5 +319,54 @@ mod tests {
             requests.get(1),
             Some(CoreRequest::ToggleDebugProfiling)
         ));
+    }
+
+    #[test]
+    fn script_events_to_requests_keeps_position_margins_in_i32_range() {
+        let requests = script_events_to_requests(vec![
+            PublishedEvent {
+                channel: "shell.position-surface".into(),
+                payload: serde_json::json!({
+                    "surface_id": "@mesh/popover",
+                    "margin_top": i64::MAX,
+                    "margin_left": i64::MIN,
+                }),
+                source_module_id: "@mesh/navigation-bar".into(),
+                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+            },
+            PublishedEvent {
+                channel: "shell.position-surface".into(),
+                payload: serde_json::json!({
+                    "surface_id": "@mesh/popover",
+                    "margin_top": "bad",
+                    "margin_left": 24,
+                }),
+                source_module_id: "@mesh/navigation-bar".into(),
+                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+            },
+        ]);
+
+        match &requests[0] {
+            CoreRequest::PositionSurface {
+                margin_top,
+                margin_left,
+                ..
+            } => {
+                assert_eq!(*margin_top, 0);
+                assert_eq!(*margin_left, 0);
+            }
+            other => panic!("expected PositionSurface, got {other:?}"),
+        }
+        match &requests[1] {
+            CoreRequest::PositionSurface {
+                margin_top,
+                margin_left,
+                ..
+            } => {
+                assert_eq!(*margin_top, 0);
+                assert_eq!(*margin_left, 24);
+            }
+            other => panic!("expected PositionSurface, got {other:?}"),
+        }
     }
 }

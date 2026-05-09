@@ -5368,13 +5368,22 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
                 "active_view": "overview",
                 "modules": [],
                 "interfaces": [],
-                "backend_runtimes": [{
-                    "interface": "mesh.audio",
-                    "provider_id": "@mesh/pipewire-audio",
-                    "status": "running",
-                    "message": "Polling steadily",
-                    "failure_count": 0
-                }],
+                "backend_runtimes": [
+                    {
+                        "interface": "mesh.audio",
+                        "provider_id": "@mesh/pipewire-audio",
+                        "status": "stopped",
+                        "message": "Old provider stopped",
+                        "failure_count": 0
+                    },
+                    {
+                        "interface": "mesh.audio",
+                        "provider_id": "@mesh/pulseaudio-audio",
+                        "status": "running",
+                        "message": "Polling steadily",
+                        "failure_count": 0
+                    }
+                ],
                 "active_surfaces": [],
                 "profiling": {
                     "session_id": 7,
@@ -5392,7 +5401,7 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
                     "surfaces": [],
                     "backends": [{
                         "interface": "mesh.audio",
-                        "provider_id": "@mesh/pipewire-audio",
+                        "provider_id": "@mesh/pulseaudio-audio",
                         "stages": [
                             {
                                 "stage": "poll_update",
@@ -5440,6 +5449,11 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
     assert!(
         text.iter()
             .any(|line| line.contains("running: Polling steadily"))
+    );
+    assert!(
+        !text
+            .iter()
+            .any(|line| line.contains("stopped: Old provider stopped"))
     );
     assert!(text.iter().any(|line| line.contains("poll_update")));
     assert!(
