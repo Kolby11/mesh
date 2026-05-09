@@ -21,7 +21,7 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-08)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 17 — canonical-benchmark-scenarios-and-proof-flows
+**Current focus:** Phase 18 — targeted-optimization-pass
 
 ## Current Position
 

@@ -36,6 +36,8 @@ The project now also has a rendering-system upgrade with:
 
 **Goal:** Make shell responsiveness measurable on real shipped interaction paths, expose that data through a debug-only live inspector built on normal `.mesh` UI primitives, and use the results to land a bounded optimization pass in the same milestone.
 
+Phase 17 is complete as of 2026-05-09. The project now has five canonical benchmark scenarios exposed through `mesh.debug` and the debug inspector, explicit frontend/event/IPC launch paths, and backend-to-frontend correlation proof for the backend-driven benchmark. Phase 18 is ready to plan for the targeted optimization pass.
+
 **Target features:**
 - A debug-only profiling mode wired through the existing debug overlay/debug command path
 - Live shell-wide profiling snapshots for input, runtime updates, backend work, build, style, layout, paint, present, redraw, and total surface render time
@@ -50,6 +52,7 @@ The project now also has a rendering-system upgrade with:
 
 - `v1.1`: Backend plugin MVP is stable enough to host real service providers and surface diagnostics.
 - `v1.2`: The renderer supports practical CSS-like styling, interaction reactivity, selection, keyboard navigation, and animation on shipped shell surfaces.
+- `v1.3 Phase 17`: Canonical benchmark scenarios are fixed on shipped interactions and exposed through the debug inspector with repeatable launch and measurement proof flows.
 
 ### Active
 
@@ -116,4 +119,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-08 after starting milestone v1.3*
+*Last updated: 2026-05-09 after completing Phase 17*
