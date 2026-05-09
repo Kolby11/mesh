@@ -146,7 +146,14 @@ impl FrontendRenderEngine {
             match command.kind {
                 DisplayPaintCommandKind::Node => {
                     let node_bounds = scaled_node_bounds(&command.node, scale);
-                    self.render_node_self(&command.node, buffer, scale, node_bounds, clip, module_id);
+                    self.render_node_self(
+                        &command.node,
+                        buffer,
+                        scale,
+                        node_bounds,
+                        clip,
+                        module_id,
+                    );
                 }
                 DisplayPaintCommandKind::Scrollbars => {
                     let bounds = scaled_node_bounds(&command.node, scale);

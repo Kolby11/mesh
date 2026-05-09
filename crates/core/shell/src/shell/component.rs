@@ -51,9 +51,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mesh_core_render::{
-    DisplayListMetrics, PixelBuffer, RenderObjectTree, RetainedDisplayList, SharedTextMeasurer,
-    TextCacheMetrics, TextRenderer, paint_frontend_tree_at_for_module_with_text_metrics,
-    paint_frontend_tree_at_for_module_with_text_metrics_clipped,
+    DamageRect, DisplayListMetrics, PixelBuffer, RenderObjectTree, RetainedDisplayList,
+    SharedTextMeasurer, TextCacheMetrics, TextRenderer,
+    paint_display_list_for_module_with_text_metrics,
 };
 
 const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
@@ -271,6 +271,7 @@ pub(super) struct FrontendSurfaceComponent {
     profiling_enabled: bool,
     profiling_records: Vec<ComponentProfilingRecord>,
     invalidation_snapshot: Option<mesh_core_debug::ProfilingInvalidationSnapshot>,
+    last_present_damage: Option<DamageRect>,
     /// Cached aggregate of restyle rules collected from `compiled.component`
     /// and every entry in `compiled.local_components`. Populated lazily on the
     /// first restyle and invalidated whenever the compiled module is replaced
@@ -351,6 +352,7 @@ impl FrontendSurfaceComponent {
             profiling_enabled: false,
             profiling_records: Vec::new(),
             invalidation_snapshot: None,
+            last_present_damage: None,
             cached_restyle_rules: None,
         }
     }
@@ -383,6 +385,10 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn invalidate_surface_config(&mut self) {
         self.invalidate(ComponentDirtyFlags::SURFACE_RECONFIGURE);
+    }
+
+    pub(super) fn invalidate_surface_config_only(&mut self) {
+        self.invalidate_style_path(ComponentDirtyFlags::SURFACE_CONFIG);
     }
 
     pub(super) fn take_dirty_for_paint(
