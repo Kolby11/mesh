@@ -5232,7 +5232,7 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
     assert!(
         benchmark_text
             .iter()
-            .any(|line| line.contains("Phase 17 adds repeatable benchmark flows"))
+            .any(|line| line.contains("Run fixed shell interactions"))
     );
     for label in [
         "Hover",
