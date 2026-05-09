@@ -53,6 +53,7 @@ use std::time::Duration;
 use mesh_core_render::{
     DisplayListMetrics, PixelBuffer, RenderObjectTree, RetainedDisplayList, SharedTextMeasurer,
     TextCacheMetrics, TextRenderer, paint_frontend_tree_at_for_module_with_text_metrics,
+    paint_frontend_tree_at_for_module_with_text_metrics_clipped,
 };
 
 const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
@@ -239,11 +240,13 @@ pub(super) struct FrontendSurfaceComponent {
     hovered_path: Vec<String>,
     hovered_pos: (f32, f32),
     hover_start: Option<std::time::Instant>,
+    tooltip_visible_previous: bool,
     runtimes: Arc<Mutex<HashMap<String, EmbeddedFrontendRuntime>>>,
     render_stack: RefCell<Vec<String>>,
     active_theme: RefCell<Theme>,
     measured_size: Option<(u32, u32)>,
     last_surface_size: Option<(u32, u32)>,
+    surface_pixels_invalid: bool,
     locale: LocaleEngine,
     interface_catalog: mesh_core_service::InterfaceCatalog,
     last_tree: Option<WidgetNode>,
@@ -324,11 +327,13 @@ impl FrontendSurfaceComponent {
             hovered_path: Vec::new(),
             hovered_pos: (0.0, 0.0),
             hover_start: None,
+            tooltip_visible_previous: false,
             runtimes: Arc::new(Mutex::new(HashMap::new())),
             render_stack: RefCell::new(Vec::new()),
             active_theme: RefCell::new(default_theme()),
             measured_size: None,
             last_surface_size: None,
+            surface_pixels_invalid: true,
             locale: LocaleEngine::new("en"),
             interface_catalog,
             last_tree: None,

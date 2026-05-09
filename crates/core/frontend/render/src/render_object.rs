@@ -36,21 +36,54 @@ impl RenderObjectDirtySummary {
 #[derive(Debug, Default)]
 pub struct RenderObjectTree {
     generation: u64,
+    retained_tree_generation: Option<u64>,
     nodes: HashMap<NodeId, RenderObjectSnapshot>,
     root: Option<NodeId>,
     last_dirty: RenderObjectDirtySummary,
+    dirty_nodes: HashSet<NodeId>,
 }
 
 impl RenderObjectTree {
     pub fn update(&mut self, root: &WidgetNode) -> RenderObjectDirtySummary {
+        self.update_inner(root, None)
+    }
+
+    pub fn update_for_retained_generation(
+        &mut self,
+        root: &WidgetNode,
+        retained_tree_generation: u64,
+    ) -> RenderObjectDirtySummary {
+        if self.retained_tree_generation == Some(retained_tree_generation) {
+            self.last_dirty = RenderObjectDirtySummary::default();
+            self.dirty_nodes.clear();
+            return self.last_dirty;
+        }
+        self.update_inner(root, Some(retained_tree_generation))
+    }
+
+    fn update_inner(
+        &mut self,
+        root: &WidgetNode,
+        retained_tree_generation: Option<u64>,
+    ) -> RenderObjectDirtySummary {
         let mut next = HashMap::new();
         collect_render_objects(root, None, &mut next);
 
         let mut dirty = RenderObjectDirtySummary::default();
+        let mut dirty_nodes = HashSet::new();
         for (&id, next_snapshot) in &next {
             match self.nodes.get(&id) {
-                Some(previous) => dirty.add_diff(previous, next_snapshot),
-                None => dirty.inserted += 1,
+                Some(previous) => {
+                    let before = dirty;
+                    dirty.add_diff(previous, next_snapshot);
+                    if dirty != before {
+                        dirty_nodes.insert(id);
+                    }
+                }
+                None => {
+                    dirty.inserted += 1;
+                    dirty_nodes.insert(id);
+                }
             }
         }
 
@@ -69,7 +102,9 @@ impl RenderObjectTree {
         }
         self.root = Some(root.id);
         self.nodes = next;
+        self.retained_tree_generation = retained_tree_generation;
         self.last_dirty = dirty;
+        self.dirty_nodes = dirty_nodes;
         dirty
     }
 
@@ -87,6 +122,10 @@ impl RenderObjectTree {
 
     pub fn last_dirty(&self) -> RenderObjectDirtySummary {
         self.last_dirty
+    }
+
+    pub fn dirty_node_ids(&self) -> &HashSet<NodeId> {
+        &self.dirty_nodes
     }
 }
 
@@ -279,9 +318,41 @@ mod tests {
         assert_eq!(dirty.text, 1);
         assert_eq!(dirty.geometry, 1);
         assert_eq!(dirty.opacity, 1);
+        assert_eq!(
+            tree.dirty_node_ids(),
+            &HashSet::from([2]),
+            "dirty node ids should identify changed render objects"
+        );
         assert_eq!(dirty.inserted, 0);
         assert_eq!(dirty.removed, 0);
         assert_eq!(tree.generation(), 2);
         assert_eq!(tree.last_dirty(), dirty);
+    }
+
+    #[test]
+    fn render_object_tree_skips_rebuild_when_retained_generation_is_unchanged() {
+        let mut root = WidgetNode::new("row");
+        root.id = 1;
+        let mut child = WidgetNode::new("text");
+        child.id = 2;
+        child.attributes.insert("content".into(), "hello".into());
+        root.children.push(child);
+
+        let mut tree = RenderObjectTree::default();
+        let first = tree.update_for_retained_generation(&root, 1);
+        assert_eq!(first.inserted, 2);
+        assert_eq!(tree.generation(), 1);
+
+        root.children[0]
+            .attributes
+            .insert("content".into(), "goodbye".into());
+        let skipped = tree.update_for_retained_generation(&root, 1);
+        assert!(!skipped.any());
+        assert!(tree.dirty_node_ids().is_empty());
+        assert_eq!(tree.generation(), 1);
+
+        let dirty = tree.update_for_retained_generation(&root, 2);
+        assert_eq!(dirty.text, 1);
+        assert_eq!(tree.generation(), 2);
     }
 }

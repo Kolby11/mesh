@@ -102,6 +102,65 @@ fn typed_invalidations_cover_text_metrics_and_surface_configuration() {
     assert!(flags.contains(ComponentDirtyFlags::METRICS));
 }
 
+#[test]
+fn phase18_script_and_text_invalidations_take_full_rebuild_paint_path() {
+    let mut component = test_frontend_component("<template><button>Push</button></template>");
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 48);
+
+    component.set_profiling_enabled(true);
+    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+    component.take_invalidation_snapshot();
+    component.take_profiling_records();
+
+    component.invalidate_interaction_restyle();
+    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+    let restyle_snapshot = component
+        .take_invalidation_snapshot()
+        .expect("restyle paint should record invalidation");
+    assert!(!restyle_snapshot.full_rebuild);
+    assert!(restyle_snapshot.retained_path);
+    assert!(
+        !component
+            .take_profiling_records()
+            .iter()
+            .any(|record| record.stage == mesh_core_debug::ProfilingStage::TreeBuild),
+        "retained restyle must not rebuild the widget tree"
+    );
+
+    component.invalidate_script_state();
+    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+    let script_snapshot = component
+        .take_invalidation_snapshot()
+        .expect("script paint should record invalidation");
+    assert!(script_snapshot.full_rebuild);
+    assert!(!script_snapshot.retained_path);
+    assert_eq!(script_snapshot.component.script, 1);
+    assert!(
+        component
+            .take_profiling_records()
+            .iter()
+            .any(|record| record.stage == mesh_core_debug::ProfilingStage::TreeBuild),
+        "SCRIPT invalidation must call build_tree_with_state through the full rebuild path"
+    );
+
+    component.invalidate_text_state();
+    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+    let text_snapshot = component
+        .take_invalidation_snapshot()
+        .expect("text paint should record invalidation");
+    assert!(text_snapshot.full_rebuild);
+    assert!(!text_snapshot.retained_path);
+    assert_eq!(text_snapshot.component.text, 1);
+    assert!(
+        component
+            .take_profiling_records()
+            .iter()
+            .any(|record| record.stage == mesh_core_debug::ProfilingStage::TreeBuild),
+        "TEXT invalidation must call build_tree_with_state through the full rebuild path"
+    );
+}
+
 // ---------- helpers shared by the three integration tests below ----------
 
 fn audio_network_catalog() -> InterfaceCatalog {

@@ -32,6 +32,25 @@ impl PixelBuffer {
         }
     }
 
+    /// Clear a rectangle to a solid color.
+    pub fn clear_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: Color) {
+        let end_x = x.saturating_add(w).min(self.width);
+        let end_y = y.saturating_add(h).min(self.height);
+        if x >= end_x || y >= end_y {
+            return;
+        }
+
+        let pixel = [color.b, color.g, color.r, color.a];
+        let row_start = (x * 4) as usize;
+        let row_end = (end_x * 4) as usize;
+        for py in y..end_y {
+            let base = (py * self.stride) as usize;
+            for chunk in self.data[base + row_start..base + row_end].chunks_exact_mut(4) {
+                chunk.copy_from_slice(&pixel);
+            }
+        }
+    }
+
     /// Set a single pixel. Coordinates are bounds-checked.
     pub fn set_pixel(&mut self, x: u32, y: u32, color: Color) {
         if x >= self.width || y >= self.height {
@@ -82,11 +101,7 @@ impl PixelBuffer {
 
     /// Fill a rectangle with a solid color.
     pub fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: Color) {
-        for py in y..y.saturating_add(h).min(self.height) {
-            for px in x..x.saturating_add(w).min(self.width) {
-                self.set_pixel(px, py, color);
-            }
-        }
+        self.clear_rect(x, y, w, h, color);
     }
 
     /// Fill a rounded rectangle. Uses a simple distance check for corners.
@@ -142,6 +157,17 @@ mod tests {
         let mut buf = PixelBuffer::new(10, 10);
         // Should not panic even with out-of-bounds rect.
         buf.fill_rect(8, 8, 20, 20, Color::WHITE);
+    }
+
+    #[test]
+    fn clear_rect_only_touches_clipped_area() {
+        let mut buf = PixelBuffer::new(4, 4);
+        buf.clear(Color::WHITE);
+        buf.clear_rect(1, 1, 2, 2, Color::TRANSPARENT);
+
+        assert_eq!(&buf.data[0..4], &[255, 255, 255, 255]);
+        let offset = ((buf.stride + 4) as usize)..((buf.stride + 8) as usize);
+        assert_eq!(&buf.data[offset], &[0, 0, 0, 0]);
     }
 
     #[test]

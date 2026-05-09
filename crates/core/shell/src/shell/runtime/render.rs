@@ -35,7 +35,7 @@ impl Shell {
             let mut rerender_attempts = 0;
             let mut component_stage_records = Vec::new();
             let component_id = self.components[index].component.id().to_string();
-            let mut buffer = loop {
+            loop {
                 let surface = self
                     .surfaces
                     .get_mut(&surface_id)
@@ -95,7 +95,16 @@ impl Shell {
                 self.presentation_engine.configure(&surface_id, cfg);
 
                 if !visible {
-                    break PixelBuffer::new(1, 1);
+                    let runtime = &mut self.components[index];
+                    if runtime
+                        .paint_buffer
+                        .as_ref()
+                        .map(|buffer| buffer.width != 1 || buffer.height != 1)
+                        .unwrap_or(true)
+                    {
+                        runtime.paint_buffer = Some(PixelBuffer::new(1, 1));
+                    }
+                    break;
                 }
 
                 let configured_size = if surface.width == 0 || surface.height == 0 {
@@ -113,23 +122,36 @@ impl Shell {
                 } else {
                     surface.height.max(1)
                 };
-                let mut buffer = PixelBuffer::new(width, height);
-                self.components[index]
+                let runtime = &mut self.components[index];
+                if runtime
+                    .paint_buffer
+                    .as_ref()
+                    .map(|buffer| buffer.width != width || buffer.height != height)
+                    .unwrap_or(true)
+                {
+                    runtime.paint_buffer = Some(PixelBuffer::new(width, height));
+                }
+                runtime.component.set_profiling_enabled(profiling_enabled);
+                runtime
                     .component
-                    .set_profiling_enabled(profiling_enabled);
-                self.components[index]
-                    .component
-                    .paint(self.theme.active(), width, height, &mut buffer)
+                    .paint(
+                        self.theme.active(),
+                        width,
+                        height,
+                        runtime
+                            .paint_buffer
+                            .as_mut()
+                            .expect("paint buffer initialised"),
+                    )
                     .map_err(ShellRunError::Component)?;
-                component_stage_records
-                    .extend(self.components[index].component.take_profiling_records());
+                component_stage_records.extend(runtime.component.take_profiling_records());
 
                 if !self.components[index].component.wants_render() || rerender_attempts >= 1 {
-                    break buffer;
+                    break;
                 }
 
                 rerender_attempts += 1;
-            };
+            }
 
             let visible = self
                 .core
@@ -169,9 +191,16 @@ impl Shell {
             }
 
             if visible && self.debug.show_layout_bounds {
-                if let Some(tree) = self.components[index].component.last_widget_tree() {
-                    self.debug_overlay
-                        .paint_layout_bounds(tree, &mut buffer, 1.0);
+                let runtime = &mut self.components[index];
+                if let Some(tree) = runtime.component.last_widget_tree() {
+                    self.debug_overlay.paint_layout_bounds(
+                        tree,
+                        runtime
+                            .paint_buffer
+                            .as_mut()
+                            .expect("paint buffer initialised"),
+                        1.0,
+                    );
                 }
             }
 
@@ -181,7 +210,10 @@ impl Shell {
                     &surface_id,
                     self.components[index].component.id(),
                     visible,
-                    &buffer,
+                    self.components[index]
+                        .paint_buffer
+                        .as_ref()
+                        .expect("paint buffer initialised"),
                 )
                 .map_err(ShellRunError::Presentation)?;
             if let Some(started) = present_started {

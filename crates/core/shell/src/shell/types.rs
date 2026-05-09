@@ -2,6 +2,7 @@ pub use mesh_core_frontend_host::{
     ComponentContext, ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent,
     CoreRequest, KeyModifiers, ServiceEvent, ShellComponent, SurfaceId, TabFocusTarget,
 };
+use mesh_core_render::PixelBuffer;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -17,6 +18,7 @@ pub(super) struct ComponentRuntime {
     pub(super) source_paths: Vec<(PathBuf, Option<SystemTime>)>,
     pub(super) module_settings_path: Option<PathBuf>,
     pub(super) module_settings_modified_at: Option<SystemTime>,
+    pub(super) paint_buffer: Option<PixelBuffer>,
 }
 
 impl ComponentRuntime {
@@ -39,6 +41,7 @@ impl ComponentRuntime {
             source_paths,
             module_settings_path,
             module_settings_modified_at: None,
+            paint_buffer: None,
         }
     }
 }

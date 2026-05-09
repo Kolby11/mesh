@@ -70,7 +70,10 @@
       "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-shell --lib shipped_navigation_volume activate_popover leaving_popover navigation_bar_keyboard navigation_volume)",
       "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-shell --lib -- shipped_navigation_volume activate_popover leaving_popover navigation_bar_keyboard navigation_volume)",
       "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo build -p mesh-core-scripting)",
-      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-shell --lib -- popover navigation_volume navigation_bar_keyboard)"
+      "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-shell --lib -- popover navigation_volume navigation_bar_keyboard)",
+      "Bash(apt list *)",
+      "Bash(command -v nix)",
+      "Read(//home/kolby/.cache/**)"
     ]
   }
 }

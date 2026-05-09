@@ -41,12 +41,11 @@ pub(crate) fn fill_rect_clipped(
     if clipped.width <= 0 || clipped.height <= 0 {
         return;
     }
-
-    for py in clipped.y..clipped.y + clipped.height {
-        for px in clipped.x..clipped.x + clipped.width {
-            buffer.set_pixel(px as u32, py as u32, color);
-        }
-    }
+    let x = clipped.x.max(0) as u32;
+    let y = clipped.y.max(0) as u32;
+    let w = clipped.width as u32;
+    let h = clipped.height as u32;
+    buffer.clear_rect(x, y, w, h, color);
 }
 
 pub(crate) fn fill_rounded_rect_clipped(

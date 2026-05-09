@@ -1,3 +1,7 @@
+use std::collections::HashSet;
+
+use crate::display_list::{DisplayListClip, DisplayPaintCommand, DisplayPaintCommandKind};
+
 use super::*;
 
 impl FrontendRenderEngine {
@@ -38,6 +42,120 @@ impl FrontendRenderEngine {
         self.render_node(root, buffer, scale, offset_x, offset_y, clip, module_id);
     }
 
+    pub fn render_tree_at_for_module_clipped(
+        &self,
+        root: &WidgetNode,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        offset_x: f32,
+        offset_y: f32,
+        clip: (u32, u32, u32, u32),
+        module_id: Option<&str>,
+    ) {
+        let surface_clip = ClipRect {
+            x: 0,
+            y: 0,
+            width: buffer.width as i32,
+            height: buffer.height as i32,
+        };
+        let damage_clip = ClipRect {
+            x: clip.0 as i32,
+            y: clip.1 as i32,
+            width: clip.2 as i32,
+            height: clip.3 as i32,
+        };
+        let clip = intersect_clip(surface_clip, damage_clip);
+        self.render_node(root, buffer, scale, offset_x, offset_y, clip, module_id);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_tree_at_for_module_clipped_filtered(
+        &self,
+        root: &WidgetNode,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        offset_x: f32,
+        offset_y: f32,
+        clip: (u32, u32, u32, u32),
+        paint_nodes: &HashSet<mesh_core_elements::NodeId>,
+        module_id: Option<&str>,
+    ) {
+        let surface_clip = ClipRect {
+            x: 0,
+            y: 0,
+            width: buffer.width as i32,
+            height: buffer.height as i32,
+        };
+        let damage_clip = ClipRect {
+            x: clip.0 as i32,
+            y: clip.1 as i32,
+            width: clip.2 as i32,
+            height: clip.3 as i32,
+        };
+        let clip = intersect_clip(surface_clip, damage_clip);
+        self.render_node_with_filter(
+            root,
+            buffer,
+            scale,
+            offset_x,
+            offset_y,
+            clip,
+            Some(paint_nodes),
+            module_id,
+        );
+    }
+
+    pub fn render_display_list_for_module(
+        &self,
+        commands: &[DisplayPaintCommand],
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        clip: Option<(u32, u32, u32, u32)>,
+        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
+        module_id: Option<&str>,
+    ) {
+        let surface_clip = ClipRect {
+            x: 0,
+            y: 0,
+            width: buffer.width as i32,
+            height: buffer.height as i32,
+        };
+        let paint_clip = clip
+            .map(|clip| {
+                intersect_clip(
+                    surface_clip,
+                    ClipRect {
+                        x: clip.0 as i32,
+                        y: clip.1 as i32,
+                        width: clip.2 as i32,
+                        height: clip.3 as i32,
+                    },
+                )
+            })
+            .unwrap_or(surface_clip);
+
+        for command in commands {
+            if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
+                continue;
+            }
+            let command_clip = scaled_display_clip(command.clip, scale);
+            let clip = intersect_clip(paint_clip, command_clip);
+            if clip.width <= 0 || clip.height <= 0 {
+                continue;
+            }
+            match command.kind {
+                DisplayPaintCommandKind::Node => {
+                    let node_bounds = scaled_node_bounds(&command.node, scale);
+                    self.render_node_self(&command.node, buffer, scale, node_bounds, clip, module_id);
+                }
+                DisplayPaintCommandKind::Scrollbars => {
+                    let bounds = scaled_node_bounds(&command.node, scale);
+                    self.render_scrollbars(&command.node, buffer, scale, bounds, clip);
+                }
+            }
+        }
+    }
+
     fn render_node(
         &self,
         node: &WidgetNode,
@@ -48,6 +166,27 @@ impl FrontendRenderEngine {
         clip: ClipRect,
         module_id: Option<&str>,
     ) {
+        self.render_node_with_filter(
+            node, buffer, scale, offset_x, offset_y, clip, None, module_id,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_node_with_filter(
+        &self,
+        node: &WidgetNode,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        offset_x: f32,
+        offset_y: f32,
+        clip: ClipRect,
+        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
+        module_id: Option<&str>,
+    ) {
+        if paint_nodes.is_some_and(|nodes| !nodes.contains(&node.id)) {
+            return;
+        }
+
         let style = &node.computed_style;
         if style.display == Display::None {
             return;
@@ -78,6 +217,79 @@ impl FrontendRenderEngine {
         if node_clip.width <= 0 || node_clip.height <= 0 {
             return;
         }
+
+        self.render_node_self(node, buffer, scale, bounds, node_clip, module_id);
+
+        let scroll_x = node_attr_f32(node, "_mesh_scroll_x");
+        let scroll_y = node_attr_f32(node, "_mesh_scroll_y");
+        let child_offset_x = offset_x - scroll_x;
+        let child_offset_y = offset_y - scroll_y;
+        let child_clip = if node_clips_children(node) {
+            intersect_clip(clip, bounds)
+        } else {
+            clip
+        };
+
+        let needs_sort = node
+            .children
+            .windows(2)
+            .any(|pair| pair[0].computed_style.z_index != pair[1].computed_style.z_index);
+
+        if needs_sort {
+            let mut child_order: Vec<usize> = (0..node.children.len()).collect();
+            child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
+            for index in child_order {
+                self.render_node_with_filter(
+                    &node.children[index],
+                    buffer,
+                    scale,
+                    child_offset_x,
+                    child_offset_y,
+                    child_clip,
+                    paint_nodes,
+                    module_id,
+                );
+            }
+        } else {
+            for child in &node.children {
+                self.render_node_with_filter(
+                    child,
+                    buffer,
+                    scale,
+                    child_offset_x,
+                    child_offset_y,
+                    child_clip,
+                    paint_nodes,
+                    module_id,
+                );
+            }
+        }
+
+        self.render_scrollbars(node, buffer, scale, bounds, clip);
+    }
+
+    fn render_node_self(
+        &self,
+        node: &WidgetNode,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        bounds: ClipRect,
+        clip: ClipRect,
+        module_id: Option<&str>,
+    ) {
+        let style = &node.computed_style;
+        if style.display == Display::None {
+            return;
+        }
+
+        let node_clip = intersect_clip(clip, bounds);
+        if node_clip.width <= 0 || node_clip.height <= 0 {
+            return;
+        }
+        let x = bounds.x;
+        let y = bounds.y;
+        let w = bounds.width;
+        let h = bounds.height;
 
         if style.background_color.a > 0 {
             let radius = style.border_radius.top_left * scale;
@@ -149,55 +361,23 @@ impl FrontendRenderEngine {
             "icon" => self.render_icon_node(node, buffer, x, y, w, h, style.color, module_id),
             _ => {}
         }
+    }
+}
 
-        let scroll_x = node_attr_f32(node, "_mesh_scroll_x");
-        let scroll_y = node_attr_f32(node, "_mesh_scroll_y");
-        let child_offset_x = offset_x - scroll_x;
-        let child_offset_y = offset_y - scroll_y;
-        let child_clip = if node_clips_children(node) {
-            intersect_clip(clip, bounds)
-        } else {
-            clip
-        };
+fn scaled_node_bounds(node: &WidgetNode, scale: f32) -> ClipRect {
+    ClipRect {
+        x: (node.layout.x * scale).round() as i32,
+        y: (node.layout.y * scale).round() as i32,
+        width: (node.layout.width * scale).round().max(0.0) as i32,
+        height: (node.layout.height * scale).round().max(0.0) as i32,
+    }
+}
 
-        // The vast majority of parents don't use z-index — every child has the
-        // same value (typically 0). Detect that case and iterate in natural
-        // order to avoid the Vec allocation + O(n log n) sort per parent per
-        // paint frame. Only fall back to sorting when at least one child has a
-        // differing z-index.
-        let needs_sort = node
-            .children
-            .windows(2)
-            .any(|pair| pair[0].computed_style.z_index != pair[1].computed_style.z_index);
-
-        if needs_sort {
-            let mut child_order: Vec<usize> = (0..node.children.len()).collect();
-            child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
-            for index in child_order {
-                self.render_node(
-                    &node.children[index],
-                    buffer,
-                    scale,
-                    child_offset_x,
-                    child_offset_y,
-                    child_clip,
-                    module_id,
-                );
-            }
-        } else {
-            for child in &node.children {
-                self.render_node(
-                    child,
-                    buffer,
-                    scale,
-                    child_offset_x,
-                    child_offset_y,
-                    child_clip,
-                    module_id,
-                );
-            }
-        }
-
-        self.render_scrollbars(node, buffer, scale, bounds, clip);
+fn scaled_display_clip(clip: DisplayListClip, scale: f32) -> ClipRect {
+    ClipRect {
+        x: (clip.x as f32 * scale).round() as i32,
+        y: (clip.y as f32 * scale).round() as i32,
+        width: (clip.width as f32 * scale).round().max(0.0) as i32,
+        height: (clip.height as f32 * scale).round().max(0.0) as i32,
     }
 }

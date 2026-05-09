@@ -277,14 +277,39 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.apply_pending_auto_focus(&tree);
         self.apply_style_animations_with_previous(&mut tree, &previous_visual_styles);
         let retained_dirty = self.retained_tree.update(&tree);
-        let render_object_dirty = self.retained_render_objects.update(&tree);
-        let force_full_damage = requires_tree_rebuild || render_object_dirty.reordered > 0;
-        let display_list_metrics = self.retained_display_list.update(
+        let retained_tree_generation = self.retained_tree.generation();
+        let render_object_dirty = self
+            .retained_render_objects
+            .update_for_retained_generation(&tree, retained_tree_generation);
+
+        let tooltip = if let (Some(start), Some(hovered_key)) =
+            (self.hover_start, self.hovered_key.as_ref())
+        {
+            if start.elapsed() >= TOOLTIP_DELAY {
+                find_tooltip_text_by_key(&tree, hovered_key).map(|text| {
+                    let (cx, cy) = self.hovered_pos;
+                    (text, cx, cy)
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let tooltip_visible = tooltip.is_some();
+        let force_full_damage = self.surface_pixels_invalid
+            || requires_tree_rebuild
+            || render_object_dirty.reordered > 0
+            || tooltip_visible
+            || self.tooltip_visible_previous;
+        let display_list_metrics = self.retained_display_list.update_for_retained_generation(
             &tree,
+            retained_tree_generation,
             content_width,
             content_height,
             force_full_damage,
-            false,
+            true,
         );
         self.invalidation_snapshot = Some(mesh_core_debug::ProfilingInvalidationSnapshot {
             full_rebuild: requires_tree_rebuild,
@@ -327,35 +352,45 @@ impl ShellComponent for FrontendSurfaceComponent {
             }
         }
         self.publish_element_metrics(&tree);
-        buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
-
-        let tooltip = if let (Some(start), Some(hovered_key)) =
-            (self.hover_start, self.hovered_key.as_ref())
-        {
-            if start.elapsed() >= TOOLTIP_DELAY {
-                find_tooltip_text_by_key(&tree, hovered_key).map(|text| {
-                    let (cx, cy) = self.hovered_pos;
-                    (text, cx, cy)
-                })
-            } else {
-                None
-            }
-        } else {
-            None
-        };
 
         let paint_started = std::time::Instant::now();
-        let text_cache_metrics = paint_frontend_tree_at_for_module_with_text_metrics(
-            &tree,
-            buffer,
-            1.0,
-            0.0,
-            0.0,
-            tooltip
-                .as_ref()
-                .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
-            Some(self.compiled.manifest.package.id.as_str()),
-        );
+        let text_cache_metrics = if display_list_metrics.damage_area == 0 {
+            TextCacheMetrics::default()
+        } else if display_list_metrics.full_surface_damage {
+            buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
+            paint_frontend_tree_at_for_module_with_text_metrics(
+                &tree,
+                buffer,
+                1.0,
+                0.0,
+                0.0,
+                tooltip
+                    .as_ref()
+                    .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
+                Some(self.compiled.manifest.package.id.as_str()),
+            )
+        } else {
+            let damage = display_list_metrics.damage_rect;
+            buffer.clear_rect(
+                damage.x,
+                damage.y,
+                damage.width,
+                damage.height,
+                mesh_core_elements::style::Color::TRANSPARENT,
+            );
+            paint_frontend_tree_at_for_module_with_text_metrics_clipped(
+                &tree,
+                buffer,
+                1.0,
+                0.0,
+                0.0,
+                (damage.x, damage.y, damage.width, damage.height),
+                tooltip
+                    .as_ref()
+                    .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
+                Some(self.compiled.manifest.package.id.as_str()),
+            )
+        };
         if let Some(snapshot) = self.invalidation_snapshot.as_mut() {
             snapshot.text = text_cache_snapshot(text_cache_metrics);
         }
@@ -368,6 +403,8 @@ impl ShellComponent for FrontendSurfaceComponent {
             });
         }
         self.last_tree = Some(tree);
+        self.tooltip_visible_previous = tooltip_visible;
+        self.surface_pixels_invalid = false;
         self.clear_runtime_dirty_states();
 
         Ok(())

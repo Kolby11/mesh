@@ -56,6 +56,16 @@ pub struct LayerShellBackend {
     state: State,
 }
 
+const SHM_BUFFER_POOL_DEPTH: usize = 2;
+
+#[derive(Debug)]
+pub(super) struct SurfaceShmBuffer {
+    buffer: Buffer,
+    width: u32,
+    height: u32,
+    stride: i32,
+}
+
 pub(super) struct SurfaceEntry {
     pub(super) layer_surface: LayerSurface,
     pub(super) cfg: LayerSurfaceConfig,
@@ -63,6 +73,8 @@ pub(super) struct SurfaceEntry {
     pub(super) width: u32,
     pub(super) height: u32,
     pub(super) configured: bool,
+    shm_buffers: Vec<SurfaceShmBuffer>,
+    next_shm_buffer: usize,
 }
 
 impl SurfaceEntry {
@@ -78,6 +90,8 @@ impl SurfaceEntry {
             cfg,
             applied_keyboard_mode,
             configured: false,
+            shm_buffers: Vec::new(),
+            next_shm_buffer: 0,
         }
     }
 
@@ -111,18 +125,98 @@ impl SurfaceEntry {
         self.configured = false;
     }
 
-    fn attach_buffer(
+    fn copy_into_shm_buffer(
         &mut self,
-        buffer: &smithay_client_toolkit::shm::slot::Buffer,
+        pool: &mut SlotPool,
+        src: &[u8],
         width: u32,
         height: u32,
-    ) {
+    ) -> Result<usize, PresentationError> {
+        let width = width.max(1);
+        let height = height.max(1);
+        let stride = width as i32 * 4;
+        if self
+            .shm_buffers
+            .iter()
+            .any(|slot| slot.width != width || slot.height != height || slot.stride != stride)
+        {
+            self.shm_buffers.clear();
+            self.next_shm_buffer = 0;
+        }
+
+        while self.shm_buffers.len() < SHM_BUFFER_POOL_DEPTH {
+            self.shm_buffers
+                .push(create_surface_shm_buffer(pool, width, height, stride)?);
+        }
+
+        let len = self.shm_buffers.len();
+        for offset in 0..len {
+            let index = (self.next_shm_buffer + offset) % len;
+            if let Some(canvas) = pool.canvas(&self.shm_buffers[index].buffer) {
+                copy_bgra_to_canvas(src, canvas, width, height);
+                self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
+                return Ok(index);
+            }
+        }
+
+        let index = self.shm_buffers.len();
+        let (wl_buffer, canvas) = pool
+            .create_buffer(
+                width as i32,
+                height as i32,
+                stride,
+                wl_shm::Format::Argb8888,
+            )
+            .map_err(|e| PresentationError::BufferAlloc(format!("create_buffer: {e}")))?;
+        copy_bgra_to_canvas(src, canvas, width, height);
+        self.shm_buffers.push(SurfaceShmBuffer {
+            buffer: wl_buffer,
+            width,
+            height,
+            stride,
+        });
+        self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
+        Ok(index)
+    }
+
+    fn attach_shm_buffer(&mut self, index: usize, width: u32, height: u32) {
+        let buffer = &self.shm_buffers[index].buffer;
         let wl_surface = self.layer_surface.wl_surface();
         wl_surface.damage_buffer(0, 0, width as i32, height as i32);
         buffer.attach_to(wl_surface).ok();
         self.layer_surface.commit();
         self.width = width;
         self.height = height;
+    }
+}
+
+fn create_surface_shm_buffer(
+    pool: &mut SlotPool,
+    width: u32,
+    height: u32,
+    stride: i32,
+) -> Result<SurfaceShmBuffer, PresentationError> {
+    let (buffer, _) = pool
+        .create_buffer(
+            width as i32,
+            height as i32,
+            stride,
+            wl_shm::Format::Argb8888,
+        )
+        .map_err(|e| PresentationError::BufferAlloc(format!("create_buffer: {e}")))?;
+    Ok(SurfaceShmBuffer {
+        buffer,
+        width,
+        height,
+        stride,
+    })
+}
+
+fn copy_bgra_to_canvas(src: &[u8], canvas: &mut [u8], width: u32, height: u32) {
+    // wl_shm Argb8888 is B,G,R,A in little-endian memory, matching PixelBuffer.
+    let len = (width as usize) * (height as usize) * 4;
+    if canvas.len() >= len && src.len() >= len {
+        canvas[..len].copy_from_slice(&src[..len]);
     }
 }
 
@@ -324,7 +418,6 @@ impl LayerShellBackend {
 
         let width = buffer.width.max(1);
         let height = buffer.height.max(1);
-        let stride = width as i32 * 4;
 
         let pool = self
             .state
@@ -332,23 +425,8 @@ impl LayerShellBackend {
             .as_mut()
             .ok_or_else(|| PresentationError::BufferAlloc("shm pool not initialised".into()))?;
 
-        let (wl_buffer, canvas) = pool
-            .create_buffer(
-                width as i32,
-                height as i32,
-                stride,
-                wl_shm::Format::Argb8888,
-            )
-            .map_err(|e| PresentationError::BufferAlloc(format!("create_buffer: {e}")))?;
-
-        // Copy BGRA -> ARGB8888 little-endian (wl_shm Argb8888 is B,G,R,A in memory).
-        let src = &buffer.data;
-        let len = (width as usize) * (height as usize) * 4;
-        if canvas.len() >= len && src.len() >= len {
-            canvas[..len].copy_from_slice(&src[..len]);
-        }
-
-        entry.attach_buffer(&wl_buffer, width, height);
+        let buffer_index = entry.copy_into_shm_buffer(pool, &buffer.data, width, height)?;
+        entry.attach_shm_buffer(buffer_index, width, height);
 
         self.dispatch_pending()?;
         Ok(())

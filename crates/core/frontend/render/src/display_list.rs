@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
+use mesh_core_elements::style::Display;
 use mesh_core_elements::{NodeId, WidgetNode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -64,6 +65,7 @@ pub struct DisplayListMetrics {
     pub entries_reused: u64,
     pub entries_rebuilt: u64,
     pub entries_removed: u64,
+    pub damage_rect: DamageRect,
     pub damage_rect_count: u64,
     pub damage_area: u64,
     pub surface_area: u64,
@@ -114,8 +116,32 @@ impl DisplayBatchBarrier {
 #[derive(Debug, Default)]
 pub struct RetainedDisplayList {
     generation: u64,
+    retained_tree_generation: Option<u64>,
+    surface_size: Option<(u32, u32)>,
     entries: HashMap<DisplayListKey, DisplayListEntry>,
+    paint_commands: Vec<DisplayPaintCommand>,
     last_metrics: DisplayListMetrics,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayPaintCommand {
+    pub node: WidgetNode,
+    pub clip: DisplayListClip,
+    pub kind: DisplayPaintCommandKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayPaintCommandKind {
+    Node,
+    Scrollbars,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DisplayListClip {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
 }
 
 impl RetainedDisplayList {
@@ -127,15 +153,66 @@ impl RetainedDisplayList {
         force_full_damage: bool,
         partial_present_supported: bool,
     ) -> DisplayListMetrics {
+        self.update_inner(
+            root,
+            None,
+            surface_width,
+            surface_height,
+            force_full_damage,
+            partial_present_supported,
+        )
+    }
+
+    pub fn update_for_retained_generation(
+        &mut self,
+        root: &WidgetNode,
+        retained_tree_generation: u64,
+        surface_width: u32,
+        surface_height: u32,
+        force_full_damage: bool,
+        partial_present_supported: bool,
+    ) -> DisplayListMetrics {
+        self.update_inner(
+            root,
+            Some(retained_tree_generation),
+            surface_width,
+            surface_height,
+            force_full_damage,
+            partial_present_supported,
+        )
+    }
+
+    fn update_inner(
+        &mut self,
+        root: &WidgetNode,
+        retained_tree_generation: Option<u64>,
+        surface_width: u32,
+        surface_height: u32,
+        force_full_damage: bool,
+        partial_present_supported: bool,
+    ) -> DisplayListMetrics {
         let surface = DamageRect {
             x: 0,
             y: 0,
             width: surface_width.max(1),
             height: surface_height.max(1),
         };
+        if retained_tree_generation.is_some()
+            && self.retained_tree_generation == retained_tree_generation
+            && self.surface_size == Some((surface.width, surface.height))
+        {
+            return self.update_metrics_without_rebuild(
+                surface,
+                force_full_damage,
+                partial_present_supported,
+            );
+        }
+
         let mut ordered_entries = Vec::new();
         collect_display_entries(root, &mut ordered_entries);
         let next: HashMap<_, _> = ordered_entries.iter().copied().collect();
+        let mut paint_commands = Vec::new();
+        collect_paint_commands(root, 0.0, 0.0, surface_clip(surface), &mut paint_commands);
 
         let mut damage: Option<DamageRect> = None;
         let mut reused = 0u64;
@@ -184,12 +261,16 @@ impl RetainedDisplayList {
             self.generation = self.generation.saturating_add(1);
         }
         self.entries = next;
+        self.paint_commands = paint_commands;
+        self.retained_tree_generation = retained_tree_generation;
+        self.surface_size = Some((surface.width, surface.height));
         self.last_metrics = DisplayListMetrics {
             retained_generation: self.generation,
             entries_total: self.entries.len() as u64,
             entries_reused: reused,
             entries_rebuilt: rebuilt,
             entries_removed: removed,
+            damage_rect,
             damage_rect_count: u64::from(damage_area > 0),
             damage_area,
             surface_area,
@@ -204,8 +285,52 @@ impl RetainedDisplayList {
         self.last_metrics
     }
 
+    fn update_metrics_without_rebuild(
+        &mut self,
+        surface: DamageRect,
+        force_full_damage: bool,
+        partial_present_supported: bool,
+    ) -> DisplayListMetrics {
+        let damage_rect = if force_full_damage {
+            surface
+        } else {
+            DamageRect::default()
+        };
+        let damage_rect = clip_rect(damage_rect, surface).unwrap_or_default();
+        let damage_area = damage_rect.area();
+        let surface_area = surface.area();
+        let skipped_paint_pixels = if partial_present_supported {
+            surface_area.saturating_sub(damage_area)
+        } else {
+            0
+        };
+        self.last_metrics = DisplayListMetrics {
+            retained_generation: self.generation,
+            entries_total: self.entries.len() as u64,
+            entries_reused: self.entries.len() as u64,
+            entries_rebuilt: 0,
+            entries_removed: 0,
+            damage_rect,
+            damage_rect_count: u64::from(damage_area > 0),
+            damage_area,
+            surface_area,
+            full_surface_damage: force_full_damage,
+            partial_present_supported,
+            skipped_paint_pixels,
+            batch_count: self.last_metrics.batch_count,
+            batched_primitives: self.last_metrics.batched_primitives,
+            barrier_count: self.last_metrics.barrier_count,
+            barriers: self.last_metrics.barriers,
+        };
+        self.last_metrics
+    }
+
     pub fn last_metrics(&self) -> DisplayListMetrics {
         self.last_metrics
+    }
+
+    pub fn paint_commands(&self) -> &[DisplayPaintCommand] {
+        &self.paint_commands
     }
 }
 
@@ -236,6 +361,121 @@ fn collect_display_entries(node: &WidgetNode, out: &mut Vec<(DisplayListKey, Dis
     }
     for child in &node.children {
         collect_display_entries(child, out);
+    }
+}
+
+fn collect_paint_commands(
+    node: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
+    clip: DisplayListClip,
+    out: &mut Vec<DisplayPaintCommand>,
+) {
+    let style = &node.computed_style;
+    if style.display == Display::None {
+        return;
+    }
+
+    let transform = style.transform;
+    let offset_x = offset_x + transform.translate_x;
+    let offset_y = offset_y + transform.translate_y;
+    let mut paint_node = node.clone();
+    paint_node.layout.x += offset_x;
+    paint_node.layout.y += offset_y;
+    paint_node.computed_style.transform.translate_x = 0.0;
+    paint_node.computed_style.transform.translate_y = 0.0;
+    paint_node.children.clear();
+
+    let bounds = node_clip_for(&paint_node);
+    let node_clip = intersect_display_clip(clip, bounds);
+    if node_clip.width <= 0 || node_clip.height <= 0 {
+        return;
+    }
+
+    out.push(DisplayPaintCommand {
+        node: paint_node.clone(),
+        clip: node_clip,
+        kind: DisplayPaintCommandKind::Node,
+    });
+
+    let scroll_x = node
+        .attributes
+        .get("_mesh_scroll_x")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let scroll_y = node
+        .attributes
+        .get("_mesh_scroll_y")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let child_offset_x = offset_x - scroll_x;
+    let child_offset_y = offset_y - scroll_y;
+    let child_clip = if node.computed_style.overflow_x.clips_contents()
+        || node.computed_style.overflow_y.clips_contents()
+    {
+        node_clip
+    } else {
+        clip
+    };
+
+    let needs_sort = node
+        .children
+        .windows(2)
+        .any(|pair| pair[0].computed_style.z_index != pair[1].computed_style.z_index);
+    if needs_sort {
+        let mut child_order: Vec<usize> = (0..node.children.len()).collect();
+        child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
+        for index in child_order {
+            collect_paint_commands(
+                &node.children[index],
+                child_offset_x,
+                child_offset_y,
+                child_clip,
+                out,
+            );
+        }
+    } else {
+        for child in &node.children {
+            collect_paint_commands(child, child_offset_x, child_offset_y, child_clip, out);
+        }
+    }
+
+    out.push(DisplayPaintCommand {
+        node: paint_node,
+        clip: node_clip,
+        kind: DisplayPaintCommandKind::Scrollbars,
+    });
+}
+
+fn surface_clip(surface: DamageRect) -> DisplayListClip {
+    DisplayListClip {
+        x: surface.x as i32,
+        y: surface.y as i32,
+        width: surface.width as i32,
+        height: surface.height as i32,
+    }
+}
+
+fn node_clip_for(node: &WidgetNode) -> DisplayListClip {
+    DisplayListClip {
+        x: node.layout.x.round() as i32,
+        y: node.layout.y.round() as i32,
+        width: node.layout.width.round().max(0.0) as i32,
+        height: node.layout.height.round().max(0.0) as i32,
+    }
+}
+
+fn intersect_display_clip(a: DisplayListClip, b: DisplayListClip) -> DisplayListClip {
+    let x1 = a.x.max(b.x);
+    let y1 = a.y.max(b.y);
+    let x2 = (a.x + a.width).min(b.x + b.width);
+    let y2 = (a.y + a.height).min(b.y + b.height);
+
+    DisplayListClip {
+        x: x1,
+        y: y1,
+        width: (x2 - x1).max(0),
+        height: (y2 - y1).max(0),
     }
 }
 
@@ -523,6 +763,32 @@ mod tests {
 
         assert!(metrics.full_surface_damage);
         assert_eq!(metrics.damage_area, 5_000);
+    }
+
+    #[test]
+    fn display_list_skips_rebuild_when_retained_generation_is_unchanged() {
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
+        let mut list = RetainedDisplayList::default();
+
+        let first = list.update_for_retained_generation(&root, 1, 100, 40, false, true);
+        assert_eq!(first.entries_rebuilt, 1);
+        assert_eq!(list.paint_commands().len(), 2);
+
+        root.children.push(node(2, "text", 10.0, 0.0, 20.0, 10.0));
+        let skipped = list.update_for_retained_generation(&root, 1, 100, 40, true, true);
+        assert_eq!(skipped.entries_rebuilt, 0);
+        assert_eq!(skipped.entries_reused, 1);
+        assert_eq!(skipped.damage_area, 4_000);
+        assert!(skipped.full_surface_damage);
+        assert_eq!(
+            list.paint_commands().len(),
+            2,
+            "paint command cache should be reused while retained generation is unchanged"
+        );
+
+        let rebuilt = list.update_for_retained_generation(&root, 2, 100, 40, false, true);
+        assert_eq!(rebuilt.entries_rebuilt, 2);
+        assert_eq!(list.paint_commands().len(), 4);
     }
 
     #[test]

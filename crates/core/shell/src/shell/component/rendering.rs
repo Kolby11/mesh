@@ -261,6 +261,7 @@ impl FrontendSurfaceComponent {
             return false;
         }
         self.last_surface_size = Some(size);
+        self.surface_pixels_invalid = true;
         self.invalidate(
             ComponentDirtyFlags::LAYOUT | ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS,
         );

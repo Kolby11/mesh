@@ -6,6 +6,11 @@ mod painter;
 mod text;
 
 use std::cell::RefCell;
+use std::collections::HashSet;
+
+use mesh_core_elements::NodeId;
+
+use crate::display_list::DisplayPaintCommand;
 
 pub use buffer::PixelBuffer;
 pub use debug_overlay::DebugOverlay;
@@ -72,6 +77,89 @@ pub fn paint_frontend_tree_at_for_module_with_text_metrics(
         engine.render_tree_at_for_module(tree, buffer, scale, offset_x, offset_y, module_id);
         if let Some((tooltip_text, x, y)) = tooltip {
             engine.render_tooltip(tooltip_text, x + offset_x, y + offset_y, buffer, scale);
+        }
+        engine.text_cache_metrics()
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn paint_frontend_tree_at_for_module_with_text_metrics_clipped(
+    tree: &mesh_core_elements::WidgetNode,
+    buffer: &mut PixelBuffer,
+    scale: f32,
+    offset_x: f32,
+    offset_y: f32,
+    clip: (u32, u32, u32, u32),
+    tooltip: Option<(&str, f32, f32)>,
+    module_id: Option<&str>,
+) -> TextCacheMetrics {
+    FRONTEND_RENDERER.with(|engine| {
+        let engine = engine.borrow();
+        engine.reset_text_cache_metrics();
+        engine.render_tree_at_for_module_clipped(
+            tree, buffer, scale, offset_x, offset_y, clip, module_id,
+        );
+        if let Some((tooltip_text, x, y)) = tooltip {
+            engine.render_tooltip(tooltip_text, x + offset_x, y + offset_y, buffer, scale);
+        }
+        engine.text_cache_metrics()
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn paint_frontend_tree_at_for_module_with_text_metrics_clipped_filtered(
+    tree: &mesh_core_elements::WidgetNode,
+    buffer: &mut PixelBuffer,
+    scale: f32,
+    offset_x: f32,
+    offset_y: f32,
+    clip: (u32, u32, u32, u32),
+    paint_nodes: &HashSet<NodeId>,
+    tooltip: Option<(&str, f32, f32)>,
+    module_id: Option<&str>,
+) -> TextCacheMetrics {
+    FRONTEND_RENDERER.with(|engine| {
+        let engine = engine.borrow();
+        engine.reset_text_cache_metrics();
+        engine.render_tree_at_for_module_clipped_filtered(
+            tree,
+            buffer,
+            scale,
+            offset_x,
+            offset_y,
+            clip,
+            paint_nodes,
+            module_id,
+        );
+        if let Some((tooltip_text, x, y)) = tooltip {
+            engine.render_tooltip(tooltip_text, x + offset_x, y + offset_y, buffer, scale);
+        }
+        engine.text_cache_metrics()
+    })
+}
+
+pub fn paint_display_list_for_module_with_text_metrics(
+    commands: &[DisplayPaintCommand],
+    buffer: &mut PixelBuffer,
+    scale: f32,
+    clip: Option<(u32, u32, u32, u32)>,
+    paint_nodes: Option<&HashSet<NodeId>>,
+    tooltip: Option<(&str, f32, f32)>,
+    module_id: Option<&str>,
+) -> TextCacheMetrics {
+    FRONTEND_RENDERER.with(|engine| {
+        let engine = engine.borrow();
+        engine.reset_text_cache_metrics();
+        engine.render_display_list_for_module(
+            commands,
+            buffer,
+            scale,
+            clip,
+            paint_nodes,
+            module_id,
+        );
+        if let Some((tooltip_text, x, y)) = tooltip {
+            engine.render_tooltip(tooltip_text, x, y, buffer, scale);
         }
         engine.text_cache_metrics()
     })
