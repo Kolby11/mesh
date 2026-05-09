@@ -1,5 +1,5 @@
 use super::types::{CoreRequest, ShellMessage};
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
@@ -67,18 +67,34 @@ fn prepare_ipc_parent(parent: &std::path::Path) -> Result<(), std::io::Error> {
         Ok(metadata) => {
             let file_type = metadata.file_type();
             if file_type.is_symlink() || !file_type.is_dir() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::AlreadyExists,
-                    format!("refusing unsafe ipc directory {}", parent.display()),
-                ));
+                return Err(unsafe_ipc_parent(parent));
             }
-            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+            let mode = metadata.permissions().mode() & 0o777;
+            if metadata.uid() != current_uid() || mode != 0o700 {
+                return Err(unsafe_ipc_parent(parent));
+            }
+            Ok(())
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             std::fs::DirBuilder::new().mode(0o700).create(parent)
         }
         Err(err) => Err(err),
     }
+}
+
+fn unsafe_ipc_parent(parent: &std::path::Path) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        format!("refusing unsafe ipc directory {}", parent.display()),
+    )
+}
+
+fn current_uid() -> u32 {
+    unsafe extern "C" {
+        fn getuid() -> u32;
+    }
+
+    unsafe { getuid() }
 }
 
 async fn handle_ipc_client(
@@ -198,6 +214,14 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    fn unique_tmp_mesh_parent(label: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::path::PathBuf::from(format!("/tmp/mesh-{label}-{}-{unique}", std::process::id()))
+    }
+
     #[test]
     fn ipc_server_refuses_to_replace_non_socket_path() {
         let dir = tempfile::tempdir().unwrap();
@@ -226,16 +250,42 @@ mod tests {
     }
 
     #[test]
+    fn ipc_server_creates_missing_private_tmp_parent_as_owner_only() {
+        let parent = unique_tmp_mesh_parent("missing-parent-test");
+        let socket_path = parent.join("mesh.sock");
+        let runtime = Runtime::new().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        spawn_ipc_server(&runtime, socket_path.clone(), tx).unwrap();
+
+        let parent_metadata = std::fs::symlink_metadata(&parent).unwrap();
+        let socket_metadata = std::fs::symlink_metadata(&socket_path).unwrap();
+        assert!(parent_metadata.file_type().is_dir());
+        assert_eq!(parent_metadata.permissions().mode() & 0o777, 0o700);
+        assert!(socket_metadata.file_type().is_socket());
+        std::fs::remove_file(socket_path).unwrap();
+        std::fs::remove_dir(parent).unwrap();
+    }
+
+    #[test]
+    fn ipc_server_refuses_non_private_tmp_parent() {
+        let parent = unique_tmp_mesh_parent("nonprivate-parent-test");
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let socket_path = parent.join("mesh.sock");
+        let runtime = Runtime::new().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let err = spawn_ipc_server(&runtime, socket_path, tx).unwrap_err();
+        std::fs::remove_dir(parent).unwrap();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+    }
+
+    #[test]
     fn ipc_server_refuses_symlinked_private_tmp_parent() {
         let target = tempfile::tempdir().unwrap();
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let parent = std::path::PathBuf::from(format!(
-            "/tmp/mesh-ipc-symlink-test-{}-{unique}",
-            std::process::id()
-        ));
+        let parent = unique_tmp_mesh_parent("symlink-test");
         symlink(target.path(), &parent).unwrap();
         let socket_path = parent.join("mesh.sock");
         let runtime = Runtime::new().unwrap();
