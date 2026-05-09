@@ -158,6 +158,8 @@ fn benchmark_snapshot(
 ) -> mesh_core_debug::DebugBenchmarkSnapshot {
     use mesh_core_debug::BenchmarkScenarioId;
 
+    let profiling_view =
+        profiling.map(|profiling| BenchmarkProfilingView::new(profiling, backend_runtimes));
     let scenarios = [
         BenchmarkScenarioId::Hover,
         BenchmarkScenarioId::SurfaceOpenClose,
@@ -170,7 +172,7 @@ fn benchmark_snapshot(
         benchmark_scenario_snapshot(
             id,
             debug.profiling_enabled,
-            profiling,
+            profiling_view.as_ref(),
             backend_runtimes,
             debug.latest_benchmark_run.as_ref(),
         )
@@ -183,11 +185,11 @@ fn benchmark_snapshot(
 fn benchmark_scenario_snapshot(
     id: mesh_core_debug::BenchmarkScenarioId,
     profiling_enabled: bool,
-    profiling: Option<&mesh_core_debug::ProfilingSnapshot>,
+    profiling_view: Option<&BenchmarkProfilingView<'_>>,
     backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
     latest_run: Option<&mesh_core_debug::DebugBenchmarkRunState>,
 ) -> mesh_core_debug::BenchmarkScenarioSnapshot {
-    let target = benchmark_target(id, profiling, backend_runtimes);
+    let target = benchmark_target(id, profiling_view, backend_runtimes);
     let (status, primary_metric, secondary_metric, hint) = if !profiling_enabled {
         (
             mesh_core_debug::BenchmarkScenarioStatus::ProfilingOff,
@@ -195,8 +197,8 @@ fn benchmark_scenario_snapshot(
             "No benchmark results yet".to_string(),
             "Start profiling first".to_string(),
         )
-    } else if let Some(profiling) = profiling {
-        let metrics = benchmark_metrics(id, profiling, backend_runtimes);
+    } else if let Some(profiling_view) = profiling_view {
+        let metrics = benchmark_metrics(id, profiling_view);
         if metrics.0 == mesh_core_debug::BenchmarkScenarioStatus::WaitingForSamples
             && id != mesh_core_debug::BenchmarkScenarioId::BackendUpdate
         {
@@ -216,6 +218,34 @@ fn benchmark_scenario_snapshot(
         primary_metric,
         secondary_metric,
         hint,
+    }
+}
+
+struct BenchmarkProfilingView<'a> {
+    navigation_bar: Option<&'a mesh_core_debug::ProfilingSurfaceSnapshot>,
+    audio_popover: Option<&'a mesh_core_debug::ProfilingSurfaceSnapshot>,
+    backend_update_backend: Option<&'a mesh_core_debug::ProfilingBackendSnapshot>,
+    backend_runtime_available: bool,
+}
+
+impl<'a> BenchmarkProfilingView<'a> {
+    fn new(
+        profiling: &'a mesh_core_debug::ProfilingSnapshot,
+        backend_runtimes: &'a [mesh_core_debug::BackendRuntimeEntry],
+    ) -> Self {
+        let navigation_bar = profiling_surface(profiling, "@mesh/navigation-bar");
+        let audio_popover = profiling_surface(profiling, "@mesh/audio-popover");
+        let backend_update_provider_id =
+            backend_update_provider_id(Some(profiling), backend_runtimes);
+        let backend_update_backend = backend_update_backend(profiling, backend_update_provider_id);
+        let backend_runtime_available = backend_update_runtime_available(backend_runtimes);
+
+        Self {
+            navigation_bar,
+            audio_popover,
+            backend_update_backend,
+            backend_runtime_available,
+        }
     }
 }
 
@@ -249,7 +279,7 @@ fn benchmark_pending_state(
 
 fn benchmark_target(
     id: mesh_core_debug::BenchmarkScenarioId,
-    profiling: Option<&mesh_core_debug::ProfilingSnapshot>,
+    profiling_view: Option<&BenchmarkProfilingView<'_>>,
     backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
 ) -> String {
     match id {
@@ -262,15 +292,14 @@ fn benchmark_target(
             "@mesh/navigation-bar focus chain".to_string()
         }
         mesh_core_debug::BenchmarkScenarioId::BackendUpdate => {
-            backend_update_target(profiling, backend_runtimes)
+            backend_update_target(profiling_view, backend_runtimes)
         }
     }
 }
 
 fn benchmark_metrics(
     id: mesh_core_debug::BenchmarkScenarioId,
-    profiling: &mesh_core_debug::ProfilingSnapshot,
-    backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
+    profiling_view: &BenchmarkProfilingView<'_>,
 ) -> (
     mesh_core_debug::BenchmarkScenarioStatus,
     String,
@@ -279,8 +308,7 @@ fn benchmark_metrics(
 ) {
     match id {
         mesh_core_debug::BenchmarkScenarioId::Hover => surface_benchmark_metrics(
-            profiling,
-            "@mesh/navigation-bar",
+            profiling_view.navigation_bar,
             &[
                 mesh_core_debug::ProfilingStage::InputHandling,
                 mesh_core_debug::ProfilingStage::StyleRestyle,
@@ -292,13 +320,11 @@ fn benchmark_metrics(
             "Interact with @mesh/navigation-bar while profiling is live",
         ),
         mesh_core_debug::BenchmarkScenarioId::SurfaceOpenClose => surface_render_benchmark_metrics(
-            profiling,
-            "@mesh/audio-popover",
+            profiling_view.audio_popover,
             "Open and close @mesh/audio-popover while profiling is live",
         ),
         mesh_core_debug::BenchmarkScenarioId::PointerUpdate => surface_benchmark_metrics(
-            profiling,
-            "@mesh/navigation-bar",
+            profiling_view.navigation_bar,
             &[
                 mesh_core_debug::ProfilingStage::InputHandling,
                 mesh_core_debug::ProfilingStage::RuntimeUpdateHandling,
@@ -311,8 +337,7 @@ fn benchmark_metrics(
             "Adjust the navigation-bar audio controls while profiling is live",
         ),
         mesh_core_debug::BenchmarkScenarioId::KeyboardTraversal => surface_benchmark_metrics(
-            profiling,
-            "@mesh/navigation-bar",
+            profiling_view.navigation_bar,
             &[
                 mesh_core_debug::ProfilingStage::InputHandling,
                 mesh_core_debug::ProfilingStage::RuntimeUpdateHandling,
@@ -324,14 +349,13 @@ fn benchmark_metrics(
             "Move focus through @mesh/navigation-bar while profiling is live",
         ),
         mesh_core_debug::BenchmarkScenarioId::BackendUpdate => {
-            backend_update_benchmark_metrics(profiling, backend_runtimes)
+            backend_update_benchmark_metrics(profiling_view)
         }
     }
 }
 
 fn surface_benchmark_metrics(
-    profiling: &mesh_core_debug::ProfilingSnapshot,
-    surface_id: &str,
+    surface: Option<&mesh_core_debug::ProfilingSurfaceSnapshot>,
     primary_stages: &[mesh_core_debug::ProfilingStage],
     secondary_stages: &[mesh_core_debug::ProfilingStage],
     hint: &str,
@@ -341,7 +365,7 @@ fn surface_benchmark_metrics(
     String,
     String,
 ) {
-    let Some(surface) = profiling_surface(profiling, surface_id) else {
+    let Some(surface) = surface else {
         return waiting_for_samples();
     };
     let primary = first_surface_stage(surface, primary_stages);
@@ -360,8 +384,7 @@ fn surface_benchmark_metrics(
 }
 
 fn surface_render_benchmark_metrics(
-    profiling: &mesh_core_debug::ProfilingSnapshot,
-    surface_id: &str,
+    surface: Option<&mesh_core_debug::ProfilingSurfaceSnapshot>,
     hint: &str,
 ) -> (
     mesh_core_debug::BenchmarkScenarioStatus,
@@ -369,7 +392,7 @@ fn surface_render_benchmark_metrics(
     String,
     String,
 ) {
-    let Some(surface) = profiling_surface(profiling, surface_id) else {
+    let Some(surface) = surface else {
         return waiting_for_samples();
     };
     if surface.total_surface_render_time_micros == 0 && surface.redraw_count == 0 {
@@ -387,18 +410,17 @@ fn surface_render_benchmark_metrics(
 }
 
 fn backend_update_benchmark_metrics(
-    profiling: &mesh_core_debug::ProfilingSnapshot,
-    backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
+    profiling_view: &BenchmarkProfilingView<'_>,
 ) -> (
     mesh_core_debug::BenchmarkScenarioStatus,
     String,
     String,
     String,
 ) {
-    let provider_id = backend_update_provider_id(Some(profiling), backend_runtimes);
-    let backend = backend_update_backend(profiling, provider_id.as_deref());
-    let frontend = profiling_surface(profiling, "@mesh/navigation-bar")
-        .or_else(|| profiling_surface(profiling, "@mesh/audio-popover"));
+    let backend = profiling_view.backend_update_backend;
+    let frontend = profiling_view
+        .navigation_bar
+        .or(profiling_view.audio_popover);
     let primary = backend.and_then(|backend| {
         first_backend_stage(
             backend,
@@ -429,7 +451,7 @@ fn backend_update_benchmark_metrics(
                 "Update mesh.audio while profiling is live".to_string(),
             )
         }
-        (None, _, _) if !backend_update_runtime_available(backend_runtimes) => (
+        (None, _, _) if !profiling_view.backend_runtime_available => (
             mesh_core_debug::BenchmarkScenarioStatus::Unavailable,
             "No backend provider samples yet".to_string(),
             "No frontend surface render samples yet".to_string(),
@@ -442,13 +464,10 @@ fn backend_update_benchmark_metrics(
 }
 
 fn backend_update_target(
-    profiling: Option<&mesh_core_debug::ProfilingSnapshot>,
+    profiling_view: Option<&BenchmarkProfilingView<'_>>,
     backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
 ) -> String {
-    let provider_id = backend_update_provider_id(profiling, backend_runtimes);
-    if let Some(backend) =
-        profiling.and_then(|profiling| backend_update_backend(profiling, provider_id.as_deref()))
-    {
+    if let Some(backend) = profiling_view.and_then(|view| view.backend_update_backend) {
         return format!("{} -> {}", backend.interface, backend.provider_id);
     }
     if let Some(runtime) = backend_runtimes
@@ -478,21 +497,21 @@ fn backend_update_runtime_available(
     backend_runtimes.iter().any(is_running_audio_runtime)
 }
 
-fn backend_update_provider_id(
-    profiling: Option<&mesh_core_debug::ProfilingSnapshot>,
-    backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
-) -> Option<String> {
+fn backend_update_provider_id<'a>(
+    profiling: Option<&'a mesh_core_debug::ProfilingSnapshot>,
+    backend_runtimes: &'a [mesh_core_debug::BackendRuntimeEntry],
+) -> Option<&'a str> {
     backend_runtimes
         .iter()
         .find(|entry| is_running_audio_runtime(entry))
-        .map(|entry| entry.provider_id.clone())
+        .map(|entry| entry.provider_id.as_str())
         .or_else(|| {
             profiling.and_then(|profiling| {
                 profiling
                     .backends
                     .iter()
                     .find(|backend| backend.interface == "mesh.audio")
-                    .map(|backend| backend.provider_id.clone())
+                    .map(|backend| backend.provider_id.as_str())
             })
         })
 }

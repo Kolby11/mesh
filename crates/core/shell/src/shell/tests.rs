@@ -1160,13 +1160,129 @@ fn phase18_baseline_ranks_hotspots_by_absolute_latency() {
     assert_eq!(candidates[0].0, "surface_render:@mesh/navigation-bar");
     assert_eq!(candidates[0].1, 142);
     assert!(
-        candidates
-            .iter()
-            .any(|(name, value, eligible)| name.starts_with("backend_publish")
+        candidates.iter().any(
+            |(name, value, eligible)| name.starts_with("backend_publish")
                 && *value == 109
-                && *eligible),
+                && *eligible
+        ),
         "backend candidate should remain eligible only when frontend impact is visible"
     );
+}
+
+#[test]
+fn phase18_benchmark_payload_preserves_render_visible_contract_after_lookup_cache() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::InputHandling,
+        std::time::Duration::from_micros(21),
+        Some("phase18_contract"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::StyleRestyle,
+        std::time::Duration::from_micros(34),
+        Some("phase18_contract"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::Layout,
+        std::time::Duration::from_micros(55),
+        Some("phase18_contract"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::Paint,
+        std::time::Duration::from_micros(67),
+        Some("phase18_contract"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::TotalSurfaceRender,
+        std::time::Duration::from_micros(142),
+        Some("phase18_contract"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/audio-popover",
+        Some("@mesh/audio-popover"),
+        ProfilingStage::TotalSurfaceRender,
+        std::time::Duration::from_micros(88),
+        Some("phase18_contract"),
+    );
+    shell.record_backend_runtime_status(
+        "mesh.audio".to_string(),
+        "@mesh/pipewire-audio".to_string(),
+        BackendRuntimeStatus::Running,
+        "phase18 backend contract".to_string(),
+    );
+    shell.record_backend_profiling_stage(
+        "mesh.audio",
+        "@mesh/pipewire-audio",
+        ProfilingBackendStage::StatePublishDelivery,
+        std::time::Duration::from_micros(109),
+        Some("phase18_contract"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let scenario_ids: Vec<_> = snapshot
+        .benchmarks
+        .scenarios
+        .iter()
+        .map(|scenario| scenario.id.id())
+        .collect();
+
+    assert_eq!(
+        scenario_ids,
+        [
+            "hover",
+            "surface_open_close",
+            "pointer_update",
+            "keyboard_traversal",
+            "backend_update"
+        ]
+    );
+
+    let navigation_rows: Vec<_> = snapshot
+        .benchmarks
+        .scenarios
+        .iter()
+        .filter(|scenario| scenario.target.contains("@mesh/navigation-bar"))
+        .collect();
+    assert_eq!(navigation_rows.len(), 3);
+    assert!(
+        navigation_rows.iter().all(|scenario| {
+            scenario.status == mesh_core_debug::BenchmarkScenarioStatus::Complete
+        })
+    );
+    assert!(navigation_rows.iter().any(|scenario| {
+        scenario.id.id() == "keyboard_traversal" && scenario.secondary_metric.contains("142us")
+    }));
+
+    let backend_update = snapshot
+        .benchmarks
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.id.id() == "backend_update")
+        .expect("backend_update benchmark row should exist");
+    assert_eq!(
+        backend_update.status,
+        mesh_core_debug::BenchmarkScenarioStatus::Complete
+    );
+    assert_eq!(backend_update.target, "mesh.audio -> @mesh/pipewire-audio");
+    assert!(
+        backend_update
+            .primary_metric
+            .contains("@mesh/pipewire-audio")
+    );
+    assert!(backend_update.secondary_metric.contains("142us"));
 }
 
 #[test]
