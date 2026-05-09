@@ -73,7 +73,8 @@
       "Bash(PKG_CONFIG_PATH=/nix/store/s11qidhaq78zrwnd6jc2plxhbmv6y9b9-libxkbcommon-1.13.1-dev/lib/pkgconfig cargo test -p mesh-core-shell --lib -- popover navigation_volume navigation_bar_keyboard)",
       "Bash(apt list *)",
       "Bash(command -v nix)",
-      "Read(//home/kolby/.cache/**)"
+      "Read(//home/kolby/.cache/**)",
+      "Bash(find ~/.cargo/registry/src/index.crates.io-*/ -name \"tiny-skia-path*\" -maxdepth 1 -type d)"
     ]
   }
 }

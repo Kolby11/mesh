@@ -1390,6 +1390,7 @@ dependencies = [
  "resvg",
  "swash",
  "tempfile",
+ "tiny-skia",
  "zeno",
 ]
 
