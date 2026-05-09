@@ -5467,6 +5467,279 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
     );
 }
 
+#[test]
+fn debug_inspector_benchmark_view_renders_five_rows_when_profiling_off() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "profiling_enabled": false,
+                "profiling_session_id": 11,
+                "active_view": "benchmark",
+                "modules": [{ "id": "@mesh/debug-inspector" }],
+                "interfaces": [],
+                "backend_runtimes": [],
+                "active_surfaces": ["@mesh/debug-inspector"],
+                "benchmarks": {
+                    "scenarios": []
+                },
+                "profiling": serde_json::Value::Null
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 640);
+    component.paint(&theme, 320, 640, &mut buffer).unwrap();
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
+        .unwrap();
+    component.paint(&theme, 320, 640, &mut buffer).unwrap();
+
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|line| line == "Benchmark / Interaction"));
+    for title in [
+        "Hover",
+        "Surface open/close",
+        "Pointer-driven update",
+        "Keyboard traversal",
+        "Backend-driven update",
+    ] {
+        assert!(
+            text.iter().any(|line| line == title),
+            "benchmark row should render {title}"
+        );
+    }
+    assert!(text.iter().any(|line| line == "Profiling off"));
+    assert!(text.iter().any(|line| line == "Start profiling first"));
+    assert!(
+        text.iter()
+            .any(|line| line.contains("@mesh/navigation-bar"))
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("mesh.audio -> @mesh/pipewire-audio"))
+    );
+}
+
+#[test]
+fn debug_inspector_benchmark_view_renders_waiting_rows_when_profiling_live_without_results() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "profiling_enabled": true,
+                "profiling_session_id": 12,
+                "active_view": "benchmark",
+                "modules": [],
+                "interfaces": [],
+                "backend_runtimes": [],
+                "active_surfaces": [],
+                "benchmarks": {
+                    "scenarios": []
+                },
+                "profiling": {
+                    "session_id": 12,
+                    "shell": {
+                        "stages": [],
+                        "redraw_count": 0,
+                        "total_surface_render_time_micros": 0
+                    },
+                    "surfaces": [],
+                    "backends": []
+                }
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 640);
+    component.paint(&theme, 320, 640, &mut buffer).unwrap();
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
+        .unwrap();
+    component.paint(&theme, 320, 640, &mut buffer).unwrap();
+
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|line| line == "Benchmark / Interaction"));
+    assert!(text.iter().any(|line| line == "Waiting for samples"));
+    assert!(text.iter().any(|line| line == "Run scenario"));
+    assert!(
+        text.iter()
+            .any(|line| line.contains("Run a scenario while profiling is live"))
+    );
+    for title in [
+        "Hover",
+        "Surface open/close",
+        "Pointer-driven update",
+        "Keyboard traversal",
+        "Backend-driven update",
+    ] {
+        assert!(text.iter().any(|line| line == title));
+    }
+}
+
+#[test]
+fn debug_inspector_benchmark_view_renders_populated_benchmark_result_rows() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "profiling_enabled": true,
+                "profiling_session_id": 13,
+                "active_view": "benchmark",
+                "modules": [],
+                "interfaces": [],
+                "backend_runtimes": [{
+                    "interface": "mesh.audio",
+                    "provider_id": "@mesh/pipewire-audio",
+                    "status": "running",
+                    "message": "Polling steadily",
+                    "failure_count": 0
+                }],
+                "active_surfaces": ["@mesh/navigation-bar", "@mesh/audio-popover"],
+                "benchmarks": {
+                    "scenarios": [
+                        {
+                            "id": "hover",
+                            "label": "Hover",
+                            "target": "@mesh/navigation-bar",
+                            "status": "Complete",
+                            "primary_metric": "input_handling: 2 samples, max 18us",
+                            "secondary_metric": "style_restyle: 2 samples, max 12us",
+                            "hint": "Interact with @mesh/navigation-bar while profiling is live"
+                        },
+                        {
+                            "id": "surface_open_close",
+                            "label": "Surface open/close",
+                            "target": "@mesh/audio-popover",
+                            "status": "Complete",
+                            "primary_metric": "total_surface_render: 140us",
+                            "secondary_metric": "redraw_count: 2",
+                            "hint": "Open and close @mesh/audio-popover while profiling is live"
+                        },
+                        {
+                            "id": "pointer_update",
+                            "label": "Pointer-driven update",
+                            "target": "@mesh/navigation-bar audio controls",
+                            "status": "Complete",
+                            "primary_metric": "runtime_update_handling: 1 samples, max 22us",
+                            "secondary_metric": "paint: 1 samples, max 30us",
+                            "hint": "Adjust the navigation-bar audio controls while profiling is live"
+                        },
+                        {
+                            "id": "keyboard_traversal",
+                            "label": "Keyboard traversal",
+                            "target": "@mesh/navigation-bar focus chain",
+                            "status": "Complete",
+                            "primary_metric": "input_handling: 1 samples, max 8us",
+                            "secondary_metric": "total_surface_render: 1 samples, max 60us",
+                            "hint": "Move focus through @mesh/navigation-bar while profiling is live"
+                        },
+                        {
+                            "id": "backend_update",
+                            "label": "Backend-driven update",
+                            "target": "mesh.audio -> @mesh/pipewire-audio",
+                            "status": "Complete",
+                            "primary_metric": "state_publish_delivery: 3 samples, max 45us",
+                            "secondary_metric": "frontend total_surface_render: 160us",
+                            "hint": "Update mesh.audio while profiling is live"
+                        }
+                    ]
+                },
+                "profiling": {
+                    "session_id": 13,
+                    "shell": {
+                        "stages": [],
+                        "redraw_count": 0,
+                        "total_surface_render_time_micros": 0
+                    },
+                    "surfaces": [],
+                    "backends": []
+                }
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 720);
+    component.paint(&theme, 320, 720, &mut buffer).unwrap();
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
+        .unwrap();
+    component.paint(&theme, 320, 720, &mut buffer).unwrap();
+
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|line| line == "Benchmark / Interaction"));
+    assert!(text.iter().any(|line| line == "Complete"));
+    assert!(text.iter().any(|line| line == "Run scenario"));
+    assert!(
+        text.iter()
+            .any(|line| line.contains("input_handling: 2 samples"))
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("total_surface_render: 140us"))
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("state_publish_delivery"))
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("@mesh/navigation-bar"))
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("mesh.audio -> @mesh/pipewire-audio"))
+    );
+}
+
+#[test]
+fn debug_inspector_benchmark_actions_publish_run_requests() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+
+    for (handler, expected_id) in [
+        (
+            "__mesh_embed__::@mesh/debug-inspector::runHoverBenchmark",
+            "hover",
+        ),
+        (
+            "__mesh_embed__::@mesh/debug-inspector::runSurfaceOpenCloseBenchmark",
+            "surface_open_close",
+        ),
+        (
+            "__mesh_embed__::@mesh/debug-inspector::runPointerUpdateBenchmark",
+            "pointer_update",
+        ),
+        (
+            "__mesh_embed__::@mesh/debug-inspector::runKeyboardTraversalBenchmark",
+            "keyboard_traversal",
+        ),
+        (
+            "__mesh_embed__::@mesh/debug-inspector::runBackendUpdateBenchmark",
+            "backend_update",
+        ),
+    ] {
+        let requests = component.call_namespaced_handler(handler, &[]).unwrap();
+        match requests.as_slice() {
+            [CoreRequest::RunDebugBenchmark { scenario_id }] => {
+                assert_eq!(scenario_id, expected_id);
+            }
+            other => panic!("expected RunDebugBenchmark for {expected_id}, got {other:?}"),
+        }
+    }
+}
+
 // ---- 09-03: post-restyle synchronization tests ----
 
 /// D-04: Hit testing uses final post-restyle bounds.
