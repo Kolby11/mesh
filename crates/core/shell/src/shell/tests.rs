@@ -882,14 +882,10 @@ fn benchmark_run_request_does_not_enable_profiling() {
             .map(|run| run.scenario_id.id()),
         Some("surface_open_close")
     );
-    assert_eq!(emitted.len(), 2);
+    assert_eq!(emitted.len(), 1);
     assert!(matches!(
         &emitted[0],
-        CoreRequest::ShowSurface { surface_id } if surface_id == "@mesh/audio-popover"
-    ));
-    assert!(matches!(
-        &emitted[1],
-        CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/audio-popover"
+        CoreRequest::ToggleSurface { surface_id } if surface_id == "@mesh/audio-popover"
     ));
 
     shell
@@ -912,6 +908,62 @@ fn benchmark_run_request_does_not_enable_profiling() {
             .as_ref()
             .map(|run| run.scenario_id.id()),
         Some("keyboard_traversal")
+    );
+}
+
+#[test]
+fn benchmark_backend_update_uses_active_audio_provider() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    shell.record_backend_runtime_status(
+        "mesh.audio".to_string(),
+        "@mesh/pulseaudio-audio".to_string(),
+        BackendRuntimeStatus::Running,
+        "backend runtime started".to_string(),
+    );
+
+    shell.record_backend_profiling_stage(
+        "mesh.audio",
+        "@mesh/pulseaudio-audio",
+        ProfilingBackendStage::StatePublishDelivery,
+        std::time::Duration::from_micros(29),
+        Some("broadcast_service_event"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::TotalSurfaceRender,
+        std::time::Duration::from_micros(41),
+        Some("service_update"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let backend_update = snapshot
+        .benchmarks
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.id.id() == "backend_update")
+        .expect("backend_update benchmark row should exist");
+
+    assert_eq!(
+        backend_update.status,
+        mesh_core_debug::BenchmarkScenarioStatus::Complete
+    );
+    assert_eq!(
+        backend_update.target,
+        "mesh.audio -> @mesh/pulseaudio-audio"
+    );
+    assert!(
+        backend_update
+            .primary_metric
+            .contains("@mesh/pulseaudio-audio")
+    );
+    assert!(
+        backend_update
+            .secondary_metric
+            .contains("total_surface_render")
     );
 }
 

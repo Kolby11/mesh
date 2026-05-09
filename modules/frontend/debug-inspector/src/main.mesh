@@ -643,6 +643,10 @@ function onToggleProfiling()
 end
 
 local function runBenchmarkScenario(scenario_id)
+    if not (debug_service and debug_service.profiling_enabled) then
+        mesh.events.publish("shell.toggle-debug-profiling", {})
+        return
+    end
     mesh.events.publish("shell.run-debug-benchmark", { scenario_id = scenario_id })
 end
 

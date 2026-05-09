@@ -390,10 +390,7 @@ impl Shell {
 
         let mut emitted = VecDeque::new();
         if scenario == BenchmarkScenarioId::SurfaceOpenClose {
-            emitted.push_back(CoreRequest::ShowSurface {
-                surface_id: "@mesh/audio-popover".to_string(),
-            });
-            emitted.push_back(CoreRequest::HideSurface {
+            emitted.push_back(CoreRequest::ToggleSurface {
                 surface_id: "@mesh/audio-popover".to_string(),
             });
         }

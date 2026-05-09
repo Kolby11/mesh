@@ -5708,6 +5708,44 @@ fn debug_inspector_benchmark_view_renders_populated_benchmark_result_rows() {
 fn debug_inspector_benchmark_actions_publish_run_requests() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
 
+    let off_requests = component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/debug-inspector::runHoverBenchmark",
+            &[],
+        )
+        .unwrap();
+    assert!(matches!(
+        off_requests.as_slice(),
+        [CoreRequest::ToggleDebugProfiling]
+    ));
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "profiling_enabled": true,
+                "profiling_session_id": 14,
+                "active_view": "benchmark",
+                "modules": [],
+                "interfaces": [],
+                "backend_runtimes": [],
+                "active_surfaces": [],
+                "profiling": {
+                    "session_id": 14,
+                    "shell": {
+                        "stages": [],
+                        "redraw_count": 0,
+                        "total_surface_render_time_micros": 0
+                    },
+                    "surfaces": [],
+                    "backends": []
+                }
+            }),
+        })
+        .unwrap();
+
     for (handler, expected_id) in [
         (
             "__mesh_embed__::@mesh/debug-inspector::runHoverBenchmark",

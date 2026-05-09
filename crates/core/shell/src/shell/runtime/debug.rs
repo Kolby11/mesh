@@ -374,7 +374,8 @@ fn backend_update_benchmark_metrics(
     String,
     String,
 ) {
-    let backend = backend_update_backend(profiling);
+    let provider_id = backend_update_provider_id(Some(profiling), backend_runtimes);
+    let backend = backend_update_backend(profiling, provider_id.as_deref());
     let frontend = profiling_surface(profiling, "@mesh/navigation-bar")
         .or_else(|| profiling_surface(profiling, "@mesh/audio-popover"));
     let primary = backend.and_then(|backend| {
@@ -423,22 +424,30 @@ fn backend_update_target(
     profiling: Option<&mesh_core_debug::ProfilingSnapshot>,
     backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
 ) -> String {
-    if let Some(backend) = profiling.and_then(backend_update_backend) {
+    let provider_id = backend_update_provider_id(profiling, backend_runtimes);
+    if let Some(backend) =
+        profiling.and_then(|profiling| backend_update_backend(profiling, provider_id.as_deref()))
+    {
         return format!("{} -> {}", backend.interface, backend.provider_id);
     }
-    if let Some(runtime) = backend_runtimes.iter().find(|entry| {
-        entry.interface == "mesh.audio" && entry.provider_id == "@mesh/pipewire-audio"
-    }) {
+    if let Some(runtime) = backend_runtimes
+        .iter()
+        .find(|entry| entry.interface == "mesh.audio")
+    {
         return format!("{} -> {}", runtime.interface, runtime.provider_id);
     }
     "mesh.audio -> @mesh/pipewire-audio".to_string()
 }
 
-fn backend_update_backend(
-    profiling: &mesh_core_debug::ProfilingSnapshot,
-) -> Option<&mesh_core_debug::ProfilingBackendSnapshot> {
+fn backend_update_backend<'a>(
+    profiling: &'a mesh_core_debug::ProfilingSnapshot,
+    provider_id: Option<&str>,
+) -> Option<&'a mesh_core_debug::ProfilingBackendSnapshot> {
     profiling.backends.iter().find(|backend| {
-        backend.interface == "mesh.audio" && backend.provider_id == "@mesh/pipewire-audio"
+        backend.interface == "mesh.audio"
+            && provider_id
+                .map(|provider_id| backend.provider_id == provider_id)
+                .unwrap_or(true)
     })
 }
 
@@ -447,7 +456,26 @@ fn backend_update_runtime_available(
 ) -> bool {
     backend_runtimes
         .iter()
-        .any(|entry| entry.interface == "mesh.audio" && entry.provider_id == "@mesh/pipewire-audio")
+        .any(|entry| entry.interface == "mesh.audio")
+}
+
+fn backend_update_provider_id(
+    profiling: Option<&mesh_core_debug::ProfilingSnapshot>,
+    backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
+) -> Option<String> {
+    backend_runtimes
+        .iter()
+        .find(|entry| entry.interface == "mesh.audio")
+        .map(|entry| entry.provider_id.clone())
+        .or_else(|| {
+            profiling.and_then(|profiling| {
+                profiling
+                    .backends
+                    .iter()
+                    .find(|backend| backend.interface == "mesh.audio")
+                    .map(|backend| backend.provider_id.clone())
+            })
+        })
 }
 
 fn waiting_for_backend_samples(
