@@ -82,7 +82,7 @@ async fn handle_ipc_client(
     Ok(())
 }
 
-fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
+pub(super) fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
     if let Some(surface_id) = command.strip_prefix("shell:show_surface:") {
         return Some(CoreRequest::ShowSurface {
             surface_id: surface_id.to_string(),

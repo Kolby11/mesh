@@ -3,7 +3,11 @@ use super::{
     InterfaceProvider, InterfaceRegistry, KeyModifiers, ServiceCommandMsg, ServiceEvent, Shell,
     TabFocusTarget, backend_launch_candidates_from_graph, component_key_pressed_input,
     component_key_released_input,
-    service::{apply_service_update, seed_service_state, service_name_from_interface},
+    ipc::parse_ipc_command,
+    service::{
+        apply_service_update, script_events_to_requests, seed_service_state,
+        service_name_from_interface,
+    },
     shell_global_shortcut_request,
     surface_layout::{SurfaceSizePolicy, load_active_theme, load_frontend_module_settings},
 };
@@ -21,7 +25,7 @@ use mesh_core_module::package::{
     InstalledModuleGraph, LoadedModuleManifest, ModuleManifestSource, ModulePackageManifest,
     RootPackageManifest,
 };
-use mesh_core_scripting::ScriptState;
+use mesh_core_scripting::{PublishedEvent, ScriptState};
 use mesh_core_service::{
     ContractCapabilities, InterfaceContract, InterfaceMethod, contract::ContractStateField,
     parse_contract_version,
@@ -663,6 +667,112 @@ fn benchmark_payload_serializes_targets_statuses_and_metrics() {
         backend_update["secondary_metric"],
         serde_json::json!("No benchmark results yet")
     );
+}
+
+#[test]
+fn benchmark_service_event_maps_to_run_request() {
+    let requests = script_events_to_requests(vec![PublishedEvent {
+        channel: "shell.run-debug-benchmark".into(),
+        payload: serde_json::json!({ "scenario_id": "hover" }),
+        source_module_id: "@mesh/debug-inspector".into(),
+        source_capabilities: mesh_core_capability::CapabilitySet::new(),
+    }]);
+
+    match requests.as_slice() {
+        [CoreRequest::RunDebugBenchmark { scenario_id }] => {
+            assert_eq!(scenario_id, "hover");
+        }
+        other => panic!("expected RunDebugBenchmark request, got {other:?}"),
+    }
+}
+
+#[test]
+fn benchmark_ipc_command_maps_to_run_request() {
+    match parse_ipc_command("shell:debug_benchmark:pointer_update") {
+        Some(CoreRequest::RunDebugBenchmark { scenario_id }) => {
+            assert_eq!(scenario_id, "pointer_update");
+        }
+        other => panic!("expected RunDebugBenchmark request, got {other:?}"),
+    }
+}
+
+#[test]
+fn benchmark_run_request_does_not_enable_profiling() {
+    let mut shell = Shell::new();
+
+    let emitted = shell
+        .apply_request(CoreRequest::RunDebugBenchmark {
+            scenario_id: "surface_open_close".into(),
+        })
+        .unwrap();
+
+    assert!(
+        !shell.debug.profiling_enabled,
+        "benchmark requests must not enable profiling"
+    );
+    assert_eq!(
+        shell
+            .debug
+            .latest_benchmark_run
+            .as_ref()
+            .map(|run| run.scenario_id.id()),
+        Some("surface_open_close")
+    );
+    assert_eq!(emitted.len(), 2);
+    assert!(matches!(
+        &emitted[0],
+        CoreRequest::ShowSurface { surface_id } if surface_id == "@mesh/audio-popover"
+    ));
+    assert!(matches!(
+        &emitted[1],
+        CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/audio-popover"
+    ));
+
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    assert!(shell.debug.profiling_enabled);
+    shell
+        .apply_request(CoreRequest::RunDebugBenchmark {
+            scenario_id: "keyboard_traversal".into(),
+        })
+        .unwrap();
+    assert!(
+        shell.debug.profiling_enabled,
+        "benchmark requests must preserve existing profiling state"
+    );
+    assert_eq!(
+        shell
+            .debug
+            .latest_benchmark_run
+            .as_ref()
+            .map(|run| run.scenario_id.id()),
+        Some("keyboard_traversal")
+    );
+}
+
+#[test]
+fn benchmark_run_request_rejects_unknown_scenario() {
+    let mut shell = Shell::new();
+
+    let emitted = shell
+        .apply_request(CoreRequest::RunDebugBenchmark {
+            scenario_id: "not_a_scenario".into(),
+        })
+        .unwrap();
+
+    assert!(
+        !shell.debug.profiling_enabled,
+        "rejected benchmark requests must not enable profiling"
+    );
+    assert!(shell.debug.latest_benchmark_run.is_none());
+    match emitted.as_slices().0 {
+        [CoreRequest::PublishDiagnostics { message }] => {
+            assert!(message.contains("unknown debug benchmark scenario"));
+            assert!(message.contains("not_a_scenario"));
+        }
+        other => panic!("expected diagnostic for unknown benchmark scenario, got {other:?}"),
+    }
 }
 
 #[test]
