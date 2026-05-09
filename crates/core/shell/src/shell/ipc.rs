@@ -1,5 +1,5 @@
 use super::types::{CoreRequest, ShellMessage};
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, PermissionsExt};
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
@@ -14,10 +14,7 @@ pub(super) fn spawn_ipc_server(
     tx: mpsc::UnboundedSender<ShellMessage>,
 ) -> Result<(), std::io::Error> {
     if let Some(parent) = socket_path.parent() {
-        std::fs::create_dir_all(parent)?;
-        if is_private_tmp_ipc_dir(parent) {
-            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
-        }
+        prepare_ipc_parent(parent)?;
     }
 
     if socket_path.exists() {
@@ -59,6 +56,29 @@ pub(super) fn spawn_ipc_server(
     });
 
     Ok(())
+}
+
+fn prepare_ipc_parent(parent: &std::path::Path) -> Result<(), std::io::Error> {
+    if !is_private_tmp_ipc_dir(parent) {
+        return std::fs::create_dir_all(parent);
+    }
+
+    match std::fs::symlink_metadata(parent) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() || !file_type.is_dir() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("refusing unsafe ipc directory {}", parent.display()),
+                ));
+            }
+            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::DirBuilder::new().mode(0o700).create(parent)
+        }
+        Err(err) => Err(err),
+    }
 }
 
 async fn handle_ipc_client(
@@ -174,7 +194,8 @@ fn is_private_tmp_ipc_dir(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+    use std::os::unix::fs::{FileTypeExt, PermissionsExt, symlink};
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
@@ -202,6 +223,28 @@ mod tests {
         let metadata = std::fs::symlink_metadata(socket_path).unwrap();
         assert!(metadata.file_type().is_socket());
         assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn ipc_server_refuses_symlinked_private_tmp_parent() {
+        let target = tempfile::tempdir().unwrap();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let parent = std::path::PathBuf::from(format!(
+            "/tmp/mesh-ipc-symlink-test-{}-{unique}",
+            std::process::id()
+        ));
+        symlink(target.path(), &parent).unwrap();
+        let socket_path = parent.join("mesh.sock");
+        let runtime = Runtime::new().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let err = spawn_ipc_server(&runtime, socket_path, tx).unwrap_err();
+        std::fs::remove_file(&parent).unwrap();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
     }
 
     #[test]
