@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Performance Instrumentation and Responsiveness
-status: executing
-stopped_at: Completed 17-03-PLAN.md
-last_updated: "2026-05-09T08:19:42.434Z"
+status: verifying
+stopped_at: Completed 17-04-PLAN.md
+last_updated: "2026-05-09T08:30:30.420Z"
 last_activity: 2026-05-09
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 16
-  completed_plans: 15
-  percent: 94
+  completed_plans: 16
+  percent: 100
 ---
 
 # State: MESH v1.3
@@ -27,7 +27,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-08)
 
 Phase: 17 (canonical-benchmark-scenarios-and-proof-flows) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-05-09
 
 ## Decisions
@@ -82,6 +82,9 @@ Last activity: 2026-05-09
 - [Phase 17]: Benchmark launch requests record session-local debug state but never toggle debug profiling.
 - [Phase 17]: Benchmark view rows consume primitive normalized props from the inspector parent rather than reading mesh.debug directly. — Matches existing debug inspector parent-owned payload normalization and keeps child view render-only.
 - [Phase 17]: Benchmark action buttons always publish shell.run-debug-benchmark with fixed canonical scenario ids. — Preserves debug-scoped run routing from Plan 17-02 and avoids inspector-local scenario aliases.
+- [Phase 17]: Backend-driven benchmark completion requires both provider-stage timing and frontend surface render timing. — Satisfies BACK-03/BENCH-05 using generic profiling snapshots only.
+- [Phase 17]: Backend benchmark target text is derived from existing profiling/runtime identities while preserving the canonical mesh.audio -> @mesh/pipewire-audio fallback. — Keeps Rust benchmark correlation generic and avoids audio payload parsing.
+- [Phase 17]: Task 17-04-03 is recorded with an empty verification commit because the final proof suite passed without code changes. — Preserves per-task atomic commit history without changing unrelated files.
 
 ## Performance Metrics
 
@@ -115,11 +118,12 @@ Last activity: 2026-05-09
 | Phase 17 P01 | 6min | 3 tasks | 3 files |
 | Phase 17 P02 | 6min | 3 tasks | 7 files |
 | Phase 17 P03 | 9min | 3 tasks | 3 files |
+| Phase 17 P04 | 7min | 3 tasks | 2 files |
 
 ## Session
 
-Last session: 2026-05-09T08:19:42.425Z
-Stopped At: Completed 17-03-PLAN.md
+Last session: 2026-05-09T08:30:30.411Z
+Stopped At: Completed 17-04-PLAN.md
 Resume File: None
 
 ## Accumulated Context

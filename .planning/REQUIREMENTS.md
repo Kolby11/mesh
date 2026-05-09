@@ -21,7 +21,7 @@
 
 - [ ] **BACK-01**: Profiling attributes backend work by provider or service rather than reporting backend time only as one aggregate bucket.
 - [ ] **BACK-02**: Backend profiling separates at least poll/update, command handling, and state publish/delivery stages.
-- [ ] **BACK-03**: Backend timing can be correlated with the resulting frontend surface cost during backend-driven state updates.
+- [x] **BACK-03**: Backend timing can be correlated with the resulting frontend surface cost during backend-driven state updates.
 
 ### Inspector UI
 
@@ -78,7 +78,7 @@
 | TIME-03 | Phase 14 | Complete |
 | BACK-01 | Phase 15 | Pending |
 | BACK-02 | Phase 15 | Pending |
-| BACK-03 | Phase 17 | Pending |
+| BACK-03 | Phase 17 | Complete |
 | INSP-01 | Phase 16 | Pending |
 | INSP-02 | Phase 16 | Pending |
 | INSP-03 | Phase 16 | Pending |
