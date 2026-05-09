@@ -145,7 +145,14 @@ fn benchmark_snapshot(
         BenchmarkScenarioId::BackendUpdate,
     ]
     .into_iter()
-    .map(|id| benchmark_scenario_snapshot(id, debug.profiling_enabled, profiling))
+    .map(|id| {
+        benchmark_scenario_snapshot(
+            id,
+            debug.profiling_enabled,
+            profiling,
+            debug.latest_benchmark_run.as_ref(),
+        )
+    })
     .collect();
 
     mesh_core_debug::DebugBenchmarkSnapshot { scenarios }
@@ -155,6 +162,7 @@ fn benchmark_scenario_snapshot(
     id: mesh_core_debug::BenchmarkScenarioId,
     profiling_enabled: bool,
     profiling: Option<&mesh_core_debug::ProfilingSnapshot>,
+    latest_run: Option<&mesh_core_debug::DebugBenchmarkRunState>,
 ) -> mesh_core_debug::BenchmarkScenarioSnapshot {
     let target = benchmark_target(id);
     let (status, primary_metric, secondary_metric, hint) = if !profiling_enabled {
@@ -165,9 +173,14 @@ fn benchmark_scenario_snapshot(
             "Start profiling first".to_string(),
         )
     } else if let Some(profiling) = profiling {
-        benchmark_metrics(id, profiling)
+        let metrics = benchmark_metrics(id, profiling);
+        if metrics.0 == mesh_core_debug::BenchmarkScenarioStatus::WaitingForSamples {
+            benchmark_pending_state(id, latest_run)
+        } else {
+            metrics
+        }
     } else {
-        waiting_for_samples()
+        benchmark_pending_state(id, latest_run)
     };
 
     mesh_core_debug::BenchmarkScenarioSnapshot {
@@ -179,6 +192,34 @@ fn benchmark_scenario_snapshot(
         secondary_metric,
         hint,
     }
+}
+
+fn benchmark_pending_state(
+    id: mesh_core_debug::BenchmarkScenarioId,
+    latest_run: Option<&mesh_core_debug::DebugBenchmarkRunState>,
+) -> (
+    mesh_core_debug::BenchmarkScenarioStatus,
+    String,
+    String,
+    String,
+) {
+    if let Some(latest_run) = latest_run
+        && latest_run.scenario_id == id
+    {
+        return (
+            latest_run.status,
+            "No benchmark results yet".to_string(),
+            "No benchmark results yet".to_string(),
+            "Benchmark requested; waiting for profiling samples".to_string(),
+        );
+    }
+
+    (
+        mesh_core_debug::BenchmarkScenarioStatus::Ready,
+        "No benchmark results yet".to_string(),
+        "No benchmark results yet".to_string(),
+        "Run this scenario while profiling is live".to_string(),
+    )
 }
 
 fn benchmark_target(id: mesh_core_debug::BenchmarkScenarioId) -> &'static str {

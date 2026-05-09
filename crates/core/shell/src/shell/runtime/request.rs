@@ -1,6 +1,8 @@
 use super::super::*;
 use crate::shell::types::TabFocusTarget;
-use mesh_core_debug::ProfilingBackendStage;
+use mesh_core_debug::{
+    BenchmarkScenarioId, BenchmarkScenarioStatus, DebugBenchmarkRunState, ProfilingBackendStage,
+};
 
 /// One main-loop tick (~60 Hz). Coalescable commands fire on the leading
 /// edge; further calls within the interval park as `pending` and are
@@ -203,8 +205,7 @@ impl Shell {
                 Ok(VecDeque::new())
             }
             CoreRequest::RunDebugBenchmark { scenario_id } => {
-                tracing::info!("diagnostic: unknown debug benchmark scenario: {scenario_id}");
-                Ok(VecDeque::new())
+                self.apply_run_debug_benchmark(&scenario_id)
             }
             CoreRequest::CycleDebugTab => {
                 self.debug.cycle_tab();
@@ -368,6 +369,35 @@ impl Shell {
             );
         }
         Some(result)
+    }
+
+    fn apply_run_debug_benchmark(
+        &mut self,
+        scenario_id: &str,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let Some(scenario) = benchmark_scenario_id(scenario_id) else {
+            let mut emitted = VecDeque::new();
+            emitted.push_back(CoreRequest::PublishDiagnostics {
+                message: format!("unknown debug benchmark scenario: {scenario_id}"),
+            });
+            return Ok(emitted);
+        };
+
+        self.debug.latest_benchmark_run = Some(DebugBenchmarkRunState {
+            scenario_id: scenario,
+            status: BenchmarkScenarioStatus::WaitingForSamples,
+        });
+
+        let mut emitted = VecDeque::new();
+        if scenario == BenchmarkScenarioId::SurfaceOpenClose {
+            emitted.push_back(CoreRequest::ShowSurface {
+                surface_id: "@mesh/audio-popover".to_string(),
+            });
+            emitted.push_back(CoreRequest::HideSurface {
+                surface_id: "@mesh/audio-popover".to_string(),
+            });
+        }
+        Ok(emitted)
     }
 
     /// Apply a cross-surface tab focus transfer. Clears focus on the
@@ -545,5 +575,16 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::RunDebugBenchmark { .. } => "run_debug_benchmark",
         CoreRequest::CycleDebugTab => "cycle_debug_tab",
         CoreRequest::Shutdown => "shutdown",
+    }
+}
+
+fn benchmark_scenario_id(scenario_id: &str) -> Option<BenchmarkScenarioId> {
+    match scenario_id {
+        "hover" => Some(BenchmarkScenarioId::Hover),
+        "surface_open_close" => Some(BenchmarkScenarioId::SurfaceOpenClose),
+        "pointer_update" => Some(BenchmarkScenarioId::PointerUpdate),
+        "keyboard_traversal" => Some(BenchmarkScenarioId::KeyboardTraversal),
+        "backend_update" => Some(BenchmarkScenarioId::BackendUpdate),
+        _ => None,
     }
 }

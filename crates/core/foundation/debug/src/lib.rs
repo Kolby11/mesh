@@ -97,6 +97,7 @@ impl BenchmarkScenarioId {
 pub enum BenchmarkScenarioStatus {
     ProfilingOff,
     Ready,
+    Running,
     WaitingForSamples,
     Complete,
     Unavailable,
@@ -108,12 +109,19 @@ impl BenchmarkScenarioStatus {
         match self {
             Self::ProfilingOff => "Profiling off",
             Self::Ready => "Ready",
+            Self::Running => "Running",
             Self::WaitingForSamples => "Waiting for samples",
             Self::Complete => "Complete",
             Self::Unavailable => "Unavailable",
             Self::Skipped => "Skipped",
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DebugBenchmarkRunState {
+    pub scenario_id: BenchmarkScenarioId,
+    pub status: BenchmarkScenarioStatus,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -279,6 +287,7 @@ pub struct DebugOverlayState {
     pub active_view: DebugInspectorView,
     pub profiling_enabled: bool,
     pub profiling_session_id: u64,
+    pub latest_benchmark_run: Option<DebugBenchmarkRunState>,
 }
 
 impl DebugOverlayState {
