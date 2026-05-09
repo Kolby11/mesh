@@ -1063,6 +1063,113 @@ fn benchmark_backend_update_reports_unavailable_for_failed_only_audio_runtime() 
 }
 
 #[test]
+fn phase18_baseline_ranks_hotspots_by_absolute_latency() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::TotalSurfaceRender,
+        std::time::Duration::from_micros(142),
+        Some("phase18_fresh_baseline"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::Paint,
+        std::time::Duration::from_micros(77),
+        Some("phase18_fresh_baseline"),
+    );
+    shell.record_backend_runtime_status(
+        "mesh.audio".to_string(),
+        "@mesh/pipewire-audio".to_string(),
+        BackendRuntimeStatus::Running,
+        "phase18 backend baseline".to_string(),
+    );
+    shell.record_backend_profiling_stage(
+        "mesh.audio",
+        "@mesh/pipewire-audio",
+        ProfilingBackendStage::StatePublishDelivery,
+        std::time::Duration::from_micros(109),
+        Some("phase18_fresh_baseline"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/audio-popover",
+        Some("@mesh/audio-popover"),
+        ProfilingStage::TotalSurfaceRender,
+        std::time::Duration::from_micros(88),
+        Some("phase18_backend_visible_frontend"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot
+        .profiling
+        .as_ref()
+        .expect("profiling should be enabled for phase 18 baseline");
+    let navigation_bar = profiling
+        .surfaces
+        .iter()
+        .find(|surface| surface.surface_id == "@mesh/navigation-bar")
+        .expect("navigation bar surface sample should be recorded");
+    let backend = profiling
+        .backends
+        .iter()
+        .find(|backend| {
+            backend.interface == "mesh.audio" && backend.provider_id == "@mesh/pipewire-audio"
+        })
+        .expect("backend sample should be recorded");
+    let backend_visible_frontend = profiling
+        .surfaces
+        .iter()
+        .find(|surface| surface.surface_id == "@mesh/audio-popover")
+        .expect("backend-driven frontend surface sample should be recorded");
+
+    let nav_render = navigation_bar
+        .stages
+        .iter()
+        .find(|stage| stage.stage == ProfilingStage::TotalSurfaceRender)
+        .expect("navigation bar render stage should be recorded");
+    let nav_paint = navigation_bar
+        .stages
+        .iter()
+        .find(|stage| stage.stage == ProfilingStage::Paint)
+        .expect("navigation bar paint stage should be recorded");
+    let backend_publish = backend
+        .stages
+        .iter()
+        .find(|stage| stage.stage == ProfilingBackendStage::StatePublishDelivery)
+        .expect("backend publish stage should be recorded");
+
+    let mut candidates = [
+        (
+            "surface_render:@mesh/navigation-bar",
+            nav_render.max_micros,
+            true,
+        ),
+        ("paint:@mesh/navigation-bar", nav_paint.max_micros, true),
+        (
+            "backend_publish:@mesh/pipewire-audio",
+            backend_publish.max_micros,
+            backend_visible_frontend.total_surface_render_time_micros > 0,
+        ),
+    ];
+    candidates.sort_by(|left, right| right.1.cmp(&left.1));
+
+    assert_eq!(candidates[0].0, "surface_render:@mesh/navigation-bar");
+    assert_eq!(candidates[0].1, 142);
+    assert!(
+        candidates
+            .iter()
+            .any(|(name, value, eligible)| name.starts_with("backend_publish")
+                && *value == 109
+                && *eligible),
+        "backend candidate should remain eligible only when frontend impact is visible"
+    );
+}
+
+#[test]
 fn benchmark_run_request_rejects_unknown_scenario() {
     let mut shell = Shell::new();
 
