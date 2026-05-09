@@ -72,7 +72,7 @@
 **Framework:** `tracing` in Rust; host-provided `mesh.log` in Luau; `eprintln!`/`println!` only for CLI user output.
 
 **Patterns:**
-- Use `tracing::info!`, `tracing::debug!`, `tracing::warn!`, and `tracing::error!` in long-running shell/runtime code, for example `crates/core/shell/src/shell/mod.rs` and `crates/core/ui/render/src/compile.rs`.
+- Use `tracing::info!`, `tracing::debug!`, `tracing::warn!`, and `tracing::error!` in long-running shell/runtime code, for example `crates/core/shell/src/shell/mod.rs` and `crates/core/frontend/compiler/src/compile.rs`.
 - Initialize CLI logging once with `tracing_subscriber::fmt().with_env_filter(...)` in `crates/tools/cli/src/main.rs`.
 - Use diagnostic collectors for user-visible plugin health rather than only logging, for example `Diagnostics::record_lifecycle_error` in `crates/core/foundation/diagnostics/src/lib.rs`.
 - Luau backends should log through small local helpers that prefix the module ID, for example `debug_info` and `debug_warn` in `modules/backend/pipewire-audio/src/main.luau`.

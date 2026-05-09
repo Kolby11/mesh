@@ -84,12 +84,13 @@ Today the path is already close to a compiler pipeline:
 .mesh SFC source
   -> crates/core/ui/component/src/parser.rs::parse_component
   -> ComponentFile { template, script, style, ... }
-  -> crates/core/frontend/compiler/src/lib.rs::build_widget_tree_from_component
-  -> WidgetNode tree
+  -> crates/core/frontend/compiler/src/compile.rs::compile_frontend_module
+  -> crates/core/frontend/compiler/src/render.rs::build_widget_tree_from_component
+  -> WidgetNode tree / CompiledFrontendModule
   -> mesh-core-elements StyleResolver / LayoutEngine
-  -> mesh-core-shell surface runtime
-  -> mesh-core-render surface painter
-  -> mesh-core-presentation surface backend
+  -> mesh-core-shell component runtime and retained dirty tracking
+  -> mesh-core-render software painter
+  -> mesh-core-presentation dev-window or layer-shell backend
 ```
 
 The main transition pressure points are:
@@ -98,8 +99,10 @@ The main transition pressure points are:
   Current template AST stores raw tag strings and generic attributes.
 - `crates/core/ui/component/src/style.rs`
   Current style AST is intentionally small: simple selectors, declarations, container queries.
-- `crates/core/frontend/compiler/src/lib.rs`
-  Compiles frontend modules and builds widget trees.
+- `crates/core/frontend/compiler/src/compile.rs`
+  Compiles frontend modules and resolves local component imports.
+- `crates/core/frontend/compiler/src/render.rs`
+  Builds widget trees from compiled component source.
 - `crates/core/frontend/compiler/src/tags.rs`
   Lowers source-level `SourceTag` values to runtime `UiTag` primitives.
 - `crates/core/ui/elements/src/style.rs`
@@ -108,6 +111,9 @@ The main transition pressure points are:
   Layout is a flexbox-like subset, not browser layout.
 - `crates/core/frontend/render/src/surface/painter.rs`
   Rendering is by UI primitive tag, not by browser semantics.
+- `crates/core/presentation/src/lib.rs`
+  Selects the dev-window or layer-shell backend and commits rendered
+  `PixelBuffer`s.
 
 ## What should change conceptually
 

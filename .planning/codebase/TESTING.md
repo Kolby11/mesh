@@ -206,7 +206,7 @@ Use targeted behavior tests as the primary quality gate. For broad changes, run 
 
 **Unit Tests:**
 - Parser and validation tests assert direct return values and error variants in files such as `crates/core/ui/component/src/parser.rs`, `crates/core/extension/plugin/src/package.rs`, `crates/core/extension/service/src/contract.rs`, and `crates/core/foundation/diagnostics/src/lib.rs`.
-- Style/render tests assert parsed values, resolved style, layout state, and pixels in files such as `crates/core/ui/elements/src/style.rs`, `crates/core/ui/render/src/surface/painter.rs`, and `crates/core/ui/render/src/surface/icon.rs`.
+- Style/render tests assert parsed values, resolved style, layout state, and pixels in files such as `crates/core/ui/elements/src/style.rs`, `crates/core/frontend/render/src/surface/painter.rs`, and `crates/core/frontend/render/src/surface/icon.rs`.
 
 **Integration Tests:**
 - Package graph tests integrate root config, module package manifests, provider selection, contributed resources, layout entrypoints, and legacy manifest loading in `crates/core/extension/plugin/src/package.rs`.
@@ -216,7 +216,7 @@ Use targeted behavior tests as the primary quality gate. For broad changes, run 
 
 **E2E Tests:**
 - Not used. There is no Playwright, WebDriver, compositor-driven, or full shell E2E test harness in the repo.
-- Rendering proof is currently unit/integration level through software buffers and pixel assertions in `crates/core/ui/render/src/surface/*.rs`.
+- Rendering proof is currently unit/integration level through software buffers and pixel assertions in `crates/core/frontend/render/src/surface/*.rs`.
 
 ## Common Patterns
 

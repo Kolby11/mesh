@@ -6,7 +6,7 @@
 
 **Wayland / Compositor:**
 - Wayland compositor - Displays shell surfaces as a Wayland client.
-  - SDK/Client: `wayland-client` 0.31.14, `smithay-client-toolkit` 0.19.2, `minifb` 0.27.0 with `wayland`, plus internal abstractions in `crates/core/platform/wayland/src/lib.rs` and rendering code in `crates/core/ui/render/Cargo.toml`.
+  - SDK/Client: `wayland-client` 0.31.14, `smithay-client-toolkit` 0.19.2, `minifb` 0.27.0 with `wayland`, plus internal abstractions in `crates/core/platform/wayland/src/lib.rs`, presentation code in `crates/core/presentation/Cargo.toml`, and software rendering code in `crates/core/frontend/render/Cargo.toml`.
   - Auth: Local Wayland session environment; no app-level credentials detected.
   - Capability/compatibility: Frontend modules can declare compositor requirements such as `wlr-layer-shell-v1` in `modules/frontend/navigation-bar/package.json`.
 

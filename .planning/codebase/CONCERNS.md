@@ -90,7 +90,7 @@
 
 **Shell and render tests depend on system Wayland libraries:**
 - Problem: Focused shell tests could not compile outside the Nix dev shell because `smithay-client-toolkit` requires `xkbcommon.pc`.
-- Files: `crates/core/ui/render/Cargo.toml`, `flake.nix`, `crates/core/shell/Cargo.toml`
+- Files: `crates/core/presentation/Cargo.toml`, `crates/core/frontend/render/Cargo.toml`, `flake.nix`, `crates/core/shell/Cargo.toml`
 - Cause: Shell depends on render/Wayland crates and there is no headless test feature for lifecycle-only tests.
 - Improvement path: Add a headless feature or split lifecycle tests into crates that do not compile Wayland/render dependencies.
 

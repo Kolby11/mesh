@@ -34,11 +34,11 @@
 - Tokio 1.52.1 - Async runtime, timers, MPSC channels, broadcast channels, IPC accept loop, and backend task orchestration in `crates/core/runtime/backend/src/lib.rs` and `crates/core/shell/src/shell/ipc.rs`.
 - mlua 0.11.6 - Embedded Luau host APIs for backend and frontend scripts in `crates/core/runtime/scripting/src/backend.rs` and `crates/core/runtime/scripting/src/context.rs`.
 - tower-lsp 0.20.0 - Language server framework for `.mesh` authoring in `crates/tools/lsp/Cargo.toml`.
-- minifb 0.27.0 + Wayland - Presentation/window pump selected by `mesh-core-render` in `crates/core/ui/render/Cargo.toml`.
+- minifb 0.27.0 + Wayland - Dev-window and layer-shell presentation selected by `mesh-core-presentation` in `crates/core/presentation/Cargo.toml`.
 
 **Testing:**
 - Rust built-in test harness - Unit and integration-style tests colocated in crate source files and test modules across `crates/core/**/src/*.rs`.
-- tempfile 3.27.0 - Temporary filesystem fixtures in crates such as `crates/core/shell/Cargo.toml`, `crates/core/extension/service/Cargo.toml`, `crates/core/ui/render/Cargo.toml`, and `crates/core/ui/icon/Cargo.toml`.
+- tempfile 3.27.0 - Temporary filesystem fixtures in crates such as `crates/core/shell/Cargo.toml`, `crates/core/extension/service/Cargo.toml`, `crates/core/frontend/render/Cargo.toml`, and `crates/core/ui/icon/Cargo.toml`.
 
 **Build/Dev:**
 - rustfmt and clippy - Provided in the Nix dev shell through `flake.nix`.
@@ -58,10 +58,10 @@
 **Infrastructure:**
 - `quick-xml` 0.39.2 - `.mesh` component markup parsing in `crates/core/ui/component/Cargo.toml`.
 - `cssparser` 0.35.0 and `lightningcss` 1.0.0-alpha.71 - CSS-like style parsing and validation for `.mesh` components in `crates/core/ui/component/Cargo.toml`.
-- `cosmic-text` 0.18.2 and `fontdb` 0.23.0 - Text shaping and font discovery in `crates/core/ui/render/Cargo.toml`.
-- `image` 0.24.9 and `resvg` 0.44.0 - Raster and SVG handling in `crates/core/ui/render/Cargo.toml`.
-- `rustix` 0.38.44 - Low-level event, filesystem, memory mapping, and shared-memory support in `crates/core/ui/render/Cargo.toml`.
-- `wayland-client` 0.31.14 and `smithay-client-toolkit` 0.19.2 - Wayland client protocol integration in `crates/core/ui/render/Cargo.toml`.
+- `cosmic-text` 0.18.2 and `fontdb` 0.23.0 - Text shaping and font discovery in `crates/core/frontend/render/Cargo.toml`.
+- `image` 0.24.9 and `resvg` 0.44.0 - Raster and SVG handling in `crates/core/frontend/render/Cargo.toml`.
+- `rustix` 0.38.44 - Low-level event, filesystem, memory mapping, and shared-memory support used by presentation/rendering crates.
+- `wayland-client` 0.31.14 and `smithay-client-toolkit` 0.19.2 - Wayland client protocol integration in `crates/core/presentation/Cargo.toml`.
 - `icon` 0.2.0 and `dirs` 4.0.0 - Icon registry and XDG-style lookup support in `crates/core/ui/icon/Cargo.toml` and `crates/core/ui/icon/src/lib.rs`.
 - `tower-lsp` 0.20.0 - `.mesh` language server transport and protocol support in `crates/tools/lsp/Cargo.toml`.
 

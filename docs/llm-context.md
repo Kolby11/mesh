@@ -184,11 +184,11 @@ capabilities, manifests, and one or more components.
 
 ### Surface rendering
 
-1. Wayland compositor calls `paint()` on `FrontendSurfaceComponent`
-2. `build_tree()` → `ScriptContext` evaluates Luau state → `WidgetNode` tree
-3. If `size_policy == ContentMeasured`: `measure_content_size()` uses manifest clamps
-4. `Painter` walks the tree, resolves styles via `StyleResolver`, draws into `PixelBuffer`
-5. Buffer committed to Wayland via `LayerShellBackend`
+1. `Shell::render_components()` in `crates/core/shell/src/shell/runtime/render.rs` chooses dirty or visible surfaces.
+2. `FrontendSurfaceComponent::render()` updates script/runtime state and `FrontendSurfaceComponent::paint()` builds or reuses the `WidgetNode` tree.
+3. The component runtime keeps retained widget identity and dirty summaries in `crates/core/shell/src/shell/component/runtime_tree.rs`.
+4. `mesh-core-render` paints the tree into a `PixelBuffer` through `paint_frontend_tree_at_for_module()`.
+5. `mesh-core-presentation` commits the buffer through either the dev-window backend or the layer-shell backend and returns normalized input events to the shell.
 
 ### Settings flow
 
@@ -220,13 +220,13 @@ backend module (mesh.toml, provides = "mesh.audio")
 
 | Task                           | Where to start                                                                                                                   |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| Add a CSS property             | `mesh-core-elements/src/style.rs` (parse), `crates/core/frontend/render/src/surface/painter.rs` (paint)                            |
+| Add a CSS property             | `crates/core/ui/component/src/style.rs` / parser modules (parse), `crates/core/ui/elements/src/style.rs` (computed style), `crates/core/frontend/render/src/surface/painter.rs` (paint) |
 | Add a new surface module       | Create `packages/modules/frontend/core/<name>/`, `package.json` with `"type": "surface"`, `src/main.mesh`                        |
 | Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core-shell/src/shell.rs`; manifest's `surface_layout` section                          |
 | Add a service (backend module) | `packages/modules/backend/core/<name>/`, `package.json` + `src/main.luau`, implement the interface contract in the module script |
-| Add a new CoreRequest action   | `CoreRequest` enum + match arm in `handle_request()` in `mesh-core-shell/src/shell.rs`                                           |
+| Add a new CoreRequest action   | `CoreRequest` enum in `crates/core/shell/src/shell/types.rs` plus request handling under `crates/core/shell/src/shell/runtime/request.rs` |
 | Add a theme token              | `mesh-core-theme/src/lib.rs`, default theme JSON, then reference with `token(group.name)` in `.mesh`                             |
-| Debug rendering                | `ToggleDebugOverlay` / `CoreRequest::CycleDebugTab`; see `mesh-core-debug/src/lib.rs`                                            |
+| Debug rendering                | `ToggleDebugOverlay` / `CoreRequest::CycleDebugTab`; see `crates/core/foundation/debug/src/lib.rs` and `crates/core/frontend/render/src/surface/debug_overlay.rs` |
 | Module manifest parsing        | `mesh-core-module/src/manifest.rs` — `JsonManifest`, `TomlManifest`, `into_manifest()`                                           |
 | Fix icons                      | See "Icon System" section below — four specific files need changes                                                               |
 
@@ -250,7 +250,7 @@ The full pipeline:
 <icon name="..."> in .mesh template
   → parser (mesh-core-component/src/parser.rs) — already works
   → WidgetNode { tag: "icon", attributes: { name, size } }
-  → painter (crates/core/frontend/render/src/surface/painter.rs:138) — reads name/src/size attrs
+  → painter (crates/core/frontend/render/src/surface/painter/widgets.rs) — reads name/src/size attrs
   → resolve_icon_path(name, size) in mesh-core-icon/src/lib.rs — BROKEN (see fix 1)
   → draw_icon_from_path(buffer, path, ...) in crates/core/frontend/render/src/surface/icon.rs — BROKEN for SVG (see fix 2)
 ```

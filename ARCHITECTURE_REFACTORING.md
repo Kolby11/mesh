@@ -1,114 +1,103 @@
-# Rendering Architecture Refactoring: Summary
+# Rendering and Runtime Crate Refactor
 
 ## Overview
-Refactored the rendering pipeline to separate concerns between frontend module rendering and core shell surface painting. The `mesh-core-render` now handles all frontend module rendering, while `mesh-core-shell` provides a thin `CorePainter` wrapper for integrating with shell surfaces.
 
-## Changes Made
+The frontend path is now split into explicit compile, runtime, paint, and presentation layers. The goal is to keep author-facing `.mesh` compilation, shell runtime orchestration, software painting, and Wayland/dev-window presentation from growing back into one coupled crate.
 
-### 1. **mesh-core-render** - Enhanced with FrontendRenderEngine
-**File**: `crates/core/ui/render/src/painter.rs` (NEW)
+## Current Boundaries
 
-Created a high-level `FrontendRenderEngine` that handles:
-- Widget tree traversal and rasterization
-- Component-specific rendering (text, input, slider, icon nodes)
-- Scrollbar rendering
-- Tooltip overlays
-- Clipping and z-index management
+| Crate | Path | Responsibility |
+|-------|------|----------------|
+| `mesh-core-component` | `crates/core/ui/component` | Parses `.mesh` single-file components into template, script, style, and import structures. |
+| `mesh-core-frontend` | `crates/core/frontend/compiler` | Compiles frontend modules, resolves local component imports, lowers source tags through `UiTag`, and builds `WidgetNode` trees. |
+| `mesh-core-elements` | `crates/core/ui/elements` | Owns the runtime widget tree, computed style, layout, accessibility, and element state contracts. |
+| `mesh-core-interaction` | `crates/core/ui/interaction` | Provides hit testing, focus traversal, scroll helpers, and widget-tree interaction queries. |
+| `mesh-core-render` | `crates/core/frontend/render` | Paints `WidgetNode` trees into `PixelBuffer`s, including text, glyph, icon, debug overlay, and primitive widget drawing. |
+| `mesh-core-presentation` | `crates/core/presentation` | Presents `PixelBuffer`s through the dev-window or layer-shell backend and normalizes input events. |
+| `mesh-core-shell` | `crates/core/shell` | Glues module discovery, scripting runtime, services, surface configuration, component invalidation, rendering, and presentation into the shell event loop. |
 
-**Key Methods**:
-- `render_tree()` - Main entry point for painting widget trees
-- `render_tooltip()` - Paint tooltip overlays
-- Component-specific renderers: `render_text_node()`, `render_slider_node()`, `render_icon_node()`, etc.
+## Rendering Flow
 
-### 2. **mesh-core-render** - Icon Support
-**File**: `crates/core/ui/render/src/icon.rs` (NEW)
-
-Added icon rendering support that delegates to `mesh-renderer`:
-- `draw_icon_from_path()` - Render icons from file paths
-- `draw_named_icon()` - Render icons by name (resolves via icon theme)
-
-**Dependencies Added**:
-- `mesh-core-icon` workspace dependency
-- Added to `Cargo.toml`
-
-### 3. **mesh-core-render** - Updated lib.rs
-**File**: `crates/core/ui/render/src/lib.rs` (MODIFIED)
-
-Changes:
-- Added `mod painter` and `pub mod icon` modules
-- Exported `FrontendRenderEngine` publicly
-- Updated `paint_frontend_tree()` to use `FrontendRenderEngine` instead of `mesh-renderer::Painter`
-- Thread-local storage now manages `FrontendRenderEngine` instance
-
-### 4. **mesh-core-shell** - New CorePainter
-**File**: `crates/core/shell/src/shell/painter.rs` (NEW)
-
-Created `CorePainter` struct that:
-- Wraps `FrontendRenderEngine` for shell surface integration
-- Provides `paint()` and `paint_tooltip()` methods
-- Acts as the bridge between component state and pixel rendering
-
-### 5. **mesh-core-shell** - Module Integration
-**File**: `crates/core/shell/src/shell/mod.rs` (MODIFIED)
-
-Added `mod painter` to make the new painter module part of the shell subsystem.
-
-### 6. **Workspace Dependencies**
-**File**: `Cargo.toml` (MODIFIED)
-
-Added `mesh-core-icon` to workspace dependencies:
-```toml
-mesh-core-icon = { path = "crates/core/ui/icon" }
+```text
+.mesh source
+  -> mesh-core-component parser
+  -> mesh-core-frontend compiler/lowering
+  -> CompiledFrontendModule
+  -> FrontendSurfaceComponent runtime in mesh-core-shell
+  -> WidgetNode tree + retained dirty summary
+  -> mesh-core-render painter
+  -> PixelBuffer
+  -> mesh-core-presentation backend
+  -> dev window or layer-shell surface
 ```
 
-## Architecture Flow
+The shell still owns when a surface needs work. `FrontendSurfaceComponent` tracks dirty categories, script state, interaction state, retained widget identity, and service/theme/locale invalidation. Painting itself is delegated to `mesh-core-render`, and surface creation or commit is delegated to `mesh-core-presentation`.
 
-```
-Frontend Component (in mesh-core-shell)
-    ↓ (builds widget tree)
-FrontendSurfaceComponent::paint()
-    ↓
-CorePainter::paint()
-    ↓
-FrontendRenderEngine::render_tree()
-    ↓ (traverses tree, renders each node)
-Component-specific renderers
-    ├─ render_text_node()
-    ├─ render_input_node()
-    ├─ render_slider_node()
-    ├─ render_icon_node()
-    │  └─ icon::draw_icon_from_path() / icon::draw_named_icon()
-    └─ render_scrollbars()
-    ↓ (writes pixels)
-PixelBuffer
-    ↓
-RenderEngine::present() → Wayland surface
+## Runtime Flow
+
+```text
+Shell::run()
+  -> discover modules and compile frontend catalog
+  -> create frontend component runtimes
+  -> spawn backend Luau providers on Tokio
+  -> handle backend/service/IPC messages
+  -> tick components and drain CoreRequest queues
+  -> render dirty components
+  -> present buffers and pump presentation events
 ```
 
-## Separation of Concerns
+Runtime scripting remains in `mesh-core-scripting` and backend polling/commands remain in `mesh-core-backend`. The runtime crates should not depend on software painting, text shaping, glyph caches, or presentation backends.
 
-| Component            | Responsibility                               |
-| -------------------- | -------------------------------------------- |
-| `mesh-renderer`      | Low-level pixel operations, Wayland backends |
-| `mesh-core-render` | Frontend module rendering pipeline (new)     |
-| `mesh-core-shell`          | Shell surface orchestration, component state |
+## What Moved
 
-## Benefits
+- Frontend compilation now lives in `crates/core/frontend/compiler`.
+- Software rendering now lives in `crates/core/frontend/render`.
+- Surface/window presentation now lives in `crates/core/presentation`.
+- Sandbox runtime metadata lives in `crates/core/runtime/sandbox`.
+- Frontend host contract types live in `crates/core/frontend/host`.
+- Surface layout policy resolution lives in `crates/core/surface-config`.
+- Animation and interaction helpers live in `crates/core/ui/animation` and `crates/core/ui/interaction`.
 
-1. **Modularity**: Module rendering logic is now cleanly separated into `mesh-core-render`
-2. **Reusability**: The `FrontendRenderEngine` can be used independently for rendering previews or other UIs
-3. **Testability**: Rendering logic can be tested without full shell integration
-4. **Maintenance**: Changes to rendering don't require changes to shell core logic
-5. **Icon Support**: Icons are now properly rendered through the engine layer
+## Dependency Direction
 
-## Compilation Status
+Normal dependency direction is:
 
-✅ `mesh-core-render`: Compiles successfully (with expected unused variable warnings)
-✅ `mesh-core-shell`: Compiles successfully
-✅ All dependencies properly integrated
+```text
+shell -> frontend compiler
+shell -> render
+shell -> presentation
+shell -> animation / interaction / surface-config / scripting / backend
+presentation -> render
+render -> elements + icon
+frontend compiler -> component + elements + module + theme
+interaction -> elements
+animation -> elements
+```
 
-## Notes
+Lower-level crates should not import `mesh-core-shell`. If render, presentation, or compiler code needs a shell-facing concept, define a small contract type in the appropriate boundary crate instead of reaching upward.
 
-- Text rendering integration is currently a placeholder (TODO)
-- The architecture is ready for full text rendering implementation by integrating `mesh-renderer::text::TextRenderer`
-- Input node rendering and some advanced text features need completion in `render_text_node()` and `render_input_node()`
+## Code Entry Points
+
+- Compile frontend modules: `crates/core/frontend/compiler/src/compile.rs`
+- Build widget trees: `crates/core/frontend/compiler/src/render.rs`
+- Lower source tags: `crates/core/frontend/compiler/src/tags.rs`
+- Paint surfaces: `crates/core/frontend/render/src/surface/painter.rs`
+- Text and glyph rendering: `crates/core/frontend/render/src/surface/text.rs`, `crates/core/frontend/render/src/surface/glyph.rs`
+- Icon painting: `crates/core/frontend/render/src/surface/icon.rs`
+- Presentation selection and commit: `crates/core/presentation/src/lib.rs`
+- Layer-shell backend: `crates/core/presentation/src/wayland_surface/`
+- Shell render loop: `crates/core/shell/src/shell/runtime/render.rs`
+- Component runtime and invalidation: `crates/core/shell/src/shell/component.rs`
+- Retained widget identity and dirty summary: `crates/core/shell/src/shell/component/runtime_tree.rs`
+
+## Practical Rules
+
+- Put source parsing in `mesh-core-component`.
+- Put source-to-runtime lowering and widget tree construction in `mesh-core-frontend`.
+- Put runtime-inspectable element, style, layout, accessibility, and state contracts in `mesh-core-elements`.
+- Put hit testing, focus, scroll, and tree queries in `mesh-core-interaction`.
+- Put pixel-buffer painting, text measurement, glyphs, icons, and debug overlay drawing in `mesh-core-render`.
+- Put layer-shell/dev-window commit and input normalization in `mesh-core-presentation`.
+- Put service state, scripting, request draining, and event-loop orchestration in `mesh-core-shell`.
+
+This split keeps rendering reusable and testable without letting runtime crates own paint backends or letting render code own shell policy.

@@ -23,9 +23,11 @@ mesh/
 │   ├── core/extension/           # Module manifests/packages and service contracts
 │   ├── core/foundation/          # Capability, config, diagnostics, events, locale, theme, debug
 │   ├── core/platform/            # Wayland platform abstraction
-│   ├── core/runtime/             # Luau runtime, backend runtime, host runtime
+│   ├── core/runtime/             # Luau runtime, backend runtime, sandbox metadata
 │   ├── core/shell/               # Main shell orchestration and component host
-│   ├── core/ui/                  # Component parser, element model, icons, renderer
+│   ├── core/frontend/            # Frontend compiler, frontend host contracts, software renderer
+│   ├── core/presentation/        # Dev-window/layer-shell presentation backends
+│   ├── core/ui/                  # Component parser, element model, icons, animation, interaction
 │   └── tools/                    # CLI and LSP binaries
 ├── docs/                         # Architecture, module-system, frontend, module, settings, theming docs
 ├── modules/                      # Source modules loaded by `config/package.json`
@@ -64,10 +66,10 @@ mesh/
 - Contains: `BackendServiceCommand`, `BackendServiceUpdate`, `BackendServiceEvent`, `spawn_backend_service()`, poll/command dispatch.
 - Key files: `crates/core/runtime/backend/src/lib.rs`.
 
-**`crates/core/runtime/host`:**
+**`crates/core/runtime/sandbox`:**
 - Purpose: Model sandbox runtime tiers and generic module runtime configuration.
 - Contains: `SandboxConfig`, `ExecutionTier`, `PluginRuntime`.
-- Key files: `crates/core/runtime/host/src/lib.rs`.
+- Key files: `crates/core/runtime/sandbox/src/lib.rs`.
 
 **`crates/core/runtime/scripting`:**
 - Purpose: Host frontend/backend Luau contexts and install capability-gated host APIs.
@@ -78,6 +80,21 @@ mesh/
 - Purpose: Main application runtime and orchestration layer.
 - Contains: `Shell`, component host, frontend catalog, IPC server, layout/input/render runtime, service routing, backend provider selection, diagnostics.
 - Key files: `crates/core/shell/src/lib.rs`, `crates/core/shell/src/shell/mod.rs`, `crates/core/shell/src/shell/component.rs`, `crates/core/shell/src/shell/component/catalog.rs`, `crates/core/shell/src/shell/service.rs`.
+
+**`crates/core/frontend/compiler`:**
+- Purpose: Compile frontend modules and lower `.mesh` component source into widget trees.
+- Contains: Frontend module compilation, local component import resolution, tag lowering, accessibility defaults, and `CompiledFrontendModule`.
+- Key files: `crates/core/frontend/compiler/src/compile.rs`, `crates/core/frontend/compiler/src/render.rs`, `crates/core/frontend/compiler/src/tags.rs`, `crates/core/frontend/compiler/src/accessibility.rs`.
+
+**`crates/core/frontend/render`:**
+- Purpose: Paint widget trees into software pixel buffers.
+- Contains: `PixelBuffer`, `FrontendRenderEngine`, surface painter, text/glyph rendering, icon painting, and debug overlay drawing.
+- Key files: `crates/core/frontend/render/src/lib.rs`, `crates/core/frontend/render/src/surface/mod.rs`, `crates/core/frontend/render/src/surface/painter.rs`, `crates/core/frontend/render/src/surface/text.rs`, `crates/core/frontend/render/src/surface/icon.rs`.
+
+**`crates/core/presentation`:**
+- Purpose: Present rendered pixel buffers and normalize surface input events.
+- Contains: dev-window backend, layer-shell backend, surface state, input event types, and presentation backend selection.
+- Key files: `crates/core/presentation/src/lib.rs`, `crates/core/presentation/src/dev_window.rs`, `crates/core/presentation/src/wayland_surface/backend.rs`, `crates/core/presentation/src/wayland_surface/handlers.rs`.
 
 **`crates/core/ui/component`:**
 - Purpose: Parse `.mesh` single-file components into typed ASTs.
@@ -93,11 +110,6 @@ mesh/
 - Purpose: Icon registry and bundled icon assets.
 - Contains: XDG icon support, fallback registry, icon config, material SVG assets.
 - Key files: `crates/core/ui/icon/src/lib.rs`, `crates/core/ui/icon/src/registry.rs`, `crates/core/ui/icon/src/config.rs`, `crates/core/ui/icon/assets/material/*.svg`.
-
-**`crates/core/ui/render`:**
-- Purpose: Compile frontend modules and paint widget trees to buffers/surfaces.
-- Contains: Frontend compiler, render engine, software painter, text/icon/surface bridges, accessibility/debug overlay.
-- Key files: `crates/core/ui/render/src/compile.rs`, `crates/core/ui/render/src/render.rs`, `crates/core/ui/render/src/surface/mod.rs`, `crates/core/ui/render/src/surface/bridge/wayland_surface.rs`.
 
 **`crates/tools/cli`:**
 - Purpose: Provide the `mesh-shell` command-line binary.
@@ -171,7 +183,10 @@ mesh/
 - `crates/core/runtime/backend/src/lib.rs`: Backend service orchestration loop.
 - `crates/core/shell/src/shell/mod.rs`: Shell lifecycle and backend launch flow.
 - `crates/core/shell/src/shell/component.rs`: Frontend component runtime.
-- `crates/core/ui/render/src/compile.rs`: Frontend module compiler.
+- `crates/core/frontend/compiler/src/compile.rs`: Frontend module compiler.
+- `crates/core/frontend/compiler/src/render.rs`: Widget tree builder.
+- `crates/core/frontend/render/src/surface/painter.rs`: Software surface painter.
+- `crates/core/presentation/src/lib.rs`: Presentation backend selection and buffer commit.
 - `crates/core/ui/component/src/parser.rs`: `.mesh` parser entrypoint.
 
 **Module System:**
@@ -256,8 +271,8 @@ mesh/
 
 **New `.mesh` Parser Or Renderer Capability:**
 - Parser changes: `crates/core/ui/component/src/parser.rs` and submodules under `crates/core/ui/component/src/parser/`.
-- Compiler changes: `crates/core/ui/render/src/compile.rs`.
-- Runtime/render changes: `crates/core/shell/src/shell/component.rs`, `crates/core/ui/elements/src/`, `crates/core/ui/render/src/`.
+- Compiler changes: `crates/core/frontend/compiler/src/compile.rs`, `crates/core/frontend/compiler/src/render.rs`, and `crates/core/frontend/compiler/src/tags.rs`.
+- Runtime/render changes: `crates/core/shell/src/shell/component.rs`, `crates/core/shell/src/shell/component/runtime_tree.rs`, `crates/core/ui/elements/src/`, `crates/core/frontend/render/src/`, and `crates/core/presentation/src/`.
 - LSP updates: `crates/tools/lsp/src/knowledge/`, `crates/tools/lsp/src/analyzer/`, and `crates/tools/lsp/src/diagnostics.rs`.
 
 **New Shell Runtime Behavior:**
