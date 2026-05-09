@@ -548,6 +548,124 @@ fn debug_snapshot_omits_profiling_payload_when_disabled() {
 }
 
 #[test]
+fn benchmark_snapshot_exposes_five_stable_scenarios() {
+    let mut shell = Shell::new();
+    let snapshot = shell.build_debug_snapshot();
+
+    assert_eq!(snapshot.benchmarks.scenarios.len(), 5);
+    assert_eq!(
+        snapshot
+            .benchmarks
+            .scenarios
+            .iter()
+            .map(|scenario| scenario.id.id())
+            .collect::<Vec<_>>(),
+        vec![
+            "hover",
+            "surface_open_close",
+            "pointer_update",
+            "keyboard_traversal",
+            "backend_update",
+        ]
+    );
+    assert_eq!(
+        snapshot
+            .benchmarks
+            .scenarios
+            .last()
+            .map(|scenario| scenario.label.as_str()),
+        Some("Backend-driven update")
+    );
+}
+
+#[test]
+fn benchmark_payload_keeps_scenarios_inert_when_profiling_disabled() {
+    let mut shell = Shell::new();
+    let snapshot = shell.build_debug_snapshot();
+
+    assert!(snapshot.profiling.is_none());
+    assert!(
+        !shell.debug.profiling_enabled,
+        "building debug snapshots must not start profiling"
+    );
+    assert!(snapshot.benchmarks.scenarios.iter().all(|scenario| {
+        scenario.status == mesh_core_debug::BenchmarkScenarioStatus::ProfilingOff
+            && scenario.hint == "Start profiling first"
+            && scenario.primary_metric == "No benchmark results yet"
+            && scenario.secondary_metric == "No benchmark results yet"
+    }));
+
+    let latest = shell
+        .latest_service_state
+        .get(mesh_core_debug::DEBUG_INTERFACE)
+        .expect("mesh.debug service state should include benchmark rows");
+    assert!(latest.state["profiling"].is_null());
+    let scenarios = latest.state["benchmarks"]["scenarios"]
+        .as_array()
+        .expect("benchmarks.scenarios should serialize as an array");
+    assert_eq!(scenarios.len(), 5);
+    assert!(scenarios.iter().all(|scenario| {
+        scenario["status"] == serde_json::json!("Profiling off")
+            && scenario["hint"] == serde_json::json!("Start profiling first")
+    }));
+}
+
+#[test]
+fn benchmark_payload_serializes_targets_statuses_and_metrics() {
+    let mut shell = Shell::new();
+    shell.build_debug_snapshot();
+
+    let latest = shell
+        .latest_service_state
+        .get(mesh_core_debug::DEBUG_INTERFACE)
+        .expect("mesh.debug service state should include benchmark payload");
+    let scenarios = latest.state["benchmarks"]["scenarios"]
+        .as_array()
+        .expect("benchmarks.scenarios should serialize as an array");
+    assert_eq!(scenarios.len(), 5);
+    assert_eq!(
+        scenarios
+            .iter()
+            .map(|scenario| scenario["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            "hover",
+            "surface_open_close",
+            "pointer_update",
+            "keyboard_traversal",
+            "backend_update",
+        ]
+    );
+    assert_eq!(
+        scenarios
+            .iter()
+            .map(|scenario| scenario["target"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            "@mesh/navigation-bar",
+            "@mesh/audio-popover",
+            "@mesh/navigation-bar audio controls",
+            "@mesh/navigation-bar focus chain",
+            "mesh.audio -> @mesh/pipewire-audio",
+        ]
+    );
+    let backend_update = &scenarios[4];
+    assert_eq!(
+        backend_update["label"],
+        serde_json::json!("Backend-driven update")
+    );
+    assert_eq!(backend_update["status"], serde_json::json!("Profiling off"));
+    assert_eq!(
+        backend_update["primary_metric"],
+        serde_json::json!("No benchmark results yet")
+    );
+    assert_eq!(
+        backend_update["secondary_metric"],
+        serde_json::json!("No benchmark results yet")
+    );
+}
+
+#[test]
 fn debug_snapshot_backfills_mesh_debug_service_state() {
     let mut shell = Shell::new();
     shell.debug.enabled = true;
