@@ -170,6 +170,7 @@ local debug_ok, debug_service = pcall(require, "@mesh/debug@>=1.0")
 if not debug_ok then debug_service = nil end
 
 active_view = "overview"
+last_service_active_view = ""
 overview_hidden = false
 surfaces_hidden = true
 backend_hidden = true
@@ -307,6 +308,22 @@ local function sync_view_state()
     surfaces_indicator_hidden = active_view ~= "surfaces"
     backend_services_indicator_hidden = active_view ~= "backend_services"
     benchmark_indicator_hidden = active_view ~= "benchmark"
+end
+
+local function service_view_id(value)
+    local view = tostring(value or "")
+    if view == "overview" or view == "surfaces" or view == "backend_services" or view == "benchmark" then
+        return view
+    end
+    return nil
+end
+
+local function sync_service_active_view()
+    local service_view = service_view_id(debug_service and debug_service.active_view)
+    if service_view ~= nil and service_view ~= last_service_active_view then
+        active_view = service_view
+        last_service_active_view = service_view
+    end
 end
 
 local function sync_overview_state_flags()
@@ -702,6 +719,7 @@ function onRender()
     local profiling = debug_service.profiling
     local surface_samples = nil
     local backend_samples = nil
+    sync_service_active_view()
 
     if debug_service.overlay_enabled then
         overlay_value = "Visible"

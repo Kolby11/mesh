@@ -296,12 +296,17 @@ impl DebugOverlayState {
     }
 
     pub fn cycle_tab(&mut self) {
-        self.active_tab = match self.active_tab {
-            DebugTab::Modules => DebugTab::Interfaces,
-            DebugTab::Interfaces => DebugTab::Health,
-            DebugTab::Health => DebugTab::Modules,
+        self.active_view = match self.active_view {
+            DebugInspectorView::Overview => DebugInspectorView::Surfaces,
+            DebugInspectorView::Surfaces => DebugInspectorView::BackendServices,
+            DebugInspectorView::BackendServices => DebugInspectorView::Benchmark,
+            DebugInspectorView::Benchmark => DebugInspectorView::Overview,
         };
-        self.active_view = DebugInspectorView::from_legacy_tab(self.active_tab);
+        self.active_tab = match self.active_view {
+            DebugInspectorView::Overview => DebugTab::Modules,
+            DebugInspectorView::Surfaces => DebugTab::Interfaces,
+            DebugInspectorView::BackendServices | DebugInspectorView::Benchmark => DebugTab::Health,
+        };
     }
 
     pub fn toggle_profiling(&mut self) -> bool {
@@ -319,6 +324,25 @@ pub enum DebugTab {
     Modules,
     Interfaces,
     Health,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cycle_tab_reaches_benchmark_view() {
+        let mut state = DebugOverlayState::default();
+
+        state.cycle_tab();
+        assert_eq!(state.active_view, DebugInspectorView::Surfaces);
+        state.cycle_tab();
+        assert_eq!(state.active_view, DebugInspectorView::BackendServices);
+        state.cycle_tab();
+        assert_eq!(state.active_view, DebugInspectorView::Benchmark);
+        state.cycle_tab();
+        assert_eq!(state.active_view, DebugInspectorView::Overview);
+    }
 }
 
 impl DebugTab {

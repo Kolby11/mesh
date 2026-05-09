@@ -47,6 +47,16 @@ impl Shell {
             SettingsWatchState { path, modified_at }
         };
 
+        let interfaces = InterfaceRegistry::new();
+        interfaces.register(InterfaceProvider {
+            interface: mesh_core_debug::DEBUG_INTERFACE.to_string(),
+            version: Some("1.0".to_string()),
+            base_module: Some("@mesh/debug".to_string()),
+            provider_module: mesh_core_debug::DEBUG_SOURCE_MODULE_ID.to_string(),
+            backend_name: "Shell".to_string(),
+            priority: 100,
+        });
+
         Self {
             config,
             settings,
@@ -55,7 +65,7 @@ impl Shell {
             events: EventBus::new(),
             diagnostics: DiagnosticsCollector::new(),
             services: ServiceRegistry::new(),
-            interfaces: InterfaceRegistry::new(),
+            interfaces,
             modules: HashMap::new(),
             module_dirs,
             core: ShellCoreState::default(),

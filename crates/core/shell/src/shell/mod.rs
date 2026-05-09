@@ -406,7 +406,9 @@ pub fn default_ipc_socket_path() -> PathBuf {
     }
 
     let uid = std::env::var("UID").unwrap_or_else(|_| "unknown".to_string());
-    PathBuf::from("/tmp").join(format!("mesh-{uid}.sock"))
+    PathBuf::from("/tmp")
+        .join(format!("mesh-{uid}"))
+        .join("mesh.sock")
 }
 
 impl Default for Shell {

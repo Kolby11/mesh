@@ -2,6 +2,19 @@ use super::super::*;
 
 impl Shell {
     pub(in crate::shell) fn build_debug_snapshot(&mut self) -> DebugSnapshot {
+        let snapshot = self.debug_snapshot();
+        self.record_debug_snapshot_state(&snapshot);
+        snapshot
+    }
+
+    pub(in crate::shell) fn publish_debug_snapshot(
+        &mut self,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let snapshot = self.debug_snapshot();
+        self.broadcast_service_event(self.debug_snapshot_event(&snapshot))
+    }
+
+    fn debug_snapshot(&mut self) -> DebugSnapshot {
         let modules = self
             .modules
             .values()
@@ -88,7 +101,7 @@ impl Shell {
             &backend_runtimes,
         );
 
-        let snapshot = DebugSnapshot {
+        DebugSnapshot {
             modules,
             interfaces,
             backend_runtimes,
@@ -96,18 +109,26 @@ impl Shell {
             active_surfaces,
             benchmarks,
             profiling,
-        };
+        }
+    }
 
+    fn record_debug_snapshot_state(&mut self, snapshot: &DebugSnapshot) {
         self.latest_service_state.insert(
             mesh_core_debug::DEBUG_INTERFACE.to_string(),
             LatestServiceState {
                 interface: mesh_core_debug::DEBUG_INTERFACE.to_string(),
                 provider_id: mesh_core_debug::DEBUG_SOURCE_MODULE_ID.to_string(),
-                state: debug_service_payload(&self.debug, &snapshot),
+                state: debug_service_payload(&self.debug, snapshot),
             },
         );
+    }
 
-        snapshot
+    fn debug_snapshot_event(&self, snapshot: &DebugSnapshot) -> ServiceEvent {
+        ServiceEvent::Updated {
+            service: mesh_core_debug::DEBUG_INTERFACE.to_string(),
+            source_module: mesh_core_debug::DEBUG_SOURCE_MODULE_ID.to_string(),
+            payload: debug_service_payload(&self.debug, snapshot),
+        }
     }
 }
 
@@ -432,7 +453,7 @@ fn backend_update_target(
     }
     if let Some(runtime) = backend_runtimes
         .iter()
-        .find(|entry| entry.interface == "mesh.audio")
+        .find(|entry| is_running_audio_runtime(entry))
     {
         return format!("{} -> {}", runtime.interface, runtime.provider_id);
     }
@@ -454,9 +475,7 @@ fn backend_update_backend<'a>(
 fn backend_update_runtime_available(
     backend_runtimes: &[mesh_core_debug::BackendRuntimeEntry],
 ) -> bool {
-    backend_runtimes
-        .iter()
-        .any(|entry| entry.interface == "mesh.audio")
+    backend_runtimes.iter().any(is_running_audio_runtime)
 }
 
 fn backend_update_provider_id(
@@ -465,7 +484,7 @@ fn backend_update_provider_id(
 ) -> Option<String> {
     backend_runtimes
         .iter()
-        .find(|entry| entry.interface == "mesh.audio")
+        .find(|entry| is_running_audio_runtime(entry))
         .map(|entry| entry.provider_id.clone())
         .or_else(|| {
             profiling.and_then(|profiling| {
@@ -476,6 +495,10 @@ fn backend_update_provider_id(
                     .map(|backend| backend.provider_id.clone())
             })
         })
+}
+
+fn is_running_audio_runtime(entry: &mesh_core_debug::BackendRuntimeEntry) -> bool {
+    entry.interface == "mesh.audio" && entry.status == BackendRuntimeStatus::Running.as_str()
 }
 
 fn waiting_for_backend_samples(

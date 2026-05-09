@@ -968,6 +968,101 @@ fn benchmark_backend_update_uses_active_audio_provider() {
 }
 
 #[test]
+fn benchmark_backend_update_ignores_terminal_audio_runtime_when_running_provider_exists() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    shell.record_backend_runtime_status(
+        "mesh.audio".to_string(),
+        "@mesh/pipewire-audio".to_string(),
+        BackendRuntimeStatus::Stopped,
+        "runtime stopped".to_string(),
+    );
+    shell.record_backend_runtime_status(
+        "mesh.audio".to_string(),
+        "@mesh/pulseaudio-audio".to_string(),
+        BackendRuntimeStatus::Running,
+        "backend runtime started".to_string(),
+    );
+    shell.record_backend_profiling_stage(
+        "mesh.audio",
+        "@mesh/pipewire-audio",
+        ProfilingBackendStage::StatePublishDelivery,
+        std::time::Duration::from_micros(99),
+        Some("stale_service_update"),
+    );
+    shell.record_backend_profiling_stage(
+        "mesh.audio",
+        "@mesh/pulseaudio-audio",
+        ProfilingBackendStage::StatePublishDelivery,
+        std::time::Duration::from_micros(29),
+        Some("broadcast_service_event"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::TotalSurfaceRender,
+        std::time::Duration::from_micros(41),
+        Some("service_update"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let backend_update = snapshot
+        .benchmarks
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.id.id() == "backend_update")
+        .expect("backend_update benchmark row should exist");
+
+    assert_eq!(
+        backend_update.target,
+        "mesh.audio -> @mesh/pulseaudio-audio"
+    );
+    assert!(
+        backend_update
+            .primary_metric
+            .contains("@mesh/pulseaudio-audio")
+    );
+    assert!(
+        !backend_update
+            .primary_metric
+            .contains("@mesh/pipewire-audio")
+    );
+}
+
+#[test]
+fn benchmark_backend_update_reports_unavailable_for_failed_only_audio_runtime() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    shell.record_backend_runtime_status(
+        "mesh.audio".to_string(),
+        "@mesh/pipewire-audio".to_string(),
+        BackendRuntimeStatus::Failed,
+        "runtime failed".to_string(),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let backend_update = snapshot
+        .benchmarks
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.id.id() == "backend_update")
+        .expect("backend_update benchmark row should exist");
+
+    assert_eq!(
+        backend_update.status,
+        mesh_core_debug::BenchmarkScenarioStatus::Unavailable
+    );
+    assert_eq!(
+        backend_update.primary_metric,
+        "No backend provider samples yet"
+    );
+}
+
+#[test]
 fn benchmark_run_request_rejects_unknown_scenario() {
     let mut shell = Shell::new();
 
@@ -1012,6 +1107,46 @@ fn debug_snapshot_backfills_mesh_debug_service_state() {
         serde_json::json!(snapshot.active_surfaces)
     );
     assert!(latest.state["profiling"].is_null());
+}
+
+#[test]
+fn shell_registers_debug_provider_for_builtin_inspector_imports() {
+    let shell = Shell::new();
+    let resolution = shell
+        .interfaces
+        .resolve(mesh_core_debug::DEBUG_INTERFACE, Some(">=1.0"));
+
+    assert_eq!(
+        resolution
+            .provider
+            .as_ref()
+            .map(|provider| provider.provider_module.as_str()),
+        Some(mesh_core_debug::DEBUG_SOURCE_MODULE_ID)
+    );
+}
+
+#[test]
+fn debug_snapshot_publish_delivers_mesh_debug_service_event() {
+    let mut shell = Shell::new();
+    shell.debug.enabled = true;
+    let events = Arc::new(Mutex::new(Vec::new()));
+    shell.register_component(Box::new(RecordingComponent::new(events.clone())));
+
+    let emitted = shell.publish_debug_snapshot().unwrap();
+
+    assert!(emitted.is_empty());
+    let events = events.lock().unwrap();
+    let ServiceEvent::Updated {
+        service,
+        source_module,
+        payload,
+    } = events
+        .last()
+        .expect("debug snapshot should be delivered as a service update");
+    assert_eq!(service, mesh_core_debug::DEBUG_INTERFACE);
+    assert_eq!(source_module, mesh_core_debug::DEBUG_SOURCE_MODULE_ID);
+    assert_eq!(payload["overlay_enabled"], serde_json::json!(true));
+    assert!(payload["benchmarks"]["scenarios"].is_array());
 }
 
 #[test]

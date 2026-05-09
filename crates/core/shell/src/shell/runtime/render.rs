@@ -3,7 +3,10 @@ use mesh_core_presentation::LayerSurfaceSizePolicy;
 
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
-        let _debug_snapshot = self.debug.enabled.then(|| self.build_debug_snapshot());
+        if self.debug.enabled {
+            let mut debug_requests = self.publish_debug_snapshot()?;
+            self.drain_requests(&mut debug_requests)?;
+        }
 
         for index in 0..self.components.len() {
             let surface_id = self.components[index].surface_id.clone();

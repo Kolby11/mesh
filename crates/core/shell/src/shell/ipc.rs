@@ -1,4 +1,5 @@
 use super::types::{CoreRequest, ShellMessage};
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
@@ -12,14 +13,28 @@ pub(super) fn spawn_ipc_server(
 ) -> Result<(), std::io::Error> {
     if let Some(parent) = socket_path.parent() {
         std::fs::create_dir_all(parent)?;
+        if is_private_tmp_ipc_dir(parent) {
+            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+        }
     }
 
     if socket_path.exists() {
-        let _ = std::fs::remove_file(&socket_path);
+        let metadata = std::fs::symlink_metadata(&socket_path)?;
+        if !metadata.file_type().is_socket() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!(
+                    "refusing to replace non-socket ipc path {}",
+                    socket_path.display()
+                ),
+            ));
+        }
+        std::fs::remove_file(&socket_path)?;
     }
 
     let _guard = runtime.enter();
     let listener = UnixListener::bind(&socket_path)?;
+    std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
     tracing::info!("listening for ipc commands on {}", socket_path.display());
 
     runtime.spawn(async move {
@@ -109,5 +124,47 @@ pub(super) fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
         "shell:debug_cycle_tab" => Some(CoreRequest::CycleDebugTab),
         "shell:shutdown" => Some(CoreRequest::Shutdown),
         _ => None,
+    }
+}
+
+fn is_private_tmp_ipc_dir(path: &std::path::Path) -> bool {
+    path.parent()
+        .is_some_and(|parent| parent == std::path::Path::new("/tmp"))
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("mesh-"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+
+    #[test]
+    fn ipc_server_refuses_to_replace_non_socket_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket_path = dir.path().join("mesh.sock");
+        std::fs::write(&socket_path, "not a socket").unwrap();
+        let runtime = Runtime::new().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let err = spawn_ipc_server(&runtime, socket_path, tx).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+    }
+
+    #[test]
+    fn ipc_server_creates_owner_only_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket_path = dir.path().join("mesh.sock");
+        let runtime = Runtime::new().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        spawn_ipc_server(&runtime, socket_path.clone(), tx).unwrap();
+
+        let metadata = std::fs::symlink_metadata(socket_path).unwrap();
+        assert!(metadata.file_type().is_socket());
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
     }
 }
