@@ -101,7 +101,59 @@
           row3_state_publish_delivery={backend_row_3_state_publish_delivery}
         />
 
-        <BenchmarkView hidden={benchmark_hidden} />
+        <BenchmarkView
+          hidden={benchmark_hidden}
+          row1_title={benchmark_row_1_title}
+          row1_scenario_id={benchmark_row_1_scenario_id}
+          row1_target={benchmark_row_1_target}
+          row1_status={benchmark_row_1_status}
+          row1_action_label={benchmark_row_1_action_label}
+          row1_action_aria_label={benchmark_row_1_action_aria_label}
+          row1_primary_metric={benchmark_row_1_primary_metric}
+          row1_secondary_metric={benchmark_row_1_secondary_metric}
+          row1_hint={benchmark_row_1_hint}
+          row1_onRun={runHoverBenchmark}
+          row2_title={benchmark_row_2_title}
+          row2_scenario_id={benchmark_row_2_scenario_id}
+          row2_target={benchmark_row_2_target}
+          row2_status={benchmark_row_2_status}
+          row2_action_label={benchmark_row_2_action_label}
+          row2_action_aria_label={benchmark_row_2_action_aria_label}
+          row2_primary_metric={benchmark_row_2_primary_metric}
+          row2_secondary_metric={benchmark_row_2_secondary_metric}
+          row2_hint={benchmark_row_2_hint}
+          row2_onRun={runSurfaceOpenCloseBenchmark}
+          row3_title={benchmark_row_3_title}
+          row3_scenario_id={benchmark_row_3_scenario_id}
+          row3_target={benchmark_row_3_target}
+          row3_status={benchmark_row_3_status}
+          row3_action_label={benchmark_row_3_action_label}
+          row3_action_aria_label={benchmark_row_3_action_aria_label}
+          row3_primary_metric={benchmark_row_3_primary_metric}
+          row3_secondary_metric={benchmark_row_3_secondary_metric}
+          row3_hint={benchmark_row_3_hint}
+          row3_onRun={runPointerUpdateBenchmark}
+          row4_title={benchmark_row_4_title}
+          row4_scenario_id={benchmark_row_4_scenario_id}
+          row4_target={benchmark_row_4_target}
+          row4_status={benchmark_row_4_status}
+          row4_action_label={benchmark_row_4_action_label}
+          row4_action_aria_label={benchmark_row_4_action_aria_label}
+          row4_primary_metric={benchmark_row_4_primary_metric}
+          row4_secondary_metric={benchmark_row_4_secondary_metric}
+          row4_hint={benchmark_row_4_hint}
+          row4_onRun={runKeyboardTraversalBenchmark}
+          row5_title={benchmark_row_5_title}
+          row5_scenario_id={benchmark_row_5_scenario_id}
+          row5_target={benchmark_row_5_target}
+          row5_status={benchmark_row_5_status}
+          row5_action_label={benchmark_row_5_action_label}
+          row5_action_aria_label={benchmark_row_5_action_aria_label}
+          row5_primary_metric={benchmark_row_5_primary_metric}
+          row5_secondary_metric={benchmark_row_5_secondary_metric}
+          row5_hint={benchmark_row_5_hint}
+          row5_onRun={runBackendUpdateBenchmark}
+        />
       </column>
     </column>
   </box>
@@ -193,6 +245,52 @@ backend_row_3_poll_update = ""
 backend_row_3_command_handling = ""
 backend_row_3_state_publish_delivery = ""
 
+benchmark_row_1_title = "Hover"
+benchmark_row_1_scenario_id = "hover"
+benchmark_row_1_target = "@mesh/navigation-bar"
+benchmark_row_1_status = "Profiling off"
+benchmark_row_1_action_label = "Start profiling first"
+benchmark_row_1_action_aria_label = "Start profiling first for Hover"
+benchmark_row_1_primary_metric = "No benchmark results yet"
+benchmark_row_1_secondary_metric = "No benchmark results yet"
+benchmark_row_1_hint = "Run a scenario while profiling is live to populate latest-session metrics."
+benchmark_row_2_title = "Surface open/close"
+benchmark_row_2_scenario_id = "surface_open_close"
+benchmark_row_2_target = "@mesh/audio-popover"
+benchmark_row_2_status = "Profiling off"
+benchmark_row_2_action_label = "Start profiling first"
+benchmark_row_2_action_aria_label = "Start profiling first for Surface open/close"
+benchmark_row_2_primary_metric = "No benchmark results yet"
+benchmark_row_2_secondary_metric = "No benchmark results yet"
+benchmark_row_2_hint = "Run a scenario while profiling is live to populate latest-session metrics."
+benchmark_row_3_title = "Pointer-driven update"
+benchmark_row_3_scenario_id = "pointer_update"
+benchmark_row_3_target = "@mesh/navigation-bar audio controls"
+benchmark_row_3_status = "Profiling off"
+benchmark_row_3_action_label = "Start profiling first"
+benchmark_row_3_action_aria_label = "Start profiling first for Pointer-driven update"
+benchmark_row_3_primary_metric = "No benchmark results yet"
+benchmark_row_3_secondary_metric = "No benchmark results yet"
+benchmark_row_3_hint = "Run a scenario while profiling is live to populate latest-session metrics."
+benchmark_row_4_title = "Keyboard traversal"
+benchmark_row_4_scenario_id = "keyboard_traversal"
+benchmark_row_4_target = "@mesh/navigation-bar focus chain"
+benchmark_row_4_status = "Profiling off"
+benchmark_row_4_action_label = "Start profiling first"
+benchmark_row_4_action_aria_label = "Start profiling first for Keyboard traversal"
+benchmark_row_4_primary_metric = "No benchmark results yet"
+benchmark_row_4_secondary_metric = "No benchmark results yet"
+benchmark_row_4_hint = "Run a scenario while profiling is live to populate latest-session metrics."
+benchmark_row_5_title = "Backend-driven update"
+benchmark_row_5_scenario_id = "backend_update"
+benchmark_row_5_target = "mesh.audio -> @mesh/pipewire-audio"
+benchmark_row_5_status = "Profiling off"
+benchmark_row_5_action_label = "Start profiling first"
+benchmark_row_5_action_aria_label = "Start profiling first for Backend-driven update"
+benchmark_row_5_primary_metric = "No benchmark results yet"
+benchmark_row_5_secondary_metric = "No benchmark results yet"
+benchmark_row_5_hint = "Run a scenario while profiling is live to populate latest-session metrics."
+
 local function count_list(value)
     if type(value) == "table" then
         return tostring(#value)
@@ -257,6 +355,164 @@ local function find_stage(stages, stage_name)
         end
     end
     return nil
+end
+
+local benchmark_definitions = {
+    {
+        id = "hover",
+        title = "Hover",
+        target = "@mesh/navigation-bar",
+    },
+    {
+        id = "surface_open_close",
+        title = "Surface open/close",
+        target = "@mesh/audio-popover",
+    },
+    {
+        id = "pointer_update",
+        title = "Pointer-driven update",
+        target = "@mesh/navigation-bar audio controls",
+    },
+    {
+        id = "keyboard_traversal",
+        title = "Keyboard traversal",
+        target = "@mesh/navigation-bar focus chain",
+    },
+    {
+        id = "backend_update",
+        title = "Backend-driven update",
+        target = "mesh.audio -> @mesh/pipewire-audio",
+    },
+}
+
+local function safe_string(value, fallback)
+    if type(value) == "string" and value ~= "" then
+        return value
+    end
+    return fallback
+end
+
+local function fallback_benchmark_status()
+    if debug_service and debug_service.profiling_enabled then
+        return "Waiting for samples"
+    end
+    return "Profiling off"
+end
+
+local function fallback_benchmark_action()
+    if debug_service and debug_service.profiling_enabled then
+        return "Run scenario"
+    end
+    return "Start profiling first"
+end
+
+local function find_benchmark_scenario(scenarios, scenario_id)
+    if type(scenarios) ~= "table" then
+        return nil
+    end
+    for _, scenario in ipairs(scenarios) do
+        if type(scenario) == "table" and tostring(scenario.id or "") == scenario_id then
+            return scenario
+        end
+    end
+    return nil
+end
+
+local function apply_benchmark_slot(slot, definition, scenario)
+    local title = definition.title
+    local scenario_id = definition.id
+    local target = definition.target
+    local status = fallback_benchmark_status()
+    local action_label = fallback_benchmark_action()
+    local primary_metric = "No benchmark results yet"
+    local secondary_metric = "No benchmark results yet"
+    local hint = "Run a scenario while profiling is live to populate latest-session metrics."
+
+    if type(scenario) == "table" then
+        title = safe_string(scenario.label, title)
+        target = safe_string(scenario.target, target)
+        status = safe_string(scenario.status, status)
+        primary_metric = safe_string(scenario.primary_metric, primary_metric)
+        secondary_metric = safe_string(scenario.secondary_metric, secondary_metric)
+        hint = safe_string(scenario.hint, hint)
+    end
+
+    if status == "Profiling off" then
+        action_label = "Start profiling first"
+    else
+        action_label = "Run scenario"
+    end
+
+    local action_aria_label = string.format("%s for %s", action_label, title)
+
+    if slot == 1 then
+        benchmark_row_1_title = title
+        benchmark_row_1_scenario_id = scenario_id
+        benchmark_row_1_target = target
+        benchmark_row_1_status = status
+        benchmark_row_1_action_label = action_label
+        benchmark_row_1_action_aria_label = action_aria_label
+        benchmark_row_1_primary_metric = primary_metric
+        benchmark_row_1_secondary_metric = secondary_metric
+        benchmark_row_1_hint = hint
+        return
+    end
+    if slot == 2 then
+        benchmark_row_2_title = title
+        benchmark_row_2_scenario_id = scenario_id
+        benchmark_row_2_target = target
+        benchmark_row_2_status = status
+        benchmark_row_2_action_label = action_label
+        benchmark_row_2_action_aria_label = action_aria_label
+        benchmark_row_2_primary_metric = primary_metric
+        benchmark_row_2_secondary_metric = secondary_metric
+        benchmark_row_2_hint = hint
+        return
+    end
+    if slot == 3 then
+        benchmark_row_3_title = title
+        benchmark_row_3_scenario_id = scenario_id
+        benchmark_row_3_target = target
+        benchmark_row_3_status = status
+        benchmark_row_3_action_label = action_label
+        benchmark_row_3_action_aria_label = action_aria_label
+        benchmark_row_3_primary_metric = primary_metric
+        benchmark_row_3_secondary_metric = secondary_metric
+        benchmark_row_3_hint = hint
+        return
+    end
+    if slot == 4 then
+        benchmark_row_4_title = title
+        benchmark_row_4_scenario_id = scenario_id
+        benchmark_row_4_target = target
+        benchmark_row_4_status = status
+        benchmark_row_4_action_label = action_label
+        benchmark_row_4_action_aria_label = action_aria_label
+        benchmark_row_4_primary_metric = primary_metric
+        benchmark_row_4_secondary_metric = secondary_metric
+        benchmark_row_4_hint = hint
+        return
+    end
+    benchmark_row_5_title = title
+    benchmark_row_5_scenario_id = scenario_id
+    benchmark_row_5_target = target
+    benchmark_row_5_status = status
+    benchmark_row_5_action_label = action_label
+    benchmark_row_5_action_aria_label = action_aria_label
+    benchmark_row_5_primary_metric = primary_metric
+    benchmark_row_5_secondary_metric = secondary_metric
+    benchmark_row_5_hint = hint
+end
+
+local function sync_benchmark_rows()
+    local scenarios = nil
+    if debug_service and type(debug_service.benchmarks) == "table" then
+        scenarios = debug_service.benchmarks.scenarios
+    end
+
+    for index, definition in ipairs(benchmark_definitions) do
+        apply_benchmark_slot(index, definition, find_benchmark_scenario(scenarios, definition.id))
+    end
 end
 
 local function surface_slot(slot, snapshot)
@@ -386,6 +642,30 @@ function onToggleProfiling()
     mesh.events.publish("shell.toggle-debug-profiling", {})
 end
 
+local function runBenchmarkScenario(scenario_id)
+    mesh.events.publish("shell.run-debug-benchmark", { scenario_id = scenario_id })
+end
+
+function runHoverBenchmark()
+    runBenchmarkScenario("hover")
+end
+
+function runSurfaceOpenCloseBenchmark()
+    runBenchmarkScenario("surface_open_close")
+end
+
+function runPointerUpdateBenchmark()
+    runBenchmarkScenario("pointer_update")
+end
+
+function runKeyboardTraversalBenchmark()
+    runBenchmarkScenario("keyboard_traversal")
+end
+
+function runBackendUpdateBenchmark()
+    runBenchmarkScenario("backend_update")
+end
+
 function onRender()
     if not debug_ok or not debug_service then
         session_status = "Debug service unavailable"
@@ -411,6 +691,7 @@ function onRender()
         backend_slot(1, nil, nil)
         backend_slot(2, nil, nil)
         backend_slot(3, nil, nil)
+        sync_benchmark_rows()
         return
     end
 
@@ -490,6 +771,7 @@ function onRender()
     backend_slot(1, backend_samples and backend_samples[1] or nil, debug_service.backend_runtimes)
     backend_slot(2, backend_samples and backend_samples[2] or nil, debug_service.backend_runtimes)
     backend_slot(3, backend_samples and backend_samples[3] or nil, debug_service.backend_runtimes)
+    sync_benchmark_rows()
 end
 </script>
 
