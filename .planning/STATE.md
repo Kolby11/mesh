@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Performance Instrumentation and Responsiveness
 status: executing
-stopped_at: Completed 17-02-PLAN.md
-last_updated: "2026-05-09T08:07:32.599Z"
+stopped_at: Completed 17-03-PLAN.md
+last_updated: "2026-05-09T08:19:42.434Z"
 last_activity: 2026-05-09
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 16
-  completed_plans: 14
-  percent: 88
+  completed_plans: 15
+  percent: 94
 ---
 
 # State: MESH v1.3
@@ -26,7 +26,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-08)
 ## Current Position
 
 Phase: 17 (canonical-benchmark-scenarios-and-proof-flows) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-05-09
 
@@ -80,6 +80,8 @@ Last activity: 2026-05-09
 - [Phase 17]: Benchmark launch requests accept only the five canonical scenario ids and report unknown ids through non-fatal diagnostics.
 - [Phase 17]: Surface open/close benchmark launch reuses normal ShowSurface and HideSurface requests for @mesh/audio-popover.
 - [Phase 17]: Benchmark launch requests record session-local debug state but never toggle debug profiling.
+- [Phase 17]: Benchmark view rows consume primitive normalized props from the inspector parent rather than reading mesh.debug directly. — Matches existing debug inspector parent-owned payload normalization and keeps child view render-only.
+- [Phase 17]: Benchmark action buttons always publish shell.run-debug-benchmark with fixed canonical scenario ids. — Preserves debug-scoped run routing from Plan 17-02 and avoids inspector-local scenario aliases.
 
 ## Performance Metrics
 
@@ -112,11 +114,12 @@ Last activity: 2026-05-09
 | Phase 10 P02 | 9 min | 2 tasks | 4 files |
 | Phase 17 P01 | 6min | 3 tasks | 3 files |
 | Phase 17 P02 | 6min | 3 tasks | 7 files |
+| Phase 17 P03 | 9min | 3 tasks | 3 files |
 
 ## Session
 
-Last session: 2026-05-09T08:07:32.589Z
-Stopped At: Completed 17-02-PLAN.md
+Last session: 2026-05-09T08:19:42.425Z
+Stopped At: Completed 17-03-PLAN.md
 Resume File: None
 
 ## Accumulated Context
