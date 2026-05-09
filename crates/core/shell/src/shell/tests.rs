@@ -12,7 +12,11 @@ use super::{
     surface_layout::{SurfaceSizePolicy, load_active_theme, load_frontend_module_settings},
 };
 use mesh_core_config::ShellConfig;
-use mesh_core_debug::{ProfilingBackendStage, ProfilingStage};
+use mesh_core_debug::{
+    ComponentInvalidationCounts, DisplayBatchBarrierSnapshot, ProfilingBackendStage,
+    ProfilingInvalidationSnapshot, ProfilingStage, RetainedInvalidationCounts,
+    RetainedPaintSnapshot, TextCacheSnapshot,
+};
 use mesh_core_elements::{LayoutRect, VariableStore, WidgetNode};
 use mesh_core_interaction::measure_content_size;
 use mesh_core_module::ModuleInstance;
@@ -1507,6 +1511,95 @@ fn profiling_snapshot_tracks_bounded_surface_samples_and_redraw_counts() {
             .any(|stage| stage.stage == ProfilingStage::TotalSurfaceRender),
         "surface summaries must expose total surface render timing as a first-class stage"
     );
+}
+
+#[test]
+fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+
+    shell.record_surface_invalidation(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingInvalidationSnapshot {
+            full_rebuild: false,
+            retained_path: true,
+            retained_generation: 7,
+            component: ComponentInvalidationCounts {
+                state: 1,
+                style: 1,
+                layout: 1,
+                paint: 1,
+                accessibility: 1,
+                metrics: 1,
+                ..Default::default()
+            },
+            retained: RetainedInvalidationCounts {
+                style: 2,
+                layout: 1,
+                state: 1,
+                ..Default::default()
+            },
+            paint: RetainedPaintSnapshot {
+                entries_total: 5,
+                entries_reused: 3,
+                entries_rebuilt: 2,
+                damage_area: 120,
+                surface_area: 1_000,
+                partial_present_supported: false,
+                skipped_paint_pixels: 0,
+                batch_count: 2,
+                batched_primitives: 5,
+                barrier_count: 3,
+                barriers: DisplayBatchBarrierSnapshot {
+                    text: 1,
+                    material_change: 2,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            text: TextCacheSnapshot {
+                layout_hits: 4,
+                layout_misses: 1,
+                shaped_entries: 1,
+                glyph_cache_active: true,
+                ..Default::default()
+            },
+        },
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.expect("profiling should be enabled");
+    let surface = profiling
+        .surfaces
+        .iter()
+        .find(|surface| surface.surface_id == "@mesh/navigation-bar")
+        .expect("surface snapshot should be recorded when invalidation occurs");
+    let invalidation = surface
+        .invalidation
+        .as_ref()
+        .expect("surface profiling should carry typed invalidation counts");
+
+    assert!(!invalidation.full_rebuild);
+    assert!(invalidation.retained_path);
+    assert_eq!(invalidation.retained_generation, 7);
+    assert_eq!(invalidation.component.style, 1);
+    assert_eq!(invalidation.component.text, 0);
+    assert_eq!(invalidation.retained.style, 2);
+    assert_eq!(invalidation.retained.layout, 1);
+    assert_eq!(invalidation.paint.entries_total, 5);
+    assert_eq!(invalidation.paint.damage_area, 120);
+    assert!(!invalidation.paint.partial_present_supported);
+    assert_eq!(invalidation.paint.skipped_paint_pixels, 0);
+    assert_eq!(invalidation.paint.batch_count, 2);
+    assert_eq!(invalidation.paint.batched_primitives, 5);
+    assert_eq!(invalidation.paint.barriers.text, 1);
+    assert_eq!(invalidation.paint.barriers.material_change, 2);
+    assert_eq!(invalidation.text.layout_hits, 4);
+    assert_eq!(invalidation.text.layout_misses, 1);
+    assert!(invalidation.text.glyph_cache_active);
 }
 
 #[test]

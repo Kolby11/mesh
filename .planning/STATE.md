@@ -1,34 +1,34 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.3
-milestone_name: Performance Instrumentation and Responsiveness
-status: ready_to_plan
-stopped_at: Completed 17-04-PLAN.md
-last_updated: "2026-05-09T08:30:30.420Z"
-last_activity: 2026-05-09
+milestone: v1.4
+milestone_name: milestone
+status: Awaiting next milestone
+stopped_at: Started milestone v1.4
+last_updated: "2026-05-09T12:22:43.657Z"
+last_activity: 2026-05-09 — Milestone v1.4 completed and archived
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 16
-  completed_plans: 16
+  total_phases: 7
+  completed_phases: 7
+  total_plans: 7
+  completed_plans: 7
   percent: 100
 ---
 
-# State: MESH v1.3
+# State: MESH v1.4
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-08)
+See: `.planning/PROJECT.md` (updated 2026-05-09)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 18 — targeted-optimization-pass
+**Current focus:** Defining requirements for v1.4 — Major Performance Fixes
 
 ## Current Position
 
-Phase: 18
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-05-09
+Phase: Milestone v1.4 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-05-09 — Milestone v1.4 completed and archived
 
 ## Decisions
 
@@ -85,6 +85,14 @@ Last activity: 2026-05-09
 - [Phase 17]: Backend-driven benchmark completion requires both provider-stage timing and frontend surface render timing. — Satisfies BACK-03/BENCH-05 using generic profiling snapshots only.
 - [Phase 17]: Backend benchmark target text is derived from existing profiling/runtime identities while preserving the canonical mesh.audio -> @mesh/pipewire-audio fallback. — Keeps Rust benchmark correlation generic and avoids audio payload parsing.
 - [Phase 17]: Task 17-04-03 is recorded with an empty verification commit because the final proof suite passed without code changes. — Preserves per-task atomic commit history without changing unrelated files.
+- [v1.4]: Retained rendering should take primary inspiration from Qt Quick's retained scene graph rather than full web-engine architecture. — MESH has shell/toolkit primitives, so item-to-render-node synchronization, retained geometry/resources, damage tracking, and batching are the better fit.
+- [v1.4]: GPU backend work waits until retained render objects, retained display data, and damage tracking exist. — Rebuilding and uploading brand-new paint data every frame would waste much of the GPU benefit.
+- [Phase 19]: Typed invalidation counts are exposed through `mesh.debug.profiling.surfaces[].invalidation` instead of a separate trace channel.
+- [Phase 19]: Script and text invalidations continue to force the full widget-tree rebuild fallback; retained style/layout/paint paths remain narrow when a previous tree is available.
+- [Phase 20]: Retained interaction restyles target previous/current stateful node keys and recompute those nodes from full style rules to prevent stale hover/focus styles.
+- [Phase 20]: Interaction restyles reuse retained layout rectangles when layout-relevant style inputs are unchanged; full layout remains the fallback for geometry-affecting changes.
+- [Phase 21]: Retained render objects are synchronized from stable widget node IDs with separate transform, clip, opacity, geometry, material, text, and accessibility slots.
+- [Phase 21]: The software painter remains unchanged; render objects are the synchronization boundary for later display-list, damage, and GPU-readiness work.
 
 ## Performance Metrics
 
@@ -122,8 +130,8 @@ Last activity: 2026-05-09
 
 ## Session
 
-Last session: 2026-05-09T08:30:30.411Z
-Stopped At: Completed 17-04-PLAN.md
+Last session: 2026-05-09T00:00:00.000Z
+Stopped At: Started milestone v1.4
 Resume File: None
 
 ## Accumulated Context
@@ -132,6 +140,7 @@ Resume File: None
 
 - v1.0 planning artifacts archived to `.planning/milestones/v1.0-reset-2026-05-03-*`.
 - v1.1 reset roadmap focuses on backend plugin MVP stability.
+- v1.4 continues phase numbering after v1.3 and starts at Phase 19.
 
 ## Deferred Items
 
@@ -169,7 +178,12 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | Roadmap | `.planning/ROADMAP.md` |
 | State | `.planning/STATE.md` |
 | Research | `.planning/research/v1.3-performance-instrumentation-and-responsiveness.md` |
+| v1.4 research | `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-08 after starting milestone v1.3*
+*State updated: 2026-05-09 after starting milestone v1.4*
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

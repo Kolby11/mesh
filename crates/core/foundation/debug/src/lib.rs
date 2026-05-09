@@ -146,6 +146,80 @@ pub struct ProfilingSurfaceSnapshot {
     pub stages: Vec<ProfilingStageSummary>,
     pub redraw_count: u64,
     pub total_surface_render_time_micros: u64,
+    pub invalidation: Option<ProfilingInvalidationSnapshot>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProfilingInvalidationSnapshot {
+    pub full_rebuild: bool,
+    pub retained_path: bool,
+    pub retained_generation: u64,
+    pub component: ComponentInvalidationCounts,
+    pub retained: RetainedInvalidationCounts,
+    pub paint: RetainedPaintSnapshot,
+    pub text: TextCacheSnapshot,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ComponentInvalidationCounts {
+    pub script: u64,
+    pub state: u64,
+    pub style: u64,
+    pub layout: u64,
+    pub paint: u64,
+    pub text: u64,
+    pub accessibility: u64,
+    pub metrics: u64,
+    pub surface_config: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RetainedInvalidationCounts {
+    pub inserted: u64,
+    pub removed: u64,
+    pub layout: u64,
+    pub style: u64,
+    pub attributes: u64,
+    pub children: u64,
+    pub state: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RetainedPaintSnapshot {
+    pub retained_generation: u64,
+    pub entries_total: u64,
+    pub entries_reused: u64,
+    pub entries_rebuilt: u64,
+    pub entries_removed: u64,
+    pub damage_rect_count: u64,
+    pub damage_area: u64,
+    pub surface_area: u64,
+    pub full_surface_damage: bool,
+    pub partial_present_supported: bool,
+    pub skipped_paint_pixels: u64,
+    pub batch_count: u64,
+    pub batched_primitives: u64,
+    pub barrier_count: u64,
+    pub barriers: DisplayBatchBarrierSnapshot,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DisplayBatchBarrierSnapshot {
+    pub text: u64,
+    pub icon: u64,
+    pub opacity: u64,
+    pub clip: u64,
+    pub translucency: u64,
+    pub material_change: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TextCacheSnapshot {
+    pub layout_hits: u64,
+    pub layout_misses: u64,
+    pub layout_invalidations: u64,
+    pub shaped_entries: u64,
+    pub glyph_cache_active: bool,
 }
 
 #[derive(Debug, Clone, Default)]

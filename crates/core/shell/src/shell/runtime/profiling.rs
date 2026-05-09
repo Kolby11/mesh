@@ -1,8 +1,9 @@
 use crate::shell::Shell;
 use mesh_core_debug::{
     ProfilingBackendSample, ProfilingBackendSnapshot, ProfilingBackendStage,
-    ProfilingBackendStageSummary, ProfilingSample, ProfilingScopeSnapshot, ProfilingSnapshot,
-    ProfilingStage, ProfilingStageSummary, ProfilingSurfaceSnapshot,
+    ProfilingBackendStageSummary, ProfilingInvalidationSnapshot, ProfilingSample,
+    ProfilingScopeSnapshot, ProfilingSnapshot, ProfilingStage, ProfilingStageSummary,
+    ProfilingSurfaceSnapshot,
 };
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::time::Duration;
@@ -81,6 +82,7 @@ impl ScopeAccumulator {
 struct SurfaceAccumulator {
     module_id: Option<String>,
     scope: ScopeAccumulator,
+    invalidation: Option<ProfilingInvalidationSnapshot>,
 }
 
 #[derive(Debug, Default)]
@@ -160,6 +162,7 @@ impl ProfilingRuntimeState {
                 stages: surface.scope.snapshot().stages,
                 redraw_count: surface.scope.redraw_count,
                 total_surface_render_time_micros: surface.scope.total_surface_render_time_micros,
+                invalidation: surface.invalidation.clone(),
             })
             .collect();
         surfaces.sort_by(|a, b| a.surface_id.cmp(&b.surface_id));
@@ -223,6 +226,7 @@ impl ProfilingRuntimeState {
             .or_insert_with(|| SurfaceAccumulator {
                 module_id: module_id.map(str::to_string),
                 scope: ScopeAccumulator::default(),
+                invalidation: None,
             });
         if surface.module_id.is_none() {
             surface.module_id = module_id.map(str::to_string);
@@ -271,11 +275,33 @@ impl ProfilingRuntimeState {
             .or_insert_with(|| SurfaceAccumulator {
                 module_id: module_id.map(str::to_string),
                 scope: ScopeAccumulator::default(),
+                invalidation: None,
             });
         if surface.module_id.is_none() {
             surface.module_id = module_id.map(str::to_string);
         }
         surface.scope.record_stage(sample, self.recent_capacity);
+    }
+
+    pub(crate) fn record_surface_invalidation(
+        &mut self,
+        surface_id: &str,
+        module_id: Option<&str>,
+        invalidation: ProfilingInvalidationSnapshot,
+    ) {
+        let module_id = module_id.filter(|id| !id.is_empty());
+        let surface = self
+            .surfaces
+            .entry(surface_id.to_string())
+            .or_insert_with(|| SurfaceAccumulator {
+                module_id: module_id.map(str::to_string),
+                scope: ScopeAccumulator::default(),
+                invalidation: None,
+            });
+        if surface.module_id.is_none() {
+            surface.module_id = module_id.map(str::to_string);
+        }
+        surface.invalidation = Some(invalidation);
     }
 
     fn make_sample(
@@ -361,6 +387,19 @@ impl Shell {
         }
         self.profiling
             .record_surface_redraw(surface_id, module_id, trigger_kind);
+    }
+
+    pub(crate) fn record_surface_invalidation(
+        &mut self,
+        surface_id: &str,
+        module_id: Option<&str>,
+        invalidation: ProfilingInvalidationSnapshot,
+    ) {
+        if !self.profiling_enabled() {
+            return;
+        }
+        self.profiling
+            .record_surface_invalidation(surface_id, module_id, invalidation);
     }
 
     pub(crate) fn record_backend_profiling_stage(

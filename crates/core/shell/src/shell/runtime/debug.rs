@@ -709,6 +709,68 @@ fn profiling_surface_snapshot_json(
         "stages": snapshot.stages.iter().map(profiling_stage_summary_json).collect::<Vec<_>>(),
         "redraw_count": snapshot.redraw_count,
         "total_surface_render_time_micros": snapshot.total_surface_render_time_micros,
+        "invalidation": snapshot.invalidation.as_ref().map(profiling_invalidation_json),
+    })
+}
+
+fn profiling_invalidation_json(
+    snapshot: &mesh_core_debug::ProfilingInvalidationSnapshot,
+) -> serde_json::Value {
+    serde_json::json!({
+        "full_rebuild": snapshot.full_rebuild,
+        "retained_path": snapshot.retained_path,
+        "retained_generation": snapshot.retained_generation,
+        "component": {
+            "script": snapshot.component.script,
+            "state": snapshot.component.state,
+            "style": snapshot.component.style,
+            "layout": snapshot.component.layout,
+            "paint": snapshot.component.paint,
+            "text": snapshot.component.text,
+            "accessibility": snapshot.component.accessibility,
+            "metrics": snapshot.component.metrics,
+            "surface_config": snapshot.component.surface_config,
+        },
+        "retained": {
+            "inserted": snapshot.retained.inserted,
+            "removed": snapshot.retained.removed,
+            "layout": snapshot.retained.layout,
+            "style": snapshot.retained.style,
+            "attributes": snapshot.retained.attributes,
+            "children": snapshot.retained.children,
+            "state": snapshot.retained.state,
+        },
+        "paint": {
+            "retained_generation": snapshot.paint.retained_generation,
+            "entries_total": snapshot.paint.entries_total,
+            "entries_reused": snapshot.paint.entries_reused,
+            "entries_rebuilt": snapshot.paint.entries_rebuilt,
+            "entries_removed": snapshot.paint.entries_removed,
+            "damage_rect_count": snapshot.paint.damage_rect_count,
+            "damage_area": snapshot.paint.damage_area,
+            "surface_area": snapshot.paint.surface_area,
+            "full_surface_damage": snapshot.paint.full_surface_damage,
+            "partial_present_supported": snapshot.paint.partial_present_supported,
+            "skipped_paint_pixels": snapshot.paint.skipped_paint_pixels,
+            "batch_count": snapshot.paint.batch_count,
+            "batched_primitives": snapshot.paint.batched_primitives,
+            "barrier_count": snapshot.paint.barrier_count,
+            "barriers": {
+                "text": snapshot.paint.barriers.text,
+                "icon": snapshot.paint.barriers.icon,
+                "opacity": snapshot.paint.barriers.opacity,
+                "clip": snapshot.paint.barriers.clip,
+                "translucency": snapshot.paint.barriers.translucency,
+                "material_change": snapshot.paint.barriers.material_change,
+            },
+        },
+        "text": {
+            "layout_hits": snapshot.text.layout_hits,
+            "layout_misses": snapshot.text.layout_misses,
+            "layout_invalidations": snapshot.text.layout_invalidations,
+            "shaped_entries": snapshot.text.shaped_entries,
+            "glyph_cache_active": snapshot.text.glyph_cache_active,
+        },
     })
 }
 

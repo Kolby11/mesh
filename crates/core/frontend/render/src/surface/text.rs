@@ -9,7 +9,11 @@ use mesh_core_elements::Color;
 use mesh_core_elements::style::TextAlign;
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
+
+const TEXT_LAYOUT_CACHE_CAPACITY: usize = 128;
 
 pub struct TextRenderer {
     engine: Mutex<TextEngine>,
@@ -18,6 +22,8 @@ pub struct TextRenderer {
 struct TextEngine {
     font_system: FontSystem,
     swash_cache: SwashCache,
+    layout_cache: HashMap<TextLayoutKey, Buffer>,
+    metrics: TextCacheMetrics,
 }
 
 thread_local! {
@@ -25,6 +31,65 @@ thread_local! {
 }
 
 pub struct SharedTextMeasurer;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TextCacheMetrics {
+    pub layout_hits: u64,
+    pub layout_misses: u64,
+    pub layout_invalidations: u64,
+    pub shaped_entries: u64,
+    pub glyph_cache_active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TextLayoutKey {
+    text: String,
+    font_family: String,
+    font_size: u32,
+    font_weight: u16,
+    line_height: u32,
+    max_width: Option<u32>,
+    align: TextAlign,
+}
+
+impl TextLayoutKey {
+    fn new(
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        max_width: Option<f32>,
+        align: TextAlign,
+    ) -> Self {
+        Self {
+            text: text.to_string(),
+            font_family: font_family.to_string(),
+            font_size: font_size.to_bits(),
+            font_weight,
+            line_height: line_height.to_bits(),
+            max_width: max_width.map(f32::to_bits),
+            align,
+        }
+    }
+}
+
+impl Hash for TextLayoutKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.text.hash(state);
+        self.font_family.hash(state);
+        self.font_size.hash(state);
+        self.font_weight.hash(state);
+        self.line_height.hash(state);
+        self.max_width.hash(state);
+        match self.align {
+            TextAlign::Left => 0u8,
+            TextAlign::Center => 1u8,
+            TextAlign::Right => 2u8,
+        }
+        .hash(state);
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextSelectionRect {
@@ -48,8 +113,29 @@ impl TextRenderer {
             engine: Mutex::new(TextEngine {
                 font_system: FontSystem::new(),
                 swash_cache: SwashCache::new(),
+                layout_cache: HashMap::new(),
+                metrics: TextCacheMetrics {
+                    glyph_cache_active: true,
+                    ..Default::default()
+                },
             }),
         }
+    }
+
+    pub fn cache_metrics(&self) -> TextCacheMetrics {
+        let mut engine = self.engine.lock().unwrap();
+        engine.metrics.shaped_entries = engine.layout_cache.len() as u64;
+        engine.metrics
+    }
+
+    pub fn reset_cache_metrics(&self) {
+        let mut engine = self.engine.lock().unwrap();
+        let shaped_entries = engine.layout_cache.len() as u64;
+        engine.metrics = TextCacheMetrics {
+            shaped_entries,
+            glyph_cache_active: true,
+            ..Default::default()
+        };
     }
 
     pub fn measure(
@@ -108,7 +194,7 @@ impl TextRenderer {
         max_width: Option<f32>,
     ) {
         let mut engine = self.engine.lock().unwrap();
-        let (attrs, metrics, width, text_align) = text_config(
+        let (_, metrics, width, text_align) = text_config(
             font_family,
             font_size,
             font_weight,
@@ -116,17 +202,16 @@ impl TextRenderer {
             max_width,
             align,
         );
-
-        let mut cosmic = Buffer::new(&mut engine.font_system, metrics);
-        {
-            let mut cosmic_borrow = cosmic.borrow_with(&mut engine.font_system);
-            cosmic_borrow.set_wrap(wrap_for(max_width));
-            cosmic_borrow.set_size(width, None);
-            cosmic_borrow.set_text(text, &attrs, Shaping::Advanced, Some(text_align));
-        }
-        drop(engine);
-
-        let mut engine = self.engine.lock().unwrap();
+        let key = TextLayoutKey::new(
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            max_width,
+            align,
+        );
+        let mut cosmic = engine.take_layout(&key, metrics, width, text_align);
 
         let base_x = x as i32;
         let base_y = y as i32;
@@ -138,6 +223,7 @@ impl TextRenderer {
             let TextEngine {
                 font_system,
                 swash_cache,
+                ..
             } = &mut *engine;
             let mut cosmic_borrow = cosmic.borrow_with(font_system);
             cosmic_borrow.draw(
@@ -167,6 +253,7 @@ impl TextRenderer {
                 },
             );
         }
+        engine.store_layout(key, cosmic);
     }
 
     pub fn measure_styled(
@@ -179,7 +266,7 @@ impl TextRenderer {
         max_width: Option<f32>,
     ) -> (f32, f32) {
         let mut engine = self.engine.lock().unwrap();
-        let (attrs, metrics, width, _) = text_config(
+        let (_, metrics, width, _) = text_config(
             font_family,
             font_size,
             font_weight,
@@ -187,24 +274,32 @@ impl TextRenderer {
             max_width,
             TextAlign::Left,
         );
-
-        let mut cosmic = Buffer::new(&mut engine.font_system, metrics);
-        let mut cosmic = cosmic.borrow_with(&mut engine.font_system);
-        cosmic.set_wrap(wrap_for(max_width));
-        cosmic.set_size(width, None);
-        cosmic.set_text(text, &attrs, Shaping::Advanced, Some(Align::Left));
+        let key = TextLayoutKey::new(
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            max_width,
+            TextAlign::Left,
+        );
+        let mut cosmic = engine.take_layout(&key, metrics, width, Align::Left);
 
         let mut measured_width = 0.0f32;
         let mut measured_height = 0.0f32;
-        for run in cosmic.layout_runs() {
-            measured_width = measured_width.max(run.line_w);
-            measured_height = measured_height.max(run.line_top + run.line_height);
+        {
+            let cosmic = cosmic.borrow_with(&mut engine.font_system);
+            for run in cosmic.layout_runs() {
+                measured_width = measured_width.max(run.line_w);
+                measured_height = measured_height.max(run.line_top + run.line_height);
+            }
         }
 
         if measured_height <= 0.0 {
             measured_height = metrics.line_height;
         }
 
+        engine.store_layout(key, cosmic);
         (measured_width, measured_height)
     }
 
@@ -222,7 +317,7 @@ impl TextRenderer {
         focus: (f32, f32),
     ) -> Option<TextSelectionGeometry> {
         let mut engine = self.engine.lock().unwrap();
-        let (attrs, metrics, width, text_align) = text_config(
+        let (_, metrics, width, text_align) = text_config(
             font_family,
             font_size,
             font_weight,
@@ -230,39 +325,96 @@ impl TextRenderer {
             max_width,
             align,
         );
+        let key = TextLayoutKey::new(
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            max_width,
+            align,
+        );
+        let mut cosmic = engine.take_layout(&key, metrics, width, text_align);
 
-        let mut cosmic = Buffer::new(&mut engine.font_system, metrics);
-        {
-            let mut cosmic_borrow = cosmic.borrow_with(&mut engine.font_system);
-            cosmic_borrow.set_wrap(wrap_for(max_width));
-            cosmic_borrow.set_size(width, None);
-            cosmic_borrow.set_text(text, &attrs, Shaping::Advanced, Some(text_align));
+        let result = {
+            let cosmic = cosmic.borrow_with(&mut engine.font_system);
+            let anchor_cursor = cosmic.hit(anchor.0, anchor.1);
+            let focus_cursor = cosmic.hit(focus.0, focus.1);
+            if let (Some(anchor_cursor), Some(focus_cursor)) = (anchor_cursor, focus_cursor) {
+                let (start, end) = order_cursors(anchor_cursor, focus_cursor);
+                let selected_text = extract_selected_text(text, start, end);
+                let highlights = cosmic
+                    .layout_runs()
+                    .filter_map(|run| {
+                        run.highlight(start, end)
+                            .map(|(x, width)| TextSelectionRect {
+                                x,
+                                y: run.line_top,
+                                width,
+                                height: run.line_height,
+                            })
+                    })
+                    .filter(|rect| rect.width > 0.0 && rect.height > 0.0)
+                    .collect();
+
+                Some(TextSelectionGeometry {
+                    start,
+                    end,
+                    selected_text,
+                    highlights,
+                })
+            } else {
+                None
+            }
+        };
+
+        engine.store_layout(key, cosmic);
+        result
+    }
+}
+
+impl TextEngine {
+    fn take_layout(
+        &mut self,
+        key: &TextLayoutKey,
+        metrics: Metrics,
+        width: Option<f32>,
+        align: Align,
+    ) -> Buffer {
+        if let Some(cosmic) = self.layout_cache.remove(key) {
+            self.metrics.layout_hits = self.metrics.layout_hits.saturating_add(1);
+            return cosmic;
         }
 
-        let anchor_cursor = cosmic.hit(anchor.0, anchor.1)?;
-        let focus_cursor = cosmic.hit(focus.0, focus.1)?;
-        let (start, end) = order_cursors(anchor_cursor, focus_cursor);
-        let selected_text = extract_selected_text(text, start, end);
-        let highlights = cosmic
-            .layout_runs()
-            .filter_map(|run| {
-                run.highlight(start, end)
-                    .map(|(x, width)| TextSelectionRect {
-                        x,
-                        y: run.line_top,
-                        width,
-                        height: run.line_height,
-                    })
-            })
-            .filter(|rect| rect.width > 0.0 && rect.height > 0.0)
-            .collect();
+        self.metrics.layout_misses = self.metrics.layout_misses.saturating_add(1);
+        let (attrs, _, _, _) = text_config(
+            &key.font_family,
+            f32::from_bits(key.font_size),
+            key.font_weight,
+            f32::from_bits(key.line_height),
+            key.max_width.map(f32::from_bits),
+            key.align,
+        );
+        let mut cosmic = Buffer::new(&mut self.font_system, metrics);
+        {
+            let mut cosmic_borrow = cosmic.borrow_with(&mut self.font_system);
+            cosmic_borrow.set_wrap(wrap_for(key.max_width.map(f32::from_bits)));
+            cosmic_borrow.set_size(width, None);
+            cosmic_borrow.set_text(&key.text, &attrs, Shaping::Advanced, Some(align));
+        }
+        cosmic
+    }
 
-        Some(TextSelectionGeometry {
-            start,
-            end,
-            selected_text,
-            highlights,
-        })
+    fn store_layout(&mut self, key: TextLayoutKey, cosmic: Buffer) {
+        if self.layout_cache.len() >= TEXT_LAYOUT_CACHE_CAPACITY
+            && !self.layout_cache.contains_key(&key)
+            && let Some(evicted) = self.layout_cache.keys().next().cloned()
+        {
+            self.layout_cache.remove(&evicted);
+            self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
+        }
+        self.layout_cache.insert(key, cosmic);
+        self.metrics.shaped_entries = self.layout_cache.len() as u64;
     }
 }
 
@@ -448,5 +600,36 @@ mod tests {
             Cursor::new(0, "cafe\u{301} nai\u{308}ve".len()),
         );
         assert_eq!(utf8, "cafe\u{301} nai\u{308}ve");
+    }
+
+    #[test]
+    fn text_cache_reuses_unchanged_measure_layout() {
+        let renderer = TextRenderer::new();
+        renderer.reset_cache_metrics();
+
+        let first = renderer.measure_styled("cached text", "Inter", 14.0, 400, 1.2, Some(120.0));
+        let second = renderer.measure_styled("cached text", "Inter", 14.0, 400, 1.2, Some(120.0));
+        let metrics = renderer.cache_metrics();
+
+        assert_eq!(first, second);
+        assert_eq!(metrics.layout_misses, 1);
+        assert_eq!(metrics.layout_hits, 1);
+        assert_eq!(metrics.shaped_entries, 1);
+        assert!(metrics.glyph_cache_active);
+    }
+
+    #[test]
+    fn text_cache_misses_when_shaping_inputs_change() {
+        let renderer = TextRenderer::new();
+        renderer.reset_cache_metrics();
+
+        renderer.measure_styled("cached text", "Inter", 14.0, 400, 1.2, Some(120.0));
+        renderer.measure_styled("cached text", "Inter", 15.0, 400, 1.2, Some(120.0));
+        renderer.measure_styled("cached text", "Inter", 15.0, 400, 1.2, Some(120.0));
+        let metrics = renderer.cache_metrics();
+
+        assert_eq!(metrics.layout_misses, 2);
+        assert_eq!(metrics.layout_hits, 1);
+        assert_eq!(metrics.shaped_entries, 2);
     }
 }

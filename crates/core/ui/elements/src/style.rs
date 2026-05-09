@@ -473,6 +473,106 @@ mod tests {
     }
 
     #[test]
+    fn targeted_restyle_recomputes_only_named_stateful_nodes() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::State("button".to_string(), "hover".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "background-color".to_string(),
+                value: StyleValue::Literal("#ff0000".to_string()),
+            }],
+            container_query: None,
+        }];
+        let mut root = crate::tree::WidgetNode::new("row");
+        let mut previous = crate::tree::WidgetNode::new("button");
+        previous
+            .attributes
+            .insert("_mesh_key".into(), "prev".into());
+        previous.state.hovered = false;
+        previous.computed_style.background_color = Color::from_hex("#ff0000").unwrap();
+        let mut current = crate::tree::WidgetNode::new("button");
+        current.attributes.insert("_mesh_key".into(), "next".into());
+        current.state.hovered = true;
+        root.children.push(previous);
+        root.children.push(current);
+
+        let target_keys = std::collections::HashSet::from(["prev".to_string(), "next".to_string()]);
+        resolver.restyle_subtree_for_keys(&mut root, &rules, StyleContext::default(), &target_keys);
+
+        assert_eq!(
+            root.children[0].computed_style.background_color,
+            ComputedStyle::default().background_color
+        );
+        assert_eq!(
+            root.children[1].computed_style.background_color,
+            Color::from_hex("#ff0000").unwrap()
+        );
+    }
+
+    #[test]
+    fn style_rule_index_matches_full_scan_for_selector_mix() {
+        use mesh_core_component::style::{Declaration, Selector};
+
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![
+            StyleRule {
+                selector: Selector::Tag("button".to_string()),
+                declarations: vec![Declaration {
+                    property: "color".to_string(),
+                    value: StyleValue::Literal("#111111".to_string()),
+                }],
+                container_query: None,
+            },
+            StyleRule {
+                selector: Selector::Class("primary".to_string()),
+                declarations: vec![Declaration {
+                    property: "background-color".to_string(),
+                    value: StyleValue::Literal("#222222".to_string()),
+                }],
+                container_query: None,
+            },
+            StyleRule {
+                selector: Selector::Id("submit".to_string()),
+                declarations: vec![Declaration {
+                    property: "border-color".to_string(),
+                    value: StyleValue::Literal("#333333".to_string()),
+                }],
+                container_query: None,
+            },
+            StyleRule {
+                selector: Selector::Compound(vec![
+                    Selector::Class("primary".to_string()),
+                    Selector::State("*".to_string(), "hover".to_string()),
+                ]),
+                declarations: vec![Declaration {
+                    property: "opacity".to_string(),
+                    value: StyleValue::Literal("0.5".to_string()),
+                }],
+                container_query: None,
+            },
+        ];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "button",
+            &["primary".to_string()],
+            Some("submit"),
+            StyleContext::default(),
+            ElementState {
+                hovered: true,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(style.color, Color::from_hex("#111111").unwrap());
+        assert_eq!(style.background_color, Color::from_hex("#222222").unwrap());
+        assert_eq!(style.border_color, Color::from_hex("#333333").unwrap());
+        assert_eq!(style.opacity, 0.5);
+    }
+
+    #[test]
     fn focus_visible_requires_focus_visible_state() {
         use crate::tree::ElementState;
         use mesh_core_component::style::{Declaration, Selector};

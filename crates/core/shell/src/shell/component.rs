@@ -29,7 +29,7 @@ pub(in crate::shell) use catalog::FrontendCatalog;
 pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 use runtime_tree::{
     RetainedWidgetTree, annotate_runtime_tree, collect_all_keys, collect_element_metrics,
-    input_accepts_char,
+    collect_stateful_keys, input_accepts_char,
 };
 
 use mesh_core_capability::{Capability, CapabilitySet};
@@ -51,7 +51,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mesh_core_render::{
-    PixelBuffer, SharedTextMeasurer, TextRenderer, paint_frontend_tree_at_for_module,
+    DisplayListMetrics, PixelBuffer, RenderObjectTree, RetainedDisplayList, SharedTextMeasurer,
+    TextCacheMetrics, TextRenderer, paint_frontend_tree_at_for_module_with_text_metrics,
 };
 
 const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
@@ -111,6 +112,57 @@ impl ComponentDirtyFlags {
 
     pub(super) fn requires_tree_rebuild(self) -> bool {
         self.intersects(Self::SCRIPT | Self::TEXT)
+    }
+
+    pub(super) fn to_debug_counts(self) -> mesh_core_debug::ComponentInvalidationCounts {
+        mesh_core_debug::ComponentInvalidationCounts {
+            script: self.contains(Self::SCRIPT) as u64,
+            state: self.contains(Self::STATE) as u64,
+            style: self.contains(Self::STYLE) as u64,
+            layout: self.contains(Self::LAYOUT) as u64,
+            paint: self.contains(Self::PAINT) as u64,
+            text: self.contains(Self::TEXT) as u64,
+            accessibility: self.contains(Self::ACCESSIBILITY) as u64,
+            metrics: self.contains(Self::METRICS) as u64,
+            surface_config: self.contains(Self::SURFACE_CONFIG) as u64,
+        }
+    }
+}
+
+fn retained_paint_snapshot(metrics: DisplayListMetrics) -> mesh_core_debug::RetainedPaintSnapshot {
+    mesh_core_debug::RetainedPaintSnapshot {
+        retained_generation: metrics.retained_generation,
+        entries_total: metrics.entries_total,
+        entries_reused: metrics.entries_reused,
+        entries_rebuilt: metrics.entries_rebuilt,
+        entries_removed: metrics.entries_removed,
+        damage_rect_count: metrics.damage_rect_count,
+        damage_area: metrics.damage_area,
+        surface_area: metrics.surface_area,
+        full_surface_damage: metrics.full_surface_damage,
+        partial_present_supported: metrics.partial_present_supported,
+        skipped_paint_pixels: metrics.skipped_paint_pixels,
+        batch_count: metrics.batch_count,
+        batched_primitives: metrics.batched_primitives,
+        barrier_count: metrics.barrier_count,
+        barriers: mesh_core_debug::DisplayBatchBarrierSnapshot {
+            text: metrics.barriers.text,
+            icon: metrics.barriers.icon,
+            opacity: metrics.barriers.opacity,
+            clip: metrics.barriers.clip,
+            translucency: metrics.barriers.translucency,
+            material_change: metrics.barriers.material_change,
+        },
+    }
+}
+
+fn text_cache_snapshot(metrics: TextCacheMetrics) -> mesh_core_debug::TextCacheSnapshot {
+    mesh_core_debug::TextCacheSnapshot {
+        layout_hits: metrics.layout_hits,
+        layout_misses: metrics.layout_misses,
+        layout_invalidations: metrics.layout_invalidations,
+        shaped_entries: metrics.shaped_entries,
+        glyph_cache_active: metrics.glyph_cache_active,
     }
 }
 
@@ -196,6 +248,8 @@ pub(super) struct FrontendSurfaceComponent {
     interface_catalog: mesh_core_service::InterfaceCatalog,
     last_tree: Option<WidgetNode>,
     retained_tree: RetainedWidgetTree,
+    retained_render_objects: RenderObjectTree,
+    retained_display_list: RetainedDisplayList,
     diagnostics: Option<Diagnostics>,
     /// Desired visibility for surface portals (`<ImportedSurface hidden={...} />`).
     /// Updated during build_tree; compared to last_surface_states in tick().
@@ -213,6 +267,7 @@ pub(super) struct FrontendSurfaceComponent {
     has_active_keyframe_animation: bool,
     profiling_enabled: bool,
     profiling_records: Vec<ComponentProfilingRecord>,
+    invalidation_snapshot: Option<mesh_core_debug::ProfilingInvalidationSnapshot>,
     /// Cached aggregate of restyle rules collected from `compiled.component`
     /// and every entry in `compiled.local_components`. Populated lazily on the
     /// first restyle and invalidated whenever the compiled module is replaced
@@ -278,6 +333,8 @@ impl FrontendSurfaceComponent {
             interface_catalog,
             last_tree: None,
             retained_tree: RetainedWidgetTree::default(),
+            retained_render_objects: RenderObjectTree::default(),
+            retained_display_list: RetainedDisplayList::default(),
             diagnostics: None,
             pending_surface_states: RefCell::new(HashMap::new()),
             last_surface_states: HashMap::new(),
@@ -288,6 +345,7 @@ impl FrontendSurfaceComponent {
             has_active_keyframe_animation: false,
             profiling_enabled: false,
             profiling_records: Vec::new(),
+            invalidation_snapshot: None,
             cached_restyle_rules: None,
         }
     }

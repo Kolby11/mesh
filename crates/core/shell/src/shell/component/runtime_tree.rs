@@ -46,6 +46,18 @@ impl RetainedTreeDirtySummary {
             self.state += 1;
         }
     }
+
+    pub(super) fn to_debug_counts(self) -> mesh_core_debug::RetainedInvalidationCounts {
+        mesh_core_debug::RetainedInvalidationCounts {
+            inserted: self.inserted as u64,
+            removed: self.removed as u64,
+            layout: self.layout as u64,
+            style: self.style as u64,
+            attributes: self.attributes as u64,
+            children: self.children as u64,
+            state: self.state as u64,
+        }
+    }
 }
 
 new_key_type! {
@@ -385,6 +397,17 @@ pub(super) fn collect_all_keys(node: &WidgetNode, keys: &mut HashSet<String>) {
     }
     for child in &node.children {
         collect_all_keys(child, keys);
+    }
+}
+
+pub(super) fn collect_stateful_keys(node: &WidgetNode, keys: &mut HashSet<String>) {
+    if node.state != ElementState::default()
+        && let Some(key) = node.attributes.get("_mesh_key")
+    {
+        keys.insert(key.clone());
+    }
+    for child in &node.children {
+        collect_stateful_keys(child, keys);
     }
 }
 

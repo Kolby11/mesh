@@ -266,7 +266,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // tree is cached, skip the Luau-driven tree build and mutate the
         // retained tree instead of cloning it.
         let mut tree = if use_retained_style_path {
-            match self.restyle_retained_tree(theme, content_width, content_height) {
+            match self.restyle_retained_tree(theme, content_width, content_height, dirty_types) {
                 Some(t) => t,
                 None => self.build_tree(theme, content_width, content_height),
             }
@@ -276,18 +276,42 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.prune_stale_interaction_targets(&tree);
         self.apply_pending_auto_focus(&tree);
         self.apply_style_animations_with_previous(&mut tree, &previous_visual_styles);
-        self.retained_tree.update(&tree);
+        let retained_dirty = self.retained_tree.update(&tree);
+        let render_object_dirty = self.retained_render_objects.update(&tree);
+        let force_full_damage = requires_tree_rebuild || render_object_dirty.reordered > 0;
+        let display_list_metrics = self.retained_display_list.update(
+            &tree,
+            content_width,
+            content_height,
+            force_full_damage,
+            false,
+        );
+        self.invalidation_snapshot = Some(mesh_core_debug::ProfilingInvalidationSnapshot {
+            full_rebuild: requires_tree_rebuild,
+            retained_path: use_retained_style_path,
+            retained_generation: self.retained_tree.generation(),
+            component: dirty_types.to_debug_counts(),
+            retained: retained_dirty.to_debug_counts(),
+            paint: retained_paint_snapshot(display_list_metrics),
+            text: mesh_core_debug::TextCacheSnapshot::default(),
+        });
         tracing::trace!(
             "retained widget tree '{}' generation={} dirty={:?}",
             self.id(),
             self.retained_tree.generation(),
-            self.retained_tree.last_dirty()
+            retained_dirty
         );
         tracing::trace!(
             "component '{}' invalidation={:?} retained_path={}",
             self.id(),
             dirty_types,
             use_retained_style_path
+        );
+        tracing::trace!(
+            "retained render objects '{}' generation={} dirty={:?}",
+            self.id(),
+            self.retained_render_objects.generation(),
+            render_object_dirty
         );
         if self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured {
             let surface_layout_manifest = self.compiled.manifest.surface_layout.as_ref();
@@ -321,7 +345,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         };
 
         let paint_started = std::time::Instant::now();
-        paint_frontend_tree_at_for_module(
+        let text_cache_metrics = paint_frontend_tree_at_for_module_with_text_metrics(
             &tree,
             buffer,
             1.0,
@@ -332,6 +356,9 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
             Some(self.compiled.manifest.package.id.as_str()),
         );
+        if let Some(snapshot) = self.invalidation_snapshot.as_mut() {
+            snapshot.text = text_cache_snapshot(text_cache_metrics);
+        }
         if self.profiling_enabled {
             self.profiling_records.push(ComponentProfilingRecord {
                 stage: mesh_core_debug::ProfilingStage::Paint,
@@ -478,6 +505,12 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn take_profiling_records(&mut self) -> Vec<ComponentProfilingRecord> {
         std::mem::take(&mut self.profiling_records)
+    }
+
+    fn take_invalidation_snapshot(
+        &mut self,
+    ) -> Option<mesh_core_debug::ProfilingInvalidationSnapshot> {
+        self.invalidation_snapshot.take()
     }
 
     fn receive_focus_transfer(

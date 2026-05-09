@@ -245,6 +245,11 @@ pub trait ShellComponent: Send {
     fn take_profiling_records(&mut self) -> Vec<ComponentProfilingRecord> {
         Vec::new()
     }
+    fn take_invalidation_snapshot(
+        &mut self,
+    ) -> Option<mesh_core_debug::ProfilingInvalidationSnapshot> {
+        None
+    }
     fn source_path(&self) -> Option<&Path> {
         None
     }

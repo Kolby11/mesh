@@ -157,6 +157,16 @@ impl Shell {
                     record.trigger_kind.as_deref(),
                 );
             }
+            if let Some(invalidation) = self.components[index]
+                .component
+                .take_invalidation_snapshot()
+            {
+                self.record_surface_invalidation(
+                    &surface_id,
+                    Some(component_id.as_str()),
+                    invalidation,
+                );
+            }
 
             if visible && self.debug.show_layout_bounds {
                 if let Some(tree) = self.components[index].component.last_widget_tree() {

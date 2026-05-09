@@ -1,101 +1,125 @@
-# Requirements: MESH v1.3 Performance Instrumentation and Responsiveness
+# Requirements: MESH v1.4 Major Performance Fixes
 
-**Defined:** 2026-05-08
+**Defined:** 2026-05-09
 **Core Value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
 
-## v1.3 Requirements
+## v1.4 Requirements
 
-### Profiling Mode
+### Dirty Invalidation
 
-- [ ] **PROF-01**: Developers can enable and disable profiling only through the existing debug overlay/debug command path, with profiling off by default in normal shell use.
-- [ ] **PROF-02**: When profiling is disabled, the shell does not emit live profiling snapshots or require profiling-specific UI/runtime work.
-- [ ] **PROF-03**: When profiling is enabled, instrumentation overhead stays bounded enough that the inspector can be used during live interaction without making measurements meaningless.
+- [ ] **DIRTY-01**: Developers can inspect typed dirty summaries that classify changed stable nodes by script/state, style, layout, paint, text, accessibility, metrics, and surface configuration impact.
+- [ ] **DIRTY-02**: Style-only, paint-only, text-only, and layout-affecting changes are routed to the narrowest valid downstream work instead of forcing a full dirty render.
+- [ ] **DIRTY-03**: Full widget-tree rebuild remains available as a correctness fallback when stable identity, child-order, or unsupported mutation data is insufficient for incremental work.
+- [ ] **DIRTY-04**: Dirty summaries preserve enough previous and next bounds/context for downstream damage and layout decisions to be deterministic.
 
-### Timing Model
+### Incremental Style and Layout
 
-- [ ] **TIME-01**: Profiling captures shell-wide timing buckets for input handling, script/runtime updates, tree build, style/restyle, layout, paint, present/commit, redraw count, and total surface render time.
-- [ ] **TIME-02**: Profiling captures per-surface timing breakdowns so developers can compare shell-wide totals with individual surface costs.
-- [ ] **TIME-03**: Profiling snapshot data rolls up stage timings into stable shell-wide and per-surface summaries suitable for a live rolling inspector.
+- [ ] **INCR-01**: Style propagation can restyle changed stable nodes and affected descendants without restyling the entire retained widget tree.
+- [ ] **INCR-02**: Layout invalidation distinguishes local size/position changes from ancestor or surface-wide relayout requirements.
+- [ ] **INCR-03**: Layout consumers can reuse retained layout output for unaffected subtrees during scoped changes.
+- [ ] **INCR-04**: Incremental style/layout behavior is verified against interaction-state, container-size, and state-driven updates from shipped surfaces.
 
-### Backend Attribution
+### Retained Render Objects
 
-- [ ] **BACK-01**: Profiling attributes backend work by provider or service rather than reporting backend time only as one aggregate bucket.
-- [ ] **BACK-02**: Backend profiling separates at least poll/update, command handling, and state publish/delivery stages.
-- [x] **BACK-03**: Backend timing can be correlated with the resulting frontend surface cost during backend-driven state updates.
+- [ ] **REND-01**: The renderer maintains a retained render-object or scene-graph tree derived from stable widget nodes rather than rebuilding render data from scratch for every frame.
+- [ ] **REND-02**: Render objects separate transform, clip, opacity, geometry, material/style, text, and accessibility-facing data so dirty types can update only the affected slots.
+- [ ] **REND-03**: Widget-to-render synchronization updates inserted, removed, reordered, and mutated nodes while preserving render-object identity where possible.
+- [ ] **REND-04**: Render-object ownership and mutation rules are explicit enough to support a future render-thread or GPU backend without unsafe cross-thread mutation assumptions.
 
-### Inspector UI
+### Retained Paint and Damage
 
-- [ ] **INSP-01**: The profiling inspector is rendered with normal `.mesh` frontend components rather than a separate native-only diagnostics UI.
-- [ ] **INSP-02**: The live inspector provides at least overview, surfaces, backend services, and benchmark/interaction views.
-- [ ] **INSP-03**: The inspector tolerates surfaces or services that have no recent samples without breaking the debug UI.
+- [x] **PAINT-01**: The display list or paint command layer is retained across frames and updated incrementally from dirty render objects.
+- [x] **PAINT-02**: Damage tracking computes changed regions from old and new bounds for paint, layout, transform, clip, text, and visibility changes.
+- [x] **PAINT-03**: Paint/present work is skipped or clipped for unchanged regions when the backend supports partial updates.
+- [x] **PAINT-04**: The debug inspector exposes retained-rendering metrics such as dirty node counts, retained-node reuse, damage area, display-list reuse, and skipped paint/present work.
 
-### Benchmark Scenarios
+### Text and Resource Caching
 
-- [x] **BENCH-01**: The shell exposes a repeatable hover benchmark scenario that reports input, hover/restyle, and render timing buckets.
-- [x] **BENCH-02**: The shell exposes a repeatable surface open/close scenario that reports total surface render cost and redraw activity.
-- [x] **BENCH-03**: The shell exposes a repeatable slider drag or other pointer-driven update scenario that reports input-to-visible-response timing.
-- [x] **BENCH-04**: The shell exposes a repeatable keyboard traversal scenario that reports focus/input/render timing.
-- [x] **BENCH-05**: The shell exposes a repeatable backend-driven state update scenario that reports backend stage timing plus resulting frontend render cost.
+- [x] **TEXT-01**: Text shaping output is cached by stable text identity, font/style inputs, content, and layout constraints.
+- [x] **TEXT-02**: Glyph cache behavior avoids reshaping or rerasterizing unchanged text during unrelated style, layout, or state updates.
+- [x] **TEXT-03**: Text cache invalidation handles content, font, size, wrapping, selection/highlight, and scale-factor changes without stale glyphs.
 
-### Optimization Outcomes
+### Lookup and Batching Optimizations
 
-- [ ] **OPT-01**: At least one high-impact hotspot identified by the new profiler is optimized within `v1.3`.
-- [ ] **OPT-02**: The milestone demonstrates at least one measurable before/after improvement on the canonical benchmark suite.
-- [ ] **OPT-03**: Normal shell behavior does not regress when profiling mode is off.
+- [x] **DATA-01**: High-traffic attributes and style properties use typed slots or equivalent compact storage instead of repeated string-key lookup on hot render paths.
+- [x] **DATA-02**: Stable identifiers, attribute names, style property names, and selector components are interned where profiling shows repeated allocation or comparison cost.
+- [x] **DATA-03**: Selector indexing narrows restyle candidates for class, id/key, pseudo-state, attribute, and structural selector changes.
+- [x] **BATCH-01**: Display-list batching groups compatible primitives by material/state while preserving MESH visual ordering semantics.
+- [x] **BATCH-02**: Clipping, opacity, transform, text, and overlapping translucent content record batching barriers so correctness is not traded for fewer draw calls.
+
+### Sequencing and Proof
+
+- [x] **SEQ-01**: GPU backend implementation remains out of milestone scope until retained render objects, retained display data, and damage tracking are working on the current backend.
+- [x] **SEQ-02**: Parallel paint/layout remains out of milestone scope until retained ownership boundaries make parallelism mechanically safe.
+- [x] **PROOF-01**: Each retained-rendering phase includes before/after benchmark evidence using the existing v1.3 canonical benchmark scenarios.
+- [x] **PROOF-02**: Normal shell behavior and visual output remain unchanged for shipped surfaces when retained/incremental paths are enabled.
 
 ## Future Requirements
 
-### Extended Profiling
+### GPU Backend
 
-- **TRACE-01**: Persist full profiling traces for later comparison or offline analysis.
-- **TRACE-02**: Support capture-and-replay style performance debugging.
-- **TRACE-03**: Export MESH profiling data into an external tracing or telemetry system.
+- **GPU-01**: Render retained display data through a wgpu/RHI-style backend that can target Vulkan/OpenGL-compatible platforms.
+- **GPU-02**: Retain GPU-side geometry, buffers, textures, and glyph resources across frames.
+- **GPU-03**: Support backend selection and fallback without changing plugin-facing `.mesh` semantics.
 
-### Broader Performance Work
+### Parallel Rendering
 
-- **RENDER-01**: Replace or fundamentally redesign the renderer architecture for GPU-centric profiling and compositing behavior.
-- **BACKARCH-01**: Redesign backend architecture independent of measured responsiveness hotspots.
+- **PAR-01**: Move eligible paint preparation to worker threads after retained render-object ownership is explicit.
+- **PAR-02**: Move eligible layout work to worker threads after layout inputs and outputs are immutable or partitioned safely.
+
+### Extended Tooling
+
+- **TRACE-01**: Persist retained-rendering and damage metrics for offline comparison.
+- **VIS-01**: Add visual debug overlays for dirty nodes, damage regions, retained display-list reuse, batching, clipping, and overdraw.
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| GPU renderer rewrite | `v1.3` is an observability and targeted optimization milestone on the current renderer. |
-| Backend architecture redesign | Only backend changes with proven visible responsiveness impact belong in this milestone. |
-| Full trace persistence and replay | The first profiler should be live and rolling before adding storage and replay complexity. |
-| End-user performance settings UI | Profiling is debug-only in `v1.3`, not part of normal shell settings. |
-| Broad surface redesigns unrelated to benchmarks | The milestone proves responsiveness on shipped surfaces rather than reopening general UI scope. |
+| GPU backend implementation | Retained rendering and damage tracking need to exist first or GPU uploads will still churn every frame. |
+| Parallel paint/layout implementation | Ownership and retained data boundaries are prerequisites for safe parallelism. |
+| Full browser-style engine architecture | MESH should borrow retained rendering principles without inheriting browser DOM/CSS/layout complexity. |
+| Broad shell UI redesign | The milestone proves performance on existing shipped surfaces and benchmarks. |
+| External telemetry or trace persistence | Live debug metrics and benchmark proof are enough for this milestone. |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PROF-01 | Phase 16 | Pending |
-| PROF-02 | Phase 14 | Complete |
-| PROF-03 | Phase 14 | Complete |
-| TIME-01 | Phase 14 | Complete |
-| TIME-02 | Phase 15 | Pending |
-| TIME-03 | Phase 14 | Complete |
-| BACK-01 | Phase 15 | Pending |
-| BACK-02 | Phase 15 | Pending |
-| BACK-03 | Phase 17 | Complete |
-| INSP-01 | Phase 16 | Pending |
-| INSP-02 | Phase 16 | Pending |
-| INSP-03 | Phase 16 | Pending |
-| BENCH-01 | Phase 17 | Complete |
-| BENCH-02 | Phase 17 | Complete |
-| BENCH-03 | Phase 17 | Complete |
-| BENCH-04 | Phase 17 | Complete |
-| BENCH-05 | Phase 17 | Complete |
-| OPT-01 | Phase 18 | Pending |
-| OPT-02 | Phase 18 | Pending |
-| OPT-03 | Phase 18 | Pending |
+| DIRTY-01 | Phase 19 | Complete |
+| DIRTY-02 | Phase 19 | Complete |
+| DIRTY-03 | Phase 19 | Complete |
+| DIRTY-04 | Phase 19 | Complete |
+| INCR-01 | Phase 20 | Complete |
+| INCR-02 | Phase 20 | Complete |
+| INCR-03 | Phase 20 | Complete |
+| INCR-04 | Phase 20 | Complete |
+| REND-01 | Phase 21 | Complete |
+| REND-02 | Phase 21 | Complete |
+| REND-03 | Phase 21 | Complete |
+| REND-04 | Phase 21 | Complete |
+| PAINT-01 | Phase 22 | Complete |
+| PAINT-02 | Phase 22 | Complete |
+| PAINT-03 | Phase 22 | Complete |
+| PAINT-04 | Phase 22 | Complete |
+| TEXT-01 | Phase 23 | Complete |
+| TEXT-02 | Phase 23 | Complete |
+| TEXT-03 | Phase 23 | Complete |
+| DATA-01 | Phase 24 | Complete |
+| DATA-02 | Phase 24 | Complete |
+| DATA-03 | Phase 24 | Complete |
+| BATCH-01 | Phase 25 | Complete |
+| BATCH-02 | Phase 25 | Complete |
+| SEQ-01 | Phase 25 | Complete |
+| SEQ-02 | Phase 25 | Complete |
+| PROOF-01 | Phase 25 | Complete |
+| PROOF-02 | Phase 25 | Complete |
 
 **Coverage:**
-- v1.3 requirements: 20 total
-- Mapped to phases: 20
+- v1.4 requirements: 28 total
+- Mapped to phases: 28
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-05-08*
-*Last updated: 2026-05-08 after starting milestone v1.3*
+*Requirements defined: 2026-05-09*
+*Last updated: 2026-05-09 after starting milestone v1.4*

@@ -11,7 +11,7 @@ pub use buffer::PixelBuffer;
 pub use debug_overlay::DebugOverlay;
 pub use glyph::GlyphAxes;
 pub use painter::FrontendRenderEngine;
-pub use text::{SharedTextMeasurer, TextRenderer};
+pub use text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer};
 
 thread_local! {
     static FRONTEND_RENDERER: RefCell<FrontendRenderEngine> = RefCell::new(FrontendRenderEngine::new());
@@ -51,11 +51,28 @@ pub fn paint_frontend_tree_at_for_module(
     tooltip: Option<(&str, f32, f32)>,
     module_id: Option<&str>,
 ) {
+    let _ = paint_frontend_tree_at_for_module_with_text_metrics(
+        tree, buffer, scale, offset_x, offset_y, tooltip, module_id,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn paint_frontend_tree_at_for_module_with_text_metrics(
+    tree: &mesh_core_elements::WidgetNode,
+    buffer: &mut PixelBuffer,
+    scale: f32,
+    offset_x: f32,
+    offset_y: f32,
+    tooltip: Option<(&str, f32, f32)>,
+    module_id: Option<&str>,
+) -> TextCacheMetrics {
     FRONTEND_RENDERER.with(|engine| {
         let engine = engine.borrow();
+        engine.reset_text_cache_metrics();
         engine.render_tree_at_for_module(tree, buffer, scale, offset_x, offset_y, module_id);
         if let Some((tooltip_text, x, y)) = tooltip {
             engine.render_tooltip(tooltip_text, x + offset_x, y + offset_y, buffer, scale);
         }
-    });
+        engine.text_cache_metrics()
+    })
 }

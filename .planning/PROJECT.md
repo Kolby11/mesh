@@ -32,19 +32,29 @@ The project now also has a rendering-system upgrade with:
 - Theme animation tokens and constrained CSS animation playback for supported visual properties
 - A richer shipped navigation bar that proves the milestone on a real shell surface
 
-## Current Milestone: v1.3 Performance Instrumentation and Responsiveness
+`v1.3` shipped on 2026-05-09.
 
-**Goal:** Make shell responsiveness measurable on real shipped interaction paths, expose that data through a debug-only live inspector built on normal `.mesh` UI primitives, and use the results to land a bounded optimization pass in the same milestone.
+The project now also has performance instrumentation and benchmark coverage with:
 
-Phase 17 is complete as of 2026-05-09. The project now has five canonical benchmark scenarios exposed through `mesh.debug` and the debug inspector, explicit frontend/event/IPC launch paths, and backend-to-frontend correlation proof for the backend-driven benchmark. Phase 18 is ready to plan for the targeted optimization pass.
+- Debug-only profiling snapshots for shell stage timing
+- Per-surface and backend-stage attribution
+- A `.mesh`-rendered debug inspector
+- Canonical benchmark scenarios for hover, surface open/close, slider drag, keyboard traversal, and backend-driven updates
+- A retained widget-tree foundation with stable `_mesh_key` runtime node IDs, retained style-only mutation, and widget-layer dirty summaries
+
+## Current Milestone: v1.4 Major Performance Fixes
+
+**Goal:** Continue the retained-rendering performance work beyond the completed widget-layer foundation by adding dirty-type invalidation, incremental style/layout propagation, retained paint data, and damage tracking before any GPU backend work.
 
 **Target features:**
-- A debug-only profiling mode wired through the existing debug overlay/debug command path
-- Live shell-wide profiling snapshots for input, runtime updates, backend work, build, style, layout, paint, present, redraw, and total surface render time
-- Per-surface and per-backend-provider/stage attribution instead of aggregate-only timing
-- A `.mesh`-rendered inspector with overview, surface, backend, and benchmark views
-- A fixed benchmark suite covering hover, surface open/close, slider drag, keyboard traversal, and backend-driven state updates
-- At least one demonstrated before/after responsiveness improvement based on the new measurements
+- Dirty-type invalidation for script/state, style, layout, paint, text, accessibility, metrics, and surface configuration
+- Incremental style propagation over stable retained widget identities
+- Incremental layout consumers that avoid full layout work when changes are scoped
+- A retained render-object/scene-graph layer separate from the widget tree
+- Retained display list and damage tracking so unchanged regions avoid unnecessary repaint/present work
+- Text shaping and glyph cache work sequenced after retained paint/damage foundations
+- Typed attribute/style slots, interned identifiers, and selector indexing to reduce repeated lookup and restyle cost
+- Display-list batching groundwork while preserving the rule that GPU backend work waits until retained rendering and damage tracking are in place
 
 ## Requirements
 
@@ -52,22 +62,22 @@ Phase 17 is complete as of 2026-05-09. The project now has five canonical benchm
 
 - `v1.1`: Backend plugin MVP is stable enough to host real service providers and surface diagnostics.
 - `v1.2`: The renderer supports practical CSS-like styling, interaction reactivity, selection, keyboard navigation, and animation on shipped shell surfaces.
-- `v1.3 Phase 17`: Canonical benchmark scenarios are fixed on shipped interactions and exposed through the debug inspector with repeatable launch and measurement proof flows.
+- `v1.3`: Canonical benchmark scenarios, profiling snapshots, debug inspector views, and retained widget-tree identity/dirty summaries are available for measuring real responsiveness work.
 
 ### Active
 
-- Measure real shell interaction latency and render cost instead of relying on qualitative “feels faster” judgments.
-- Keep profiling overhead bounded and disabled unless the debug profiling path is active.
-- Attribute backend cost by provider/service stage and frontend cost by surface/stage so hotspots are actionable.
-- Prove responsiveness work on real shipped surfaces and canonical interactions rather than synthetic microbenchmarks only.
-- Land targeted optimizations in the same milestone and demonstrate at least one measurable improvement.
+- Use Qt Quick-style retained rendering principles: separate item/widget state from retained render nodes, synchronize changed items into render nodes, retain geometry/resources, and batch renderable primitives.
+- Extend widget-layer dirty summaries into typed invalidation that downstream style, layout, paint, text, accessibility, metrics, and surface configuration stages can consume.
+- Avoid full tree rebuild/layout/paint work when stable node IDs and dirty types prove the change is scoped.
+- Establish damage tracking and retained display data before pursuing GPU backend work.
+- Keep performance proof tied to the existing debug inspector and canonical benchmark scenarios.
 
 ### Out of Scope
 
-- GPU renderer replacement or renderer architecture rewrite — `v1.3` is about observability and bounded tuning on the current stack.
-- Backend architecture redesign — backend work should only change when profiling proves visible responsiveness impact.
-- Full trace capture, replay, or external tracing infrastructure — the first profiler is live/rolling and debug-only.
-- Broad visual redesign or unrelated surface rewrites — existing shipped surfaces remain the proof targets.
+- Implementing the GPU backend itself — `v1.4` prepares the retained rendering and damage/batching foundations first.
+- Parallel paint/layout — this waits until ownership boundaries and retained render data remove the current bottlenecks.
+- Broad shell UI redesign — existing shipped surfaces and benchmarks remain the proof targets.
+- Full trace capture/replay or external telemetry — profiling remains live/debug-oriented unless needed to prove this milestone.
 
 ## Key Decisions
 
@@ -83,6 +93,8 @@ Phase 17 is complete as of 2026-05-09. The project now has five canonical benchm
 | Profiling mode is debug-only and entered through the existing debug path | Instrumentation and inspector UI should help developers without expanding end-user settings surface | Locked for v1.3 |
 | The first profiler is live and rolling, not capture/replay | The milestone needs actionable observability with bounded overhead before trace persistence complexity | Locked for v1.3 |
 | Responsiveness acceptance is based on fixed benchmark scenarios on shipped surfaces | Prevents vague performance claims and keeps optimization work measurable | Locked for v1.3 |
+| Retained rendering should follow Qt-style scene graph principles more than browser-engine architecture | MESH is a shell UI toolkit with controlled primitives, so item-to-render-node synchronization, retained geometry, dirty regions, and batching fit better than full browser pipeline complexity | Locked for v1.4 |
+| GPU backend work waits until retained rendering, dirty invalidation, retained display data, and damage tracking exist | Uploading brand-new paint data every frame would waste much of the GPU benefit | Locked for v1.4 |
 
 <details>
 <summary>Archived milestone framing</summary>
@@ -92,6 +104,10 @@ Phase 17 is complete as of 2026-05-09. The project now has five canonical benchm
 ### v1.2 Rendering System Upgrade
 
 The `v1.2` milestone centered on making MESH rendering expressive enough for distinctive shell UI without turning the renderer into a browser engine. It focused on practical CSS coverage, container and interaction reactivity, text selection and copy, keyboard navigation, animation support, and the navigation bar as the proof surface.
+
+### v1.3 Performance Instrumentation and Responsiveness
+
+The `v1.3` milestone centered on measuring and proving real shell responsiveness through debug-only profiling snapshots, per-surface/backend attribution, a `.mesh` inspector, fixed benchmark scenarios, and the first retained widget-tree foundation.
 
 ### v1.1 Backend Plugin MVP
 
@@ -119,4 +135,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-09 after completing Phase 17*
+*Last updated: 2026-05-09 after starting milestone v1.4*

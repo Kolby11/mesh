@@ -3,11 +3,150 @@ use super::*;
 use crate::tree::ElementState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use mesh_core_theme::{Theme, TokenValue};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Resolves style values against a theme's design tokens.
 pub struct StyleResolver<'a> {
     theme: &'a Theme,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StyleNodeAttrs {
+    tag: String,
+    classes: Vec<String>,
+    class_set: HashSet<String>,
+    id: Option<String>,
+    key: Option<String>,
+    module_id: Option<String>,
+    state: ElementState,
+}
+
+impl StyleNodeAttrs {
+    pub fn new(tag: &str, classes: &[String], id: Option<&str>, state: ElementState) -> Self {
+        let classes: Vec<String> = classes
+            .iter()
+            .flat_map(|class| class.split_whitespace())
+            .filter(|class| !class.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let class_set = classes.iter().cloned().collect();
+        Self {
+            tag: tag.to_string(),
+            classes,
+            class_set,
+            id: id.map(str::to_string),
+            key: None,
+            module_id: None,
+            state,
+        }
+    }
+
+    pub fn from_node(node: &crate::tree::WidgetNode) -> Self {
+        let classes: Vec<String> = node
+            .attributes
+            .get("class")
+            .map(|s| s.split_whitespace().map(str::to_owned).collect())
+            .unwrap_or_default();
+        let mut attrs = Self::new(
+            &node.tag,
+            &classes,
+            node.attributes.get("id").map(String::as_str),
+            node.state,
+        );
+        attrs.key = node.attributes.get("_mesh_key").cloned();
+        attrs.module_id = node.attributes.get("_mesh_module_id").cloned();
+        attrs
+    }
+
+    fn has_class(&self, class: &str) -> bool {
+        self.class_set.contains(class)
+    }
+
+    fn id(&self) -> Option<&str> {
+        self.id.as_deref()
+    }
+
+    fn module_id(&self) -> Option<&str> {
+        self.module_id.as_deref()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StyleRuleIndex<'a> {
+    rules: &'a [StyleRule],
+    tag: HashMap<&'a str, Vec<usize>>,
+    class: HashMap<&'a str, Vec<usize>>,
+    id: HashMap<&'a str, Vec<usize>>,
+    state: HashMap<&'a str, Vec<usize>>,
+    fallback: Vec<usize>,
+}
+
+impl<'a> StyleRuleIndex<'a> {
+    pub fn new(rules: &'a [StyleRule]) -> Self {
+        let mut index = Self {
+            rules,
+            tag: HashMap::new(),
+            class: HashMap::new(),
+            id: HashMap::new(),
+            state: HashMap::new(),
+            fallback: Vec::new(),
+        };
+        for (idx, rule) in rules.iter().enumerate() {
+            index.index_selector(idx, &rule.selector);
+        }
+        index
+    }
+
+    pub fn candidate_rules(&self, attrs: &StyleNodeAttrs) -> Vec<&'a StyleRule> {
+        let mut ids = Vec::new();
+        let mut seen = HashSet::new();
+        self.push_all(&mut ids, &mut seen, &self.fallback);
+        if let Some(tag) = self.tag.get(attrs.tag.as_str()) {
+            self.push_all(&mut ids, &mut seen, tag);
+        }
+        for class in &attrs.classes {
+            if let Some(class_ids) = self.class.get(class.as_str()) {
+                self.push_all(&mut ids, &mut seen, class_ids);
+            }
+        }
+        if let Some(id) = attrs.id() {
+            if let Some(id_ids) = self.id.get(id) {
+                self.push_all(&mut ids, &mut seen, id_ids);
+            }
+        }
+        for state_name in active_state_names(attrs.state) {
+            if let Some(state_ids) = self.state.get(state_name) {
+                self.push_all(&mut ids, &mut seen, state_ids);
+            }
+        }
+        ids.sort_unstable();
+        ids.into_iter().map(|idx| &self.rules[idx]).collect()
+    }
+
+    fn push_all(&self, out: &mut Vec<usize>, seen: &mut HashSet<usize>, values: &[usize]) {
+        for &value in values {
+            if seen.insert(value) {
+                out.push(value);
+            }
+        }
+    }
+
+    fn index_selector(&mut self, idx: usize, selector: &'a Selector) {
+        match selector_index_key(selector) {
+            Some(SelectorIndexKey::Tag(tag)) => self.tag.entry(tag).or_default().push(idx),
+            Some(SelectorIndexKey::Class(class)) => self.class.entry(class).or_default().push(idx),
+            Some(SelectorIndexKey::Id(id)) => self.id.entry(id).or_default().push(idx),
+            Some(SelectorIndexKey::State(state)) => self.state.entry(state).or_default().push(idx),
+            None => self.fallback.push(idx),
+        }
+    }
+}
+
+enum SelectorIndexKey<'a> {
+    Tag(&'a str),
+    Class(&'a str),
+    Id(&'a str),
+    State(&'a str),
 }
 
 impl<'a> StyleResolver<'a> {
@@ -172,24 +311,36 @@ impl<'a> StyleResolver<'a> {
         state: ElementState,
         module_id: Option<&str>,
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
+        let mut attrs = StyleNodeAttrs::new(tag, classes, id, state);
+        attrs.module_id = module_id.map(str::to_string);
+        self.resolve_node_style_with_attrs(rules, &attrs, context)
+    }
+
+    fn resolve_node_style_with_attrs(
+        &self,
+        rules: &[StyleRule],
+        attrs: &StyleNodeAttrs,
+        context: StyleContext,
+    ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
         let mut style = ComputedStyle::default();
         let mut diagnostics = Vec::new();
         let mut variables = HashMap::new();
 
-        if tag == "column" {
+        if attrs.tag == "column" {
             style.direction = FlexDirection::Column;
         }
 
         self.apply_theme_component_defaults(
             &mut style,
-            tag,
-            module_id,
+            &attrs.tag,
+            attrs.module_id(),
             &mut diagnostics,
             &mut variables,
         );
 
-        for rule in rules {
-            if rule_matches(rule, tag, classes, id, context, state) {
+        let index = StyleRuleIndex::new(rules);
+        for rule in index.candidate_rules(attrs) {
+            if rule_matches_attrs(rule, attrs, context) {
                 for decl in &rule.declarations {
                     self.apply_declaration_with_diagnostics(
                         &mut style,
@@ -234,22 +385,18 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
     ) {
         if node.state != ElementState::default() {
-            let classes: Vec<String> = node
-                .attributes
-                .get("class")
-                .map(|s| s.split_whitespace().map(str::to_owned).collect())
-                .unwrap_or_default();
-            let id = node.attributes.get("id").map(|s| s.as_str());
-            let state = node.state;
+            let attrs = StyleNodeAttrs::from_node(node);
+            let index = StyleRuleIndex::new(rules);
 
             tracing::debug!(
                 "[hover] restyle: tag={} classes={:?} state={state:?}",
-                node.tag,
-                classes
+                attrs.tag,
+                attrs.classes,
+                state = attrs.state
             );
-            for rule in rules {
+            for rule in index.candidate_rules(&attrs) {
                 if selector_involves_state(&rule.selector)
-                    && rule_matches(rule, &node.tag, &classes, id, context, state)
+                    && rule_matches_attrs(rule, &attrs, context)
                 {
                     tracing::debug!(
                         "[hover] restyle: applying rule selector={:?}",
@@ -274,6 +421,27 @@ impl<'a> StyleResolver<'a> {
             self.restyle_subtree(child, rules, context);
         }
         node.children = restyled;
+    }
+
+    pub fn restyle_subtree_for_keys(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        context: StyleContext,
+        target_keys: &std::collections::HashSet<String>,
+    ) {
+        if node
+            .attributes
+            .get("_mesh_key")
+            .is_some_and(|key| target_keys.contains(key))
+        {
+            let attrs = StyleNodeAttrs::from_node(node);
+            node.computed_style = self.resolve_node_style_with_attrs(rules, &attrs, context).0;
+        }
+
+        for child in &mut node.children {
+            self.restyle_subtree_for_keys(child, rules, context, target_keys);
+        }
     }
 
     fn apply_theme_component_defaults(
@@ -396,34 +564,26 @@ fn classify_theme_style_value(value: &str) -> StyleValue {
     }
 }
 
-fn selector_matches(
-    selector: &Selector,
-    tag: &str,
-    classes: &[String],
-    id: Option<&str>,
-    state: ElementState,
-) -> bool {
+fn selector_matches_attrs(selector: &Selector, attrs: &StyleNodeAttrs) -> bool {
     match selector {
         Selector::Universal => true,
-        Selector::Tag(t) => t == tag,
-        Selector::Class(c) => classes.iter().any(|cls| cls == c),
-        Selector::Id(i) => id == Some(i.as_str()),
+        Selector::Tag(t) => t == &attrs.tag,
+        Selector::Class(c) => attrs.has_class(c),
+        Selector::Id(i) => attrs.id() == Some(i.as_str()),
         Selector::State(t, pseudo) => {
-            let tag_matches = t == "*" || t == tag;
+            let tag_matches = t == "*" || t == &attrs.tag;
             let state_matches = match pseudo.as_str() {
-                "hover" | "hovered" => state.hovered,
-                "focus" | "focused" => state.focused,
-                "active" => state.active,
-                "disabled" => state.disabled,
-                "checked" => state.checked,
-                "focus-visible" => state.focus_visible,
+                "hover" | "hovered" => attrs.state.hovered,
+                "focus" | "focused" => attrs.state.focused,
+                "active" => attrs.state.active,
+                "disabled" => attrs.state.disabled,
+                "checked" => attrs.state.checked,
+                "focus-visible" => attrs.state.focus_visible,
                 _ => false,
             };
             tag_matches && state_matches
         }
-        Selector::Compound(parts) => parts
-            .iter()
-            .all(|s| selector_matches(s, tag, classes, id, state)),
+        Selector::Compound(parts) => parts.iter().all(|s| selector_matches_attrs(s, attrs)),
     }
 }
 
@@ -435,18 +595,53 @@ fn selector_involves_state(selector: &Selector) -> bool {
     }
 }
 
-fn rule_matches(
-    rule: &StyleRule,
-    tag: &str,
-    classes: &[String],
-    id: Option<&str>,
-    context: StyleContext,
-    state: ElementState,
-) -> bool {
-    selector_matches(&rule.selector, tag, classes, id, state)
+fn rule_matches_attrs(rule: &StyleRule, attrs: &StyleNodeAttrs, context: StyleContext) -> bool {
+    selector_matches_attrs(&rule.selector, attrs)
         && rule
             .container_query
             .is_none_or(|query| query.matches(context.container_width, context.container_height))
+}
+
+fn selector_index_key(selector: &Selector) -> Option<SelectorIndexKey<'_>> {
+    match selector {
+        Selector::Tag(tag) => Some(SelectorIndexKey::Tag(tag)),
+        Selector::Class(class) => Some(SelectorIndexKey::Class(class)),
+        Selector::Id(id) => Some(SelectorIndexKey::Id(id)),
+        Selector::State(_, state) => Some(SelectorIndexKey::State(state)),
+        Selector::Compound(parts) => {
+            let mut best = None;
+            for part in parts {
+                match part {
+                    Selector::Id(id) => return Some(SelectorIndexKey::Id(id)),
+                    Selector::Class(class) => best = Some(SelectorIndexKey::Class(class)),
+                    Selector::Tag(tag) if best.is_none() => best = Some(SelectorIndexKey::Tag(tag)),
+                    Selector::State(_, state) if best.is_none() => {
+                        best = Some(SelectorIndexKey::State(state));
+                    }
+                    Selector::Universal => {}
+                    Selector::Tag(_) | Selector::State(_, _) => {}
+                    Selector::Compound(_) => return None,
+                }
+            }
+            best
+        }
+        Selector::Universal => None,
+    }
+}
+
+fn active_state_names(state: ElementState) -> impl Iterator<Item = &'static str> {
+    [
+        (state.hovered, "hover"),
+        (state.hovered, "hovered"),
+        (state.focused, "focus"),
+        (state.focused, "focused"),
+        (state.active, "active"),
+        (state.disabled, "disabled"),
+        (state.checked, "checked"),
+        (state.focus_visible, "focus-visible"),
+    ]
+    .into_iter()
+    .filter_map(|(active, name)| active.then_some(name))
 }
 
 fn apply_declaration(

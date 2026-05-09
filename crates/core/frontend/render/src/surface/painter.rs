@@ -5,7 +5,7 @@ mod widgets;
 
 use super::PixelBuffer;
 use super::icon;
-use super::text::{TextRenderer, TextSelectionGeometry};
+use super::text::{TextCacheMetrics, TextRenderer, TextSelectionGeometry};
 use mesh_core_elements::style::{Color, Display, Overflow, TextAlign, TextDirection, TextOverflow};
 use mesh_core_elements::tree::WidgetNode;
 
@@ -21,6 +21,14 @@ impl FrontendRenderEngine {
         Self {
             text_renderer: TextRenderer::new(),
         }
+    }
+
+    pub fn reset_text_cache_metrics(&self) {
+        self.text_renderer.reset_cache_metrics();
+    }
+
+    pub fn text_cache_metrics(&self) -> TextCacheMetrics {
+        self.text_renderer.cache_metrics()
     }
 }
 
