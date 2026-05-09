@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_render::DamageRect;
 
 /// Configuration passed from the shell before each present.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +65,7 @@ pub(super) struct SurfaceShmBuffer {
     width: u32,
     height: u32,
     stride: i32,
+    pending_damage: Option<DamageRect>,
 }
 
 pub(super) struct SurfaceEntry {
@@ -75,6 +77,7 @@ pub(super) struct SurfaceEntry {
     pub(super) configured: bool,
     shm_buffers: Vec<SurfaceShmBuffer>,
     next_shm_buffer: usize,
+    pub(super) frame_pending: bool,
 }
 
 impl SurfaceEntry {
@@ -92,6 +95,7 @@ impl SurfaceEntry {
             configured: false,
             shm_buffers: Vec::new(),
             next_shm_buffer: 0,
+            frame_pending: false,
         }
     }
 
@@ -131,10 +135,15 @@ impl SurfaceEntry {
         src: &[u8],
         width: u32,
         height: u32,
-    ) -> Result<usize, PresentationError> {
+        damage: Option<DamageRect>,
+    ) -> Result<(usize, DamageRect), PresentationError> {
         let width = width.max(1);
         let height = height.max(1);
         let stride = width as i32 * 4;
+        let full = full_damage(width, height);
+        let frame_damage = damage
+            .and_then(|rect| clip_damage(rect, full))
+            .unwrap_or(full);
         if self
             .shm_buffers
             .iter()
@@ -149,13 +158,21 @@ impl SurfaceEntry {
                 .push(create_surface_shm_buffer(pool, width, height, stride)?);
         }
 
+        for slot in &mut self.shm_buffers {
+            slot.pending_damage = Some(union_damage(slot.pending_damage, frame_damage));
+        }
+
         let len = self.shm_buffers.len();
         for offset in 0..len {
             let index = (self.next_shm_buffer + offset) % len;
+            let copy_damage = self.shm_buffers[index]
+                .pending_damage
+                .unwrap_or(frame_damage);
             if let Some(canvas) = pool.canvas(&self.shm_buffers[index].buffer) {
-                copy_bgra_to_canvas(src, canvas, width, height);
+                copy_bgra_damage_to_canvas(src, canvas, width, height, copy_damage);
+                self.shm_buffers[index].pending_damage = None;
                 self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
-                return Ok(index);
+                return Ok((index, frame_damage));
             }
         }
 
@@ -174,16 +191,31 @@ impl SurfaceEntry {
             width,
             height,
             stride,
+            pending_damage: None,
         });
         self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
-        Ok(index)
+        Ok((index, full))
     }
 
-    fn attach_shm_buffer(&mut self, index: usize, width: u32, height: u32) {
+    fn attach_shm_buffer(
+        &mut self,
+        qh: &QueueHandle<State>,
+        index: usize,
+        width: u32,
+        height: u32,
+        damage: DamageRect,
+    ) {
         let buffer = &self.shm_buffers[index].buffer;
         let wl_surface = self.layer_surface.wl_surface();
-        wl_surface.damage_buffer(0, 0, width as i32, height as i32);
+        wl_surface.damage_buffer(
+            damage.x as i32,
+            damage.y as i32,
+            damage.width as i32,
+            damage.height as i32,
+        );
         buffer.attach_to(wl_surface).ok();
+        wl_surface.frame(qh, wl_surface.clone());
+        self.frame_pending = true;
         self.layer_surface.commit();
         self.width = width;
         self.height = height;
@@ -209,6 +241,7 @@ fn create_surface_shm_buffer(
         width,
         height,
         stride,
+        pending_damage: Some(full_damage(width, height)),
     })
 }
 
@@ -217,6 +250,84 @@ fn copy_bgra_to_canvas(src: &[u8], canvas: &mut [u8], width: u32, height: u32) {
     let len = (width as usize) * (height as usize) * 4;
     if canvas.len() >= len && src.len() >= len {
         canvas[..len].copy_from_slice(&src[..len]);
+    }
+}
+
+fn full_damage(width: u32, height: u32) -> DamageRect {
+    DamageRect {
+        x: 0,
+        y: 0,
+        width: width.max(1),
+        height: height.max(1),
+    }
+}
+
+fn clip_damage(rect: DamageRect, bounds: DamageRect) -> Option<DamageRect> {
+    let x1 = rect.x.max(bounds.x);
+    let y1 = rect.y.max(bounds.y);
+    let x2 = rect
+        .x
+        .saturating_add(rect.width)
+        .min(bounds.x.saturating_add(bounds.width));
+    let y2 = rect
+        .y
+        .saturating_add(rect.height)
+        .min(bounds.y.saturating_add(bounds.height));
+    (x2 > x1 && y2 > y1).then_some(DamageRect {
+        x: x1,
+        y: y1,
+        width: x2 - x1,
+        height: y2 - y1,
+    })
+}
+
+fn union_damage(current: Option<DamageRect>, next: DamageRect) -> DamageRect {
+    let Some(current) = current else {
+        return next;
+    };
+    if current.width == 0 || current.height == 0 {
+        return next;
+    }
+    if next.width == 0 || next.height == 0 {
+        return current;
+    }
+    let left = current.x.min(next.x);
+    let top = current.y.min(next.y);
+    let right = current
+        .x
+        .saturating_add(current.width)
+        .max(next.x.saturating_add(next.width));
+    let bottom = current
+        .y
+        .saturating_add(current.height)
+        .max(next.y.saturating_add(next.height));
+    DamageRect {
+        x: left,
+        y: top,
+        width: right.saturating_sub(left),
+        height: bottom.saturating_sub(top),
+    }
+}
+
+fn copy_bgra_damage_to_canvas(
+    src: &[u8],
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    damage: DamageRect,
+) {
+    let Some(damage) = clip_damage(damage, full_damage(width, height)) else {
+        return;
+    };
+    let stride = width as usize * 4;
+    let row_bytes = damage.width as usize * 4;
+    let x_offset = damage.x as usize * 4;
+    for row in damage.y as usize..damage.y.saturating_add(damage.height) as usize {
+        let start = row * stride + x_offset;
+        let end = start + row_bytes;
+        if end <= src.len() && end <= canvas.len() {
+            canvas[start..end].copy_from_slice(&src[start..end]);
+        }
     }
 }
 
@@ -384,9 +495,20 @@ impl LayerShellBackend {
     pub fn present(
         &mut self,
         surface_id: &str,
+        title: &str,
+        visible: bool,
+        buffer: &PixelBuffer,
+    ) -> Result<(), PresentationError> {
+        self.present_with_damage(surface_id, title, visible, buffer, None)
+    }
+
+    pub fn present_with_damage(
+        &mut self,
+        surface_id: &str,
         _title: &str,
         visible: bool,
         buffer: &PixelBuffer,
+        damage: Option<DamageRect>,
     ) -> Result<(), PresentationError> {
         if !visible {
             self.state.release_surface_focus_grab(surface_id);
@@ -409,24 +531,37 @@ impl LayerShellBackend {
         }
         self.wait_for_surface_configure(surface_id)?;
 
-        let Some(entry) = self.state.surfaces.get_mut(surface_id) else {
+        if self
+            .state
+            .surfaces
+            .get(surface_id)
+            .is_some_and(|entry| entry.frame_pending)
+        {
+            // Drain any ready frame callback before committing a newer frame. If the
+            // callback is not ready yet we still commit the latest buffer rather than
+            // dropping freshly painted damage; the pending flag remains useful to
+            // coalesce event-loop work and prevent busy polling.
+            self.dispatch_available()?;
+        }
+
+        let width = buffer.width.max(1);
+        let height = buffer.height.max(1);
+        let qh = self.state.qh.clone();
+        let state = &mut self.state;
+        let pool = state
+            .pool
+            .as_mut()
+            .ok_or_else(|| PresentationError::BufferAlloc("shm pool not initialised".into()))?;
+        let Some(entry) = state.surfaces.get_mut(surface_id) else {
             return Ok(());
         };
         if !entry.configured {
             return Ok(());
         }
 
-        let width = buffer.width.max(1);
-        let height = buffer.height.max(1);
-
-        let pool = self
-            .state
-            .pool
-            .as_mut()
-            .ok_or_else(|| PresentationError::BufferAlloc("shm pool not initialised".into()))?;
-
-        let buffer_index = entry.copy_into_shm_buffer(pool, &buffer.data, width, height)?;
-        entry.attach_shm_buffer(buffer_index, width, height);
+        let (buffer_index, damage) =
+            entry.copy_into_shm_buffer(pool, &buffer.data, width, height, damage)?;
+        entry.attach_shm_buffer(&qh, buffer_index, width, height, damage);
 
         self.dispatch_pending()?;
         Ok(())

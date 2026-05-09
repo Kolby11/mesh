@@ -37,7 +37,7 @@ impl RenderObjectDirtySummary {
 pub struct RenderObjectTree {
     generation: u64,
     retained_tree_generation: Option<u64>,
-    nodes: HashMap<NodeId, RenderObjectSnapshot>,
+    objects: HashMap<NodeId, RenderObjectPaintData>,
     root: Option<NodeId>,
     last_dirty: RenderObjectDirtySummary,
     dirty_nodes: HashSet<NodeId>,
@@ -66,33 +66,22 @@ impl RenderObjectTree {
         root: &WidgetNode,
         retained_tree_generation: Option<u64>,
     ) -> RenderObjectDirtySummary {
-        let mut next = HashMap::new();
-        collect_render_objects(root, None, &mut next);
-
         let mut dirty = RenderObjectDirtySummary::default();
         let mut dirty_nodes = HashSet::new();
-        for (&id, next_snapshot) in &next {
-            match self.nodes.get(&id) {
-                Some(previous) => {
-                    let before = dirty;
-                    dirty.add_diff(previous, next_snapshot);
-                    if dirty != before {
-                        dirty_nodes.insert(id);
-                    }
-                }
-                None => {
-                    dirty.inserted += 1;
-                    dirty_nodes.insert(id);
-                }
-            }
-        }
+        let mut visited = HashSet::new();
 
-        let next_ids: HashSet<_> = next.keys().copied().collect();
-        dirty.removed = self
-            .nodes
-            .keys()
-            .filter(|id| !next_ids.contains(id))
-            .count();
+        update_retained_render_objects(
+            root,
+            None,
+            &mut self.objects,
+            &mut visited,
+            &mut dirty,
+            &mut dirty_nodes,
+        );
+
+        let before_remove = self.objects.len();
+        self.objects.retain(|id, _| visited.contains(id));
+        dirty.removed = before_remove.saturating_sub(self.objects.len());
 
         if self.root != Some(root.id) {
             dirty.reordered += usize::from(self.root.is_some());
@@ -101,7 +90,6 @@ impl RenderObjectTree {
             self.generation = self.generation.saturating_add(1);
         }
         self.root = Some(root.id);
-        self.nodes = next;
         self.retained_tree_generation = retained_tree_generation;
         self.last_dirty = dirty;
         self.dirty_nodes = dirty_nodes;
@@ -113,11 +101,11 @@ impl RenderObjectTree {
     }
 
     pub fn len(&self) -> usize {
-        self.nodes.len()
+        self.objects.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
+        self.objects.is_empty()
     }
 
     pub fn last_dirty(&self) -> RenderObjectDirtySummary {
@@ -130,7 +118,7 @@ impl RenderObjectTree {
 }
 
 impl RenderObjectDirtySummary {
-    fn add_diff(&mut self, previous: &RenderObjectSnapshot, next: &RenderObjectSnapshot) {
+    fn add_diff(&mut self, previous: &RenderObjectPaintData, next: &RenderObjectPaintData) {
         if previous.parent != next.parent || previous.child_ids != next.child_ids {
             self.reordered += 1;
         }
@@ -159,7 +147,7 @@ impl RenderObjectDirtySummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct RenderObjectSnapshot {
+struct RenderObjectPaintData {
     parent: Option<NodeId>,
     child_ids: Vec<NodeId>,
     transform: TransformSlot,
@@ -188,19 +176,39 @@ struct TextSlot {
 
 type ColorSlot = (u8, u8, u8, u8);
 
-fn collect_render_objects(
+fn update_retained_render_objects(
     node: &WidgetNode,
     parent: Option<NodeId>,
-    out: &mut HashMap<NodeId, RenderObjectSnapshot>,
+    objects: &mut HashMap<NodeId, RenderObjectPaintData>,
+    visited: &mut HashSet<NodeId>,
+    dirty: &mut RenderObjectDirtySummary,
+    dirty_nodes: &mut HashSet<NodeId>,
 ) {
-    out.insert(node.id, render_object_snapshot(node, parent));
+    visited.insert(node.id);
+    let next = render_object_paint_data(node, parent);
+    match objects.get_mut(&node.id) {
+        Some(current) => {
+            let before = *dirty;
+            dirty.add_diff(current, &next);
+            if *dirty != before {
+                dirty_nodes.insert(node.id);
+            }
+            *current = next;
+        }
+        None => {
+            dirty.inserted += 1;
+            dirty_nodes.insert(node.id);
+            objects.insert(node.id, next);
+        }
+    }
+
     for child in &node.children {
-        collect_render_objects(child, Some(node.id), out);
+        update_retained_render_objects(child, Some(node.id), objects, visited, dirty, dirty_nodes);
     }
 }
 
-fn render_object_snapshot(node: &WidgetNode, parent: Option<NodeId>) -> RenderObjectSnapshot {
-    RenderObjectSnapshot {
+fn render_object_paint_data(node: &WidgetNode, parent: Option<NodeId>) -> RenderObjectPaintData {
+    RenderObjectPaintData {
         parent,
         child_ids: node.children.iter().map(|child| child.id).collect(),
         transform: transform_slot(node.computed_style.transform),
@@ -327,6 +335,30 @@ mod tests {
         assert_eq!(dirty.removed, 0);
         assert_eq!(tree.generation(), 2);
         assert_eq!(tree.last_dirty(), dirty);
+    }
+
+    #[test]
+    fn render_object_tree_removes_unvisited_retained_paint_data() {
+        let mut root = WidgetNode::new("row");
+        root.id = 1;
+        let mut first_child = WidgetNode::new("text");
+        first_child.id = 2;
+        let mut second_child = WidgetNode::new("icon");
+        second_child.id = 3;
+        root.children.push(first_child);
+        root.children.push(second_child);
+
+        let mut tree = RenderObjectTree::default();
+        let first = tree.update(&root);
+        assert_eq!(first.inserted, 3);
+        assert_eq!(tree.len(), 3);
+
+        root.children.pop();
+        let dirty = tree.update(&root);
+        assert_eq!(dirty.removed, 1);
+        assert_eq!(dirty.reordered, 1);
+        assert_eq!(tree.len(), 2);
+        assert_eq!(tree.generation(), 2);
     }
 
     #[test]

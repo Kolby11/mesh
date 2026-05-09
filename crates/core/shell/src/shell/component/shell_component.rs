@@ -348,43 +348,43 @@ impl ShellComponent for FrontendSurfaceComponent {
             );
             if self.measured_size != Some(measured_size) {
                 self.measured_size = Some(measured_size);
-                self.invalidate_surface_config();
+                self.invalidate_surface_config_only();
             }
         }
         self.publish_element_metrics(&tree);
 
         let paint_started = std::time::Instant::now();
+        self.last_present_damage = if display_list_metrics.damage_area == 0 {
+            None
+        } else {
+            Some(display_list_metrics.damage_rect)
+        };
         let text_cache_metrics = if display_list_metrics.damage_area == 0 {
             TextCacheMetrics::default()
-        } else if display_list_metrics.full_surface_damage {
-            buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
-            paint_frontend_tree_at_for_module_with_text_metrics(
-                &tree,
-                buffer,
-                1.0,
-                0.0,
-                0.0,
-                tooltip
-                    .as_ref()
-                    .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
-                Some(self.compiled.manifest.package.id.as_str()),
-            )
         } else {
             let damage = display_list_metrics.damage_rect;
-            buffer.clear_rect(
-                damage.x,
-                damage.y,
-                damage.width,
-                damage.height,
-                mesh_core_elements::style::Color::TRANSPARENT,
-            );
-            paint_frontend_tree_at_for_module_with_text_metrics_clipped(
-                &tree,
+            if display_list_metrics.full_surface_damage {
+                buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
+            } else {
+                buffer.clear_rect(
+                    damage.x,
+                    damage.y,
+                    damage.width,
+                    damage.height,
+                    mesh_core_elements::style::Color::TRANSPARENT,
+                );
+            }
+            paint_display_list_for_module_with_text_metrics(
+                self.retained_display_list.paint_commands(),
                 buffer,
                 1.0,
-                0.0,
-                0.0,
-                (damage.x, damage.y, damage.width, damage.height),
+                (!display_list_metrics.full_surface_damage).then_some((
+                    damage.x,
+                    damage.y,
+                    damage.width,
+                    damage.height,
+                )),
+                None,
                 tooltip
                     .as_ref()
                     .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
@@ -548,6 +548,24 @@ impl ShellComponent for FrontendSurfaceComponent {
         &mut self,
     ) -> Option<mesh_core_debug::ProfilingInvalidationSnapshot> {
         self.invalidation_snapshot.take()
+    }
+
+    fn take_present_damage(&mut self) -> Option<DamageRect> {
+        self.last_present_damage.take()
+    }
+
+    fn wants_immediate_rerender(&self) -> bool {
+        if !self.wants_render() {
+            return false;
+        }
+        let configure_only = !self.dirty
+            && self.style_only_dirty
+            && !self.dirty_types.is_empty()
+            && self
+                .dirty_types
+                .difference(ComponentDirtyFlags::SURFACE_CONFIG)
+                .is_empty();
+        !configure_only
     }
 
     fn receive_focus_transfer(

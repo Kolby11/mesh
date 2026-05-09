@@ -1,5 +1,6 @@
 use super::super::*;
 use mesh_core_presentation::LayerSurfaceSizePolicy;
+use mesh_core_render::DamageRect;
 
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
@@ -10,6 +11,9 @@ impl Shell {
 
         for index in 0..self.components.len() {
             let surface_id = self.components[index].surface_id.clone();
+            if !self.components[index].component.wants_render() {
+                continue;
+            }
             let surface_size = {
                 let surface = self
                     .surfaces
@@ -25,9 +29,6 @@ impl Shell {
                 self.components[index]
                     .component
                     .surface_size_changed(width, height);
-            }
-            if !self.components[index].component.wants_render() {
-                continue;
             }
 
             let total_render_started = self.profiling_enabled().then(std::time::Instant::now);
@@ -146,7 +147,9 @@ impl Shell {
                     .map_err(ShellRunError::Component)?;
                 component_stage_records.extend(runtime.component.take_profiling_records());
 
-                if !self.components[index].component.wants_render() || rerender_attempts >= 1 {
+                if !self.components[index].component.wants_immediate_rerender()
+                    || rerender_attempts >= 1
+                {
                     break;
                 }
 
@@ -190,33 +193,43 @@ impl Shell {
                 );
             }
 
+            let mut present_damage = self.components[index].component.take_present_damage();
             if visible && self.debug.show_layout_bounds {
                 let runtime = &mut self.components[index];
                 if let Some(tree) = runtime.component.last_widget_tree() {
-                    self.debug_overlay.paint_layout_bounds(
-                        tree,
-                        runtime
-                            .paint_buffer
-                            .as_mut()
-                            .expect("paint buffer initialised"),
-                        1.0,
-                    );
+                    let buffer = runtime
+                        .paint_buffer
+                        .as_mut()
+                        .expect("paint buffer initialised");
+                    self.debug_overlay.paint_layout_bounds(tree, buffer, 1.0);
+                    present_damage = Some(full_buffer_damage(buffer));
                 }
             }
 
+            let mut presented = false;
             let present_started = self.profiling_enabled().then(std::time::Instant::now);
-            self.presentation_engine
-                .present(
-                    &surface_id,
-                    self.components[index].component.id(),
-                    visible,
-                    self.components[index]
-                        .paint_buffer
-                        .as_ref()
-                        .expect("paint buffer initialised"),
-                )
-                .map_err(ShellRunError::Presentation)?;
-            if let Some(started) = present_started {
+            // `take_present_damage == None` means paint produced no changed pixels,
+            // so skip the present entirely. `present_with_damage(None)` is reserved
+            // for legacy callers that do not know their damage and need a full
+            // buffer upload/damage.
+            if !visible || present_damage.is_some() {
+                self.presentation_engine
+                    .present_with_damage(
+                        &surface_id,
+                        self.components[index].component.id(),
+                        visible,
+                        self.components[index]
+                            .paint_buffer
+                            .as_ref()
+                            .expect("paint buffer initialised"),
+                        present_damage,
+                    )
+                    .map_err(ShellRunError::Presentation)?;
+                presented = true;
+            }
+            if let Some(started) = present_started
+                && presented
+            {
                 self.record_surface_profiling_stage(
                     &surface_id,
                     Some(component_id.as_str()),
@@ -225,7 +238,7 @@ impl Shell {
                     Some("present"),
                 );
             }
-            if visible {
+            if visible && presented {
                 self.record_surface_redraw(
                     &surface_id,
                     Some(component_id.as_str()),
@@ -243,5 +256,14 @@ impl Shell {
             }
         }
         Ok(())
+    }
+}
+
+fn full_buffer_damage(buffer: &PixelBuffer) -> DamageRect {
+    DamageRect {
+        x: 0,
+        y: 0,
+        width: buffer.width.max(1),
+        height: buffer.height.max(1),
     }
 }

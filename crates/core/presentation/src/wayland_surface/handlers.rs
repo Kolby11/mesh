@@ -23,9 +23,16 @@ impl CompositorHandler for State {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
+        surface: &wl_surface::WlSurface,
         _time: u32,
     ) {
+        if let Some(entry) = self
+            .surfaces
+            .values_mut()
+            .find(|entry| entry.layer_surface.wl_surface() == surface)
+        {
+            entry.frame_pending = false;
+        }
     }
 
     fn surface_enter(

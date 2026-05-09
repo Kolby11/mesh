@@ -3,8 +3,8 @@ pub mod render_object;
 pub mod surface;
 
 pub use display_list::{
-    DisplayBatchBarrierCounts, DisplayListClip, DisplayListMetrics, DisplayPaintCommand,
-    DisplayPaintCommandKind, RetainedDisplayList,
+    DamageRect, DisplayBatchBarrierCounts, DisplayListClip, DisplayListMetrics,
+    DisplayPaintCommand, DisplayPaintCommandKind, RetainedDisplayList,
 };
 pub use render_object::{RenderObjectDirtySummary, RenderObjectTree};
 pub use surface::{
