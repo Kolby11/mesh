@@ -106,11 +106,6 @@ impl ComponentDirtyFlags {
         .union(Self::ACCESSIBILITY)
         .union(Self::METRICS);
 
-    pub(super) const SURFACE_RECONFIGURE: Self = Self::SURFACE_CONFIG
-        .union(Self::LAYOUT)
-        .union(Self::PAINT)
-        .union(Self::METRICS);
-
     pub(super) fn requires_tree_rebuild(self) -> bool {
         self.intersects(Self::SCRIPT | Self::TEXT)
     }
@@ -384,7 +379,11 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn invalidate_surface_config(&mut self) {
-        self.invalidate(ComponentDirtyFlags::SURFACE_RECONFIGURE);
+        self.invalidate_surface_config_only();
+    }
+
+    pub(super) fn invalidate_surface_config_only(&mut self) {
+        self.invalidate_style_path(ComponentDirtyFlags::SURFACE_CONFIG);
     }
 
     pub(super) fn invalidate_surface_config_only(&mut self) {

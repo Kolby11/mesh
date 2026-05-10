@@ -68,6 +68,13 @@ pub(super) struct SurfaceShmBuffer {
     pending_damage: Option<DamageRect>,
 }
 
+struct PendingPresent {
+    data: Vec<u8>,
+    width: u32,
+    height: u32,
+    damage: Option<DamageRect>,
+}
+
 pub(super) struct SurfaceEntry {
     pub(super) layer_surface: LayerSurface,
     pub(super) cfg: LayerSurfaceConfig,
@@ -78,6 +85,7 @@ pub(super) struct SurfaceEntry {
     shm_buffers: Vec<SurfaceShmBuffer>,
     next_shm_buffer: usize,
     pub(super) frame_pending: bool,
+    pending_present: Option<PendingPresent>,
 }
 
 impl SurfaceEntry {
@@ -96,6 +104,7 @@ impl SurfaceEntry {
             shm_buffers: Vec::new(),
             next_shm_buffer: 0,
             frame_pending: false,
+            pending_present: None,
         }
     }
 
@@ -119,14 +128,55 @@ impl SurfaceEntry {
         self.layer_surface.commit();
         self.cfg = cfg;
         self.applied_keyboard_mode = keyboard_mode;
+        // A committed layer-shell configuration may produce a new configure
+        // event. Mark the current size as stale for blocking callers while
+        // still allowing non-blocking cached-size users to avoid a roundtrip.
+        self.configured = false;
     }
 
     fn hide(&mut self) {
+        self.pending_present = None;
+        self.frame_pending = false;
         let wl_surface = self.layer_surface.wl_surface();
         wl_surface.attach(None, 0, 0);
         self.layer_surface.commit();
         // Wait for a fresh configure before attaching a buffer again after remap.
         self.configured = false;
+    }
+
+    fn defer_present(&mut self, src: &[u8], width: u32, height: u32, damage: Option<DamageRect>) {
+        let width = width.max(1);
+        let height = height.max(1);
+        let damage = match self.pending_present.as_ref() {
+            Some(previous) if previous.width == width && previous.height == height => {
+                merge_optional_damage(previous.damage, damage)
+            }
+            Some(_) => None,
+            None => damage,
+        };
+        self.pending_present = Some(PendingPresent {
+            data: src.to_vec(),
+            width,
+            height,
+            damage,
+        });
+    }
+
+    fn take_present_damage_for_current(
+        &mut self,
+        width: u32,
+        height: u32,
+        damage: Option<DamageRect>,
+    ) -> Option<DamageRect> {
+        match self.pending_present.take() {
+            Some(previous)
+                if previous.width == width.max(1) && previous.height == height.max(1) =>
+            {
+                merge_optional_damage(previous.damage, damage)
+            }
+            Some(_) => None,
+            None => damage,
+        }
     }
 
     fn copy_into_shm_buffer(
@@ -281,6 +331,18 @@ fn clip_damage(rect: DamageRect, bounds: DamageRect) -> Option<DamageRect> {
     })
 }
 
+fn merge_optional_damage(
+    previous: Option<DamageRect>,
+    next: Option<DamageRect>,
+) -> Option<DamageRect> {
+    match (previous, next) {
+        (Some(previous), Some(next)) => Some(union_damage(Some(previous), next)),
+        // None means unknown/full damage in the presentation API. If either
+        // side is unknown, keep the coalesced damage unknown so the eventual
+        // commit refreshes the entire buffer.
+        (Some(_), None) | (None, Some(_)) | (None, None) => None,
+    }
+}
 fn union_damage(current: Option<DamageRect>, next: DamageRect) -> DamageRect {
     let Some(current) = current else {
         return next;
@@ -531,21 +593,22 @@ impl LayerShellBackend {
         }
         self.wait_for_surface_configure(surface_id)?;
 
+        let width = buffer.width.max(1);
+        let height = buffer.height.max(1);
         if self
             .state
             .surfaces
             .get(surface_id)
             .is_some_and(|entry| entry.frame_pending)
         {
-            // Drain any ready frame callback before committing a newer frame. If the
-            // callback is not ready yet we still commit the latest buffer rather than
-            // dropping freshly painted damage; the pending flag remains useful to
-            // coalesce event-loop work and prevent busy polling.
             self.dispatch_available()?;
+            if let Some(entry) = self.state.surfaces.get_mut(surface_id)
+                && entry.frame_pending
+            {
+                entry.defer_present(&buffer.data, width, height, damage);
+                return Ok(());
+            }
         }
-
-        let width = buffer.width.max(1);
-        let height = buffer.height.max(1);
         let qh = self.state.qh.clone();
         let state = &mut self.state;
         let pool = state
@@ -558,6 +621,7 @@ impl LayerShellBackend {
         if !entry.configured {
             return Ok(());
         }
+        let damage = entry.take_present_damage_for_current(width, height, damage);
 
         let (buffer_index, damage) =
             entry.copy_into_shm_buffer(pool, &buffer.data, width, height, damage)?;
@@ -573,19 +637,25 @@ impl LayerShellBackend {
     ) -> Result<Option<(u32, u32)>, PresentationError> {
         self.wait_for_surface_configure(surface_id)?;
 
-        Ok(self
-            .state
+        Ok(self.surface_size_if_known(surface_id))
+    }
+
+    pub fn surface_size_if_known(&self, surface_id: &str) -> Option<(u32, u32)> {
+        self.state
             .surfaces
             .get(surface_id)
-            .map(|entry| (entry.width.max(1), entry.height.max(1))))
+            .filter(|entry| entry.configured)
+            .map(|entry| (entry.width.max(1), entry.height.max(1)))
     }
 
     pub fn pump(&mut self) {
         let _ = self.dispatch_available();
+        let _ = self.flush_deferred_presents();
     }
 
     pub fn poll_events(&mut self) -> Vec<DevWindowEvent> {
         let _ = self.dispatch_available();
+        let _ = self.flush_deferred_presents();
         self.state.push_due_keyboard_repeats();
         let events = std::mem::take(&mut self.state.events);
         if !events.is_empty() {
@@ -595,6 +665,43 @@ impl LayerShellBackend {
             );
         }
         events
+    }
+
+    fn flush_deferred_presents(&mut self) -> Result<(), PresentationError> {
+        if !self.state.surfaces.values().any(|entry| {
+            entry.pending_present.is_some() && !entry.frame_pending && entry.configured
+        }) {
+            return Ok(());
+        }
+
+        let qh = self.state.qh.clone();
+        let state = &mut self.state;
+        let pool = state
+            .pool
+            .as_mut()
+            .ok_or_else(|| PresentationError::BufferAlloc("shm pool not initialised".into()))?;
+
+        for entry in state.surfaces.values_mut() {
+            if entry.frame_pending || !entry.configured {
+                continue;
+            }
+            let Some(pending) = entry.pending_present.take() else {
+                continue;
+            };
+            let (buffer_index, damage) = entry.copy_into_shm_buffer(
+                pool,
+                &pending.data,
+                pending.width,
+                pending.height,
+                pending.damage,
+            )?;
+            entry.attach_shm_buffer(&qh, buffer_index, pending.width, pending.height, damage);
+        }
+
+        self.event_queue
+            .flush()
+            .map_err(|e| PresentationError::SurfaceCreate(format!("flush: {e}")))?;
+        Ok(())
     }
 
     fn dispatch_pending(&mut self) -> Result<(), PresentationError> {

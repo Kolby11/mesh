@@ -101,8 +101,11 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.return_focus = None;
                     self.close_on_focus_leave = false;
                     self.keyboard_mode_override = None;
-                } else if !was_visible && self.surface_layout.keyboard_mode != KeyboardMode::None {
-                    self.pending_auto_focus = true;
+                } else if !was_visible {
+                    self.surface_pixels_invalid = true;
+                    if self.surface_layout.keyboard_mode != KeyboardMode::None {
+                        self.pending_auto_focus = true;
+                    }
                 }
                 self.invalidate_surface_config();
             }

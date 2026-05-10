@@ -30,7 +30,6 @@ impl Shell {
                     .component
                     .surface_size_changed(width, height);
             }
-
             let total_render_started = self.profiling_enabled().then(std::time::Instant::now);
             let profiling_enabled = self.profiling_enabled();
             let mut rerender_attempts = 0;
@@ -105,24 +104,32 @@ impl Shell {
                     {
                         runtime.paint_buffer = Some(PixelBuffer::new(1, 1));
                     }
+                    runtime.known_surface_size = None;
                     break;
                 }
 
-                let configured_size = if surface.width == 0 || surface.height == 0 {
-                    self.presentation_engine.surface_size(&surface_id)?
+                let requested_width = surface.width;
+                let requested_height = surface.height;
+                let dynamic_size = if requested_width == 0 || requested_height == 0 {
+                    self.resolve_dynamic_surface_size(index, &surface_id)?
                 } else {
                     None
                 };
-                let width = if surface.width == 0 {
-                    configured_size.map(|(width, _)| width).unwrap_or(1)
+                let width = if requested_width == 0 {
+                    dynamic_size.map(|(width, _)| width).unwrap_or(1)
                 } else {
-                    surface.width.max(1)
+                    requested_width.max(1)
                 };
-                let height = if surface.height == 0 {
-                    configured_size.map(|(_, height)| height).unwrap_or(1)
+                let height = if requested_height == 0 {
+                    dynamic_size.map(|(_, height)| height).unwrap_or(1)
                 } else {
-                    surface.height.max(1)
+                    requested_height.max(1)
                 };
+                self.components[index].known_surface_size = Some((width, height));
+                self.components[index]
+                    .component
+                    .surface_size_changed(width, height);
+
                 let runtime = &mut self.components[index];
                 if runtime
                     .paint_buffer
@@ -238,13 +245,6 @@ impl Shell {
                     Some("present"),
                 );
             }
-            if visible && presented {
-                self.record_surface_redraw(
-                    &surface_id,
-                    Some(component_id.as_str()),
-                    Some("present"),
-                );
-            }
             if let Some(started) = total_render_started {
                 self.record_surface_profiling_stage(
                     &surface_id,
@@ -254,8 +254,37 @@ impl Shell {
                     Some("rebuild"),
                 );
             }
+            if visible && presented {
+                self.record_surface_redraw(
+                    &surface_id,
+                    Some(component_id.as_str()),
+                    Some("present"),
+                );
+            }
         }
         Ok(())
+    }
+
+    fn resolve_dynamic_surface_size(
+        &mut self,
+        index: usize,
+        surface_id: &str,
+    ) -> Result<Option<(u32, u32)>, ShellRunError> {
+        if let Some(size) = self.presentation_engine.surface_size_if_known(surface_id) {
+            self.components[index].known_surface_size = Some(size);
+            return Ok(Some(size));
+        }
+        if let Some(size) = self.components[index].known_surface_size {
+            return Ok(Some(size));
+        }
+        let size = self
+            .presentation_engine
+            .surface_size(surface_id)
+            .map_err(ShellRunError::Presentation)?;
+        if let Some(size) = size {
+            self.components[index].known_surface_size = Some(size);
+        }
+        Ok(size)
     }
 }
 

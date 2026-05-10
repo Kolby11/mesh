@@ -98,8 +98,23 @@ fn typed_invalidations_cover_text_metrics_and_surface_configuration() {
     assert!(!requires_tree_rebuild);
     assert!(can_use_retained_path);
     assert!(flags.contains(ComponentDirtyFlags::SURFACE_CONFIG));
-    assert!(flags.contains(ComponentDirtyFlags::LAYOUT));
-    assert!(flags.contains(ComponentDirtyFlags::METRICS));
+    assert!(!flags.contains(ComponentDirtyFlags::LAYOUT));
+    assert!(!flags.contains(ComponentDirtyFlags::PAINT));
+    assert!(!flags.contains(ComponentDirtyFlags::METRICS));
+}
+
+#[test]
+fn surface_config_only_invalidations_do_not_request_immediate_rerender() {
+    let mut component = test_frontend_component("<template><button /></template>");
+
+    component.dirty = false;
+    component.style_only_dirty = false;
+    component.dirty_types = ComponentDirtyFlags::empty();
+
+    component.invalidate_surface_config();
+
+    assert!(component.wants_render());
+    assert!(!component.wants_immediate_rerender());
 }
 
 #[test]

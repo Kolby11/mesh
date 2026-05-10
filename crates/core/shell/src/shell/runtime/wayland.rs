@@ -52,8 +52,19 @@ impl Shell {
             };
             let _ = surface;
             let surface_size = fixed_surface_size
-                .or(self.presentation_engine.surface_size(&runtime_surface_id)?)
+                .or(self.components[index].known_surface_size)
+                .or_else(|| {
+                    self.components[index]
+                        .paint_buffer
+                        .as_ref()
+                        .map(|buffer| (buffer.width.max(1), buffer.height.max(1)))
+                })
+                .or_else(|| {
+                    self.presentation_engine
+                        .surface_size_if_known(&runtime_surface_id)
+                })
                 .unwrap_or((1, 1));
+            self.components[index].known_surface_size = Some(surface_size);
 
             if let WindowEvent::Key {
                 event: WindowKeyEvent::Pressed(key, mods),

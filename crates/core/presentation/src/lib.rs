@@ -106,6 +106,13 @@ impl PresentationEngine {
         }
     }
 
+    pub fn surface_size_if_known(&self, surface_id: &str) -> Option<(u32, u32)> {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.surface_size_if_known(surface_id),
+            Backend::DevWindow(_) => None,
+        }
+    }
+
     pub fn pump(&mut self) {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.pump(),
