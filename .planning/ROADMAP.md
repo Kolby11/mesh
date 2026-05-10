@@ -1,160 +1,144 @@
-# Roadmap: MESH v1.4 Major Performance Fixes
+# Roadmap: MESH v1.5 CPU Rendering Performance Improvement
 
 **Status:** Active milestone planning
-**Phases:** 19-25
-**Total Phases:** 7
+**Phases:** 26-31
+**Total Phases:** 6
 
 ## Overview
 
-`v1.4` turns the retained widget-tree foundation from `v1.3` into a Qt-inspired retained rendering pipeline. MESH should keep stable widget identity, synchronize changes into retained render objects, retain display/paint data, track damage, and batch compatible primitives before attempting a GPU backend.
+`v1.5` keeps the focus on the software CPU renderer. The user reports that everything still feels laggy, so this milestone does not broaden into GPU backend work or parallel paint/layout. Instead it uses Qt Quick renderer research and the existing MESH benchmark harness to find and remove the remaining full-tree, full-command-list, and repeat-rasterization bottlenecks on real shell surfaces.
 
-The milestone deliberately follows the sequence: retained widget tree, dirty invalidation, incremental style/layout, retained render/display data, damage tracking, text/glyph caching, typed/interned hot data, selector indexing, and batching. GPU and parallel layout/paint stay future work until those foundations remove the current rebuild/upload bottlenecks.
+The milestone specifically targets the gaps left after `v1.4`: retained render objects and display data exist, but local changes can still trigger surface-wide command recollection, partial-damage paints still scan the entire command list, and the icon/image/SVG pipeline still repeats expensive raster work. The end goal is a software renderer that feels visibly smoother on the shipped proof surfaces before any later GPU milestone.
 
 ## Phases
 
-### Phase 19: Dirty-Type Invalidation Model
+### Phase 26: CPU Render Profiling and Baseline Proof
 
-- [x] Phase 19: Complete (completed 2026-05-09)
-
-**Goal:** Turn widget-layer dirty summaries into typed invalidation that downstream systems can consume without assuming every change requires a full render rebuild.
-**Depends on:** Phase 18
-**Requirements:** `DIRTY-01`, `DIRTY-02`, `DIRTY-03`, `DIRTY-04`
+**Goal:** Attribute the remaining CPU rendering cost on shipped surfaces and canonical benchmark scenarios before implementation phases begin.
+**Depends on:** Phase 25
+**Requirements:** `PERF-01`, `PERF-02`
 
 Planned work:
 
-- Define dirty classes for script/state, style, layout, paint, text, accessibility, metrics, and surface configuration.
-- Preserve previous/next identity and bounds context needed for incremental layout and damage.
-- Keep explicit full-rebuild fallback behavior for unsupported mutation patterns.
-- Surface typed invalidation counts through debug profiling snapshots.
+- Attribute CPU render cost across tree build, style restyle, layout, render-object sync, retained display-list rebuild, paint traversal, text shaping, glyph work, and icon/image raster work.
+- Record baseline benchmark numbers and visible-smoothness notes for shipped surfaces such as `@mesh/navigation-bar` and `@mesh/audio-popover`.
+- Surface the new counters through the existing debug inspector and benchmark payloads rather than building a new benchmark system.
+- Document which stages dominate the current “everything is laggy” report so later phases target the right bottlenecks.
 
-### Phase 20: Incremental Style and Layout Propagation
+### Phase 27: Viewport Culling and Visibility Elision
 
-- [x] Phase 20: Complete (completed 2026-05-09)
-
-**Goal:** Reuse retained widget and layout data for unaffected subtrees while restyling and laying out only the nodes whose dirty types require it.
-**Depends on:** Phase 19
-**Requirements:** `INCR-01`, `INCR-02`, `INCR-03`, `INCR-04`
+**Goal:** Prune offscreen, hidden, or clip-excluded work earlier so the CPU renderer stops generating unnecessary paint work.
+**Depends on:** Phase 26
+**Requirements:** `CULL-01`, `CULL-02`, `CULL-04`
 
 Planned work:
 
-- Propagate style invalidation from changed stable nodes to only affected descendants.
-- Distinguish local layout changes from ancestor, sibling, or surface-wide relayout.
-- Let layout consumers reuse retained layout output where constraints and inputs are unchanged.
-- Verify the incremental path on interaction-state, container-size, and state-driven shipped-surface updates.
+- Introduce viewport- and clip-aware subtree omission for scrollable and clipped content where children are fully outside the visible region.
+- Short-circuit render work for nodes hidden by explicit visibility or ineffective opacity rules.
+- Replace expensive per-item clipping cases with cheaper omission or elision strategies where possible.
+- Keep pruning decisions observable in debug metrics so false positives can be caught early.
 
-### Phase 21: Retained Render-Object Scene Graph
+### Phase 28: Incremental Paint Command Retention
 
-- [x] Phase 21: Complete (completed 2026-05-09)
-
-**Goal:** Add a retained render-object tree, analogous to Qt Quick's item-to-QSGNode synchronization boundary, so widget changes update render nodes instead of recreating all render data.
-**Depends on:** Phase 20
-**Requirements:** `REND-01`, `REND-02`, `REND-03`, `REND-04`
+**Goal:** Stop local retained-tree changes from forcing whole-surface paint-command recollection.
+**Depends on:** Phase 26, Phase 27
+**Requirements:** `PIPE-01`, `PIPE-02`
 
 Planned work:
 
-- Introduce render-object nodes keyed from stable widget identities.
-- Separate transform, clip, opacity, geometry, material/style, text, and accessibility-facing slots.
-- Synchronize inserted, removed, reordered, and mutated widgets into retained render-object changes.
-- Document ownership and mutation rules that keep a future render-thread or GPU backend viable.
+- Refactor retained display data so command ownership is tracked per dirty subtree rather than as one surface-wide flat rebuild step.
+- Update transform-, scroll-, and reorder-only paths so they preserve unrelated descendant paint data.
+- Reduce z-order and command-signature churn for unchanged branches.
+- Preserve full-surface fallbacks when dirty summaries are too broad for safe local reuse.
 
-### Phase 22: Retained Display List and Damage Tracking
+### Phase 29: Damage-Indexed Paint Execution and Repaint Policy
 
-- [x] Phase 22: Complete (completed 2026-05-09)
-
-**Goal:** Retain paint commands across frames and compute damage so unchanged regions do not require unnecessary paint or present work.
-**Depends on:** Phase 21
-**Requirements:** `PAINT-01`, `PAINT-02`, `PAINT-03`, `PAINT-04`
+**Goal:** Make partial-damage paints proportional to the changed region instead of total surface complexity.
+**Depends on:** Phase 28
+**Requirements:** `PIPE-03`, `PIPE-04`, `CULL-03`
 
 Planned work:
 
-- Build or adapt a retained display-list layer from render-object output.
-- Compute damage from old and new bounds for layout, paint, text, transform, clip, and visibility changes.
-- Clip or skip paint/present work for unchanged regions on supported backends.
-- Expose retained-node reuse, display-list reuse, damage area, and skipped work in the debug inspector.
+- Add a retained mapping from damage regions to affected command ranges, nodes, or buckets.
+- Restrict partial paints to commands intersecting the damage region plus required overlays such as tooltips or scrollbars.
+- Add a measured repaint-policy switch between minimal damage, bounding-rect repaint, and full-surface repaint.
+- Verify ordering, clipping, and correctness when filtered execution skips unrelated commands.
 
-### Phase 23: Text Shaping and Glyph Cache
+### Phase 30: Raster Cache Hardening for Icons, Images, and Text
 
-- [x] Phase 23: Complete (completed 2026-05-09)
-
-**Goal:** Stop unchanged text from reshaping or rerasterizing during unrelated updates while preserving correct invalidation for text-specific changes.
-**Depends on:** Phase 22
-**Requirements:** `TEXT-01`, `TEXT-02`, `TEXT-03`
+**Goal:** Remove repeat rasterization, resize, and parse cost from steady-state CPU painting.
+**Depends on:** Phase 26, Phase 28
+**Requirements:** `CACHE-01`, `CACHE-02`, `CACHE-03`
 
 Planned work:
 
-- Cache shaped text by stable identity, text content, font/style inputs, layout constraints, and scale factor.
-- Reuse glyph/raster data across unrelated style, layout, and state updates.
-- Invalidate text output for content, font, size, wrapping, selection/highlight, and scale changes.
-- Add benchmark proof for text-heavy surfaces or representative text widgets.
+- Cache rasterized SVG/icon/image variants by the visual inputs that actually affect the output.
+- Eliminate repeated decode/resize churn for unchanged bitmap icons and images.
+- Preserve and extend text/glyph cache reuse across hover, animation, scroll, and state-driven updates.
+- Retain opaque/translucent metadata so the painter can avoid unnecessary blending and redundant background work.
 
-### Phase 24: Typed Slots, Interning, and Selector Indexing
+### Phase 31: Smoothness Proof and CPU Render Tuning
 
-- [x] Phase 24: Complete (completed 2026-05-09)
-
-**Goal:** Reduce hot-path lookup and restyle candidate cost by replacing repeated string-key scans with typed storage, interned identifiers, and selector indexes where profiling justifies it.
-**Depends on:** Phase 20
-**Requirements:** `DATA-01`, `DATA-02`, `DATA-03`
+**Goal:** Tune the new CPU rendering heuristics and prove that shipped shell surfaces feel visibly smoother.
+**Depends on:** Phase 27, Phase 29, Phase 30
+**Requirements:** `PERF-03`, `SMTH-01`, `SMTH-02`, `SMTH-03`
 
 Planned work:
 
-- Move high-traffic attributes and style values to typed slots or compact equivalents.
-- Intern stable identifiers, attribute names, style property names, and selector components on hot paths.
-- Add selector indexes for class, id/key, pseudo-state, attribute, and structural restyle triggers.
-- Verify memory and CPU impact against the canonical benchmark suite.
-
-### Phase 25: Display-List Batching and GPU Readiness Guardrails
-
-- [x] Phase 25: Complete (completed 2026-05-09)
-
-**Goal:** Batch compatible retained display primitives and leave the renderer in a clean state for a later GPU backend without implementing the GPU backend in this milestone.
-**Depends on:** Phase 22, Phase 24
-**Requirements:** `BATCH-01`, `BATCH-02`, `SEQ-01`, `SEQ-02`, `PROOF-01`, `PROOF-02`
-
-Planned work:
-
-- Batch compatible primitives by material/state while preserving MESH ordering, clipping, opacity, transform, and translucent-overlap semantics.
-- Record batching barriers explicitly so debug output can explain why primitives did or did not merge.
-- Add milestone-level benchmark comparisons for dirty invalidation, retained render data, damage, text cache, selector indexing, and batching.
-- Document the remaining handoff criteria for GPU backend and parallel paint/layout milestones.
+- Tune repaint-policy thresholds, cache behavior, clear/background rules, and culling heuristics using real benchmark data.
+- Re-run canonical benchmark scenarios on the shipped proof surfaces and compare against Phase 26 baselines.
+- Validate that visuals and interactions remain correct apart from smoother rendering behavior.
+- Document what still belongs to future GPU or parallel milestones after the CPU path is improved.
 
 ## Milestone Boundaries
 
 ### Included
 
-- Typed dirty invalidation for retained widget changes
-- Incremental style and layout propagation
-- Retained render-object tree
-- Retained display-list or paint command layer
-- Damage tracking and partial paint/present behavior where supported
-- Text shaping/glyph caching
-- Typed style/attribute slots, interned identifiers, selector indexing
-- Display-list batching and GPU-readiness guardrails
+- Research-backed CPU render hotspot attribution
+- Viewport/visibility pruning for retained rendering
+- Dirty-subtree retained paint-command updates
+- Damage-indexed CPU paint execution
+- Retained raster caches for SVG/icons/images/text where profiling justifies them
+- Visible-smoothness proof on shipped shell surfaces
 
 ### Excluded
 
 - GPU backend implementation
 - Parallel paint/layout implementation
-- Full browser-style rendering engine complexity
 - Broad shell UI redesign
-- External profiling telemetry or full trace persistence
+- A second benchmark/profiling system
+- Trace persistence or external telemetry export
 
 ## Research Basis
 
-This roadmap borrows from Qt Quick rather than web engines: Qt separates QML items from retained scene-graph nodes, synchronizes changed items into render nodes, retains geometry/resources, tracks render-loop boundaries, and batches compatible primitives. MESH should adopt the same principles while keeping its Rust/Luau architecture and `.mesh` semantics.
+This roadmap follows Qt Quick’s retained-rendering guidance rather than browser-engine architecture. The most important lessons carried forward are: retain paint-facing data separately from UI-facing state, make visibility explicit, avoid assuming clipping is a free optimization, keep repeated motion cheap through retention, and treat repaint region selection as a measured policy decision.
 
-Primary research note: `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md`
+Primary research artifacts:
+
+- `.planning/research/STACK.md`
+- `.planning/research/FEATURES.md`
+- `.planning/research/ARCHITECTURE.md`
+- `.planning/research/PITFALLS.md`
+- `.planning/research/SUMMARY.md`
+
+Primary external sources:
+
+- https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph-renderer.html
+- https://doc.qt.io/qt-6/qtquick-performance.html
+- https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html
 
 ## Archived Milestones
 
+- `v1.4` Major Performance Fixes — shipped 2026-05-09.
 - `v1.3` Performance Instrumentation and Responsiveness — shipped 2026-05-09.
-- `v1.2` Rendering System Upgrade — shipped 2026-05-08. Archive: `.planning/milestones/v1.2-ROADMAP.md`
-- `v1.1` Backend Plugin MVP — shipped 2026-05-05. Archive: `.planning/milestones/v1.1-ROADMAP.md`
+- `v1.2` Rendering System Upgrade — shipped 2026-05-08.
+- `v1.1` Backend Plugin MVP — shipped 2026-05-05.
 
 ## Backlog and Carryover
 
-- Deferred validation/UAT cleanup remains backlog work outside `v1.4`.
-- The pending unified package/module manifest phase idea remains future work unless reprioritized independently.
-- GPU backend and parallel paint/layout are sequenced after retained rendering and damage tracking.
+- Deferred validation/UAT cleanup from older milestones remains backlog work outside `v1.5`.
+- The pending unified package/module manifest phase idea remains future planning work and is not part of CPU rendering optimization.
+- GPU backend and parallel paint/layout remain sequenced after this milestone proves the CPU retained pipeline is smooth enough.
 
 ---
-*Roadmap updated: 2026-05-09 after starting milestone v1.4*
+*Roadmap updated: 2026-05-10 after starting milestone v1.5*
