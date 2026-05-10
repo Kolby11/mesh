@@ -129,8 +129,8 @@ Last activity: 2026-05-10 — Milestone v1.5 roadmap created
 
 ## Session
 
-Last session: 2026-05-09T00:00:00.000Z
-Stopped At: Started milestone v1.4
+Last session: 2026-05-10T00:00:00.000Z
+Stopped At: Created roadmap for milestone v1.5
 Resume File: None
 
 ## Accumulated Context
@@ -140,6 +140,7 @@ Resume File: None
 - v1.0 planning artifacts archived to `.planning/milestones/v1.0-reset-2026-05-03-*`.
 - v1.1 reset roadmap focuses on backend plugin MVP stability.
 - v1.4 continues phase numbering after v1.3 and starts at Phase 19.
+- v1.5 continues phase numbering after v1.4 and starts at Phase 26.
 
 ## Deferred Items
 
