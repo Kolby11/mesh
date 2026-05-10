@@ -1,5 +1,6 @@
 use super::PixelBuffer;
 use super::glyph::{GlyphAxes, draw_font_glyph};
+use super::profiling;
 use image::imageops::FilterType;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget, resolve_icon_result};
@@ -49,6 +50,7 @@ pub fn draw_icon_from_path_with_options(
         return;
     }
 
+    let raster_started = std::time::Instant::now();
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         match ext.to_ascii_lowercase().as_str() {
             "png" | "jpg" | "jpeg" | "bmp" => {
@@ -138,6 +140,7 @@ pub fn draw_icon_from_path_with_options(
             _ => {}
         }
     }
+    profiling::record_icon_image_raster(raster_started.elapsed());
 }
 
 fn blend_icon_pixel(buffer: &mut PixelBuffer, x: i32, y: i32, color: Color) {
@@ -158,6 +161,7 @@ pub fn draw_missing_icon_fallback(
     dest_h: i32,
     tint: Color,
 ) {
+    let raster_started = std::time::Instant::now();
     let w = dest_w.max(1) as u32;
     let h = dest_h.max(1) as u32;
 
@@ -196,6 +200,7 @@ pub fn draw_missing_icon_fallback(
             );
         }
     }
+    profiling::record_icon_image_raster(raster_started.elapsed());
 }
 
 pub fn draw_named_icon(

@@ -54,7 +54,7 @@ use std::time::Duration;
 use mesh_core_render::{
     DamageRect, DisplayListMetrics, PixelBuffer, RenderObjectTree, RetainedDisplayList,
     SharedTextMeasurer, TextCacheMetrics, TextRenderer,
-    paint_display_list_for_module_with_text_metrics,
+    paint_display_list_for_module_with_profiling_metrics,
 };
 
 const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
@@ -187,6 +187,7 @@ fn text_cache_snapshot(metrics: TextCacheMetrics) -> mesh_core_debug::TextCacheS
         layout_invalidations: metrics.layout_invalidations,
         shaped_entries: metrics.shaped_entries,
         glyph_cache_active: metrics.glyph_cache_active,
+        shaping_micros: metrics.shaping_micros,
     }
 }
 

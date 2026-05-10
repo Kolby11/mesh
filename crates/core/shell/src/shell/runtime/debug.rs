@@ -770,6 +770,7 @@ fn profiling_invalidation_json(
             "layout_invalidations": snapshot.text.layout_invalidations,
             "shaped_entries": snapshot.text.shaped_entries,
             "glyph_cache_active": snapshot.text.glyph_cache_active,
+            "shaping_micros": snapshot.text.shaping_micros,
         },
     })
 }

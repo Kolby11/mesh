@@ -176,6 +176,36 @@ fn phase18_script_and_text_invalidations_take_full_rebuild_paint_path() {
     );
 }
 
+#[test]
+fn retained_paint_path_records_phase26_cpu_attribution_stages() {
+    let mut component = test_frontend_component(
+        "<template><row><text>Proof</text><icon name=\"phase26-missing-icon\" /></row></template>",
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 48);
+
+    component.set_profiling_enabled(true);
+    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+
+    let stages: std::collections::HashSet<_> = component
+        .take_profiling_records()
+        .into_iter()
+        .map(|record| record.stage)
+        .collect();
+
+    assert!(stages.contains(&mesh_core_debug::ProfilingStage::RenderObjectSync));
+    assert!(stages.contains(&mesh_core_debug::ProfilingStage::RetainedDisplayListUpdate));
+    assert!(stages.contains(&mesh_core_debug::ProfilingStage::PaintTraversal));
+    assert!(stages.contains(&mesh_core_debug::ProfilingStage::TextShaping));
+    assert!(stages.contains(&mesh_core_debug::ProfilingStage::IconImageRaster));
+    assert!(stages.contains(&mesh_core_debug::ProfilingStage::Paint));
+
+    let invalidation = component
+        .take_invalidation_snapshot()
+        .expect("profiling-enabled paint should capture invalidation proof");
+    assert!(invalidation.text.shaping_micros > 0);
+}
+
 // ---------- helpers shared by the three integration tests below ----------
 
 fn audio_network_catalog() -> InterfaceCatalog {

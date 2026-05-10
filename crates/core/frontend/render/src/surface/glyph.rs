@@ -6,6 +6,7 @@
 //! path as monochrome SVG icons.
 
 use super::PixelBuffer;
+use super::profiling;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::SupportedAxes;
 use std::collections::HashMap;
@@ -186,6 +187,7 @@ pub fn draw_font_glyph(
     dest_h: i32,
     tint: Color,
 ) -> bool {
+    let raster_started = std::time::Instant::now();
     let px = dest_w.max(dest_h).max(1) as u32;
     let key = GlyphCacheKey {
         font_path: hash_path(font_path),
@@ -254,5 +256,6 @@ pub fn draw_font_glyph(
             buffer.blend_pixel(x as u32, y as u32, pixel, 255);
         }
     }
+    profiling::record_icon_image_raster(raster_started.elapsed());
     true
 }

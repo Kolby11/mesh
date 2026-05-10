@@ -220,6 +220,7 @@ pub struct TextCacheSnapshot {
     pub layout_invalidations: u64,
     pub shaped_entries: u64,
     pub glyph_cache_active: bool,
+    pub shaping_micros: u64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -291,6 +292,11 @@ pub enum ProfilingStage {
     TreeBuild,
     StyleRestyle,
     Layout,
+    RenderObjectSync,
+    RetainedDisplayListUpdate,
+    PaintTraversal,
+    TextShaping,
+    IconImageRaster,
     Paint,
     PresentCommit,
     RedrawCount,
@@ -306,6 +312,11 @@ impl ProfilingStage {
             Self::TreeBuild => "tree_build",
             Self::StyleRestyle => "style_restyle",
             Self::Layout => "layout",
+            Self::RenderObjectSync => "render_object_sync",
+            Self::RetainedDisplayListUpdate => "retained_display_list_update",
+            Self::PaintTraversal => "paint_traversal",
+            Self::TextShaping => "text_shaping",
+            Self::IconImageRaster => "icon_image_raster",
             Self::Paint => "paint",
             Self::PresentCommit => "present_commit",
             Self::RedrawCount => "redraw_count",

@@ -39,6 +39,7 @@ pub struct TextCacheMetrics {
     pub layout_invalidations: u64,
     pub shaped_entries: u64,
     pub glyph_cache_active: bool,
+    pub shaping_micros: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -387,6 +388,7 @@ impl TextEngine {
         }
 
         self.metrics.layout_misses = self.metrics.layout_misses.saturating_add(1);
+        let shaping_started = std::time::Instant::now();
         let (attrs, _, _, _) = text_config(
             &key.font_family,
             f32::from_bits(key.font_size),
@@ -402,6 +404,12 @@ impl TextEngine {
             cosmic_borrow.set_size(width, None);
             cosmic_borrow.set_text(&key.text, &attrs, Shaping::Advanced, Some(align));
         }
+        self.metrics.shaping_micros = self.metrics.shaping_micros.saturating_add(
+            shaping_started
+                .elapsed()
+                .as_micros()
+                .min(u128::from(u64::MAX)) as u64,
+        );
         cosmic
     }
 

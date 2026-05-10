@@ -1997,15 +1997,50 @@ fn profiling_snapshot_includes_required_shell_stage_buckets() {
     shell.record_surface_profiling_stage(
         "@mesh/navigation-bar",
         Some("@mesh/navigation-bar"),
-        ProfilingStage::Paint,
+        ProfilingStage::RenderObjectSync,
         std::time::Duration::from_micros(16),
         Some("rebuild"),
     );
     shell.record_surface_profiling_stage(
         "@mesh/navigation-bar",
         Some("@mesh/navigation-bar"),
-        ProfilingStage::PresentCommit,
+        ProfilingStage::RetainedDisplayListUpdate,
         std::time::Duration::from_micros(17),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::PaintTraversal,
+        std::time::Duration::from_micros(18),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::TextShaping,
+        std::time::Duration::from_micros(19),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::IconImageRaster,
+        std::time::Duration::from_micros(20),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::Paint,
+        std::time::Duration::from_micros(21),
+        Some("rebuild"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::PresentCommit,
+        std::time::Duration::from_micros(22),
         Some("present"),
     );
     shell.record_surface_redraw(
@@ -2017,7 +2052,7 @@ fn profiling_snapshot_includes_required_shell_stage_buckets() {
         "@mesh/navigation-bar",
         Some("@mesh/navigation-bar"),
         ProfilingStage::TotalSurfaceRender,
-        std::time::Duration::from_micros(18),
+        std::time::Duration::from_micros(23),
         Some("rebuild"),
     );
 
@@ -2035,10 +2070,85 @@ fn profiling_snapshot_includes_required_shell_stage_buckets() {
     assert!(stages.contains(&ProfilingStage::TreeBuild));
     assert!(stages.contains(&ProfilingStage::StyleRestyle));
     assert!(stages.contains(&ProfilingStage::Layout));
+    assert!(stages.contains(&ProfilingStage::RenderObjectSync));
+    assert!(stages.contains(&ProfilingStage::RetainedDisplayListUpdate));
+    assert!(stages.contains(&ProfilingStage::PaintTraversal));
+    assert!(stages.contains(&ProfilingStage::TextShaping));
+    assert!(stages.contains(&ProfilingStage::IconImageRaster));
     assert!(stages.contains(&ProfilingStage::Paint));
     assert!(stages.contains(&ProfilingStage::PresentCommit));
     assert!(stages.contains(&ProfilingStage::RedrawCount));
     assert!(stages.contains(&ProfilingStage::TotalSurfaceRender));
+}
+
+#[test]
+fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::RenderObjectSync,
+        std::time::Duration::from_micros(31),
+        Some("hover"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::RetainedDisplayListUpdate,
+        std::time::Duration::from_micros(32),
+        Some("hover"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::PaintTraversal,
+        std::time::Duration::from_micros(33),
+        Some("hover"),
+    );
+    shell.record_surface_invalidation(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingInvalidationSnapshot {
+            text: TextCacheSnapshot {
+                shaping_micros: 34,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+
+    shell.build_debug_snapshot();
+
+    let latest = shell
+        .latest_service_state
+        .get(mesh_core_debug::DEBUG_INTERFACE)
+        .expect("mesh.debug state should be published");
+    let stages = latest.state["profiling"]["surfaces"][0]["stages"]
+        .as_array()
+        .expect("surface stages should serialize as an array");
+    let labels: std::collections::HashSet<_> = stages
+        .iter()
+        .filter_map(|stage| stage["stage"].as_str())
+        .collect();
+
+    assert!(labels.contains("render_object_sync"));
+    assert!(labels.contains("retained_display_list_update"));
+    assert!(labels.contains("paint_traversal"));
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["text"]["shaping_micros"],
+        serde_json::json!(34)
+    );
+    assert_eq!(
+        latest.state["benchmarks"]["scenarios"]
+            .as_array()
+            .expect("benchmark scenarios should stay serialized")
+            .len(),
+        5
+    );
 }
 
 #[test]

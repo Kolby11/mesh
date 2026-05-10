@@ -292,12 +292,18 @@ impl ShellComponent for FrontendSurfaceComponent {
         let retained_tree_generation = self.retained_tree.generation();
         let use_generation_shortcuts =
             dirty_types.is_empty() && !requires_tree_rebuild && !self.surface_pixels_invalid;
+        let render_object_started = std::time::Instant::now();
         let render_object_dirty = if use_generation_shortcuts {
             self.retained_render_objects
                 .update_for_retained_generation(&tree, retained_tree_generation)
         } else {
             self.retained_render_objects.update(&tree)
         };
+        self.record_profiling_stage_with_elapsed(
+            mesh_core_debug::ProfilingStage::RenderObjectSync,
+            render_object_started.elapsed(),
+            Some("rebuild"),
+        );
 
         let tooltip = if let (Some(start), Some(hovered_key)) =
             (self.hover_start, self.hovered_key.as_ref())
@@ -320,6 +326,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             width: content_width.max(1),
             height: content_height.max(1),
         };
+        let display_list_started = std::time::Instant::now();
         let display_list_metrics = if use_generation_shortcuts {
             self.retained_display_list.update_for_retained_generation(
                 &tree,
@@ -338,6 +345,11 @@ impl ShellComponent for FrontendSurfaceComponent {
                 true,
             )
         };
+        self.record_profiling_stage_with_elapsed(
+            mesh_core_debug::ProfilingStage::RetainedDisplayListUpdate,
+            display_list_started.elapsed(),
+            Some("rebuild"),
+        );
         let current_tooltip_damage =
             tooltip_damage_rect(tooltip.as_ref(), content_width, content_height);
         let tooltip_damage = merge_optional_damage(
@@ -409,8 +421,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         } else {
             effective_damage.rect
         };
-        let text_cache_metrics = if paint_damage.is_none() {
-            TextCacheMetrics::default()
+        let paint_metrics = if paint_damage.is_none() {
+            mesh_core_render::PaintProfilingMetrics::default()
         } else {
             let damage = paint_damage.expect("present damage is available when paint runs");
             if effective_damage.full_surface {
@@ -424,7 +436,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                     mesh_core_elements::style::Color::TRANSPARENT,
                 );
             }
-            paint_display_list_for_module_with_text_metrics(
+            paint_display_list_for_module_with_profiling_metrics(
                 self.retained_display_list.paint_commands(),
                 buffer,
                 1.0,
@@ -443,8 +455,27 @@ impl ShellComponent for FrontendSurfaceComponent {
         };
         self.last_present_damage =
             merge_optional_damage(self.last_present_damage, paint_damage, surface_damage);
+        let traversal_micros = paint_metrics
+            .traversal_micros
+            .saturating_sub(paint_metrics.text.shaping_micros)
+            .saturating_sub(paint_metrics.icon_image_raster_micros);
+        self.record_profiling_stage_with_elapsed(
+            mesh_core_debug::ProfilingStage::PaintTraversal,
+            std::time::Duration::from_micros(traversal_micros),
+            Some("rebuild"),
+        );
+        self.record_profiling_stage_with_elapsed(
+            mesh_core_debug::ProfilingStage::TextShaping,
+            std::time::Duration::from_micros(paint_metrics.text.shaping_micros),
+            Some("rebuild"),
+        );
+        self.record_profiling_stage_with_elapsed(
+            mesh_core_debug::ProfilingStage::IconImageRaster,
+            std::time::Duration::from_micros(paint_metrics.icon_image_raster_micros),
+            Some("rebuild"),
+        );
         if let Some(snapshot) = self.invalidation_snapshot.as_mut() {
-            snapshot.text = text_cache_snapshot(text_cache_metrics);
+            snapshot.text = text_cache_snapshot(paint_metrics.text);
         }
         if self.profiling_enabled {
             self.profiling_records.push(ComponentProfilingRecord {

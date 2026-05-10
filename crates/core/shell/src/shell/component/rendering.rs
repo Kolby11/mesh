@@ -1,7 +1,7 @@
 use super::*;
 
 impl FrontendSurfaceComponent {
-    fn record_profiling_stage(
+    pub(super) fn record_profiling_stage(
         &mut self,
         stage: mesh_core_debug::ProfilingStage,
         started_at: std::time::Instant,
@@ -18,7 +18,7 @@ impl FrontendSurfaceComponent {
         });
     }
 
-    fn record_profiling_stage_with_elapsed(
+    pub(super) fn record_profiling_stage_with_elapsed(
         &mut self,
         stage: mesh_core_debug::ProfilingStage,
         elapsed: std::time::Duration,
