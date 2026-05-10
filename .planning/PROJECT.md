@@ -2,7 +2,7 @@
 
 ## What This Is
 
-MESH is a Rust-based, Wayland-native shell framework that pushes service behavior into Luau plugins while keeping the Rust core focused on generic runtime wiring, state delivery, and diagnostics.
+MESH is a Rust-based, Wayland-native shell framework that pushes service behavior into Luau plugins while keeping the Rust core focused on generic runtime wiring, state delivery, diagnostics, and frontend rendering. The framework is aimed at authors who want distinctive shell UI and service integrations without giving up deterministic behavior or inspectable performance.
 
 ## Core Value
 
@@ -17,7 +17,7 @@ The project now has a backend plugin MVP with:
 - A shell-owned installed-plugin package manifest and normalized plugin graph
 - Explicit active-provider selection for backend service categories
 - Deterministic backend runtime lifecycle with visible status and diagnostics
-- A locked backend Luau MVP API: `mesh.exec(program, args)`, `mesh.config()`, `mesh.log(level, msg)`, `mesh.service.emit(...)`, and `mesh.service.set_poll_interval(ms)`
+- A locked backend Luau MVP API centered on structured `mesh.exec(program, args)`
 - Generic service state and command routing without service-specific Rust branches
 - A reference backend plugin plus automated proof coverage and backend author docs
 
@@ -42,19 +42,31 @@ The project now also has performance instrumentation and benchmark coverage with
 - Canonical benchmark scenarios for hover, surface open/close, slider drag, keyboard traversal, and backend-driven updates
 - A retained widget-tree foundation with stable `_mesh_key` runtime node IDs, retained style-only mutation, and widget-layer dirty summaries
 
-## Current Milestone: v1.4 Major Performance Fixes
+`v1.4` shipped on 2026-05-09.
 
-**Goal:** Continue the retained-rendering performance work beyond the completed widget-layer foundation by adding dirty-type invalidation, incremental style/layout propagation, retained paint data, and damage tracking before any GPU backend work.
+The project now also has the first retained-rendering pipeline passes with:
+
+- Typed invalidation routed across style, layout, paint, text, and configuration changes
+- Incremental style/layout propagation for retained widget identities
+- A retained render-object tree synchronized from stable widget nodes
+- A retained display list with damage tracking and partial-present plumbing
+- Text layout caching, selector indexing, and batching barrier metrics
+- Debug inspector metrics showing retained rendering, damage, text cache, and batching behavior
+
+Even with those foundations, the software CPU renderer still feels laggy on real shell surfaces. The next milestone focuses on the remaining CPU-side pipeline bottlenecks before any GPU backend work.
+
+## Current Milestone: v1.5 CPU Rendering Performance Improvement
+
+**Goal:** Use Qt Quick renderer research plus live MESH profiling to identify the remaining CPU rendering bottlenecks, then implement retained pipeline improvements that make shipped shell surfaces feel visibly smoother on the software renderer.
 
 **Target features:**
-- Dirty-type invalidation for script/state, style, layout, paint, text, accessibility, metrics, and surface configuration
-- Incremental style propagation over stable retained widget identities
-- Incremental layout consumers that avoid full layout work when changes are scoped
-- A retained render-object/scene-graph layer separate from the widget tree
-- Retained display list and damage tracking so unchanged regions avoid unnecessary repaint/present work
-- Text shaping and glyph cache work sequenced after retained paint/damage foundations
-- Typed attribute/style slots, interned identifiers, and selector indexing to reduce repeated lookup and restyle cost
-- Display-list batching groundwork while preserving the rule that GPU backend work waits until retained rendering and damage tracking are in place
+- Qt Quick scene-graph and performance guidance translated into MESH-specific CPU rendering requirements
+- Benchmark-visible attribution for tree build, restyle, layout, render-object sync, retained display-list rebuild, command traversal, text shaping, glyph work, and icon/image raster work
+- Viewport- and visibility-aware pruning so offscreen or hidden content stops generating unnecessary CPU paint work
+- Incremental retained paint-command updates that avoid recollecting the full surface command set for local changes
+- Damage-scoped paint execution that touches only commands relevant to the changed region and overlays
+- Hardened SVG, bitmap, icon, text, and glyph caching for repeated CPU paints
+- Heuristic tuning and proof on shipped surfaces using the existing canonical benchmark scenarios
 
 ## Requirements
 
@@ -63,21 +75,23 @@ The project now also has performance instrumentation and benchmark coverage with
 - `v1.1`: Backend plugin MVP is stable enough to host real service providers and surface diagnostics.
 - `v1.2`: The renderer supports practical CSS-like styling, interaction reactivity, selection, keyboard navigation, and animation on shipped shell surfaces.
 - `v1.3`: Canonical benchmark scenarios, profiling snapshots, debug inspector views, and retained widget-tree identity/dirty summaries are available for measuring real responsiveness work.
+- `v1.4`: The renderer has typed invalidation, retained render objects, retained display data, damage tracking, text caching, selector indexing, and batching metrics on the software path.
 
 ### Active
 
-- Use Qt Quick-style retained rendering principles: separate item/widget state from retained render nodes, synchronize changed items into render nodes, retain geometry/resources, and batch renderable primitives.
-- Extend widget-layer dirty summaries into typed invalidation that downstream style, layout, paint, text, accessibility, metrics, and surface configuration stages can consume.
-- Avoid full tree rebuild/layout/paint work when stable node IDs and dirty types prove the change is scoped.
-- Establish damage tracking and retained display data before pursuing GPU backend work.
-- Keep performance proof tied to the existing debug inspector and canonical benchmark scenarios.
+- Make the CPU renderer visibly smoother on real shipped surfaces before investigating any GPU backend milestone.
+- Use profiling and benchmark proof to target the highest-cost retained rendering stages instead of optimizing blindly.
+- Stop whole-tree retained paint-command rebuilds and whole-command-list scans when only a local region changed.
+- Prune offscreen, hidden, or clip-excluded content earlier so the CPU painter does less work.
+- Retain more raster work for text, glyphs, SVGs, images, and icons so repeated paints avoid re-decoding or re-rasterizing unchanged assets.
 
 ### Out of Scope
 
-- Implementing the GPU backend itself — `v1.4` prepares the retained rendering and damage/batching foundations first.
-- Parallel paint/layout — this waits until ownership boundaries and retained render data remove the current bottlenecks.
-- Broad shell UI redesign — existing shipped surfaces and benchmarks remain the proof targets.
-- Full trace capture/replay or external telemetry — profiling remains live/debug-oriented unless needed to prove this milestone.
+- GPU backend implementation — the CPU retained pipeline must feel smooth first.
+- Parallel paint/layout — ownership and retained CPU data boundaries should be proven before parallel work.
+- Broad shell UI redesign — shipped surfaces remain the proof targets.
+- A second benchmark system distinct from the canonical debug scenarios — the existing benchmarks remain the acceptance harness.
+- Full trace persistence or telemetry export — milestone proof stays inspector- and benchmark-driven.
 
 ## Key Decisions
 
@@ -95,25 +109,30 @@ The project now also has performance instrumentation and benchmark coverage with
 | Responsiveness acceptance is based on fixed benchmark scenarios on shipped surfaces | Prevents vague performance claims and keeps optimization work measurable | Locked for v1.3 |
 | Retained rendering should follow Qt-style scene graph principles more than browser-engine architecture | MESH is a shell UI toolkit with controlled primitives, so item-to-render-node synchronization, retained geometry, dirty regions, and batching fit better than full browser pipeline complexity | Locked for v1.4 |
 | GPU backend work waits until retained rendering, dirty invalidation, retained display data, and damage tracking exist | Uploading brand-new paint data every frame would waste much of the GPU benefit | Locked for v1.4 |
+| CPU rendering smoothness comes before GPU work | A laggy software path would hide pipeline inefficiencies and make later GPU work harder to evaluate | Locked for v1.5 |
+| Qt research should inform implementation, not force a literal Qt clone | MESH needs the same retained-rendering principles, but applied to its existing Rust software-renderer architecture | Locked for v1.5 |
+| Visible smoothness on shipped surfaces outranks microbenchmark-only wins | The user reports real lag everywhere; optimization must improve lived interaction quality, not just synthetic numbers | Locked for v1.5 |
 
 <details>
 <summary>Archived milestone framing</summary>
 
 ## Previous Milestone Framing
 
-### v1.2 Rendering System Upgrade
+### v1.4 Major Performance Fixes
 
-The `v1.2` milestone centered on making MESH rendering expressive enough for distinctive shell UI without turning the renderer into a browser engine. It focused on practical CSS coverage, container and interaction reactivity, text selection and copy, keyboard navigation, animation support, and the navigation bar as the proof surface.
+The `v1.4` milestone centered on turning the retained widget-tree foundation from `v1.3` into a retained rendering pipeline: typed invalidation, incremental style/layout propagation, retained render objects, retained display data, damage tracking, text caching, selector indexing, and batching guardrails.
 
 ### v1.3 Performance Instrumentation and Responsiveness
 
 The `v1.3` milestone centered on measuring and proving real shell responsiveness through debug-only profiling snapshots, per-surface/backend attribution, a `.mesh` inspector, fixed benchmark scenarios, and the first retained widget-tree foundation.
 
+### v1.2 Rendering System Upgrade
+
+The `v1.2` milestone centered on making MESH rendering expressive enough for distinctive shell UI without turning the renderer into a browser engine. It focused on practical CSS coverage, container and interaction reactivity, text selection and copy, keyboard navigation, animation support, and the navigation bar as the proof surface.
+
 ### v1.1 Backend Plugin MVP
 
 The `v1.1` milestone centered on making backend plugins stable enough for MVP by first introducing a unified shell-owned plugin package manifest, then using it to drive backend lifecycle, provider selection, host APIs, service contracts, and diagnostics.
-
-Target features included the central plugin package manifest, frontend-to-backend dependency declaration, backend lifecycle control, the backend host API contract, service provider contracts, runtime diagnostics, and a fresh reference plugin proving the authoring path.
 
 </details>
 
@@ -135,4 +154,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-09 after starting milestone v1.4*
+*Last updated: 2026-05-10 after starting milestone v1.5*

@@ -1,33 +1,22 @@
 # MESH Milestones
 
-## v1.4 Major Performance Fixes (Shipped: 2026-05-09)
-
-**Phases completed:** 7 phases, 7 plans, 0 tasks
-
-**Key accomplishments:**
-
-- (none recorded)
-
----
-
-## v1.4 Major Performance Fixes
+## v1.5 CPU Rendering Performance Improvement
 
 **Status:** active
-**Started:** 2026-05-09
+**Started:** 2026-05-10
 
-**Goal:** Continue retained-rendering performance work by adding dirty-type invalidation, incremental style/layout propagation, retained render/display data, damage tracking, and batching foundations before GPU backend work.
+**Goal:** Research Qt Quick renderer patterns and current MESH CPU bottlenecks, then implement the retained pipeline, culling, and caching improvements needed to make shipped shell surfaces feel visibly smoother on the software renderer.
 
 **Planned scope:**
 
-- Dirty-type invalidation for script/state, style, layout, paint, text, accessibility, metrics, and surface configuration
-- Incremental style and layout propagation
-- Retained render-object scene graph
-- Retained display list and damage tracking
-- Text shaping and glyph cache
-- Typed slots, interned identifiers, selector indexing, and display-list batching
-- GPU and parallel rendering readiness guardrails
+- Attribute CPU render cost across canonical benchmark scenarios and shipped proof surfaces
+- Prune offscreen, hidden, and clip-excluded content earlier in the retained paint pipeline
+- Replace whole-tree retained paint-command recollection with dirty-subtree updates
+- Restrict partial-damage paints to commands that actually intersect the changed region
+- Cache expensive SVG, bitmap, icon, text, and glyph raster work more aggressively
+- Tune repaint heuristics for visible smoothness while keeping GPU and parallel rendering out of scope
 
-**Planned phases:** 19-25
+**Planned phases:** 26-31
 
 **Active artifacts:**
 
@@ -35,7 +24,34 @@
 - `.planning/REQUIREMENTS.md`
 - `.planning/ROADMAP.md`
 - `.planning/STATE.md`
-- `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md`
+- `.planning/research/STACK.md`
+- `.planning/research/FEATURES.md`
+- `.planning/research/ARCHITECTURE.md`
+- `.planning/research/PITFALLS.md`
+- `.planning/research/SUMMARY.md`
+
+## v1.4 Major Performance Fixes
+
+**Status:** shipped
+**Started:** 2026-05-09
+**Archived:** 2026-05-09
+
+**Goal:** Continue retained-rendering performance work by adding dirty-type invalidation, incremental style/layout propagation, retained render/display data, damage tracking, and batching foundations before GPU backend work.
+
+**Delivered:**
+
+- Typed invalidation for style, layout, paint, text, accessibility, metrics, and surface configuration changes
+- Incremental style/layout propagation over retained widget identity
+- Retained render objects synchronized from stable widget nodes
+- Retained display list plus damage tracking and partial-present metrics
+- Text layout caching, selector indexing, typed slots, and batching barrier counters
+- GPU-readiness guardrails without implementing a GPU backend
+
+**Stats:** 7 phases, 7 plans, retained CPU rendering foundations shipped
+
+**Archive artifacts:**
+
+- `.planning/milestones/v1.4-phases/`
 
 ## v1.3 Performance Instrumentation and Responsiveness
 
@@ -60,18 +76,31 @@
 - `.planning/milestones/v1.3-ROADMAP.md`
 - `.planning/milestones/v1.3-REQUIREMENTS.md`
 
-## v1.0 Scripting API Stabilization
+## v1.2 Rendering System Upgrade
 
-**Status:** archived by reset
-**Archived:** 2026-05-03
-**Reason:** User reset active roadmap to focus on backend plugin MVP fundamentals before continuing frontend documentation or distribution work.
+**Status:** shipped
+**Started:** 2026-05-05
+**Archived:** 2026-05-08
+
+**Goal:** Make MESH frontend rendering expressive and interactive enough for distinctive shell UI without turning the renderer into a full browser engine.
+
+**Delivered:**
+
+- Practical CSS coverage with diagnostics, shorthands, token resolution, and author docs
+- Container-size and interaction-state reactivity without losing runtime or service state
+- Selectable rendered text with copy support and theme-owned highlight rendering
+- Keyboard navigation, focus-visible behavior, and configurable shortcuts on shipped surfaces
+- Theme animation tokens and constrained CSS animation playback with diagnostics
+- Navigation-bar migration as the milestone proof surface
+
+**Stats:** 6 phases, 26 plans, 26 requirements shipped
+
+**Deferred at close:** 4 acknowledged items recorded in `.planning/STATE.md`
 
 **Archive artifacts:**
 
-- `.planning/milestones/v1.0-reset-2026-05-03-ROADMAP.md`
-- `.planning/milestones/v1.0-reset-2026-05-03-REQUIREMENTS.md`
-- `.planning/milestones/v1.0-reset-2026-05-03-STATE.md`
-- `.planning/milestones/v1.0-reset-2026-05-03-phases/`
+- `.planning/milestones/v1.2-ROADMAP.md`
+- `.planning/milestones/v1.2-REQUIREMENTS.md`
 
 ## v1.1 Backend Plugin MVP
 
@@ -99,28 +128,15 @@
 - `.planning/milestones/v1.1-ROADMAP.md`
 - `.planning/milestones/v1.1-REQUIREMENTS.md`
 
-## v1.2 Rendering System Upgrade
+## v1.0 Scripting API Stabilization
 
-**Status:** shipped
-**Started:** 2026-05-05
-**Archived:** 2026-05-08
-
-**Goal:** Make MESH frontend rendering expressive and interactive enough for distinctive shell UI without turning the renderer into a full browser engine.
-
-**Delivered:**
-
-- Practical CSS coverage with diagnostics, shorthands, token resolution, and author docs
-- Container-size and interaction-state reactivity without losing runtime or service state
-- Selectable rendered text with copy support and theme-owned highlight rendering
-- Keyboard navigation, focus-visible behavior, and configurable shortcuts on shipped surfaces
-- Theme animation tokens and constrained CSS animation playback with diagnostics
-- Navigation-bar migration as the milestone proof surface
-
-**Stats:** 6 phases, 26 plans, 26 requirements shipped
-
-**Deferred at close:** 4 acknowledged items recorded in `.planning/STATE.md`
+**Status:** archived by reset
+**Archived:** 2026-05-03
+**Reason:** User reset active roadmap to focus on backend plugin MVP fundamentals before continuing frontend documentation or distribution work.
 
 **Archive artifacts:**
 
-- `.planning/milestones/v1.2-ROADMAP.md`
-- `.planning/milestones/v1.2-REQUIREMENTS.md`
+- `.planning/milestones/v1.0-reset-2026-05-03-ROADMAP.md`
+- `.planning/milestones/v1.0-reset-2026-05-03-REQUIREMENTS.md`
+- `.planning/milestones/v1.0-reset-2026-05-03-STATE.md`
+- `.planning/milestones/v1.0-reset-2026-05-03-phases/`

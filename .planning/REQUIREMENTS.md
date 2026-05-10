@@ -1,125 +1,91 @@
-# Requirements: MESH v1.4 Major Performance Fixes
+# Requirements: MESH v1.5 CPU Rendering Performance Improvement
 
-**Defined:** 2026-05-09
+**Defined:** 2026-05-10
 **Core Value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
 
-## v1.4 Requirements
+## v1.5 Requirements
 
-### Dirty Invalidation
+### CPU Profiling and Proof
 
-- [ ] **DIRTY-01**: Developers can inspect typed dirty summaries that classify changed stable nodes by script/state, style, layout, paint, text, accessibility, metrics, and surface configuration impact.
-- [ ] **DIRTY-02**: Style-only, paint-only, text-only, and layout-affecting changes are routed to the narrowest valid downstream work instead of forcing a full dirty render.
-- [ ] **DIRTY-03**: Full widget-tree rebuild remains available as a correctness fallback when stable identity, child-order, or unsupported mutation data is insufficient for incremental work.
-- [ ] **DIRTY-04**: Dirty summaries preserve enough previous and next bounds/context for downstream damage and layout decisions to be deterministic.
+- [ ] **PERF-01**: Developers can inspect CPU render cost for tree build, style restyle, layout, render-object sync, retained display-list rebuild, paint traversal, text shaping, and icon/image raster work on each canonical benchmark scenario.
+- [ ] **PERF-02**: Every v1.5 optimization phase records before/after benchmark evidence on shipped surfaces using the existing canonical benchmark scenarios.
+- [ ] **PERF-03**: Optimization decisions are accepted only when they improve visible smoothness on shipped shell surfaces, not merely aggregate internal counters.
 
-### Incremental Style and Layout
+### Visibility and Culling
 
-- [ ] **INCR-01**: Style propagation can restyle changed stable nodes and affected descendants without restyling the entire retained widget tree.
-- [ ] **INCR-02**: Layout invalidation distinguishes local size/position changes from ancestor or surface-wide relayout requirements.
-- [ ] **INCR-03**: Layout consumers can reuse retained layout output for unaffected subtrees during scoped changes.
-- [ ] **INCR-04**: Incremental style/layout behavior is verified against interaction-state, container-size, and state-driven updates from shipped surfaces.
+- [ ] **CULL-01**: Fully offscreen descendants inside clipped or scrollable regions are omitted from retained paint-command generation or execution on the CPU path.
+- [ ] **CULL-02**: Nodes hidden by explicit visibility, surface state, or fully ineffective opacity stop generating unnecessary CPU paint work until they become visible again.
+- [ ] **CULL-03**: The renderer can choose between minimal-damage, bounding-rect, and full-surface repaint policies based on measured CPU cost instead of assuming the smallest region is always cheapest.
+- [ ] **CULL-04**: Clipping and viewport rules avoid per-item CPU overhead on small primitives when a cheaper elision or coarser-boundary alternative exists.
 
-### Retained Render Objects
+### Retained Paint Pipeline
 
-- [ ] **REND-01**: The renderer maintains a retained render-object or scene-graph tree derived from stable widget nodes rather than rebuilding render data from scratch for every frame.
-- [ ] **REND-02**: Render objects separate transform, clip, opacity, geometry, material/style, text, and accessibility-facing data so dirty types can update only the affected slots.
-- [ ] **REND-03**: Widget-to-render synchronization updates inserted, removed, reordered, and mutated nodes while preserving render-object identity where possible.
-- [ ] **REND-04**: Render-object ownership and mutation rules are explicit enough to support a future render-thread or GPU backend without unsafe cross-thread mutation assumptions.
+- [ ] **PIPE-01**: Local retained-tree changes rebuild only the affected render-object and paint-command subtrees instead of recollecting the full surface command set.
+- [ ] **PIPE-02**: Transforms, scroll offsets, and reorder-only changes can update retained paint data without invalidating unrelated descendant geometry or style state.
+- [ ] **PIPE-03**: Partial-damage paints visit only commands that intersect the damaged region or explicitly depend on global overlays such as tooltips or scrollbars.
+- [ ] **PIPE-04**: Command ordering, clipping, and visual correctness remain stable when filtered execution skips unrelated commands.
 
-### Retained Paint and Damage
+### Raster and Resource Caching
 
-- [x] **PAINT-01**: The display list or paint command layer is retained across frames and updated incrementally from dirty render objects.
-- [x] **PAINT-02**: Damage tracking computes changed regions from old and new bounds for paint, layout, transform, clip, text, and visibility changes.
-- [x] **PAINT-03**: Paint/present work is skipped or clipped for unchanged regions when the backend supports partial updates.
-- [x] **PAINT-04**: The debug inspector exposes retained-rendering metrics such as dirty node counts, retained-node reuse, damage area, display-list reuse, and skipped paint/present work.
+- [ ] **CACHE-01**: SVG icons, bitmap icons, and resized image variants are cached in a retained raster form so repeated paints avoid reparsing, decoding, and rescaling unchanged assets.
+- [ ] **CACHE-02**: Text and glyph caches continue to reuse unchanged layout and raster data across hover, animation, scroll, and state-driven updates.
+- [ ] **CACHE-03**: Opaque vs translucent resource metadata is retained so the painter can avoid unnecessary blending and redundant background draws when content is fully opaque.
 
-### Text and Resource Caching
+### Smoothness Guardrails
 
-- [x] **TEXT-01**: Text shaping output is cached by stable text identity, font/style inputs, content, and layout constraints.
-- [x] **TEXT-02**: Glyph cache behavior avoids reshaping or rerasterizing unchanged text during unrelated style, layout, or state updates.
-- [x] **TEXT-03**: Text cache invalidation handles content, font, size, wrapping, selection/highlight, and scale-factor changes without stale glyphs.
-
-### Lookup and Batching Optimizations
-
-- [x] **DATA-01**: High-traffic attributes and style properties use typed slots or equivalent compact storage instead of repeated string-key lookup on hot render paths.
-- [x] **DATA-02**: Stable identifiers, attribute names, style property names, and selector components are interned where profiling shows repeated allocation or comparison cost.
-- [x] **DATA-03**: Selector indexing narrows restyle candidates for class, id/key, pseudo-state, attribute, and structural selector changes.
-- [x] **BATCH-01**: Display-list batching groups compatible primitives by material/state while preserving MESH visual ordering semantics.
-- [x] **BATCH-02**: Clipping, opacity, transform, text, and overlapping translucent content record batching barriers so correctness is not traded for fewer draw calls.
-
-### Sequencing and Proof
-
-- [x] **SEQ-01**: GPU backend implementation remains out of milestone scope until retained render objects, retained display data, and damage tracking are working on the current backend.
-- [x] **SEQ-02**: Parallel paint/layout remains out of milestone scope until retained ownership boundaries make parallelism mechanically safe.
-- [x] **PROOF-01**: Each retained-rendering phase includes before/after benchmark evidence using the existing v1.3 canonical benchmark scenarios.
-- [x] **PROOF-02**: Normal shell behavior and visual output remain unchanged for shipped surfaces when retained/incremental paths are enabled.
+- [ ] **SMTH-01**: Canonical hover, surface open/close, pointer update, keyboard traversal, and backend update scenarios look visibly smoother on shipped surfaces after the milestone.
+- [ ] **SMTH-02**: Normal shell visuals and interaction correctness remain unchanged apart from smoother rendering behavior.
+- [ ] **SMTH-03**: GPU backend and parallel paint/layout remain out of scope until the CPU retained pipeline is demonstrably smooth on real surfaces.
 
 ## Future Requirements
 
-### GPU Backend
+### Deeper Diagnostics
 
-- **GPU-01**: Render retained display data through a wgpu/RHI-style backend that can target Vulkan/OpenGL-compatible platforms.
-- **GPU-02**: Retain GPU-side geometry, buffers, textures, and glyph resources across frames.
-- **GPU-03**: Support backend selection and fallback without changing plugin-facing `.mesh` semantics.
+- **VIS-01**: Add visual overlays for culled regions, filtered command hits, damage policy selection, and overdraw after the CPU pipeline is stable.
+- **TRACE-01**: Persist retained-rendering and raster-cache metrics for offline comparison if live inspector proof stops being sufficient.
 
-### Parallel Rendering
+### Future Rendering Work
 
-- **PAR-01**: Move eligible paint preparation to worker threads after retained render-object ownership is explicit.
-- **PAR-02**: Move eligible layout work to worker threads after layout inputs and outputs are immutable or partitioned safely.
-
-### Extended Tooling
-
-- **TRACE-01**: Persist retained-rendering and damage metrics for offline comparison.
-- **VIS-01**: Add visual debug overlays for dirty nodes, damage regions, retained display-list reuse, batching, clipping, and overdraw.
+- **GPU-01**: Render retained display data through a GPU backend once the CPU path is no longer the dominant bottleneck.
+- **PAR-01**: Move eligible paint/layout work to worker threads once retained ownership boundaries are explicit and mechanically safe.
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| GPU backend implementation | Retained rendering and damage tracking need to exist first or GPU uploads will still churn every frame. |
-| Parallel paint/layout implementation | Ownership and retained data boundaries are prerequisites for safe parallelism. |
-| Full browser-style engine architecture | MESH should borrow retained rendering principles without inheriting browser DOM/CSS/layout complexity. |
-| Broad shell UI redesign | The milestone proves performance on existing shipped surfaces and benchmarks. |
-| External telemetry or trace persistence | Live debug metrics and benchmark proof are enough for this milestone. |
+| GPU backend implementation | The user explicitly wants CPU rendering logic improved first, and current CPU waste would hide the real GPU value. |
+| Parallel paint/layout | Retained command ownership and repaint correctness should be proven on one CPU path before parallelism is introduced. |
+| Broad shell UI redesign | Existing shipped surfaces remain the proof targets for visible smoothness. |
+| A new benchmark harness | The canonical benchmark scenarios already exist and should remain the sole acceptance path. |
+| Trace persistence or telemetry export | Live inspector metrics and benchmark proof are sufficient for this milestone. |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DIRTY-01 | Phase 19 | Complete |
-| DIRTY-02 | Phase 19 | Complete |
-| DIRTY-03 | Phase 19 | Complete |
-| DIRTY-04 | Phase 19 | Complete |
-| INCR-01 | Phase 20 | Complete |
-| INCR-02 | Phase 20 | Complete |
-| INCR-03 | Phase 20 | Complete |
-| INCR-04 | Phase 20 | Complete |
-| REND-01 | Phase 21 | Complete |
-| REND-02 | Phase 21 | Complete |
-| REND-03 | Phase 21 | Complete |
-| REND-04 | Phase 21 | Complete |
-| PAINT-01 | Phase 22 | Complete |
-| PAINT-02 | Phase 22 | Complete |
-| PAINT-03 | Phase 22 | Complete |
-| PAINT-04 | Phase 22 | Complete |
-| TEXT-01 | Phase 23 | Complete |
-| TEXT-02 | Phase 23 | Complete |
-| TEXT-03 | Phase 23 | Complete |
-| DATA-01 | Phase 24 | Complete |
-| DATA-02 | Phase 24 | Complete |
-| DATA-03 | Phase 24 | Complete |
-| BATCH-01 | Phase 25 | Complete |
-| BATCH-02 | Phase 25 | Complete |
-| SEQ-01 | Phase 25 | Complete |
-| SEQ-02 | Phase 25 | Complete |
-| PROOF-01 | Phase 25 | Complete |
-| PROOF-02 | Phase 25 | Complete |
+| PERF-01 | Phase 26 | Pending |
+| PERF-02 | Phase 26 | Pending |
+| CULL-01 | Phase 27 | Pending |
+| CULL-02 | Phase 27 | Pending |
+| CULL-04 | Phase 27 | Pending |
+| PIPE-01 | Phase 28 | Pending |
+| PIPE-02 | Phase 28 | Pending |
+| PIPE-03 | Phase 29 | Pending |
+| PIPE-04 | Phase 29 | Pending |
+| CULL-03 | Phase 29 | Pending |
+| CACHE-01 | Phase 30 | Pending |
+| CACHE-02 | Phase 30 | Pending |
+| CACHE-03 | Phase 30 | Pending |
+| PERF-03 | Phase 31 | Pending |
+| SMTH-01 | Phase 31 | Pending |
+| SMTH-02 | Phase 31 | Pending |
+| SMTH-03 | Phase 31 | Pending |
 
 **Coverage:**
-- v1.4 requirements: 28 total
-- Mapped to phases: 28
+- v1.5 requirements: 17 total
+- Mapped to phases: 17
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-05-09*
-*Last updated: 2026-05-09 after starting milestone v1.4*
+*Requirements defined: 2026-05-10*
+*Last updated: 2026-05-10 after milestone initialization*
