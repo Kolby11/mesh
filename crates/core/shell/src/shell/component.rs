@@ -386,10 +386,6 @@ impl FrontendSurfaceComponent {
         self.invalidate_style_path(ComponentDirtyFlags::SURFACE_CONFIG);
     }
 
-    pub(super) fn invalidate_surface_config_only(&mut self) {
-        self.invalidate_style_path(ComponentDirtyFlags::SURFACE_CONFIG);
-    }
-
     pub(super) fn take_dirty_for_paint(
         &mut self,
     ) -> (bool, bool, ComponentDirtyFlags, ComponentDirtyFlags) {
