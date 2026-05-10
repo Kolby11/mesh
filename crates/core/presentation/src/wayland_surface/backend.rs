@@ -343,7 +343,6 @@ fn merge_optional_damage(
         (Some(_), None) | (None, Some(_)) | (None, None) => None,
     }
 }
-
 fn union_damage(current: Option<DamageRect>, next: DamageRect) -> DamageRect {
     let Some(current) = current else {
         return next;
@@ -596,7 +595,6 @@ impl LayerShellBackend {
 
         let width = buffer.width.max(1);
         let height = buffer.height.max(1);
-
         if self
             .state
             .surfaces
@@ -611,7 +609,6 @@ impl LayerShellBackend {
                 return Ok(());
             }
         }
-
         let qh = self.state.qh.clone();
         let state = &mut self.state;
         let pool = state

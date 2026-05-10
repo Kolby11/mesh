@@ -14,7 +14,6 @@ impl Shell {
             if !self.components[index].component.wants_render() {
                 continue;
             }
-
             let total_render_started = self.profiling_enabled().then(std::time::Instant::now);
             let profiling_enabled = self.profiling_enabled();
             let mut rerender_attempts = 0;
