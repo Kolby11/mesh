@@ -245,7 +245,13 @@ impl FrontendSurfaceComponent {
             // bounds before hit-testing, accessibility publishing, and paint.
             let layout_started = std::time::Instant::now();
             let measurer = SharedTextMeasurer;
-            LayoutEngine::compute_with_measurer(tree, width as f32, height as f32, Some(&measurer));
+            LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+                tree,
+                width as f32,
+                height as f32,
+                &mut self.intrinsic_layout_cache,
+                Some(&measurer),
+            );
             self.record_profiling_stage(
                 mesh_core_debug::ProfilingStage::Layout,
                 layout_started,

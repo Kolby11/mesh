@@ -171,6 +171,13 @@ pub enum CoreEvent {
         surface_id: SurfaceId,
         visible: bool,
     },
+    ThemeChanged {
+        theme_id: String,
+        is_dark: bool,
+    },
+    LocaleChanged {
+        locale: String,
+    },
     ShuttingDown,
 }
 

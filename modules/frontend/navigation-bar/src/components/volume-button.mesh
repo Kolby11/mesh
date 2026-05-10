@@ -11,7 +11,7 @@
 </template>
 
 <script lang="luau">
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 icon_name = "audio-volume-muted"

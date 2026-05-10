@@ -123,11 +123,11 @@ end)
 
 ### Via the interface proxy
 
-Use `require("@mesh/<service>")` to load an interface proxy. If the
+Use `require("mesh.<service>")` to load an interface proxy. If the
 interface is unavailable, `require` will throw, so wrap it in `pcall`:
 
 ```luau
-local ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local ok, audio = pcall(require, "mesh.audio@>=1.0")
 
 if not ok or not audio then
   showUnavailable("No audio backend installed.")

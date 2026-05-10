@@ -86,6 +86,10 @@ impl LayerShellHandler for State {
             .find(|(_, entry)| entry.layer_surface.wl_surface() == layer.wl_surface())
             .map(|(id, _)| id.clone());
         if let Some(id) = id {
+            tracing::debug!(
+                "[focus] layer_shell: layer surface closed, releasing focus grab if active for surface_id={id}"
+            );
+            self.release_surface_focus_grab(&id);
             self.surfaces.remove(&id);
         }
     }
@@ -189,6 +193,12 @@ impl PointerHandler for State {
                 }
                 PointerEventKind::Leave { .. } => {
                     tracing::debug!("[hover] layer_shell: pointer leave surface_id={surface_id}");
+                    if self.focus_grab_surface_id.as_deref() == Some(surface_id.as_str()) {
+                        tracing::debug!(
+                            "[focus] layer_shell: pointer left grabbed surface_id={surface_id}; releasing focus grab"
+                        );
+                        self.release_surface_focus_grab(&surface_id);
+                    }
                     if self.pointer_focus.as_deref() == Some(&surface_id) {
                         self.pointer_focus = None;
                     }
@@ -292,6 +302,10 @@ impl Dispatch<HyprlandFocusGrabV1, (), State> for State {
     ) {
         if let hyprland_focus_grab_v1::Event::Cleared = event {
             tracing::debug!("[focus] layer_shell: compositor cleared focus grab");
+            if let Some(grab) = state.focus_grab.take() {
+                grab.destroy();
+            }
+            state.focus_grab_requested_at = None;
             if let Some(surface_id) = state.focus_grab_surface_id.take() {
                 state.reapply_surface_config(&surface_id);
             }
@@ -314,7 +328,15 @@ impl KeyboardHandler for State {
         if self.keyboard_focus != focused {
             self.keyboard_repeat = None;
         }
-        self.keyboard_focus = focused;
+        self.keyboard_focus = focused.clone();
+        if let Some(surface_id) = focused
+            && self.focus_grab_surface_id.as_deref() == Some(surface_id.as_str())
+        {
+            tracing::debug!(
+                "[focus] layer_shell: keyboard focus entered grabbed surface_id={surface_id}; releasing focus grab"
+            );
+            self.release_surface_focus_grab(&surface_id);
+        }
     }
 
     fn leave(
@@ -322,9 +344,17 @@ impl KeyboardHandler for State {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _keyboard: &wl_keyboard::WlKeyboard,
-        _surface: &wl_surface::WlSurface,
+        surface: &wl_surface::WlSurface,
         _serial: u32,
     ) {
+        if let Some(surface_id) = self.surface_id_for_wl_surface(surface)
+            && self.focus_grab_surface_id.as_deref() == Some(surface_id.as_str())
+        {
+            tracing::debug!(
+                "[focus] layer_shell: keyboard focus left grabbed surface_id={surface_id}; releasing focus grab"
+            );
+            self.release_surface_focus_grab(&surface_id);
+        }
         self.keyboard_focus = None;
         self.keyboard_repeat = None;
     }

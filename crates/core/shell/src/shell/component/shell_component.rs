@@ -1,5 +1,12 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DamagePolicy {
+    Minimal,
+    BoundingRect,
+    FullRepaint,
+}
+
 impl ShellComponent for FrontendSurfaceComponent {
     fn id(&self) -> &str {
         &self.compiled.manifest.package.id
@@ -129,10 +136,12 @@ impl ShellComponent for FrontendSurfaceComponent {
             for runtime in runtimes.values_mut() {
                 let service_name = crate::shell::service::service_name_from_interface(service);
                 let required = format!("service.{service_name}.read");
-                let has_read = runtime
-                    .script_ctx
-                    .capabilities
-                    .is_granted(&Capability::new(&required));
+                let capabilities = &runtime.script_ctx.capabilities;
+                let has_read = capabilities.is_granted(&Capability::new(&required))
+                    || (service == "mesh.theme"
+                        && capabilities.is_granted(&Capability::new("theme.read")))
+                    || (service == "mesh.locale"
+                        && capabilities.is_granted(&Capability::new("locale.read")));
                 let previous = runtime.script_ctx.state().get(&service_name);
                 let tracked_fields = runtime.script_ctx.tracked_fields_for_service(&service_name);
                 apply_service_update(
@@ -281,9 +290,14 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.apply_style_animations_with_previous(&mut tree, &previous_visual_styles);
         let retained_dirty = self.retained_tree.update(&tree);
         let retained_tree_generation = self.retained_tree.generation();
-        let render_object_dirty = self
-            .retained_render_objects
-            .update_for_retained_generation(&tree, retained_tree_generation);
+        let use_generation_shortcuts =
+            dirty_types.is_empty() && !requires_tree_rebuild && !self.surface_pixels_invalid;
+        let render_object_dirty = if use_generation_shortcuts {
+            self.retained_render_objects
+                .update_for_retained_generation(&tree, retained_tree_generation)
+        } else {
+            self.retained_render_objects.update(&tree)
+        };
 
         let tooltip = if let (Some(start), Some(hovered_key)) =
             (self.hover_start, self.hovered_key.as_ref())
@@ -300,19 +314,52 @@ impl ShellComponent for FrontendSurfaceComponent {
             None
         };
 
-        let tooltip_visible = tooltip.is_some();
-        let force_full_damage = self.surface_pixels_invalid
-            || requires_tree_rebuild
-            || render_object_dirty.reordered > 0
-            || tooltip_visible
-            || self.tooltip_visible_previous;
-        let display_list_metrics = self.retained_display_list.update_for_retained_generation(
-            &tree,
-            retained_tree_generation,
-            content_width,
-            content_height,
-            force_full_damage,
-            true,
+        let surface_damage = DamageRect {
+            x: 0,
+            y: 0,
+            width: content_width.max(1),
+            height: content_height.max(1),
+        };
+        let display_list_metrics = if use_generation_shortcuts {
+            self.retained_display_list.update_for_retained_generation(
+                &tree,
+                retained_tree_generation,
+                content_width,
+                content_height,
+                self.surface_pixels_invalid,
+                true,
+            )
+        } else {
+            self.retained_display_list.update(
+                &tree,
+                content_width,
+                content_height,
+                self.surface_pixels_invalid,
+                true,
+            )
+        };
+        let current_tooltip_damage =
+            tooltip_damage_rect(tooltip.as_ref(), content_width, content_height);
+        let tooltip_damage = merge_optional_damage(
+            current_tooltip_damage,
+            self.last_tooltip_damage,
+            surface_damage,
+        );
+        let reorder_damage = if render_object_dirty.reordered > 0 {
+            damage_rect_for_node_ids(
+                &tree,
+                self.retained_render_objects.dirty_node_ids(),
+                surface_damage,
+            )
+        } else {
+            None
+        };
+        let effective_damage = select_effective_damage(
+            display_list_metrics,
+            surface_damage,
+            requires_tree_rebuild,
+            reorder_damage,
+            tooltip_damage,
         );
         self.invalidation_snapshot = Some(mesh_core_debug::ProfilingInvalidationSnapshot {
             full_rebuild: requires_tree_rebuild,
@@ -320,7 +367,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             retained_generation: self.retained_tree.generation(),
             component: dirty_types.to_debug_counts(),
             retained: retained_dirty.to_debug_counts(),
-            paint: retained_paint_snapshot(display_list_metrics),
+            paint: retained_paint_snapshot(display_list_metrics, effective_damage),
             text: mesh_core_debug::TextCacheSnapshot::default(),
         });
         tracing::trace!(
@@ -357,16 +404,16 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.publish_element_metrics(&tree);
 
         let paint_started = std::time::Instant::now();
-        self.last_present_damage = if display_list_metrics.damage_area == 0 {
-            None
+        let paint_damage = if effective_damage.full_surface {
+            Some(surface_damage)
         } else {
-            Some(display_list_metrics.damage_rect)
+            effective_damage.rect
         };
-        let text_cache_metrics = if display_list_metrics.damage_area == 0 {
+        let text_cache_metrics = if paint_damage.is_none() {
             TextCacheMetrics::default()
         } else {
-            let damage = display_list_metrics.damage_rect;
-            if display_list_metrics.full_surface_damage {
+            let damage = paint_damage.expect("present damage is available when paint runs");
+            if effective_damage.full_surface {
                 buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
             } else {
                 buffer.clear_rect(
@@ -381,7 +428,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 self.retained_display_list.paint_commands(),
                 buffer,
                 1.0,
-                (!display_list_metrics.full_surface_damage).then_some((
+                (!effective_damage.full_surface).then_some((
                     damage.x,
                     damage.y,
                     damage.width,
@@ -394,6 +441,8 @@ impl ShellComponent for FrontendSurfaceComponent {
                 Some(self.compiled.manifest.package.id.as_str()),
             )
         };
+        self.last_present_damage =
+            merge_optional_damage(self.last_present_damage, paint_damage, surface_damage);
         if let Some(snapshot) = self.invalidation_snapshot.as_mut() {
             snapshot.text = text_cache_snapshot(text_cache_metrics);
         }
@@ -406,7 +455,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             });
         }
         self.last_tree = Some(tree);
-        self.tooltip_visible_previous = tooltip_visible;
+        self.last_tooltip_damage = current_tooltip_damage;
         self.surface_pixels_invalid = false;
         self.clear_runtime_dirty_states();
 
@@ -414,15 +463,42 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn theme_changed(&mut self) -> Result<(), ComponentError> {
-        self.invalidate_style_path(ComponentDirtyFlags::STYLE_RELAYOUT | ComponentDirtyFlags::TEXT);
+        // Theme tokens drive every styled property. Drop every retained cache
+        // so the next paint rebuilds the tree from scratch with the new theme,
+        // and force a full pixel-buffer repaint so the selective-damage path
+        // cannot skip the present.
+        tracing::debug!("theme_changed for component '{}'", self.id());
+        self.last_tree = None;
+        self.cached_restyle_rules = None;
+        self.intrinsic_layout_cache = IntrinsicLayoutCache::default();
+        self.retained_tree = RetainedWidgetTree::default();
+        self.retained_render_objects = RenderObjectTree::default();
+        self.retained_display_list = RetainedDisplayList::default();
+        // A theme swap is a global palette replacement, not a local CSS
+        // transition. Drop transition state so stale light/dark colors cannot
+        // paint over the newly active theme.
+        self.style_animations.clear();
+        // Preserve keyframe timelines, but rebuild token-resolved rules.
+        self.keyframe_rules.clear();
+        self.render_hooks_pending = true;
+        self.surface_pixels_invalid = true;
+        self.invalidate_script_state();
         Ok(())
     }
 
     fn locale_changed(&mut self, locale: &LocaleEngine) -> Result<(), ComponentError> {
+        tracing::debug!("locale_changed for component '{}'", self.id());
         self.locale.set_locale(locale.current());
         self.runtimes.lock().unwrap().clear();
         self.init_root_runtime()?;
+        self.last_tree = None;
+        self.cached_restyle_rules = None;
+        self.intrinsic_layout_cache = IntrinsicLayoutCache::default();
+        self.retained_tree = RetainedWidgetTree::default();
+        self.retained_render_objects = RenderObjectTree::default();
+        self.retained_display_list = RetainedDisplayList::default();
         self.render_hooks_pending = true;
+        self.surface_pixels_invalid = true;
         self.invalidate_script_state();
         Ok(())
     }
@@ -603,5 +679,248 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn set_keyboard_mode_override(&mut self, mode: Option<KeyboardMode>) {
         self.keyboard_mode_override = mode;
         self.invalidate_surface_config();
+    }
+}
+
+fn select_effective_damage(
+    metrics: DisplayListMetrics,
+    surface: DamageRect,
+    requires_tree_rebuild: bool,
+    reorder_damage: Option<DamageRect>,
+    tooltip_damage: Option<DamageRect>,
+) -> EffectiveDamage {
+    if metrics.full_surface_damage {
+        return EffectiveDamage {
+            rect: Some(surface),
+            full_surface: true,
+        };
+    }
+
+    let base_damage = (metrics.damage_area > 0).then_some(metrics.damage_rect);
+    let combined_damage = merge_optional_damage(
+        merge_optional_damage(base_damage, reorder_damage, surface),
+        tooltip_damage,
+        surface,
+    );
+    let Some(damage) = combined_damage else {
+        return EffectiveDamage::none();
+    };
+
+    let policy = select_damage_policy(
+        metrics,
+        requires_tree_rebuild,
+        reorder_damage.is_some() || tooltip_damage.is_some(),
+        damage.area(),
+    );
+    match policy {
+        DamagePolicy::Minimal | DamagePolicy::BoundingRect => EffectiveDamage {
+            rect: Some(damage),
+            full_surface: false,
+        },
+        DamagePolicy::FullRepaint => EffectiveDamage {
+            rect: Some(surface),
+            full_surface: true,
+        },
+    }
+}
+
+fn select_damage_policy(
+    metrics: DisplayListMetrics,
+    requires_tree_rebuild: bool,
+    has_extra_damage_sources: bool,
+    candidate_area: u64,
+) -> DamagePolicy {
+    if candidate_area == 0 {
+        return DamagePolicy::Minimal;
+    }
+
+    let changed_entries = metrics
+        .entries_rebuilt
+        .saturating_add(metrics.entries_removed);
+    let mostly_changed_entries =
+        metrics.entries_total > 0 && changed_entries * 4 >= metrics.entries_total * 3;
+    let large_damage = metrics.surface_area > 0 && candidate_area * 2 >= metrics.surface_area;
+
+    if large_damage || (requires_tree_rebuild && mostly_changed_entries) {
+        DamagePolicy::FullRepaint
+    } else if has_extra_damage_sources {
+        DamagePolicy::BoundingRect
+    } else {
+        DamagePolicy::Minimal
+    }
+}
+
+fn tooltip_damage_rect(
+    tooltip: Option<&(String, f32, f32)>,
+    surface_width: u32,
+    surface_height: u32,
+) -> Option<DamageRect> {
+    let (_, cursor_x, cursor_y) = tooltip?;
+    let width = TOOLTIP_OVERLAY_WIDTH.min(surface_width.max(1));
+    let height = TOOLTIP_OVERLAY_HEIGHT.min(surface_height.max(1));
+    let max_x = surface_width.saturating_sub(width).saturating_sub(6);
+    let max_y = surface_height.saturating_sub(height).saturating_sub(6);
+    let x = (((*cursor_x + 14.0).round() as i32).max(4) as u32).min(max_x);
+    let y = (((*cursor_y + 18.0).round() as i32).max(4) as u32).min(max_y);
+    Some(DamageRect {
+        x,
+        y,
+        width,
+        height,
+    })
+}
+
+fn damage_rect_for_node_ids(
+    node: &WidgetNode,
+    node_ids: &HashSet<mesh_core_elements::NodeId>,
+    surface: DamageRect,
+) -> Option<DamageRect> {
+    let mut damage = None;
+    collect_damage_rect_for_node_ids(node, node_ids, surface, &mut damage);
+    damage
+}
+
+fn collect_damage_rect_for_node_ids(
+    node: &WidgetNode,
+    node_ids: &HashSet<mesh_core_elements::NodeId>,
+    surface: DamageRect,
+    damage: &mut Option<DamageRect>,
+) {
+    if node_ids.contains(&node.id)
+        && let Some(bounds) = damage_rect_for_widget_node(node, surface)
+    {
+        *damage = Some(match *damage {
+            Some(current) => union_damage(current, bounds),
+            None => bounds,
+        });
+    }
+
+    for child in &node.children {
+        collect_damage_rect_for_node_ids(child, node_ids, surface, damage);
+    }
+}
+
+fn damage_rect_for_widget_node(node: &WidgetNode, surface: DamageRect) -> Option<DamageRect> {
+    if node.layout.width <= 0.0 || node.layout.height <= 0.0 {
+        return None;
+    }
+    let left = node.layout.x.floor().max(0.0) as u32;
+    let top = node.layout.y.floor().max(0.0) as u32;
+    let right = (node.layout.x + node.layout.width).ceil().max(0.0) as u32;
+    let bottom = (node.layout.y + node.layout.height).ceil().max(0.0) as u32;
+    clip_damage(
+        DamageRect {
+            x: left,
+            y: top,
+            width: right.saturating_sub(left),
+            height: bottom.saturating_sub(top),
+        },
+        surface,
+    )
+}
+
+fn merge_optional_damage(
+    current: Option<DamageRect>,
+    next: Option<DamageRect>,
+    surface: DamageRect,
+) -> Option<DamageRect> {
+    match (current, next) {
+        (Some(current), Some(next)) => clip_damage(union_damage(current, next), surface),
+        (Some(current), None) => clip_damage(current, surface),
+        (None, Some(next)) => clip_damage(next, surface),
+        (None, None) => None,
+    }
+}
+
+fn union_damage(current: DamageRect, next: DamageRect) -> DamageRect {
+    let left = current.x.min(next.x);
+    let top = current.y.min(next.y);
+    let right = current
+        .x
+        .saturating_add(current.width)
+        .max(next.x.saturating_add(next.width));
+    let bottom = current
+        .y
+        .saturating_add(current.height)
+        .max(next.y.saturating_add(next.height));
+    DamageRect {
+        x: left,
+        y: top,
+        width: right.saturating_sub(left),
+        height: bottom.saturating_sub(top),
+    }
+}
+
+fn clip_damage(rect: DamageRect, surface: DamageRect) -> Option<DamageRect> {
+    let left = rect.x.max(surface.x);
+    let top = rect.y.max(surface.y);
+    let right = rect
+        .x
+        .saturating_add(rect.width)
+        .min(surface.x.saturating_add(surface.width));
+    let bottom = rect
+        .y
+        .saturating_add(rect.height)
+        .min(surface.y.saturating_add(surface.height));
+    (right > left && bottom > top).then_some(DamageRect {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn surface(width: u32, height: u32) -> DamageRect {
+        DamageRect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn policy_keeps_small_overlay_damage_as_bounding_rect() {
+        let metrics = DisplayListMetrics {
+            surface_area: 10_000,
+            ..Default::default()
+        };
+        let tooltip = Some(DamageRect {
+            x: 10,
+            y: 10,
+            width: 40,
+            height: 20,
+        });
+
+        let effective = select_effective_damage(metrics, surface(100, 100), false, None, tooltip);
+
+        assert_eq!(
+            effective.rect, tooltip,
+            "small tooltip invalidation should stay as a bounded repaint"
+        );
+        assert!(!effective.full_surface);
+    }
+
+    #[test]
+    fn policy_promotes_large_bounding_damage_to_full_repaint() {
+        let metrics = DisplayListMetrics {
+            surface_area: 10_000,
+            ..Default::default()
+        };
+        let reorder = Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 80,
+        });
+
+        let effective = select_effective_damage(metrics, surface(100, 100), false, reorder, None);
+
+        assert!(effective.full_surface);
+        assert_eq!(effective.rect, Some(surface(100, 100)));
     }
 }

@@ -6,12 +6,11 @@
 /// The injected API:
 ///
 /// ```text
-/// require("@mesh/<service>") → interface proxy
-/// require("@mesh/<service>").state → active provider latest state table
+/// require("mesh.<service>") → interface proxy
+/// require("mesh.<service>").state → active provider latest state table
 /// mesh.theme.token(name)      → value          (requires theme.read)
 /// mesh.theme.tokens(group)    → table          (requires theme.read)
 /// mesh.theme.on_change(cb)    → subscription   (requires theme.read)
-/// mesh.service.use(name)      → service proxy  (frontend helper)
 /// mesh.locale.current()       → string         (requires locale.read)
 /// mesh.locale.translate(key)  → string         (requires locale.read)
 /// mesh.config()               → table          (backend helper; full module settings)

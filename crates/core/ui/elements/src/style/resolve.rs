@@ -322,6 +322,16 @@ impl<'a> StyleResolver<'a> {
         attrs: &StyleNodeAttrs,
         context: StyleContext,
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
+        let index = StyleRuleIndex::new(rules);
+        self.resolve_node_style_with_attrs_indexed(&index, attrs, context)
+    }
+
+    fn resolve_node_style_with_attrs_indexed(
+        &self,
+        index: &StyleRuleIndex<'_>,
+        attrs: &StyleNodeAttrs,
+        context: StyleContext,
+    ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
         let mut style = ComputedStyle::default();
         let mut diagnostics = Vec::new();
         let mut variables = HashMap::new();
@@ -338,7 +348,6 @@ impl<'a> StyleResolver<'a> {
             &mut variables,
         );
 
-        let index = StyleRuleIndex::new(rules);
         for rule in index.candidate_rules(attrs) {
             if rule_matches_attrs(rule, attrs, context) {
                 for decl in &rule.declarations {
@@ -384,9 +393,18 @@ impl<'a> StyleResolver<'a> {
         rules: &[StyleRule],
         context: StyleContext,
     ) {
+        let index = StyleRuleIndex::new(rules);
+        self.restyle_subtree_with_index(node, &index, context);
+    }
+
+    fn restyle_subtree_with_index(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        index: &StyleRuleIndex<'_>,
+        context: StyleContext,
+    ) {
         if node.state != ElementState::default() {
             let attrs = StyleNodeAttrs::from_node(node);
-            let index = StyleRuleIndex::new(rules);
 
             tracing::debug!(
                 "[hover] restyle: tag={} classes={:?} state={state:?}",
@@ -418,7 +436,7 @@ impl<'a> StyleResolver<'a> {
         let children = std::mem::take(&mut node.children);
         let mut restyled = children;
         for child in &mut restyled {
-            self.restyle_subtree(child, rules, context);
+            self.restyle_subtree_with_index(child, index, context);
         }
         node.children = restyled;
     }
@@ -430,17 +448,30 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
         target_keys: &std::collections::HashSet<String>,
     ) {
+        let index = StyleRuleIndex::new(rules);
+        self.restyle_subtree_for_keys_with_index(node, &index, context, target_keys);
+    }
+
+    fn restyle_subtree_for_keys_with_index(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        index: &StyleRuleIndex<'_>,
+        context: StyleContext,
+        target_keys: &std::collections::HashSet<String>,
+    ) {
         if node
             .attributes
             .get("_mesh_key")
             .is_some_and(|key| target_keys.contains(key))
         {
             let attrs = StyleNodeAttrs::from_node(node);
-            node.computed_style = self.resolve_node_style_with_attrs(rules, &attrs, context).0;
+            node.computed_style = self
+                .resolve_node_style_with_attrs_indexed(index, &attrs, context)
+                .0;
         }
 
         for child in &mut node.children {
-            self.restyle_subtree_for_keys(child, rules, context, target_keys);
+            self.restyle_subtree_for_keys_with_index(child, index, context, target_keys);
         }
     }
 

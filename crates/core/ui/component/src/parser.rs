@@ -510,7 +510,7 @@ end
         let source = r#"
 <script lang="luau">
 local handler = function() end
-local audio = require("@mesh/audio")
+local audio = require("mesh.audio")
 mesh.service.bind("audio.muted", "audio_muted")
 mesh.service.on("audio", "sync_audio_state")
 </script>
@@ -521,7 +521,7 @@ mesh.service.on("audio", "sync_audio_state")
         assert!(
             script
                 .source
-                .contains("local audio = require(\"@mesh/audio\")")
+                .contains("local audio = require(\"mesh.audio\")")
         );
         assert!(
             script

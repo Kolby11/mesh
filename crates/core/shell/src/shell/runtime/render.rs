@@ -201,6 +201,12 @@ impl Shell {
             }
 
             let mut present_damage = self.components[index].component.take_present_damage();
+            if visible && self.components[index].force_full_present {
+                if let Some(buffer) = self.components[index].paint_buffer.as_ref() {
+                    present_damage = Some(full_buffer_damage(buffer));
+                }
+                self.components[index].force_full_present = false;
+            }
             if visible && self.debug.show_layout_bounds {
                 let runtime = &mut self.components[index];
                 if let Some(tree) = runtime.component.last_widget_tree() {

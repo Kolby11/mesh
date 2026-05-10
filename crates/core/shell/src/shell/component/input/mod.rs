@@ -62,6 +62,7 @@ impl FrontendSurfaceComponent {
                                     &[serde_json::json!(value)],
                                 )?);
                             }
+                            self.invalidate_script_state();
                         } else {
                             self.active_slider_key = None;
                             if find_node_by_key(&tree, &node_key).is_some_and(|node| {
@@ -101,6 +102,7 @@ impl FrontendSurfaceComponent {
                             "release",
                             &[serde_json::json!(value)],
                         )?);
+                        self.invalidate_script_state();
                     }
 
                     self.end_text_selection_drag();
@@ -140,7 +142,14 @@ impl FrontendSurfaceComponent {
                             &[serde_json::json!(value)],
                         )?);
                     }
-                    self.invalidate_interaction_restyle();
+                    // Slider drag must always trigger a full repaint: the knob
+                    // moved (slider_values mutated above) and the change handler
+                    // typically writes reactive globals (e.g. percent label).
+                    // Force a script-state rebuild + full surface repaint
+                    // unconditionally; relying on state_dirty detection misses
+                    // intermediate frames and the selective-damage path can
+                    // skip presents when only text content differs.
+                    self.invalidate_script_state();
                     if !requests.is_empty() {
                         return Ok(requests);
                     }

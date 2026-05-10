@@ -1353,6 +1353,21 @@ fn shell_registers_debug_provider_for_builtin_inspector_imports() {
 }
 
 #[test]
+fn shell_registers_theme_provider_for_frontend_theme_proxy() {
+    let shell = Shell::new();
+    let resolution = shell.interfaces.resolve("mesh.theme", None);
+
+    assert_eq!(
+        resolution
+            .provider
+            .as_ref()
+            .map(|provider| provider.provider_module.as_str()),
+        Some("@mesh/shell"),
+        "frontend modules with theme.read must be able to resolve require(\"mesh.theme\")"
+    );
+}
+
+#[test]
 fn debug_snapshot_publish_delivers_mesh_debug_service_event() {
     let mut shell = Shell::new();
     shell.debug.enabled = true;
@@ -2356,6 +2371,13 @@ fn pointer_click_claims_keyboard_owner_without_forcing_exclusive_mode() {
         Some(mesh_core_wayland::KeyboardMode::OnDemand)
     );
     assert_eq!(
+        shell
+            .surfaces
+            .get("@mesh/audio-popover")
+            .map(|surface| surface.keyboard_mode),
+        Some(mesh_core_wayland::KeyboardMode::Exclusive)
+    );
+    assert_eq!(
         popover_state
             .lock()
             .unwrap()
@@ -2366,6 +2388,93 @@ fn pointer_click_claims_keyboard_owner_without_forcing_exclusive_mode() {
     assert_eq!(
         nav_state.lock().unwrap().keyboard_mode_overrides.as_slice(),
         [None]
+    );
+}
+
+#[test]
+fn pointer_click_inside_keyboard_owner_preserves_exclusive_override() {
+    let mut shell = Shell::new();
+    let popover_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/audio-popover",
+        popover_state.clone(),
+    )));
+    shell.keyboard_focus_surface = Some("@mesh/audio-popover".into());
+
+    shell.claim_keyboard_focus_for_surface("@mesh/audio-popover");
+
+    assert_eq!(
+        shell.keyboard_focus_surface.as_deref(),
+        Some("@mesh/audio-popover")
+    );
+    assert!(
+        popover_state
+            .lock()
+            .unwrap()
+            .keyboard_mode_overrides
+            .is_empty(),
+        "clicking the already-focused popover must not clear its Exclusive keyboard override"
+    );
+}
+
+#[test]
+fn pointer_click_after_transfer_clears_transfer_forced_exclusive_override() {
+    let mut shell = Shell::new();
+    let nav_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    let popover_state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/navigation-bar",
+        nav_state.clone(),
+    )));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/audio-popover",
+        popover_state.clone(),
+    )));
+    shell.keyboard_focus_surface = Some("@mesh/navigation-bar".into());
+    let mut emitted = shell
+        .apply_request(CoreRequest::TransferTabFocus {
+            from_surface: "@mesh/navigation-bar".into(),
+            to_surface: "@mesh/audio-popover".into(),
+            target: TabFocusTarget::First,
+            return_target: Some(("@mesh/navigation-bar".into(), "volume-button".into())),
+            target_closes_on_leave: true,
+            close_source: None,
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+
+    assert_eq!(
+        shell
+            .surfaces
+            .get("@mesh/audio-popover")
+            .map(|surface| surface.keyboard_mode),
+        Some(mesh_core_wayland::KeyboardMode::Exclusive)
+    );
+    assert_eq!(
+        popover_state
+            .lock()
+            .unwrap()
+            .keyboard_mode_overrides
+            .as_slice(),
+        [Some(mesh_core_wayland::KeyboardMode::Exclusive)]
+    );
+
+    shell.claim_keyboard_focus_for_surface("@mesh/audio-popover");
+
+    assert_eq!(
+        popover_state
+            .lock()
+            .unwrap()
+            .keyboard_mode_overrides
+            .as_slice(),
+        [Some(mesh_core_wayland::KeyboardMode::Exclusive), None]
+    );
+    assert_eq!(
+        shell
+            .surfaces
+            .get("@mesh/audio-popover")
+            .map(|surface| surface.keyboard_mode),
+        Some(mesh_core_wayland::KeyboardMode::OnDemand)
     );
 }
 
@@ -2896,6 +3005,29 @@ fn settings_theme_reload_syncs_theme_service_state() {
             .get("mesh.theme")
             .and_then(|state| state.state.get("is_dark")),
         Some(&serde_json::json!(false))
+    );
+}
+
+#[test]
+fn set_theme_forces_full_present_on_existing_components() {
+    let mut shell = Shell::new();
+    let seen_events = Arc::new(Mutex::new(Vec::new()));
+    shell
+        .components
+        .push(super::types::ComponentRuntime::new(Box::new(
+            RecordingComponent::new(seen_events),
+        )));
+
+    let mut light = mesh_core_theme::default_theme();
+    light.id = "test-light-present".into();
+    light.name = "test-light-present".into();
+    shell.theme.register_theme(light);
+
+    shell.apply_set_theme("test-light-present").unwrap();
+
+    assert!(
+        shell.components[0].force_full_present,
+        "theme changes must force a full present for already-painted surfaces"
     );
 }
 

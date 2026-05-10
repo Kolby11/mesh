@@ -2,11 +2,14 @@
 ///
 /// Computes `LayoutRect` for every node in a widget tree. Supports row/column
 /// direction, flex-grow/shrink, gap, padding, and margin.
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+
 use crate::style::{
     AlignItems, AlignSelf, Dimension, Display, Edges, FlexDirection, JustifyContent, Overflow,
     Position, TextDirection,
 };
-use crate::tree::WidgetNode;
+use crate::tree::{NodeId, WidgetNode};
 
 /// Trait for measuring text dimensions. Implemented outside `mesh-core-elements` (in the
 /// shell render stack) and injected so the layout engine can shrink-wrap text
@@ -40,13 +43,196 @@ impl LayoutRect {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct IntrinsicLayoutCache {
+    generation: u64,
+    entries: HashMap<IntrinsicLayoutKey, IntrinsicLayoutEntry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct IntrinsicLayoutKey {
+    node_id: NodeId,
+    subtree_signature: u64,
+    available_width_bits: u32,
+    available_height_bits: u32,
+    text_measurement_enabled: bool,
+    override_root_width_auto: bool,
+    override_root_height_auto: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct IntrinsicLayoutEntry {
+    layout: LayoutRect,
+    last_used_generation: u64,
+}
+
+impl IntrinsicLayoutCache {
+    fn begin_pass(&mut self) -> u64 {
+        self.generation = self.generation.saturating_add(1).max(1);
+        self.generation
+    }
+
+    fn get(&mut self, key: IntrinsicLayoutKey, generation: u64) -> Option<LayoutRect> {
+        let entry = self.entries.get_mut(&key)?;
+        entry.last_used_generation = generation;
+        Some(entry.layout)
+    }
+
+    fn insert(&mut self, key: IntrinsicLayoutKey, layout: LayoutRect, generation: u64) {
+        self.entries.insert(
+            key,
+            IntrinsicLayoutEntry {
+                layout,
+                last_used_generation: generation,
+            },
+        );
+    }
+
+    fn finish_pass(&mut self, generation: u64) {
+        self.entries
+            .retain(|_, entry| entry.last_used_generation == generation);
+    }
+}
+
+struct LayoutContext<'a> {
+    measurer: Option<&'a dyn TextMeasurer>,
+    intrinsic_cache: Option<&'a mut IntrinsicLayoutCache>,
+    cache_generation: u64,
+    signature_cache: HashMap<NodeId, u64>,
+}
+
+impl<'a> LayoutContext<'a> {
+    fn new(
+        measurer: Option<&'a dyn TextMeasurer>,
+        intrinsic_cache: Option<&'a mut IntrinsicLayoutCache>,
+    ) -> Self {
+        let mut intrinsic_cache = intrinsic_cache;
+        let cache_generation = intrinsic_cache
+            .as_mut()
+            .map(|cache| cache.begin_pass())
+            .unwrap_or_default();
+        Self {
+            measurer,
+            intrinsic_cache,
+            cache_generation,
+            signature_cache: HashMap::new(),
+        }
+    }
+
+    fn finish_pass(&mut self) {
+        if let Some(cache) = self.intrinsic_cache.as_mut() {
+            cache.finish_pass(self.cache_generation);
+        }
+    }
+
+    fn measure_intrinsic_layout(
+        &mut self,
+        node: &WidgetNode,
+        available_w: f32,
+        available_h: f32,
+        override_root_width_auto: bool,
+        override_root_height_auto: bool,
+    ) -> LayoutRect {
+        let key = if self.intrinsic_cache.is_some() {
+            Some(IntrinsicLayoutKey {
+                node_id: node.id,
+                subtree_signature: self.intrinsic_signature(node),
+                available_width_bits: available_w.to_bits(),
+                available_height_bits: available_h.to_bits(),
+                text_measurement_enabled: self.measurer.is_some(),
+                override_root_width_auto,
+                override_root_height_auto,
+            })
+        } else {
+            None
+        };
+        if let Some(key) = key
+            && let Some(layout) = self
+                .intrinsic_cache
+                .as_mut()
+                .and_then(|cache| cache.get(key, self.cache_generation))
+        {
+            return layout;
+        }
+
+        let mut probe = node.clone();
+        if override_root_width_auto {
+            probe.computed_style.width = Dimension::Auto;
+        }
+        if override_root_height_auto {
+            probe.computed_style.height = Dimension::Auto;
+        }
+        layout_node(&mut probe, 0.0, 0.0, available_w, available_h, self);
+        let layout = probe.layout;
+        if let Some(key) = key
+            && let Some(cache) = self.intrinsic_cache.as_mut()
+        {
+            cache.insert(key, layout, self.cache_generation);
+        }
+        layout
+    }
+
+    fn intrinsic_signature(&mut self, node: &WidgetNode) -> u64 {
+        if let Some(signature) = self.signature_cache.get(&node.id) {
+            return *signature;
+        }
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        node.tag.hash(&mut hasher);
+        node.attributes.get("content").hash(&mut hasher);
+        hash_dimension(node.computed_style.width, &mut hasher);
+        hash_dimension(node.computed_style.height, &mut hasher);
+        hash_dimension(node.computed_style.flex_basis, &mut hasher);
+        hash_option_f32(node.computed_style.min_width, &mut hasher);
+        hash_option_f32(node.computed_style.max_width, &mut hasher);
+        hash_option_f32(node.computed_style.min_height, &mut hasher);
+        hash_option_f32(node.computed_style.max_height, &mut hasher);
+        hash_edges(node.computed_style.padding, &mut hasher);
+        hash_edges(node.computed_style.margin, &mut hasher);
+        hash_enum(node.computed_style.display, &mut hasher);
+        hash_enum(node.computed_style.direction, &mut hasher);
+        hash_enum(node.computed_style.justify_content, &mut hasher);
+        hash_enum(node.computed_style.align_items, &mut hasher);
+        hash_enum(node.computed_style.align_self, &mut hasher);
+        hash_enum(node.computed_style.position, &mut hasher);
+        hash_enum(node.computed_style.overflow_x, &mut hasher);
+        hash_enum(node.computed_style.overflow_y, &mut hasher);
+        hash_enum(node.computed_style.text_direction, &mut hasher);
+        node.computed_style.gap.to_bits().hash(&mut hasher);
+        node.computed_style.flex_grow.to_bits().hash(&mut hasher);
+        node.computed_style.flex_shrink.to_bits().hash(&mut hasher);
+        node.computed_style.font_family.hash(&mut hasher);
+        node.computed_style.font_size.to_bits().hash(&mut hasher);
+        node.computed_style.font_weight.hash(&mut hasher);
+        node.computed_style.line_height.to_bits().hash(&mut hasher);
+        hash_option_f32(node.computed_style.inset_top, &mut hasher);
+        hash_option_f32(node.computed_style.inset_right, &mut hasher);
+        hash_option_f32(node.computed_style.inset_bottom, &mut hasher);
+        hash_option_f32(node.computed_style.inset_left, &mut hasher);
+        for child in &node.children {
+            child.id.hash(&mut hasher);
+            self.intrinsic_signature(child).hash(&mut hasher);
+        }
+        let signature = hasher.finish();
+        self.signature_cache.insert(node.id, signature);
+        signature
+    }
+}
+
 /// The layout engine. Stateless — call `compute` on a widget tree.
 pub struct LayoutEngine;
 
 impl LayoutEngine {
     /// Compute layout for the entire tree within the given bounds.
     pub fn compute(root: &mut WidgetNode, available_width: f32, available_height: f32) {
-        layout_node(root, 0.0, 0.0, available_width, available_height, None);
+        let mut cache = IntrinsicLayoutCache::default();
+        Self::compute_with_intrinsic_cache_and_measurer(
+            root,
+            available_width,
+            available_height,
+            &mut cache,
+            None,
+        );
     }
 
     /// Like `compute` but with an optional text measurer for accurate shrink-wrapping.
@@ -56,7 +242,34 @@ impl LayoutEngine {
         available_height: f32,
         measurer: Option<&dyn TextMeasurer>,
     ) {
-        layout_node(root, 0.0, 0.0, available_width, available_height, measurer);
+        let mut cache = IntrinsicLayoutCache::default();
+        Self::compute_with_intrinsic_cache_and_measurer(
+            root,
+            available_width,
+            available_height,
+            &mut cache,
+            measurer,
+        );
+    }
+
+    /// Reuses retained intrinsic probe results across layout passes.
+    pub fn compute_with_intrinsic_cache_and_measurer(
+        root: &mut WidgetNode,
+        available_width: f32,
+        available_height: f32,
+        intrinsic_cache: &mut IntrinsicLayoutCache,
+        measurer: Option<&dyn TextMeasurer>,
+    ) {
+        let mut context = LayoutContext::new(measurer, Some(intrinsic_cache));
+        layout_node(
+            root,
+            0.0,
+            0.0,
+            available_width,
+            available_height,
+            &mut context,
+        );
+        context.finish_pass();
     }
 }
 
@@ -66,7 +279,7 @@ fn layout_node(
     y: f32,
     available_w: f32,
     available_h: f32,
-    measurer: Option<&dyn TextMeasurer>,
+    context: &mut LayoutContext<'_>,
 ) {
     if node.computed_style.display == Display::None {
         node.layout = LayoutRect::default();
@@ -79,29 +292,31 @@ fn layout_node(
     let margin = style.margin;
 
     // For text leaf nodes, measure intrinsic size if a measurer is available.
-    let text_dims: Option<(f32, f32)> =
-        if let (true, Some(m)) = (node.tag == "text" && node.children.is_empty(), measurer) {
-            let text = node
-                .attributes
-                .get("content")
-                .map(|s| s.as_str())
-                .unwrap_or("");
-            let avail_w = (available_w - margin.horizontal()).max(0.0);
-            let mw = match style.width {
-                Dimension::Content => None,
-                _ => Some(avail_w),
-            };
-            Some(m.measure_text(
-                text,
-                &style.font_family,
-                style.font_size,
-                style.font_weight,
-                style.line_height,
-                mw,
-            ))
-        } else {
-            None
+    let text_dims: Option<(f32, f32)> = if let (true, Some(m)) = (
+        node.tag == "text" && node.children.is_empty(),
+        context.measurer,
+    ) {
+        let text = node
+            .attributes
+            .get("content")
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let avail_w = (available_w - margin.horizontal()).max(0.0);
+        let mw = match style.width {
+            Dimension::Content => None,
+            _ => Some(avail_w),
         };
+        Some(m.measure_text(
+            text,
+            &style.font_family,
+            style.font_size,
+            style.font_weight,
+            style.line_height,
+            mw,
+        ))
+    } else {
+        None
+    };
 
     // Resolve own size, then apply min/max constraints.
     let width = if let Some((tw, _)) = text_dims {
@@ -119,10 +334,9 @@ fn layout_node(
                 // Container with Content: dry-run to measure children naturally.
                 // Override Content → Auto on the probe so we don't recurse infinitely.
                 if !node.children.is_empty() {
-                    let mut probe = node.clone();
-                    probe.computed_style.width = Dimension::Auto;
-                    layout_node(&mut probe, 0.0, 0.0, 32_000.0, available_h, measurer);
-                    probe.layout.width
+                    context
+                        .measure_intrinsic_layout(node, 32_000.0, available_h, true, false)
+                        .width
                 } else {
                     (available_w - margin.horizontal()).max(0.0)
                 }
@@ -242,12 +456,14 @@ fn layout_node(
                         } else {
                             (large, inner_h)
                         };
-                        let mut dummy = node.children[idx].clone();
-                        layout_node(&mut dummy, 0.0, 0.0, mw, mh, measurer);
                         let size = if is_column {
-                            dummy.layout.height
+                            context
+                                .measure_intrinsic_layout(&node.children[idx], mw, mh, false, false)
+                                .height
                         } else {
-                            dummy.layout.width
+                            context
+                                .measure_intrinsic_layout(&node.children[idx], mw, mh, false, false)
+                                .width
                         };
                         child_sizes[idx] = size;
                         fixed_main += size;
@@ -273,12 +489,14 @@ fn layout_node(
                 } else {
                     (large, inner_h)
                 };
-                let mut dummy = node.children[idx].clone();
-                layout_node(&mut dummy, 0.0, 0.0, mw, mh, measurer);
                 child_sizes[idx] = if is_column {
-                    dummy.layout.height
+                    context
+                        .measure_intrinsic_layout(&node.children[idx], mw, mh, false, false)
+                        .height
                 } else {
-                    dummy.layout.width
+                    context
+                        .measure_intrinsic_layout(&node.children[idx], mw, mh, false, false)
+                        .width
                 };
             } else {
                 child_sizes[idx] = 0.0;
@@ -335,7 +553,7 @@ fn layout_node(
                 )
             };
 
-            layout_node(&mut node.children[idx], cx, cy, cw, ch, measurer);
+            layout_node(&mut node.children[idx], cx, cy, cw, ch, context);
             content_main += child_main_size;
             cursor += child_main_size + style.gap + extra_gap;
         }
@@ -401,10 +619,46 @@ fn layout_node(
             let child = &node.children[i];
             absolute_child_rect(child, node.layout, node.computed_style.padding)
         };
-        layout_node(&mut node.children[i], ax, ay, aw, ah, measurer);
+        layout_node(&mut node.children[i], ax, ay, aw, ah, context);
         // Restore the computed absolute position — layout_node adds margin to x/y,
         // and absolute_child_rect already subtracts it so the result is correct.
     }
+}
+
+fn hash_dimension(dimension: Dimension, hasher: &mut impl Hasher) {
+    match dimension {
+        Dimension::Auto => 0u8.hash(hasher),
+        Dimension::Px(value) => {
+            1u8.hash(hasher);
+            value.to_bits().hash(hasher);
+        }
+        Dimension::Percent(value) => {
+            2u8.hash(hasher);
+            value.to_bits().hash(hasher);
+        }
+        Dimension::Content => 3u8.hash(hasher),
+    }
+}
+
+fn hash_option_f32(value: Option<f32>, hasher: &mut impl Hasher) {
+    match value {
+        Some(value) => {
+            true.hash(hasher);
+            value.to_bits().hash(hasher);
+        }
+        None => false.hash(hasher),
+    }
+}
+
+fn hash_edges(edges: Edges, hasher: &mut impl Hasher) {
+    edges.top.to_bits().hash(hasher);
+    edges.right.to_bits().hash(hasher);
+    edges.bottom.to_bits().hash(hasher);
+    edges.left.to_bits().hash(hasher);
+}
+
+fn hash_enum<T>(value: T, hasher: &mut impl Hasher) {
+    std::mem::discriminant(&value).hash(hasher);
 }
 
 /// Compute `(x, y, available_w, available_h)` for an absolutely-positioned child.
@@ -523,12 +777,33 @@ fn explicit_size(dim: Dimension, inner_size: f32) -> f32 {
 mod tests {
     use super::*;
     use crate::style::{Display, Edges, FlexDirection, Overflow, Position};
+    use std::cell::Cell;
 
     fn make_node(tag: &str, width: Dimension, height: Dimension) -> WidgetNode {
         let mut node = WidgetNode::new(tag);
         node.computed_style.width = width;
         node.computed_style.height = height;
         node
+    }
+
+    #[derive(Default)]
+    struct CountingMeasurer {
+        calls: Cell<usize>,
+    }
+
+    impl TextMeasurer for CountingMeasurer {
+        fn measure_text(
+            &self,
+            text: &str,
+            _font_family: &str,
+            _font_size: f32,
+            _font_weight: u16,
+            _line_height: f32,
+            _max_width: Option<f32>,
+        ) -> (f32, f32) {
+            self.calls.set(self.calls.get() + 1);
+            (text.len() as f32 * 8.0, 16.0)
+        }
     }
 
     #[test]
@@ -771,5 +1046,55 @@ mod tests {
         // Column direction is not affected by RTL — children still stack top-to-bottom.
         assert_eq!(root.children[0].layout.y, 0.0);
         assert_eq!(root.children[1].layout.y, 40.0);
+    }
+
+    #[test]
+    fn intrinsic_cache_reuses_probe_layouts_across_passes() {
+        let mut root = make_node("row", Dimension::Content, Dimension::Auto);
+        root.computed_style.direction = FlexDirection::Row;
+        let mut child = make_node("text", Dimension::Auto, Dimension::Auto);
+        child.attributes.insert("content".into(), "hello".into());
+        root.children.push(child);
+
+        let measurer = CountingMeasurer::default();
+        let mut cache = IntrinsicLayoutCache::default();
+
+        LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+            &mut root,
+            300.0,
+            40.0,
+            &mut cache,
+            Some(&measurer),
+        );
+        let first_pass_calls = measurer.calls.get();
+        assert!(first_pass_calls > 0);
+
+        LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+            &mut root,
+            300.0,
+            40.0,
+            &mut cache,
+            Some(&measurer),
+        );
+        let second_pass_calls = measurer.calls.get();
+        let cached_delta = second_pass_calls - first_pass_calls;
+        assert!(cached_delta > 0);
+
+        root.children[0]
+            .attributes
+            .insert("content".into(), "hello world".into());
+        LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+            &mut root,
+            300.0,
+            40.0,
+            &mut cache,
+            Some(&measurer),
+        );
+        let third_pass_calls = measurer.calls.get();
+        let invalidated_delta = third_pass_calls - second_pass_calls;
+        assert!(
+            cached_delta < invalidated_delta,
+            "warm cache should avoid probe measurements until the text changes"
+        );
     }
 }

@@ -81,7 +81,7 @@ import audio from "mesh.audio@>=1.0"
 Local component imports resolve relative to the importing file, `@src/...`
 resolves from the module's `src/` directory, module component imports resolve
 through declared module dependencies, and `mesh.*` imports expose the same
-interface proxy returned by `require("@mesh/<service>")`.
+interface proxy returned by `require("mesh.<service>")`.
 
 Imported components are standalone. Inside an imported component template,
 expressions and event handlers may resolve only:
@@ -292,12 +292,11 @@ mesh.state.set("volume_icon_name", "audio-volume-muted")
 mesh.state.set("volume_label", "0%")
 mesh.state.set("volume_tooltip", "Volume unavailable")
 
-local audio = mesh.service.use("audio")
-audio:bind("muted", "audio_muted")
-audio:bind("percent", "audio_percent")
-audio:on_change("sync_audio_state")
+local audio = require("mesh.audio@>=1.0")
 
-function sync_audio_state()
+function onRender()
+  local audio_percent = audio.percent or 0
+  local audio_muted = audio.muted or false
   if audio_muted or audio_percent == 0 then
     volume_icon_name = "audio-volume-muted"
   elseif audio_percent < 34 then
@@ -314,10 +313,9 @@ end
 </script>
 ```
 
-The template can read the raw service object as `{audio.*}` after updates
-arrive. The script can opt into explicit local names like `audio_muted` and
-`audio_percent` through `audio:bind("field", "local_name")`, and it
-subscribes to updates explicitly with `audio:on_change("handler")`.
+The template should read derived globals such as `volume_icon_name` and
+`volume_label`. The script reads proxy fields directly during `onRender()`
+and derives presentation state locally.
 
 For pointer-driven handlers like `onclick`, the callback also receives an
 event table with:
@@ -436,12 +434,11 @@ mesh.state.set("volume_icon_name", "audio-volume-muted")
 mesh.state.set("volume_label", "0%")
 mesh.state.set("volume_tooltip", "Volume unavailable")
 
-local audio = mesh.service.use("audio")
-audio:bind("muted", "audio_muted")
-audio:bind("percent", "audio_percent")
-audio:on_change("sync_audio_state")
+local audio = require("mesh.audio@>=1.0")
 
-function sync_audio_state()
+function onRender()
+    local audio_percent = audio.percent or 0
+    local audio_muted = audio.muted or false
     if audio_muted or audio_percent == 0 then
         volume_icon_name = "audio-volume-muted"
     elseif audio_percent < 34 then

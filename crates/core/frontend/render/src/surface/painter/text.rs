@@ -1,3 +1,5 @@
+use crate::display_list::{DisplayPaintNode, DisplayTextPaint};
+
 use super::*;
 
 impl FrontendRenderEngine {
@@ -76,6 +78,99 @@ impl FrontendRenderEngine {
                 ty as i32,
                 clip,
                 style,
+                &display_text,
+                effective_align,
+                inner_width,
+                scale,
+                selection,
+            );
+            return;
+        }
+
+        self.text_renderer.render_clipped(
+            &display_text,
+            &style.font_family,
+            style.font_size * scale,
+            style.font_weight,
+            style.line_height,
+            effective_align,
+            style.color,
+            buffer,
+            tx,
+            ty,
+            clip_to_tuple(clip),
+            Some(inner_width),
+        );
+    }
+
+    pub(super) fn render_display_text_node(
+        &self,
+        node: &DisplayPaintNode,
+        text: &DisplayTextPaint,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        x: i32,
+        y: i32,
+        clip: ClipRect,
+    ) {
+        let style = &node.style;
+        if text.text.is_empty() {
+            return;
+        }
+
+        let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
+        let ty = (y + (style.padding.top * scale) as i32).max(0) as u32;
+        let inner_width = ((node.layout.width - style.padding.horizontal()) * scale).max(0.0);
+
+        let display_text: std::borrow::Cow<'_, str> =
+            if style.text_overflow == TextOverflow::Ellipsis && inner_width > 0.0 {
+                let (text_width, _) = self.text_renderer.measure_styled(
+                    &text.text,
+                    &style.font_family,
+                    style.font_size * scale,
+                    style.font_weight,
+                    style.line_height,
+                    None,
+                );
+                if text_width > inner_width {
+                    std::borrow::Cow::Owned(truncate_with_ellipsis(
+                        &self.text_renderer,
+                        &text.text,
+                        &style.font_family,
+                        style.font_size * scale,
+                        style.font_weight,
+                        style.line_height,
+                        inner_width,
+                    ))
+                } else {
+                    std::borrow::Cow::Borrowed(text.text.as_str())
+                }
+            } else {
+                std::borrow::Cow::Borrowed(text.text.as_str())
+            };
+
+        let effective_align =
+            if style.text_direction == TextDirection::Rtl && style.text_align == TextAlign::Left {
+                TextAlign::Right
+            } else {
+                style.text_align
+            };
+
+        if let Some(selection) = selection_geometry_for_display(
+            &self.text_renderer,
+            node,
+            &display_text,
+            effective_align,
+            inner_width,
+            scale,
+        ) {
+            render_display_selection_highlights(
+                &self.text_renderer,
+                buffer,
+                tx as i32,
+                ty as i32,
+                clip,
+                node,
                 &display_text,
                 effective_align,
                 inner_width,
@@ -285,6 +380,53 @@ pub(super) fn selection_geometry(
     Some((geometry, selection_background, selection_foreground))
 }
 
+fn selection_geometry_for_display(
+    renderer: &TextRenderer,
+    node: &DisplayPaintNode,
+    display_text: &str,
+    align: TextAlign,
+    inner_width: f32,
+    scale: f32,
+) -> Option<(TextSelectionGeometry, Color, Color)> {
+    let style = &node.style;
+    if display_text.is_empty()
+        || style.text_overflow == TextOverflow::Ellipsis
+        || style.overflow_x != Overflow::Visible
+        || style.overflow_y != Overflow::Visible
+    {
+        return None;
+    }
+
+    let selection = match &node.content {
+        crate::display_list::DisplayPaintContent::Text(text) => text.selection?,
+        _ => return None,
+    };
+
+    let geometry = renderer.selection_geometry(
+        display_text,
+        &style.font_family,
+        style.font_size * scale,
+        style.font_weight,
+        style.line_height,
+        align,
+        Some(inner_width),
+        (
+            selection.anchor_x - selection.text_x,
+            selection.anchor_y - selection.text_y,
+        ),
+        (
+            selection.focus_x - selection.text_x,
+            selection.focus_y - selection.text_y,
+        ),
+    )?;
+
+    if geometry.highlights.is_empty() {
+        return None;
+    }
+
+    Some((geometry, selection.background, selection.foreground))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_selection_highlights(
     renderer: &TextRenderer,
@@ -299,6 +441,64 @@ pub(super) fn render_selection_highlights(
     scale: f32,
     selection: (TextSelectionGeometry, Color, Color),
 ) {
+    let (selection_geometry, selection_background, selection_foreground) = selection;
+
+    renderer.render_clipped(
+        display_text,
+        &style.font_family,
+        style.font_size * scale,
+        style.font_weight,
+        style.line_height,
+        align,
+        style.color,
+        buffer,
+        tx.max(0) as u32,
+        ty.max(0) as u32,
+        clip_to_tuple(clip),
+        Some(inner_width),
+    );
+
+    for highlight in &selection_geometry.highlights {
+        let rect = ClipRect {
+            x: tx + highlight.x.round() as i32,
+            y: ty + highlight.y.round() as i32,
+            width: highlight.width.ceil() as i32,
+            height: highlight.height.ceil() as i32,
+        };
+        let highlight_clip = intersect_clip(clip, rect);
+        fill_rect_clipped(buffer, rect, selection_background, highlight_clip);
+        renderer.render_clipped(
+            display_text,
+            &style.font_family,
+            style.font_size * scale,
+            style.font_weight,
+            style.line_height,
+            align,
+            selection_foreground,
+            buffer,
+            tx.max(0) as u32,
+            ty.max(0) as u32,
+            clip_to_tuple(highlight_clip),
+            Some(inner_width),
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_display_selection_highlights(
+    renderer: &TextRenderer,
+    buffer: &mut PixelBuffer,
+    tx: i32,
+    ty: i32,
+    clip: ClipRect,
+    node: &DisplayPaintNode,
+    display_text: &str,
+    align: TextAlign,
+    inner_width: f32,
+    scale: f32,
+    selection: (TextSelectionGeometry, Color, Color),
+) {
+    let style = &node.style;
     let (selection_geometry, selection_background, selection_foreground) = selection;
 
     renderer.render_clipped(

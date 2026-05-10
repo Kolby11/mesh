@@ -269,6 +269,24 @@ fn audio_network_catalog() -> InterfaceCatalog {
         backend_name: "NetworkManager".into(),
         priority: 100,
     });
+    catalog.register_contract(InterfaceContract {
+        interface: "mesh.theme".into(),
+        version: parse_contract_version("1.0").unwrap(),
+        file_path: PathBuf::from("<test>"),
+        state_fields: Vec::new(),
+        methods: Vec::new(),
+        events: Vec::new(),
+        types: HashMap::new(),
+        capabilities: ContractCapabilities::default(),
+    });
+    catalog.register_provider(InterfaceProvider {
+        interface: "mesh.theme".into(),
+        version: Some("1.0".into()),
+        base_module: Some("@mesh/theme-interface".into()),
+        provider_module: "@mesh/shell-theme".into(),
+        backend_name: "Shell Theme".into(),
+        priority: 100,
+    });
     catalog
 }
 
@@ -405,6 +423,32 @@ fn minimal_test_manifest(id: &str) -> Manifest {
 
 fn test_frontend_component(source: &str) -> FrontendSurfaceComponent {
     test_frontend_component_with_catalog(source, InterfaceCatalog::default(), &[])
+}
+
+fn buffer_pixel(buffer: &PixelBuffer, x: u32, y: u32) -> [u8; 4] {
+    let offset = (y * buffer.stride + x * 4) as usize;
+    [
+        buffer.data[offset],
+        buffer.data[offset + 1],
+        buffer.data[offset + 2],
+        buffer.data[offset + 3],
+    ]
+}
+
+fn themed_primary(id: &str, primary_hex: &str) -> Theme {
+    let mut theme = default_theme();
+    theme.id = id.to_string();
+    theme.name = id.to_string();
+    theme.tokens.insert(
+        "color.primary".into(),
+        mesh_core_theme::TokenValue::String(primary_hex.to_string()),
+    );
+    theme
+}
+
+fn test_theme(id: &str) -> Theme {
+    mesh_core_theme::load_theme_from_path(&mesh_core_theme::theme_path_for_id(id))
+        .unwrap_or_else(|err| panic!("failed to load test theme {id}: {err}"))
 }
 
 fn test_frontend_component_with_required_icons(
@@ -1924,6 +1968,35 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         activation_requests.as_slice(),
         [CoreRequest::SetTheme { theme_id }] if theme_id == "mesh-default-light"
     ));
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.theme".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({
+                "current": "mesh-default-light",
+                "theme_id": "mesh-default-light",
+                "is_dark": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let activation_requests = component
+        .handle_input(
+            &theme,
+            320,
+            80,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        activation_requests.as_slice(),
+        [CoreRequest::SetTheme { theme_id }] if theme_id == "mesh-default-dark"
+    ));
 }
 
 #[test]
@@ -2571,7 +2644,7 @@ fn navigation_volume_slider_proves_event_state_render_flow() {
   <slider min="0" max="1" value="{slider_value}" onchange={onVolumeChange} />
 </template>
 <script lang="luau">
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 audio_percent = 0
@@ -2752,6 +2825,547 @@ end
             .is_dirty(),
         "paint should consume runtime dirty state after rebuilding"
     );
+}
+
+#[test]
+fn slider_drag_repaints_across_multiple_pointer_moves() {
+    let mut component = test_frontend_component(
+        r#"
+<style>
+slider {
+  width: 220px;
+  height: 40px;
+  color: #ffffff;
+}
+</style>
+<template>
+  <slider min="0" max="100" value="0" />
+</template>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 40);
+
+    component.paint(&theme, 240, 40, &mut buffer).unwrap();
+    let initial = buffer.data.clone();
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            40,
+            ComponentInput::PointerButton {
+                x: 24.0,
+                y: 20.0,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    component
+        .handle_input(
+            &theme,
+            240,
+            40,
+            ComponentInput::PointerMove { x: 200.0, y: 20.0 },
+        )
+        .unwrap();
+    component.paint(&theme, 240, 40, &mut buffer).unwrap();
+    let after_first_drag = buffer.data.clone();
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            40,
+            ComponentInput::PointerMove { x: 60.0, y: 20.0 },
+        )
+        .unwrap();
+    component.paint(&theme, 240, 40, &mut buffer).unwrap();
+    let after_second_drag = buffer.data.clone();
+
+    assert_ne!(after_first_drag, initial);
+    assert_ne!(
+        after_second_drag, after_first_drag,
+        "each pointer move while dragging should repaint the slider immediately"
+    );
+    let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
+        .and_then(|slider| slider.attributes.get("value"))
+        .and_then(|value| value.parse::<f32>().ok())
+        .expect("painted slider value");
+    assert!(
+        rendered_value < 40.0,
+        "second drag should move the painted slider back toward the left, got {rendered_value}"
+    );
+}
+
+#[test]
+fn theme_change_repaints_token_styled_content() {
+    let mut component = test_frontend_component(
+        r#"
+<style>
+box {
+  width: 48px;
+  height: 24px;
+  background-color: token(color.primary);
+}
+</style>
+<template>
+  <box />
+</template>
+"#,
+    );
+    let dark = themed_primary("test-dark", "#112233");
+    let light = themed_primary("test-light", "#c0ffee");
+    let mut buffer = PixelBuffer::new(64, 32);
+
+    component.paint(&dark, 64, 32, &mut buffer).unwrap();
+    let dark_pixel = buffer_pixel(&buffer, 12, 12);
+
+    component.theme_changed().unwrap();
+    component.paint(&light, 64, 32, &mut buffer).unwrap();
+    let light_pixel = buffer_pixel(&buffer, 12, 12);
+
+    assert_ne!(dark_pixel, light_pixel);
+    assert_eq!(light_pixel, [0xee, 0xff, 0xc0, 0xff]);
+}
+
+#[test]
+fn real_navigation_bar_repaints_when_theme_changes() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let dark = default_theme();
+    let mut light = default_theme();
+    light.id = "mesh-default-light".into();
+    light.name = "mesh-default-light".into();
+    light.tokens.insert(
+        "color.surface-container".into(),
+        mesh_core_theme::TokenValue::String("#f0f0f0".into()),
+    );
+    light.tokens.insert(
+        "color.on-surface".into(),
+        mesh_core_theme::TokenValue::String("#111111".into()),
+    );
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+
+    component.paint(&dark, width, height, &mut buffer).unwrap();
+    let dark_snapshot = buffer.data.clone();
+
+    component.theme_changed().unwrap();
+    component.paint(&light, width, height, &mut buffer).unwrap();
+
+    assert_ne!(
+        buffer.data, dark_snapshot,
+        "navigation bar should repaint when the active theme changes"
+    );
+}
+
+#[test]
+fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_back_to_dark() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let dark = test_theme("mesh-default-dark");
+    let light = test_theme("mesh-default-light");
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+
+    component.paint(&dark, width, height, &mut buffer).unwrap();
+
+    component.theme_changed().unwrap();
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.theme".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({
+                "current": "mesh-default-light",
+                "theme_id": "mesh-default-light",
+                "is_dark": false
+            }),
+        })
+        .unwrap();
+    for _ in 0..2 {
+        component.paint(&light, width, height, &mut buffer).unwrap();
+        if !component.wants_immediate_rerender() {
+            break;
+        }
+    }
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    let theme_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeToggle",
+    )
+    .expect("rendered theme button");
+    let button_sample_x = (theme_button.layout.x + 6.0).round() as u32;
+    let button_sample_y = (theme_button.layout.y + 6.0).round() as u32;
+
+    component
+        .handle_input(
+            &light,
+            width,
+            height,
+            ComponentInput::PointerMove {
+                x: theme_button.layout.x + theme_button.layout.width * 0.5,
+                y: theme_button.layout.y + theme_button.layout.height * 0.5,
+            },
+        )
+        .unwrap();
+    component.paint(&light, width, height, &mut buffer).unwrap();
+    assert!(
+        !component.style_animations.is_empty(),
+        "hovering the theme button should leave transition state to invalidate"
+    );
+
+    component.theme_changed().unwrap();
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.theme".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({
+                "current": "mesh-default-dark",
+                "theme_id": "mesh-default-dark",
+                "is_dark": true
+            }),
+        })
+        .unwrap();
+    component.paint(&dark, width, height, &mut buffer).unwrap();
+
+    assert_eq!(
+        buffer_pixel(&buffer, 8, 8),
+        [0x1f, 0x1b, 0x1c, 0xff],
+        "already-painted navigation shell should repaint to dark surface immediately"
+    );
+    assert_eq!(
+        buffer_pixel(&buffer, button_sample_x, button_sample_y),
+        [0x58, 0x44, 0x4a, 0xff],
+        "theme button hover state should repaint with the dark hover palette, not stale light colors"
+    );
+}
+
+#[test]
+fn immediate_rerender_preserves_present_damage_from_first_pass() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box>
+    <text>{theme_label}</text>
+  </box>
+</template>
+<script lang="luau">
+theme_label = "dark"
+
+local theme_ok, theme = pcall(function()
+    return require("mesh.theme")
+end)
+if not theme_ok then theme = nil end
+
+function onRender()
+    if theme and theme.is_dark == false then
+        theme_label = "light"
+    else
+        theme_label = "dark"
+    end
+end
+</script>
+<style>
+box {
+  width: 140px;
+  height: 40px;
+  background-color: token(color.surface-container);
+}
+text {
+  width: 100px;
+  height: 24px;
+  color: token(color.on-surface);
+}
+</style>
+"#,
+        audio_network_catalog(),
+        &["theme.read"],
+    );
+    let dark = default_theme();
+    let mut light = default_theme();
+    light.id = "mesh-default-light".into();
+    light.name = "mesh-default-light".into();
+    light.tokens.insert(
+        "color.surface-container".into(),
+        mesh_core_theme::TokenValue::String("#f0f0f0".into()),
+    );
+    light.tokens.insert(
+        "color.on-surface".into(),
+        mesh_core_theme::TokenValue::String("#111111".into()),
+    );
+    let mut buffer = PixelBuffer::new(160, 48);
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.theme".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({
+                "current": "mesh-default-dark",
+                "theme_id": "mesh-default-dark",
+                "is_dark": true
+            }),
+        })
+        .unwrap();
+    for _ in 0..2 {
+        component.paint(&dark, 160, 48, &mut buffer).unwrap();
+        if !component.wants_immediate_rerender() {
+            break;
+        }
+    }
+    component.take_present_damage();
+
+    component.theme_changed().unwrap();
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.theme".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({
+                "current": "mesh-default-light",
+                "theme_id": "mesh-default-light",
+                "is_dark": false
+            }),
+        })
+        .unwrap();
+    component.paint(&light, 160, 48, &mut buffer).unwrap();
+    assert!(
+        component.wants_immediate_rerender(),
+        "onRender state sync should request the same-frame rerender that used to erase damage"
+    );
+    component.paint(&light, 160, 48, &mut buffer).unwrap();
+
+    assert!(
+        component.take_present_damage().is_some(),
+        "same-frame rerender must preserve first-pass damage so the shell still presents"
+    );
+}
+
+#[test]
+fn navigation_volume_slider_repaints_after_consecutive_drag_paints() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <slider min="0" max="1" value="{slider_value}" onchange={onVolumeChange} />
+</template>
+<script lang="luau">
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
+if not audio_ok then audio = nil end
+
+slider_value = 0.0
+
+local function clamp_volume(value)
+    local numeric = tonumber(value) or 0
+    if numeric < 0 then return 0.0 end
+    if numeric > 1 then return 1.0 end
+    return numeric
+end
+
+function onVolumeChange(value)
+    local normalized = clamp_volume(value)
+    slider_value = normalized
+    if audio_ok and audio then
+        audio.set_volume("default", normalized)
+    end
+end
+</script>
+<style>
+slider {
+  width: 220px;
+  height: 40px;
+  color: #ffffff;
+}
+</style>
+"#,
+        audio_network_catalog(),
+        &["service.audio.read", "service.audio.control"],
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 40);
+
+    component.paint(&theme, 240, 40, &mut buffer).unwrap();
+    component
+        .handle_input(
+            &theme,
+            240,
+            40,
+            ComponentInput::PointerButton {
+                x: 200.0,
+                y: 20.0,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    component.paint(&theme, 240, 40, &mut buffer).unwrap();
+    let after_first_drag = buffer.data.clone();
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            40,
+            ComponentInput::PointerMove { x: 60.0, y: 20.0 },
+        )
+        .unwrap();
+    component.paint(&theme, 240, 40, &mut buffer).unwrap();
+
+    assert_ne!(
+        buffer.data, after_first_drag,
+        "subsequent drag paints should track the latest slider position"
+    );
+}
+
+#[test]
+fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
+    let mut component =
+        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    let theme = default_theme();
+    let width = 280;
+    let height = 180;
+    let mut buffer = PixelBuffer::new(width, height);
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 20,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
+        .expect("audio popover slider");
+    let drag_x = slider.layout.x + slider.layout.width * 0.8;
+    let drag_y = slider.layout.y + slider.layout.height * 0.5;
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x: drag_x,
+                y: drag_y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 20,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
+        .and_then(|slider| slider.attributes.get("value"))
+        .and_then(|value| value.parse::<f32>().ok())
+        .expect("painted slider value");
+    assert!(
+        rendered_value > 0.7,
+        "in-flight slider drag should stay visible instead of snapping back to stale backend value, got {rendered_value}"
+    );
+}
+
+#[test]
+fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
+    let mut component =
+        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    let theme = default_theme();
+    let width = 280;
+    let height = 180;
+    let mut buffer = PixelBuffer::new(width, height);
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
+        .expect("audio popover slider");
+    let drag_x = slider.layout.x + slider.layout.width * 0.8;
+    let drag_y = slider.layout.y + slider.layout.height * 0.5;
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x: drag_x,
+                y: drag_y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x: drag_x,
+                y: drag_y,
+                pressed: false,
+            },
+        )
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let requests = component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::KeyPressed {
+                key: "ArrowDown".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+
+    match requests.as_slice() {
+        [
+            CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+                ..
+            },
+        ] => {
+            assert_eq!(interface, "mesh.audio");
+            assert_eq!(command, "set_volume");
+            let volume = payload["volume"].as_f64().expect("numeric volume payload");
+            assert!(
+                (volume - 0.75).abs() < 0.001,
+                "keyboard step after mouse drag should decrement from the drag value, got {volume}"
+            );
+        }
+        other => panic!("expected one audio set_volume request, got {other:?}"),
+    }
 }
 
 #[test]
@@ -3120,7 +3734,7 @@ fn service_update_runs_on_render_before_rebuilding_tree() {
   <box title="{audio_tooltip}" />
 </template>
 <script lang="luau">
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 audio_tooltip = "Volume unavailable"
@@ -3213,7 +3827,7 @@ fn frontend_proxy_state_update_reaches_render_state() {
   <box title="{volumeLevel}" />
 </template>
 <script lang="luau">
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 volumeLevel = 0
@@ -3265,7 +3879,7 @@ fn frontend_proxy_state_read_tracks_repaint_invalidation() {
   <box title="{volumeLevel}" />
 </template>
 <script lang="luau">
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 volumeLevel = 0
@@ -4004,7 +4618,7 @@ volumeIcon = "audio-volume-muted"
 volumeLevel = 0
 
 function onRender()
-    local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+    local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
     if not audio_ok or not audio then return end
     local pct = audio.percent or 0
     local muted = audio.muted or false
@@ -4070,7 +4684,7 @@ fn frontend_proxy_command_from_bundled_handler_becomes_service_command_request()
 wifi_enabled = false
 
 function onToggleWiFi()
-    local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+    local network_ok, network = pcall(require, "mesh.network@>=1.0")
     if network_ok and network then
         local enabled = network.wifi_enabled or false
         network.set_wifi_enabled(not enabled)
@@ -4120,7 +4734,7 @@ end
 
 // ---------- integration test 3: missing service keeps fallback copy -----
 
-/// Proves that when `pcall(require, "@mesh/audio@>=1.0")` fails (e.g. the
+/// Proves that when `pcall(require, "mesh.audio@>=1.0")` fails (e.g. the
 /// interface contract is not registered in the catalog), the script still
 /// produces user-visible explanatory text rather than a blank or nil surface.
 #[test]
@@ -4139,7 +4753,7 @@ volumeIcon = "audio-volume-muted"
 batteryText = "N/A"
 
 function onRender()
-    local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+    local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
     if not audio_ok or not audio then
         volumeLevel = "0"
         volumeIcon = "audio-volume-muted"
@@ -4179,7 +4793,7 @@ fn quick_settings_audio_render_state_uses_seeded_payload() {
     let mut ctx = make_audio_ctx();
     ctx.load_script(
         r#"
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+ local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 audio_label = "0%"
@@ -4252,7 +4866,7 @@ fn quick_settings_audio_slider_publishes_set_volume_service_command() {
     let mut ctx = make_audio_ctx();
     ctx.load_script(
         r#"
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+ local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 audio_percent = 0
@@ -4308,7 +4922,7 @@ fn quick_settings_network_toggle_publishes_set_wifi_enabled_service_command() {
     let mut ctx = make_network_ctx();
     ctx.load_script(
         r#"
-local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+ local network_ok, network = pcall(require, "mesh.network@>=1.0")
 if not network_ok then network = nil end
 
 network_status = ""
@@ -4361,9 +4975,9 @@ fn quick_settings_missing_services_keep_visible_fallback_copy() {
 
     ctx.load_script(
         r#"
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
-local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+local network_ok, network = pcall(require, "mesh.network@>=1.0")
 if not network_ok then network = nil end
 
 audio_status = ""
@@ -4407,7 +5021,7 @@ function onConnectWiFi()
         return
     end
 
-    local ok, network = pcall(require, "@mesh/network@>=1.0")
+    local ok, network = pcall(require, "mesh.network@>=1.0")
     if ok and network and network.available ~= false then
         network.connect(network_id)
     end
@@ -4437,7 +5051,7 @@ fn quick_settings_wifi_row_publishes_connect_for_wifi_network_ids() {
 network_id = "wifi:OfficeNet"
 
 function onConnectWiFi()
-    local ok, network = pcall(require, "@mesh/network@>=1.0")
+    local ok, network = pcall(require, "mesh.network@>=1.0")
     if ok and network and network.available ~= false then
         network.connect(network_id)
     end
@@ -5077,7 +5691,7 @@ fn real_core_surfaces_quick_settings_commands_publish_service_requests() {
     audio_ctx
         .load_script(
             r#"
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 function onVolumeChange(value)
@@ -5119,7 +5733,7 @@ end
     network_ctx
         .load_script(
             r#"
-local network_ok, network = pcall(require, "@mesh/network@>=1.0")
+local network_ok, network = pcall(require, "mesh.network@>=1.0")
 if not network_ok then network = nil end
 
 function onToggleWiFi()

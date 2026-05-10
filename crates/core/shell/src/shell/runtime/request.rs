@@ -3,6 +3,7 @@ use crate::shell::types::TabFocusTarget;
 use mesh_core_debug::{
     BenchmarkScenarioId, BenchmarkScenarioStatus, DebugBenchmarkRunState, ProfilingBackendStage,
 };
+use mesh_core_presentation::LayerSurfaceSizePolicy;
 
 /// One main-loop tick (~60 Hz). Coalescable commands fire on the leading
 /// edge; further calls within the interval park as `pending` and are
@@ -13,8 +14,105 @@ const COMMAND_THROTTLE_INTERVAL: std::time::Duration = std::time::Duration::from
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 
 impl Shell {
+    fn clear_transfer_owned_keyboard_mode(
+        &mut self,
+        surface_id: &str,
+    ) -> Option<mesh_core_wayland::KeyboardMode> {
+        let previous_mode = self
+            .transfer_owned_keyboard_modes
+            .remove(surface_id)
+            .or_else(|| {
+                self.surfaces
+                    .get(surface_id)
+                    .map(|surface| surface.keyboard_mode)
+            });
+        let Some(previous_mode) = previous_mode else {
+            return None;
+        };
+        if previous_mode == mesh_core_wayland::KeyboardMode::OnDemand {
+            self.configure_surface_keyboard_mode(surface_id, mesh_core_wayland::KeyboardMode::None);
+        }
+        if let Some(surface) = self.surfaces.get_mut(surface_id) {
+            surface.keyboard_mode = previous_mode;
+        }
+        if let Some(runtime) = self
+            .components
+            .iter_mut()
+            .find(|runtime| runtime.surface_id == surface_id)
+        {
+            runtime.component.set_keyboard_mode_override(None);
+        }
+        Some(previous_mode)
+    }
+
+    fn configure_surface_keyboard_mode(
+        &mut self,
+        surface_id: &str,
+        keyboard_mode: mesh_core_wayland::KeyboardMode,
+    ) {
+        let (surface, visible) = match self.surfaces.get(surface_id) {
+            Some(surface) => {
+                let visible = self
+                    .core
+                    .surfaces
+                    .get(surface_id)
+                    .map(|state| state.visible)
+                    .unwrap_or(surface.visible);
+                (surface, visible)
+            }
+            None => return,
+        };
+
+        let size_policy = self
+            .components
+            .iter()
+            .find(|runtime| runtime.surface_id == surface_id)
+            .and_then(|runtime| {
+                runtime
+                    .component
+                    .allows_shrink_to_fit()
+                    .then_some(LayerSurfaceSizePolicy::Flexible)
+            })
+            .unwrap_or(LayerSurfaceSizePolicy::Fixed);
+
+        let cfg = if visible {
+            LayerSurfaceConfig {
+                edge: surface.edge,
+                layer: surface.layer.unwrap_or(Layer::Top),
+                size_policy,
+                width: surface.width,
+                height: surface.height,
+                exclusive_zone: surface.exclusive_zone,
+                keyboard_mode,
+                namespace: surface_id.to_string(),
+                margin_top: surface.margin_top,
+                margin_right: surface.margin_right,
+                margin_bottom: surface.margin_bottom,
+                margin_left: surface.margin_left,
+            }
+        } else {
+            LayerSurfaceConfig {
+                edge: surface.edge,
+                layer: surface.layer.unwrap_or(Layer::Top),
+                size_policy: LayerSurfaceSizePolicy::Fixed,
+                width: 1,
+                height: 1,
+                exclusive_zone: 0,
+                keyboard_mode: mesh_core_wayland::KeyboardMode::None,
+                namespace: surface_id.to_string(),
+                margin_top: 0,
+                margin_right: 0,
+                margin_bottom: 0,
+                margin_left: 0,
+            }
+        };
+
+        self.presentation_engine.configure(surface_id, cfg);
+    }
+
     pub(in crate::shell) fn claim_keyboard_focus_for_surface(&mut self, surface_id: &str) {
-        if let Some(previous) = self.keyboard_focus_surface.clone()
+        let previous_focus = self.keyboard_focus_surface.clone();
+        if let Some(previous) = previous_focus.as_deref()
             && previous != surface_id
         {
             if let Some(runtime) = self
@@ -24,15 +122,27 @@ impl Shell {
             {
                 runtime.component.set_keyboard_mode_override(None);
             }
+            if self.transfer_owned_keyboard_modes.contains_key(previous) {
+                self.clear_transfer_owned_keyboard_mode(previous);
+            }
+        } else if previous_focus.as_deref() == Some(surface_id)
+            && self.transfer_owned_keyboard_modes.contains_key(surface_id)
+        {
+            self.clear_transfer_owned_keyboard_mode(surface_id);
         }
 
         self.keyboard_focus_surface = Some(surface_id.to_string());
-        if let Some(runtime) = self
-            .components
-            .iter_mut()
-            .find(|runtime| runtime.surface_id == surface_id)
-        {
-            runtime.component.set_keyboard_mode_override(None);
+        if previous_focus.as_deref() != Some(surface_id) {
+            if let Some(runtime) = self
+                .components
+                .iter_mut()
+                .find(|runtime| runtime.surface_id == surface_id)
+            {
+                runtime.component.set_keyboard_mode_override(None);
+            }
+            if self.transfer_owned_keyboard_modes.contains_key(surface_id) {
+                self.clear_transfer_owned_keyboard_mode(surface_id);
+            }
         }
     }
 
@@ -413,21 +523,44 @@ impl Shell {
         tracing::info!(
             "apply_transfer_tab_focus from={from_surface} to={to_surface} return_target={return_target:?} target_closes_on_leave={target_closes_on_leave} close_source={close_source:?}"
         );
-        if let Some(runtime) = self
+        if self
             .components
             .iter_mut()
-            .find(|r| r.surface_id == from_surface)
+            .any(|runtime| runtime.surface_id == from_surface)
         {
-            runtime.component.release_focus_for_transfer();
+            if let Some(runtime) = self
+                .components
+                .iter_mut()
+                .find(|runtime| runtime.surface_id == from_surface)
+            {
+                runtime.component.release_focus_for_transfer();
+            }
+            if let Some(runtime) = self
+                .components
+                .iter_mut()
+                .find(|runtime| runtime.surface_id == from_surface)
+            {
+                runtime
+                    .component
+                    .set_keyboard_mode_override(Some(mesh_core_wayland::KeyboardMode::None));
+            }
             // Source: clear any prior override and force None so the
             // compositor can hand keyboard delivery to the target.
-            runtime
-                .component
-                .set_keyboard_mode_override(Some(mesh_core_wayland::KeyboardMode::None));
+            self.clear_transfer_owned_keyboard_mode(from_surface);
         }
         if let Some(surface) = self.surfaces.get_mut(from_surface) {
             surface.keyboard_mode = mesh_core_wayland::KeyboardMode::None;
         }
+
+        let target_owns_keyboard = target_closes_on_leave || close_source.is_some();
+        let target_restore_keyboard_mode = self
+            .transfer_owned_keyboard_modes
+            .remove(to_surface)
+            .or_else(|| {
+                self.surfaces
+                    .get(to_surface)
+                    .map(|surface| surface.keyboard_mode)
+            });
 
         let target_found = if let Some(runtime) = self
             .components
@@ -443,19 +576,44 @@ impl Shell {
             // This includes the return leg from a closing popover; falling
             // back to OnDemand there leaves some compositors with no concrete
             // surface delivering subsequent key events.
-            let target_owns_keyboard = target_closes_on_leave || close_source.is_some();
             let mode = if target_owns_keyboard {
                 Some(mesh_core_wayland::KeyboardMode::Exclusive)
             } else {
                 None
             };
             runtime.component.set_keyboard_mode_override(mode);
+            if target_owns_keyboard {
+                if let Some(restore_mode) = target_restore_keyboard_mode {
+                    self.transfer_owned_keyboard_modes
+                        .insert(to_surface.to_string(), restore_mode);
+                } else {
+                    self.transfer_owned_keyboard_modes.insert(
+                        to_surface.to_string(),
+                        mesh_core_wayland::KeyboardMode::None,
+                    );
+                }
+                if let Some(surface) = self.surfaces.get_mut(to_surface) {
+                    surface.keyboard_mode = mesh_core_wayland::KeyboardMode::Exclusive;
+                }
+            } else {
+                self.transfer_owned_keyboard_modes.remove(to_surface);
+                if let Some(surface) = self.surfaces.get_mut(to_surface) {
+                    surface.keyboard_mode = mesh_core_wayland::KeyboardMode::OnDemand;
+                }
+            }
             true
         } else {
             tracing::warn!(
                 to_surface,
                 "TransferTabFocus target component not found; ignoring"
             );
+            if let Some(restore_mode) = target_restore_keyboard_mode {
+                if let Some(surface) = self.surfaces.get_mut(to_surface) {
+                    surface.keyboard_mode = restore_mode;
+                }
+            } else {
+                self.transfer_owned_keyboard_modes.remove(to_surface);
+            }
             false
         };
 
@@ -465,14 +623,6 @@ impl Shell {
         }
 
         self.keyboard_focus_surface = Some(to_surface.to_string());
-
-        if let Some(surface) = self.surfaces.get_mut(to_surface) {
-            surface.keyboard_mode = if target_closes_on_leave || close_source.is_some() {
-                mesh_core_wayland::KeyboardMode::Exclusive
-            } else {
-                mesh_core_wayland::KeyboardMode::OnDemand
-            };
-        }
 
         let mut emitted = VecDeque::new();
         if let Some(close) = close_source {
@@ -536,6 +686,20 @@ impl Shell {
         visible: bool,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         tracing::info!("set_surface_visibility surface_id={surface_id} visible={visible}");
+        if !visible {
+            if let Some(runtime) = self
+                .components
+                .iter_mut()
+                .find(|runtime| runtime.surface_id == surface_id.as_str())
+            {
+                runtime.component.set_keyboard_mode_override(None);
+            }
+            if let Some(previous_mode) = self.transfer_owned_keyboard_modes.remove(&surface_id) {
+                if let Some(surface) = self.surfaces.get_mut(&surface_id) {
+                    surface.keyboard_mode = previous_mode;
+                }
+            }
+        }
         if surface_id == DEBUG_INSPECTOR_SURFACE_ID {
             self.debug.enabled = visible;
         }

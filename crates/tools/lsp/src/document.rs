@@ -37,7 +37,7 @@ pub struct Document {
     pub script_functions: Vec<String>,
     /// Template element bindings exposed to Luau through `refs.<name>`.
     pub element_refs: Vec<ElementRef>,
-    /// Local variables bound to interface proxies via `require("@mesh/...")`.
+    /// Local variables bound to interface proxies via `require("mesh....")`.
     /// Maps variable name → canonical interface name (e.g. "audio" → "mesh.audio").
     pub interface_proxies: HashMap<String, String>,
 }
@@ -210,7 +210,7 @@ fn extract_script_info(
                 }
             }
 
-            // Detect: local <var> = require("@mesh/...")
+            // Detect: local <var> = require("mesh....")
             if let Some(req_pos) = rest.find("= require(") {
                 let var_name = rest[..req_pos].trim().to_string();
                 let after_req = &rest[req_pos + "= require(".len()..];
@@ -226,17 +226,6 @@ fn extract_script_info(
                     interface_proxies.insert(var_name, iface);
                 }
             }
-
-            if let Some(use_pos) = rest.find("= mesh.service.use(") {
-                let var_name = rest[..use_pos].trim().to_string();
-                let after_use = &rest[use_pos + "= mesh.service.use(".len()..];
-                if let Some(service) = parse_first_string_arg(after_use) {
-                    let iface = canonicalize_interface_name(&service);
-                    if !var_name.is_empty() && !iface.is_empty() {
-                        interface_proxies.insert(var_name, iface);
-                    }
-                }
-            }
         }
     }
 
@@ -244,18 +233,20 @@ fn extract_script_info(
 }
 
 /// Convert a require module string to a canonical interface name.
-/// "@mesh/audio@>=1.0" → "mesh.audio", "@mesh/audio" → "mesh.audio"
+/// "mesh.audio@>=1.0" → "mesh.audio", "mesh.audio" → "mesh.audio"
 fn canonicalize_interface_name(module: &str) -> String {
     // Strip version suffix
-    let module = module.split('@').next().unwrap_or(module);
-    if let Some(rest) = module.strip_prefix("@mesh/") {
-        format!("mesh.{}", rest.replace('/', "."))
-    } else if let Some(rest) = module.strip_prefix("@mesh.") {
-        format!("mesh.{rest}")
-    } else if module.starts_with("mesh.") {
+    let module = if let Some((left, _)) = module.rsplit_once('@') {
+        if left.starts_with("mesh.") {
+            left
+        } else {
+            module
+        }
+    } else {
+        module
+    };
+    if module.starts_with("mesh.") {
         module.to_string()
-    } else if !module.is_empty() {
-        format!("mesh.{module}")
     } else {
         String::new()
     }
@@ -358,10 +349,10 @@ mod tests {
     }
 
     #[test]
-    fn extracts_service_bindings_from_service_use_proxy() {
+    fn extracts_service_bindings_from_require_proxy() {
         let source = r#"
 <script lang="luau">
-local theme = mesh.service.use("theme")
+local theme = require("mesh.theme")
 theme:bind("is_dark", "theme_is_dark")
 </script>
 "#;

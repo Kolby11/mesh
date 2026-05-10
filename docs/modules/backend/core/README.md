@@ -45,7 +45,7 @@ Legacy `package.json` manifests may still use `provides` during migration:
 The MVP contract separates readable state from mutating commands:
 
 ```lua
-local audio = require("@mesh/audio")
+local audio = require("mesh.audio")
 local percent = audio.state.percent
 local muted = audio.state.muted
 ```
@@ -59,7 +59,7 @@ end
 
 For the migrated MVP interfaces (`mesh.audio`, `mesh.network`, `mesh.power`,
 and `mesh.media`), read current service data from
-`require("@mesh/<interface>").state` and use interface methods only for
+`require("mesh.<interface>").state` and use interface methods only for
 commands. Some older bundled interfaces still retain read helpers until they
 move to the same state-first pattern.
 

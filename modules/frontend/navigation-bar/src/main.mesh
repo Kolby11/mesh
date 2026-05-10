@@ -38,7 +38,7 @@ import SettingsButton from "./components/settings-button.mesh"
 import VolumeButton from "./components/volume-button.mesh"
 import ThemeButton from "./components/theme-button.mesh"
 
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 audio_surface_id = "@mesh/audio-popover"

@@ -27,7 +27,7 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
     //
     //   Guaranteed core state fields — documented in each interface's
     //   [[state_fields]] contract table. Read as plain field access:
-    //     local audio = require("@mesh/audio@>=1.0")
+    //     local audio = require("mesh.audio@>=1.0")
     //     local p = audio.percent   -- number (0.0–100.0)
     //     local m = audio.muted     -- boolean
     //
@@ -45,12 +45,6 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
     //   There are no read-style helper methods (no default_output(), no
     //   connections(), no active_player()). State discovery always comes
     //   from emitted fields, never from callable read helpers.
-    MeshApiEntry {
-        path: "service.use",
-        signature: "mesh.service.use(service_name: string) -> ServiceProxy",
-        description: "Create a service proxy for the named interface. The proxy exposes guaranteed core state fields as plain field access (e.g. `proxy.percent`, `proxy.available`) and mutating command methods as callable functions (e.g. `proxy.volume_up()`). Richer provider-only runtime extras are also readable as plain fields. There are no read-style helper methods — all state comes from emitted fields.",
-        backend_only: false,
-    },
     // Service (backend)
     MeshApiEntry {
         path: "service.emit",

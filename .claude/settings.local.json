@@ -74,7 +74,10 @@
       "Bash(apt list *)",
       "Bash(command -v nix)",
       "Read(//home/kolby/.cache/**)",
-      "Bash(find ~/.cargo/registry/src/index.crates.io-*/ -name \"tiny-skia-path*\" -maxdepth 1 -type d)"
+      "Bash(find ~/.cargo/registry/src/index.crates.io-*/ -name \"tiny-skia-path*\" -maxdepth 1 -type d)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/nxm1hyyqqf5f5h075q3v8hs3sxv3ny7z-libxkbcommon-1.8.1-dev/lib/pkgconfig cargo check -p mesh-core-shell --lib)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/nxm1hyyqqf5f5h075q3v8hs3sxv3ny7z-libxkbcommon-1.8.1-dev/lib/pkgconfig cargo test -p mesh-core-shell --lib --no-run)",
+      "Bash(PKG_CONFIG_PATH=/nix/store/nxm1hyyqqf5f5h075q3v8hs3sxv3ny7z-libxkbcommon-1.8.1-dev/lib/pkgconfig cargo check -p mesh-core-shell --tests)"
     ]
   }
 }

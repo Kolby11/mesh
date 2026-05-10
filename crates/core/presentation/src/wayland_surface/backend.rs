@@ -68,13 +68,6 @@ pub(super) struct SurfaceShmBuffer {
     pending_damage: Option<DamageRect>,
 }
 
-struct PendingPresent {
-    data: Vec<u8>,
-    width: u32,
-    height: u32,
-    damage: Option<DamageRect>,
-}
-
 pub(super) struct SurfaceEntry {
     pub(super) layer_surface: LayerSurface,
     pub(super) cfg: LayerSurfaceConfig,
@@ -85,7 +78,6 @@ pub(super) struct SurfaceEntry {
     shm_buffers: Vec<SurfaceShmBuffer>,
     next_shm_buffer: usize,
     pub(super) frame_pending: bool,
-    pending_present: Option<PendingPresent>,
 }
 
 impl SurfaceEntry {
@@ -104,7 +96,6 @@ impl SurfaceEntry {
             shm_buffers: Vec::new(),
             next_shm_buffer: 0,
             frame_pending: false,
-            pending_present: None,
         }
     }
 
@@ -123,60 +114,31 @@ impl SurfaceEntry {
     }
 
     fn apply_config(&mut self, cfg: LayerSurfaceConfig, keyboard_mode: KeyboardMode) {
+        let requires_fresh_configure =
+            surface_change_requires_fresh_configure(&self.cfg, &cfg, self.configured);
         let effective_cfg = cfg.with_keyboard_mode(keyboard_mode);
         apply_config(&self.layer_surface, &effective_cfg);
         self.layer_surface.commit();
         self.cfg = cfg;
         self.applied_keyboard_mode = keyboard_mode;
-        // A committed layer-shell configuration may produce a new configure
-        // event. Mark the current size as stale for blocking callers while
-        // still allowing non-blocking cached-size users to avoid a roundtrip.
-        self.configured = false;
+        // Geometry/layout reconfiguration can require a fresh layer-shell
+        // configure before another buffer attach. Keyboard interactivity-only
+        // changes do not, and some compositors never answer them with a new
+        // configure event. Keeping `configured` true in that case avoids
+        // dropping every subsequent present after a mouse-triggered focus
+        // transition on an already visible surface.
+        if requires_fresh_configure {
+            self.configured = false;
+        }
     }
 
     fn hide(&mut self) {
-        self.pending_present = None;
         self.frame_pending = false;
         let wl_surface = self.layer_surface.wl_surface();
         wl_surface.attach(None, 0, 0);
         self.layer_surface.commit();
         // Wait for a fresh configure before attaching a buffer again after remap.
         self.configured = false;
-    }
-
-    fn defer_present(&mut self, src: &[u8], width: u32, height: u32, damage: Option<DamageRect>) {
-        let width = width.max(1);
-        let height = height.max(1);
-        let damage = match self.pending_present.as_ref() {
-            Some(previous) if previous.width == width && previous.height == height => {
-                merge_optional_damage(previous.damage, damage)
-            }
-            Some(_) => None,
-            None => damage,
-        };
-        self.pending_present = Some(PendingPresent {
-            data: src.to_vec(),
-            width,
-            height,
-            damage,
-        });
-    }
-
-    fn take_present_damage_for_current(
-        &mut self,
-        width: u32,
-        height: u32,
-        damage: Option<DamageRect>,
-    ) -> Option<DamageRect> {
-        match self.pending_present.take() {
-            Some(previous)
-                if previous.width == width.max(1) && previous.height == height.max(1) =>
-            {
-                merge_optional_damage(previous.damage, damage)
-            }
-            Some(_) => None,
-            None => damage,
-        }
     }
 
     fn copy_into_shm_buffer(
@@ -222,7 +184,12 @@ impl SurfaceEntry {
                 copy_bgra_damage_to_canvas(src, canvas, width, height, copy_damage);
                 self.shm_buffers[index].pending_damage = None;
                 self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
-                return Ok((index, frame_damage));
+                // When a buffer is reused while older frame callbacks are still
+                // outstanding, `pending_damage` can be larger than the current
+                // frame's damage. We must report the region we actually copied
+                // into this buffer, otherwise the compositor may keep showing
+                // stale pixels outside `frame_damage`.
+                return Ok((index, copy_damage));
             }
         }
 
@@ -270,6 +237,23 @@ impl SurfaceEntry {
         self.width = width;
         self.height = height;
     }
+}
+
+fn surface_change_requires_fresh_configure(
+    previous: &LayerSurfaceConfig,
+    next: &LayerSurfaceConfig,
+    configured: bool,
+) -> bool {
+    !configured
+        || previous.edge != next.edge
+        || previous.layer != next.layer
+        || previous.exclusive_zone != next.exclusive_zone
+        || previous.width != next.width
+        || previous.height != next.height
+        || previous.margin_top != next.margin_top
+        || previous.margin_right != next.margin_right
+        || previous.margin_bottom != next.margin_bottom
+        || previous.margin_left != next.margin_left
 }
 
 fn create_surface_shm_buffer(
@@ -331,18 +315,6 @@ fn clip_damage(rect: DamageRect, bounds: DamageRect) -> Option<DamageRect> {
     })
 }
 
-fn merge_optional_damage(
-    previous: Option<DamageRect>,
-    next: Option<DamageRect>,
-) -> Option<DamageRect> {
-    match (previous, next) {
-        (Some(previous), Some(next)) => Some(union_damage(Some(previous), next)),
-        // None means unknown/full damage in the presentation API. If either
-        // side is unknown, keep the coalesced damage unknown so the eventual
-        // commit refreshes the entire buffer.
-        (Some(_), None) | (None, Some(_)) | (None, None) => None,
-    }
-}
 fn union_damage(current: Option<DamageRect>, next: DamageRect) -> DamageRect {
     let Some(current) = current else {
         return next;
@@ -428,6 +400,7 @@ impl LayerShellBackend {
             activation_seat: None,
             focus_grab: None,
             focus_grab_surface_id: None,
+            focus_grab_requested_at: None,
             qh,
             pool,
             surfaces: HashMap::new(),
@@ -451,6 +424,9 @@ impl LayerShellBackend {
     /// Apply a surface's desired config. Creates the layer surface lazily on first call.
     pub fn configure(&mut self, surface_id: &str, cfg: LayerSurfaceConfig) {
         let cfg = self.clamp_surface_config(cfg);
+        if cfg.keyboard_mode != KeyboardMode::OnDemand {
+            self.state.release_surface_focus_grab(surface_id);
+        }
         let qh = self.state.qh.clone();
         let effective_keyboard_mode = self
             .state
@@ -601,13 +577,14 @@ impl LayerShellBackend {
             .get(surface_id)
             .is_some_and(|entry| entry.frame_pending)
         {
+            // Frame callbacks are throttling hints, not correctness gates.
+            // Some layer-shell compositors can leave a callback pending while
+            // the surface remains otherwise usable; hard-deferring every
+            // repaint behind that flag makes later theme/focus/drag updates
+            // invisible until a remap path happens to clear the surface state.
+            // Drain any available callback, then commit the latest buffer even
+            // if the old callback is still pending.
             self.dispatch_available()?;
-            if let Some(entry) = self.state.surfaces.get_mut(surface_id)
-                && entry.frame_pending
-            {
-                entry.defer_present(&buffer.data, width, height, damage);
-                return Ok(());
-            }
         }
         let qh = self.state.qh.clone();
         let state = &mut self.state;
@@ -621,8 +598,6 @@ impl LayerShellBackend {
         if !entry.configured {
             return Ok(());
         }
-        let damage = entry.take_present_damage_for_current(width, height, damage);
-
         let (buffer_index, damage) =
             entry.copy_into_shm_buffer(pool, &buffer.data, width, height, damage)?;
         entry.attach_shm_buffer(&qh, buffer_index, width, height, damage);
@@ -650,12 +625,12 @@ impl LayerShellBackend {
 
     pub fn pump(&mut self) {
         let _ = self.dispatch_available();
-        let _ = self.flush_deferred_presents();
+        let _ = self.release_expired_surface_focus_grab();
     }
 
     pub fn poll_events(&mut self) -> Vec<DevWindowEvent> {
         let _ = self.dispatch_available();
-        let _ = self.flush_deferred_presents();
+        let _ = self.release_expired_surface_focus_grab();
         self.state.push_due_keyboard_repeats();
         let events = std::mem::take(&mut self.state.events);
         if !events.is_empty() {
@@ -667,40 +642,12 @@ impl LayerShellBackend {
         events
     }
 
-    fn flush_deferred_presents(&mut self) -> Result<(), PresentationError> {
-        if !self.state.surfaces.values().any(|entry| {
-            entry.pending_present.is_some() && !entry.frame_pending && entry.configured
-        }) {
-            return Ok(());
+    fn release_expired_surface_focus_grab(&mut self) -> Result<(), PresentationError> {
+        if self.state.release_expired_surface_focus_grab() {
+            self.event_queue
+                .flush()
+                .map_err(|e| PresentationError::SurfaceCreate(format!("flush: {e}")))?;
         }
-
-        let qh = self.state.qh.clone();
-        let state = &mut self.state;
-        let pool = state
-            .pool
-            .as_mut()
-            .ok_or_else(|| PresentationError::BufferAlloc("shm pool not initialised".into()))?;
-
-        for entry in state.surfaces.values_mut() {
-            if entry.frame_pending || !entry.configured {
-                continue;
-            }
-            let Some(pending) = entry.pending_present.take() else {
-                continue;
-            };
-            let (buffer_index, damage) = entry.copy_into_shm_buffer(
-                pool,
-                &pending.data,
-                pending.width,
-                pending.height,
-                pending.damage,
-            )?;
-            entry.attach_shm_buffer(&qh, buffer_index, pending.width, pending.height, damage);
-        }
-
-        self.event_queue
-            .flush()
-            .map_err(|e| PresentationError::SurfaceCreate(format!("flush: {e}")))?;
         Ok(())
     }
 
@@ -711,6 +658,7 @@ impl LayerShellBackend {
         self.event_queue
             .dispatch_pending(&mut self.state)
             .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
+        self.release_expired_surface_focus_grab()?;
         Ok(())
     }
 
@@ -810,6 +758,7 @@ impl LayerShellBackend {
         self.event_queue
             .dispatch_pending(&mut self.state)
             .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
+        self.release_expired_surface_focus_grab()?;
         Ok(())
     }
 }
@@ -860,5 +809,56 @@ fn map_keyboard(mode: KeyboardMode) -> KeyboardInteractivity {
         KeyboardMode::None => KeyboardInteractivity::None,
         KeyboardMode::Exclusive => KeyboardInteractivity::Exclusive,
         KeyboardMode::OnDemand => KeyboardInteractivity::OnDemand,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_cfg() -> LayerSurfaceConfig {
+        LayerSurfaceConfig {
+            edge: Some(Edge::Left),
+            layer: MeshLayer::Overlay,
+            size_policy: LayerSurfaceSizePolicy::Fixed,
+            width: 280,
+            height: 164,
+            exclusive_zone: 0,
+            keyboard_mode: KeyboardMode::OnDemand,
+            namespace: "@mesh/audio-popover".into(),
+            margin_top: 24,
+            margin_right: 0,
+            margin_bottom: 0,
+            margin_left: 24,
+        }
+    }
+
+    #[test]
+    fn keyboard_mode_only_reconfigure_keeps_surface_configured() {
+        let previous = base_cfg();
+        let mut next = previous.clone();
+        next.keyboard_mode = KeyboardMode::Exclusive;
+
+        assert!(
+            !surface_change_requires_fresh_configure(&previous, &next, true),
+            "keyboard interactivity-only changes must not force a fresh configure for an already-visible surface"
+        );
+    }
+
+    #[test]
+    fn geometry_reconfigure_still_requires_fresh_configure() {
+        let previous = base_cfg();
+        let mut next = previous.clone();
+        next.width = 320;
+
+        assert!(surface_change_requires_fresh_configure(&previous, &next, true));
+    }
+
+    #[test]
+    fn unconfigured_surface_still_requires_initial_configure() {
+        let previous = base_cfg();
+        let next = previous.clone();
+
+        assert!(surface_change_requires_fresh_configure(&previous, &next, false));
     }
 }

@@ -277,7 +277,7 @@ local cfg = mesh.config
 local fmt = cfg.get("clock_format")   -- resolved through the full stack
 
 -- contract-level settings (via the proxy)
-local audio = require("@mesh/audio@>=1.0")
+local audio = require("mesh.audio@>=1.0")
 local pri   = audio.config.get("default_output_priority")
 
 -- subscribe to changes

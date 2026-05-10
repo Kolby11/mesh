@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 
-use crate::display_list::{DisplayListClip, DisplayPaintCommand, DisplayPaintCommandKind};
+use crate::display_list::{
+    DisplayListClip, DisplayPaintCommand, DisplayPaintCommandKind, DisplayPaintContent,
+    DisplayPaintNode,
+};
 
 use super::*;
 
@@ -145,8 +148,8 @@ impl FrontendRenderEngine {
             }
             match command.kind {
                 DisplayPaintCommandKind::Node => {
-                    let node_bounds = scaled_node_bounds(&command.node, scale);
-                    self.render_node_self(
+                    let node_bounds = scaled_display_node_bounds(&command.node, scale);
+                    self.render_display_node_self(
                         &command.node,
                         buffer,
                         scale,
@@ -156,8 +159,8 @@ impl FrontendRenderEngine {
                     );
                 }
                 DisplayPaintCommandKind::Scrollbars => {
-                    let bounds = scaled_node_bounds(&command.node, scale);
-                    self.render_scrollbars(&command.node, buffer, scale, bounds, clip);
+                    let bounds = scaled_display_node_bounds(&command.node, scale);
+                    self.render_display_scrollbars(&command.node, buffer, scale, bounds, clip);
                 }
             }
         }
@@ -369,9 +372,109 @@ impl FrontendRenderEngine {
             _ => {}
         }
     }
+
+    fn render_display_node_self(
+        &self,
+        node: &DisplayPaintNode,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        bounds: ClipRect,
+        clip: ClipRect,
+        module_id: Option<&str>,
+    ) {
+        let style = &node.style;
+        let node_clip = intersect_clip(clip, bounds);
+        if node_clip.width <= 0 || node_clip.height <= 0 {
+            return;
+        }
+
+        let x = bounds.x;
+        let y = bounds.y;
+        let w = bounds.width;
+        let h = bounds.height;
+
+        if style.background_color.a > 0 {
+            let radius = style.border_radius * scale;
+            if radius > 0.5 {
+                fill_rounded_rect_clipped(
+                    buffer,
+                    bounds,
+                    radius,
+                    style.background_color,
+                    node_clip,
+                );
+            } else {
+                fill_rect_clipped(buffer, bounds, style.background_color, node_clip);
+            }
+        }
+
+        if style.border_width.top > 0.0 && style.border_color.a > 0 {
+            let border_width = (style.border_width.top * scale).max(1.0) as i32;
+            fill_rect_clipped(
+                buffer,
+                ClipRect {
+                    x,
+                    y,
+                    width: w,
+                    height: border_width,
+                },
+                style.border_color,
+                node_clip,
+            );
+            fill_rect_clipped(
+                buffer,
+                ClipRect {
+                    x,
+                    y: y + h.saturating_sub(border_width),
+                    width: w,
+                    height: border_width,
+                },
+                style.border_color,
+                node_clip,
+            );
+            fill_rect_clipped(
+                buffer,
+                ClipRect {
+                    x,
+                    y,
+                    width: border_width,
+                    height: h,
+                },
+                style.border_color,
+                node_clip,
+            );
+            fill_rect_clipped(
+                buffer,
+                ClipRect {
+                    x: x + w.saturating_sub(border_width),
+                    y,
+                    width: border_width,
+                    height: h,
+                },
+                style.border_color,
+                node_clip,
+            );
+        }
+
+        match &node.content {
+            DisplayPaintContent::Text(text) => {
+                self.render_display_text_node(node, text, buffer, scale, x, y, node_clip);
+            }
+            DisplayPaintContent::Input(input) => {
+                self.render_display_input_node(node, input, buffer, scale, x, y, node_clip);
+            }
+            DisplayPaintContent::Slider(slider) => {
+                self.render_display_slider_node(node, slider, buffer, scale, x, y, w, h, node_clip);
+            }
+            DisplayPaintContent::Icon(icon) => {
+                self.render_display_icon_node(node, icon, buffer, x, y, w, h, module_id);
+            }
+            DisplayPaintContent::None => {}
+        }
+    }
 }
 
-fn scaled_node_bounds(node: &WidgetNode, scale: f32) -> ClipRect {
+fn scaled_display_node_bounds(node: &DisplayPaintNode, scale: f32) -> ClipRect {
     ClipRect {
         x: (node.layout.x * scale).round() as i32,
         y: (node.layout.y * scale).round() as i32,

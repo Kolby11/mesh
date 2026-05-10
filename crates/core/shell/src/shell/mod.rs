@@ -19,7 +19,7 @@ use mesh_core_service::{
 use mesh_core_theme::ThemeEngine;
 use mesh_core_wayland::{ClipboardWriter, Layer, StubSurface, WaylandClipboard};
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -378,6 +378,7 @@ pub struct Shell {
     debug_overlay: DebugOverlay,
     active_key_modifiers: KeyModifiers,
     keyboard_focus_surface: Option<SurfaceId>,
+    transfer_owned_keyboard_modes: HashMap<SurfaceId, mesh_core_wayland::KeyboardMode>,
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,
     backend_runtime_statuses: HashMap<(String, String), BackendRuntimeStatusEntry>,

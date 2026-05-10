@@ -509,13 +509,6 @@ fn extract_script_symbols(source: &str) -> (Vec<String>, Vec<String>, Vec<String
                     push_unique(&mut interface_proxies, var_name.to_string());
                 }
             }
-
-            if let Some(use_pos) = rest.find("= mesh.service.use(") {
-                let var_name = rest[..use_pos].trim();
-                if is_identifier(var_name) {
-                    push_unique(&mut interface_proxies, var_name.to_string());
-                }
-            }
         }
 
         if let Some(name) = parse_global_assignment(trimmed) {

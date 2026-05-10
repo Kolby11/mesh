@@ -1,8 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use mesh_core_elements::style::Display;
-use mesh_core_elements::{NodeId, WidgetNode};
+use mesh_core_elements::style::{
+    Color, Display, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
+};
+use mesh_core_elements::{LayoutRect, NodeId, WidgetNode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DisplayPrimitiveSlot {
@@ -125,9 +127,101 @@ pub struct RetainedDisplayList {
 
 #[derive(Debug, Clone)]
 pub struct DisplayPaintCommand {
-    pub node: WidgetNode,
+    pub node: DisplayPaintNode,
     pub clip: DisplayListClip,
     pub kind: DisplayPaintCommandKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayPaintNode {
+    pub id: NodeId,
+    pub layout: LayoutRect,
+    pub style: DisplayPaintStyle,
+    pub content: DisplayPaintContent,
+    pub scrollbars: DisplayScrollbars,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayPaintStyle {
+    pub background_color: Color,
+    pub border_color: Color,
+    pub border_width: Edges,
+    pub border_radius: f32,
+    pub color: Color,
+    pub padding: Edges,
+    pub overflow_x: Overflow,
+    pub overflow_y: Overflow,
+    pub font_family: String,
+    pub font_size: f32,
+    pub font_weight: u16,
+    pub line_height: f32,
+    pub text_align: TextAlign,
+    pub text_overflow: TextOverflow,
+    pub text_direction: TextDirection,
+    pub icon_fill: Option<f32>,
+    pub icon_weight: Option<f32>,
+    pub icon_grade: Option<f32>,
+    pub icon_optical_size: Option<f32>,
+}
+
+#[derive(Debug, Clone)]
+pub enum DisplayPaintContent {
+    None,
+    Text(DisplayTextPaint),
+    Input(DisplayInputPaint),
+    Slider(DisplaySliderPaint),
+    Icon(DisplayIconPaint),
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayTextPaint {
+    pub text: String,
+    pub selection: Option<DisplayTextSelectionPaint>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DisplayTextSelectionPaint {
+    pub background: Color,
+    pub foreground: Color,
+    pub anchor_x: f32,
+    pub anchor_y: f32,
+    pub focus_x: f32,
+    pub focus_y: f32,
+    pub text_x: f32,
+    pub text_y: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayInputPaint {
+    pub value: String,
+    pub placeholder: String,
+    pub mask_text: bool,
+    pub focused: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DisplaySliderPaint {
+    pub min: f32,
+    pub max: f32,
+    pub value: f32,
+    pub vertical: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayIconPaint {
+    pub src: Option<String>,
+    pub name: Option<String>,
+    pub size: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DisplayScrollbars {
+    pub max_x: f32,
+    pub max_y: f32,
+    pub scroll_x: f32,
+    pub scroll_y: f32,
+    pub content_width: f32,
+    pub content_height: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,8 +303,8 @@ impl RetainedDisplayList {
         }
 
         let mut ordered_entries = Vec::new();
-        collect_display_entries(root, &mut ordered_entries);
-        let next: HashMap<_, _> = ordered_entries.iter().copied().collect();
+        let mut next = HashMap::new();
+        collect_display_entries(root, &mut ordered_entries, &mut next);
         let mut paint_commands = Vec::new();
         collect_paint_commands(root, 0.0, 0.0, surface_clip(surface), &mut paint_commands);
 
@@ -232,10 +326,9 @@ impl RetainedDisplayList {
             }
         }
 
-        let next_keys: HashSet<_> = next.keys().copied().collect();
         let mut removed = 0u64;
         for (key, previous) in &self.entries {
-            if !next_keys.contains(key) {
+            if !next.contains_key(key) {
                 removed = removed.saturating_add(1);
                 damage = union_damage(damage, previous.bounds);
             }
@@ -342,25 +435,29 @@ struct DisplayListEntry {
     barrier: Option<DisplayBatchBarrier>,
 }
 
-fn collect_display_entries(node: &WidgetNode, out: &mut Vec<(DisplayListKey, DisplayListEntry)>) {
+fn collect_display_entries(
+    node: &WidgetNode,
+    out: &mut Vec<(DisplayListKey, DisplayListEntry)>,
+    next: &mut HashMap<DisplayListKey, DisplayListEntry>,
+) {
     if let Some(bounds) = damage_rect_for_node(node) {
         for slot in primitive_slots_for_node(node) {
-            out.push((
-                DisplayListKey {
-                    node_id: node.id,
-                    slot,
-                },
-                DisplayListEntry {
-                    bounds,
-                    signature: primitive_signature(node, slot),
-                    batch_signature: batch_signature(node, slot),
-                    barrier: batch_barrier(node, slot),
-                },
-            ));
+            let key = DisplayListKey {
+                node_id: node.id,
+                slot,
+            };
+            let entry = DisplayListEntry {
+                bounds,
+                signature: primitive_signature(node, slot),
+                batch_signature: batch_signature(node, slot),
+                barrier: batch_barrier(node, slot),
+            };
+            out.push((key, entry));
+            next.insert(key, entry);
         }
     }
     for child in &node.children {
-        collect_display_entries(child, out);
+        collect_display_entries(child, out, next);
     }
 }
 
@@ -379,12 +476,7 @@ fn collect_paint_commands(
     let transform = style.transform;
     let offset_x = offset_x + transform.translate_x;
     let offset_y = offset_y + transform.translate_y;
-    let mut paint_node = node.clone();
-    paint_node.layout.x += offset_x;
-    paint_node.layout.y += offset_y;
-    paint_node.computed_style.transform.translate_x = 0.0;
-    paint_node.computed_style.transform.translate_y = 0.0;
-    paint_node.children.clear();
+    let paint_node = build_paint_node(node, offset_x, offset_y);
 
     let bounds = node_clip_for(&paint_node);
     let node_clip = intersect_display_clip(clip, bounds);
@@ -456,13 +548,143 @@ fn surface_clip(surface: DamageRect) -> DisplayListClip {
     }
 }
 
-fn node_clip_for(node: &WidgetNode) -> DisplayListClip {
+fn node_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
     DisplayListClip {
         x: node.layout.x.round() as i32,
         y: node.layout.y.round() as i32,
         width: node.layout.width.round().max(0.0) as i32,
         height: node.layout.height.round().max(0.0) as i32,
     }
+}
+
+fn build_paint_node(node: &WidgetNode, offset_x: f32, offset_y: f32) -> DisplayPaintNode {
+    DisplayPaintNode {
+        id: node.id,
+        layout: LayoutRect {
+            x: node.layout.x + offset_x,
+            y: node.layout.y + offset_y,
+            width: node.layout.width,
+            height: node.layout.height,
+        },
+        style: DisplayPaintStyle {
+            background_color: node.computed_style.background_color,
+            border_color: node.computed_style.border_color,
+            border_width: node.computed_style.border_width,
+            border_radius: node.computed_style.border_radius.top_left,
+            color: node.computed_style.color,
+            padding: node.computed_style.padding,
+            overflow_x: node.computed_style.overflow_x,
+            overflow_y: node.computed_style.overflow_y,
+            font_family: node.computed_style.font_family.clone(),
+            font_size: node.computed_style.font_size,
+            font_weight: node.computed_style.font_weight,
+            line_height: node.computed_style.line_height,
+            text_align: node.computed_style.text_align,
+            text_overflow: node.computed_style.text_overflow,
+            text_direction: node.computed_style.text_direction,
+            icon_fill: node.computed_style.icon_fill,
+            icon_weight: node.computed_style.icon_weight,
+            icon_grade: node.computed_style.icon_grade,
+            icon_optical_size: node.computed_style.icon_optical_size,
+        },
+        content: build_paint_content(node),
+        scrollbars: DisplayScrollbars {
+            max_x: attr_f32(node, "_mesh_scroll_max_x"),
+            max_y: attr_f32(node, "_mesh_scroll_max_y"),
+            scroll_x: attr_f32(node, "_mesh_scroll_x"),
+            scroll_y: attr_f32(node, "_mesh_scroll_y"),
+            content_width: attr_f32(node, "_mesh_content_width"),
+            content_height: attr_f32(node, "_mesh_content_height"),
+        },
+    }
+}
+
+fn build_paint_content(node: &WidgetNode) -> DisplayPaintContent {
+    match node.tag.as_str() {
+        "text" => DisplayPaintContent::Text(DisplayTextPaint {
+            text: node
+                .attributes
+                .get("text")
+                .cloned()
+                .or_else(|| node.attributes.get("content").cloned())
+                .unwrap_or_default(),
+            selection: build_text_selection(node),
+        }),
+        "input" => DisplayPaintContent::Input(DisplayInputPaint {
+            value: node.attributes.get("value").cloned().unwrap_or_default(),
+            placeholder: node
+                .attributes
+                .get("placeholder")
+                .cloned()
+                .unwrap_or_default(),
+            mask_text: node
+                .attributes
+                .get("type")
+                .is_some_and(|value| value == "password"),
+            focused: node
+                .attributes
+                .get("_mesh_focused")
+                .is_some_and(|value| value == "true"),
+        }),
+        "slider" => DisplayPaintContent::Slider(DisplaySliderPaint {
+            min: attr_f32_with_default(node, "min", 0.0),
+            max: attr_f32_with_default(node, "max", 100.0),
+            value: attr_f32_with_default(node, "value", 50.0),
+            vertical: node
+                .attributes
+                .get("orient")
+                .is_some_and(|value| value == "vertical"),
+        }),
+        "icon" => DisplayPaintContent::Icon(DisplayIconPaint {
+            src: node.attributes.get("src").cloned(),
+            name: node.attributes.get("name").cloned(),
+            size: node
+                .attributes
+                .get("size")
+                .and_then(|value| value.parse::<u32>().ok()),
+        }),
+        _ => DisplayPaintContent::None,
+    }
+}
+
+fn build_text_selection(node: &WidgetNode) -> Option<DisplayTextSelectionPaint> {
+    Some(DisplayTextSelectionPaint {
+        background: Color::from_hex(node.attributes.get("_mesh_selection_background")?)?,
+        foreground: Color::from_hex(node.attributes.get("_mesh_selection_foreground")?)?,
+        anchor_x: node
+            .attributes
+            .get("_mesh_selection_anchor_x")?
+            .parse::<f32>()
+            .ok()?,
+        anchor_y: node
+            .attributes
+            .get("_mesh_selection_anchor_y")?
+            .parse::<f32>()
+            .ok()?,
+        focus_x: node
+            .attributes
+            .get("_mesh_selection_focus_x")?
+            .parse::<f32>()
+            .ok()?,
+        focus_y: node
+            .attributes
+            .get("_mesh_selection_focus_y")?
+            .parse::<f32>()
+            .ok()?,
+        text_x: attr_f32(node, "_mesh_selection_text_x"),
+        text_y: attr_f32(node, "_mesh_selection_text_y"),
+    })
+}
+
+fn attr_f32(node: &WidgetNode, key: &str) -> f32 {
+    attr_f32_with_default(node, key, 0.0)
+}
+
+fn attr_f32_with_default(node: &WidgetNode, key: &str, default: f32) -> f32 {
+    node.attributes
+        .get(key)
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(default)
 }
 
 fn intersect_display_clip(a: DisplayListClip, b: DisplayListClip) -> DisplayListClip {
@@ -579,8 +801,17 @@ fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     slot.hash(&mut hasher);
     node.tag.hash(&mut hasher);
-    node.attributes.get("content").hash(&mut hasher);
-    node.attributes.get("name").hash(&mut hasher);
+    hash_attribute(node, "content", &mut hasher);
+    hash_attribute(node, "text", &mut hasher);
+    hash_attribute(node, "name", &mut hasher);
+    hash_attribute(node, "value", &mut hasher);
+    hash_attribute(node, "placeholder", &mut hasher);
+    hash_attribute(node, "type", &mut hasher);
+    hash_attribute(node, "min", &mut hasher);
+    hash_attribute(node, "max", &mut hasher);
+    hash_attribute(node, "orient", &mut hasher);
+    hash_attribute(node, "src", &mut hasher);
+    hash_attribute(node, "size", &mut hasher);
     node.computed_style.background_color.r.hash(&mut hasher);
     node.computed_style.background_color.g.hash(&mut hasher);
     node.computed_style.background_color.b.hash(&mut hasher);
@@ -593,9 +824,89 @@ fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
     node.computed_style.color.g.hash(&mut hasher);
     node.computed_style.color.b.hash(&mut hasher);
     node.computed_style.color.a.hash(&mut hasher);
+    node.computed_style
+        .border_width
+        .top
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style
+        .border_width
+        .right
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style
+        .border_width
+        .bottom
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style
+        .border_width
+        .left
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style
+        .border_radius
+        .top_left
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style
+        .border_radius
+        .top_right
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style
+        .border_radius
+        .bottom_right
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style
+        .border_radius
+        .bottom_left
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style.padding.top.to_bits().hash(&mut hasher);
+    node.computed_style
+        .padding
+        .right
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style
+        .padding
+        .bottom
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style.padding.left.to_bits().hash(&mut hasher);
     node.computed_style.opacity.to_bits().hash(&mut hasher);
     node.computed_style.font_family.hash(&mut hasher);
     node.computed_style.font_size.to_bits().hash(&mut hasher);
+    node.computed_style.font_weight.hash(&mut hasher);
+    node.computed_style.line_height.to_bits().hash(&mut hasher);
+    std::mem::discriminant(&node.computed_style.text_align).hash(&mut hasher);
+    std::mem::discriminant(&node.computed_style.text_overflow).hash(&mut hasher);
+    std::mem::discriminant(&node.computed_style.text_direction).hash(&mut hasher);
+    std::mem::discriminant(&node.computed_style.font_style).hash(&mut hasher);
+    std::mem::discriminant(&node.computed_style.overflow_x).hash(&mut hasher);
+    std::mem::discriminant(&node.computed_style.overflow_y).hash(&mut hasher);
+    node.computed_style
+        .letter_spacing
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style
+        .icon_fill
+        .map(f32::to_bits)
+        .hash(&mut hasher);
+    node.computed_style
+        .icon_weight
+        .map(f32::to_bits)
+        .hash(&mut hasher);
+    node.computed_style
+        .icon_grade
+        .map(f32::to_bits)
+        .hash(&mut hasher);
+    node.computed_style
+        .icon_optical_size
+        .map(f32::to_bits)
+        .hash(&mut hasher);
     hasher.finish()
 }
 
@@ -617,6 +928,15 @@ fn batch_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
     node.computed_style.font_family.hash(&mut hasher);
     node.computed_style.font_size.to_bits().hash(&mut hasher);
     hasher.finish()
+}
+
+fn hash_attribute(
+    node: &WidgetNode,
+    key: &str,
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+) {
+    key.hash(hasher);
+    node.attributes.get(key).hash(hasher);
 }
 
 fn batch_barrier(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> Option<DisplayBatchBarrier> {
@@ -822,5 +1142,96 @@ mod tests {
         assert_eq!(metrics.barriers.text, 1);
         assert_eq!(metrics.barriers.clip, 1);
         assert_eq!(metrics.barrier_count, 2);
+    }
+
+    #[test]
+    fn display_list_rebuilds_when_slider_value_changes() {
+        let mut root = node(1, "slider", 0.0, 0.0, 100.0, 20.0);
+        root.attributes.insert("min".into(), "0".into());
+        root.attributes.insert("max".into(), "100".into());
+        root.attributes.insert("value".into(), "25".into());
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 20, false, true);
+
+        root.attributes.insert("value".into(), "75".into());
+        let metrics = list.update(&root, 100, 20, false, true);
+
+        assert_eq!(metrics.entries_rebuilt, 1);
+        assert_eq!(metrics.damage_area, 2_000);
+    }
+
+    #[test]
+    fn display_list_rebuilds_when_border_width_changes() {
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 20.0);
+        root.computed_style.border_color = Color::WHITE;
+        root.computed_style.border_width = mesh_core_elements::style::Edges::all(1.0);
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 20, false, true);
+
+        root.computed_style.border_width = mesh_core_elements::style::Edges::all(4.0);
+        let metrics = list.update(&root, 100, 20, false, true);
+
+        assert_eq!(metrics.entries_rebuilt, 2);
+        assert_eq!(metrics.damage_area, 2_000);
+    }
+
+    #[test]
+    fn display_list_stores_compact_paint_payloads() {
+        let mut root = node(1, "box", 10.0, 20.0, 80.0, 30.0);
+        root.computed_style.transform.translate_x = 5.0;
+        root.computed_style.transform.translate_y = 7.0;
+        root.computed_style.overflow_x = Overflow::Scroll;
+        root.attributes
+            .insert("_mesh_scroll_max_x".into(), "40".into());
+        root.attributes
+            .insert("_mesh_content_width".into(), "120".into());
+
+        let mut text = node(2, "text", 20.0, 30.0, 20.0, 10.0);
+        text.attributes.insert("content".into(), "hello".into());
+        text.attributes
+            .insert("_mesh_selection_background".into(), "#112233".into());
+        text.attributes
+            .insert("_mesh_selection_foreground".into(), "#ddeeff".into());
+        text.attributes
+            .insert("_mesh_selection_anchor_x".into(), "2".into());
+        text.attributes
+            .insert("_mesh_selection_anchor_y".into(), "3".into());
+        text.attributes
+            .insert("_mesh_selection_focus_x".into(), "8".into());
+        text.attributes
+            .insert("_mesh_selection_focus_y".into(), "9".into());
+        text.attributes
+            .insert("_mesh_selection_text_x".into(), "1".into());
+        text.attributes
+            .insert("_mesh_selection_text_y".into(), "1".into());
+        root.children.push(text);
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 100, false, false);
+
+        let root_command = list
+            .paint_commands()
+            .iter()
+            .find(|command| command.node.id == 1 && command.kind == DisplayPaintCommandKind::Node)
+            .expect("root command");
+        assert_eq!(root_command.node.layout.x, 15.0);
+        assert_eq!(root_command.node.layout.y, 27.0);
+        assert_eq!(root_command.node.scrollbars.max_x, 40.0);
+        assert_eq!(root_command.node.scrollbars.content_width, 120.0);
+
+        let text_command = list
+            .paint_commands()
+            .iter()
+            .find(|command| command.node.id == 2 && command.kind == DisplayPaintCommandKind::Node)
+            .expect("text command");
+        match &text_command.node.content {
+            DisplayPaintContent::Text(text) => {
+                assert_eq!(text.text, "hello");
+                let selection = text.selection.expect("selection payload");
+                assert_eq!(selection.anchor_x, 2.0);
+                assert_eq!(selection.focus_y, 9.0);
+            }
+            other => panic!("expected text paint payload, got {other:?}"),
+        }
     }
 }

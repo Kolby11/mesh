@@ -105,7 +105,7 @@ fn require_import_installs_proxy() {
     ctx.load_script(
         r#"
 function init()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
 end
 "#,
     )
@@ -157,7 +157,7 @@ fn require_imports_interface_proxy() {
     ctx.load_script(
         r#"
 function init()
-    local audio = require("@mesh/audio")
+    local audio = require("mesh.audio")
 end
 "#,
     )
@@ -173,7 +173,7 @@ fn rejects_missing_interface_contract() {
     ctx.load_script(
         r#"
 function init()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
 end
 "#,
     )
@@ -191,7 +191,7 @@ fn require_missing_interface_emits_visible_diagnostic() {
     ctx.load_script(
         r#"
 function init()
-    require("@mesh/audio@>=1.0")
+    require("mesh.audio@>=1.0")
 end
 "#,
     )
@@ -217,7 +217,7 @@ fn pcall_require_still_emits_interface_diagnostic() {
 ok = true
 
 function init()
-    ok = pcall(require, "@mesh/audio")
+    ok = pcall(require, "mesh.audio")
 end
 "#,
     )
@@ -243,7 +243,7 @@ fn unknown_method_reads_state_field_as_nil() {
     ctx.load_script(
         r#"
 function init()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
     local val = audio.mute_all  -- unknown key: should return nil, not error
     assert(val == nil)
 end
@@ -454,7 +454,7 @@ fn interface_proxy_tracks_top_level_field_reads() {
 icon_name = "audio-volume-muted"
 
 function sync_audio_state()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
     local percent = audio.percent or 0
     if audio.muted then
         icon_name = "audio-volume-muted"
@@ -498,7 +498,7 @@ fn interface_proxy_exposes_state_table() {
 audio_state_type = ""
 
 function init()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
     audio_state_type = type(audio.state)
 end
 "#,
@@ -524,7 +524,7 @@ fn interface_proxy_state_reads_latest_payload() {
 audio_percent = 0
 
 function sync_audio_state()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
     audio_percent = audio.state.percent or 0
 end
 "#,
@@ -553,7 +553,7 @@ state_percent = 0
 direct_percent = 0
 
 function sync_audio_state()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
     state_percent = audio.state.percent or 0
     direct_percent = audio.percent or 0
 end
@@ -579,7 +579,7 @@ fn interface_proxy_reads_state_fields_without_callbacks() {
 icon_name = "audio-volume-muted"
 
 function init()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
     if audio.muted then
         icon_name = "audio-volume-muted"
     elseif audio.percent < 50 then
@@ -613,7 +613,7 @@ audio_muted = false
 audio_source = ""
 
 function sync_audio_state()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
     audio_percent = audio.percent or 0
     audio_muted = audio.muted or false
     audio_source = audio.source_module or ""
@@ -656,40 +656,9 @@ end
 }
 
 #[test]
-fn service_use_reads_state_fields_without_callbacks() {
+fn provider_only_require_creates_read_only_proxy() {
     let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
-    let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
-    ctx.set_interface_catalog(audio_catalog());
-    ctx.load_script(
-        r#"
-audio_icon = "audio-volume-muted"
-
-function init()
-    local audio = mesh.service.use("audio")
-    if audio.muted then
-        audio_icon = "audio-volume-muted"
-    else
-        audio_icon = "audio-volume-high"
-    end
-end
-"#,
-    )
-    .unwrap();
-
-    let payload = serde_json::json!({ "muted": false });
-    ctx.apply_service_payload("audio", &payload);
-    ctx.call_init().unwrap();
-    assert_eq!(
-        ctx.state.get("audio_icon"),
-        Some(Value::String("audio-volume-high".into()))
-    );
-}
-
-#[test]
-fn provider_only_service_use_creates_read_only_proxy() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.theme.read"));
+    caps.grant(Capability::new("theme.read"));
     let mut ctx = ScriptContext::new("@test/theme-widget", caps).unwrap();
     ctx.set_interface_catalog(theme_provider_only_catalog());
     ctx.load_script(
@@ -697,7 +666,7 @@ fn provider_only_service_use_creates_read_only_proxy() {
 theme_icon = "weather-clear-night"
 
 function sync_theme_state()
-    local theme = mesh.service.use("theme")
+    local theme = require("mesh.theme")
     if theme.is_dark then
         theme_icon = "weather-clear-night"
     else
@@ -718,6 +687,25 @@ end
 }
 
 #[test]
+fn rejects_legacy_mesh_require_syntax() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+function init()
+    require("@mesh/audio@>=1.0")
+end
+"#,
+    )
+    .unwrap();
+
+    let err = ctx.call_init().unwrap_err();
+    assert!(matches!(err, ScriptError::LuaError(message) if message.contains("unsupported require: @mesh/audio@>=1.0")));
+}
+
+#[test]
 fn interface_proxy_method_publishes_service_command() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("service.audio.read"));
@@ -727,7 +715,7 @@ fn interface_proxy_method_publishes_service_command() {
     ctx.load_script(
         r#"
 function init()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
     audio:set_volume("default", 0.5)
     audio.set_volume("default", 0.5)
 end
@@ -797,7 +785,7 @@ queued_ok = false
 queued = false
 
 function init()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
     local result = audio.set_volume("default", 0.5)
     queued_ok = result.ok
     queued = result.queued
@@ -828,12 +816,12 @@ denied_ok = true
 denied_error = ""
 
 function read_state()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
     audio_percent = audio.percent or 0
 end
 
 function change_volume()
-    local audio = require("@mesh/audio@>=1.0")
+    local audio = require("mesh.audio@>=1.0")
     local result = audio.set_volume("default", 0.5)
     denied_ok = result.ok
     denied_error = result.error or ""

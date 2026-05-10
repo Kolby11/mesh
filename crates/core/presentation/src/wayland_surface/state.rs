@@ -2,6 +2,7 @@ use super::backend::{SurfaceEntry, apply_config};
 use super::*;
 
 const MAX_REPEAT_EVENTS_PER_POLL: usize = 64;
+const SURFACE_FOCUS_GRAB_TIMEOUT: Duration = Duration::from_millis(750);
 
 pub(super) struct KeyboardRepeatState {
     pub(super) surface_id: String,
@@ -44,6 +45,7 @@ pub(super) struct State {
     pub(super) activation_seat: Option<wl_seat::WlSeat>,
     pub(super) focus_grab: Option<HyprlandFocusGrabV1>,
     pub(super) focus_grab_surface_id: Option<String>,
+    pub(super) focus_grab_requested_at: Option<Instant>,
     pub(super) qh: QueueHandle<State>,
     pub(super) pool: Option<SlotPool>,
     pub(super) surfaces: HashMap<String, SurfaceEntry>,
@@ -150,6 +152,12 @@ impl State {
             return false;
         };
         if self.keyboard_focus.as_deref() == Some(surface_id) {
+            if self.focus_grab_surface_id.as_deref() == Some(surface_id) {
+                tracing::debug!(
+                    "[focus] layer_shell: focus already on grabbed surface_id={surface_id}; releasing stale focus grab"
+                );
+                self.release_surface_focus_grab(surface_id);
+            }
             return true;
         }
         let Some(entry) = self.surfaces.get(surface_id) else {
@@ -175,6 +183,7 @@ impl State {
             grab.add_surface(entry.layer_surface.wl_surface());
             grab.commit();
             self.focus_grab_surface_id = Some(surface_id.to_string());
+            self.focus_grab_requested_at = Some(Instant::now());
             if let Some(previous_surface_id) = previous_surface_id.as_deref()
                 && previous_surface_id != surface_id
             {
@@ -183,6 +192,45 @@ impl State {
             self.reapply_surface_config(surface_id);
         }
 
+        true
+    }
+
+    pub(super) fn release_expired_surface_focus_grab(&mut self) -> bool {
+        let Some(surface_id) = self.focus_grab_surface_id.clone() else {
+            return false;
+        };
+        let Some(requested_at) = self.focus_grab_requested_at else {
+            tracing::warn!(
+                "[focus] layer_shell: focus grab active for surface_id={surface_id} without request timestamp; releasing"
+            );
+            self.release_surface_focus_grab(&surface_id);
+            return true;
+        };
+        if let Some(keyboard_focus) = self.keyboard_focus.as_deref() {
+            if keyboard_focus != surface_id {
+                tracing::debug!(
+                    "[focus] layer_shell: focus moved off grabbed surface from={keyboard_focus} to={surface_id}; releasing focus grab"
+                );
+                self.release_surface_focus_grab(&surface_id);
+                return true;
+            }
+            if requested_at.elapsed() < SURFACE_FOCUS_GRAB_TIMEOUT {
+                return false;
+            }
+            tracing::warn!(
+                "[focus] layer_shell: focus stayed on grabbed surface_id={surface_id} for too long; releasing focus grab"
+            );
+            self.release_surface_focus_grab(&surface_id);
+            return true;
+        }
+        if requested_at.elapsed() < SURFACE_FOCUS_GRAB_TIMEOUT {
+            return false;
+        }
+
+        tracing::warn!(
+            "[focus] layer_shell: focus grab timed out for surface_id={surface_id}; releasing"
+        );
+        self.release_surface_focus_grab(&surface_id);
         true
     }
 
@@ -224,8 +272,10 @@ impl State {
         if self.focus_grab_surface_id.as_deref() != Some(surface_id) {
             return;
         }
-        let Some(grab) = self.focus_grab.as_ref() else {
+        let Some(grab) = self.focus_grab.take() else {
             self.focus_grab_surface_id = None;
+            self.focus_grab_requested_at = None;
+            self.reapply_surface_config(surface_id);
             return;
         };
         if let Some(entry) = self.surfaces.get(surface_id) {
@@ -233,9 +283,13 @@ impl State {
                 "[focus] layer_shell: releasing focus grab for surface_id={surface_id}"
             );
             grab.remove_surface(entry.layer_surface.wl_surface());
-            grab.commit();
         }
+        // Destroy is the protocol's hard release path: it removes an active
+        // grab even if a compositor does not process an empty whitelist the way
+        // we expect. The next focus request creates a fresh grab object.
+        grab.destroy();
         self.focus_grab_surface_id = None;
+        self.focus_grab_requested_at = None;
         self.reapply_surface_config(surface_id);
     }
 

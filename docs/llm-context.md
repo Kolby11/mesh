@@ -211,7 +211,7 @@ backend module (mesh.toml, provides = "mesh.audio")
   → registered in InterfaceRegistry
   → emits events on EventBus
   → Shell sets __mesh_svc_audio Lua table and calls on_change handlers via ScriptContext
-  → frontend modules use require("@mesh/audio") proxy to read state and call commands
+  → frontend modules use require("mesh.audio") proxy to read state and call commands
 ```
 
 ---
@@ -441,12 +441,12 @@ obj.insert("icon_name", icon_name);
 Example of what is RIGHT:
 ```lua
 -- packages/modules/frontend/core/volume-slider/src/main.mesh <script>
-local audio = require("@mesh/audio@>=1.0")
+local audio = require("mesh.audio@>=1.0")
 
 icon_name = "audio-volume-muted"
 audio_label = "0%"
 
-audio.on_change(function()
+function onRender()
     local p = audio.percent or 0
     local m = audio.muted or false
     if m or p == 0 then
@@ -457,7 +457,7 @@ audio.on_change(function()
         icon_name = "audio-volume-high"
     end
     audio_label = string.format("%d%%", p)
-end)
+end
 
 function onVolumeUp()   audio.volume_up()   end
 function onVolumeDown() audio.volume_down() end
@@ -478,19 +478,19 @@ local helper = function() end     -- private, not synced
 
 ### Interface proxies
 
-`require("@mesh/audio@>=1.0")` returns a proxy for the named backend service. Use it as a Lua local:
+`require("mesh.audio@>=1.0")` returns a proxy for the named backend service. Use it as a Lua local:
 
 ```lua
-local audio = require("@mesh/audio@>=1.0")
+local audio = require("mesh.audio@>=1.0")
 
 -- Read state fields (populated when backend emits)
 local p = audio.percent   -- number
 local m = audio.muted     -- boolean
 
--- Register a change handler (called on every backend update)
-audio.on_change(function()
+-- Derive display state during render
+function onRender()
     icon_name = audio.muted and "audio-volume-muted" or "audio-volume-high"
-end)
+end
 
 -- Call commands (published as events to the backend)
 audio.volume_up()

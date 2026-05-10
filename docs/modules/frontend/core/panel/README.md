@@ -32,7 +32,7 @@ asking the core for presentation-ready values.
 
 ## Consumed interfaces
 
-Looked up via `require("@mesh/<service>")`; all are optional and fall
+Looked up via `require("mesh.<service>")`; all are optional and fall
 back to `"N/A"` / `"0"` / `"disconnected"` when no implementation is
 registered. The core only brokers those lookups and payloads; formatting and
 fallback presentation live in the module script.

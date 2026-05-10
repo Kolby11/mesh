@@ -34,12 +34,20 @@ impl Shell {
     }
 
     pub(in crate::shell) fn mark_components_theme_changed(&mut self) -> Result<(), ShellRunError> {
+        let theme_id = self.theme.active().id.clone();
+        let is_dark = theme_id.contains("dark");
         for runtime in &mut self.components {
             runtime
                 .component
                 .theme_changed()
                 .map_err(ShellRunError::Component)?;
+            runtime.force_full_present = true;
         }
+        // Broadcast event so script-side subscribers can react. Painter-level
+        // invalidation is handled by `theme_changed()` above; the event is
+        // additive — components that opt in via `handle_core_event` can use it
+        // for non-visual derived state (e.g. icon name based on dark mode).
+        let _ = self.broadcast_core_event(CoreEvent::ThemeChanged { theme_id, is_dark })?;
         Ok(())
     }
 
@@ -162,12 +170,15 @@ impl Shell {
 
     pub(in crate::shell) fn mark_components_locale_changed(&mut self) -> Result<(), ShellRunError> {
         let locale = self.locale.clone();
+        let locale_id = locale.current().to_string();
         for runtime in &mut self.components {
             runtime
                 .component
                 .locale_changed(&locale)
                 .map_err(ShellRunError::Component)?;
+            runtime.force_full_present = true;
         }
+        let _ = self.broadcast_core_event(CoreEvent::LocaleChanged { locale: locale_id })?;
         Ok(())
     }
 }

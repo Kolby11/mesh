@@ -14,7 +14,39 @@ theme_icon = "weather-clear-night"
 theme_tooltip = "Switch to light theme"
 theme_is_dark = true
 
+local theme_ok, theme = pcall(function()
+    return require("mesh.theme")
+end)
+if not theme_ok then theme = nil end
+
+local function read_theme_is_dark()
+    if theme_ok and theme then
+        local current_is_dark = theme.is_dark
+        if current_is_dark == nil and theme.state then
+            current_is_dark = theme.state.is_dark
+        end
+        if current_is_dark ~= nil then
+            return current_is_dark == true
+        end
+
+        local current = theme.current or theme.theme_id
+        if current == nil and theme.state then
+            current = theme.state.current or theme.state.theme_id
+        end
+        if type(current) == "string" then
+            return string.find(current, "dark", 1, true) ~= nil
+        end
+    end
+
+    return theme_is_dark
+end
+
+local function sync_theme_state()
+    theme_is_dark = read_theme_is_dark()
+end
+
 function onRender()
+    sync_theme_state()
     if theme_is_dark then
         theme_icon = "weather-clear-night"
         theme_tooltip = "Switch to light theme"
@@ -25,6 +57,7 @@ function onRender()
 end
 
 function onThemeToggle()
+    sync_theme_state()
     local next_theme
     if theme_is_dark then
         next_theme = "mesh-default-light"

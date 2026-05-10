@@ -2,7 +2,7 @@ use super::lookup::{
     interface_error_message, lookup_failure_reason, lua_err, lua_value_to_string, map_lua_error,
     record_lookup_diagnostic, record_lookup_diagnostic_lua,
 };
-use super::proxy::{create_interface_proxy, create_service_proxy, service_name_from_interface};
+use super::proxy::create_interface_proxy;
 use super::{PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport, ScriptState};
 use crate::host_api::{HostApiManifest, InterfaceProxy};
 use mesh_core_capability::CapabilitySet;
@@ -215,62 +215,6 @@ impl ScriptContext {
         let has_locale_read = manifest.has_locale_read;
 
         let published_events = Arc::clone(&self.shared_published_events);
-        let tracked_service_fields = Arc::clone(&self.tracked_service_fields);
-        let interface_catalog_for_service = interface_catalog.clone();
-        let allowed_interfaces_for_service = allowed_interfaces.clone();
-        let module_id_for_service = self.module_id.clone();
-        let capabilities_for_service = self.capabilities.clone();
-        let diagnostics_for_service = Arc::clone(&self.shared_diagnostics);
-        mesh_core_service
-            .set(
-                "use",
-                self.lua
-                    .create_function(move |lua, service: String| {
-                        let canonical = InterfaceProxy::canonical_name(&service);
-                        let readable = canonical == "mesh.theme" && has_theme_read
-                            || canonical == "mesh.locale" && has_locale_read
-                            || allowed_interfaces_for_service.contains(&canonical)
-                            || !canonical.starts_with("mesh.");
-                        if canonical.starts_with("mesh.") && !readable {
-                            return Err(record_lookup_diagnostic_lua(
-                                &diagnostics_for_service,
-                                &module_id_for_service,
-                                &canonical,
-                                None,
-                                "capability denied",
-                                ScriptError::CapabilityDenied(canonical.clone()),
-                            ));
-                        }
-
-                        let resolution = interface_catalog_for_service.resolve(&canonical, None);
-                        if resolution.provider.is_none() {
-                            let reason =
-                                lookup_failure_reason(&interface_catalog_for_service, &resolution);
-                            return Err(record_lookup_diagnostic_lua(
-                                &diagnostics_for_service,
-                                &module_id_for_service,
-                                &canonical,
-                                None,
-                                &reason,
-                                ScriptError::InterfaceUnavailable(canonical.clone()),
-                            ));
-                        }
-                        create_service_proxy(
-                            lua,
-                            service_name_from_interface(&canonical),
-                            resolution.contract.clone(),
-                            canonical,
-                            module_id_for_service.clone(),
-                            capabilities_for_service.clone(),
-                            Arc::clone(&tracked_service_fields),
-                            Arc::clone(&published_events),
-                        )
-                    })
-                    .map_err(lua_err)?,
-            )
-            .map_err(lua_err)?;
-
-        let published_events = Arc::clone(&self.shared_published_events);
         let module_id = self.module_id.clone();
         let capabilities = self.capabilities.clone();
         mesh_core_events
@@ -480,20 +424,13 @@ impl ScriptContext {
                 let mut module_name = module.as_str();
                 let mut version = None;
                 if let Some((left, right)) = module.rsplit_once('@') {
-                    if left.starts_with("@mesh.")
-                        || left.starts_with("@mesh/")
-                        || left.starts_with("mesh.")
-                    {
+                    if left.starts_with("mesh.") {
                         module_name = left;
                         version = Some(right.to_string());
                     }
                 }
 
-                let interface = if let Some(stripped) = module_name.strip_prefix("@mesh.") {
-                    format!("mesh.{stripped}")
-                } else if let Some(stripped) = module_name.strip_prefix("@mesh/") {
-                    format!("mesh.{}", stripped.replace('/', "."))
-                } else if module_name.starts_with("mesh.") {
+                let interface = if module_name.starts_with("mesh.") {
                     module_name.to_string()
                 } else {
                     return Err(mlua::Error::external(ScriptError::LuaError(format!(

@@ -212,7 +212,7 @@ these blocks:
 | Block                  | Purpose                                                                                                                                                                                                          |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `<template>`           | XHTML-like markup describing the UI tree. Dynamic attributes use `{}` and event handlers use `onclick={handler}`-style attributes.                                                                               |
-| `<script lang="luau">` | Luau code implementing state, service proxy reads via `require("@mesh/<service>")`, display-state derivation in `onRender()`, and element event handlers.                                                        |
+| `<script lang="luau">` | Luau code implementing state, service proxy reads via `require("mesh.<service>")`, display-state derivation in `onRender()`, and element event handlers.                                                          |
 | `<style>`              | CSS-like styling. Token references use `token(group.name)` and inherit the active theme. Supports `overflow`, `overflow-x`, `overflow-y`, and container breakpoints via `@container (min-width: 640px) { ... }`. |
 
 ## Core surfaces

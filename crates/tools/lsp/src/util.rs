@@ -53,7 +53,7 @@ pub enum ScriptContext {
     EventCurrentTarget {
         prefix: String,
     },
-    /// Cursor is after `require("@mesh/` or `mesh.service.bind("`.
+    /// Cursor is after `require("mesh.` or `mesh.service.bind("`.
     ServiceName,
     /// Cursor is after `<proxy_var>.` where `proxy_var` is bound to an interface via `require`.
     InterfaceProxy {
@@ -264,12 +264,10 @@ pub fn script_context_at(block_content: &str, offset: usize) -> ScriptContext {
         }
     }
 
-    // Check for service name context: require("@mesh/" or mesh.service.bind(" or mesh.service.on("
+    // Check for service name context: require("mesh." or mesh.service.bind(" or mesh.service.on("
     for pattern in &[
-        "require(\"@mesh/",
-        "require('@mesh/",
-        "require(\"@mesh.",
-        "require('@mesh.",
+        "require(\"mesh.",
+        "require('mesh.",
         "mesh.service.bind(\"",
         "mesh.service.bind('",
         "mesh.service.on(\"",

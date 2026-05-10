@@ -1,5 +1,6 @@
 use super::component::{FrontendCatalog, FrontendSurfaceComponent};
 use super::*;
+use std::collections::HashSet;
 
 const BUILTIN_DEBUG_INSPECTOR_ID: &str = "@mesh/debug-inspector";
 
@@ -56,6 +57,14 @@ impl Shell {
             backend_name: "Shell".to_string(),
             priority: 100,
         });
+        interfaces.register(InterfaceProvider {
+            interface: "mesh.theme".to_string(),
+            version: Some("1.0".to_string()),
+            base_module: Some("@mesh/theme-interface".to_string()),
+            provider_module: "@mesh/shell".to_string(),
+            backend_name: "Shell Theme".to_string(),
+            priority: 200,
+        });
 
         Self {
             config,
@@ -79,6 +88,7 @@ impl Shell {
             debug_overlay: DebugOverlay::new(),
             active_key_modifiers: KeyModifiers::default(),
             keyboard_focus_surface: None,
+            transfer_owned_keyboard_modes: HashMap::new(),
             service_handlers: HashMap::new(),
             backend_runtimes: HashMap::new(),
             backend_runtime_statuses: HashMap::new(),

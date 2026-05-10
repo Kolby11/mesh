@@ -35,7 +35,8 @@ use runtime_tree::{
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::{
-    LayoutEngine, StyleContext, StyleResolver, VariableStore, WidgetNode, element_snapshot_json,
+    IntrinsicLayoutCache, LayoutEngine, StyleContext, StyleResolver, VariableStore, WidgetNode,
+    element_snapshot_json,
 };
 use mesh_core_frontend::{
     CompiledFrontendModule, FrontendRenderMode, compile_frontend_module, root_accessibility_role,
@@ -125,19 +126,46 @@ impl ComponentDirtyFlags {
     }
 }
 
-fn retained_paint_snapshot(metrics: DisplayListMetrics) -> mesh_core_debug::RetainedPaintSnapshot {
+#[derive(Debug, Clone, Copy)]
+struct EffectiveDamage {
+    rect: Option<DamageRect>,
+    full_surface: bool,
+}
+
+impl EffectiveDamage {
+    fn none() -> Self {
+        Self {
+            rect: None,
+            full_surface: false,
+        }
+    }
+}
+
+fn retained_paint_snapshot(
+    metrics: DisplayListMetrics,
+    effective_damage: EffectiveDamage,
+) -> mesh_core_debug::RetainedPaintSnapshot {
+    let damage_area = if effective_damage.full_surface {
+        metrics.surface_area
+    } else {
+        effective_damage.rect.map(|rect| rect.area()).unwrap_or(0)
+    };
     mesh_core_debug::RetainedPaintSnapshot {
         retained_generation: metrics.retained_generation,
         entries_total: metrics.entries_total,
         entries_reused: metrics.entries_reused,
         entries_rebuilt: metrics.entries_rebuilt,
         entries_removed: metrics.entries_removed,
-        damage_rect_count: metrics.damage_rect_count,
-        damage_area: metrics.damage_area,
+        damage_rect_count: u64::from(effective_damage.rect.is_some()),
+        damage_area,
         surface_area: metrics.surface_area,
-        full_surface_damage: metrics.full_surface_damage,
+        full_surface_damage: effective_damage.full_surface,
         partial_present_supported: metrics.partial_present_supported,
-        skipped_paint_pixels: metrics.skipped_paint_pixels,
+        skipped_paint_pixels: if metrics.partial_present_supported {
+            metrics.surface_area.saturating_sub(damage_area)
+        } else {
+            0
+        },
         batch_count: metrics.batch_count,
         batched_primitives: metrics.batched_primitives,
         barrier_count: metrics.barrier_count,
@@ -235,7 +263,7 @@ pub(super) struct FrontendSurfaceComponent {
     hovered_path: Vec<String>,
     hovered_pos: (f32, f32),
     hover_start: Option<std::time::Instant>,
-    tooltip_visible_previous: bool,
+    last_tooltip_damage: Option<DamageRect>,
     runtimes: Arc<Mutex<HashMap<String, EmbeddedFrontendRuntime>>>,
     render_stack: RefCell<Vec<String>>,
     active_theme: RefCell<Theme>,
@@ -245,6 +273,7 @@ pub(super) struct FrontendSurfaceComponent {
     locale: LocaleEngine,
     interface_catalog: mesh_core_service::InterfaceCatalog,
     last_tree: Option<WidgetNode>,
+    intrinsic_layout_cache: IntrinsicLayoutCache,
     retained_tree: RetainedWidgetTree,
     retained_render_objects: RenderObjectTree,
     retained_display_list: RetainedDisplayList,
@@ -323,7 +352,7 @@ impl FrontendSurfaceComponent {
             hovered_path: Vec::new(),
             hovered_pos: (0.0, 0.0),
             hover_start: None,
-            tooltip_visible_previous: false,
+            last_tooltip_damage: None,
             runtimes: Arc::new(Mutex::new(HashMap::new())),
             render_stack: RefCell::new(Vec::new()),
             active_theme: RefCell::new(default_theme()),
@@ -333,6 +362,7 @@ impl FrontendSurfaceComponent {
             locale: LocaleEngine::new("en"),
             interface_catalog,
             last_tree: None,
+            intrinsic_layout_cache: IntrinsicLayoutCache::default(),
             retained_tree: RetainedWidgetTree::default(),
             retained_render_objects: RenderObjectTree::default(),
             retained_display_list: RetainedDisplayList::default(),
@@ -355,14 +385,26 @@ impl FrontendSurfaceComponent {
     pub(super) fn invalidate(&mut self, flags: ComponentDirtyFlags) {
         self.dirty_types |= flags;
         self.dirty = true;
+        if invalidation_requires_pixel_repaint(flags) {
+            self.surface_pixels_invalid = true;
+        }
     }
 
     pub(super) fn invalidate_style_path(&mut self, flags: ComponentDirtyFlags) {
         self.dirty_types |= flags;
         self.style_only_dirty = true;
+        if invalidation_requires_pixel_repaint(flags) {
+            self.surface_pixels_invalid = true;
+        }
     }
 
     pub(super) fn invalidate_script_state(&mut self) {
+        // Handler-driven state mutations can change any rendered value
+        // (slider knob position, text content, icon names). Force a full
+        // pixel-buffer repaint to bypass the selective-damage shortcut, which
+        // can misjudge damage for content-only changes (e.g. drag-driven
+        // continuous text and slider knob updates).
+        self.surface_pixels_invalid = true;
         self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
     }
 
@@ -380,10 +422,6 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn invalidate_surface_config(&mut self) {
         self.invalidate_surface_config_only();
-    }
-
-    pub(super) fn invalidate_surface_config_only(&mut self) {
-        self.invalidate_style_path(ComponentDirtyFlags::SURFACE_CONFIG);
     }
 
     pub(super) fn invalidate_surface_config_only(&mut self) {
@@ -412,6 +450,18 @@ impl FrontendSurfaceComponent {
             self.last_dirty_types,
         )
     }
+}
+
+fn invalidation_requires_pixel_repaint(flags: ComponentDirtyFlags) -> bool {
+    flags.intersects(
+        ComponentDirtyFlags::STATE
+            | ComponentDirtyFlags::STYLE
+            | ComponentDirtyFlags::LAYOUT
+            | ComponentDirtyFlags::PAINT
+            | ComponentDirtyFlags::TEXT
+            | ComponentDirtyFlags::ACCESSIBILITY
+            | ComponentDirtyFlags::METRICS,
+    )
 }
 
 fn tracked_service_fields_changed(

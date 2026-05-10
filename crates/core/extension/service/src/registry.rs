@@ -26,7 +26,7 @@ pub struct ServiceEntry {
 
 /// Central registry that holds one active typed backend per service type.
 ///
-/// New frontend modules should prefer `require("@mesh/<service>")` and contract
+/// New frontend modules should prefer `require("mesh.<service>")` and contract
 /// providers. This registry is for compatibility with older Rust call sites.
 #[derive(Default)]
 pub struct ServiceRegistry {

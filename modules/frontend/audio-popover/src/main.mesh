@@ -16,6 +16,7 @@
         max="1"
         value="{slider_value}"
         onchange={onVolumeChange}
+        onrelease={onVolumeRelease}
       />
 
       <row class="audio-actions">
@@ -34,7 +35,7 @@
 </template>
 
 <script lang="luau">
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 icon_name = "audio-volume-muted"
@@ -44,6 +45,8 @@ audio_percent_label = "--%"
 slider_value = 0.0
 mute_button_text = "Mute"
 mute_button_label = "Toggle mute"
+volume_dragging = false
+pending_slider_value = nil
 
 local function clamp_unit(value)
     local numeric = tonumber(value) or 0
@@ -96,22 +99,41 @@ function onRender()
         slider_value = 0.0
         mute_button_text = "Mute"
         mute_button_label = "Audio unavailable"
+        volume_dragging = false
+        pending_slider_value = nil
         return
     end
 
     local percent = clamp_percent(audio.percent)
     local muted = audio.muted or false
+    local backend_value = clamp_unit(percent / 100)
+    if pending_slider_value ~= nil then
+        if math.abs(backend_value - pending_slider_value) <= 0.02 then
+            pending_slider_value = nil
+        else
+            sync_audio_copy(pending_slider_value * 100, muted)
+            return
+        end
+    end
+
     sync_audio_copy(percent, muted)
 end
 
 function onVolumeChange(value)
     local normalized = clamp_unit(value)
+    volume_dragging = true
+    pending_slider_value = normalized
     sync_audio_copy(normalized * 100, false)
     if audio_ok and audio and audio.available ~= false then
         audio.set_volume("default", normalized)
     else
         audio_status = "Audio controls unavailable"
     end
+end
+
+function onVolumeRelease(value)
+    volume_dragging = false
+    pending_slider_value = clamp_unit(value)
 end
 
 function onToggleMute()

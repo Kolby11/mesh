@@ -27,7 +27,7 @@ pub use element::{
     element_snapshot_json, element_type_for_tag,
 };
 pub use events::{EventDispatcher, InputState, Modifiers, RawInputEvent, UiEvent};
-pub use layout::{LayoutEngine, LayoutRect, TextMeasurer};
+pub use layout::{IntrinsicLayoutCache, LayoutEngine, LayoutRect, TextMeasurer};
 pub use style::{
     AlignContent, AlignItems, AlignSelf, Color, ComputedStyle, Corners, Dimension, Display, Edges,
     FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow, Position, StyleContext,

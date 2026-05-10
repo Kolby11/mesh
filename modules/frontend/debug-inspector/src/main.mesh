@@ -166,7 +166,7 @@ import OverviewView from "./components/overview-view.mesh"
 import SurfacesView from "./components/surfaces-view.mesh"
 import ViewTabs from "./components/view-tabs.mesh"
 
-local debug_ok, debug_service = pcall(require, "@mesh/debug@>=1.0")
+local debug_ok, debug_service = pcall(require, "mesh.debug@>=1.0")
 if not debug_ok then debug_service = nil end
 
 active_view = "overview"
