@@ -14,6 +14,22 @@ impl Shell {
             if !self.components[index].component.wants_render() {
                 continue;
             }
+            let surface_size = {
+                let surface = self
+                    .surfaces
+                    .get(&surface_id)
+                    .ok_or_else(|| ShellRunError::MissingSurface(surface_id.clone()))?;
+                if surface.width == 0 || surface.height == 0 {
+                    self.presentation_engine.surface_size(&surface_id)?
+                } else {
+                    Some((surface.width.max(1), surface.height.max(1)))
+                }
+            };
+            if let Some((width, height)) = surface_size {
+                self.components[index]
+                    .component
+                    .surface_size_changed(width, height);
+            }
             let total_render_started = self.profiling_enabled().then(std::time::Instant::now);
             let profiling_enabled = self.profiling_enabled();
             let mut rerender_attempts = 0;
