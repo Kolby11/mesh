@@ -19,6 +19,9 @@ pub(super) struct ComponentRuntime {
     pub(super) module_settings_path: Option<PathBuf>,
     pub(super) module_settings_modified_at: Option<SystemTime>,
     pub(super) paint_buffer: Option<PixelBuffer>,
+    /// Last surface size resolved by shell/presentation without requiring a
+    /// compositor roundtrip on every render or input event.
+    pub(super) known_surface_size: Option<(u32, u32)>,
 }
 
 impl ComponentRuntime {
@@ -42,6 +45,7 @@ impl ComponentRuntime {
             module_settings_path,
             module_settings_modified_at: None,
             paint_buffer: None,
+            known_surface_size: None,
         }
     }
 }

@@ -24,11 +24,22 @@ impl PixelBuffer {
 
     /// Clear the buffer to a solid color.
     pub fn clear(&mut self, color: Color) {
-        for pixel in self.data.chunks_exact_mut(4) {
-            pixel[0] = color.b;
-            pixel[1] = color.g;
-            pixel[2] = color.r;
-            pixel[3] = color.a;
+        let pixel = [color.b, color.g, color.r, color.a];
+        if pixel == [0, 0, 0, 0] {
+            self.data.fill(0);
+            return;
+        }
+        let width_bytes = (self.width * 4) as usize;
+        if self.height == 0 || width_bytes == 0 {
+            return;
+        }
+        let first_len = width_bytes.min(self.data.len());
+        let (first_row, rest) = self.data.split_at_mut(first_len);
+        for chunk in first_row.chunks_exact_mut(4) {
+            chunk.copy_from_slice(&pixel);
+        }
+        for row in rest.chunks_exact_mut(self.stride as usize) {
+            row[..width_bytes].copy_from_slice(first_row);
         }
     }
 
@@ -43,11 +54,15 @@ impl PixelBuffer {
         let pixel = [color.b, color.g, color.r, color.a];
         let row_start = (x * 4) as usize;
         let row_end = (end_x * 4) as usize;
+        let row_len = row_end.saturating_sub(row_start);
+        let mut pattern = Vec::with_capacity(row_len);
+        pattern.resize(row_len, 0);
+        for chunk in pattern.chunks_exact_mut(4) {
+            chunk.copy_from_slice(&pixel);
+        }
         for py in y..end_y {
             let base = (py * self.stride) as usize;
-            for chunk in self.data[base + row_start..base + row_end].chunks_exact_mut(4) {
-                chunk.copy_from_slice(&pixel);
-            }
+            self.data[base + row_start..base + row_end].copy_from_slice(&pattern);
         }
     }
 

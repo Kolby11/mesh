@@ -3,7 +3,7 @@ mod wayland_surface;
 
 use std::collections::HashMap;
 
-use mesh_core_render::PixelBuffer;
+use mesh_core_render::{DamageRect, PixelBuffer};
 
 pub use dev_window::{DevWindowEvent as WindowEvent, DevWindowKeyEvent as WindowKeyEvent, KeyMods};
 pub use wayland_surface::{LayerSurfaceConfig, LayerSurfaceSizePolicy};
@@ -77,8 +77,21 @@ impl PresentationEngine {
         visible: bool,
         buffer: &PixelBuffer,
     ) -> Result<(), PresentationError> {
+        self.present_with_damage(surface_id, title, visible, buffer, None)
+    }
+
+    pub fn present_with_damage(
+        &mut self,
+        surface_id: &str,
+        title: &str,
+        visible: bool,
+        buffer: &PixelBuffer,
+        damage: Option<DamageRect>,
+    ) -> Result<(), PresentationError> {
         match &mut self.backend {
-            Backend::WaylandSurface(bridge) => bridge.present(surface_id, title, visible, buffer),
+            Backend::WaylandSurface(bridge) => {
+                bridge.present_with_damage(surface_id, title, visible, buffer, damage)
+            }
             Backend::DevWindow(bridge) => bridge.present(surface_id, title, visible, buffer),
         }
     }
@@ -90,6 +103,13 @@ impl PresentationEngine {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.surface_size(surface_id),
             Backend::DevWindow(_) => Ok(None),
+        }
+    }
+
+    pub fn surface_size_if_known(&self, surface_id: &str) -> Option<(u32, u32)> {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.surface_size_if_known(surface_id),
+            Backend::DevWindow(_) => None,
         }
     }
 

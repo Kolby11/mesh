@@ -103,7 +103,8 @@ fn rounded_rect_via_tiny_skia(
 ) -> Option<()> {
     let buffer_width = buffer.width;
     let buffer_height = buffer.height;
-    let mut pixmap = tiny_skia::PixmapMut::from_bytes(&mut buffer.data, buffer_width, buffer_height)?;
+    let mut pixmap =
+        tiny_skia::PixmapMut::from_bytes(&mut buffer.data, buffer_width, buffer_height)?;
 
     let path = build_rounded_rect_path(rect, radius)?;
     let path_bounds = path.bounds();

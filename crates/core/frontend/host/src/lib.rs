@@ -6,7 +6,7 @@ use mesh_core_debug::ProfilingStage;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::WidgetNode;
 use mesh_core_locale::LocaleEngine;
-use mesh_core_render::PixelBuffer;
+use mesh_core_render::{DamageRect, PixelBuffer};
 use mesh_core_scripting::ScriptError;
 use mesh_core_theme::Theme;
 use mesh_core_wayland::{KeyboardMode, ShellSurface};
@@ -249,6 +249,14 @@ pub trait ShellComponent: Send {
         &mut self,
     ) -> Option<mesh_core_debug::ProfilingInvalidationSnapshot> {
         None
+    }
+    /// Return the damage from the most recent paint for partial presentation.
+    fn take_present_damage(&mut self) -> Option<DamageRect> {
+        None
+    }
+    /// Whether pending dirtiness should be resolved in the same render pass.
+    fn wants_immediate_rerender(&self) -> bool {
+        self.wants_render()
     }
     fn source_path(&self) -> Option<&Path> {
         None

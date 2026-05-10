@@ -1,5 +1,6 @@
 use super::super::*;
 use mesh_core_presentation::LayerSurfaceSizePolicy;
+use mesh_core_render::DamageRect;
 
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
@@ -10,22 +11,6 @@ impl Shell {
 
         for index in 0..self.components.len() {
             let surface_id = self.components[index].surface_id.clone();
-            let surface_size = {
-                let surface = self
-                    .surfaces
-                    .get(&surface_id)
-                    .ok_or_else(|| ShellRunError::MissingSurface(surface_id.clone()))?;
-                if surface.width == 0 || surface.height == 0 {
-                    self.presentation_engine.surface_size(&surface_id)?
-                } else {
-                    Some((surface.width.max(1), surface.height.max(1)))
-                }
-            };
-            if let Some((width, height)) = surface_size {
-                self.components[index]
-                    .component
-                    .surface_size_changed(width, height);
-            }
             if !self.components[index].component.wants_render() {
                 continue;
             }
@@ -104,24 +89,32 @@ impl Shell {
                     {
                         runtime.paint_buffer = Some(PixelBuffer::new(1, 1));
                     }
+                    runtime.known_surface_size = None;
                     break;
                 }
 
-                let configured_size = if surface.width == 0 || surface.height == 0 {
-                    self.presentation_engine.surface_size(&surface_id)?
+                let requested_width = surface.width;
+                let requested_height = surface.height;
+                let dynamic_size = if requested_width == 0 || requested_height == 0 {
+                    self.resolve_dynamic_surface_size(index, &surface_id)?
                 } else {
                     None
                 };
-                let width = if surface.width == 0 {
-                    configured_size.map(|(width, _)| width).unwrap_or(1)
+                let width = if requested_width == 0 {
+                    dynamic_size.map(|(width, _)| width).unwrap_or(1)
                 } else {
-                    surface.width.max(1)
+                    requested_width.max(1)
                 };
-                let height = if surface.height == 0 {
-                    configured_size.map(|(_, height)| height).unwrap_or(1)
+                let height = if requested_height == 0 {
+                    dynamic_size.map(|(_, height)| height).unwrap_or(1)
                 } else {
-                    surface.height.max(1)
+                    requested_height.max(1)
                 };
+                self.components[index].known_surface_size = Some((width, height));
+                self.components[index]
+                    .component
+                    .surface_size_changed(width, height);
+
                 let runtime = &mut self.components[index];
                 if runtime
                     .paint_buffer
@@ -146,7 +139,9 @@ impl Shell {
                     .map_err(ShellRunError::Component)?;
                 component_stage_records.extend(runtime.component.take_profiling_records());
 
-                if !self.components[index].component.wants_render() || rerender_attempts >= 1 {
+                if !self.components[index].component.wants_immediate_rerender()
+                    || rerender_attempts >= 1
+                {
                     break;
                 }
 
@@ -190,45 +185,48 @@ impl Shell {
                 );
             }
 
+            let mut present_damage = self.components[index].component.take_present_damage();
             if visible && self.debug.show_layout_bounds {
                 let runtime = &mut self.components[index];
                 if let Some(tree) = runtime.component.last_widget_tree() {
-                    self.debug_overlay.paint_layout_bounds(
-                        tree,
-                        runtime
-                            .paint_buffer
-                            .as_mut()
-                            .expect("paint buffer initialised"),
-                        1.0,
-                    );
+                    let buffer = runtime
+                        .paint_buffer
+                        .as_mut()
+                        .expect("paint buffer initialised");
+                    self.debug_overlay.paint_layout_bounds(tree, buffer, 1.0);
+                    present_damage = Some(full_buffer_damage(buffer));
                 }
             }
 
+            let mut presented = false;
             let present_started = self.profiling_enabled().then(std::time::Instant::now);
-            self.presentation_engine
-                .present(
-                    &surface_id,
-                    self.components[index].component.id(),
-                    visible,
-                    self.components[index]
-                        .paint_buffer
-                        .as_ref()
-                        .expect("paint buffer initialised"),
-                )
-                .map_err(ShellRunError::Presentation)?;
-            if let Some(started) = present_started {
+            // `take_present_damage == None` means paint produced no changed pixels,
+            // so skip the present entirely. `present_with_damage(None)` is reserved
+            // for legacy callers that do not know their damage and need a full
+            // buffer upload/damage.
+            if !visible || present_damage.is_some() {
+                self.presentation_engine
+                    .present_with_damage(
+                        &surface_id,
+                        self.components[index].component.id(),
+                        visible,
+                        self.components[index]
+                            .paint_buffer
+                            .as_ref()
+                            .expect("paint buffer initialised"),
+                        present_damage,
+                    )
+                    .map_err(ShellRunError::Presentation)?;
+                presented = true;
+            }
+            if let Some(started) = present_started
+                && presented
+            {
                 self.record_surface_profiling_stage(
                     &surface_id,
                     Some(component_id.as_str()),
                     mesh_core_debug::ProfilingStage::PresentCommit,
                     started.elapsed(),
-                    Some("present"),
-                );
-            }
-            if visible {
-                self.record_surface_redraw(
-                    &surface_id,
-                    Some(component_id.as_str()),
                     Some("present"),
                 );
             }
@@ -241,7 +239,45 @@ impl Shell {
                     Some("rebuild"),
                 );
             }
+            if visible && presented {
+                self.record_surface_redraw(
+                    &surface_id,
+                    Some(component_id.as_str()),
+                    Some("present"),
+                );
+            }
         }
         Ok(())
+    }
+
+    fn resolve_dynamic_surface_size(
+        &mut self,
+        index: usize,
+        surface_id: &str,
+    ) -> Result<Option<(u32, u32)>, ShellRunError> {
+        if let Some(size) = self.presentation_engine.surface_size_if_known(surface_id) {
+            self.components[index].known_surface_size = Some(size);
+            return Ok(Some(size));
+        }
+        if let Some(size) = self.components[index].known_surface_size {
+            return Ok(Some(size));
+        }
+        let size = self
+            .presentation_engine
+            .surface_size(surface_id)
+            .map_err(ShellRunError::Presentation)?;
+        if let Some(size) = size {
+            self.components[index].known_surface_size = Some(size);
+        }
+        Ok(size)
+    }
+}
+
+fn full_buffer_damage(buffer: &PixelBuffer) -> DamageRect {
+    DamageRect {
+        x: 0,
+        y: 0,
+        width: buffer.width.max(1),
+        height: buffer.height.max(1),
     }
 }
