@@ -2152,6 +2152,225 @@ fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
 }
 
 #[test]
+fn phase26_baseline_proof_records_canonical_scenario_values_and_retained_hotspots() {
+    let mut shell = Shell::new();
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::InputHandling,
+        std::time::Duration::from_micros(24),
+        Some("phase26_prechange"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::StyleRestyle,
+        std::time::Duration::from_micros(61),
+        Some("phase26_prechange"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::RuntimeUpdateHandling,
+        std::time::Duration::from_micros(42),
+        Some("phase26_prechange"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::Layout,
+        std::time::Duration::from_micros(94),
+        Some("phase26_prechange"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::Paint,
+        std::time::Duration::from_micros(149),
+        Some("phase26_prechange"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::TotalSurfaceRender,
+        std::time::Duration::from_micros(214),
+        Some("phase26_prechange"),
+    );
+
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::RenderObjectSync,
+        std::time::Duration::from_micros(34),
+        Some("phase26_post"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::RetainedDisplayListUpdate,
+        std::time::Duration::from_micros(57),
+        Some("phase26_post"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::PaintTraversal,
+        std::time::Duration::from_micros(91),
+        Some("phase26_post"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::TextShaping,
+        std::time::Duration::from_micros(12),
+        Some("phase26_post"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingStage::IconImageRaster,
+        std::time::Duration::from_micros(6),
+        Some("phase26_post"),
+    );
+    shell.record_surface_invalidation(
+        "@mesh/navigation-bar",
+        Some("@mesh/navigation-bar"),
+        ProfilingInvalidationSnapshot {
+            text: TextCacheSnapshot {
+                shaping_micros: 12,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+
+    shell.record_surface_redraw(
+        "@mesh/audio-popover",
+        Some("@mesh/audio-popover"),
+        Some("phase26_prechange"),
+    );
+    shell.record_surface_redraw(
+        "@mesh/audio-popover",
+        Some("@mesh/audio-popover"),
+        Some("phase26_prechange"),
+    );
+    shell.record_surface_redraw(
+        "@mesh/audio-popover",
+        Some("@mesh/audio-popover"),
+        Some("phase26_prechange"),
+    );
+    shell.record_surface_profiling_stage(
+        "@mesh/audio-popover",
+        Some("@mesh/audio-popover"),
+        ProfilingStage::TotalSurfaceRender,
+        std::time::Duration::from_micros(188),
+        Some("phase26_prechange"),
+    );
+
+    shell.record_backend_runtime_status(
+        "mesh.audio".to_string(),
+        "@mesh/pipewire-audio".to_string(),
+        BackendRuntimeStatus::Running,
+        "phase26 benchmark runtime".to_string(),
+    );
+    shell.record_backend_profiling_stage(
+        "mesh.audio",
+        "@mesh/pipewire-audio",
+        ProfilingBackendStage::StatePublishDelivery,
+        std::time::Duration::from_micros(73),
+        Some("phase26_prechange"),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+    let scenario_by_id = |id: &str| -> &mesh_core_debug::BenchmarkScenarioSnapshot {
+        snapshot
+            .benchmarks
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.id.id() == id)
+            .expect("benchmark scenario should exist")
+    };
+
+    let hover = scenario_by_id("hover");
+    assert_eq!(hover.primary_metric, "input_handling: 1 samples, max 24us");
+    assert_eq!(hover.secondary_metric, "style_restyle: 1 samples, max 61us");
+
+    let surface_open_close = scenario_by_id("surface_open_close");
+    assert_eq!(
+        surface_open_close.primary_metric,
+        "total_surface_render: 188us"
+    );
+    assert_eq!(surface_open_close.secondary_metric, "redraw_count: 3");
+
+    let pointer_update = scenario_by_id("pointer_update");
+    assert_eq!(
+        pointer_update.primary_metric,
+        "input_handling: 1 samples, max 24us"
+    );
+    assert_eq!(
+        pointer_update.secondary_metric,
+        "layout: 1 samples, max 94us"
+    );
+
+    let keyboard_traversal = scenario_by_id("keyboard_traversal");
+    assert_eq!(
+        keyboard_traversal.primary_metric,
+        "input_handling: 1 samples, max 24us"
+    );
+    assert_eq!(
+        keyboard_traversal.secondary_metric,
+        "total_surface_render: 1 samples, max 214us"
+    );
+
+    let backend_update = scenario_by_id("backend_update");
+    assert_eq!(
+        backend_update.primary_metric,
+        "mesh.audio -> @mesh/pipewire-audio state_publish_delivery: 1 samples, max 73us"
+    );
+    assert_eq!(
+        backend_update.secondary_metric,
+        "frontend total_surface_render: 214us"
+    );
+
+    let profiling = snapshot
+        .profiling
+        .as_ref()
+        .expect("profiling should be enabled for phase 26 baseline proof");
+    let navigation_bar = profiling
+        .surfaces
+        .iter()
+        .find(|surface| surface.surface_id == "@mesh/navigation-bar")
+        .expect("navigation bar surface sample should be recorded");
+    let retained_hotspots: Vec<_> = navigation_bar
+        .stages
+        .iter()
+        .filter_map(|stage| match stage.stage {
+            ProfilingStage::PaintTraversal
+            | ProfilingStage::RetainedDisplayListUpdate
+            | ProfilingStage::RenderObjectSync
+            | ProfilingStage::TextShaping
+            | ProfilingStage::IconImageRaster => Some((stage.stage, stage.max_micros)),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        retained_hotspots,
+        vec![
+            (ProfilingStage::RenderObjectSync, 34),
+            (ProfilingStage::RetainedDisplayListUpdate, 57),
+            (ProfilingStage::PaintTraversal, 91),
+            (ProfilingStage::TextShaping, 12),
+            (ProfilingStage::IconImageRaster, 6),
+        ]
+    );
+}
+
+#[test]
 fn profiling_snapshot_uses_surface_id_as_canonical_key_and_skips_unworked_surfaces() {
     let mut shell = Shell::new();
     shell

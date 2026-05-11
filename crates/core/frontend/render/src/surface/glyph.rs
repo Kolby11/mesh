@@ -187,7 +187,6 @@ pub fn draw_font_glyph(
     dest_h: i32,
     tint: Color,
 ) -> bool {
-    let raster_started = std::time::Instant::now();
     let px = dest_w.max(dest_h).max(1) as u32;
     let key = GlyphCacheKey {
         font_path: hash_path(font_path),
@@ -219,7 +218,9 @@ pub fn draw_font_glyph(
     let glyph = match cache_lookup(key) {
         Some(value) => value,
         None => {
+            let raster_started = std::time::Instant::now();
             let value = rasterize(font_path, codepoint, px, axes, supported_axes);
+            profiling::record_icon_image_raster(raster_started.elapsed());
             cache_store(key, value.clone());
             value
         }
@@ -256,6 +257,78 @@ pub fn draw_font_glyph(
             buffer.blend_pixel(x as u32, y as u32, pixel, 255);
         }
     }
-    profiling::record_icon_image_raster(raster_started.elapsed());
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn clear_glyph_cache() {
+        if let Some(cache) = GLYPH_CACHE.get() {
+            cache.lock().unwrap().clear();
+        }
+    }
+
+    #[test]
+    fn cached_font_glyph_hits_do_not_record_raster_time() {
+        clear_glyph_cache();
+        profiling::reset_raster_metrics();
+
+        let font_path = Path::new("/tmp/phase26-cached-glyph.ttf");
+        let tint = Color {
+            r: 32,
+            g: 96,
+            b: 180,
+            a: 255,
+        };
+        let supported_axes = SupportedAxes::default();
+        let axes = GlyphAxes::default();
+        let key = GlyphCacheKey {
+            font_path: hash_path(font_path),
+            codepoint: 'a' as u32,
+            px: 12,
+            color: encode_color(tint),
+            fill_q: i32::MIN,
+            weight_q: i32::MIN,
+            grade_q: i32::MIN,
+            opsz_q: i32::MIN,
+        };
+        cache_store(
+            key,
+            Some(CachedGlyph {
+                width: 2,
+                height: 2,
+                placement_left: 0,
+                placement_top: 0,
+                pixels: vec![255, 128, 64, 255],
+            }),
+        );
+
+        let mut buffer = PixelBuffer::new(8, 8);
+        assert!(draw_font_glyph(
+            &mut buffer,
+            font_path,
+            'a' as u32,
+            supported_axes,
+            axes,
+            1,
+            1,
+            12,
+            12,
+            tint,
+        ));
+
+        let metrics = profiling::raster_metrics();
+        assert_eq!(
+            metrics.icon_image_raster_micros, 0,
+            "cache hits should keep cached glyph blits out of icon_image_raster timing"
+        );
+        assert!(
+            buffer.data.iter().any(|channel| *channel > 0),
+            "cached glyph draw should still paint into the destination buffer"
+        );
+
+        clear_glyph_cache();
+    }
 }

@@ -172,16 +172,62 @@ pub fn paint_display_list_for_module_with_profiling_metrics(
             paint_nodes,
             module_id,
         );
+        let traversal_micros = traversal_started
+            .elapsed()
+            .as_micros()
+            .min(u128::from(u64::MAX)) as u64;
         if let Some((tooltip_text, x, y)) = tooltip {
             engine.render_tooltip(tooltip_text, x, y, buffer, scale);
         }
         PaintProfilingMetrics {
             text: engine.text_cache_metrics(),
-            traversal_micros: traversal_started
-                .elapsed()
-                .as_micros()
-                .min(u128::from(u64::MAX)) as u64,
+            traversal_micros,
             icon_image_raster_micros: profiling::raster_metrics().icon_image_raster_micros,
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tooltip_overlay_does_not_dominate_paint_traversal_metric() {
+        let mut without_tooltip_buffer = PixelBuffer::new(1024, 160);
+        let without_tooltip = paint_display_list_for_module_with_profiling_metrics(
+            &[],
+            &mut without_tooltip_buffer,
+            1.0,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let tooltip = "phase26 retained traversal proof ".repeat(256);
+        let mut with_tooltip_buffer = PixelBuffer::new(1024, 160);
+        let with_tooltip = paint_display_list_for_module_with_profiling_metrics(
+            &[],
+            &mut with_tooltip_buffer,
+            1.0,
+            None,
+            None,
+            Some((&tooltip, 12.0, 18.0)),
+            None,
+        );
+
+        assert!(
+            with_tooltip.text.shaping_micros > 0,
+            "tooltip render should exercise text shaping on a cache miss"
+        );
+
+        let baseline = without_tooltip.traversal_micros.max(1);
+        let allowed_growth = baseline.saturating_mul(10).saturating_add(100);
+        assert!(
+            with_tooltip.traversal_micros <= allowed_growth,
+            "tooltip overlay work should not be counted inside paint_traversal: baseline={}us with_tooltip={}us",
+            without_tooltip.traversal_micros,
+            with_tooltip.traversal_micros
+        );
+    }
 }
