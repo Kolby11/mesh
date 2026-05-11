@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: CPU Rendering Performance Improvement
-status: planning
-stopped_at: Phase 29 context gathered
-last_updated: "2026-05-11T13:01:09.053Z"
+status: ready_to_execute
+stopped_at: Phase 29 planned
+last_updated: "2026-05-11T21:13:52+02:00"
 last_activity: 2026-05-11
 progress:
   total_phases: 6
   completed_phases: 3
-  total_plans: 3
+  total_plans: 4
   completed_plans: 3
-  percent: 100
+  percent: 75
 ---
 
 # State: MESH v1.5
@@ -21,13 +21,13 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-10)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 28 — incremental-paint-command-retention
+**Current focus:** Phase 29 — damage-indexed-paint-execution-and-repaint-policy
 
 ## Current Position
 
 Phase: 29
-Plan: Not started
-Status: Ready to plan
+Plan: 1 of 1 planned
+Status: Ready to execute
 Last activity: 2026-05-11
 
 ## Decisions
@@ -130,9 +130,9 @@ Last activity: 2026-05-11
 
 ## Session
 
-Last session: 2026-05-11T13:01:09.041Z
-Stopped At: Phase 29 context gathered
-Resume File: .planning/phases/29-damage-indexed-paint-execution-and-repaint-policy/29-CONTEXT.md
+Last session: 2026-05-11T21:13:52+02:00
+Stopped At: Phase 29 planned
+Resume File: .planning/phases/29-damage-indexed-paint-execution-and-repaint-policy/29-01-PLAN.md
 
 ## Accumulated Context
 
@@ -188,4 +188,4 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 
 ## Operator Next Steps
 
-- Start Phase 27 with /gsd-discuss-phase 27
+- Execute Phase 29 with /gsd-execute-phase 29

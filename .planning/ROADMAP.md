@@ -64,6 +64,17 @@ Planned work:
 - Add a measured repaint-policy switch between minimal damage, bounding-rect repaint, and full-surface repaint.
 - Verify ordering, clipping, and correctness when filtered execution skips unrelated commands.
 
+Plans:
+
+- **29-01: Damage-indexed retained paint execution and repaint-policy proof** *(Wave 1)* — add retained command-span metadata, route partial paints through ordered filtered command inputs, expose repaint-policy and filtered-execution counters, and record canonical benchmark evidence.
+
+Cross-cutting constraints:
+
+- Preserve retained subtree ownership as the primary damage lookup authority; do not introduce a new global flat command index.
+- Preserve display-list ordering, clipping, scrollbar inclusion, and tooltip overlay separation when filtering paint execution.
+- Prefer bounding-rect or full-surface fallback whenever dirty summaries, clip/state ancestry, or span selection cannot cheaply prove correctness.
+- Publish aggregate proof through the existing `invalidation.paint` debug payload only.
+
 ### Phase 30: Raster Cache Hardening for Icons, Images, and Text
 
 **Goal:** Remove repeat rasterization, resize, and parse cost from steady-state CPU painting.
