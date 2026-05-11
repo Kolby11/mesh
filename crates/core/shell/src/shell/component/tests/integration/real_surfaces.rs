@@ -34,7 +34,7 @@ audio_surface_hidden = true
 function onToggleAudioSurface(event)
     local position = event.current_target.position or {}
     local margin_left = tonumber(position.margin_left) or 0
-    local margin_top = (tonumber(position.margin_bottom) or 0) + 8
+    local margin_top = 0
 
     if audio_surface_hidden then
         mesh.events.publish("shell.position-surface", {
@@ -205,7 +205,7 @@ fn shipped_navigation_volume_button_publishes_immediate_audio_popover_show() {
             request,
             CoreRequest::PositionSurface {
                 surface_id,
-                margin_top: 48,
+                margin_top: 0,
                 margin_left: 32
             } if surface_id == "@mesh/audio-popover"
         )),

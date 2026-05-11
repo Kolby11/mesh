@@ -69,7 +69,9 @@ end
 function onToggleAudioSurface(event)
     local position = event.current_target.position or {}
     local margin_left = tonumber(position.margin_left) or 0
-    local margin_top = (tonumber(position.margin_bottom) or 0) + 8
+    -- Layer-shell places this popover in the usable area below the navbar's
+    -- exclusive zone, so vertical margin is relative to that boundary.
+    local margin_top = 0
 
     if audio_surface_hidden then
         audio_surface_hidden = false

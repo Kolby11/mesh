@@ -182,7 +182,7 @@ audio_surface_hidden = true
 function onToggleAudioSurface(event)
     local position = event.current_target.position or {}
     local margin_left = tonumber(position.margin_left) or 0
-    local margin_top = (tonumber(position.margin_bottom) or 0) + 8
+    local margin_top = 0
 
     if audio_surface_hidden then
         mesh.events.publish("shell.position-surface", {
@@ -300,7 +300,7 @@ end
         ] => {
             assert_eq!(surface_id, "@mesh/audio-popover");
             assert_eq!(*margin_left, 32);
-            assert_eq!(*margin_top, 48);
+            assert_eq!(*margin_top, 0);
         }
         other => panic!("expected audio popover position request, got {other:?}"),
     }
