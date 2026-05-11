@@ -71,6 +71,7 @@ Each task was committed atomically:
 **Follow-up closeout fixes:**
 
 - `eb21fa3` (`fix`) - corrected retained attribution semantics and added targeted regression coverage for cached glyph hits, tooltip overlay traversal, and canonical baseline proof values.
+- `f206c01` (`test`) - added shipped-surface proof capture for the five Phase 26 scenario classes and refreshed the baseline artifact with measured values from the current environment.
 
 ## Files Created/Modified
 

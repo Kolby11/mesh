@@ -7,8 +7,8 @@
 
 ### CPU Profiling and Proof
 
-- [ ] **PERF-01**: Developers can inspect CPU render cost for tree build, style restyle, layout, render-object sync, retained display-list rebuild, paint traversal, text shaping, and icon/image raster work on each canonical benchmark scenario.
-- [ ] **PERF-02**: Every v1.5 optimization phase records before/after benchmark evidence on shipped surfaces using the existing canonical benchmark scenarios.
+- [x] **PERF-01**: Developers can inspect CPU render cost for tree build, style restyle, layout, render-object sync, retained display-list rebuild, paint traversal, text shaping, and icon/image raster work on each canonical benchmark scenario.
+- [x] **PERF-02**: Every v1.5 optimization phase records before/after benchmark evidence on shipped surfaces using the existing canonical benchmark scenarios.
 - [ ] **PERF-03**: Optimization decisions are accepted only when they improve visible smoothness on shipped shell surfaces, not merely aggregate internal counters.
 
 ### Visibility and Culling
@@ -63,8 +63,8 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PERF-01 | Phase 26 | Pending |
-| PERF-02 | Phase 26 | Pending |
+| PERF-01 | Phase 26 | Complete |
+| PERF-02 | Phase 26 | Complete |
 | CULL-01 | Phase 27 | Pending |
 | CULL-02 | Phase 27 | Pending |
 | CULL-04 | Phase 27 | Pending |
@@ -88,4 +88,4 @@
 
 ---
 *Requirements defined: 2026-05-10*
-*Last updated: 2026-05-10 after milestone initialization*
+*Last updated: 2026-05-11 after Phase 26 verification passed*
