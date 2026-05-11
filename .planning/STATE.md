@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: CPU Rendering Performance Improvement
-status: ready_to_execute
-stopped_at: Phase 29 planned
-last_updated: "2026-05-11T21:13:52+02:00"
+status: ready_to_verify
+stopped_at: Phase 29 execution complete
+last_updated: "2026-05-11T21:40:52+02:00"
 last_activity: 2026-05-11
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 4
-  completed_plans: 3
-  percent: 75
+  completed_plans: 4
+  percent: 100
 ---
 
 # State: MESH v1.5
@@ -26,8 +26,8 @@ See: `.planning/PROJECT.md` (updated 2026-05-10)
 ## Current Position
 
 Phase: 29
-Plan: 1 of 1 planned
-Status: Ready to execute
+Plan: 1 of 1 complete
+Status: Ready to verify
 Last activity: 2026-05-11
 
 ## Decisions
@@ -93,6 +93,9 @@ Last activity: 2026-05-11
 - [Phase 20]: Interaction restyles reuse retained layout rectangles when layout-relevant style inputs are unchanged; full layout remains the fallback for geometry-affecting changes.
 - [Phase 21]: Retained render objects are synchronized from stable widget node IDs with separate transform, clip, opacity, geometry, material, text, and accessibility slots.
 - [Phase 21]: The software painter remains unchanged; render objects are the synchronization boundary for later display-list, damage, and GPU-readiness work.
+- [Phase 29]: Retained damage-indexed paint execution stays owned by `mesh-core-render`; shell code selects effective damage and policy, then asks the retained display list for ordered command input.
+- [Phase 29]: Repaint-policy proof is published only through existing `invalidation.paint` profiling payloads with aggregate filtered-span, filtered-command, skipped-command, and fallback counters.
+- [Phase 29]: Benchmark evidence continues to reuse the Phase 26 canonical scenario IDs and harness; visible smoothness and threshold tuning remain Phase 31 responsibilities.
 
 ## Performance Metrics
 
@@ -127,12 +130,13 @@ Last activity: 2026-05-11
 | Phase 17 P02 | 6min | 3 tasks | 7 files |
 | Phase 17 P03 | 9min | 3 tasks | 3 files |
 | Phase 17 P04 | 7min | 3 tasks | 2 files |
+| Phase 29 P01 | 27min | 3 tasks | 12 files |
 
 ## Session
 
-Last session: 2026-05-11T21:13:52+02:00
-Stopped At: Phase 29 planned
-Resume File: .planning/phases/29-damage-indexed-paint-execution-and-repaint-policy/29-01-PLAN.md
+Last session: 2026-05-11T21:40:52+02:00
+Stopped At: Phase 29 execution complete
+Resume File: .planning/phases/29-damage-indexed-paint-execution-and-repaint-policy/29-01-SUMMARY.md
 
 ## Accumulated Context
 
@@ -184,8 +188,8 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-10 after milestone v1.5 roadmap creation*
+*State updated: 2026-05-11 after Phase 29 execution completed*
 
 ## Operator Next Steps
 
-- Execute Phase 29 with /gsd-execute-phase 29
+- Verify Phase 29 with /gsd-verify-work 29

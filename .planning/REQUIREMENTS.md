@@ -15,15 +15,15 @@
 
 - [ ] **CULL-01**: Fully offscreen descendants inside clipped or scrollable regions are omitted from retained paint-command generation or execution on the CPU path.
 - [ ] **CULL-02**: Nodes hidden by explicit visibility, surface state, or fully ineffective opacity stop generating unnecessary CPU paint work until they become visible again.
-- [ ] **CULL-03**: The renderer can choose between minimal-damage, bounding-rect, and full-surface repaint policies based on measured CPU cost instead of assuming the smallest region is always cheapest.
+- [x] **CULL-03**: The renderer can choose between minimal-damage, bounding-rect, and full-surface repaint policies based on measured CPU cost instead of assuming the smallest region is always cheapest.
 - [ ] **CULL-04**: Clipping and viewport rules avoid per-item CPU overhead on small primitives when a cheaper elision or coarser-boundary alternative exists.
 
 ### Retained Paint Pipeline
 
 - [ ] **PIPE-01**: Local retained-tree changes rebuild only the affected render-object and paint-command subtrees instead of recollecting the full surface command set.
 - [ ] **PIPE-02**: Transforms, scroll offsets, and reorder-only changes can update retained paint data without invalidating unrelated descendant geometry or style state.
-- [ ] **PIPE-03**: Partial-damage paints visit only commands that intersect the damaged region or explicitly depend on global overlays such as tooltips or scrollbars.
-- [ ] **PIPE-04**: Command ordering, clipping, and visual correctness remain stable when filtered execution skips unrelated commands.
+- [x] **PIPE-03**: Partial-damage paints visit only commands that intersect the damaged region or explicitly depend on global overlays such as tooltips or scrollbars.
+- [x] **PIPE-04**: Command ordering, clipping, and visual correctness remain stable when filtered execution skips unrelated commands.
 
 ### Raster and Resource Caching
 
@@ -70,9 +70,9 @@
 | CULL-04 | Phase 27 | Pending |
 | PIPE-01 | Phase 28 | Pending |
 | PIPE-02 | Phase 28 | Pending |
-| PIPE-03 | Phase 29 | Pending |
-| PIPE-04 | Phase 29 | Pending |
-| CULL-03 | Phase 29 | Pending |
+| PIPE-03 | Phase 29 | Complete |
+| PIPE-04 | Phase 29 | Complete |
+| CULL-03 | Phase 29 | Complete |
 | CACHE-01 | Phase 30 | Pending |
 | CACHE-02 | Phase 30 | Pending |
 | CACHE-03 | Phase 30 | Pending |
@@ -88,4 +88,4 @@
 
 ---
 *Requirements defined: 2026-05-10*
-*Last updated: 2026-05-11 after Phase 26 verification passed*
+*Last updated: 2026-05-11 after Phase 29 execution completed*
