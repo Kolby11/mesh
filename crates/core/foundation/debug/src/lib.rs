@@ -197,6 +197,10 @@ pub struct RetainedPaintSnapshot {
     pub full_surface_damage: bool,
     pub partial_present_supported: bool,
     pub skipped_paint_pixels: u64,
+    pub omitted_subtrees: u64,
+    pub omitted_nodes: u64,
+    pub omitted_commands: u64,
+    pub preclipped_descendants: u64,
     pub batch_count: u64,
     pub batched_primitives: u64,
     pub barrier_count: u64,
@@ -378,6 +382,10 @@ pub struct DebugOverlayState {
 impl DebugOverlayState {
     pub fn toggle(&mut self) {
         self.enabled = !self.enabled;
+    }
+
+    pub fn toggle_layout_bounds(&mut self) {
+        self.show_layout_bounds = !self.show_layout_bounds;
     }
 
     pub fn cycle_tab(&mut self) {

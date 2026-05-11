@@ -11,6 +11,9 @@ pub enum DevWindowEvent {
         x: f32,
         y: f32,
     },
+    PointerLeave {
+        surface_id: String,
+    },
     PointerButton {
         surface_id: String,
         x: f32,

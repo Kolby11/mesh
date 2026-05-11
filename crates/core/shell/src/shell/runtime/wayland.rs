@@ -95,6 +95,7 @@ impl Shell {
                     }
                 }
                 WindowEvent::PointerMove { x, y, .. } => ComponentInput::PointerMove { x, y },
+                WindowEvent::PointerLeave { .. } => ComponentInput::PointerLeave,
                 WindowEvent::PointerButton { x, y, pressed, .. } => {
                     ComponentInput::PointerButton { x, y, pressed }
                 }
@@ -175,6 +176,7 @@ impl Shell {
 fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
     match event {
         WindowEvent::PointerMove { .. } => "pointer_move",
+        WindowEvent::PointerLeave { .. } => "pointer_leave",
         WindowEvent::PointerButton { .. } => "pointer_button",
         WindowEvent::Scroll { .. } => "scroll",
         WindowEvent::Key { .. } => "key",

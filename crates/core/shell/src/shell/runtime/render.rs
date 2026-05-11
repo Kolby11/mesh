@@ -54,47 +54,11 @@ impl Shell {
                     .get(&surface_id)
                     .map(|state| state.visible)
                     .unwrap_or(surface.visible);
-                let cfg = if visible {
-                    LayerSurfaceConfig {
-                        edge: surface.edge,
-                        layer: surface.layer.unwrap_or(Layer::Top),
-                        size_policy: if self.components[index].component.allows_shrink_to_fit() {
-                            LayerSurfaceSizePolicy::Flexible
-                        } else {
-                            LayerSurfaceSizePolicy::Fixed
-                        },
-                        width: surface.width,
-                        height: surface.height,
-                        exclusive_zone: surface.exclusive_zone,
-                        keyboard_mode: surface.keyboard_mode,
-                        namespace: surface_id.clone(),
-                        margin_top: surface.margin_top,
-                        margin_right: surface.margin_right,
-                        margin_bottom: surface.margin_bottom,
-                        margin_left: surface.margin_left,
-                    }
-                } else {
-                    LayerSurfaceConfig {
-                        edge: surface.edge,
-                        layer: surface.layer.unwrap_or(Layer::Top),
-                        size_policy: LayerSurfaceSizePolicy::Fixed,
-                        width: 1,
-                        height: 1,
-                        exclusive_zone: 0,
-                        // Hidden surfaces never want keyboard — even if the
-                        // configured mode is exclusive, we don't want to
-                        // steal input while the popover is collapsed to 1×1.
-                        keyboard_mode: mesh_core_wayland::KeyboardMode::None,
-                        namespace: surface_id.clone(),
-                        margin_top: 0,
-                        margin_right: 0,
-                        margin_bottom: 0,
-                        margin_left: 0,
-                    }
-                };
-                self.presentation_engine.configure(&surface_id, cfg);
-
                 if !visible {
+                    // Do not reconfigure hidden surfaces to synthetic 1x1/zero-margin
+                    // geometry before detaching them. Some compositors can show that
+                    // transient geometry during close, which makes anchored popovers
+                    // appear to fly toward the default screen position.
                     let runtime = &mut self.components[index];
                     if runtime
                         .paint_buffer
@@ -107,6 +71,26 @@ impl Shell {
                     runtime.known_surface_size = None;
                     break;
                 }
+
+                let cfg = LayerSurfaceConfig {
+                    edge: surface.edge,
+                    layer: surface.layer.unwrap_or(Layer::Top),
+                    size_policy: if self.components[index].component.allows_shrink_to_fit() {
+                        LayerSurfaceSizePolicy::Flexible
+                    } else {
+                        LayerSurfaceSizePolicy::Fixed
+                    },
+                    width: surface.width,
+                    height: surface.height,
+                    exclusive_zone: surface.exclusive_zone,
+                    keyboard_mode: surface.keyboard_mode,
+                    namespace: surface_id.clone(),
+                    margin_top: surface.margin_top,
+                    margin_right: surface.margin_right,
+                    margin_bottom: surface.margin_bottom,
+                    margin_left: surface.margin_left,
+                };
+                self.presentation_engine.configure(&surface_id, cfg);
 
                 let requested_width = surface.width;
                 let requested_height = surface.height;

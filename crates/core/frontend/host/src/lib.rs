@@ -26,6 +26,7 @@ pub enum ComponentInput {
         x: f32,
         y: f32,
     },
+    PointerLeave,
     PointerButton {
         x: f32,
         y: f32,
@@ -144,6 +145,7 @@ pub enum CoreRequest {
         close_source: Option<SurfaceId>,
     },
     ToggleDebugOverlay,
+    ToggleDebugLayoutBounds,
     ToggleDebugProfiling,
     RunDebugBenchmark {
         scenario_id: String,

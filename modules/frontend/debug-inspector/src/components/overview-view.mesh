@@ -34,10 +34,18 @@
       <text class="profiling-toggle-text">{profiling_button_text}</text>
     </button>
 
+    <button class="layout-bounds-toggle" onclick={onToggleLayoutBounds} aria-label="{layout_bounds_button_label}">
+      <text class="layout-bounds-toggle-text">{layout_bounds_button_text}</text>
+    </button>
+
     <column class="metric-group">
       <row class="metric-row">
         <text class="metric-label">Overlay visibility</text>
         <text class="metric-value">{overlay_value}</text>
+      </row>
+      <row class="metric-row">
+        <text class="metric-label">Layout bounds</text>
+        <text class="metric-value">{layout_bounds_value}</text>
       </row>
       <row class="metric-row">
         <text class="metric-label">Live session</text>
@@ -124,6 +132,21 @@
     font-size: token(typography.size.sm);
     font-weight: 700;
     color: token(color.on-primary);
+}
+
+.layout-bounds-toggle {
+    width: 100%;
+    min-height: 36px;
+    justify-content: center;
+    align-items: center;
+    border-radius: token(radius.md);
+    background: token(color.secondary-container);
+}
+
+.layout-bounds-toggle-text {
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+    color: token(color.on-secondary-container);
 }
 
 .metric-group {

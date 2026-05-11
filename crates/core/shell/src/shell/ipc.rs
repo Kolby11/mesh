@@ -191,6 +191,7 @@ pub(super) fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
     }
     match command {
         "shell:debug_overlay" => Some(CoreRequest::ToggleDebugOverlay),
+        "shell:debug_layout_bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
         "shell:debug_profiling" => Some(CoreRequest::ToggleDebugProfiling),
         "shell:debug_cycle_tab" => Some(CoreRequest::CycleDebugTab),
         "shell:shutdown" => Some(CoreRequest::Shutdown),

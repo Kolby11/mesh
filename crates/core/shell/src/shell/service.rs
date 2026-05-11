@@ -109,6 +109,7 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                     theme_id: id.to_string(),
                 }),
             "shell.toggle-debug-overlay" => Some(CoreRequest::ToggleDebugOverlay),
+            "shell.toggle-debug-layout-bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
             "shell.toggle-debug-profiling" => Some(CoreRequest::ToggleDebugProfiling),
             "shell.run-debug-benchmark" => {
                 match event.payload.get("scenario_id").and_then(|v| v.as_str()) {
@@ -304,6 +305,12 @@ mod tests {
                 source_capabilities: mesh_core_capability::CapabilitySet::new(),
             },
             PublishedEvent {
+                channel: "shell.toggle-debug-layout-bounds".into(),
+                payload: serde_json::json!({}),
+                source_module_id: "@mesh/debug-inspector".into(),
+                source_capabilities: mesh_core_capability::CapabilitySet::new(),
+            },
+            PublishedEvent {
                 channel: "shell.toggle-debug-profiling".into(),
                 payload: serde_json::json!({}),
                 source_module_id: "@mesh/debug-inspector".into(),
@@ -317,6 +324,10 @@ mod tests {
         ));
         assert!(matches!(
             requests.get(1),
+            Some(CoreRequest::ToggleDebugLayoutBounds)
+        ));
+        assert!(matches!(
+            requests.get(2),
             Some(CoreRequest::ToggleDebugProfiling)
         ));
     }

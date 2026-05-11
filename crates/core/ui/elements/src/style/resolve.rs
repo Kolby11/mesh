@@ -394,7 +394,7 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
     ) {
         let index = StyleRuleIndex::new(rules);
-        self.restyle_subtree_with_index(node, &index, context);
+        self.restyle_subtree_with_index(node, &index, context, None);
     }
 
     fn restyle_subtree_with_index(
@@ -402,41 +402,21 @@ impl<'a> StyleResolver<'a> {
         node: &mut crate::tree::WidgetNode,
         index: &StyleRuleIndex<'_>,
         context: StyleContext,
+        parent_style: Option<&ComputedStyle>,
     ) {
-        if node.state != ElementState::default() {
-            let attrs = StyleNodeAttrs::from_node(node);
-
-            tracing::debug!(
-                "[hover] restyle: tag={} classes={:?} state={state:?}",
-                attrs.tag,
-                attrs.classes,
-                state = attrs.state
-            );
-            for rule in index.candidate_rules(&attrs) {
-                if selector_involves_state(&rule.selector)
-                    && rule_matches_attrs(rule, &attrs, context)
-                {
-                    tracing::debug!(
-                        "[hover] restyle: applying rule selector={:?}",
-                        rule.selector
-                    );
-                    for decl in &rule.declarations {
-                        apply_declaration(
-                            &mut node.computed_style,
-                            &decl.property,
-                            &decl.value,
-                            self,
-                            &HashMap::new(),
-                        );
-                    }
-                }
-            }
+        let attrs = StyleNodeAttrs::from_node(node);
+        node.computed_style = self
+            .resolve_node_style_with_attrs_indexed(index, &attrs, context)
+            .0;
+        if let Some(parent_style) = parent_style {
+            inherit_retained_text_style(&mut node.computed_style, parent_style);
         }
 
         let children = std::mem::take(&mut node.children);
         let mut restyled = children;
+        let parent_style = node.computed_style.clone();
         for child in &mut restyled {
-            self.restyle_subtree_with_index(child, index, context);
+            self.restyle_subtree_with_index(child, index, context, Some(&parent_style));
         }
         node.children = restyled;
     }
@@ -618,19 +598,30 @@ fn selector_matches_attrs(selector: &Selector, attrs: &StyleNodeAttrs) -> bool {
     }
 }
 
-fn selector_involves_state(selector: &Selector) -> bool {
-    match selector {
-        Selector::State(_, _) => true,
-        Selector::Compound(parts) => parts.iter().any(|s| matches!(s, Selector::State(_, _))),
-        _ => false,
-    }
-}
-
 fn rule_matches_attrs(rule: &StyleRule, attrs: &StyleNodeAttrs, context: StyleContext) -> bool {
     selector_matches_attrs(&rule.selector, attrs)
         && rule
             .container_query
             .is_none_or(|query| query.matches(context.container_width, context.container_height))
+}
+
+fn inherit_retained_text_style(style: &mut ComputedStyle, parent_style: &ComputedStyle) {
+    let defaults = ComputedStyle::default();
+    if style.color.a == 0 {
+        style.color = parent_style.color;
+    }
+    if style.font_family == defaults.font_family {
+        style.font_family = parent_style.font_family.clone();
+    }
+    if (style.font_size - defaults.font_size).abs() < f32::EPSILON {
+        style.font_size = parent_style.font_size;
+    }
+    if style.font_weight == defaults.font_weight {
+        style.font_weight = parent_style.font_weight;
+    }
+    if (style.line_height - defaults.line_height).abs() < f32::EPSILON {
+        style.line_height = parent_style.line_height;
+    }
 }
 
 fn selector_index_key(selector: &Selector) -> Option<SelectorIndexKey<'_>> {
@@ -1051,14 +1042,14 @@ fn apply_declaration(
             };
         }
         "visibility" => {
-            if matches!(
-                resolver
-                    .resolve_value_with_variables(value, variables)
-                    .as_str(),
-                "hidden" | "collapse"
-            ) {
-                style.opacity = 0.0;
-            }
+            style.visibility = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
+                "hidden" => Visibility::Hidden,
+                "collapse" => Visibility::Collapse,
+                _ => Visibility::Visible,
+            };
         }
         "position" => {
             style.position = match resolver

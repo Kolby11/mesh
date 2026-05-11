@@ -305,6 +305,18 @@ impl Shell {
                     self.debug.enabled,
                 )
             }
+            CoreRequest::ToggleDebugLayoutBounds => {
+                self.debug.toggle_layout_bounds();
+                tracing::debug!(
+                    "debug layout bounds: {}",
+                    if self.debug.show_layout_bounds {
+                        "on"
+                    } else {
+                        "off"
+                    }
+                );
+                Ok(VecDeque::new())
+            }
             CoreRequest::ToggleDebugProfiling => {
                 let enabled = self.debug.toggle_profiling();
                 if enabled {
@@ -732,6 +744,7 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::ActivatePopover { .. } => "activate_popover",
         CoreRequest::TransferTabFocus { .. } => "transfer_tab_focus",
         CoreRequest::ToggleDebugOverlay => "toggle_debug_overlay",
+        CoreRequest::ToggleDebugLayoutBounds => "toggle_debug_layout_bounds",
         CoreRequest::ToggleDebugProfiling => "toggle_debug_profiling",
         CoreRequest::RunDebugBenchmark { .. } => "run_debug_benchmark",
         CoreRequest::CycleDebugTab => "cycle_debug_tab",

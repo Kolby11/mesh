@@ -150,6 +150,10 @@ pub fn coalesce_pointer_moves(events: Vec<WindowEvent>) -> Vec<WindowEvent> {
                     WindowEvent::PointerMove { surface_id, x, y },
                 );
             }
+            WindowEvent::PointerLeave { surface_id } => {
+                pending_moves.remove(&surface_id);
+                output.push(WindowEvent::PointerLeave { surface_id });
+            }
             event => {
                 let surface_id = event_surface_id(&event).to_string();
                 if let Some(pointer_move) = pending_moves.remove(&surface_id) {
@@ -167,6 +171,7 @@ pub fn coalesce_pointer_moves(events: Vec<WindowEvent>) -> Vec<WindowEvent> {
 pub fn event_surface_id(event: &WindowEvent) -> &str {
     match event {
         WindowEvent::PointerMove { surface_id, .. }
+        | WindowEvent::PointerLeave { surface_id }
         | WindowEvent::PointerButton { surface_id, .. }
         | WindowEvent::Scroll { surface_id, .. }
         | WindowEvent::Key { surface_id, .. }

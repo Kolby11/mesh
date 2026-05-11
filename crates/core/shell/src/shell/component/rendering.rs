@@ -174,10 +174,6 @@ impl FrontendSurfaceComponent {
         trigger_kind: &'static str,
         dirty_types: ComponentDirtyFlags,
     ) {
-        let mut previous_stateful_keys = HashSet::new();
-        if trigger_kind == "restyle" {
-            collect_stateful_keys(tree, &mut previous_stateful_keys);
-        }
         annotate_runtime_tree(
             tree,
             "root".to_string(),
@@ -212,16 +208,14 @@ impl FrontendSurfaceComponent {
             && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
         let mut reused_retained_layout = false;
         if targeted_interaction_restyle {
-            let mut target_keys = previous_stateful_keys;
-            collect_stateful_keys(tree, &mut target_keys);
-            if target_keys.is_empty() {
-                resolver.restyle_subtree(tree, restyle_rules, context);
-            } else {
-                let layout_signatures_before = collect_layout_style_signatures(tree, &target_keys);
-                resolver.restyle_subtree_for_keys(tree, restyle_rules, context, &target_keys);
-                reused_retained_layout =
-                    layout_signatures_before == collect_layout_style_signatures(tree, &target_keys);
-            }
+            // Pseudo-state selectors are not isolated to the stateful node:
+            // `.parent:hover .child` and similar relationship selectors can
+            // change descendants that are not themselves hovered/focused.
+            // Restyle the retained tree globally, but keep interaction
+            // invalidation layout-stable unless a caller explicitly requests
+            // layout.
+            resolver.restyle_subtree(tree, restyle_rules, context);
+            reused_retained_layout = !dirty_types.contains(ComponentDirtyFlags::LAYOUT);
         } else {
             resolver.restyle_subtree(tree, restyle_rules, context);
         }
@@ -343,66 +337,6 @@ impl FrontendSurfaceComponent {
             self.record_runtime_style_diagnostics_for_node(child, rules, resolver, context);
         }
     }
-}
-
-fn collect_layout_style_signatures(
-    node: &WidgetNode,
-    target_keys: &HashSet<String>,
-) -> HashMap<String, String> {
-    let mut signatures = HashMap::new();
-    collect_layout_style_signatures_for_node(node, target_keys, &mut signatures);
-    signatures
-}
-
-fn collect_layout_style_signatures_for_node(
-    node: &WidgetNode,
-    target_keys: &HashSet<String>,
-    signatures: &mut HashMap<String, String>,
-) {
-    if let Some(key) = node.attributes.get("_mesh_key")
-        && target_keys.contains(key)
-    {
-        signatures.insert(key.clone(), layout_style_signature(&node.computed_style));
-    }
-    for child in &node.children {
-        collect_layout_style_signatures_for_node(child, target_keys, signatures);
-    }
-}
-
-fn layout_style_signature(style: &mesh_core_elements::style::ComputedStyle) -> String {
-    [
-        format!("{:?}", style.width),
-        format!("{:?}", style.height),
-        format!("{:?}", style.min_width),
-        format!("{:?}", style.max_width),
-        format!("{:?}", style.min_height),
-        format!("{:?}", style.max_height),
-        format!("{:?}", style.padding),
-        format!("{:?}", style.margin),
-        format!("{:?}", style.border_width),
-        style.font_family.clone(),
-        style.font_size.to_bits().to_string(),
-        style.font_weight.to_string(),
-        style.line_height.to_bits().to_string(),
-        style.letter_spacing.to_bits().to_string(),
-        format!("{:?}", style.display),
-        format!("{:?}", style.direction),
-        format!("{:?}", style.justify_content),
-        format!("{:?}", style.align_items),
-        format!("{:?}", style.align_content),
-        style.gap.to_bits().to_string(),
-        style.flex_grow.to_bits().to_string(),
-        style.flex_shrink.to_bits().to_string(),
-        format!("{:?}", style.flex_basis),
-        format!("{:?}", style.flex_wrap),
-        format!("{:?}", style.align_self),
-        format!("{:?}", style.position),
-        format!("{:?}", style.inset_top.map(f32::to_bits)),
-        format!("{:?}", style.inset_right.map(f32::to_bits)),
-        format!("{:?}", style.inset_bottom.map(f32::to_bits)),
-        format!("{:?}", style.inset_left.map(f32::to_bits)),
-    ]
-    .join("|")
 }
 
 fn annotate_selection_node(

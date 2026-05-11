@@ -32,31 +32,23 @@ end
     text-wrap: none;
     transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
                 color token(animation.duration.short) token(animation.curves.bezier.standard),
-                border-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                border-radius token(animation.duration.fast) token(animation.curves.bezier.standard),
-                transform token(animation.duration.short) token(animation.curves.bezier.standard),
-                padding token(animation.duration.short) token(animation.curves.bezier.standard);
+                border-radius token(animation.duration.fast) token(animation.curves.bezier.standard);
 }
 
 .nav-button:hover {
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
-    border-color: token(color.outline);
     border-radius: token(radius.full);
-    transform: scale(1.06);
 }
 
 .nav-button:focus,
 .nav-button:focus-visible {
     background: token(color.tertiary-container);
     color: token(color.on-tertiary-container);
-    border-color: token(color.primary);
     border-radius: token(radius.full);
-    transform: scale(1.04);
 }
 
 .nav-button:active {
-    transform: scale(0.94);
     border-radius: token(radius.full);
 }
 
@@ -67,12 +59,7 @@ end
     justify-content: center;
     align-items: center;
     color: inherit;
-    transition: color token(animation.duration.short) token(animation.curves.bezier.standard),
-                transform token(animation.duration.short) token(animation.curves.bezier.standard);
-}
-
-.nav-button:hover .nav-button-glyph {
-    transform: scale(1.08);
+    transition: color token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
 @container (max-width: 720px) {

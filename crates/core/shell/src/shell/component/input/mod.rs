@@ -201,6 +201,17 @@ impl FrontendSurfaceComponent {
                     self.invalidate_interaction_restyle();
                 }
             }
+            ComponentInput::PointerLeave => {
+                if self.hovered_key.is_some()
+                    || !self.hovered_path.is_empty()
+                    || self.hover_start.is_some()
+                {
+                    self.hovered_key = None;
+                    self.hovered_path.clear();
+                    self.hover_start = None;
+                    self.invalidate_interaction_restyle();
+                }
+            }
             ComponentInput::Scroll { x, y, dx, dy } => {
                 if let Some(scroll_key) = find_scrollable_at(&tree, x, y) {
                     if let Some(node) = find_node_by_key(&tree, &scroll_key) {

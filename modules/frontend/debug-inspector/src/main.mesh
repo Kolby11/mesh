@@ -48,6 +48,10 @@
           onToggleProfiling={onToggleProfiling}
           profiling_button_label={profiling_button_label}
           profiling_button_text={profiling_button_text}
+          onToggleLayoutBounds={onToggleLayoutBounds}
+          layout_bounds_button_label={layout_bounds_button_label}
+          layout_bounds_button_text={layout_bounds_button_text}
+          layout_bounds_value={layout_bounds_value}
         />
 
         <SurfacesView
@@ -184,6 +188,9 @@ profiling_badge = "Idle"
 profiling_copy = "Profiling stays off until you explicitly start it."
 profiling_button_text = "Start profiling"
 profiling_button_label = "Start debug profiling"
+layout_bounds_button_text = "Show layout bounds"
+layout_bounds_button_label = "Show debug layout bounds"
+layout_bounds_value = "Hidden"
 
 overview_state_kind = "off"
 overview_off_hidden = false
@@ -659,6 +666,10 @@ function onToggleProfiling()
     mesh.events.publish("shell.toggle-debug-profiling", {})
 end
 
+function onToggleLayoutBounds()
+    mesh.events.publish("shell.toggle-debug-layout-bounds", {})
+end
+
 local function runBenchmarkScenario(scenario_id)
     if not (debug_service and debug_service.profiling_enabled) then
         mesh.events.publish("shell.toggle-debug-profiling", {})
@@ -696,6 +707,9 @@ function onRender()
         overview_state_title = "Profiling is off"
         overview_state_copy = "Enable profiling to collect rolling shell, surface, and backend timings."
         overlay_value = "Unavailable"
+        layout_bounds_value = "Unavailable"
+        layout_bounds_button_text = "Show layout bounds"
+        layout_bounds_button_label = "Show debug layout bounds"
         session_value = "Session --"
         module_count = "0"
         active_surface_count = "0"
@@ -725,6 +739,16 @@ function onRender()
         overlay_value = "Visible"
     else
         overlay_value = "Hidden"
+    end
+
+    if debug_service.layout_bounds_enabled then
+        layout_bounds_value = "Visible"
+        layout_bounds_button_text = "Hide layout bounds"
+        layout_bounds_button_label = "Hide debug layout bounds"
+    else
+        layout_bounds_value = "Hidden"
+        layout_bounds_button_text = "Show layout bounds"
+        layout_bounds_button_label = "Show debug layout bounds"
     end
 
     session_value = string.format("Session %s", tostring(debug_service.profiling_session_id or 0))

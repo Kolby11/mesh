@@ -147,6 +147,7 @@ pub struct ComputedStyle {
     pub text_overflow: TextOverflow,
     pub text_direction: TextDirection,
     pub display: Display,
+    pub visibility: Visibility,
     pub direction: FlexDirection,
     pub justify_content: JustifyContent,
     pub align_items: AlignItems,
@@ -207,6 +208,7 @@ impl Default for ComputedStyle {
             text_overflow: TextOverflow::Clip,
             text_direction: TextDirection::Ltr,
             display: Display::Flex,
+            visibility: Visibility::Visible,
             direction: FlexDirection::Row,
             justify_content: JustifyContent::Start,
             align_items: AlignItems::Stretch,
@@ -484,6 +486,27 @@ impl TransitionProperties {
     pub fn animates_inset_left(self) -> bool {
         self.all || self.inset_left
     }
+
+    pub fn affects_layout(self) -> bool {
+        self.all
+            || self.border_width
+            || self.width
+            || self.height
+            || self.min_width
+            || self.max_width
+            || self.min_height
+            || self.max_height
+            || self.padding
+            || self.margin
+            || self.font_size
+            || self.letter_spacing
+            || self.line_height
+            || self.gap
+            || self.inset_top
+            || self.inset_right
+            || self.inset_bottom
+            || self.inset_left
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -655,6 +678,14 @@ impl Color {
 pub enum Display {
     Flex,
     None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Visibility {
+    #[default]
+    Visible,
+    Hidden,
+    Collapse,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

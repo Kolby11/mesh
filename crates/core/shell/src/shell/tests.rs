@@ -520,6 +520,7 @@ fn debug_profiling_request_toggles_independent_session_state() {
 
     assert!(!shell.debug.profiling_enabled);
     assert_eq!(shell.debug.profiling_session_id, 0);
+    assert!(!shell.debug.show_layout_bounds);
 
     shell
         .apply_request(CoreRequest::ToggleDebugProfiling)
@@ -543,6 +544,32 @@ fn debug_profiling_request_toggles_independent_session_state() {
         !shell.debug.profiling_enabled,
         "debug overlay visibility must remain independent from profiling state"
     );
+    assert!(
+        !shell.debug.show_layout_bounds,
+        "profiling changes must remain independent from layout-bounds debugging"
+    );
+}
+
+#[test]
+fn debug_layout_bounds_toggle_remains_independent_from_overlay_visibility() {
+    let mut shell = Shell::new();
+
+    shell
+        .apply_request(CoreRequest::ToggleDebugLayoutBounds)
+        .unwrap();
+    assert!(shell.debug.show_layout_bounds);
+    assert!(!shell.debug.enabled);
+    assert!(!shell.debug.profiling_enabled);
+
+    shell
+        .apply_request(CoreRequest::ToggleDebugOverlay)
+        .unwrap();
+    assert!(shell.debug.show_layout_bounds);
+
+    shell
+        .apply_request(CoreRequest::ToggleDebugLayoutBounds)
+        .unwrap();
+    assert!(!shell.debug.show_layout_bounds);
 }
 
 #[test]
@@ -1326,6 +1353,10 @@ fn debug_snapshot_backfills_mesh_debug_service_state() {
 
     assert_eq!(latest.provider_id, mesh_core_debug::DEBUG_SOURCE_MODULE_ID);
     assert_eq!(latest.state["overlay_enabled"], serde_json::json!(true));
+    assert_eq!(
+        latest.state["layout_bounds_enabled"],
+        serde_json::json!(false)
+    );
     assert_eq!(latest.state["profiling_enabled"], serde_json::json!(false));
     assert_eq!(latest.state["profiling_session_id"], serde_json::json!(0));
     assert_eq!(latest.state["active_view"], serde_json::json!("overview"));
@@ -1388,6 +1419,7 @@ fn debug_snapshot_publish_delivers_mesh_debug_service_event() {
     assert_eq!(service, mesh_core_debug::DEBUG_INTERFACE);
     assert_eq!(source_module, mesh_core_debug::DEBUG_SOURCE_MODULE_ID);
     assert_eq!(payload["overlay_enabled"], serde_json::json!(true));
+    assert_eq!(payload["layout_bounds_enabled"], serde_json::json!(false));
     assert!(payload["benchmarks"]["scenarios"].is_array());
 }
 
@@ -1405,6 +1437,10 @@ fn debug_overlay_toggle_does_not_enable_profiling_in_mesh_debug_payload() {
         .expect("mesh.debug state should exist after snapshot generation");
 
     assert_eq!(latest.state["overlay_enabled"], serde_json::json!(true));
+    assert_eq!(
+        latest.state["layout_bounds_enabled"],
+        serde_json::json!(false)
+    );
     assert_eq!(latest.state["profiling_enabled"], serde_json::json!(false));
     assert_eq!(latest.state["profiling_session_id"], serde_json::json!(0));
     assert!(latest.state["profiling"].is_null());
@@ -1565,6 +1601,10 @@ fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
                 surface_area: 1_000,
                 partial_present_supported: false,
                 skipped_paint_pixels: 0,
+                omitted_subtrees: 2,
+                omitted_nodes: 5,
+                omitted_commands: 10,
+                preclipped_descendants: 4,
                 batch_count: 2,
                 batched_primitives: 5,
                 barrier_count: 3,
@@ -1608,6 +1648,10 @@ fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
     assert_eq!(invalidation.paint.damage_area, 120);
     assert!(!invalidation.paint.partial_present_supported);
     assert_eq!(invalidation.paint.skipped_paint_pixels, 0);
+    assert_eq!(invalidation.paint.omitted_subtrees, 2);
+    assert_eq!(invalidation.paint.omitted_nodes, 5);
+    assert_eq!(invalidation.paint.omitted_commands, 10);
+    assert_eq!(invalidation.paint.preclipped_descendants, 4);
     assert_eq!(invalidation.paint.batch_count, 2);
     assert_eq!(invalidation.paint.batched_primitives, 5);
     assert_eq!(invalidation.paint.barriers.text, 1);
@@ -2141,6 +2185,10 @@ fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
     assert_eq!(
         latest.state["profiling"]["surfaces"][0]["invalidation"]["text"]["shaping_micros"],
         serde_json::json!(34)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["omitted_subtrees"],
+        serde_json::json!(0)
     );
     assert_eq!(
         latest.state["benchmarks"]["scenarios"]

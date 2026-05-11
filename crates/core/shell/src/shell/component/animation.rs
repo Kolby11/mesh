@@ -294,6 +294,7 @@ impl FrontendSurfaceComponent {
         let mut live_keys = HashSet::new();
         let mut live_keyframe_keys = HashSet::new();
         let mut has_active_animation = false;
+        let mut has_layout_affecting_animation = false;
         let mut has_active_keyframe_animation = false;
         let theme = self.active_theme.borrow().clone();
         let resolver = StyleResolver::new(&theme);
@@ -306,6 +307,7 @@ impl FrontendSurfaceComponent {
             &mut live_keys,
             &mut live_keyframe_keys,
             &mut has_active_animation,
+            &mut has_layout_affecting_animation,
             &mut has_active_keyframe_animation,
         );
 
@@ -321,7 +323,12 @@ impl FrontendSurfaceComponent {
             // Animations only mutate style/layout, never script state — keep
             // the cheap restyle-only path engaged so we don't drag the Luau
             // tree-build into every animation tick.
-            self.invalidate_style_path(ComponentDirtyFlags::STYLE_RELAYOUT);
+            let flags = if has_layout_affecting_animation || has_active_keyframe_animation {
+                ComponentDirtyFlags::STYLE_RELAYOUT
+            } else {
+                ComponentDirtyFlags::VISUAL_REPAINT
+            };
+            self.invalidate_style_path(flags);
         }
     }
 
@@ -334,11 +341,17 @@ impl FrontendSurfaceComponent {
         live_keys: &mut HashSet<String>,
         live_keyframe_keys: &mut HashSet<String>,
         has_active_animation: &mut bool,
+        has_layout_affecting_animation: &mut bool,
         has_active_keyframe_animation: &mut bool,
     ) {
         if let Some(key) = node.attributes.get("_mesh_key").cloned() {
             live_keys.insert(key.clone());
             self.apply_node_style_animation(&key, node, previous_styles, now, has_active_animation);
+            if self.style_animations.get(&key).is_some_and(|animation| {
+                !animation.finished(now) && animation.transition.properties.affects_layout()
+            }) {
+                *has_layout_affecting_animation = true;
+            }
             self.apply_node_keyframe_animation(
                 &key,
                 node,
@@ -358,6 +371,7 @@ impl FrontendSurfaceComponent {
                 live_keys,
                 live_keyframe_keys,
                 has_active_animation,
+                has_layout_affecting_animation,
                 has_active_keyframe_animation,
             );
         }

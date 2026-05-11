@@ -202,6 +202,8 @@ impl PointerHandler for State {
                     if self.pointer_focus.as_deref() == Some(&surface_id) {
                         self.pointer_focus = None;
                     }
+                    self.events
+                        .push(DevWindowEvent::PointerLeave { surface_id });
                 }
                 PointerEventKind::Motion { .. } => {
                     let (x, y) = (event.position.0 as f32, event.position.1 as f32);

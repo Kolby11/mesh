@@ -138,6 +138,7 @@ fn debug_service_payload(
 ) -> serde_json::Value {
     serde_json::json!({
         "overlay_enabled": debug.enabled,
+        "layout_bounds_enabled": debug.show_layout_bounds,
         "profiling_enabled": debug.profiling_enabled,
         "profiling_session_id": debug.profiling_session_id,
         "active_view": debug.active_view.label(),
@@ -752,6 +753,10 @@ fn profiling_invalidation_json(
             "full_surface_damage": snapshot.paint.full_surface_damage,
             "partial_present_supported": snapshot.paint.partial_present_supported,
             "skipped_paint_pixels": snapshot.paint.skipped_paint_pixels,
+            "omitted_subtrees": snapshot.paint.omitted_subtrees,
+            "omitted_nodes": snapshot.paint.omitted_nodes,
+            "omitted_commands": snapshot.paint.omitted_commands,
+            "preclipped_descendants": snapshot.paint.preclipped_descendants,
             "batch_count": snapshot.paint.batch_count,
             "batched_primitives": snapshot.paint.batched_primitives,
             "barrier_count": snapshot.paint.barrier_count,

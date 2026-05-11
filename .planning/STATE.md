@@ -4,8 +4,8 @@ milestone: v1.5
 milestone_name: CPU Rendering Performance Improvement
 status: executing
 stopped_at: Phase 27 context gathered
-last_updated: "2026-05-11T11:38:33.789Z"
-last_activity: 2026-05-11 -- Phase 27 planning complete
+last_updated: "2026-05-11T11:40:24.414Z"
+last_activity: 2026-05-11 -- Phase 27 execution started
 progress:
   total_phases: 6
   completed_phases: 1
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-10)
 
 ## Current Position
 
-Phase: 27
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-11 -- Phase 27 planning complete
+Phase: 27 (viewport-culling-and-visibility-elision) — EXECUTING
+Plan: 1 of 1
+Status: Executing Phase 27
+Last activity: 2026-05-11 -- Phase 27 execution started
 
 ## Decisions
 

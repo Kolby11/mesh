@@ -29,7 +29,7 @@ pub(in crate::shell) use catalog::FrontendCatalog;
 pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 use runtime_tree::{
     RetainedWidgetTree, annotate_runtime_tree, collect_all_keys, collect_element_metrics,
-    collect_stateful_keys, input_accepts_char,
+    input_accepts_char,
 };
 
 use mesh_core_capability::{Capability, CapabilitySet};
@@ -100,9 +100,13 @@ impl ComponentDirtyFlags {
         .union(Self::ACCESSIBILITY)
         .union(Self::METRICS);
 
+    pub(super) const VISUAL_REPAINT: Self = Self::STYLE
+        .union(Self::PAINT)
+        .union(Self::ACCESSIBILITY)
+        .union(Self::METRICS);
+
     pub(super) const INTERACTION_RESTYLE: Self = Self::STATE
         .union(Self::STYLE)
-        .union(Self::LAYOUT)
         .union(Self::PAINT)
         .union(Self::ACCESSIBILITY)
         .union(Self::METRICS);
@@ -166,6 +170,10 @@ fn retained_paint_snapshot(
         } else {
             0
         },
+        omitted_subtrees: metrics.omitted_subtrees,
+        omitted_nodes: metrics.omitted_nodes,
+        omitted_commands: metrics.omitted_commands,
+        preclipped_descendants: metrics.preclipped_descendants,
         batch_count: metrics.batch_count,
         batched_primitives: metrics.batched_primitives,
         barrier_count: metrics.barrier_count,

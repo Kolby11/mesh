@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use mesh_core_elements::style::{
-    Color, Display, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
+    Color, Display, Edges, Overflow, TextAlign, TextDirection, TextOverflow, Visibility,
 };
 use mesh_core_elements::{LayoutRect, NodeId, WidgetNode};
 
@@ -74,6 +74,10 @@ pub struct DisplayListMetrics {
     pub full_surface_damage: bool,
     pub partial_present_supported: bool,
     pub skipped_paint_pixels: u64,
+    pub omitted_subtrees: u64,
+    pub omitted_nodes: u64,
+    pub omitted_commands: u64,
+    pub preclipped_descendants: u64,
     pub batch_count: u64,
     pub batched_primitives: u64,
     pub barrier_count: u64,
@@ -304,9 +308,17 @@ impl RetainedDisplayList {
 
         let mut ordered_entries = Vec::new();
         let mut next = HashMap::new();
-        collect_display_entries(root, &mut ordered_entries, &mut next);
+        collect_display_entries(root, 0.0, 0.0, &mut ordered_entries, &mut next);
         let mut paint_commands = Vec::new();
-        collect_paint_commands(root, 0.0, 0.0, surface_clip(surface), &mut paint_commands);
+        let mut pruning = PruningMetrics::default();
+        collect_paint_commands(
+            root,
+            0.0,
+            0.0,
+            surface_clip(surface),
+            &mut paint_commands,
+            &mut pruning,
+        );
 
         let mut damage: Option<DamageRect> = None;
         let mut reused = 0u64;
@@ -370,6 +382,10 @@ impl RetainedDisplayList {
             full_surface_damage,
             partial_present_supported,
             skipped_paint_pixels,
+            omitted_subtrees: pruning.omitted_subtrees,
+            omitted_nodes: pruning.omitted_nodes,
+            omitted_commands: pruning.omitted_commands,
+            preclipped_descendants: pruning.preclipped_descendants,
             batch_count: batch_metrics.batch_count,
             batched_primitives: batch_metrics.batched_primitives,
             barrier_count: batch_metrics.barrier_count,
@@ -410,6 +426,10 @@ impl RetainedDisplayList {
             full_surface_damage: force_full_damage,
             partial_present_supported,
             skipped_paint_pixels,
+            omitted_subtrees: self.last_metrics.omitted_subtrees,
+            omitted_nodes: self.last_metrics.omitted_nodes,
+            omitted_commands: self.last_metrics.omitted_commands,
+            preclipped_descendants: self.last_metrics.preclipped_descendants,
             batch_count: self.last_metrics.batch_count,
             batched_primitives: self.last_metrics.batched_primitives,
             barrier_count: self.last_metrics.barrier_count,
@@ -435,12 +455,81 @@ struct DisplayListEntry {
     barrier: Option<DisplayBatchBarrier>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct PruningMetrics {
+    omitted_subtrees: u64,
+    omitted_nodes: u64,
+    omitted_commands: u64,
+    preclipped_descendants: u64,
+}
+
+impl PruningMetrics {
+    fn record_omitted_subtree(&mut self, counts: PrunedSubtreeCounts, preclipped: bool) {
+        if counts.nodes == 0 && counts.commands == 0 {
+            return;
+        }
+        self.omitted_subtrees = self.omitted_subtrees.saturating_add(1);
+        self.omitted_nodes = self.omitted_nodes.saturating_add(counts.nodes);
+        self.omitted_commands = self.omitted_commands.saturating_add(counts.commands);
+        if preclipped {
+            self.preclipped_descendants = self.preclipped_descendants.saturating_add(counts.nodes);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct PrunedSubtreeCounts {
+    nodes: u64,
+    commands: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FloatBounds {
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+}
+
+impl FloatBounds {
+    fn intersects_clip(self, clip: DisplayListClip) -> bool {
+        let clip_left = clip.x as f32;
+        let clip_top = clip.y as f32;
+        let clip_right = (clip.x + clip.width) as f32;
+        let clip_bottom = (clip.y + clip.height) as f32;
+        self.right > clip_left
+            && self.bottom > clip_top
+            && self.left < clip_right
+            && self.top < clip_bottom
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            left: self.left.min(other.left),
+            top: self.top.min(other.top),
+            right: self.right.max(other.right),
+            bottom: self.bottom.max(other.bottom),
+        }
+    }
+}
+
 fn collect_display_entries(
     node: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
     out: &mut Vec<(DisplayListKey, DisplayListEntry)>,
     next: &mut HashMap<DisplayListKey, DisplayListEntry>,
 ) {
-    if let Some(bounds) = damage_rect_for_node(node) {
+    if node_is_explicitly_hidden(node) {
+        return;
+    }
+
+    let style = &node.computed_style;
+    let transform = style.transform;
+    let offset_x = offset_x + transform.translate_x;
+    let offset_y = offset_y + transform.translate_y;
+
+    if let Some(bounds) = damage_rect_for_node_at(node, offset_x, offset_y) {
         for slot in primitive_slots_for_node(node) {
             let key = DisplayListKey {
                 node_id: node.id,
@@ -456,8 +545,22 @@ fn collect_display_entries(
             next.insert(key, entry);
         }
     }
+
+    let scroll_x = node
+        .attributes
+        .get("_mesh_scroll_x")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let scroll_y = node
+        .attributes
+        .get("_mesh_scroll_y")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let child_offset_x = offset_x - scroll_x;
+    let child_offset_y = offset_y - scroll_y;
+
     for child in &node.children {
-        collect_display_entries(child, out, next);
+        collect_display_entries(child, child_offset_x, child_offset_y, out, next);
     }
 }
 
@@ -467,12 +570,14 @@ fn collect_paint_commands(
     offset_y: f32,
     clip: DisplayListClip,
     out: &mut Vec<DisplayPaintCommand>,
+    pruning: &mut PruningMetrics,
 ) {
-    let style = &node.computed_style;
-    if style.display == Display::None {
+    if node_is_explicitly_hidden(node) {
+        pruning.record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, true), false);
         return;
     }
 
+    let style = &node.computed_style;
     let transform = style.transform;
     let offset_x = offset_x + transform.translate_x;
     let offset_y = offset_y + transform.translate_y;
@@ -481,6 +586,7 @@ fn collect_paint_commands(
     let bounds = node_clip_for(&paint_node);
     let node_clip = intersect_display_clip(clip, bounds);
     if node_clip.width <= 0 || node_clip.height <= 0 {
+        pruning.record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, false), true);
         return;
     }
 
@@ -518,17 +624,40 @@ fn collect_paint_commands(
         let mut child_order: Vec<usize> = (0..node.children.len()).collect();
         child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
         for index in child_order {
+            let child = &node.children[index];
+            if should_preclip_child_subtree(child, child_offset_x, child_offset_y, child_clip) {
+                pruning.record_omitted_subtree(
+                    count_pruned_subtree(child, child_offset_x, child_offset_y, false),
+                    true,
+                );
+                continue;
+            }
             collect_paint_commands(
-                &node.children[index],
+                child,
                 child_offset_x,
                 child_offset_y,
                 child_clip,
                 out,
+                pruning,
             );
         }
     } else {
         for child in &node.children {
-            collect_paint_commands(child, child_offset_x, child_offset_y, child_clip, out);
+            if should_preclip_child_subtree(child, child_offset_x, child_offset_y, child_clip) {
+                pruning.record_omitted_subtree(
+                    count_pruned_subtree(child, child_offset_x, child_offset_y, false),
+                    true,
+                );
+                continue;
+            }
+            collect_paint_commands(
+                child,
+                child_offset_x,
+                child_offset_y,
+                child_clip,
+                out,
+                pruning,
+            );
         }
     }
 
@@ -537,6 +666,94 @@ fn collect_paint_commands(
         clip: node_clip,
         kind: DisplayPaintCommandKind::Scrollbars,
     });
+}
+
+fn node_is_explicitly_hidden(node: &WidgetNode) -> bool {
+    node.computed_style.display == Display::None
+        || matches!(
+            node.computed_style.visibility,
+            Visibility::Hidden | Visibility::Collapse
+        )
+        || node
+            .attributes
+            .get("hidden")
+            .is_some_and(|value| truthy_attribute(value))
+}
+
+fn truthy_attribute(value: &str) -> bool {
+    matches!(value, "" | "true" | "1" | "hidden" | "disabled" | "checked")
+}
+
+fn should_preclip_child_subtree(
+    child: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
+    clip: DisplayListClip,
+) -> bool {
+    subtree_bounds_at(child, offset_x, offset_y).is_some_and(|bounds| !bounds.intersects_clip(clip))
+}
+
+fn subtree_bounds_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Option<FloatBounds> {
+    if node_is_explicitly_hidden(node) {
+        return None;
+    }
+
+    let transform = node.computed_style.transform;
+    let offset_x = offset_x + transform.translate_x;
+    let offset_y = offset_y + transform.translate_y;
+    let mut bounds = node_bounds_at(node, offset_x, offset_y);
+    let scroll_x = attr_f32(node, "_mesh_scroll_x");
+    let scroll_y = attr_f32(node, "_mesh_scroll_y");
+    let child_offset_x = offset_x - scroll_x;
+    let child_offset_y = offset_y - scroll_y;
+    for child in &node.children {
+        if let Some(child_bounds) = subtree_bounds_at(child, child_offset_x, child_offset_y) {
+            bounds = Some(match bounds {
+                Some(existing) => existing.union(child_bounds),
+                None => child_bounds,
+            });
+        }
+    }
+    bounds
+}
+
+fn node_bounds_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Option<FloatBounds> {
+    (node.layout.width > 0.0 && node.layout.height > 0.0).then_some(FloatBounds {
+        left: node.layout.x + offset_x,
+        top: node.layout.y + offset_y,
+        right: node.layout.x + offset_x + node.layout.width,
+        bottom: node.layout.y + offset_y + node.layout.height,
+    })
+}
+
+fn count_pruned_subtree(
+    node: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
+    include_hidden_root: bool,
+) -> PrunedSubtreeCounts {
+    if node_is_explicitly_hidden(node) && !include_hidden_root {
+        return PrunedSubtreeCounts::default();
+    }
+
+    let transform = node.computed_style.transform;
+    let offset_x = offset_x + transform.translate_x;
+    let offset_y = offset_y + transform.translate_y;
+    let mut counts = PrunedSubtreeCounts::default();
+    if node.layout.width > 0.0 && node.layout.height > 0.0 {
+        counts.nodes = 1;
+        counts.commands = 2;
+    }
+    let scroll_x = attr_f32(node, "_mesh_scroll_x");
+    let scroll_y = attr_f32(node, "_mesh_scroll_y");
+    let child_offset_x = offset_x - scroll_x;
+    let child_offset_y = offset_y - scroll_y;
+    for child in &node.children {
+        let child_counts = count_pruned_subtree(child, child_offset_x, child_offset_y, false);
+        counts.nodes = counts.nodes.saturating_add(child_counts.nodes);
+        counts.commands = counts.commands.saturating_add(child_counts.commands);
+    }
+    counts
 }
 
 fn surface_clip(surface: DamageRect) -> DisplayListClip {
@@ -781,14 +998,16 @@ fn primitive_slots_for_node(node: &WidgetNode) -> Vec<DisplayPrimitiveSlot> {
     slots
 }
 
-fn damage_rect_for_node(node: &WidgetNode) -> Option<DamageRect> {
+fn damage_rect_for_node_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Option<DamageRect> {
     if node.layout.width <= 0.0 || node.layout.height <= 0.0 {
         return None;
     }
-    let x = node.layout.x.floor().max(0.0) as u32;
-    let y = node.layout.y.floor().max(0.0) as u32;
-    let right = (node.layout.x + node.layout.width).ceil().max(0.0) as u32;
-    let bottom = (node.layout.y + node.layout.height).ceil().max(0.0) as u32;
+    let left = node.layout.x + offset_x;
+    let top = node.layout.y + offset_y;
+    let x = left.floor().max(0.0) as u32;
+    let y = top.floor().max(0.0) as u32;
+    let right = (left + node.layout.width).ceil().max(0.0) as u32;
+    let bottom = (top + node.layout.height).ceil().max(0.0) as u32;
     Some(DamageRect {
         x,
         y,
@@ -999,7 +1218,7 @@ fn clip_rect(rect: DamageRect, surface: DamageRect) -> Option<DamageRect> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mesh_core_elements::style::{Color, Overflow};
+    use mesh_core_elements::style::{Color, Overflow, Visibility};
 
     fn node(id: NodeId, tag: &str, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
         let mut node = WidgetNode::new(tag);
@@ -1233,5 +1452,87 @@ mod tests {
             }
             other => panic!("expected text paint payload, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn display_list_omits_explicitly_hidden_descendants() {
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+        let mut hidden = node(2, "box", 10.0, 10.0, 20.0, 20.0);
+        hidden.computed_style.visibility = Visibility::Hidden;
+        hidden.children.push(node(3, "text", 0.0, 0.0, 10.0, 10.0));
+        root.children.push(hidden);
+
+        let mut list = RetainedDisplayList::default();
+        let metrics = list.update(&root, 100, 100, false, false);
+
+        assert!(
+            list.paint_commands()
+                .iter()
+                .all(|command| command.node.id != 2 && command.node.id != 3)
+        );
+        assert_eq!(metrics.omitted_subtrees, 1);
+        assert_eq!(metrics.omitted_nodes, 2);
+        assert_eq!(metrics.omitted_commands, 4);
+    }
+
+    #[test]
+    fn display_list_keeps_plain_opacity_zero_nodes_paintable() {
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+        let mut transparent = node(2, "box", 10.0, 10.0, 20.0, 20.0);
+        transparent.computed_style.opacity = 0.0;
+        root.children.push(transparent);
+
+        let mut list = RetainedDisplayList::default();
+        let metrics = list.update(&root, 100, 100, false, false);
+
+        assert!(
+            list.paint_commands().iter().any(
+                |command| command.node.id == 2 && command.kind == DisplayPaintCommandKind::Node
+            )
+        );
+        assert_eq!(metrics.omitted_subtrees, 0);
+        assert_eq!(metrics.omitted_nodes, 0);
+    }
+
+    #[test]
+    fn display_list_preclips_fully_out_of_viewport_descendants() {
+        let mut root = node(1, "box", 0.0, 0.0, 40.0, 40.0);
+        root.computed_style.overflow_x = Overflow::Hidden;
+        root.computed_style.overflow_y = Overflow::Hidden;
+        let child = node(2, "box", 60.0, 0.0, 20.0, 20.0);
+        root.children.push(child);
+
+        let mut list = RetainedDisplayList::default();
+        let metrics = list.update(&root, 100, 100, false, false);
+
+        assert!(
+            list.paint_commands()
+                .iter()
+                .all(|command| command.node.id != 2),
+            "fully out-of-viewport descendants should be omitted before paint traversal"
+        );
+        assert_eq!(metrics.omitted_subtrees, 1);
+        assert_eq!(metrics.omitted_nodes, 1);
+        assert_eq!(metrics.preclipped_descendants, 1);
+    }
+
+    #[test]
+    fn display_list_keeps_partially_intersecting_descendants_paintable() {
+        let mut root = node(1, "box", 0.0, 0.0, 40.0, 40.0);
+        root.computed_style.overflow_x = Overflow::Hidden;
+        root.computed_style.overflow_y = Overflow::Hidden;
+        let child = node(2, "box", 30.0, 0.0, 20.0, 20.0);
+        root.children.push(child);
+
+        let mut list = RetainedDisplayList::default();
+        let metrics = list.update(&root, 100, 100, false, false);
+
+        assert!(
+            list.paint_commands().iter().any(
+                |command| command.node.id == 2 && command.kind == DisplayPaintCommandKind::Node
+            )
+        );
+        assert_eq!(metrics.omitted_subtrees, 0);
+        assert_eq!(metrics.preclipped_descendants, 0);
     }
 }

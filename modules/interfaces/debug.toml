@@ -7,6 +7,11 @@ type = "boolean"
 description = "Whether the shell debug overlay path is currently visible"
 
 [[state_fields]]
+name = "layout_bounds_enabled"
+type = "boolean"
+description = "Whether debug-only widget layout bounds are currently painted over live surfaces"
+
+[[state_fields]]
 name = "profiling_enabled"
 type = "boolean"
 description = "Whether debug-only profiling collection is currently active"

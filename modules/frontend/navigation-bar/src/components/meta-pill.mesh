@@ -19,8 +19,7 @@
     padding-inline: token(spacing.sm);
     border-radius: token(radius.full);
     background: token(color.tertiary-container);
-    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                transform token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
 .meta-pill-text {
@@ -32,7 +31,6 @@
 
 .meta-pill:hover {
     background: token(color.secondary-container);
-    transform: scale(1.02);
 }
 
 .meta-pill-text:hover {
