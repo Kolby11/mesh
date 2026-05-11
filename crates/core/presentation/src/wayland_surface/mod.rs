@@ -27,7 +27,9 @@ use smithay_client_toolkit::{
     seat::{
         Capability as SeatCapability, SeatHandler, SeatState,
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RepeatInfo},
-        pointer::{PointerEvent, PointerEventKind, PointerHandler},
+        pointer::{
+            CursorIcon, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer,
+        },
     },
     shell::{
         WaylandSurface,

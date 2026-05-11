@@ -2157,6 +2157,14 @@ fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
         "@mesh/navigation-bar",
         Some("@mesh/navigation-bar"),
         ProfilingInvalidationSnapshot {
+            paint: RetainedPaintSnapshot {
+                subtree_segments_reused: 7,
+                subtree_segments_rebuilt: 2,
+                subtree_commands_rebuilt: 5,
+                full_fallback_count: 1,
+                broad_dirty_fallback_count: 1,
+                ..Default::default()
+            },
             text: TextCacheSnapshot {
                 shaping_micros: 34,
                 ..Default::default()
@@ -2189,6 +2197,26 @@ fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
     assert_eq!(
         latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["omitted_subtrees"],
         serde_json::json!(0)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["subtree_segments_reused"],
+        serde_json::json!(7)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["subtree_segments_rebuilt"],
+        serde_json::json!(2)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["subtree_commands_rebuilt"],
+        serde_json::json!(5)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["full_fallback_count"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["broad_dirty_fallback_count"],
+        serde_json::json!(1)
     );
     assert_eq!(
         latest.state["benchmarks"]["scenarios"]

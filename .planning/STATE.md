@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: CPU Rendering Performance Improvement
-status: executing
+status: ready_to_plan
 stopped_at: Phase 28 context gathered
-last_updated: "2026-05-11T12:09:17.097Z"
-last_activity: 2026-05-11 -- Phase 28 planning complete
+last_updated: "2026-05-11T12:13:33.622Z"
+last_activity: 2026-05-11 -- Phase 28 execution started
 progress:
   total_phases: 6
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 3
   completed_plans: 2
-  percent: 67
+  percent: 50
 ---
 
 # State: MESH v1.5
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-10)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 27 — viewport-culling-and-visibility-elision
+**Current focus:** Phase 28 — incremental-paint-command-retention
 
 ## Current Position
 
-Phase: 28
+Phase: 29
 Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-11 -- Phase 28 planning complete
+Status: Ready to plan
+Last activity: 2026-05-11
 
 ## Decisions
 

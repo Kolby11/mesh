@@ -3,7 +3,7 @@
     <row class="nav-shell">
       <column class="status-cluster">
         <row class="status-head">
-          <text ref="status-primary" class="status-primary" selectable="true">{primary_status}</text>
+          <text ref="status-primary" class="status-primary">{primary_status}</text>
           <box class="status-accent">
             <MetaPill />
           </box>

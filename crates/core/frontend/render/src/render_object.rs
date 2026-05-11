@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use mesh_core_elements::style::{Color, ComputedStyle, Edges, Transform2D};
-use mesh_core_elements::{LayoutRect, NodeId, WidgetNode};
+use mesh_core_elements::{NodeId, WidgetNode};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RenderObjectDirtySummary {
@@ -160,7 +160,7 @@ struct RenderObjectPaintData {
 }
 
 type TransformSlot = (u32, u32, u32, u32, u32);
-type GeometrySlot = (u32, u32, u32, u32);
+type GeometrySlot = (u32, u32, u32, u32, u32, u32, u32, u32, u32, u32);
 type ClipSlot = (bool, u32, u32, u32, u32);
 type AccessibilitySlot = (String, Option<String>, bool, bool);
 
@@ -214,7 +214,7 @@ fn render_object_paint_data(node: &WidgetNode, parent: Option<NodeId>) -> Render
         transform: transform_slot(node.computed_style.transform),
         clip: clip_slot(node),
         opacity: node.computed_style.opacity.to_bits(),
-        geometry: geometry_slot(node.layout),
+        geometry: geometry_slot(node),
         material: material_hash(&node.computed_style),
         text: text_slot(node),
         accessibility: accessibility_slot(node),
@@ -234,16 +234,23 @@ fn transform_slot(transform: Transform2D) -> TransformSlot {
 fn clip_slot(node: &WidgetNode) -> ClipSlot {
     let clips = node.computed_style.overflow_x.clips_contents()
         || node.computed_style.overflow_y.clips_contents();
-    let geometry = geometry_slot(node.layout);
+    let geometry = geometry_slot(node);
     (clips, geometry.0, geometry.1, geometry.2, geometry.3)
 }
 
-fn geometry_slot(layout: LayoutRect) -> GeometrySlot {
+fn geometry_slot(node: &WidgetNode) -> GeometrySlot {
+    let layout = node.layout;
     (
         layout.x.to_bits(),
         layout.y.to_bits(),
         layout.width.to_bits(),
         layout.height.to_bits(),
+        attr_f32(node, "_mesh_scroll_x").to_bits(),
+        attr_f32(node, "_mesh_scroll_y").to_bits(),
+        attr_f32(node, "_mesh_scroll_max_x").to_bits(),
+        attr_f32(node, "_mesh_scroll_max_y").to_bits(),
+        attr_f32(node, "_mesh_content_width").to_bits(),
+        attr_f32(node, "_mesh_content_height").to_bits(),
     )
 }
 
@@ -291,6 +298,13 @@ fn hash_edges(edges: Edges, hasher: &mut impl Hasher) {
 
 fn color_slot(color: Color) -> ColorSlot {
     (color.r, color.g, color.b, color.a)
+}
+
+fn attr_f32(node: &WidgetNode, key: &str) -> f32 {
+    node.attributes
+        .get(key)
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -386,5 +400,28 @@ mod tests {
         let dirty = tree.update_for_retained_generation(&root, 2);
         assert_eq!(dirty.text, 1);
         assert_eq!(tree.generation(), 2);
+    }
+
+    #[test]
+    fn render_object_tree_marks_scroll_updates_as_geometry_dirty() {
+        let mut root = WidgetNode::new("scroll");
+        root.id = 1;
+        root.attributes.insert("_mesh_scroll_x".into(), "0".into());
+        let mut child = WidgetNode::new("text");
+        child.id = 2;
+        root.children.push(child);
+
+        let mut tree = RenderObjectTree::default();
+        tree.update(&root);
+
+        root.attributes.insert("_mesh_scroll_x".into(), "24".into());
+        let dirty = tree.update(&root);
+
+        assert_eq!(dirty.geometry, 1);
+        assert_eq!(
+            tree.dirty_node_ids(),
+            &HashSet::from([1]),
+            "scroll updates should dirty the scrolled render object so retained paint can rebuild its subtree locally"
+        );
     }
 }

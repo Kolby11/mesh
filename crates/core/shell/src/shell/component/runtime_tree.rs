@@ -535,8 +535,7 @@ pub(super) fn annotate_runtime_tree(
                         .and_then(|value: &String| value.parse::<f32>().ok())
                 })
                 .unwrap_or(0.0);
-            node.attributes
-                .insert("value".into(), format!("{value:.2}"));
+            node.attributes.insert("value".into(), value.to_string());
         }
         "switch" | "checkbox" => {
             node.attributes.insert(

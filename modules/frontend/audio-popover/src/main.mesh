@@ -20,13 +20,13 @@
       />
 
       <row class="audio-actions">
-        <button class="audio-action" onclick={onVolumeDown} aria-label="Lower volume">
+        <button class="audio-action audio-action-compact" onclick={onVolumeDown} aria-label="Lower volume">
           <text class="audio-action-text">-</text>
         </button>
         <button class="audio-action" onclick={onToggleMute} aria-label="{mute_button_label}">
           <text class="audio-action-text">{mute_button_text}</text>
         </button>
-        <button class="audio-action" onclick={onVolumeUp} aria-label="Raise volume">
+        <button class="audio-action audio-action-compact" onclick={onVolumeUp} aria-label="Raise volume">
           <text class="audio-action-text">+</text>
         </button>
       </row>
@@ -47,6 +47,8 @@ mute_button_text = "Mute"
 mute_button_label = "Toggle mute"
 volume_dragging = false
 pending_slider_value = nil
+audio_muted = false
+last_sent_slider_value = nil
 
 local function clamp_unit(value)
     local numeric = tonumber(value) or 0
@@ -66,6 +68,7 @@ local function sync_audio_copy(percent, muted)
     local safe_percent = clamp_percent(percent)
     slider_value = clamp_unit(safe_percent / 100)
     audio_percent_label = string.format("%d%%", safe_percent)
+    audio_muted = muted and true or false
 
     if muted or safe_percent == 0 then
         icon_name = "audio-volume-muted"
@@ -123,9 +126,12 @@ function onVolumeChange(value)
     local normalized = clamp_unit(value)
     volume_dragging = true
     pending_slider_value = normalized
-    sync_audio_copy(normalized * 100, false)
+    sync_audio_copy(normalized * 100, audio_muted)
     if audio_ok and audio and audio.available ~= false then
-        audio.set_volume("default", normalized)
+        if last_sent_slider_value == nil or math.abs(last_sent_slider_value - normalized) >= 0.01 then
+            last_sent_slider_value = normalized
+            audio.set_volume("default", normalized)
+        end
     else
         audio_status = "Audio controls unavailable"
     end
@@ -134,10 +140,12 @@ end
 function onVolumeRelease(value)
     volume_dragging = false
     pending_slider_value = clamp_unit(value)
+    last_sent_slider_value = nil
 end
 
 function onToggleMute()
     if audio_ok and audio and audio.available ~= false then
+        sync_audio_copy(slider_value * 100, not audio_muted)
         audio.toggle_mute()
     else
         audio_status = "Audio controls unavailable"
@@ -146,6 +154,9 @@ end
 
 function onVolumeDown()
     if audio_ok and audio and audio.available ~= false then
+        local next_value = clamp_unit(slider_value - 0.05)
+        pending_slider_value = next_value
+        sync_audio_copy(next_value * 100, false)
         audio.volume_down()
     else
         audio_status = "Audio controls unavailable"
@@ -154,6 +165,9 @@ end
 
 function onVolumeUp()
     if audio_ok and audio and audio.available ~= false then
+        local next_value = clamp_unit(slider_value + 0.05)
+        pending_slider_value = next_value
+        sync_audio_copy(next_value * 100, false)
         audio.volume_up()
     else
         audio_status = "Audio controls unavailable"
@@ -177,9 +191,6 @@ end
     border-radius: token(radius.lg);
     background: token(color.surface-container);
     color: token(color.on-surface);
-    border-width: 1px;
-    border-style: solid;
-    border-color: token(color.outline-variant);
 }
 
 .audio-header {
@@ -224,24 +235,28 @@ end
 }
 
 .audio-slider:focus-visible {
-    background: token(color.secondary-container);
     border-radius: token(radius.md);
 }
 
 .audio-actions {
     width: 100%;
     gap: token(spacing.sm);
-    justify-content: space-between;
+    align-items: center;
 }
 
 .audio-action {
-    flex-grow: 1;
     height: 36px;
+    padding: 0 token(spacing.md);
     justify-content: center;
     align-items: center;
     border-radius: token(radius.md);
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
+}
+
+.audio-action-compact {
+    width: 36px;
+    padding: 0;
 }
 
 .audio-action:focus-visible {

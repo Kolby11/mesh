@@ -1,10 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use mesh_core_elements::style::{
     Color, Display, Edges, Overflow, TextAlign, TextDirection, TextOverflow, Visibility,
 };
 use mesh_core_elements::{LayoutRect, NodeId, WidgetNode};
+
+use crate::RenderObjectDirtySummary;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DisplayPrimitiveSlot {
@@ -67,6 +69,11 @@ pub struct DisplayListMetrics {
     pub entries_reused: u64,
     pub entries_rebuilt: u64,
     pub entries_removed: u64,
+    pub subtree_segments_reused: u64,
+    pub subtree_segments_rebuilt: u64,
+    pub subtree_commands_rebuilt: u64,
+    pub full_fallback_count: u64,
+    pub broad_dirty_fallback_count: u64,
     pub damage_rect: DamageRect,
     pub damage_rect_count: u64,
     pub damage_area: u64,
@@ -123,8 +130,10 @@ impl DisplayBatchBarrier {
 pub struct RetainedDisplayList {
     generation: u64,
     retained_tree_generation: Option<u64>,
+    root_id: Option<NodeId>,
     surface_size: Option<(u32, u32)>,
     entries: HashMap<DisplayListKey, DisplayListEntry>,
+    subtrees: HashMap<NodeId, RetainedPaintSubtree>,
     paint_commands: Vec<DisplayPaintCommand>,
     last_metrics: DisplayListMetrics,
 }
@@ -242,6 +251,25 @@ pub struct DisplayListClip {
     pub height: i32,
 }
 
+#[derive(Debug, Clone, Default)]
+struct RetainedPaintSubtree {
+    commands: Vec<DisplayPaintCommand>,
+    pruning: PruningMetrics,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct LocalReuseMetrics {
+    reused_segments: u64,
+    rebuilt_segments: u64,
+    rebuilt_commands: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocalReuseDecision {
+    RebuildDirtySubtrees,
+    FallbackFull { broad_dirty: bool },
+}
+
 impl RetainedDisplayList {
     pub fn update(
         &mut self,
@@ -254,6 +282,30 @@ impl RetainedDisplayList {
         self.update_inner(
             root,
             None,
+            None,
+            None,
+            surface_width,
+            surface_height,
+            force_full_damage,
+            partial_present_supported,
+        )
+    }
+
+    pub fn update_with_dirty_nodes(
+        &mut self,
+        root: &WidgetNode,
+        dirty_summary: RenderObjectDirtySummary,
+        dirty_node_ids: &HashSet<NodeId>,
+        surface_width: u32,
+        surface_height: u32,
+        force_full_damage: bool,
+        partial_present_supported: bool,
+    ) -> DisplayListMetrics {
+        self.update_inner(
+            root,
+            None,
+            Some(dirty_summary),
+            Some(dirty_node_ids),
             surface_width,
             surface_height,
             force_full_damage,
@@ -265,6 +317,8 @@ impl RetainedDisplayList {
         &mut self,
         root: &WidgetNode,
         retained_tree_generation: u64,
+        dirty_summary: RenderObjectDirtySummary,
+        dirty_node_ids: &HashSet<NodeId>,
         surface_width: u32,
         surface_height: u32,
         force_full_damage: bool,
@@ -273,6 +327,8 @@ impl RetainedDisplayList {
         self.update_inner(
             root,
             Some(retained_tree_generation),
+            Some(dirty_summary),
+            Some(dirty_node_ids),
             surface_width,
             surface_height,
             force_full_damage,
@@ -284,6 +340,8 @@ impl RetainedDisplayList {
         &mut self,
         root: &WidgetNode,
         retained_tree_generation: Option<u64>,
+        dirty_summary: Option<RenderObjectDirtySummary>,
+        dirty_node_ids: Option<&HashSet<NodeId>>,
         surface_width: u32,
         surface_height: u32,
         force_full_damage: bool,
@@ -309,16 +367,69 @@ impl RetainedDisplayList {
         let mut ordered_entries = Vec::new();
         let mut next = HashMap::new();
         collect_display_entries(root, 0.0, 0.0, &mut ordered_entries, &mut next);
-        let mut paint_commands = Vec::new();
-        let mut pruning = PruningMetrics::default();
-        collect_paint_commands(
+        let dirty_summary = dirty_summary.unwrap_or_default();
+        let empty_dirty_nodes = HashSet::new();
+        let dirty_node_ids = dirty_node_ids.unwrap_or(&empty_dirty_nodes);
+        let decision = self.local_reuse_decision(
             root,
-            0.0,
-            0.0,
-            surface_clip(surface),
-            &mut paint_commands,
-            &mut pruning,
+            dirty_summary,
+            dirty_node_ids,
+            surface.width,
+            surface.height,
         );
+        let (paint_commands, pruning, subtrees, local_metrics) = match decision {
+            LocalReuseDecision::RebuildDirtySubtrees => {
+                let rebuild_ancestors = collect_dirty_ancestor_ids(root, dirty_node_ids);
+                let mut next_subtrees = HashMap::new();
+                let mut local_metrics = LocalReuseMetrics::default();
+                let subtree = build_paint_subtree(
+                    root,
+                    0.0,
+                    0.0,
+                    surface_clip(surface),
+                    false,
+                    dirty_node_ids,
+                    &rebuild_ancestors,
+                    &self.subtrees,
+                    &mut next_subtrees,
+                    &mut local_metrics,
+                );
+                (
+                    subtree.commands,
+                    subtree.pruning,
+                    next_subtrees,
+                    local_metrics,
+                )
+            }
+            LocalReuseDecision::FallbackFull { .. } => {
+                let mut paint_commands = Vec::new();
+                let mut pruning = PruningMetrics::default();
+                collect_paint_commands(
+                    root,
+                    0.0,
+                    0.0,
+                    surface_clip(surface),
+                    &mut paint_commands,
+                    &mut pruning,
+                );
+                let mut next_subtrees = HashMap::new();
+                let mut local_metrics = LocalReuseMetrics::default();
+                let subtree = build_paint_subtree(
+                    root,
+                    0.0,
+                    0.0,
+                    surface_clip(surface),
+                    true,
+                    dirty_node_ids,
+                    &HashSet::new(),
+                    &HashMap::new(),
+                    &mut next_subtrees,
+                    &mut local_metrics,
+                );
+                debug_assert_eq!(paint_commands.len(), subtree.commands.len());
+                (paint_commands, pruning, next_subtrees, local_metrics)
+            }
+        };
 
         let mut damage: Option<DamageRect> = None;
         let mut reused = 0u64;
@@ -366,15 +477,29 @@ impl RetainedDisplayList {
             self.generation = self.generation.saturating_add(1);
         }
         self.entries = next;
+        self.subtrees = subtrees;
         self.paint_commands = paint_commands;
+        self.root_id = Some(root.id);
         self.retained_tree_generation = retained_tree_generation;
         self.surface_size = Some((surface.width, surface.height));
+        let (full_fallback_count, broad_dirty_fallback_count) = match decision {
+            LocalReuseDecision::FallbackFull { broad_dirty } if !self.entries.is_empty() => {
+                (1, u64::from(broad_dirty))
+            }
+            LocalReuseDecision::FallbackFull { broad_dirty } => (1, u64::from(broad_dirty)),
+            _ => (0, 0),
+        };
         self.last_metrics = DisplayListMetrics {
             retained_generation: self.generation,
             entries_total: self.entries.len() as u64,
             entries_reused: reused,
             entries_rebuilt: rebuilt,
             entries_removed: removed,
+            subtree_segments_reused: local_metrics.reused_segments,
+            subtree_segments_rebuilt: local_metrics.rebuilt_segments,
+            subtree_commands_rebuilt: local_metrics.rebuilt_commands,
+            full_fallback_count,
+            broad_dirty_fallback_count,
             damage_rect,
             damage_rect_count: u64::from(damage_area > 0),
             damage_area,
@@ -419,6 +544,11 @@ impl RetainedDisplayList {
             entries_reused: self.entries.len() as u64,
             entries_rebuilt: 0,
             entries_removed: 0,
+            subtree_segments_reused: self.subtrees.len() as u64,
+            subtree_segments_rebuilt: 0,
+            subtree_commands_rebuilt: 0,
+            full_fallback_count: 0,
+            broad_dirty_fallback_count: 0,
             damage_rect,
             damage_rect_count: u64::from(damage_area > 0),
             damage_area,
@@ -444,6 +574,41 @@ impl RetainedDisplayList {
 
     pub fn paint_commands(&self) -> &[DisplayPaintCommand] {
         &self.paint_commands
+    }
+
+    fn local_reuse_decision(
+        &self,
+        root: &WidgetNode,
+        dirty_summary: RenderObjectDirtySummary,
+        dirty_node_ids: &HashSet<NodeId>,
+        surface_width: u32,
+        surface_height: u32,
+    ) -> LocalReuseDecision {
+        if self.surface_size == Some((surface_width, surface_height))
+            && self.root_id == Some(root.id)
+            && !self.subtrees.is_empty()
+            && dirty_summary.any()
+        {
+            if dirty_node_ids.is_empty() {
+                return LocalReuseDecision::FallbackFull { broad_dirty: false };
+            }
+            let broad_limit = (self.subtrees.len() / 2).max(8);
+            if dirty_node_ids.len() > broad_limit {
+                return LocalReuseDecision::FallbackFull { broad_dirty: true };
+            }
+            return LocalReuseDecision::RebuildDirtySubtrees;
+        }
+
+        if self.surface_size == Some((surface_width, surface_height))
+            && self.root_id == Some(root.id)
+            && !self.subtrees.is_empty()
+        {
+            return LocalReuseDecision::FallbackFull {
+                broad_dirty: dirty_node_ids.is_empty(),
+            };
+        }
+
+        LocalReuseDecision::FallbackFull { broad_dirty: false }
     }
 }
 
@@ -666,6 +831,173 @@ fn collect_paint_commands(
         clip: node_clip,
         kind: DisplayPaintCommandKind::Scrollbars,
     });
+}
+
+fn collect_dirty_ancestor_ids(
+    root: &WidgetNode,
+    dirty_node_ids: &HashSet<NodeId>,
+) -> HashSet<NodeId> {
+    let mut ancestors = HashSet::new();
+    let mut path = Vec::new();
+    collect_dirty_ancestor_ids_inner(root, dirty_node_ids, &mut path, &mut ancestors);
+    ancestors
+}
+
+fn collect_dirty_ancestor_ids_inner(
+    node: &WidgetNode,
+    dirty_node_ids: &HashSet<NodeId>,
+    path: &mut Vec<NodeId>,
+    ancestors: &mut HashSet<NodeId>,
+) {
+    let is_dirty = dirty_node_ids.contains(&node.id);
+    if is_dirty {
+        for ancestor in path.iter().copied() {
+            ancestors.insert(ancestor);
+        }
+    }
+    path.push(node.id);
+    for child in &node.children {
+        collect_dirty_ancestor_ids_inner(child, dirty_node_ids, path, ancestors);
+    }
+    path.pop();
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_paint_subtree(
+    node: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
+    clip: DisplayListClip,
+    force_rebuild: bool,
+    dirty_node_ids: &HashSet<NodeId>,
+    dirty_ancestors: &HashSet<NodeId>,
+    previous_subtrees: &HashMap<NodeId, RetainedPaintSubtree>,
+    next_subtrees: &mut HashMap<NodeId, RetainedPaintSubtree>,
+    metrics: &mut LocalReuseMetrics,
+) -> RetainedPaintSubtree {
+    let node_is_dirty = dirty_node_ids.contains(&node.id);
+    let node_is_ancestor = dirty_ancestors.contains(&node.id);
+    if !force_rebuild
+        && !node_is_dirty
+        && !node_is_ancestor
+        && let Some(previous) = previous_subtrees.get(&node.id)
+    {
+        metrics.reused_segments = metrics.reused_segments.saturating_add(1);
+        let reused = previous.clone();
+        next_subtrees.insert(node.id, reused.clone());
+        return reused;
+    }
+
+    metrics.rebuilt_segments = metrics.rebuilt_segments.saturating_add(1);
+
+    if node_is_explicitly_hidden(node) {
+        let mut subtree = RetainedPaintSubtree::default();
+        subtree
+            .pruning
+            .record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, true), false);
+        next_subtrees.insert(node.id, subtree.clone());
+        return subtree;
+    }
+
+    let style = &node.computed_style;
+    let transform = style.transform;
+    let offset_x = offset_x + transform.translate_x;
+    let offset_y = offset_y + transform.translate_y;
+    let paint_node = build_paint_node(node, offset_x, offset_y);
+    let bounds = node_clip_for(&paint_node);
+    let node_clip = intersect_display_clip(clip, bounds);
+    if node_clip.width <= 0 || node_clip.height <= 0 {
+        let mut subtree = RetainedPaintSubtree::default();
+        subtree
+            .pruning
+            .record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, false), true);
+        next_subtrees.insert(node.id, subtree.clone());
+        return subtree;
+    }
+
+    let mut subtree = RetainedPaintSubtree::default();
+    subtree.commands.push(DisplayPaintCommand {
+        node: paint_node.clone(),
+        clip: node_clip,
+        kind: DisplayPaintCommandKind::Node,
+    });
+    metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+
+    let scroll_x = node
+        .attributes
+        .get("_mesh_scroll_x")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let scroll_y = node
+        .attributes
+        .get("_mesh_scroll_y")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let child_offset_x = offset_x - scroll_x;
+    let child_offset_y = offset_y - scroll_y;
+    let child_clip = if node.computed_style.overflow_x.clips_contents()
+        || node.computed_style.overflow_y.clips_contents()
+    {
+        node_clip
+    } else {
+        clip
+    };
+    let needs_sort = node
+        .children
+        .windows(2)
+        .any(|pair| pair[0].computed_style.z_index != pair[1].computed_style.z_index);
+    let mut child_order: Vec<usize> = (0..node.children.len()).collect();
+    if needs_sort {
+        child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
+    }
+    for index in child_order {
+        let child = &node.children[index];
+        if should_preclip_child_subtree(child, child_offset_x, child_offset_y, child_clip) {
+            subtree.pruning.record_omitted_subtree(
+                count_pruned_subtree(child, child_offset_x, child_offset_y, false),
+                true,
+            );
+            continue;
+        }
+        let child_subtree = build_paint_subtree(
+            child,
+            child_offset_x,
+            child_offset_y,
+            child_clip,
+            force_rebuild || node_is_dirty,
+            dirty_node_ids,
+            dirty_ancestors,
+            previous_subtrees,
+            next_subtrees,
+            metrics,
+        );
+        subtree.commands.extend(child_subtree.commands);
+        subtree.pruning.omitted_subtrees = subtree
+            .pruning
+            .omitted_subtrees
+            .saturating_add(child_subtree.pruning.omitted_subtrees);
+        subtree.pruning.omitted_nodes = subtree
+            .pruning
+            .omitted_nodes
+            .saturating_add(child_subtree.pruning.omitted_nodes);
+        subtree.pruning.omitted_commands = subtree
+            .pruning
+            .omitted_commands
+            .saturating_add(child_subtree.pruning.omitted_commands);
+        subtree.pruning.preclipped_descendants = subtree
+            .pruning
+            .preclipped_descendants
+            .saturating_add(child_subtree.pruning.preclipped_descendants);
+    }
+
+    subtree.commands.push(DisplayPaintCommand {
+        node: paint_node,
+        clip: node_clip,
+        kind: DisplayPaintCommandKind::Scrollbars,
+    });
+    metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+    next_subtrees.insert(node.id, subtree.clone());
+    subtree
 }
 
 fn node_is_explicitly_hidden(node: &WidgetNode) -> bool {
@@ -1220,6 +1552,14 @@ mod tests {
     use super::*;
     use mesh_core_elements::style::{Color, Overflow, Visibility};
 
+    fn command_debugs(commands: &[DisplayPaintCommand], ids: &[NodeId]) -> Vec<String> {
+        commands
+            .iter()
+            .filter(|command| ids.contains(&command.node.id))
+            .map(|command| format!("{command:?}"))
+            .collect()
+    }
+
     fn node(id: NodeId, tag: &str, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
         let mut node = WidgetNode::new(tag);
         node.id = id;
@@ -1309,12 +1649,36 @@ mod tests {
         let mut root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
         let mut list = RetainedDisplayList::default();
 
-        let first = list.update_for_retained_generation(&root, 1, 100, 40, false, true);
+        let first = list.update_for_retained_generation(
+            &root,
+            1,
+            RenderObjectDirtySummary {
+                inserted: 1,
+                ..Default::default()
+            },
+            &HashSet::from([1]),
+            100,
+            40,
+            false,
+            true,
+        );
         assert_eq!(first.entries_rebuilt, 1);
         assert_eq!(list.paint_commands().len(), 2);
 
         root.children.push(node(2, "text", 10.0, 0.0, 20.0, 10.0));
-        let skipped = list.update_for_retained_generation(&root, 1, 100, 40, true, true);
+        let skipped = list.update_for_retained_generation(
+            &root,
+            1,
+            RenderObjectDirtySummary {
+                inserted: 1,
+                ..Default::default()
+            },
+            &HashSet::from([1]),
+            100,
+            40,
+            true,
+            true,
+        );
         assert_eq!(skipped.entries_rebuilt, 0);
         assert_eq!(skipped.entries_reused, 1);
         assert_eq!(skipped.damage_area, 4_000);
@@ -1325,9 +1689,162 @@ mod tests {
             "paint command cache should be reused while retained generation is unchanged"
         );
 
-        let rebuilt = list.update_for_retained_generation(&root, 2, 100, 40, false, true);
+        let rebuilt = list.update_for_retained_generation(
+            &root,
+            2,
+            RenderObjectDirtySummary {
+                inserted: 1,
+                ..Default::default()
+            },
+            &HashSet::from([1]),
+            100,
+            40,
+            false,
+            true,
+        );
         assert_eq!(rebuilt.entries_rebuilt, 2);
         assert_eq!(list.paint_commands().len(), 4);
+    }
+
+    #[test]
+    fn display_list_reuses_unrelated_subtrees_for_transform_updates() {
+        let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
+        let mut left = node(2, "box", 0.0, 0.0, 40.0, 40.0);
+        left.children.push(node(3, "text", 4.0, 4.0, 20.0, 12.0));
+        let mut right = node(4, "box", 60.0, 0.0, 40.0, 40.0);
+        right.children.push(node(5, "text", 4.0, 4.0, 20.0, 12.0));
+        root.children.push(left);
+        root.children.push(right);
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 120, 40, false, true);
+        let before = list.paint_commands().to_vec();
+
+        root.children[0].computed_style.transform.translate_x = 12.0;
+        let metrics = list.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                transform: 1,
+                ..Default::default()
+            },
+            &HashSet::from([2]),
+            120,
+            40,
+            false,
+            true,
+        );
+        let after = list.paint_commands().to_vec();
+
+        let right_before = command_debugs(&before, &[4, 5]);
+        let right_after = command_debugs(&after, &[4, 5]);
+        assert_eq!(right_before, right_after);
+        assert!(metrics.subtree_segments_reused > 0);
+        assert!(metrics.subtree_segments_rebuilt > 0);
+        assert_eq!(metrics.full_fallback_count, 0);
+    }
+
+    #[test]
+    fn display_list_reuses_unrelated_subtrees_for_scroll_updates() {
+        let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
+        let mut left = node(2, "box", 0.0, 0.0, 40.0, 40.0);
+        left.computed_style.overflow_x = Overflow::Hidden;
+        left.attributes.insert("_mesh_scroll_x".into(), "0".into());
+        left.children.push(node(3, "text", 30.0, 4.0, 20.0, 12.0));
+        let mut right = node(4, "box", 60.0, 0.0, 40.0, 40.0);
+        right.children.push(node(5, "text", 4.0, 4.0, 20.0, 12.0));
+        root.children.push(left);
+        root.children.push(right);
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 120, 40, false, true);
+        let before = list.paint_commands().to_vec();
+
+        root.children[0]
+            .attributes
+            .insert("_mesh_scroll_x".into(), "18".into());
+        let metrics = list.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                geometry: 1,
+                ..Default::default()
+            },
+            &HashSet::from([2]),
+            120,
+            40,
+            false,
+            true,
+        );
+        let after = list.paint_commands().to_vec();
+
+        let right_before = command_debugs(&before, &[4, 5]);
+        let right_after = command_debugs(&after, &[4, 5]);
+        assert_eq!(right_before, right_after);
+        assert!(metrics.subtree_segments_reused > 0);
+        assert!(metrics.subtree_commands_rebuilt > 0);
+    }
+
+    #[test]
+    fn display_list_reuses_unrelated_subtrees_for_local_reorder_updates() {
+        let mut root = node(1, "row", 0.0, 0.0, 160.0, 40.0);
+        let mut left = node(2, "row", 0.0, 0.0, 80.0, 40.0);
+        let mut left_first = node(3, "box", 0.0, 0.0, 20.0, 20.0);
+        left_first.computed_style.z_index = 0;
+        let mut left_second = node(4, "box", 20.0, 0.0, 20.0, 20.0);
+        left_second.computed_style.z_index = 1;
+        left.children.push(left_first);
+        left.children.push(left_second);
+        let mut right = node(5, "box", 100.0, 0.0, 40.0, 40.0);
+        right.children.push(node(6, "text", 4.0, 4.0, 20.0, 12.0));
+        root.children.push(left);
+        root.children.push(right);
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 160, 40, false, true);
+        let before = list.paint_commands().to_vec();
+
+        root.children[0].children.swap(0, 1);
+        let metrics = list.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                reordered: 1,
+                ..Default::default()
+            },
+            &HashSet::from([2]),
+            160,
+            40,
+            false,
+            true,
+        );
+        let after = list.paint_commands().to_vec();
+
+        let right_before = command_debugs(&before, &[5, 6]);
+        let right_after = command_debugs(&after, &[5, 6]);
+        assert_eq!(right_before, right_after);
+        assert!(metrics.subtree_segments_reused > 0);
+        assert_eq!(metrics.full_fallback_count, 0);
+    }
+
+    #[test]
+    fn display_list_falls_back_for_ambiguous_dirty_summaries() {
+        let root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 40, false, true);
+
+        let metrics = list.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                geometry: 1,
+                ..Default::default()
+            },
+            &HashSet::new(),
+            100,
+            40,
+            false,
+            true,
+        );
+
+        assert_eq!(metrics.full_fallback_count, 1);
+        assert_eq!(metrics.broad_dirty_fallback_count, 0);
     }
 
     #[test]

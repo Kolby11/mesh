@@ -331,14 +331,18 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.retained_display_list.update_for_retained_generation(
                 &tree,
                 retained_tree_generation,
+                render_object_dirty,
+                self.retained_render_objects.dirty_node_ids(),
                 content_width,
                 content_height,
                 self.surface_pixels_invalid,
                 true,
             )
         } else {
-            self.retained_display_list.update(
+            self.retained_display_list.update_with_dirty_nodes(
                 &tree,
+                render_object_dirty,
+                self.retained_render_objects.dirty_node_ids(),
                 content_width,
                 content_height,
                 self.surface_pixels_invalid,

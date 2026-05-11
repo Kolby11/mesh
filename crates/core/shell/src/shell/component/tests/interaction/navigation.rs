@@ -465,7 +465,7 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
 }
 
 #[test]
-fn navigation_bar_real_surface_exposes_selectable_status_copy() {
+fn navigation_bar_real_surface_keeps_status_copy_non_selectable() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
     component
@@ -490,8 +490,8 @@ fn navigation_bar_real_surface_exposes_selectable_status_copy() {
         .expect("rendered navigation tree");
     assert_eq!(
         count_selectable_text_nodes(tree),
-        1,
-        "the shipped nav bar should expose exactly one selectable passive text node"
+        0,
+        "the shipped nav bar should not expose selectable passive text nodes"
     );
 
     let status_primary =

@@ -135,7 +135,14 @@ impl SeatHandler for State {
     ) {
         self.activation_seat = Some(seat.clone());
         if capability == SeatCapability::Pointer && self.pointer.is_none() {
-            if let Ok(ptr) = self.seat_state.get_pointer(qh, &seat) {
+            let cursor_surface = self.compositor_state.create_surface(qh);
+            if let Ok(ptr) = self.seat_state.get_pointer_with_theme(
+                qh,
+                &seat,
+                self.shm.wl_shm(),
+                cursor_surface,
+                ThemeSpec::default(),
+            ) {
                 tracing::debug!("[hover] layer_shell: pointer capability acquired");
                 self.pointer = Some(ptr);
             }
@@ -155,9 +162,7 @@ impl SeatHandler for State {
         capability: SeatCapability,
     ) {
         if capability == SeatCapability::Pointer {
-            if let Some(pointer) = self.pointer.take() {
-                pointer.release();
-            }
+            let _ = self.pointer.take();
         }
         if capability == SeatCapability::Keyboard {
             if let Some(keyboard) = self.keyboard.take() {
@@ -176,7 +181,7 @@ impl SeatHandler for State {
 impl PointerHandler for State {
     fn pointer_frame(
         &mut self,
-        _conn: &Connection,
+        conn: &Connection,
         _qh: &QueueHandle<Self>,
         _pointer: &wl_pointer::WlPointer,
         events: &[PointerEvent],
@@ -190,6 +195,13 @@ impl PointerHandler for State {
                 PointerEventKind::Enter { .. } => {
                     tracing::debug!("[hover] layer_shell: pointer enter surface_id={surface_id}");
                     self.pointer_focus = Some(surface_id.clone());
+                    if let Some(pointer) = self.pointer.as_ref() {
+                        if let Err(error) = pointer.set_cursor(conn, CursorIcon::Default) {
+                            tracing::debug!(
+                                "[hover] layer_shell: failed to set default cursor on enter: {error}"
+                            );
+                        }
+                    }
                 }
                 PointerEventKind::Leave { .. } => {
                     tracing::debug!("[hover] layer_shell: pointer leave surface_id={surface_id}");

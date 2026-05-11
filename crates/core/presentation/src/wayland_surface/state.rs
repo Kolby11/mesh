@@ -49,7 +49,7 @@ pub(super) struct State {
     pub(super) qh: QueueHandle<State>,
     pub(super) pool: Option<SlotPool>,
     pub(super) surfaces: HashMap<String, SurfaceEntry>,
-    pub(super) pointer: Option<wl_pointer::WlPointer>,
+    pub(super) pointer: Option<ThemedPointer>,
     pub(super) keyboard: Option<wl_keyboard::WlKeyboard>,
     pub(super) pointer_focus: Option<String>,
     pub(super) keyboard_focus: Option<String>,
