@@ -36,6 +36,20 @@ impl DamageRect {
         u64::from(self.width) * u64::from(self.height)
     }
 
+    pub fn intersects(self, other: Self) -> bool {
+        if self.width == 0 || self.height == 0 || other.width == 0 || other.height == 0 {
+            return false;
+        }
+        let self_right = self.x.saturating_add(self.width);
+        let self_bottom = self.y.saturating_add(self.height);
+        let other_right = other.x.saturating_add(other.width);
+        let other_bottom = other.y.saturating_add(other.height);
+        self.x < other_right
+            && self_right > other.x
+            && self.y < other_bottom
+            && self_bottom > other.y
+    }
+
     fn union(self, other: Self) -> Self {
         if self.width == 0 || self.height == 0 {
             return other;
@@ -85,10 +99,33 @@ pub struct DisplayListMetrics {
     pub omitted_nodes: u64,
     pub omitted_commands: u64,
     pub preclipped_descendants: u64,
+    pub repaint_policy: DisplayListRepaintPolicy,
+    pub filtered_span_count: u64,
+    pub filtered_command_count: u64,
+    pub filtered_commands_skipped: u64,
+    pub filtered_fallback_count: u64,
     pub batch_count: u64,
     pub batched_primitives: u64,
     pub barrier_count: u64,
     pub barriers: DisplayBatchBarrierCounts,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DisplayListRepaintPolicy {
+    MinimalDamage,
+    BoundingRect,
+    #[default]
+    FullSurface,
+}
+
+impl DisplayListRepaintPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MinimalDamage => "minimal_damage",
+            Self::BoundingRect => "bounding_rect",
+            Self::FullSurface => "full_surface",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -134,6 +171,7 @@ pub struct RetainedDisplayList {
     surface_size: Option<(u32, u32)>,
     entries: HashMap<DisplayListKey, DisplayListEntry>,
     subtrees: HashMap<NodeId, RetainedPaintSubtree>,
+    command_spans: Vec<RetainedCommandSpan>,
     paint_commands: Vec<DisplayPaintCommand>,
     last_metrics: DisplayListMetrics,
 }
@@ -251,10 +289,36 @@ pub struct DisplayListClip {
     pub height: i32,
 }
 
+#[derive(Debug, Clone)]
+pub struct SelectedDisplayListPaint {
+    commands: Vec<DisplayPaintCommand>,
+    metrics: DisplayListMetrics,
+}
+
+impl SelectedDisplayListPaint {
+    pub fn commands(&self) -> &[DisplayPaintCommand] {
+        &self.commands
+    }
+
+    pub fn metrics(&self) -> DisplayListMetrics {
+        self.metrics
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct RetainedPaintSubtree {
     commands: Vec<DisplayPaintCommand>,
     pruning: PruningMetrics,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RetainedCommandSpan {
+    owner: NodeId,
+    start: usize,
+    end: usize,
+    bounds: DamageRect,
+    command_count: usize,
+    includes_scrollbars: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -472,12 +536,14 @@ impl RetainedDisplayList {
             0
         };
         let batch_metrics = compute_batch_metrics(&ordered_entries);
+        let command_spans = build_command_spans(root, &paint_commands);
 
         if rebuilt > 0 || removed > 0 || force_full_damage {
             self.generation = self.generation.saturating_add(1);
         }
         self.entries = next;
         self.subtrees = subtrees;
+        self.command_spans = command_spans;
         self.paint_commands = paint_commands;
         self.root_id = Some(root.id);
         self.retained_tree_generation = retained_tree_generation;
@@ -511,6 +577,11 @@ impl RetainedDisplayList {
             omitted_nodes: pruning.omitted_nodes,
             omitted_commands: pruning.omitted_commands,
             preclipped_descendants: pruning.preclipped_descendants,
+            repaint_policy: DisplayListRepaintPolicy::FullSurface,
+            filtered_span_count: 0,
+            filtered_command_count: self.paint_commands.len() as u64,
+            filtered_commands_skipped: 0,
+            filtered_fallback_count: 0,
             batch_count: batch_metrics.batch_count,
             batched_primitives: batch_metrics.batched_primitives,
             barrier_count: batch_metrics.barrier_count,
@@ -560,6 +631,11 @@ impl RetainedDisplayList {
             omitted_nodes: self.last_metrics.omitted_nodes,
             omitted_commands: self.last_metrics.omitted_commands,
             preclipped_descendants: self.last_metrics.preclipped_descendants,
+            repaint_policy: DisplayListRepaintPolicy::FullSurface,
+            filtered_span_count: 0,
+            filtered_command_count: self.paint_commands.len() as u64,
+            filtered_commands_skipped: 0,
+            filtered_fallback_count: 0,
             batch_count: self.last_metrics.batch_count,
             batched_primitives: self.last_metrics.batched_primitives,
             barrier_count: self.last_metrics.barrier_count,
@@ -574,6 +650,64 @@ impl RetainedDisplayList {
 
     pub fn paint_commands(&self) -> &[DisplayPaintCommand] {
         &self.paint_commands
+    }
+
+    pub fn select_paint_commands(
+        &self,
+        damage: Option<DamageRect>,
+        policy: DisplayListRepaintPolicy,
+    ) -> SelectedDisplayListPaint {
+        let mut metrics = self.last_metrics;
+        metrics.repaint_policy = policy;
+        metrics.filtered_span_count = 0;
+        metrics.filtered_command_count = 0;
+        metrics.filtered_commands_skipped = 0;
+        metrics.filtered_fallback_count = 0;
+
+        let full_commands = self.paint_commands.len() as u64;
+        let Some(damage) = damage else {
+            metrics.repaint_policy = DisplayListRepaintPolicy::MinimalDamage;
+            metrics.filtered_commands_skipped = full_commands;
+            return SelectedDisplayListPaint {
+                commands: Vec::new(),
+                metrics,
+            };
+        };
+
+        if matches!(policy, DisplayListRepaintPolicy::FullSurface) {
+            metrics.filtered_span_count = self.command_spans.len() as u64;
+            metrics.filtered_command_count = full_commands;
+            metrics.filtered_fallback_count = u64::from(!self.paint_commands.is_empty());
+            return SelectedDisplayListPaint {
+                commands: self.paint_commands.clone(),
+                metrics,
+            };
+        }
+
+        let mut selected_indices = Vec::new();
+        let mut matched_spans = 0u64;
+        for span in &self.command_spans {
+            if span.bounds.intersects(damage) {
+                matched_spans = matched_spans.saturating_add(1);
+                for index in span.start..span.end {
+                    if index < self.paint_commands.len() {
+                        selected_indices.push(index);
+                    }
+                }
+            }
+        }
+        selected_indices.sort_unstable();
+        selected_indices.dedup();
+
+        let commands: Vec<_> = selected_indices
+            .iter()
+            .filter_map(|index| self.paint_commands.get(*index).cloned())
+            .collect();
+        metrics.filtered_span_count = matched_spans;
+        metrics.filtered_command_count = commands.len() as u64;
+        metrics.filtered_commands_skipped = full_commands.saturating_sub(commands.len() as u64);
+
+        SelectedDisplayListPaint { commands, metrics }
     }
 
     fn local_reuse_decision(
@@ -1104,6 +1238,114 @@ fn node_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
         width: node.layout.width.round().max(0.0) as i32,
         height: node.layout.height.round().max(0.0) as i32,
     }
+}
+
+fn command_bounds(command: &DisplayPaintCommand) -> DamageRect {
+    let bounds = node_clip_for(&command.node);
+    let clip = intersect_display_clip(bounds, command.clip);
+    DamageRect {
+        x: clip.x.max(0) as u32,
+        y: clip.y.max(0) as u32,
+        width: clip.width.max(0) as u32,
+        height: clip.height.max(0) as u32,
+    }
+}
+
+fn build_command_spans(
+    root: &WidgetNode,
+    commands: &[DisplayPaintCommand],
+) -> Vec<RetainedCommandSpan> {
+    let mut by_owner: HashMap<NodeId, Vec<usize>> = HashMap::new();
+    for (index, command) in commands.iter().enumerate() {
+        by_owner.entry(command.node.id).or_default().push(index);
+    }
+
+    let mut spans = Vec::new();
+    if let Some(root_indices) = by_owner.get(&root.id) {
+        push_contiguous_owner_spans(root.id, root_indices, commands, &mut spans);
+    }
+    collect_command_spans(root, root.id, commands, &by_owner, &mut spans);
+    spans.sort_by_key(|span| span.start);
+    spans
+}
+
+fn push_contiguous_owner_spans(
+    owner: NodeId,
+    indices: &[usize],
+    commands: &[DisplayPaintCommand],
+    spans: &mut Vec<RetainedCommandSpan>,
+) {
+    let mut indices = indices.to_vec();
+    indices.sort_unstable();
+    indices.dedup();
+
+    let mut run_start = 0usize;
+    while run_start < indices.len() {
+        let mut run_end = run_start + 1;
+        while run_end < indices.len() && indices[run_end] == indices[run_end - 1].saturating_add(1)
+        {
+            run_end += 1;
+        }
+        push_command_span(owner, &indices[run_start..run_end], commands, spans);
+        run_start = run_end;
+    }
+}
+
+fn push_command_span(
+    owner: NodeId,
+    indices: &[usize],
+    commands: &[DisplayPaintCommand],
+    spans: &mut Vec<RetainedCommandSpan>,
+) {
+    if indices.is_empty() {
+        return;
+    }
+
+    let mut bounds = DamageRect::default();
+    let mut includes_scrollbars = false;
+    for index in indices {
+        if let Some(command) = commands.get(*index) {
+            let command_bounds = command_bounds(command);
+            bounds = if bounds.width == 0 || bounds.height == 0 {
+                command_bounds
+            } else {
+                bounds.union(command_bounds)
+            };
+            includes_scrollbars |= matches!(command.kind, DisplayPaintCommandKind::Scrollbars);
+        }
+    }
+
+    spans.push(RetainedCommandSpan {
+        owner,
+        start: indices[0],
+        end: indices[indices.len() - 1].saturating_add(1),
+        bounds,
+        command_count: indices.len(),
+        includes_scrollbars,
+    });
+}
+
+fn collect_command_spans(
+    node: &WidgetNode,
+    root_id: NodeId,
+    commands: &[DisplayPaintCommand],
+    by_owner: &HashMap<NodeId, Vec<usize>>,
+    spans: &mut Vec<RetainedCommandSpan>,
+) -> Vec<usize> {
+    let mut indices = by_owner.get(&node.id).cloned().unwrap_or_default();
+    for child in &node.children {
+        indices.extend(collect_command_spans(
+            child, root_id, commands, by_owner, spans,
+        ));
+    }
+
+    if node.id != root_id && !indices.is_empty() {
+        indices.sort_unstable();
+        indices.dedup();
+        push_command_span(node.id, &indices, commands, spans);
+    }
+
+    indices
 }
 
 fn build_paint_node(node: &WidgetNode, offset_x: f32, offset_y: f32) -> DisplayPaintNode {
@@ -1822,6 +2064,112 @@ mod tests {
         assert_eq!(right_before, right_after);
         assert!(metrics.subtree_segments_reused > 0);
         assert_eq!(metrics.full_fallback_count, 0);
+    }
+
+    #[test]
+    fn display_list_records_span_metadata_and_policy_labels() {
+        let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
+        let mut left = node(2, "box", 0.0, 0.0, 40.0, 40.0);
+        left.children.push(node(3, "text", 4.0, 4.0, 20.0, 12.0));
+        let mut right = node(4, "box", 70.0, 0.0, 40.0, 40.0);
+        right.children.push(node(5, "text", 4.0, 4.0, 20.0, 12.0));
+        root.children.push(left);
+        root.children.push(right);
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 120, 40, false, true);
+
+        let left_span = list
+            .command_spans
+            .iter()
+            .find(|span| span.owner == 2)
+            .expect("left retained subtree should have command span metadata");
+        assert!(left_span.start < left_span.end);
+        assert!(left_span.command_count >= 4);
+        assert!(left_span.includes_scrollbars);
+        assert_eq!(
+            DisplayListRepaintPolicy::MinimalDamage.as_str(),
+            "minimal_damage"
+        );
+        assert_eq!(
+            DisplayListRepaintPolicy::BoundingRect.as_str(),
+            "bounding_rect"
+        );
+        assert_eq!(
+            DisplayListRepaintPolicy::FullSurface.as_str(),
+            "full_surface"
+        );
+    }
+
+    #[test]
+    fn display_list_filters_sparse_damage_without_reordering_commands() {
+        let mut root = node(1, "row", 0.0, 0.0, 160.0, 40.0);
+        root.children.push(node(2, "box", 0.0, 0.0, 40.0, 40.0));
+        root.children.push(node(3, "box", 80.0, 0.0, 40.0, 40.0));
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 160, 40, false, true);
+        let full_order: Vec<_> = list
+            .paint_commands()
+            .iter()
+            .map(|command| (command.node.id, command.kind))
+            .collect();
+
+        let selected = list.select_paint_commands(
+            Some(DamageRect {
+                x: 0,
+                y: 0,
+                width: 45,
+                height: 40,
+            }),
+            DisplayListRepaintPolicy::MinimalDamage,
+        );
+        let filtered_order: Vec<_> = selected
+            .commands()
+            .iter()
+            .map(|command| (command.node.id, command.kind))
+            .collect();
+
+        assert!(selected.metrics().filtered_command_count < full_order.len() as u64);
+        assert!(selected.metrics().filtered_commands_skipped > 0);
+        assert!(selected.metrics().filtered_span_count > 0);
+        assert!(
+            filtered_order
+                .iter()
+                .any(|item| *item == (2, DisplayPaintCommandKind::Scrollbars))
+        );
+        let projected_full: Vec<_> = full_order
+            .into_iter()
+            .filter(|item| filtered_order.contains(item))
+            .collect();
+        assert_eq!(filtered_order, projected_full);
+    }
+
+    #[test]
+    fn display_list_full_surface_policy_keeps_all_commands_and_records_fallback() {
+        let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
+        root.children.push(node(2, "box", 0.0, 0.0, 40.0, 40.0));
+        root.children.push(node(3, "box", 70.0, 0.0, 40.0, 40.0));
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 120, 40, false, true);
+        let selected = list.select_paint_commands(
+            Some(DamageRect {
+                x: 0,
+                y: 0,
+                width: 120,
+                height: 40,
+            }),
+            DisplayListRepaintPolicy::FullSurface,
+        );
+
+        assert_eq!(selected.commands().len(), list.paint_commands().len());
+        assert_eq!(
+            selected.metrics().repaint_policy,
+            DisplayListRepaintPolicy::FullSurface
+        );
+        assert_eq!(selected.metrics().filtered_commands_skipped, 0);
+        assert_eq!(selected.metrics().filtered_fallback_count, 1);
     }
 
     #[test]

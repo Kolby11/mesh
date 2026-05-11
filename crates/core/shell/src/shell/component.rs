@@ -52,8 +52,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mesh_core_render::{
-    DamageRect, DisplayListMetrics, PixelBuffer, RenderObjectTree, RetainedDisplayList,
-    SharedTextMeasurer, TextCacheMetrics, TextRenderer,
+    DamageRect, DisplayListMetrics, DisplayListRepaintPolicy, PixelBuffer, RenderObjectTree,
+    RetainedDisplayList, SharedTextMeasurer, TextCacheMetrics, TextRenderer,
     paint_display_list_for_module_with_profiling_metrics,
 };
 
@@ -134,6 +134,7 @@ impl ComponentDirtyFlags {
 struct EffectiveDamage {
     rect: Option<DamageRect>,
     full_surface: bool,
+    policy: DisplayListRepaintPolicy,
 }
 
 impl EffectiveDamage {
@@ -141,6 +142,7 @@ impl EffectiveDamage {
         Self {
             rect: None,
             full_surface: false,
+            policy: DisplayListRepaintPolicy::MinimalDamage,
         }
     }
 }
@@ -179,6 +181,11 @@ fn retained_paint_snapshot(
         omitted_nodes: metrics.omitted_nodes,
         omitted_commands: metrics.omitted_commands,
         preclipped_descendants: metrics.preclipped_descendants,
+        repaint_policy: repaint_policy_snapshot(metrics.repaint_policy),
+        filtered_span_count: metrics.filtered_span_count,
+        filtered_command_count: metrics.filtered_command_count,
+        filtered_commands_skipped: metrics.filtered_commands_skipped,
+        filtered_fallback_count: metrics.filtered_fallback_count,
         batch_count: metrics.batch_count,
         batched_primitives: metrics.batched_primitives,
         barrier_count: metrics.barrier_count,
@@ -190,6 +197,22 @@ fn retained_paint_snapshot(
             translucency: metrics.barriers.translucency,
             material_change: metrics.barriers.material_change,
         },
+    }
+}
+
+fn repaint_policy_snapshot(
+    policy: DisplayListRepaintPolicy,
+) -> mesh_core_debug::RepaintPolicySnapshot {
+    match policy {
+        DisplayListRepaintPolicy::MinimalDamage => {
+            mesh_core_debug::RepaintPolicySnapshot::MinimalDamage
+        }
+        DisplayListRepaintPolicy::BoundingRect => {
+            mesh_core_debug::RepaintPolicySnapshot::BoundingRect
+        }
+        DisplayListRepaintPolicy::FullSurface => {
+            mesh_core_debug::RepaintPolicySnapshot::FullSurface
+        }
     }
 }
 

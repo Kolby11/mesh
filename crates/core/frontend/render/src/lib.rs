@@ -4,7 +4,8 @@ pub mod surface;
 
 pub use display_list::{
     DamageRect, DisplayBatchBarrierCounts, DisplayListClip, DisplayListMetrics,
-    DisplayPaintCommand, DisplayPaintCommandKind, RetainedDisplayList,
+    DisplayListRepaintPolicy, DisplayPaintCommand, DisplayPaintCommandKind, RetainedDisplayList,
+    SelectedDisplayListPaint,
 };
 pub use render_object::{RenderObjectDirtySummary, RenderObjectTree};
 pub use surface::{

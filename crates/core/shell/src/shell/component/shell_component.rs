@@ -1,12 +1,5 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DamagePolicy {
-    Minimal,
-    BoundingRect,
-    FullRepaint,
-}
-
 impl ShellComponent for FrontendSurfaceComponent {
     fn id(&self) -> &str {
         &self.compiled.manifest.package.id
@@ -377,13 +370,21 @@ impl ShellComponent for FrontendSurfaceComponent {
             reorder_damage,
             tooltip_damage,
         );
+        let paint_damage = if effective_damage.full_surface {
+            Some(surface_damage)
+        } else {
+            effective_damage.rect
+        };
+        let selected_paint = self
+            .retained_display_list
+            .select_paint_commands(paint_damage, effective_damage.policy);
         self.invalidation_snapshot = Some(mesh_core_debug::ProfilingInvalidationSnapshot {
             full_rebuild: requires_tree_rebuild,
             retained_path: use_retained_style_path,
             retained_generation: self.retained_tree.generation(),
             component: dirty_types.to_debug_counts(),
             retained: retained_dirty.to_debug_counts(),
-            paint: retained_paint_snapshot(display_list_metrics, effective_damage),
+            paint: retained_paint_snapshot(selected_paint.metrics(), effective_damage),
             text: mesh_core_debug::TextCacheSnapshot::default(),
         });
         tracing::trace!(
@@ -420,11 +421,6 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.publish_element_metrics(&tree);
 
         let paint_started = std::time::Instant::now();
-        let paint_damage = if effective_damage.full_surface {
-            Some(surface_damage)
-        } else {
-            effective_damage.rect
-        };
         let paint_metrics = if paint_damage.is_none() {
             mesh_core_render::PaintProfilingMetrics::default()
         } else {
@@ -441,7 +437,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 );
             }
             paint_display_list_for_module_with_profiling_metrics(
-                self.retained_display_list.paint_commands(),
+                selected_paint.commands(),
                 buffer,
                 1.0,
                 (!effective_damage.full_surface).then_some((
@@ -728,6 +724,7 @@ fn select_effective_damage(
         return EffectiveDamage {
             rect: Some(surface),
             full_surface: true,
+            policy: DisplayListRepaintPolicy::FullSurface,
         };
     }
 
@@ -748,13 +745,17 @@ fn select_effective_damage(
         damage.area(),
     );
     match policy {
-        DamagePolicy::Minimal | DamagePolicy::BoundingRect => EffectiveDamage {
-            rect: Some(damage),
-            full_surface: false,
-        },
-        DamagePolicy::FullRepaint => EffectiveDamage {
+        DisplayListRepaintPolicy::MinimalDamage | DisplayListRepaintPolicy::BoundingRect => {
+            EffectiveDamage {
+                rect: Some(damage),
+                full_surface: false,
+                policy,
+            }
+        }
+        DisplayListRepaintPolicy::FullSurface => EffectiveDamage {
             rect: Some(surface),
             full_surface: true,
+            policy,
         },
     }
 }
@@ -764,9 +765,9 @@ fn select_damage_policy(
     requires_tree_rebuild: bool,
     has_extra_damage_sources: bool,
     candidate_area: u64,
-) -> DamagePolicy {
+) -> DisplayListRepaintPolicy {
     if candidate_area == 0 {
-        return DamagePolicy::Minimal;
+        return DisplayListRepaintPolicy::MinimalDamage;
     }
 
     let changed_entries = metrics
@@ -777,11 +778,11 @@ fn select_damage_policy(
     let large_damage = metrics.surface_area > 0 && candidate_area * 2 >= metrics.surface_area;
 
     if large_damage || (requires_tree_rebuild && mostly_changed_entries) {
-        DamagePolicy::FullRepaint
+        DisplayListRepaintPolicy::FullSurface
     } else if has_extra_damage_sources {
-        DamagePolicy::BoundingRect
+        DisplayListRepaintPolicy::BoundingRect
     } else {
-        DamagePolicy::Minimal
+        DisplayListRepaintPolicy::MinimalDamage
     }
 }
 
@@ -938,6 +939,7 @@ mod tests {
             "small tooltip invalidation should stay as a bounded repaint"
         );
         assert!(!effective.full_surface);
+        assert_eq!(effective.policy, DisplayListRepaintPolicy::BoundingRect);
     }
 
     #[test]
@@ -957,5 +959,6 @@ mod tests {
 
         assert!(effective.full_surface);
         assert_eq!(effective.rect, Some(surface(100, 100)));
+        assert_eq!(effective.policy, DisplayListRepaintPolicy::FullSurface);
     }
 }

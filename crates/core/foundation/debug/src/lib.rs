@@ -206,10 +206,33 @@ pub struct RetainedPaintSnapshot {
     pub omitted_nodes: u64,
     pub omitted_commands: u64,
     pub preclipped_descendants: u64,
+    pub repaint_policy: RepaintPolicySnapshot,
+    pub filtered_span_count: u64,
+    pub filtered_command_count: u64,
+    pub filtered_commands_skipped: u64,
+    pub filtered_fallback_count: u64,
     pub batch_count: u64,
     pub batched_primitives: u64,
     pub barrier_count: u64,
     pub barriers: DisplayBatchBarrierSnapshot,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RepaintPolicySnapshot {
+    MinimalDamage,
+    BoundingRect,
+    #[default]
+    FullSurface,
+}
+
+impl RepaintPolicySnapshot {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MinimalDamage => "minimal_damage",
+            Self::BoundingRect => "bounding_rect",
+            Self::FullSurface => "full_surface",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

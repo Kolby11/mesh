@@ -14,8 +14,8 @@ use super::{
 use mesh_core_config::ShellConfig;
 use mesh_core_debug::{
     ComponentInvalidationCounts, DisplayBatchBarrierSnapshot, ProfilingBackendStage,
-    ProfilingInvalidationSnapshot, ProfilingStage, RetainedInvalidationCounts,
-    RetainedPaintSnapshot, TextCacheSnapshot,
+    ProfilingInvalidationSnapshot, ProfilingStage, RepaintPolicySnapshot,
+    RetainedInvalidationCounts, RetainedPaintSnapshot, TextCacheSnapshot,
 };
 use mesh_core_elements::{LayoutRect, VariableStore, WidgetNode};
 use mesh_core_interaction::measure_content_size;
@@ -1605,6 +1605,10 @@ fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
                 omitted_nodes: 5,
                 omitted_commands: 10,
                 preclipped_descendants: 4,
+                repaint_policy: RepaintPolicySnapshot::BoundingRect,
+                filtered_span_count: 3,
+                filtered_command_count: 4,
+                filtered_commands_skipped: 1,
                 batch_count: 2,
                 batched_primitives: 5,
                 barrier_count: 3,
@@ -1652,6 +1656,14 @@ fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
     assert_eq!(invalidation.paint.omitted_nodes, 5);
     assert_eq!(invalidation.paint.omitted_commands, 10);
     assert_eq!(invalidation.paint.preclipped_descendants, 4);
+    assert_eq!(
+        invalidation.paint.repaint_policy,
+        RepaintPolicySnapshot::BoundingRect
+    );
+    assert_eq!(invalidation.paint.filtered_span_count, 3);
+    assert_eq!(invalidation.paint.filtered_command_count, 4);
+    assert_eq!(invalidation.paint.filtered_commands_skipped, 1);
+    assert_eq!(invalidation.paint.filtered_fallback_count, 0);
     assert_eq!(invalidation.paint.batch_count, 2);
     assert_eq!(invalidation.paint.batched_primitives, 5);
     assert_eq!(invalidation.paint.barriers.text, 1);
@@ -2163,6 +2175,11 @@ fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
                 subtree_commands_rebuilt: 5,
                 full_fallback_count: 1,
                 broad_dirty_fallback_count: 1,
+                repaint_policy: RepaintPolicySnapshot::FullSurface,
+                filtered_span_count: 4,
+                filtered_command_count: 9,
+                filtered_commands_skipped: 0,
+                filtered_fallback_count: 1,
                 ..Default::default()
             },
             text: TextCacheSnapshot {
@@ -2216,6 +2233,26 @@ fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
     );
     assert_eq!(
         latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["broad_dirty_fallback_count"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["repaint_policy"],
+        serde_json::json!("full_surface")
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["filtered_span_count"],
+        serde_json::json!(4)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["filtered_command_count"],
+        serde_json::json!(9)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["filtered_commands_skipped"],
+        serde_json::json!(0)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["filtered_fallback_count"],
         serde_json::json!(1)
     );
     assert_eq!(
