@@ -851,7 +851,9 @@ mod tests {
         let mut next = previous.clone();
         next.width = 320;
 
-        assert!(surface_change_requires_fresh_configure(&previous, &next, true));
+        assert!(surface_change_requires_fresh_configure(
+            &previous, &next, true
+        ));
     }
 
     #[test]
@@ -859,6 +861,8 @@ mod tests {
         let previous = base_cfg();
         let next = previous.clone();
 
-        assert!(surface_change_requires_fresh_configure(&previous, &next, false));
+        assert!(surface_change_requires_fresh_configure(
+            &previous, &next, false
+        ));
     }
 }

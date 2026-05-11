@@ -702,7 +702,9 @@ end
     .unwrap();
 
     let err = ctx.call_init().unwrap_err();
-    assert!(matches!(err, ScriptError::LuaError(message) if message.contains("unsupported require: @mesh/audio@>=1.0")));
+    assert!(
+        matches!(err, ScriptError::LuaError(message) if message.contains("unsupported require: @mesh/audio@>=1.0"))
+    );
 }
 
 #[test]
