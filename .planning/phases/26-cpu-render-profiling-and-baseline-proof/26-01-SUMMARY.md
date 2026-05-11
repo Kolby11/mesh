@@ -44,7 +44,7 @@ completed: 2026-05-10
 
 # Phase 26 Plan 01: CPU Render Profiling and Baseline Proof Summary
 
-**Retained CPU render hotspots are now attributed through the existing `mesh.debug.profiling` path, with stable canonical benchmark targets and a reusable Phase 26 baseline proof artifact that records concrete scenario values and retained-stage hotspots.**
+**Retained CPU render hotspots are now attributed through the existing `mesh.debug.profiling` path, with stable canonical benchmark targets and a reusable Phase 26 baseline proof artifact that combines real shipped-surface measurements with deterministic benchmark-row proofs.**
 
 ## Performance
 
@@ -58,7 +58,7 @@ completed: 2026-05-10
 
 - Added retained CPU render attribution stages for render-object sync, retained display-list update, paint traversal, text shaping, and icon/image raster work without changing the benchmark harness.
 - Threaded the new attribution through the shell debug payload and invalidation JSON, including `text.shaping_micros` for direct shell-consumer inspection.
-- Recorded concrete canonical benchmark values plus retained-stage hotspot ordering in a reusable Phase 26 baseline proof artifact.
+- Recorded real shipped-surface baseline measurements plus deterministic canonical benchmark-row values in a reusable Phase 26 baseline proof artifact.
 - Tightened the retained attribution semantics after review so cached glyph blits stay out of `icon_image_raster` and tooltip overlays stay out of `paint_traversal`.
 
 ## Task Commits
@@ -81,14 +81,14 @@ Each task was committed atomically:
 - `crates/core/frontend/render/src/surface/icon.rs`, `crates/core/frontend/render/src/surface/glyph.rs` - recorded icon/image raster timing across file, SVG, and glyph-backed icon paints, while keeping cached glyph blits out of raster timing.
 - `crates/core/shell/src/shell/component/shell_component.rs` - recorded retained render-object sync, display-list update, traversal, shaping, and raster stages on the shipped shell paint path.
 - `crates/core/shell/src/shell/runtime/debug.rs` - serialized the extended profiling payload into `mesh.debug`.
-- `crates/core/shell/src/shell/tests.rs`, `crates/core/shell/src/shell/component/tests.rs` - locked the stable benchmark rows, new stage serialization, retained paint-path attribution, and deterministic Phase 26 baseline proof values with focused tests.
+- `crates/core/shell/src/shell/tests.rs`, `crates/core/shell/src/shell/component/tests.rs` - locked the stable benchmark rows, new stage serialization, retained paint-path attribution, deterministic benchmark-row values, and real shipped-surface baseline measurements with focused tests.
 - `.planning/phases/26-cpu-render-profiling-and-baseline-proof/26-01-BASELINE.md` - captured the canonical benchmark evidence and retained hotspot ranking for later v1.5 optimization phases.
 
 ## Decisions Made
 
 - Extended the existing debug profiling path instead of inventing a parallel benchmark/profiling mechanism, matching the milestone constraint.
 - Kept the benchmark scenario IDs and shipped targets unchanged; the new attribution lives under `mesh.debug.profiling`, not in renamed benchmark rows.
-- Baseline proof is deterministic and test-backed through `Shell::build_debug_snapshot()` rather than a compositor-live capture path, which matches the existing benchmark contract and keeps the artifact reproducible in CI.
+- Baseline proof uses both real shipped-surface component measurements and deterministic `Shell::build_debug_snapshot()` contract tests so the artifact has real timings without inventing a second benchmark system.
 - Left `.planning/STATE.md` and `.planning/ROADMAP.md` untouched in this isolated execution to avoid conflicting with the orchestrator’s pending shared-state update.
 
 ## Deviations from Plan
@@ -109,8 +109,8 @@ None - no external service configuration required.
 
 ## Next Phase Readiness
 
-- Later v1.5 optimization phases can now compare before/after work against the same five benchmark IDs, the recorded Phase 26 baseline values, and the retained hotspot ordering while inspecting the same substages through `mesh.debug.profiling`.
-- The baseline remains deterministic and benchmark-contract-backed rather than compositor-live telemetry, so later optimization phases should continue using the same benchmark rows and then attach their own before/after deltas when behavior changes.
+- Later v1.5 optimization phases can now compare before/after work against the same five benchmark IDs, the recorded shipped-surface baseline values, and the retained hotspot ordering while inspecting the same substages through `mesh.debug.profiling`.
+- The baseline still stops short of compositor-live telemetry, but it now carries real shipped-surface measurements plus deterministic benchmark-row contract proof, so later optimization phases should continue using the same benchmark rows and attach their own before/after deltas when behavior changes.
 
 ## Self-Check: PASSED
 
