@@ -1,4 +1,5 @@
 use super::*;
+use std::fs;
 
 #[test]
 fn failing_handler_is_reported_once_and_does_not_clear_render_state() {

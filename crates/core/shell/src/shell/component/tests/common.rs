@@ -1,4 +1,24 @@
 use super::*;
+use crate::shell::ComponentContext;
+use crate::shell::component::FrontendSurfaceComponent;
+use crate::shell::component::catalog::FrontendCatalogEntry;
+use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_component::parse_component;
+use mesh_core_diagnostics::Diagnostics;
+use mesh_core_elements::style::Display;
+use mesh_core_frontend::CompiledFrontendModule;
+use mesh_core_module::manifest::{
+    CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
+};
+use mesh_core_module::{ExportsSection, Manifest, ModuleType, PackageSection};
+use mesh_core_scripting::ScriptContext;
+use mesh_core_service::{
+    ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract, InterfaceMethod,
+    InterfaceProvider, parse_contract_version,
+};
+use mesh_core_theme::{Theme, default_theme};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 pub(super) fn audio_network_catalog() -> InterfaceCatalog {
     let mut catalog = InterfaceCatalog::default();
