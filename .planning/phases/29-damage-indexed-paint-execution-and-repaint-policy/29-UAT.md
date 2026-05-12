@@ -1,19 +1,15 @@
 ---
-status: testing
+status: complete
 phase: 29-damage-indexed-paint-execution-and-repaint-policy
 source:
   - .planning/phases/29-damage-indexed-paint-execution-and-repaint-policy/29-01-SUMMARY.md
 started: "2026-05-11T21:45:52+02:00"
-updated: "2026-05-11T21:51:05+02:00"
+updated: "2026-05-12T13:36:20+02:00"
 ---
 
 ## Current Test
 
-number: 3
-name: Full-Surface Fallback Is Explicit
-expected: |
-  For a broad or ambiguous repaint case, retained paint execution keeps the full command list, reports `repaint_policy: "full_surface"`, and increments `filtered_fallback_count`.
-awaiting: user response
+[testing complete]
 
 ## Tests
 
@@ -30,18 +26,18 @@ reason: "i have no way to measure his"
 
 ### 3. Full-Surface Fallback Is Explicit
 expected: For a broad or ambiguous repaint case, retained paint execution keeps the full command list, reports `repaint_policy: "full_surface"`, and increments `filtered_fallback_count`.
-result: [pending]
+result: pass
 
 ### 4. Canonical Benchmark Proof Remains In Existing Harness
 expected: The Phase 29 benchmark proof uses the existing benchmark path and lists all five canonical scenario IDs: `hover`, `surface_open_close`, `pointer_update`, `keyboard_traversal`, and `backend_update`. It does not introduce a new benchmark harness or trace persistence path.
-result: [pending]
+result: pass
 
 ## Summary
 
 total: 4
-passed: 0
+passed: 2
 issues: 1
-pending: 2
+pending: 0
 skipped: 1
 blocked: 0
 
