@@ -94,7 +94,7 @@ impl FrontendRenderEngine {
             style.font_weight,
             style.line_height,
             effective_align,
-            style.color,
+            opacity_color(style.color, style.opacity),
             buffer,
             tx,
             ty,

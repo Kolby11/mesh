@@ -14,6 +14,8 @@
         };
 
         runtimeLibs = with pkgs; [
+          fontconfig
+          freetype
           libxkbcommon
           wayland
           wayland-protocols

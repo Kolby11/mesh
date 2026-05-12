@@ -149,7 +149,8 @@ Primary external sources:
 
 - Deferred validation/UAT cleanup from older milestones remains backlog work outside `v1.5`.
 - The pending unified package/module manifest phase idea remains future planning work and is not part of CPU rendering optimization.
-- GPU backend and parallel paint/layout remain sequenced after this milestone proves the CPU retained pipeline is smooth enough.
+- Skia-backed rendering is now the high-priority next milestone candidate after `v1.5`: first as a benchmarkable painter/backend spike against the retained display-list command stream, then as a migration only if it clearly improves shipped-surface performance.
+- Parallel paint/layout remains sequenced after this milestone proves the CPU retained pipeline is smooth enough.
 
 ---
 *Roadmap updated: 2026-05-11 after Phase 29 execution completed*

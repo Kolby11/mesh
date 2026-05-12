@@ -9,8 +9,12 @@ use super::text::{TextCacheMetrics, TextRenderer, TextSelectionGeometry};
 use mesh_core_elements::style::{Color, Display, Overflow, TextAlign, TextDirection, TextOverflow};
 use mesh_core_elements::tree::WidgetNode;
 
-pub(crate) use geometry::{ClipRect, fill_rect_clipped, fill_rounded_rect_clipped};
-use geometry::{clip_to_tuple, dim_color, intersect_clip, node_attr_f32, node_clips_children};
+pub(crate) use geometry::{
+    ClipRect, fill_rect_clipped, fill_rounded_rect_clipped, stroke_rounded_rect_clipped,
+};
+use geometry::{
+    clip_to_tuple, dim_color, intersect_clip, node_attr_f32, node_clips_children, opacity_color,
+};
 
 pub struct FrontendRenderEngine {
     text_renderer: TextRenderer,

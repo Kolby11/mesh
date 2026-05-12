@@ -113,25 +113,34 @@ impl From<RawTheme> for Theme {
         let mut tokens = raw.tokens;
         let mut defaults = raw.defaults;
         let mut base_defaults = defaults.components.remove("base").unwrap_or_default();
+        let mut legacy_transition_fragments = Vec::new();
 
-        let legacy_animation_keys: Vec<String> = tokens
+        let mut legacy_animation_keys: Vec<String> = tokens
             .keys()
             .filter_map(|key| {
                 key.strip_prefix(LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX)
                     .map(str::to_owned)
             })
             .collect();
+        legacy_animation_keys.sort();
 
         for animation_name in legacy_animation_keys {
             let legacy_key = format!("{LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX}{animation_name}");
             let Some(TokenValue::String(value)) = tokens.remove(&legacy_key) else {
                 continue;
             };
-            base_defaults.entry(animation_name).or_insert(value);
+            legacy_transition_fragments.push(value);
         }
 
-        for (name, value) in raw.default_shell_animations {
-            base_defaults.entry(name).or_insert(value);
+        let mut default_shell_animations: Vec<_> =
+            raw.default_shell_animations.into_iter().collect();
+        default_shell_animations.sort_by(|left, right| left.0.cmp(&right.0));
+        for (_name, value) in default_shell_animations {
+            legacy_transition_fragments.push(value);
+        }
+
+        if !legacy_transition_fragments.is_empty() && !base_defaults.contains_key("transition") {
+            base_defaults.insert("transition".into(), legacy_transition_fragments.join(", "));
         }
 
         if !base_defaults.is_empty() {
@@ -337,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_default_shell_animation_tokens_are_extracted_into_base_component_defaults() {
+    fn legacy_default_shell_animation_tokens_are_extracted_into_base_transition() {
         let theme = parse_theme(
             r##"{
               "id": "legacy",
@@ -345,19 +354,25 @@ mod tests {
               "tokens": {
                 "color.primary": "#000000",
                 "animation.duration.fast": 90.0,
-                "animation.default.hover": "all 90ms ease-out"
+                "animation.default.border-radius": "border-radius 90ms ease-out",
+                "animation.default.opacity": "opacity 90ms ease-out"
               }
             }"##,
         )
         .expect("legacy theme parses");
 
-        assert!(theme.token("animation.default.hover").is_none());
+        assert!(theme.token("animation.default.opacity").is_none());
         assert_eq!(
             theme
                 .component_defaults("base")
-                .and_then(|defaults| defaults.get("hover"))
+                .and_then(|defaults| defaults.get("transition"))
                 .map(String::as_str),
-            Some("all 90ms ease-out")
+            Some("border-radius 90ms ease-out, opacity 90ms ease-out")
+        );
+        assert!(
+            theme
+                .component_defaults("base")
+                .is_none_or(|defaults| !defaults.contains_key("opacity"))
         );
         assert!(theme.token("animation.duration.fast").is_some());
     }

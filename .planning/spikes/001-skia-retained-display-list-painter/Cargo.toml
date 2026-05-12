@@ -1,0 +1,10 @@
+[package]
+name = "skia-retained-display-list-painter"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+skia-safe = "0.97"

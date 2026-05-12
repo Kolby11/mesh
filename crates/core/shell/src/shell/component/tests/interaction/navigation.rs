@@ -336,7 +336,6 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component.paint(&theme, width, height, &mut buffer).unwrap();
-
     let shortcut_requests = component
         .handle_input(
             &theme,
@@ -415,6 +414,141 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         activation_requests.as_slice(),
         [CoreRequest::SetTheme { theme_id }] if theme_id == "mesh-default-dark"
     ));
+}
+
+#[test]
+fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    let button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar/local:ThemeButton::onThemeToggle",
+    )
+    .expect("navigation theme button");
+    let button_key = button
+        .attributes
+        .get("_mesh_key")
+        .expect("theme button mesh key")
+        .clone();
+    let nav_shell = first_node_with_attr(tree, "class", "nav-shell").expect("navigation shell");
+    let control_cluster =
+        first_node_with_attr(tree, "ref", "control-cluster").expect("control cluster");
+    assert!(
+        nav_shell.computed_style.background_color.a > 0,
+        "navigation shell should resolve a nontransparent background"
+    );
+    let shell_center_alpha = alpha_at(
+        &buffer,
+        (nav_shell.layout.x + nav_shell.layout.width * 0.5).round() as u32,
+        (nav_shell.layout.y + nav_shell.layout.height * 0.5).round() as u32,
+    );
+    assert!(
+        shell_center_alpha > 0,
+        "navigation shell center should paint an opaque background"
+    );
+    assert!(
+        ((control_cluster.layout.y + control_cluster.layout.height * 0.5)
+            - (nav_shell.layout.y + nav_shell.layout.height * 0.5))
+            .abs()
+            <= 1.0,
+        "navigation control cluster should be vertically centered in the shell"
+    );
+    let button_key_for_bounds = button
+        .attributes
+        .get("_mesh_key")
+        .expect("theme button mesh key");
+    let (_button_left, button_top, _button_right, button_bottom) =
+        find_node_bounds_by_key(tree, button_key_for_bounds, 0.0, 0.0).expect("button bounds");
+    assert!(
+        (((button_top + button_bottom) * 0.5)
+            - (nav_shell.layout.y + nav_shell.layout.height * 0.5))
+            .abs()
+            <= 1.0,
+        "navigation button should be vertically centered in the shell"
+    );
+    assert_eq!(button.computed_style.border_radius.top_left, 16.0);
+    assert_eq!(button.computed_style.transform.scale_x, 1.0);
+    assert_eq!(button.computed_style.transform.scale_y, 1.0);
+    let visible_pixels = nontransparent_pixels(&buffer);
+    assert!(
+        visible_pixels > 40_000,
+        "navigation bar should paint visible Skia backgrounds, got only {visible_pixels} nontransparent pixels"
+    );
+    assert!(button.computed_style.transition.duration_ms > 0);
+    assert!(
+        button
+            .computed_style
+            .transition
+            .properties
+            .animates_border_radius()
+    );
+    assert!(
+        button
+            .computed_style
+            .transition
+            .properties
+            .animates_transform()
+    );
+
+    let hover_x = button.layout.x + button.layout.width * 0.5;
+    let hover_y = button.layout.y + button.layout.height * 0.5;
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerMove {
+                x: hover_x,
+                y: hover_y,
+            },
+        )
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let hovered_tree = component
+        .last_tree
+        .as_ref()
+        .expect("hovered navigation tree");
+    let hovered_button = node_by_mesh_key(hovered_tree, &button_key);
+
+    assert_eq!(hovered_button.computed_style.border_radius.top_left, 9999.0);
+    assert_eq!(hovered_button.computed_style.transform.translate_y, -1.0);
+    assert!((hovered_button.computed_style.transform.scale_x - 1.04).abs() < 0.001);
+    assert!((hovered_button.computed_style.transform.scale_y - 1.04).abs() < 0.001);
+    let hovered_visible_pixels = nontransparent_pixels(&buffer);
+    assert!(
+        hovered_visible_pixels > 40_000,
+        "hover repaint should preserve visible Skia backgrounds, got only {hovered_visible_pixels} nontransparent pixels"
+    );
+    let center_alpha = alpha_at(&buffer, hover_x.round() as u32, hover_y.round() as u32);
+    assert!(
+        center_alpha > 0,
+        "hovered navigation button center should remain visible after transition repaint"
+    );
+}
+
+fn nontransparent_pixels(buffer: &PixelBuffer) -> usize {
+    buffer
+        .data
+        .chunks_exact(4)
+        .filter(|pixel| pixel[3] > 0)
+        .count()
+}
+
+fn alpha_at(buffer: &PixelBuffer, x: u32, y: u32) -> u8 {
+    let x = x.min(buffer.width.saturating_sub(1));
+    let y = y.min(buffer.height.saturating_sub(1));
+    let offset = (y * buffer.stride + x * 4) as usize;
+    buffer.data[offset + 3]
 }
 
 #[test]

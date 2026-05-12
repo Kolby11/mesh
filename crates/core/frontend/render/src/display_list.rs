@@ -209,6 +209,7 @@ pub struct DisplayPaintStyle {
     pub text_align: TextAlign,
     pub text_overflow: TextOverflow,
     pub text_direction: TextDirection,
+    pub opacity: f32,
     pub icon_fill: Option<f32>,
     pub icon_weight: Option<f32>,
     pub icon_grade: Option<f32>,
@@ -694,6 +695,11 @@ impl RetainedDisplayList {
                         selected_indices.push(index);
                     }
                 }
+            }
+        }
+        for (index, command) in self.paint_commands.iter().enumerate() {
+            if command_bounds(command).intersects(damage) {
+                selected_indices.push(index);
             }
         }
         selected_indices.sort_unstable();
@@ -1184,11 +1190,14 @@ fn subtree_bounds_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Option<
 }
 
 fn node_bounds_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Option<FloatBounds> {
-    (node.layout.width > 0.0 && node.layout.height > 0.0).then_some(FloatBounds {
-        left: node.layout.x + offset_x,
-        top: node.layout.y + offset_y,
-        right: node.layout.x + offset_x + node.layout.width,
-        bottom: node.layout.y + offset_y + node.layout.height,
+    (node.layout.width > 0.0 && node.layout.height > 0.0).then(|| {
+        let layout = transformed_layout_at(node, offset_x, offset_y);
+        FloatBounds {
+            left: layout.x,
+            top: layout.y,
+            right: layout.x + layout.width,
+            bottom: layout.y + layout.height,
+        }
     })
 }
 
@@ -1349,20 +1358,16 @@ fn collect_command_spans(
 }
 
 fn build_paint_node(node: &WidgetNode, offset_x: f32, offset_y: f32) -> DisplayPaintNode {
+    let opacity = node.computed_style.opacity;
     DisplayPaintNode {
         id: node.id,
-        layout: LayoutRect {
-            x: node.layout.x + offset_x,
-            y: node.layout.y + offset_y,
-            width: node.layout.width,
-            height: node.layout.height,
-        },
+        layout: transformed_layout_at(node, offset_x, offset_y),
         style: DisplayPaintStyle {
-            background_color: node.computed_style.background_color,
-            border_color: node.computed_style.border_color,
+            background_color: opacity_color(node.computed_style.background_color, opacity),
+            border_color: opacity_color(node.computed_style.border_color, opacity),
             border_width: node.computed_style.border_width,
             border_radius: node.computed_style.border_radius.top_left,
-            color: node.computed_style.color,
+            color: opacity_color(node.computed_style.color, opacity),
             padding: node.computed_style.padding,
             overflow_x: node.computed_style.overflow_x,
             overflow_y: node.computed_style.overflow_y,
@@ -1373,6 +1378,7 @@ fn build_paint_node(node: &WidgetNode, offset_x: f32, offset_y: f32) -> DisplayP
             text_align: node.computed_style.text_align,
             text_overflow: node.computed_style.text_overflow,
             text_direction: node.computed_style.text_direction,
+            opacity,
             icon_fill: node.computed_style.icon_fill,
             icon_weight: node.computed_style.icon_weight,
             icon_grade: node.computed_style.icon_grade,
@@ -1387,6 +1393,30 @@ fn build_paint_node(node: &WidgetNode, offset_x: f32, offset_y: f32) -> DisplayP
             content_width: attr_f32(node, "_mesh_content_width"),
             content_height: attr_f32(node, "_mesh_content_height"),
         },
+    }
+}
+
+fn transformed_layout_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> LayoutRect {
+    let scale_x = node.computed_style.transform.scale_x.max(0.0);
+    let scale_y = node.computed_style.transform.scale_y.max(0.0);
+    let base_x = node.layout.x + offset_x;
+    let base_y = node.layout.y + offset_y;
+    let width = node.layout.width * scale_x;
+    let height = node.layout.height * scale_y;
+    LayoutRect {
+        x: base_x - (width - node.layout.width) * 0.5,
+        y: base_y - (height - node.layout.height) * 0.5,
+        width,
+        height,
+    }
+}
+
+fn opacity_color(color: Color, opacity: f32) -> Color {
+    Color {
+        a: ((color.a as f32) * opacity.clamp(0.0, 1.0))
+            .round()
+            .clamp(0.0, 255.0) as u8,
+        ..color
     }
 }
 
@@ -1576,12 +1606,13 @@ fn damage_rect_for_node_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> O
     if node.layout.width <= 0.0 || node.layout.height <= 0.0 {
         return None;
     }
-    let left = node.layout.x + offset_x;
-    let top = node.layout.y + offset_y;
+    let layout = transformed_layout_at(node, offset_x, offset_y);
+    let left = layout.x;
+    let top = layout.y;
     let x = left.floor().max(0.0) as u32;
     let y = top.floor().max(0.0) as u32;
-    let right = (left + node.layout.width).ceil().max(0.0) as u32;
-    let bottom = (top + node.layout.height).ceil().max(0.0) as u32;
+    let right = (left + layout.width).ceil().max(0.0) as u32;
+    let bottom = (top + layout.height).ceil().max(0.0) as u32;
     Some(DamageRect {
         x,
         y,
@@ -2143,6 +2174,36 @@ mod tests {
             .filter(|item| filtered_order.contains(item))
             .collect();
         assert_eq!(filtered_order, projected_full);
+    }
+
+    #[test]
+    fn display_list_partial_damage_replays_intersecting_backgrounds() {
+        let mut root = node(1, "row", 0.0, 0.0, 160.0, 40.0);
+        root.children.push(node(2, "box", 0.0, 0.0, 40.0, 40.0));
+        root.children.push(node(3, "box", 80.0, 0.0, 40.0, 40.0));
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 160, 40, false, true);
+        let selected = list.select_paint_commands(
+            Some(DamageRect {
+                x: 88,
+                y: 8,
+                width: 12,
+                height: 12,
+            }),
+            DisplayListRepaintPolicy::MinimalDamage,
+        );
+        let ids: Vec<_> = selected
+            .commands()
+            .iter()
+            .map(|command| command.node.id)
+            .collect();
+
+        assert!(
+            ids.contains(&1),
+            "partial repaint must replay root background under damaged child pixels"
+        );
+        assert!(ids.contains(&3), "damaged child command should be selected");
     }
 
     #[test]

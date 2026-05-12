@@ -385,6 +385,13 @@ impl FrontendSurfaceComponent {
         now: Instant,
         has_active_animation: &mut bool,
     ) {
+        if node.computed_style.animation.name.is_some() {
+            // CSS animations own their animated properties; do not layer
+            // transition playback on top of the same node.
+            self.style_animations.remove(key);
+            return;
+        }
+
         let desired = AnimatedVisualStyle::from_node(node);
         let previous_displayed = self
             .style_animations

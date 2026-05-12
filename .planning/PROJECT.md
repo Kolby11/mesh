@@ -55,6 +55,8 @@ The project now also has the first retained-rendering pipeline passes with:
 
 Even with those foundations, the software CPU renderer still feels laggy on real shell surfaces. The next milestone focuses on the remaining CPU-side pipeline bottlenecks before any GPU backend work.
 
+Skia-backed rendering is now a high-priority next-milestone candidate. After `v1.5` finishes the retained CPU pipeline work, `v1.6` should investigate whether Skia can materially improve MESH rendering performance and, if so, migrate the low-level painter behind the existing retained-rendering architecture.
+
 ## Current Milestone: v1.5 CPU Rendering Performance Improvement
 
 **Goal:** Use Qt Quick renderer research plus live MESH profiling to identify the remaining CPU rendering bottlenecks, then implement retained pipeline improvements that make shipped shell surfaces feel visibly smoother on the software renderer.
@@ -84,6 +86,7 @@ Even with those foundations, the software CPU renderer still feels laggy on real
 - Stop whole-tree retained paint-command rebuilds and whole-command-list scans when only a local region changed.
 - Prune offscreen, hidden, or clip-excluded content earlier so the CPU painter does less work.
 - Retain more raster work for text, glyphs, SVGs, images, and icons so repeated paints avoid re-decoding or re-rasterizing unchanged assets.
+- Prioritize a Skia-backed renderer investigation as the next milestone if v1.5 retained CPU work does not make shipped surfaces feel smooth enough.
 
 ### Out of Scope
 
@@ -112,6 +115,7 @@ Even with those foundations, the software CPU renderer still feels laggy on real
 | CPU rendering smoothness comes before GPU work | A laggy software path would hide pipeline inefficiencies and make later GPU work harder to evaluate | Locked for v1.5 |
 | Qt research should inform implementation, not force a literal Qt clone | MESH needs the same retained-rendering principles, but applied to its existing Rust software-renderer architecture | Locked for v1.5 |
 | Visible smoothness on shipped surfaces outranks microbenchmark-only wins | The user reports real lag everywhere; optimization must improve lived interaction quality, not just synthetic numbers | Locked for v1.5 |
+| Skia-backed rendering is the next major performance priority after v1.5 | Skia may provide a faster and more complete low-level 2D paint backend than the current custom/tiny-skia/resvg/cosmic-text/swash software path, but it must be proven against MESH's shipped surfaces before migration | Planned for v1.6 |
 
 <details>
 <summary>Archived milestone framing</summary>

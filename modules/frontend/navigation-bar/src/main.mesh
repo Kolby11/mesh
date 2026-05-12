@@ -18,11 +18,17 @@
       </column>
       <spacer class="nav-spacer" />
       <row ref="control-cluster" class="control-cluster">
-        <VolumeButton
-          onActivate={onToggleAudioSurface}
-        />
-        <ThemeButton />
-        <SettingsButton />
+        <row class="control-button-cell">
+          <VolumeButton
+            onActivate={onToggleAudioSurface}
+          />
+        </row>
+        <row class="control-button-cell">
+          <ThemeButton />
+        </row>
+        <row class="control-button-cell">
+          <SettingsButton />
+        </row>
       </row>
     </row>
     <AudioPopover hidden={audio_surface_hidden} />
@@ -171,10 +177,16 @@ end
 }
 
 .control-cluster {
+    height: 100%;
     flex-shrink: 0;
     align-items: center;
     gap: token(spacing.xs);
-    justify-content: end;
+}
+
+.control-button-cell {
+    height: 40px;
+    flex-shrink: 0;
+    align-items: center;
 }
 
 @keyframes status-pulse {

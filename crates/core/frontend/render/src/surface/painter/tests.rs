@@ -1,4 +1,5 @@
 use super::*;
+use crate::display_list::{DamageRect, DisplayListRepaintPolicy, RetainedDisplayList};
 use mesh_core_elements::layout::LayoutRect;
 use mesh_core_elements::style::{Dimension, Edges};
 use mesh_core_frontend::compile_frontend_module;
@@ -64,6 +65,109 @@ fn painter_draws_border_from_computed_edges() {
 
     assert_eq!(pixel(&buffer, 1, 1), Color::from_hex("#ff0000").unwrap());
     assert_eq!(pixel(&buffer, 10, 10), Color::TRANSPARENT);
+}
+
+#[test]
+fn painter_draws_rounded_border_without_square_corners() {
+    let border = Color::from_hex("#ff0000").unwrap();
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 20.0,
+            height: 20.0,
+        },
+        Color::TRANSPARENT,
+    );
+    root.computed_style.border_width = Edges::all(2.0);
+    root.computed_style.border_color = border;
+    root.computed_style.border_radius.top_left = 8.0;
+
+    let mut buffer = PixelBuffer::new(24, 24);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    assert_eq!(pixel(&buffer, 0, 0), Color::TRANSPARENT);
+    assert!(pixel(&buffer, 10, 0).a > 0);
+    assert!(pixel(&buffer, 0, 10).a > 0);
+    assert_eq!(pixel(&buffer, 10, 10), Color::TRANSPARENT);
+}
+
+#[test]
+fn painter_applies_opacity_to_skia_filled_background() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 20.0,
+            height: 20.0,
+        },
+        Color::WHITE,
+    );
+    root.computed_style.opacity = 0.5;
+
+    let mut buffer = PixelBuffer::new(24, 24);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    let center = pixel(&buffer, 10, 10);
+    assert_eq!(
+        center,
+        Color {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 128,
+        }
+    );
+}
+
+#[test]
+fn retained_display_list_paints_opacity_through_skia_path() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 20.0,
+            height: 20.0,
+        },
+        Color::WHITE,
+    );
+    root.computed_style.opacity = 0.5;
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 24, 24, false, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 24,
+            height: 24,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+
+    let mut buffer = PixelBuffer::new(24, 24);
+    FrontendRenderEngine::new().render_display_list_for_module(
+        selected.commands(),
+        &mut buffer,
+        1.0,
+        None,
+        None,
+        None,
+    );
+
+    let center = pixel(&buffer, 10, 10);
+    assert_eq!(
+        center,
+        Color {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 128,
+        }
+    );
 }
 
 #[test]

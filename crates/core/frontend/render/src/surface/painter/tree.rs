@@ -4,6 +4,7 @@ use crate::display_list::{
     DisplayListClip, DisplayPaintCommand, DisplayPaintCommandKind, DisplayPaintContent,
     DisplayPaintNode,
 };
+use mesh_core_elements::style::Edges;
 
 use super::*;
 
@@ -202,20 +203,25 @@ impl FrontendRenderEngine {
             return;
         }
 
-        // Apply the additive part of `transform` (translate). Scale and
-        // rotation aren't visually applied yet. They still propagate through
-        // the data model so authors can wire them up and see the animation
-        // graph activate; the painter will start honoring them once the
-        // tiny_skia path lands.
+        // Apply the visually-supported parts of `transform`. Rotation still
+        // propagates through the data model but is not painted yet.
         let transform = style.transform;
         let offset_x = offset_x + transform.translate_x;
         let offset_y = offset_y + transform.translate_y;
 
         let layout = &node.layout;
-        let x = ((layout.x + offset_x) * scale).round() as i32;
-        let y = ((layout.y + offset_y) * scale).round() as i32;
-        let w = (layout.width * scale).round().max(0.0) as i32;
-        let h = (layout.height * scale).round().max(0.0) as i32;
+        let scale_x = transform.scale_x.max(0.0);
+        let scale_y = transform.scale_y.max(0.0);
+        let base_w = layout.width * scale;
+        let base_h = layout.height * scale;
+        let scaled_w = base_w * scale_x;
+        let scaled_h = base_h * scale_y;
+        let base_x = (layout.x + offset_x) * scale;
+        let base_y = (layout.y + offset_y) * scale;
+        let x = (base_x - (scaled_w - base_w) * 0.5).round() as i32;
+        let y = (base_y - (scaled_h - base_h) * 0.5).round() as i32;
+        let w = scaled_w.round().max(0.0) as i32;
+        let h = scaled_h.round().max(0.0) as i32;
         let bounds = ClipRect {
             x,
             y,
@@ -301,74 +307,34 @@ impl FrontendRenderEngine {
         let w = bounds.width;
         let h = bounds.height;
 
-        if style.background_color.a > 0 {
+        let background_color = opacity_color(style.background_color, style.opacity);
+        let border_color = opacity_color(style.border_color, style.opacity);
+        let content_color = opacity_color(style.color, style.opacity);
+
+        if background_color.a > 0 {
             let radius = style.border_radius.top_left * scale;
             if radius > 0.5 {
-                fill_rounded_rect_clipped(
-                    buffer,
-                    bounds,
-                    radius,
-                    style.background_color,
-                    node_clip,
-                );
+                fill_rounded_rect_clipped(buffer, bounds, radius, background_color, node_clip);
             } else {
-                fill_rect_clipped(buffer, bounds, style.background_color, node_clip);
+                fill_rect_clipped(buffer, bounds, background_color, node_clip);
             }
         }
 
-        if style.border_width.top > 0.0 && style.border_color.a > 0 {
-            let border_width = (style.border_width.top * scale).max(1.0) as i32;
-            fill_rect_clipped(
-                buffer,
-                ClipRect {
-                    x,
-                    y,
-                    width: w,
-                    height: border_width,
-                },
-                style.border_color,
-                node_clip,
-            );
-            fill_rect_clipped(
-                buffer,
-                ClipRect {
-                    x,
-                    y: y + h.saturating_sub(border_width),
-                    width: w,
-                    height: border_width,
-                },
-                style.border_color,
-                node_clip,
-            );
-            fill_rect_clipped(
-                buffer,
-                ClipRect {
-                    x,
-                    y,
-                    width: border_width,
-                    height: h,
-                },
-                style.border_color,
-                node_clip,
-            );
-            fill_rect_clipped(
-                buffer,
-                ClipRect {
-                    x: x + w.saturating_sub(border_width),
-                    y,
-                    width: border_width,
-                    height: h,
-                },
-                style.border_color,
-                node_clip,
-            );
-        }
+        draw_border_clipped(
+            buffer,
+            bounds,
+            &style.border_width,
+            style.border_radius.top_left * scale,
+            border_color,
+            scale,
+            node_clip,
+        );
 
         match node.tag.as_str() {
             "text" => self.render_text_node(node, buffer, scale, x, y, node_clip),
             "input" => self.render_input_node(node, buffer, scale, x, y, node_clip),
             "slider" => self.render_slider_node(node, buffer, scale, x, y, w, h, node_clip),
-            "icon" => self.render_icon_node(node, buffer, x, y, w, h, style.color, module_id),
+            "icon" => self.render_icon_node(node, buffer, x, y, w, h, content_color, module_id),
             _ => {}
         }
     }
@@ -408,53 +374,15 @@ impl FrontendRenderEngine {
             }
         }
 
-        if style.border_width.top > 0.0 && style.border_color.a > 0 {
-            let border_width = (style.border_width.top * scale).max(1.0) as i32;
-            fill_rect_clipped(
-                buffer,
-                ClipRect {
-                    x,
-                    y,
-                    width: w,
-                    height: border_width,
-                },
-                style.border_color,
-                node_clip,
-            );
-            fill_rect_clipped(
-                buffer,
-                ClipRect {
-                    x,
-                    y: y + h.saturating_sub(border_width),
-                    width: w,
-                    height: border_width,
-                },
-                style.border_color,
-                node_clip,
-            );
-            fill_rect_clipped(
-                buffer,
-                ClipRect {
-                    x,
-                    y,
-                    width: border_width,
-                    height: h,
-                },
-                style.border_color,
-                node_clip,
-            );
-            fill_rect_clipped(
-                buffer,
-                ClipRect {
-                    x: x + w.saturating_sub(border_width),
-                    y,
-                    width: border_width,
-                    height: h,
-                },
-                style.border_color,
-                node_clip,
-            );
-        }
+        draw_border_clipped(
+            buffer,
+            bounds,
+            &style.border_width,
+            style.border_radius * scale,
+            style.border_color,
+            scale,
+            node_clip,
+        );
 
         match &node.content {
             DisplayPaintContent::Text(text) => {
@@ -490,4 +418,72 @@ fn scaled_display_clip(clip: DisplayListClip, scale: f32) -> ClipRect {
         width: (clip.width as f32 * scale).round().max(0.0) as i32,
         height: (clip.height as f32 * scale).round().max(0.0) as i32,
     }
+}
+
+fn draw_border_clipped(
+    buffer: &mut PixelBuffer,
+    bounds: ClipRect,
+    border_widths: &Edges,
+    radius: f32,
+    color: Color,
+    scale: f32,
+    clip: ClipRect,
+) {
+    if border_widths.top <= 0.0 || color.a == 0 {
+        return;
+    }
+
+    let border_width = (border_widths.top * scale).max(1.0) as i32;
+    if stroke_rounded_rect_clipped(buffer, bounds, radius, border_width, color, clip) {
+        return;
+    }
+
+    let x = bounds.x;
+    let y = bounds.y;
+    let w = bounds.width;
+    let h = bounds.height;
+    fill_rect_clipped(
+        buffer,
+        ClipRect {
+            x,
+            y,
+            width: w,
+            height: border_width,
+        },
+        color,
+        clip,
+    );
+    fill_rect_clipped(
+        buffer,
+        ClipRect {
+            x,
+            y: y + h.saturating_sub(border_width),
+            width: w,
+            height: border_width,
+        },
+        color,
+        clip,
+    );
+    fill_rect_clipped(
+        buffer,
+        ClipRect {
+            x,
+            y,
+            width: border_width,
+            height: h,
+        },
+        color,
+        clip,
+    );
+    fill_rect_clipped(
+        buffer,
+        ClipRect {
+            x: x + w.saturating_sub(border_width),
+            y,
+            width: border_width,
+            height: h,
+        },
+        color,
+        clip,
+    );
 }

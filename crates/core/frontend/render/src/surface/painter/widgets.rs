@@ -40,10 +40,11 @@ impl FrontendRenderEngine {
         } else {
             display_value.as_str()
         };
+        let style_color = opacity_color(style.color, style.opacity);
         let text_color = if display_value.is_empty() {
-            dim_color(style.color, 0.6)
+            dim_color(style_color, 0.6)
         } else {
-            style.color
+            style_color
         };
 
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
@@ -95,7 +96,7 @@ impl FrontendRenderEngine {
                     width: 2,
                     height: glyph_height,
                 },
-                style.color,
+                style_color,
                 clip,
             );
         }
@@ -195,6 +196,7 @@ impl FrontendRenderEngine {
         clip: ClipRect,
     ) {
         let style = &node.computed_style;
+        let style_color = opacity_color(style.color, style.opacity);
         let min = node
             .attributes
             .get("min")
@@ -239,7 +241,7 @@ impl FrontendRenderEngine {
                     width: track_thickness,
                     height: track_h,
                 },
-                dim_color(style.color, 0.35),
+                dim_color(style_color, 0.35),
                 clip,
             );
 
@@ -252,7 +254,7 @@ impl FrontendRenderEngine {
                     width: track_thickness,
                     height: active_h.max(0),
                 },
-                style.color,
+                style_color,
                 clip,
             );
 
@@ -267,7 +269,7 @@ impl FrontendRenderEngine {
                     height: thumb_radius * 2,
                 },
                 thumb_radius as f32,
-                style.color,
+                style_color,
                 clip,
             );
         } else {
@@ -282,7 +284,7 @@ impl FrontendRenderEngine {
                     width: track_w,
                     height: track_thickness,
                 },
-                dim_color(style.color, 0.35),
+                dim_color(style_color, 0.35),
                 clip,
             );
 
@@ -295,7 +297,7 @@ impl FrontendRenderEngine {
                     width: active_w.max(0),
                     height: track_thickness,
                 },
-                style.color,
+                style_color,
                 clip,
             );
 
@@ -310,7 +312,7 @@ impl FrontendRenderEngine {
                     height: thumb_radius * 2,
                 },
                 thumb_radius as f32,
-                style.color,
+                style_color,
                 clip,
             );
         }

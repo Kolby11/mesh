@@ -1,7 +1,10 @@
 /// Pixel buffer for software rendering.
 use mesh_core_elements::style::Color;
+use skia_safe::{
+    AlphaType, BlendMode, Canvas, ColorType, ImageInfo, Paint, PaintStyle, RRect, Rect, surfaces,
+};
 
-/// An ARGB8888 pixel buffer.
+/// A BGRA8888 pixel buffer.
 #[derive(Debug, Clone)]
 pub struct PixelBuffer {
     pub data: Vec<u8>,
@@ -24,22 +27,15 @@ impl PixelBuffer {
 
     /// Clear the buffer to a solid color.
     pub fn clear(&mut self, color: Color) {
-        let pixel = [color.b, color.g, color.r, color.a];
-        if pixel == [0, 0, 0, 0] {
+        if color.a == 0 && color.r == 0 && color.g == 0 && color.b == 0 {
             self.data.fill(0);
             return;
         }
-        let width_bytes = (self.width * 4) as usize;
-        if self.height == 0 || width_bytes == 0 {
+
+        if !self.with_skia_canvas(|canvas| {
+            canvas.clear(skia_color(color));
+        }) {
             return;
-        }
-        let first_len = width_bytes.min(self.data.len());
-        let (first_row, rest) = self.data.split_at_mut(first_len);
-        for chunk in first_row.chunks_exact_mut(4) {
-            chunk.copy_from_slice(&pixel);
-        }
-        for row in rest.chunks_exact_mut(self.stride as usize) {
-            row[..width_bytes].copy_from_slice(first_row);
         }
     }
 
@@ -51,19 +47,12 @@ impl PixelBuffer {
             return;
         }
 
-        let pixel = [color.b, color.g, color.r, color.a];
-        let row_start = (x * 4) as usize;
-        let row_end = (end_x * 4) as usize;
-        let row_len = row_end.saturating_sub(row_start);
-        let mut pattern = Vec::with_capacity(row_len);
-        pattern.resize(row_len, 0);
-        for chunk in pattern.chunks_exact_mut(4) {
-            chunk.copy_from_slice(&pixel);
-        }
-        for py in y..end_y {
-            let base = (py * self.stride) as usize;
-            self.data[base + row_start..base + row_end].copy_from_slice(&pattern);
-        }
+        let rect = Rect::from_xywh(x as f32, y as f32, (end_x - x) as f32, (end_y - y) as f32);
+        self.with_skia_canvas(|canvas| {
+            let mut paint = src_paint(color);
+            paint.set_style(PaintStyle::Fill);
+            canvas.draw_rect(rect, &paint);
+        });
     }
 
     /// Set a single pixel. Coordinates are bounds-checked.
@@ -119,38 +108,134 @@ impl PixelBuffer {
         self.clear_rect(x, y, w, h, color);
     }
 
-    /// Fill a rounded rectangle. Uses a simple distance check for corners.
+    /// Fill a rounded rectangle through the Skia raster backend.
     pub fn fill_rounded_rect(&mut self, x: u32, y: u32, w: u32, h: u32, radius: f32, color: Color) {
-        let r = radius.min(w as f32 / 2.0).min(h as f32 / 2.0);
-        let ri = r as u32;
-
-        for py in y..y.saturating_add(h).min(self.height) {
-            for px in x..x.saturating_add(w).min(self.width) {
-                let lx = px - x;
-                let ly = py - y;
-
-                // Check if we're in a corner region.
-                let in_corner = (lx < ri && ly < ri)
-                    || (lx >= w - ri && ly < ri)
-                    || (lx < ri && ly >= h - ri)
-                    || (lx >= w - ri && ly >= h - ri);
-
-                if in_corner {
-                    // Find the center of the relevant corner circle.
-                    let cx = if lx < ri { x + ri } else { x + w - ri - 1 } as f32;
-                    let cy = if ly < ri { y + ri } else { y + h - ri - 1 } as f32;
-
-                    let dx = px as f32 - cx;
-                    let dy = py as f32 - cy;
-                    if dx * dx + dy * dy <= r * r {
-                        self.set_pixel(px, py, color);
-                    }
-                } else {
-                    self.set_pixel(px, py, color);
-                }
-            }
+        if w == 0 || h == 0 {
+            return;
         }
+        let radius = radius.max(0.0).min(w as f32 * 0.5).min(h as f32 * 0.5);
+        let rect = Rect::from_xywh(x as f32, y as f32, w as f32, h as f32);
+        self.with_skia_canvas(|canvas| {
+            let mut paint = src_over_paint(color);
+            paint.set_style(PaintStyle::Fill);
+            canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+        });
     }
+
+    pub(crate) fn fill_rounded_rect_clipped(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        radius: f32,
+        color: Color,
+        clip: (i32, i32, i32, i32),
+    ) -> bool {
+        if w <= 0 || h <= 0 || clip.2 <= 0 || clip.3 <= 0 {
+            return false;
+        }
+
+        self.with_skia_canvas(|canvas| {
+            let save_count = canvas.save();
+            canvas.clip_rect(
+                Rect::from_xywh(clip.0 as f32, clip.1 as f32, clip.2 as f32, clip.3 as f32),
+                None,
+                false,
+            );
+            let rect = Rect::from_xywh(x as f32, y as f32, w as f32, h as f32);
+            let radius = radius.max(0.0).min(w as f32 * 0.5).min(h as f32 * 0.5);
+            let mut paint = src_over_paint(color);
+            paint.set_style(PaintStyle::Fill);
+            canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+            canvas.restore_to_count(save_count);
+        })
+    }
+
+    pub(crate) fn stroke_rounded_rect_clipped(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        radius: f32,
+        stroke_width: f32,
+        color: Color,
+        clip: (i32, i32, i32, i32),
+    ) -> bool {
+        if w <= 0 || h <= 0 || stroke_width <= 0.0 || clip.2 <= 0 || clip.3 <= 0 {
+            return false;
+        }
+
+        self.with_skia_canvas(|canvas| {
+            let save_count = canvas.save();
+            canvas.clip_rect(
+                Rect::from_xywh(clip.0 as f32, clip.1 as f32, clip.2 as f32, clip.3 as f32),
+                None,
+                false,
+            );
+
+            let inset = stroke_width * 0.5;
+            let stroke_w = (w as f32 - stroke_width).max(0.0);
+            let stroke_h = (h as f32 - stroke_width).max(0.0);
+            if stroke_w > 0.0 && stroke_h > 0.0 {
+                let rect = Rect::from_xywh(x as f32 + inset, y as f32 + inset, stroke_w, stroke_h);
+                let radius = (radius - inset)
+                    .max(0.0)
+                    .min(stroke_w * 0.5)
+                    .min(stroke_h * 0.5);
+                let mut paint = src_over_paint(color);
+                paint.set_style(PaintStyle::Stroke);
+                paint.set_stroke_width(stroke_width);
+                canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+            }
+
+            canvas.restore_to_count(save_count);
+        })
+    }
+
+    pub(crate) fn with_skia_canvas(&mut self, draw: impl FnOnce(&Canvas)) -> bool {
+        if self.width == 0 || self.height == 0 || self.stride == 0 {
+            return false;
+        }
+
+        let info = ImageInfo::new(
+            (self.width as i32, self.height as i32),
+            ColorType::BGRA8888,
+            AlphaType::Unpremul,
+            None,
+        );
+        let Some(mut surface) = surfaces::wrap_pixels(
+            &info,
+            self.data.as_mut_slice(),
+            Some(self.stride as usize),
+            None,
+        ) else {
+            return false;
+        };
+        draw(surface.canvas());
+        true
+    }
+}
+
+pub(crate) fn skia_color(color: Color) -> skia_safe::Color {
+    skia_safe::Color::from_argb(color.a, color.r, color.g, color.b)
+}
+
+fn src_paint(color: Color) -> Paint {
+    let mut paint = Paint::default();
+    paint.set_anti_alias(false);
+    paint.set_color(skia_color(color));
+    paint.set_blend_mode(BlendMode::Src);
+    paint
+}
+
+fn src_over_paint(color: Color) -> Paint {
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color(skia_color(color));
+    paint.set_blend_mode(BlendMode::SrcOver);
+    paint
 }
 
 #[cfg(test)]

@@ -30,6 +30,29 @@
 - `.planning/research/PITFALLS.md`
 - `.planning/research/SUMMARY.md`
 
+## v1.6 Skia-Backed Rendering Performance Investigation
+
+**Status:** planned next
+**Starts after:** v1.5 CPU Rendering Performance Improvement
+
+**Goal:** Determine whether a Skia-backed renderer materially improves MESH rendering performance and, if it does, migrate the low-level paint backend behind the existing retained-rendering architecture.
+
+**Priority:** high. If v1.5 still leaves shipped shell surfaces feeling laggy, Skia becomes the next major rendering priority rather than a distant GPU-only idea.
+
+**Planned scope:**
+
+- Research Rust Skia integration options, build constraints, CPU/GPU backend support, Wayland presentation fit, and long-term maintenance cost
+- Build a benchmarkable Skia-backed painter spike for the existing retained display-list command stream
+- Compare Skia CPU and available GPU paths against the current custom/tiny-skia/resvg/cosmic-text/swash software stack on canonical scenarios
+- Decide whether to migrate `mesh-core-render` primitives to Skia wholesale, use Skia selectively for expensive primitives, or keep the current renderer
+- If the spike wins, plan the migration behind the existing retained widget tree, render-object tree, damage policy, profiling, and shell presentation boundaries
+
+**Out of scope for the spike:**
+
+- Replacing the `.mesh` compiler, layout engine, retained tree, module system, input handling, or shell service architecture
+- Removing v1.5 retained-pipeline work; Skia should consume the improved retained command stream rather than replace the architecture around it
+- Shipping a partial migration without benchmark proof and visual-correctness coverage
+
 ## v1.4 Major Performance Fixes
 
 **Status:** shipped
