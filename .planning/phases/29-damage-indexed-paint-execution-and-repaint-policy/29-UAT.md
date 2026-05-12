@@ -44,11 +44,15 @@ blocked: 0
 ## Gaps
 
 - truth: "Inspecting the existing debug profiling payload for a surface shows repaint-policy proof under `invalidation.paint`, including `repaint_policy`, `filtered_span_count`, `filtered_command_count`, `filtered_commands_skipped`, and `filtered_fallback_count`. The policy value is one of `minimal_damage`, `bounding_rect`, or `full_surface`."
-  status: failed
+  status: fixed
   reason: "User reported: i dont know the debug window is kinda messy but isnt this too much of a rerendering?"
   severity: major
   test: 1
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "The debug service serialized Phase 29 retained-paint counters, but the debug-inspector Surfaces view only rendered stage timing, total render time, and redraw count. Operators could not see repaint policy, filtered command count, skipped commands, or fallback count in the actual inspection surface."
+  artifacts:
+    - "modules/frontend/debug-inspector/src/main.mesh"
+    - "modules/frontend/debug-inspector/src/components/surfaces-view.mesh"
+    - "crates/core/shell/src/shell/component/tests/integration/debug.rs"
+  missing:
+    - "Surface-row rendering for retained paint filtering counters"
+  debug_session: "fixed inline during autonomous Phase 29 gap closure"

@@ -18,6 +18,8 @@
           <text class="surface-metric">{row1_stage_label}</text>
           <text class="surface-metric">{row1_render_label}</text>
           <text class="surface-metric">{row1_redraw_label}</text>
+          <text class="surface-metric">{row1_paint_policy_label}</text>
+          <text class="surface-metric">{row1_paint_filter_label}</text>
         </column>
       </box>
 
@@ -28,6 +30,8 @@
           <text class="surface-metric">{row2_stage_label}</text>
           <text class="surface-metric">{row2_render_label}</text>
           <text class="surface-metric">{row2_redraw_label}</text>
+          <text class="surface-metric">{row2_paint_policy_label}</text>
+          <text class="surface-metric">{row2_paint_filter_label}</text>
         </column>
       </box>
 
@@ -38,6 +42,8 @@
           <text class="surface-metric">{row3_stage_label}</text>
           <text class="surface-metric">{row3_render_label}</text>
           <text class="surface-metric">{row3_redraw_label}</text>
+          <text class="surface-metric">{row3_paint_policy_label}</text>
+          <text class="surface-metric">{row3_paint_filter_label}</text>
         </column>
       </box>
     </column>

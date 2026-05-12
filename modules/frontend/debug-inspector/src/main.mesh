@@ -64,18 +64,24 @@
           row1_stage_label={surface_row_1_stage_label}
           row1_render_label={surface_row_1_render_label}
           row1_redraw_label={surface_row_1_redraw_label}
+          row1_paint_policy_label={surface_row_1_paint_policy_label}
+          row1_paint_filter_label={surface_row_1_paint_filter_label}
           row2_hidden={surface_row_2_hidden}
           row2_surface_id={surface_row_2_surface_id}
           row2_module_id={surface_row_2_module_id}
           row2_stage_label={surface_row_2_stage_label}
           row2_render_label={surface_row_2_render_label}
           row2_redraw_label={surface_row_2_redraw_label}
+          row2_paint_policy_label={surface_row_2_paint_policy_label}
+          row2_paint_filter_label={surface_row_2_paint_filter_label}
           row3_hidden={surface_row_3_hidden}
           row3_surface_id={surface_row_3_surface_id}
           row3_module_id={surface_row_3_module_id}
           row3_stage_label={surface_row_3_stage_label}
           row3_render_label={surface_row_3_render_label}
           row3_redraw_label={surface_row_3_redraw_label}
+          row3_paint_policy_label={surface_row_3_paint_policy_label}
+          row3_paint_filter_label={surface_row_3_paint_filter_label}
         />
 
         <BackendServicesView
@@ -215,18 +221,24 @@ surface_row_1_module_id = ""
 surface_row_1_stage_label = ""
 surface_row_1_render_label = ""
 surface_row_1_redraw_label = ""
+surface_row_1_paint_policy_label = ""
+surface_row_1_paint_filter_label = ""
 surface_row_2_hidden = true
 surface_row_2_surface_id = ""
 surface_row_2_module_id = ""
 surface_row_2_stage_label = ""
 surface_row_2_render_label = ""
 surface_row_2_redraw_label = ""
+surface_row_2_paint_policy_label = ""
+surface_row_2_paint_filter_label = ""
 surface_row_3_hidden = true
 surface_row_3_surface_id = ""
 surface_row_3_module_id = ""
 surface_row_3_stage_label = ""
 surface_row_3_render_label = ""
 surface_row_3_redraw_label = ""
+surface_row_3_paint_policy_label = ""
+surface_row_3_paint_filter_label = ""
 
 backend_state_copy = "Runtime health and stage timing stay separated even when providers are idle."
 backend_empty = true
@@ -379,6 +391,51 @@ local function find_stage(stages, stage_name)
         end
     end
     return nil
+end
+
+local function paint_snapshot(snapshot)
+    if type(snapshot) ~= "table" or type(snapshot.invalidation) ~= "table" then
+        return nil
+    end
+    if type(snapshot.invalidation.paint) ~= "table" then
+        return nil
+    end
+    return snapshot.invalidation.paint
+end
+
+local function numeric_counter(value)
+    local numeric = tonumber(value)
+    if numeric == nil then
+        return nil
+    end
+    return numeric
+end
+
+local function paint_policy_label(snapshot)
+    local paint = paint_snapshot(snapshot)
+    if paint == nil or paint.repaint_policy == nil then
+        return "Paint policy unavailable"
+    end
+    local fallback_count = numeric_counter(paint.filtered_fallback_count)
+    if fallback_count == nil then
+        return "Paint policy unavailable"
+    end
+    local policy = tostring(paint.repaint_policy or "unknown")
+    return string.format("Paint policy %s; fallbacks %d", policy, fallback_count)
+end
+
+local function paint_filter_label(snapshot)
+    local paint = paint_snapshot(snapshot)
+    if paint == nil then
+        return "Filtered paint counters unavailable"
+    end
+    local filtered = numeric_counter(paint.filtered_command_count)
+    local skipped = numeric_counter(paint.filtered_commands_skipped)
+    local spans = numeric_counter(paint.filtered_span_count)
+    if filtered == nil or skipped == nil or spans == nil then
+        return "Filtered paint counters unavailable"
+    end
+    return string.format("Filtered %d commands from %d spans; skipped %d", filtered, spans, skipped)
 end
 
 local benchmark_definitions = {
@@ -551,6 +608,8 @@ local function surface_slot(slot, snapshot)
             micros_label(snapshot.total_surface_render_time_micros)
         )
         surface_row_1_redraw_label = string.format("Redraws %s", tostring(snapshot.redraw_count or 0))
+        surface_row_1_paint_policy_label = paint_policy_label(snapshot)
+        surface_row_1_paint_filter_label = paint_filter_label(snapshot)
         return
     end
     if slot == 2 then
@@ -564,6 +623,8 @@ local function surface_slot(slot, snapshot)
             micros_label(snapshot.total_surface_render_time_micros)
         )
         surface_row_2_redraw_label = string.format("Redraws %s", tostring(snapshot.redraw_count or 0))
+        surface_row_2_paint_policy_label = paint_policy_label(snapshot)
+        surface_row_2_paint_filter_label = paint_filter_label(snapshot)
         return
     end
     surface_row_3_hidden = snapshot == nil
@@ -576,6 +637,8 @@ local function surface_slot(slot, snapshot)
         micros_label(snapshot.total_surface_render_time_micros)
     )
     surface_row_3_redraw_label = string.format("Redraws %s", tostring(snapshot.redraw_count or 0))
+    surface_row_3_paint_policy_label = paint_policy_label(snapshot)
+    surface_row_3_paint_filter_label = paint_filter_label(snapshot)
 end
 
 local function runtime_label(interface_name, provider_id, runtimes)
@@ -805,7 +868,7 @@ function onRender()
     surfaces_empty_hidden = not surfaces_empty
     backend_empty = list_size(backend_samples) == 0
     backend_empty_hidden = not backend_empty
-    surfaces_state_copy = "Compare per-surface timing and redraw activity without leaving the right-side panel."
+    surfaces_state_copy = "Compare per-surface timing, redraw activity, and retained paint filtering without leaving the right-side panel."
     backend_state_copy = "Runtime health and stage timing stay separated so lifecycle issues do not read like performance cost."
     sync_view_state()
     sync_overview_state_flags()

@@ -128,6 +128,99 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
 }
 
 #[test]
+fn debug_inspector_surfaces_view_renders_retained_paint_filtering_counters() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "profiling_enabled": true,
+                "profiling_session_id": 29,
+                "active_view": "surfaces",
+                "modules": [{ "id": "@mesh/debug-inspector" }],
+                "interfaces": [],
+                "backend_runtimes": [],
+                "active_surfaces": ["@mesh/navigation-bar"],
+                "benchmarks": {
+                    "scenarios": []
+                },
+                "profiling": {
+                    "session_id": 29,
+                    "shell": {
+                        "stages": [],
+                        "redraw_count": 1,
+                        "total_surface_render_time_micros": 55
+                    },
+                    "surfaces": [
+                        {
+                            "surface_id": "@mesh/navigation-bar",
+                            "module_id": "@mesh/navigation-bar",
+                            "stages": [{
+                                "stage": "paint",
+                                "sample_count": 1,
+                                "total_micros": 41,
+                                "max_micros": 41,
+                                "recent_samples": []
+                            }],
+                            "redraw_count": 2,
+                            "total_surface_render_time_micros": 96,
+                            "invalidation": {
+                                "paint": {
+                                    "repaint_policy": "minimal_damage",
+                                    "filtered_span_count": 3,
+                                    "filtered_command_count": 7,
+                                    "filtered_commands_skipped": 12,
+                                    "filtered_fallback_count": 0
+                                }
+                            }
+                        },
+                        {
+                            "surface_id": "@mesh/audio-popover",
+                            "module_id": "@mesh/audio-popover",
+                            "stages": [],
+                            "redraw_count": 1,
+                            "total_surface_render_time_micros": 20,
+                            "invalidation": {
+                                "paint": {
+                                    "repaint_policy": "minimal_damage"
+                                }
+                            }
+                        }
+                    ],
+                    "backends": []
+                }
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(360, 640);
+    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
+        .unwrap();
+    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|line| line == "Surfaces"));
+    assert!(
+        text.iter()
+            .any(|line| line == "Paint policy minimal_damage; fallbacks 0")
+    );
+    assert!(
+        text.iter()
+            .any(|line| line == "Filtered 7 commands from 3 spans; skipped 12")
+    );
+    assert!(text.iter().any(|line| line == "Paint policy unavailable"));
+    assert!(
+        text.iter()
+            .any(|line| line == "Filtered paint counters unavailable")
+    );
+}
+
+#[test]
 fn debug_inspector_benchmark_view_renders_five_rows_when_profiling_off() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
     component
