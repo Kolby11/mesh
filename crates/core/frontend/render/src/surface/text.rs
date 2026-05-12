@@ -627,17 +627,140 @@ mod tests {
     }
 
     #[test]
+    fn text_cache_reuses_unchanged_render_layout() {
+        let renderer = TextRenderer::new();
+        renderer.reset_cache_metrics();
+
+        let mut buffer = PixelBuffer::new(240, 80);
+        renderer.render_clipped(
+            "cached render text",
+            "Inter",
+            14.0,
+            400,
+            1.2,
+            TextAlign::Left,
+            Color::BLACK,
+            &mut buffer,
+            4,
+            4,
+            (0, 0, 240, 80),
+            Some(180.0),
+        );
+        renderer.render_clipped(
+            "cached render text",
+            "Inter",
+            14.0,
+            400,
+            1.2,
+            TextAlign::Left,
+            Color::WHITE,
+            &mut buffer,
+            12,
+            8,
+            (0, 0, 240, 80),
+            Some(180.0),
+        );
+        let metrics = renderer.cache_metrics();
+
+        assert_eq!(metrics.layout_misses, 1);
+        assert_eq!(metrics.layout_hits, 1);
+        assert_eq!(metrics.shaped_entries, 1);
+    }
+
+    #[test]
+    fn text_cache_reuses_unchanged_selection_layout() {
+        let renderer = TextRenderer::new();
+        renderer.reset_cache_metrics();
+
+        let first = renderer.selection_geometry(
+            "alpha beta gamma delta",
+            "Inter",
+            14.0,
+            400,
+            1.2,
+            TextAlign::Left,
+            Some(120.0),
+            (0.0, 0.0),
+            (120.0, 40.0),
+        );
+        let second = renderer.selection_geometry(
+            "alpha beta gamma delta",
+            "Inter",
+            14.0,
+            400,
+            1.2,
+            TextAlign::Left,
+            Some(120.0),
+            (8.0, 0.0),
+            (60.0, 20.0),
+        );
+        let metrics = renderer.cache_metrics();
+
+        assert!(first.is_some());
+        assert!(second.is_some());
+        assert_eq!(metrics.layout_misses, 1);
+        assert_eq!(metrics.layout_hits, 1);
+        assert_eq!(metrics.shaped_entries, 1);
+    }
+
+    #[test]
     fn text_cache_misses_when_shaping_inputs_change() {
         let renderer = TextRenderer::new();
         renderer.reset_cache_metrics();
 
         renderer.measure_styled("cached text", "Inter", 14.0, 400, 1.2, Some(120.0));
+        renderer.measure_styled("cached text", "Serif", 14.0, 400, 1.2, Some(120.0));
         renderer.measure_styled("cached text", "Inter", 15.0, 400, 1.2, Some(120.0));
-        renderer.measure_styled("cached text", "Inter", 15.0, 400, 1.2, Some(120.0));
+        renderer.measure_styled("changed text", "Inter", 15.0, 400, 1.2, Some(120.0));
+        renderer.measure_styled("changed text", "Inter", 15.0, 600, 1.2, Some(120.0));
+        renderer.measure_styled("changed text", "Inter", 15.0, 600, 1.4, Some(120.0));
+        renderer.measure_styled("changed text", "Inter", 15.0, 600, 1.4, Some(160.0));
+        renderer.measure_styled("changed text", "Inter", 15.0, 600, 1.4, Some(160.0));
+        let metrics = renderer.cache_metrics();
+
+        assert_eq!(metrics.layout_misses, 7);
+        assert_eq!(metrics.layout_hits, 1);
+        assert_eq!(metrics.shaped_entries, 7);
+    }
+
+    #[test]
+    fn text_cache_misses_when_alignment_changes() {
+        let renderer = TextRenderer::new();
+        renderer.reset_cache_metrics();
+        let mut buffer = PixelBuffer::new(240, 80);
+
+        renderer.render_clipped(
+            "aligned text",
+            "Inter",
+            14.0,
+            400,
+            1.2,
+            TextAlign::Left,
+            Color::BLACK,
+            &mut buffer,
+            4,
+            4,
+            (0, 0, 240, 80),
+            Some(180.0),
+        );
+        renderer.render_clipped(
+            "aligned text",
+            "Inter",
+            14.0,
+            400,
+            1.2,
+            TextAlign::Center,
+            Color::BLACK,
+            &mut buffer,
+            4,
+            4,
+            (0, 0, 240, 80),
+            Some(180.0),
+        );
         let metrics = renderer.cache_metrics();
 
         assert_eq!(metrics.layout_misses, 2);
-        assert_eq!(metrics.layout_hits, 1);
+        assert_eq!(metrics.layout_hits, 0);
         assert_eq!(metrics.shaped_entries, 2);
     }
 }

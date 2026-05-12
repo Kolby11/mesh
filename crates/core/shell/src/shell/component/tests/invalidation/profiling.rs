@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_debug::ProfilingInvalidationSnapshot;
 
 fn stage_max_micros(
     records: &[ComponentProfilingRecord],
@@ -10,6 +11,34 @@ fn stage_max_micros(
         .map(|record| record.duration.as_micros().min(u128::from(u64::MAX)) as u64)
         .max()
         .unwrap_or(0)
+}
+
+fn assert_text_cache_proof_active(label: &str, snapshot: &ProfilingInvalidationSnapshot) {
+    assert!(
+        snapshot.text.glyph_cache_active,
+        "{label} should keep text/glyph cache metrics active"
+    );
+    assert!(
+        snapshot.text.layout_hits + snapshot.text.layout_misses > 0,
+        "{label} should report text layout cache activity"
+    );
+}
+
+fn assert_raster_cache_proof_active(label: &str, snapshot: &ProfilingInvalidationSnapshot) {
+    assert!(
+        snapshot.paint.raster_cache_hits
+            + snapshot.paint.raster_cache_misses
+            + snapshot.paint.raster_cache_bypasses
+            > 0,
+        "{label} should report icon/image raster cache activity"
+    );
+}
+
+fn assert_raster_cache_reuse(label: &str, snapshot: &ProfilingInvalidationSnapshot) {
+    assert!(
+        snapshot.paint.raster_cache_hits > 0,
+        "{label} should report warm icon/image raster cache reuse"
+    );
 }
 
 #[test]
@@ -175,7 +204,7 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         .expect("backend update should capture invalidation proof");
 
     eprintln!(
-        "PHASE26_BASELINE hover style_restyle={}us paint={}us traversal={}us retained={} full_rebuild={}",
+        "PHASE26_BASELINE hover style_restyle={}us paint={}us traversal={}us text_hits={} text_misses={} shaping={}us raster_hits={} raster_misses={} raster_bypasses={} retained={} full_rebuild={}",
         stage_max_micros(
             &hover_records,
             mesh_core_debug::ProfilingStage::StyleRestyle
@@ -185,11 +214,17 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
             &hover_records,
             mesh_core_debug::ProfilingStage::PaintTraversal
         ),
+        hover_invalidation.text.layout_hits,
+        hover_invalidation.text.layout_misses,
+        hover_invalidation.text.shaping_micros,
+        hover_invalidation.paint.raster_cache_hits,
+        hover_invalidation.paint.raster_cache_misses,
+        hover_invalidation.paint.raster_cache_bypasses,
         hover_invalidation.retained_path,
         hover_invalidation.full_rebuild
     );
     eprintln!(
-        "PHASE26_BASELINE surface_open_close paint={}us traversal={}us shaping={}us retained={} full_rebuild={}",
+        "PHASE26_BASELINE surface_open_close paint={}us traversal={}us text_hits={} text_misses={} shaping={}us raster_hits={} raster_misses={} raster_bypasses={} retained={} full_rebuild={}",
         stage_max_micros(
             &surface_open_close_records,
             mesh_core_debug::ProfilingStage::Paint
@@ -198,12 +233,17 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
             &surface_open_close_records,
             mesh_core_debug::ProfilingStage::PaintTraversal
         ),
+        surface_open_close_invalidation.text.layout_hits,
+        surface_open_close_invalidation.text.layout_misses,
         surface_open_close_invalidation.text.shaping_micros,
+        surface_open_close_invalidation.paint.raster_cache_hits,
+        surface_open_close_invalidation.paint.raster_cache_misses,
+        surface_open_close_invalidation.paint.raster_cache_bypasses,
         surface_open_close_invalidation.retained_path,
         surface_open_close_invalidation.full_rebuild
     );
     eprintln!(
-        "PHASE26_BASELINE pointer_update layout={}us paint={}us traversal={}us retained={} full_rebuild={}",
+        "PHASE26_BASELINE pointer_update layout={}us paint={}us traversal={}us text_hits={} text_misses={} shaping={}us raster_hits={} raster_misses={} raster_bypasses={} retained={} full_rebuild={}",
         stage_max_micros(
             &pointer_update_records,
             mesh_core_debug::ProfilingStage::Layout
@@ -216,11 +256,17 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
             &pointer_update_records,
             mesh_core_debug::ProfilingStage::PaintTraversal
         ),
+        pointer_update_invalidation.text.layout_hits,
+        pointer_update_invalidation.text.layout_misses,
+        pointer_update_invalidation.text.shaping_micros,
+        pointer_update_invalidation.paint.raster_cache_hits,
+        pointer_update_invalidation.paint.raster_cache_misses,
+        pointer_update_invalidation.paint.raster_cache_bypasses,
         pointer_update_invalidation.retained_path,
         pointer_update_invalidation.full_rebuild
     );
     eprintln!(
-        "PHASE26_BASELINE keyboard_traversal style_restyle={}us paint={}us traversal={}us retained={} full_rebuild={}",
+        "PHASE26_BASELINE keyboard_traversal style_restyle={}us paint={}us traversal={}us text_hits={} text_misses={} shaping={}us raster_hits={} raster_misses={} raster_bypasses={} retained={} full_rebuild={}",
         stage_max_micros(
             &keyboard_records,
             mesh_core_debug::ProfilingStage::StyleRestyle
@@ -230,11 +276,17 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
             &keyboard_records,
             mesh_core_debug::ProfilingStage::PaintTraversal
         ),
+        keyboard_invalidation.text.layout_hits,
+        keyboard_invalidation.text.layout_misses,
+        keyboard_invalidation.text.shaping_micros,
+        keyboard_invalidation.paint.raster_cache_hits,
+        keyboard_invalidation.paint.raster_cache_misses,
+        keyboard_invalidation.paint.raster_cache_bypasses,
         keyboard_invalidation.retained_path,
         keyboard_invalidation.full_rebuild
     );
     eprintln!(
-        "PHASE26_BASELINE backend_update paint={}us traversal={}us shaping={}us retained={} full_rebuild={}",
+        "PHASE26_BASELINE backend_update paint={}us traversal={}us text_hits={} text_misses={} shaping={}us raster_hits={} raster_misses={} raster_bypasses={} retained={} full_rebuild={}",
         stage_max_micros(
             &backend_update_records,
             mesh_core_debug::ProfilingStage::Paint
@@ -243,7 +295,12 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
             &backend_update_records,
             mesh_core_debug::ProfilingStage::PaintTraversal
         ),
+        backend_update_invalidation.text.layout_hits,
+        backend_update_invalidation.text.layout_misses,
         backend_update_invalidation.text.shaping_micros,
+        backend_update_invalidation.paint.raster_cache_hits,
+        backend_update_invalidation.paint.raster_cache_misses,
+        backend_update_invalidation.paint.raster_cache_bypasses,
         backend_update_invalidation.retained_path,
         backend_update_invalidation.full_rebuild
     );
@@ -277,4 +334,18 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         ) > 0,
         "backend update proof should record a real shipped-surface repaint"
     );
+    assert_text_cache_proof_active("hover", &hover_invalidation);
+    assert_text_cache_proof_active("surface_open_close", &surface_open_close_invalidation);
+    assert_text_cache_proof_active("pointer_update", &pointer_update_invalidation);
+    assert_text_cache_proof_active("keyboard_traversal", &keyboard_invalidation);
+    assert_text_cache_proof_active("backend_update", &backend_update_invalidation);
+    assert_raster_cache_proof_active("hover", &hover_invalidation);
+    assert_raster_cache_proof_active("surface_open_close", &surface_open_close_invalidation);
+    assert_raster_cache_proof_active("pointer_update", &pointer_update_invalidation);
+    assert_raster_cache_proof_active("keyboard_traversal", &keyboard_invalidation);
+    assert_raster_cache_proof_active("backend_update", &backend_update_invalidation);
+    assert_raster_cache_reuse("hover", &hover_invalidation);
+    assert_raster_cache_reuse("pointer_update", &pointer_update_invalidation);
+    assert_raster_cache_reuse("keyboard_traversal", &keyboard_invalidation);
+    assert_raster_cache_reuse("backend_update", &backend_update_invalidation);
 }

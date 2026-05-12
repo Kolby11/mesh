@@ -476,6 +476,12 @@ impl ShellComponent for FrontendSurfaceComponent {
         );
         if let Some(snapshot) = self.invalidation_snapshot.as_mut() {
             snapshot.text = text_cache_snapshot(paint_metrics.text);
+            snapshot.paint.raster_cache_hits = paint_metrics.raster_cache_hits;
+            snapshot.paint.raster_cache_misses = paint_metrics.raster_cache_misses;
+            snapshot.paint.raster_cache_bypasses = paint_metrics.raster_cache_bypasses;
+            snapshot.paint.raster_cache_opaque_hits = paint_metrics.raster_cache_opaque_hits;
+            snapshot.paint.raster_cache_translucent_hits =
+                paint_metrics.raster_cache_translucent_hits;
         }
         if self.profiling_enabled {
             self.profiling_records.push(ComponentProfilingRecord {

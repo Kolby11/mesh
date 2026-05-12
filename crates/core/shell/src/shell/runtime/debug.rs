@@ -778,6 +778,11 @@ fn profiling_invalidation_json(
                 "translucency": snapshot.paint.barriers.translucency,
                 "material_change": snapshot.paint.barriers.material_change,
             },
+            "raster_cache_hits": snapshot.paint.raster_cache_hits,
+            "raster_cache_misses": snapshot.paint.raster_cache_misses,
+            "raster_cache_bypasses": snapshot.paint.raster_cache_bypasses,
+            "raster_cache_opaque_hits": snapshot.paint.raster_cache_opaque_hits,
+            "raster_cache_translucent_hits": snapshot.paint.raster_cache_translucent_hits,
         },
         "text": {
             "layout_hits": snapshot.text.layout_hits,

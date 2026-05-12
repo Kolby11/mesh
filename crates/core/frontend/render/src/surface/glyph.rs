@@ -263,6 +263,12 @@ pub fn draw_font_glyph(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    fn glyph_test_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     fn clear_glyph_cache() {
         if let Some(cache) = GLYPH_CACHE.get() {
@@ -270,8 +276,44 @@ mod tests {
         }
     }
 
+    fn cached_test_key(
+        font_path: &Path,
+        tint: Color,
+        px: u32,
+        supported_axes: SupportedAxes,
+        axes: GlyphAxes,
+    ) -> GlyphCacheKey {
+        GlyphCacheKey {
+            font_path: hash_path(font_path),
+            codepoint: 'a' as u32,
+            px,
+            color: encode_color(tint),
+            fill_q: if supported_axes.fill {
+                quantize(axes.fill)
+            } else {
+                i32::MIN
+            },
+            weight_q: if supported_axes.weight {
+                quantize(axes.weight)
+            } else {
+                i32::MIN
+            },
+            grade_q: if supported_axes.grade {
+                quantize(axes.grade)
+            } else {
+                i32::MIN
+            },
+            opsz_q: if supported_axes.optical_size {
+                quantize(axes.optical_size)
+            } else {
+                i32::MIN
+            },
+        }
+    }
+
     #[test]
     fn cached_font_glyph_hits_do_not_record_raster_time() {
+        let _guard = glyph_test_lock();
         clear_glyph_cache();
         profiling::reset_raster_metrics();
 
@@ -284,16 +326,7 @@ mod tests {
         };
         let supported_axes = SupportedAxes::default();
         let axes = GlyphAxes::default();
-        let key = GlyphCacheKey {
-            font_path: hash_path(font_path),
-            codepoint: 'a' as u32,
-            px: 12,
-            color: encode_color(tint),
-            fill_q: i32::MIN,
-            weight_q: i32::MIN,
-            grade_q: i32::MIN,
-            opsz_q: i32::MIN,
-        };
+        let key = cached_test_key(font_path, tint, 12, supported_axes, axes);
         cache_store(
             key,
             Some(CachedGlyph {
@@ -330,5 +363,71 @@ mod tests {
         );
 
         clear_glyph_cache();
+    }
+
+    #[test]
+    fn glyph_cache_key_separates_tint_size_and_axes() {
+        let _guard = glyph_test_lock();
+        clear_glyph_cache();
+
+        let font_path = Path::new("/tmp/phase30-cached-glyph.ttf");
+        let tint = Color {
+            r: 32,
+            g: 96,
+            b: 180,
+            a: 255,
+        };
+        let alternate_tint = Color {
+            r: 200,
+            g: 40,
+            b: 64,
+            a: 255,
+        };
+        let supported_axes = SupportedAxes {
+            fill: true,
+            weight: true,
+            grade: false,
+            optical_size: false,
+        };
+        let axes = GlyphAxes {
+            fill: Some(0.0),
+            weight: Some(400.0),
+            ..Default::default()
+        };
+        let base = cached_test_key(font_path, tint, 12, supported_axes, axes);
+        let alternate_tint_key =
+            cached_test_key(font_path, alternate_tint, 12, supported_axes, axes);
+        let alternate_size_key = cached_test_key(font_path, tint, 14, supported_axes, axes);
+        let alternate_axes_key = cached_test_key(
+            font_path,
+            tint,
+            12,
+            supported_axes,
+            GlyphAxes {
+                fill: Some(1.0),
+                weight: Some(400.0),
+                ..Default::default()
+            },
+        );
+
+        assert_ne!(base, alternate_tint_key);
+        assert_ne!(base, alternate_size_key);
+        assert_ne!(base, alternate_axes_key);
+
+        let mut buffer = PixelBuffer::new(16, 16);
+        assert!(cache_lookup(alternate_tint_key).is_none());
+        assert!(!draw_font_glyph(
+            &mut buffer,
+            font_path,
+            'a' as u32,
+            supported_axes,
+            axes,
+            1,
+            1,
+            12,
+            12,
+            alternate_tint,
+        ));
+        assert!(matches!(cache_lookup(alternate_tint_key), Some(None)));
     }
 }

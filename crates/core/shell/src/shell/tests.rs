@@ -1617,6 +1617,11 @@ fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
                     material_change: 2,
                     ..Default::default()
                 },
+                raster_cache_hits: 8,
+                raster_cache_misses: 2,
+                raster_cache_bypasses: 1,
+                raster_cache_opaque_hits: 5,
+                raster_cache_translucent_hits: 3,
                 ..Default::default()
             },
             text: TextCacheSnapshot {
@@ -1668,6 +1673,11 @@ fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
     assert_eq!(invalidation.paint.batched_primitives, 5);
     assert_eq!(invalidation.paint.barriers.text, 1);
     assert_eq!(invalidation.paint.barriers.material_change, 2);
+    assert_eq!(invalidation.paint.raster_cache_hits, 8);
+    assert_eq!(invalidation.paint.raster_cache_misses, 2);
+    assert_eq!(invalidation.paint.raster_cache_bypasses, 1);
+    assert_eq!(invalidation.paint.raster_cache_opaque_hits, 5);
+    assert_eq!(invalidation.paint.raster_cache_translucent_hits, 3);
     assert_eq!(invalidation.text.layout_hits, 4);
     assert_eq!(invalidation.text.layout_misses, 1);
     assert!(invalidation.text.glyph_cache_active);
@@ -2180,6 +2190,11 @@ fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
                 filtered_command_count: 9,
                 filtered_commands_skipped: 0,
                 filtered_fallback_count: 1,
+                raster_cache_hits: 6,
+                raster_cache_misses: 2,
+                raster_cache_bypasses: 1,
+                raster_cache_opaque_hits: 4,
+                raster_cache_translucent_hits: 2,
                 ..Default::default()
             },
             text: TextCacheSnapshot {
@@ -2254,6 +2269,26 @@ fn profiling_debug_payload_serializes_phase26_surface_attribution_labels() {
     assert_eq!(
         latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["filtered_fallback_count"],
         serde_json::json!(1)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["raster_cache_hits"],
+        serde_json::json!(6)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["raster_cache_misses"],
+        serde_json::json!(2)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["raster_cache_bypasses"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["raster_cache_opaque_hits"],
+        serde_json::json!(4)
+    );
+    assert_eq!(
+        latest.state["profiling"]["surfaces"][0]["invalidation"]["paint"]["raster_cache_translucent_hits"],
+        serde_json::json!(2)
     );
     assert_eq!(
         latest.state["benchmarks"]["scenarios"]

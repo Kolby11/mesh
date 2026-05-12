@@ -1,7 +1,7 @@
 mod buffer;
 mod debug_overlay;
 mod glyph;
-mod icon;
+pub(crate) mod icon;
 mod painter;
 mod profiling;
 mod text;
@@ -25,6 +25,11 @@ pub struct PaintProfilingMetrics {
     pub text: TextCacheMetrics,
     pub traversal_micros: u64,
     pub icon_image_raster_micros: u64,
+    pub raster_cache_hits: u64,
+    pub raster_cache_misses: u64,
+    pub raster_cache_bypasses: u64,
+    pub raster_cache_opaque_hits: u64,
+    pub raster_cache_translucent_hits: u64,
 }
 
 thread_local! {
@@ -179,10 +184,16 @@ pub fn paint_display_list_for_module_with_profiling_metrics(
         if let Some((tooltip_text, x, y)) = tooltip {
             engine.render_tooltip(tooltip_text, x, y, buffer, scale);
         }
+        let raster = profiling::raster_metrics();
         PaintProfilingMetrics {
             text: engine.text_cache_metrics(),
             traversal_micros,
-            icon_image_raster_micros: profiling::raster_metrics().icon_image_raster_micros,
+            icon_image_raster_micros: raster.icon_image_raster_micros,
+            raster_cache_hits: raster.raster_cache_hits,
+            raster_cache_misses: raster.raster_cache_misses,
+            raster_cache_bypasses: raster.raster_cache_bypasses,
+            raster_cache_opaque_hits: raster.raster_cache_opaque_hits,
+            raster_cache_translucent_hits: raster.raster_cache_translucent_hits,
         }
     })
 }

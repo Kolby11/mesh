@@ -4,24 +4,382 @@ use super::profiling;
 use image::imageops::FilterType;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget, resolve_icon_result};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
-static IMAGE_CACHE: OnceLock<Mutex<HashMap<PathBuf, image::RgbaImage>>> = OnceLock::new();
+static IMAGE_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedImage>>> = OnceLock::new();
+static RASTER_CACHE: OnceLock<Mutex<RasterVariantCache>> = OnceLock::new();
+const RASTER_CACHE_CAPACITY: usize = 256;
 
-fn image_cache() -> &'static Mutex<HashMap<PathBuf, image::RgbaImage>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CachedResourceOpacity {
+    Unknown,
+    Opaque,
+    Translucent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum RasterSourceKind {
+    File,
+    MissingIcon,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct FileFreshness {
+    len: u64,
+    modified_nanos: u128,
+}
+
+#[derive(Debug, Clone)]
+struct CachedImage {
+    freshness: FileFreshness,
+    image: image::RgbaImage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct RasterCacheKey {
+    source_kind: RasterSourceKind,
+    source_identity: PathBuf,
+    width: u32,
+    height: u32,
+    tint: u32,
+    multicolor: bool,
+    freshness: Option<FileFreshness>,
+}
+
+#[derive(Debug, Clone)]
+struct RasterVariant {
+    width: u32,
+    height: u32,
+    pixels: Vec<u8>,
+    fully_opaque: bool,
+}
+
+#[derive(Debug, Default)]
+struct RasterVariantCache {
+    entries: HashMap<RasterCacheKey, RasterVariant>,
+    order: VecDeque<RasterCacheKey>,
+}
+
+impl RasterVariantCache {
+    fn get(&mut self, key: &RasterCacheKey) -> Option<RasterVariant> {
+        self.entries.get(key).cloned()
+    }
+
+    fn insert(&mut self, key: RasterCacheKey, variant: RasterVariant) {
+        if !self.entries.contains_key(&key) {
+            self.order.push_back(key.clone());
+        }
+        self.entries.insert(key, variant);
+        while self.entries.len() > RASTER_CACHE_CAPACITY {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&evicted);
+        }
+    }
+}
+
+fn image_cache() -> &'static Mutex<HashMap<PathBuf, CachedImage>> {
     IMAGE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn raster_cache() -> &'static Mutex<RasterVariantCache> {
+    RASTER_CACHE.get_or_init(|| Mutex::new(RasterVariantCache::default()))
+}
+
 fn get_or_load(path: &Path) -> Option<image::RgbaImage> {
+    let Some(freshness) = file_freshness(path) else {
+        return image::open(path).ok().map(|image| image.to_rgba8());
+    };
     let mut guard = image_cache().lock().unwrap();
-    if let Some(img) = guard.get(path) {
-        return Some(img.clone());
+    if let Some(cached) = guard.get(path)
+        && cached.freshness == freshness
+    {
+        return Some(cached.image.clone());
     }
     let img = image::open(path).ok()?.to_rgba8();
-    guard.insert(path.to_path_buf(), img.clone());
+    guard.insert(
+        path.to_path_buf(),
+        CachedImage {
+            freshness,
+            image: img.clone(),
+        },
+    );
     Some(img)
+}
+
+fn encode_tint(color: Color) -> u32 {
+    ((color.r as u32) << 24) | ((color.g as u32) << 16) | ((color.b as u32) << 8) | color.a as u32
+}
+
+fn file_freshness(path: &Path) -> Option<FileFreshness> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?;
+    let modified_nanos = modified
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(FileFreshness {
+        len: metadata.len(),
+        modified_nanos,
+    })
+}
+
+fn source_identity(path: &Path) -> PathBuf {
+    match std::fs::canonicalize(path) {
+        Ok(canonical) => canonical,
+        Err(_) if path.is_absolute() => path.to_path_buf(),
+        Err(_) => std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|| path.to_path_buf()),
+    }
+}
+
+fn raster_file_key(
+    path: &Path,
+    width: u32,
+    height: u32,
+    tint: Color,
+    multicolor: bool,
+) -> Option<RasterCacheKey> {
+    Some(RasterCacheKey {
+        source_kind: RasterSourceKind::File,
+        source_identity: source_identity(path),
+        width,
+        height,
+        tint: encode_tint(tint),
+        multicolor,
+        freshness: Some(file_freshness(path)?),
+    })
+}
+
+fn svg_file_is_cacheable(path: &Path) -> bool {
+    let Ok(svg_data) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    !svg_has_external_resource_reference(&svg_data)
+}
+
+fn svg_has_external_resource_reference(svg_data: &str) -> bool {
+    let mut remaining = svg_data;
+    while let Some(index) = remaining.find("href") {
+        remaining = &remaining[index + "href".len()..];
+        let trimmed = remaining.trim_start();
+        let trimmed = trimmed.strip_prefix('=').unwrap_or(trimmed).trim_start();
+        let Some(quote) = trimmed
+            .chars()
+            .next()
+            .filter(|ch| *ch == '"' || *ch == '\'')
+        else {
+            continue;
+        };
+        let value = &trimmed[quote.len_utf8()..];
+        let Some(end) = value.find(quote) else {
+            return true;
+        };
+        let reference = value[..end].trim();
+        if !reference.is_empty() && !reference.starts_with('#') && !reference.starts_with("data:") {
+            return true;
+        }
+        remaining = &value[end + quote.len_utf8()..];
+    }
+
+    let mut remaining = svg_data;
+    while let Some(index) = remaining.find("url(") {
+        let after = &remaining[index + "url(".len()..];
+        let Some(end) = after.find(')') else {
+            return true;
+        };
+        let reference = after[..end]
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim();
+        if !reference.is_empty() && !reference.starts_with('#') && !reference.starts_with("data:") {
+            return true;
+        }
+        remaining = &after[end + 1..];
+    }
+
+    false
+}
+
+fn missing_icon_key(width: u32, height: u32, tint: Color) -> RasterCacheKey {
+    RasterCacheKey {
+        source_kind: RasterSourceKind::MissingIcon,
+        source_identity: PathBuf::from("builtin:missing-icon"),
+        width,
+        height,
+        tint: encode_tint(tint),
+        multicolor: false,
+        freshness: None,
+    }
+}
+
+fn cached_variant(key: &RasterCacheKey) -> Option<RasterVariant> {
+    raster_cache().lock().ok()?.get(key)
+}
+
+pub(crate) fn cached_file_resource_opacity(
+    path: &Path,
+    width: u32,
+    height: u32,
+    tint: Color,
+    multicolor: bool,
+) -> CachedResourceOpacity {
+    let Some(ext) = path.extension().and_then(|value| value.to_str()) else {
+        return CachedResourceOpacity::Unknown;
+    };
+    let ext = ext.to_ascii_lowercase();
+    let cacheable = match ext.as_str() {
+        "svg" => svg_file_is_cacheable(path),
+        "png" | "jpg" | "jpeg" | "bmp" => true,
+        _ => false,
+    };
+    if !cacheable {
+        return CachedResourceOpacity::Unknown;
+    }
+    let Some(key) = raster_file_key(path, width, height, tint, multicolor) else {
+        return CachedResourceOpacity::Unknown;
+    };
+    let Some(variant) = cached_variant(&key) else {
+        return CachedResourceOpacity::Unknown;
+    };
+    if variant.fully_opaque {
+        CachedResourceOpacity::Opaque
+    } else {
+        CachedResourceOpacity::Translucent
+    }
+}
+
+fn store_variant(key: RasterCacheKey, variant: RasterVariant) {
+    if let Ok(mut cache) = raster_cache().lock() {
+        cache.insert(key, variant);
+    }
+}
+
+fn blit_variant(buffer: &mut PixelBuffer, variant: &RasterVariant, dest_x: i32, dest_y: i32) {
+    for y in 0..variant.height {
+        for x in 0..variant.width {
+            let idx = ((y * variant.width + x) * 4) as usize;
+            let alpha = variant.pixels[idx + 3];
+            if alpha == 0 {
+                continue;
+            }
+            let color = Color {
+                r: variant.pixels[idx],
+                g: variant.pixels[idx + 1],
+                b: variant.pixels[idx + 2],
+                a: alpha,
+            };
+            blend_icon_pixel(
+                buffer,
+                dest_x.saturating_add(x as i32),
+                dest_y.saturating_add(y as i32),
+                color,
+            );
+        }
+    }
+}
+
+fn variant_from_rgba(width: u32, height: u32, pixels: Vec<u8>) -> RasterVariant {
+    let fully_opaque = pixels.chunks_exact(4).all(|pixel| pixel[3] == 255);
+    RasterVariant {
+        width,
+        height,
+        pixels,
+        fully_opaque,
+    }
+}
+
+fn raster_bitmap_variant(
+    path: &Path,
+    width: u32,
+    height: u32,
+    tint: Color,
+    multicolor: bool,
+) -> Option<RasterVariant> {
+    let img = get_or_load(path)?;
+    let scaled = image::imageops::resize(&img, width, height, FilterType::Lanczos3);
+    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height {
+        for x in 0..width {
+            let p = scaled.get_pixel(x, y);
+            if multicolor {
+                pixels.extend_from_slice(&[p[0], p[1], p[2], p[3]]);
+            } else {
+                pixels.extend_from_slice(&[tint.r, tint.g, tint.b, p[3]]);
+            }
+        }
+    }
+    Some(variant_from_rgba(width, height, pixels))
+}
+
+fn raster_svg_variant(
+    path: &Path,
+    width: u32,
+    height: u32,
+    tint: Color,
+    multicolor: bool,
+) -> Option<RasterVariant> {
+    let svg_data = std::fs::read_to_string(path).ok()?;
+    let mut opt = resvg::usvg::Options::default();
+    opt.resources_dir = path.parent().map(|p| p.to_path_buf());
+    let tree = resvg::usvg::Tree::from_str(&svg_data, &opt).ok()?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
+    let scale_x = width as f32 / tree.size().width();
+    let scale_y = height as f32 / tree.size().height();
+    let transform = resvg::tiny_skia::Transform::from_scale(scale_x, scale_y);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    Some(variant_from_pixmap(
+        width,
+        height,
+        pixmap.data(),
+        tint,
+        multicolor,
+    ))
+}
+
+fn raster_missing_icon_variant(width: u32, height: u32, tint: Color) -> Option<RasterVariant> {
+    let opt = resvg::usvg::Options::default();
+    let tree = resvg::usvg::Tree::from_str(MISSING_ICON_SVG, &opt).ok()?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
+    let scale_x = width as f32 / tree.size().width();
+    let scale_y = height as f32 / tree.size().height();
+    let transform = resvg::tiny_skia::Transform::from_scale(scale_x, scale_y);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    Some(variant_from_pixmap(
+        width,
+        height,
+        pixmap.data(),
+        tint,
+        false,
+    ))
+}
+
+fn variant_from_pixmap(
+    width: u32,
+    height: u32,
+    data: &[u8],
+    tint: Color,
+    multicolor: bool,
+) -> RasterVariant {
+    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+    for py in 0..height {
+        for px in 0..width {
+            let idx = (py * width + px) as usize * 4;
+            if multicolor {
+                pixels.extend_from_slice(&[data[idx], data[idx + 1], data[idx + 2], data[idx + 3]]);
+            } else {
+                pixels.extend_from_slice(&[tint.r, tint.g, tint.b, data[idx + 3]]);
+            }
+        }
+    }
+    variant_from_rgba(width, height, pixels)
 }
 
 pub fn draw_icon_from_path(
@@ -50,97 +408,60 @@ pub fn draw_icon_from_path_with_options(
         return;
     }
 
-    let raster_started = std::time::Instant::now();
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        match ext.to_ascii_lowercase().as_str() {
-            "png" | "jpg" | "jpeg" | "bmp" => {
-                if let Some(img) = get_or_load(path) {
-                    let dest_w = dest_w.max(1) as u32;
-                    let dest_h = dest_h.max(1) as u32;
-                    let scaled =
-                        image::imageops::resize(&img, dest_w, dest_h, FilterType::Lanczos3);
-                    for y in 0..dest_h {
-                        for x in 0..dest_w {
-                            let p = scaled.get_pixel(x, y);
-                            if p[3] == 0 {
-                                continue;
-                            }
-                            let color = if multicolor {
-                                Color {
-                                    r: p[0],
-                                    g: p[1],
-                                    b: p[2],
-                                    a: p[3],
-                                }
-                            } else {
-                                Color {
-                                    r: tint.r,
-                                    g: tint.g,
-                                    b: tint.b,
-                                    a: p[3],
-                                }
-                            };
-                            blend_icon_pixel(
-                                buffer,
-                                dest_x.saturating_add(x as i32),
-                                dest_y.saturating_add(y as i32),
-                                color,
-                            );
-                        }
-                    }
-                }
+    let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+        return;
+    };
+    let width = dest_w.max(1) as u32;
+    let height = dest_h.max(1) as u32;
+    let ext = ext.to_ascii_lowercase();
+    let key = match ext.as_str() {
+        "svg" if svg_file_is_cacheable(path) => {
+            raster_file_key(path, width, height, tint, multicolor)
+        }
+        "svg" => None,
+        "png" | "jpg" | "jpeg" | "bmp" => raster_file_key(path, width, height, tint, multicolor),
+        _ => None,
+    };
+    if let Some(key) = key.as_ref()
+        && let Some(variant) = cached_variant(key)
+    {
+        profiling::record_raster_cache_hit(variant.fully_opaque);
+        blit_variant(buffer, &variant, dest_x, dest_y);
+        return;
+    }
+
+    let variant = match ext.as_str() {
+        "png" | "jpg" | "jpeg" | "bmp" => {
+            if key.is_some() {
+                profiling::record_raster_cache_miss();
+            } else {
+                profiling::record_raster_cache_bypass();
             }
-            "svg" => {
-                if let Ok(svg_data) = std::fs::read_to_string(path) {
-                    let mut opt = resvg::usvg::Options::default();
-                    opt.resources_dir = path.parent().map(|p| p.to_path_buf());
-                    if let Ok(tree) = resvg::usvg::Tree::from_str(&svg_data, &opt) {
-                        let w = dest_w.max(1) as u32;
-                        let h = dest_h.max(1) as u32;
-                        if let Some(mut pixmap) = resvg::tiny_skia::Pixmap::new(w, h) {
-                            let scale_x = w as f32 / tree.size().width();
-                            let scale_y = h as f32 / tree.size().height();
-                            let transform =
-                                resvg::tiny_skia::Transform::from_scale(scale_x, scale_y);
-                            resvg::render(&tree, transform, &mut pixmap.as_mut());
-                            let data = pixmap.data();
-                            for py in 0..h {
-                                for px in 0..w {
-                                    let idx = (py * w + px) as usize * 4;
-                                    if data[idx + 3] == 0 {
-                                        continue;
-                                    }
-                                    let color = if multicolor {
-                                        Color {
-                                            r: data[idx],
-                                            g: data[idx + 1],
-                                            b: data[idx + 2],
-                                            a: data[idx + 3],
-                                        }
-                                    } else {
-                                        Color {
-                                            r: tint.r,
-                                            g: tint.g,
-                                            b: tint.b,
-                                            a: data[idx + 3],
-                                        }
-                                    };
-                                    blend_icon_pixel(
-                                        buffer,
-                                        dest_x.saturating_add(px as i32),
-                                        dest_y.saturating_add(py as i32),
-                                        color,
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
+            let raster_started = std::time::Instant::now();
+            let variant = raster_bitmap_variant(path, width, height, tint, multicolor);
+            profiling::record_icon_image_raster(raster_started.elapsed());
+            variant
+        }
+        "svg" => {
+            if key.is_some() {
+                profiling::record_raster_cache_miss();
+            } else {
+                profiling::record_raster_cache_bypass();
             }
-            _ => {}
+            let raster_started = std::time::Instant::now();
+            let variant = raster_svg_variant(path, width, height, tint, multicolor);
+            profiling::record_icon_image_raster(raster_started.elapsed());
+            variant
+        }
+        _ => None,
+    };
+
+    if let Some(variant) = variant {
+        blit_variant(buffer, &variant, dest_x, dest_y);
+        if let Some(key) = key {
+            store_variant(key, variant);
         }
     }
-    profiling::record_icon_image_raster(raster_started.elapsed());
 }
 
 fn blend_icon_pixel(buffer: &mut PixelBuffer, x: i32, y: i32, color: Color) {
@@ -161,46 +482,24 @@ pub fn draw_missing_icon_fallback(
     dest_h: i32,
     tint: Color,
 ) {
-    let raster_started = std::time::Instant::now();
-    let w = dest_w.max(1) as u32;
-    let h = dest_h.max(1) as u32;
-
-    let mut opt = resvg::usvg::Options::default();
-    let Ok(tree) = resvg::usvg::Tree::from_str(MISSING_ICON_SVG, &opt) else {
+    let width = dest_w.max(1) as u32;
+    let height = dest_h.max(1) as u32;
+    let key = missing_icon_key(width, height, tint);
+    if let Some(variant) = cached_variant(&key) {
+        profiling::record_raster_cache_hit(variant.fully_opaque);
+        blit_variant(buffer, &variant, dest_x, dest_y);
         return;
-    };
-    opt.resources_dir = None;
-    let Some(mut pixmap) = resvg::tiny_skia::Pixmap::new(w, h) else {
-        return;
-    };
-    let scale_x = w as f32 / tree.size().width();
-    let scale_y = h as f32 / tree.size().height();
-    let transform = resvg::tiny_skia::Transform::from_scale(scale_x, scale_y);
-    resvg::render(&tree, transform, &mut pixmap.as_mut());
-
-    let data = pixmap.data();
-    for py in 0..h {
-        for px in 0..w {
-            let idx = (py * w + px) as usize * 4;
-            let alpha = data[idx + 3];
-            if alpha == 0 {
-                continue;
-            }
-            let color = Color {
-                r: tint.r,
-                g: tint.g,
-                b: tint.b,
-                a: alpha,
-            };
-            blend_icon_pixel(
-                buffer,
-                dest_x.saturating_add(px as i32),
-                dest_y.saturating_add(py as i32),
-                color,
-            );
-        }
     }
+
+    profiling::record_raster_cache_miss();
+    let raster_started = std::time::Instant::now();
+    let variant = raster_missing_icon_variant(width, height, tint);
     profiling::record_icon_image_raster(raster_started.elapsed());
+
+    if let Some(variant) = variant {
+        blit_variant(buffer, &variant, dest_x, dest_y);
+        store_variant(key, variant);
+    }
 }
 
 pub fn draw_named_icon(
@@ -355,6 +654,14 @@ mod tests {
     use super::*;
     use image::{ImageBuffer, Rgba};
     use std::fs;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+    #[cfg(unix)]
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    fn icon_test_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     fn tint() -> Color {
         Color {
@@ -388,15 +695,85 @@ mod tests {
         pixels
     }
 
-    #[test]
-    fn svg_icon_rasterizes_and_tints() {
-        let td = tempfile::tempdir().unwrap();
-        let path = td.path().join("symbol.svg");
+    fn clear_icon_caches() {
+        if let Some(cache) = RASTER_CACHE.get() {
+            let mut cache = cache.lock().unwrap();
+            cache.entries.clear();
+            cache.order.clear();
+        }
+        if let Some(cache) = IMAGE_CACHE.get() {
+            cache.lock().unwrap().clear();
+        }
+        profiling::reset_raster_metrics();
+    }
+
+    fn write_test_svg(path: &Path) {
         fs::write(
-            &path,
+            path,
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect x="1" y="1" width="6" height="6" fill="black"/></svg>"#,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn svg_external_resource_references_bypass_raster_cache() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let image_path = td.path().join("linked.png");
+        let svg_path = td.path().join("linked.svg");
+        ImageBuffer::from_fn(2, 2, |_, _| Rgba([255u8, 0, 0, 255]))
+            .save(&image_path)
+            .unwrap();
+        fs::write(
+            &svg_path,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><image href="linked.png" width="8" height="8"/></svg>"#,
+        )
+        .unwrap();
+
+        let mut buffer = PixelBuffer::new(16, 16);
+        draw_icon_from_path_with_options(&mut buffer, &svg_path, 0, 0, 8, 8, tint(), true);
+        draw_icon_from_path_with_options(&mut buffer, &svg_path, 0, 0, 8, 8, tint(), true);
+
+        let metrics = profiling::raster_metrics();
+        assert_eq!(metrics.raster_cache_hits, 0);
+        assert_eq!(metrics.raster_cache_misses, 0);
+        assert_eq!(metrics.raster_cache_bypasses, 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_identity_preserves_distinct_non_utf8_paths() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let first = td
+            .path()
+            .join(OsString::from_vec(vec![b'i', 0xff, b'.', b'p', b'n', b'g']));
+        let second = td
+            .path()
+            .join(OsString::from_vec(vec![b'i', 0xfe, b'.', b'p', b'n', b'g']));
+        ImageBuffer::from_fn(1, 1, |_, _| Rgba([255u8, 0, 0, 255]))
+            .save(&first)
+            .unwrap();
+        ImageBuffer::from_fn(1, 1, |_, _| Rgba([0u8, 255, 0, 255]))
+            .save(&second)
+            .unwrap();
+
+        let first_key = raster_file_key(&first, 8, 8, tint(), true).unwrap();
+        let second_key = raster_file_key(&second, 8, 8, tint(), true).unwrap();
+
+        assert_ne!(first_key.source_identity, second_key.source_identity);
+        assert_ne!(first_key, second_key);
+    }
+
+    #[test]
+    fn svg_icon_rasterizes_and_tints() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("symbol.svg");
+        write_test_svg(&path);
 
         let mut buffer = PixelBuffer::new(24, 24);
         draw_icon_from_path(&mut buffer, &path, 4, 3, 14, 12, tint());
@@ -415,6 +792,8 @@ mod tests {
 
     #[test]
     fn raster_icon_decodes_resizes_and_tints() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
         let td = tempfile::tempdir().unwrap();
         let path = td.path().join("symbol.png");
         let image = ImageBuffer::from_fn(2, 2, |_, _| Rgba([255u8, 0, 0, 255]));
@@ -438,6 +817,8 @@ mod tests {
 
     #[test]
     fn multicolor_raster_preserves_source_colors() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
         let td = tempfile::tempdir().unwrap();
         let path = td.path().join("logo.png");
         let image = ImageBuffer::from_fn(2, 1, |x, _| {
@@ -460,6 +841,8 @@ mod tests {
 
     #[test]
     fn missing_icon_paints_builtin_fallback() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
         let mut buffer = PixelBuffer::new(30, 30);
         draw_missing_icon_fallback(&mut buffer, 6, 5, 18, 18, tint());
 
@@ -473,7 +856,132 @@ mod tests {
     }
 
     #[test]
+    fn svg_raster_variant_cache_reuses_unchanged_key() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("symbol.svg");
+        write_test_svg(&path);
+
+        let mut first = PixelBuffer::new(24, 24);
+        draw_icon_from_path(&mut first, &path, 4, 4, 12, 12, tint());
+        let first_metrics = profiling::raster_metrics();
+        assert_eq!(first_metrics.raster_cache_misses, 1);
+        assert_eq!(first_metrics.raster_cache_hits, 0);
+
+        profiling::reset_raster_metrics();
+        let mut second = PixelBuffer::new(24, 24);
+        draw_icon_from_path(&mut second, &path, 4, 4, 12, 12, tint());
+        let second_metrics = profiling::raster_metrics();
+        assert_eq!(second_metrics.raster_cache_hits, 1);
+        assert_eq!(second_metrics.raster_cache_misses, 0);
+        assert_eq!(second_metrics.icon_image_raster_micros, 0);
+    }
+
+    #[test]
+    fn raster_variant_cache_separates_tint_and_multicolor_keys() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("symbol.svg");
+        write_test_svg(&path);
+
+        let mut buffer = PixelBuffer::new(24, 24);
+        draw_icon_from_path(&mut buffer, &path, 2, 2, 12, 12, tint());
+
+        profiling::reset_raster_metrics();
+        let alternate_tint = Color {
+            r: 240,
+            g: 40,
+            b: 80,
+            a: 255,
+        };
+        draw_icon_from_path(&mut buffer, &path, 2, 2, 12, 12, alternate_tint);
+        let tint_metrics = profiling::raster_metrics();
+        assert_eq!(tint_metrics.raster_cache_hits, 0);
+        assert_eq!(tint_metrics.raster_cache_misses, 1);
+
+        profiling::reset_raster_metrics();
+        draw_icon_from_path_with_options(&mut buffer, &path, 2, 2, 12, 12, tint(), true);
+        let multicolor_metrics = profiling::raster_metrics();
+        assert_eq!(multicolor_metrics.raster_cache_hits, 0);
+        assert_eq!(multicolor_metrics.raster_cache_misses, 1);
+    }
+
+    #[test]
+    fn bitmap_raster_variant_cache_invalidates_when_file_freshness_changes() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("logo.png");
+        let image = ImageBuffer::from_fn(2, 2, |_, _| Rgba([255u8, 0, 0, 255]));
+        image.save(&path).unwrap();
+
+        let mut buffer = PixelBuffer::new(24, 24);
+        draw_icon_from_path_with_options(&mut buffer, &path, 2, 2, 12, 12, tint(), true);
+
+        let replacement = ImageBuffer::from_fn(5, 4, |_, _| Rgba([0u8, 255, 0, 255]));
+        replacement.save(&path).unwrap();
+
+        profiling::reset_raster_metrics();
+        draw_icon_from_path_with_options(&mut buffer, &path, 2, 2, 12, 12, tint(), true);
+        let metrics = profiling::raster_metrics();
+        assert_eq!(metrics.raster_cache_hits, 0);
+        assert_eq!(metrics.raster_cache_misses, 1);
+    }
+
+    #[test]
+    fn raster_variant_cache_reports_opaque_and_translucent_hits() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let opaque_path = td.path().join("opaque.png");
+        let translucent_path = td.path().join("translucent.png");
+        ImageBuffer::from_fn(2, 2, |_, _| Rgba([255u8, 0, 0, 255]))
+            .save(&opaque_path)
+            .unwrap();
+        ImageBuffer::from_fn(2, 2, |x, _| {
+            if x == 0 {
+                Rgba([0u8, 255, 0, 255])
+            } else {
+                Rgba([0u8, 255, 0, 96])
+            }
+        })
+        .save(&translucent_path)
+        .unwrap();
+
+        let mut buffer = PixelBuffer::new(24, 24);
+        draw_icon_from_path(&mut buffer, &opaque_path, 0, 0, 10, 10, tint());
+        draw_icon_from_path(&mut buffer, &translucent_path, 12, 0, 10, 10, tint());
+
+        profiling::reset_raster_metrics();
+        draw_icon_from_path(&mut buffer, &opaque_path, 0, 0, 10, 10, tint());
+        draw_icon_from_path(&mut buffer, &translucent_path, 12, 0, 10, 10, tint());
+        let metrics = profiling::raster_metrics();
+        assert_eq!(metrics.raster_cache_hits, 2);
+        assert_eq!(metrics.raster_cache_misses, 0);
+        assert_eq!(metrics.raster_cache_opaque_hits, 1);
+        assert_eq!(metrics.raster_cache_translucent_hits, 1);
+    }
+
+    #[test]
+    fn missing_icon_fallback_uses_raster_variant_cache() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let mut buffer = PixelBuffer::new(24, 24);
+        draw_missing_icon_fallback(&mut buffer, 2, 2, 16, 16, tint());
+
+        profiling::reset_raster_metrics();
+        draw_missing_icon_fallback(&mut buffer, 2, 2, 16, 16, tint());
+        let metrics = profiling::raster_metrics();
+        assert_eq!(metrics.raster_cache_hits, 1);
+        assert_eq!(metrics.raster_cache_misses, 0);
+    }
+
+    #[test]
     fn draw_named_icon_uses_destination_box_for_missing_fallback() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
         let td = tempfile::tempdir().unwrap();
         let config = mesh_core_icon::IconConfig::from_toml_str(&format!(
             r#"

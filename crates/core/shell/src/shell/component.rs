@@ -197,6 +197,7 @@ fn retained_paint_snapshot(
             translucency: metrics.barriers.translucency,
             material_change: metrics.barriers.material_change,
         },
+        ..Default::default()
     }
 }
 

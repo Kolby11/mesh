@@ -215,6 +215,11 @@ pub struct RetainedPaintSnapshot {
     pub batched_primitives: u64,
     pub barrier_count: u64,
     pub barriers: DisplayBatchBarrierSnapshot,
+    pub raster_cache_hits: u64,
+    pub raster_cache_misses: u64,
+    pub raster_cache_bypasses: u64,
+    pub raster_cache_opaque_hits: u64,
+    pub raster_cache_translucent_hits: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::path::Path;
 
 use mesh_core_elements::style::{
     Color, Display, Edges, Overflow, TextAlign, TextDirection, TextOverflow, Visibility,
@@ -1766,7 +1767,7 @@ fn hash_attribute(
 fn batch_barrier(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> Option<DisplayBatchBarrier> {
     match slot {
         DisplayPrimitiveSlot::Text => return Some(DisplayBatchBarrier::Text),
-        DisplayPrimitiveSlot::Icon => return Some(DisplayBatchBarrier::Icon),
+        DisplayPrimitiveSlot::Icon => {}
         DisplayPrimitiveSlot::Background
         | DisplayPrimitiveSlot::Border
         | DisplayPrimitiveSlot::Generic => {}
@@ -1779,6 +1780,15 @@ fn batch_barrier(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> Option<Displa
     {
         return Some(DisplayBatchBarrier::Clip);
     }
+    if matches!(slot, DisplayPrimitiveSlot::Icon) {
+        return match cached_icon_resource_opacity(node) {
+            crate::surface::icon::CachedResourceOpacity::Opaque => None,
+            crate::surface::icon::CachedResourceOpacity::Translucent => {
+                Some(DisplayBatchBarrier::Translucency)
+            }
+            crate::surface::icon::CachedResourceOpacity::Unknown => Some(DisplayBatchBarrier::Icon),
+        };
+    }
     let translucent = match slot {
         DisplayPrimitiveSlot::Background => node.computed_style.background_color.a < 255,
         DisplayPrimitiveSlot::Border => node.computed_style.border_color.a < 255,
@@ -1789,6 +1799,21 @@ fn batch_barrier(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> Option<Displa
         return Some(DisplayBatchBarrier::Translucency);
     }
     None
+}
+
+fn cached_icon_resource_opacity(node: &WidgetNode) -> crate::surface::icon::CachedResourceOpacity {
+    let Some(src) = node.attributes.get("src") else {
+        return crate::surface::icon::CachedResourceOpacity::Unknown;
+    };
+    let width = node.layout.width.round().max(1.0) as u32;
+    let height = node.layout.height.round().max(1.0) as u32;
+    crate::surface::icon::cached_file_resource_opacity(
+        Path::new(src),
+        width,
+        height,
+        node.computed_style.color,
+        false,
+    )
 }
 
 fn union_damage(current: Option<DamageRect>, next: DamageRect) -> Option<DamageRect> {
@@ -2287,6 +2312,129 @@ mod tests {
         assert_eq!(metrics.barriers.text, 1);
         assert_eq!(metrics.barriers.clip, 1);
         assert_eq!(metrics.barrier_count, 2);
+    }
+
+    #[test]
+    fn display_list_keeps_opaque_backgrounds_batchable_and_translucent_backgrounds_conservative() {
+        let mut opaque_root = node(1, "row", 0.0, 0.0, 100.0, 20.0);
+        opaque_root
+            .children
+            .push(node(2, "box", 0.0, 0.0, 20.0, 20.0));
+        let mut opaque_list = RetainedDisplayList::default();
+
+        let opaque_metrics = opaque_list.update(&opaque_root, 100, 20, false, false);
+
+        assert_eq!(opaque_metrics.barriers.translucency, 0);
+        assert_eq!(opaque_metrics.barrier_count, 0);
+        assert_eq!(opaque_metrics.batch_count, 1);
+
+        let mut translucent_root = node(1, "row", 0.0, 0.0, 100.0, 20.0);
+        let mut translucent = node(2, "box", 0.0, 0.0, 20.0, 20.0);
+        translucent.computed_style.background_color.a = 128;
+        translucent_root.children.push(translucent);
+        let mut translucent_list = RetainedDisplayList::default();
+
+        let translucent_metrics = translucent_list.update(&translucent_root, 100, 20, false, false);
+
+        assert_eq!(translucent_metrics.barriers.translucency, 1);
+        assert_eq!(translucent_metrics.barrier_count, 1);
+        assert_eq!(translucent_metrics.batch_count, 0);
+    }
+
+    #[test]
+    fn display_list_uses_cached_icon_opacity_for_conservative_barriers() {
+        let td = tempfile::tempdir().unwrap();
+        let opaque_path = td.path().join("opaque.png");
+        let translucent_path = td.path().join("translucent.png");
+        image::ImageBuffer::from_fn(2, 2, |_, _| image::Rgba([255u8, 0, 0, 255]))
+            .save(&opaque_path)
+            .unwrap();
+        image::ImageBuffer::from_fn(2, 2, |x, _| {
+            if x == 0 {
+                image::Rgba([255u8, 0, 0, 255])
+            } else {
+                image::Rgba([255u8, 0, 0, 96])
+            }
+        })
+        .save(&translucent_path)
+        .unwrap();
+
+        let mut buffer = crate::surface::PixelBuffer::new(16, 16);
+        let tint = Color::WHITE;
+        crate::surface::icon::draw_icon_from_path(&mut buffer, &opaque_path, 0, 0, 10, 10, tint);
+        crate::surface::icon::draw_icon_from_path(
+            &mut buffer,
+            &translucent_path,
+            0,
+            0,
+            10,
+            10,
+            tint,
+        );
+        assert_eq!(
+            crate::surface::icon::cached_file_resource_opacity(&opaque_path, 10, 10, tint, false),
+            crate::surface::icon::CachedResourceOpacity::Opaque
+        );
+        assert_eq!(
+            crate::surface::icon::cached_file_resource_opacity(
+                &translucent_path,
+                10,
+                10,
+                tint,
+                false
+            ),
+            crate::surface::icon::CachedResourceOpacity::Translucent
+        );
+
+        let mut root = node(1, "row", 0.0, 0.0, 100.0, 20.0);
+        root.computed_style.background_color = Color::TRANSPARENT;
+        let mut opaque = node(2, "icon", 0.0, 0.0, 10.0, 10.0);
+        opaque.computed_style.background_color = Color::TRANSPARENT;
+        opaque.computed_style.color = tint;
+        opaque
+            .attributes
+            .insert("src".into(), opaque_path.to_string_lossy().into_owned());
+        let mut translucent = node(3, "icon", 12.0, 0.0, 10.0, 10.0);
+        translucent.computed_style.background_color = Color::TRANSPARENT;
+        translucent.computed_style.color = tint;
+        translucent.attributes.insert(
+            "src".into(),
+            translucent_path.to_string_lossy().into_owned(),
+        );
+        let mut unknown = node(4, "icon", 24.0, 0.0, 10.0, 10.0);
+        unknown.computed_style.background_color = Color::TRANSPARENT;
+        unknown.computed_style.color = tint;
+        unknown.attributes.insert(
+            "src".into(),
+            td.path().join("missing.png").to_string_lossy().into_owned(),
+        );
+        root.children.push(opaque);
+        root.children.push(translucent);
+        root.children.push(unknown);
+
+        let mut list = RetainedDisplayList::default();
+        let metrics = list.update(&root, 100, 20, false, false);
+
+        assert_eq!(metrics.barriers.icon, 1);
+        assert_eq!(metrics.barriers.translucency, 1);
+        assert_eq!(metrics.barriers.opacity, 0);
+
+        let mut transparent_root = node(1, "row", 0.0, 0.0, 100.0, 20.0);
+        transparent_root.computed_style.background_color = Color::TRANSPARENT;
+        let mut transparent_icon = node(2, "icon", 0.0, 0.0, 10.0, 10.0);
+        transparent_icon.computed_style.background_color = Color::TRANSPARENT;
+        transparent_icon.computed_style.color = tint;
+        transparent_icon.computed_style.opacity = 0.5;
+        transparent_icon
+            .attributes
+            .insert("src".into(), opaque_path.to_string_lossy().into_owned());
+        transparent_root.children.push(transparent_icon);
+
+        let mut transparent_list = RetainedDisplayList::default();
+        let transparent_metrics = transparent_list.update(&transparent_root, 100, 20, false, false);
+
+        assert_eq!(transparent_metrics.barriers.opacity, 1);
+        assert_eq!(transparent_metrics.barriers.icon, 0);
     }
 
     #[test]
