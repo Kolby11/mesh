@@ -27,9 +27,9 @@
 
 ### Raster and Resource Caching
 
-- [ ] **CACHE-01**: SVG icons, bitmap icons, and resized image variants are cached in a retained raster form so repeated paints avoid reparsing, decoding, and rescaling unchanged assets.
-- [ ] **CACHE-02**: Text and glyph caches continue to reuse unchanged layout and raster data across hover, animation, scroll, and state-driven updates.
-- [ ] **CACHE-03**: Opaque vs translucent resource metadata is retained so the painter can avoid unnecessary blending and redundant background draws when content is fully opaque.
+- [x] **CACHE-01**: SVG icons, bitmap icons, and resized image variants are cached in a retained raster form so repeated paints avoid reparsing, decoding, and rescaling unchanged assets.
+- [x] **CACHE-02**: Text and glyph caches continue to reuse unchanged layout and raster data across hover, animation, scroll, and state-driven updates.
+- [x] **CACHE-03**: Opaque vs translucent resource metadata is retained so the painter can avoid unnecessary blending and redundant background draws when content is fully opaque.
 
 ### Smoothness Guardrails
 
@@ -73,9 +73,9 @@
 | PIPE-03 | Phase 29 | Complete |
 | PIPE-04 | Phase 29 | Complete |
 | CULL-03 | Phase 29 | Complete |
-| CACHE-01 | Phase 30 | Pending |
-| CACHE-02 | Phase 30 | Pending |
-| CACHE-03 | Phase 30 | Pending |
+| CACHE-01 | Phase 30 | Complete |
+| CACHE-02 | Phase 30 | Complete |
+| CACHE-03 | Phase 30 | Complete |
 | PERF-03 | Phase 31 | Pending |
 | SMTH-01 | Phase 31 | Pending |
 | SMTH-02 | Phase 31 | Pending |
@@ -88,4 +88,4 @@
 
 ---
 *Requirements defined: 2026-05-10*
-*Last updated: 2026-05-11 after Phase 29 execution completed*
+*Last updated: 2026-05-12 after Phase 30 execution completed*

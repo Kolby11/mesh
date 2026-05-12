@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: CPU Rendering Performance Improvement
 status: ready_to_plan
-stopped_at: Phase 29 complete, ready to plan Phase 30
+stopped_at: Phase 30 complete, ready to plan Phase 31
 last_updated: "2026-05-12T13:55:34+02:00"
 last_activity: 2026-05-12
 progress:
@@ -21,7 +21,7 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-10)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 30 — raster-cache-hardening-for-icons-images-and-text
+**Current focus:** Phase 31 — smoothness-proof-and-cpu-render-tuning
 
 ## Current Position
 
