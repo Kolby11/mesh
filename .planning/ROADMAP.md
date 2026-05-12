@@ -67,6 +67,7 @@ Planned work:
 Plans:
 
 - **29-01: Damage-indexed retained paint execution and repaint-policy proof** *(Wave 1, complete 2026-05-11)* — added retained command-span metadata, routed partial paints through ordered filtered command inputs, exposed repaint-policy and filtered-execution counters, and recorded canonical benchmark evidence.
+- **29-02: Debug-inspector retained paint counter readability** *(Wave 1, complete 2026-05-12)* — closed the UAT observability gap by rendering retained paint policy, filtered command, skipped command, span, and fallback counters in the shipped debug inspector.
 
 Cross-cutting constraints:
 
@@ -153,4 +154,4 @@ Primary external sources:
 - Parallel paint/layout remains sequenced after this milestone proves the CPU retained pipeline is smooth enough.
 
 ---
-*Roadmap updated: 2026-05-11 after Phase 29 execution completed*
+*Roadmap updated: 2026-05-12 after Phase 29 verification and transition*

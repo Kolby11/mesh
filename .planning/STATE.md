@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: CPU Rendering Performance Improvement
-status: ready_to_verify
-stopped_at: Phase 29 execution complete
-last_updated: "2026-05-11T21:40:52+02:00"
-last_activity: 2026-05-11
+status: ready_to_plan
+stopped_at: Phase 29 complete, ready to plan Phase 30
+last_updated: "2026-05-12T13:55:34+02:00"
+last_activity: 2026-05-12
 progress:
   total_phases: 6
-  completed_phases: 3
-  total_plans: 4
-  completed_plans: 4
-  percent: 100
+  completed_phases: 4
+  total_plans: 5
+  completed_plans: 5
+  percent: 67
 ---
 
 # State: MESH v1.5
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-10)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 29 — damage-indexed-paint-execution-and-repaint-policy
+**Current focus:** Phase 30 — raster-cache-hardening-for-icons-images-and-text
 
 ## Current Position
 
-Phase: 29
-Plan: 1 of 1 complete
-Status: Ready to verify
-Last activity: 2026-05-11
+Phase: 30
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-05-12
 
 ## Decisions
 
@@ -96,6 +96,7 @@ Last activity: 2026-05-11
 - [Phase 29]: Retained damage-indexed paint execution stays owned by `mesh-core-render`; shell code selects effective damage and policy, then asks the retained display list for ordered command input.
 - [Phase 29]: Repaint-policy proof is published only through existing `invalidation.paint` profiling payloads with aggregate filtered-span, filtered-command, skipped-command, and fallback counters.
 - [Phase 29]: Benchmark evidence continues to reuse the Phase 26 canonical scenario IDs and harness; visible smoothness and threshold tuning remain Phase 31 responsibilities.
+- [Phase 29]: The debug-inspector Surfaces view renders retained paint policy, filtered command, skipped command, span, and fallback counters directly; partial payloads must render unavailable labels rather than zero-like proof.
 
 ## Performance Metrics
 
@@ -131,12 +132,13 @@ Last activity: 2026-05-11
 | Phase 17 P03 | 9min | 3 tasks | 3 files |
 | Phase 17 P04 | 7min | 3 tasks | 2 files |
 | Phase 29 P01 | 27min | 3 tasks | 12 files |
+| Phase 29 P02 | 16min | 1 task | 4 files |
 
 ## Session
 
-Last session: 2026-05-11T21:40:52+02:00
-Stopped At: Phase 29 execution complete
-Resume File: .planning/phases/29-damage-indexed-paint-execution-and-repaint-policy/29-01-SUMMARY.md
+Last session: 2026-05-12T13:55:34+02:00
+Stopped At: Phase 29 complete, ready to plan Phase 30
+Resume File: None
 
 ## Accumulated Context
 
@@ -188,8 +190,8 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-11 after Phase 29 execution completed*
+*State updated: 2026-05-12 after Phase 29 verification and transition*
 
 ## Operator Next Steps
 
-- Verify Phase 29 with /gsd-verify-work 29
+- Plan Phase 30: Raster Cache Hardening for Icons, Images, and Text
