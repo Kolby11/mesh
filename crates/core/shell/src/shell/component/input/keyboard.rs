@@ -1,10 +1,19 @@
 use super::super::*;
 
 #[derive(Debug, Clone)]
-pub(super) struct ResolvedSurfaceShortcut {
-    pub(super) key: String,
-    pub(super) handler: String,
-    pub(super) target_ref: Option<String>,
+pub(in crate::shell::component) struct ResolvedSurfaceShortcut {
+    pub(in crate::shell::component) action_id: String,
+    pub(in crate::shell::component) key: String,
+    pub(in crate::shell::component) handler: String,
+    pub(in crate::shell::component) target_ref: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct SurfaceShortcutDeclaration {
+    action_id: String,
+    default_key: String,
+    handler: String,
+    target_ref: Option<String>,
 }
 
 impl FrontendSurfaceComponent {
@@ -125,10 +134,79 @@ impl FrontendSurfaceComponent {
             .any(|binding| Self::key_matches_binding(key, binding))
     }
 
-    fn resolved_surface_shortcuts(
+    pub(in crate::shell::component) fn resolved_surface_shortcuts(
         &self,
         keyboard_settings: &mesh_core_config::KeyboardSettings,
     ) -> Vec<ResolvedSurfaceShortcut> {
+        let declarations = self.surface_shortcut_declarations();
+        if declarations.is_empty() {
+            return Vec::new();
+        }
+
+        let overrides = keyboard_settings.surface_shortcuts.get(self.surface_id());
+
+        declarations
+            .into_iter()
+            .filter_map(|declaration| {
+                let override_key = overrides
+                    .and_then(|surface| surface.get(&declaration.action_id))
+                    .and_then(|shortcut| shortcut.key.clone());
+                let effective_key = override_key.unwrap_or(declaration.default_key);
+                if effective_key.trim().is_empty() {
+                    return None;
+                }
+
+                Some(ResolvedSurfaceShortcut {
+                    action_id: declaration.action_id,
+                    key: effective_key,
+                    handler: declaration.handler,
+                    target_ref: declaration.target_ref,
+                })
+            })
+            .collect()
+    }
+
+    fn surface_shortcut_declarations(&self) -> Vec<SurfaceShortcutDeclaration> {
+        let mut declarations = self.manifest_surface_shortcut_declarations();
+        for legacy in self.legacy_settings_surface_shortcut_declarations() {
+            if declarations
+                .iter()
+                .any(|declaration| declaration.action_id == legacy.action_id)
+            {
+                continue;
+            }
+            declarations.push(legacy);
+        }
+        declarations
+    }
+
+    fn manifest_surface_shortcut_declarations(&self) -> Vec<SurfaceShortcutDeclaration> {
+        self.compiled
+            .manifest
+            .keybinds
+            .actions
+            .iter()
+            .filter_map(|(action_id, action)| {
+                if action.scope != mesh_core_module::KeybindScope::Surface
+                    || action.trigger.kind != mesh_core_module::KeybindTriggerKind::Shortcut
+                {
+                    return None;
+                }
+                let default_key = action.trigger.key.as_ref()?.to_string();
+                if action.handler.trim().is_empty() || default_key.trim().is_empty() {
+                    return None;
+                }
+                Some(SurfaceShortcutDeclaration {
+                    action_id: action_id.clone(),
+                    default_key,
+                    handler: action.handler.clone(),
+                    target_ref: action.target_ref.clone(),
+                })
+            })
+            .collect()
+    }
+
+    fn legacy_settings_surface_shortcut_declarations(&self) -> Vec<SurfaceShortcutDeclaration> {
         let Some(shortcuts) = self
             .settings_json
             .get("keyboard")
@@ -138,23 +216,18 @@ impl FrontendSurfaceComponent {
             return Vec::new();
         };
 
-        let overrides = keyboard_settings.surface_shortcuts.get(self.surface_id());
-
         shortcuts
             .iter()
             .filter_map(|(shortcut_id, value)| {
                 let handler = value.get("handler")?.as_str()?.to_string();
                 let default_key = value.get("key")?.as_str()?.to_string();
-                let override_key = overrides
-                    .and_then(|surface| surface.get(shortcut_id))
-                    .and_then(|shortcut| shortcut.key.clone());
-                let effective_key = override_key.unwrap_or(default_key);
-                if effective_key.trim().is_empty() {
+                if handler.trim().is_empty() || default_key.trim().is_empty() {
                     return None;
                 }
 
-                Some(ResolvedSurfaceShortcut {
-                    key: effective_key,
+                Some(SurfaceShortcutDeclaration {
+                    action_id: shortcut_id.clone(),
+                    default_key,
                     handler,
                     target_ref: value
                         .get("target_ref")

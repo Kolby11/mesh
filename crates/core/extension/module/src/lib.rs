@@ -6,7 +6,8 @@ pub mod package;
 pub use lifecycle::{ModuleInstance, ModuleState};
 pub use manifest::{
     AccessibilitySection, ComponentExport, DependencyGraphError, ExportsSection,
-    IconRequirementsSection, LoadedManifest, Manifest, ManifestSource, ModuleType, PackageSection,
+    IconRequirementsSection, KeybindAction, KeybindScope, KeybindTrigger, KeybindTriggerKind,
+    KeybindsSection, LoadedManifest, Manifest, ManifestSource, ModuleType, PackageSection,
     ProvidedInterface, ServiceSection, SlotContribution, SlotDefinition,
     validate_module_dependency_graph,
 };

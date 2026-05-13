@@ -330,6 +330,80 @@ end
 }
 
 #[test]
+fn keyboard_shortcuts_manifest_keybind_action_resolves_user_override_by_action_id() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+mute_count = 0
+function onMuteShortcut()
+    mute_count = mute_count + 1
+end
+</script>
+"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            handler: "onMuteShortcut".into(),
+            target_ref: Some("volume-button".into()),
+            scope: mesh_core_module::KeybindScope::Surface,
+            label: None,
+            label_i18n_key: Some("nav.volume".into()),
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+        },
+    );
+    component.last_tree = Some(root_with(vec![event_node_with_attrs(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        40.0,
+        24.0,
+        &[("ref", "volume-button")],
+        &[],
+    )]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "m".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(runtime_number(&component, "mute_count"), 1.0);
+
+    let keyboard_settings = mesh_core_config::KeyboardSettings {
+        surface_shortcuts: HashMap::from([(
+            "@test/reactive-surface".into(),
+            HashMap::from([(
+                "mute".into(),
+                mesh_core_config::SurfaceShortcutOverride {
+                    key: Some("u".into()),
+                },
+            )]),
+        )]),
+        ..mesh_core_config::KeyboardSettings::default()
+    };
+    let resolved = component.resolved_surface_shortcuts(&keyboard_settings);
+
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].action_id, "mute");
+    assert_eq!(resolved[0].key, "u");
+    assert_eq!(resolved[0].handler, "onMuteShortcut");
+    assert_eq!(resolved[0].target_ref.as_deref(), Some("volume-button"));
+}
+
+#[test]
 fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
