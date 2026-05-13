@@ -289,6 +289,12 @@ pub trait ShellComponent: Send {
     }
     /// Override this surface's position for popover placement.
     fn apply_position(&mut self, _margin_top: i32, _margin_left: i32) {}
+    /// Duration in milliseconds to keep a surface mapped while it exits.
+    fn hide_transition_ms(&self) -> u64 {
+        0
+    }
+    /// Mark whether the surface is currently playing its hide transition.
+    fn set_surface_exiting(&mut self, _exiting: bool) {}
     fn allows_shrink_to_fit(&self) -> bool {
         false
     }

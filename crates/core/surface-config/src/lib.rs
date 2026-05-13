@@ -8,6 +8,12 @@ pub enum SurfaceSizePolicy {
     ContentMeasured,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SurfaceDisplayTransition {
+    pub show_ms: u64,
+    pub hide_ms: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SurfaceLayoutSettings {
     pub edge: Edge,
@@ -22,6 +28,7 @@ pub struct SurfaceLayoutSettings {
     pub margin_right: i32,
     pub margin_bottom: i32,
     pub margin_left: i32,
+    pub display_transition: SurfaceDisplayTransition,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +55,7 @@ pub fn generic_surface_layout_fallback() -> SurfaceLayoutSettings {
         margin_right: 0,
         margin_bottom: 0,
         margin_left: 0,
+        display_transition: SurfaceDisplayTransition::default(),
     }
 }
 
@@ -148,6 +156,13 @@ pub fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayoutSetting
             .and_then(|v| i32::try_from(v).ok())
         {
             layout.margin_left = v;
+        }
+        if let Some(display_transition) = props
+            .get("display_transition")
+            .and_then(|p| p.get("default"))
+            .and_then(parse_display_transition)
+        {
+            layout.display_transition = display_transition;
         }
     }
 
@@ -268,8 +283,27 @@ pub fn load_frontend_module_settings(
     {
         layout.margin_left = v;
     }
+    if let Some(display_transition) = surface
+        .and_then(|value| value.get("display_transition"))
+        .and_then(parse_display_transition)
+    {
+        layout.display_transition = display_transition;
+    }
 
     FrontendModuleSettingsState { raw, layout }
+}
+
+fn parse_display_transition(value: &serde_json::Value) -> Option<SurfaceDisplayTransition> {
+    let object = value.as_object()?;
+    let show_ms = object
+        .get("show_ms")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or_default();
+    let hide_ms = object
+        .get("hide_ms")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or_default();
+    Some(SurfaceDisplayTransition { show_ms, hide_ms })
 }
 
 pub fn parse_surface_edge(value: &str) -> Option<Edge> {

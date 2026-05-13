@@ -104,6 +104,14 @@
             "type": "boolean",
             "default": false,
             "description": "Whether this surface starts visible when Mesh boots."
+          },
+          "display_transition": {
+            "type": "object",
+            "default": {
+              "show_ms": 120,
+              "hide_ms": 120
+            },
+            "description": "Display transition durations for mapping and unmapping this surface."
           }
         }
       }

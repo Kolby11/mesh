@@ -1,17 +1,21 @@
 ---
-status: diagnosed
+status: partial
 phase: 31-smoothness-proof-and-cpu-render-tuning
 source:
   - .planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-PLAN.md
 started: "2026-05-13T18:33:02+02:00"
-updated: "2026-05-13T19:01:41+02:00"
+updated: "2026-05-13T19:17:33+02:00"
 ---
 
 # Phase 31 UAT - Smoothness Proof and CPU Render Tuning
 
 ## Current Test
 
-[testing complete]
+number: 2
+name: surface_open_close
+expected: |
+  Audio popover opens and closes without a visible stall and keeps icon/text layout correct.
+awaiting: live retest after 31-02 gap closure
 
 ## Tests
 
@@ -27,17 +31,19 @@ severity: none
 expected: Audio popover opens and closes without a visible stall and keeps icon/text layout correct.
 benchmark_ref: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-BENCHMARK.md` scenario `surface_open_close`
 correctness_check: Popover content, icons, text, clipping, and background remain visually stable while opening and closing; no stale pixels remain after close.
-result: issue
+result: pending
 reported: "it does open on the correct place but when i want to close it using the button that i opened it with i need to click it three times, also the slider does not allow drag on the initial grab, i need to grab it again so this indicates some problem with focus, also the surface fades in but on close instantly disappears we should be able to configure the display transition using css and maybe component and shell config"
-severity: major
+fix_evidence: "31-02 implemented portal-only close toggling, first-grab slider regression coverage, and configurable surface hide transition lifecycle. Awaiting live retest."
+severity: none
 
 ### 3. pointer_update
 expected: Audio slider/control pointer update tracks input without visible repaint lag and keeps control state correct.
 benchmark_ref: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-BENCHMARK.md` scenario `pointer_update`
 correctness_check: Slider thumb, filled track, displayed value, and command dispatch state remain synchronized during pointer movement.
-result: issue
+result: pending
 reported: "it has a slight lag espetially on bigger value changes, also increasing the values using the buttons does not move the slider"
-severity: major
+fix_evidence: "31-02 reconciled preserved shell slider values with script-owned values and added button/backend slider synchronization regression coverage. Awaiting live retest."
+severity: none
 
 ### 4. keyboard_traversal
 expected: Tab focus traversal moves focus visibly without lag and keeps focus-visible styling correct.
@@ -51,23 +57,24 @@ severity: none
 expected: Audio backend state update refreshes visible values without a stall and keeps service-driven UI state correct.
 benchmark_ref: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-BENCHMARK.md` scenario `backend_update`
 correctness_check: Backend-provided audio availability, volume percent, muted state, and visible labels update consistently without layout corruption or stale text.
-result: issue
+result: pending
 reported: "mostly yes but when i mute the volume the volume button in the navigation bar sometimes does not react, even acts as inverted, also the slider does not respond to the button volume change"
-severity: major
+fix_evidence: "31-02 added pending mute confirmation behavior, precise button volume updates, and backend reconciliation coverage. Awaiting live retest."
+severity: none
 
 ## Summary
 
 total: 5
 passed: 2
-issues: 3
-pending: 0
+issues: 0
+pending: 3
 skipped: 0
 blocked: 0
 
 ## Gaps
 
 - truth: "Audio popover opens and closes without a visible stall and keeps icon/text layout correct."
-  status: failed
+  status: fixed_pending_uat
   reason: "User reported: it does open on the correct place but when i want to close it using the button that i opened it with i need to click it three times, also the slider does not allow drag on the initial grab, i need to grab it again so this indicates some problem with focus, also the surface fades in but on close instantly disappears we should be able to configure the display transition using css and maybe component and shell config"
   severity: major
   test: 2
@@ -85,7 +92,7 @@ blocked: 0
     - "Add configurable surface show/hide transition support so close can keep the surface mapped until the display transition completes."
   debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
 - truth: "Audio slider/control pointer update tracks input without visible repaint lag and keeps control state correct."
-  status: failed
+  status: fixed_pending_uat
   reason: "User reported: it has a slight lag espetially on bigger value changes, also increasing the values using the buttons does not move the slider"
   severity: major
   test: 3
@@ -103,7 +110,7 @@ blocked: 0
     - "Keep active-drag preservation intact so stale backend updates do not snap the slider during a drag."
   debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
 - truth: "Audio backend state update refreshes visible values without a stall and keeps service-driven UI state correct."
-  status: failed
+  status: fixed_pending_uat
   reason: "User reported: mostly yes but when i mute the volume the volume button in the navigation bar sometimes does not react, even acts as inverted, also the slider does not respond to the button volume change"
   severity: major
   test: 5
@@ -127,4 +134,4 @@ Final Phase 31 acceptance requires each scenario result to be set to `pass`, `is
 
 ## Acceptance Note
 
-Live UAT was performed against the shipped navigation/audio surfaces. Two scenarios passed and three major interaction/state gaps were diagnosed; final Phase 31 acceptance requires executing the gap-closure plan and rerunning these UAT rows.
+Live UAT was performed against the shipped navigation/audio surfaces. Two scenarios passed and three major interaction/state gaps were diagnosed. Plan 31-02 implemented automated fixes and regression coverage for those gaps; final Phase 31 acceptance requires live retest of tests 2, 3, and 5.

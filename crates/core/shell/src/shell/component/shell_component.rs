@@ -94,6 +94,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 let was_visible = self.visible;
                 self.visible = *visible;
                 if !visible {
+                    self.surface_exiting = false;
                     self.clear_selection();
                     self.focused_key = None;
                     self.focus_visible_key = None;
@@ -102,6 +103,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.close_on_focus_leave = false;
                     self.keyboard_mode_override = None;
                 } else if !was_visible {
+                    self.surface_exiting = false;
                     self.surface_pixels_invalid = true;
                     if self.surface_layout.keyboard_mode != KeyboardMode::None {
                         self.pending_auto_focus = true;
@@ -643,6 +645,18 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.surface_layout.margin_top = margin_top;
         self.surface_layout.margin_left = margin_left;
         self.invalidate_surface_config();
+    }
+
+    fn hide_transition_ms(&self) -> u64 {
+        self.surface_layout.display_transition.hide_ms
+    }
+
+    fn set_surface_exiting(&mut self, exiting: bool) {
+        if self.surface_exiting == exiting {
+            return;
+        }
+        self.surface_exiting = exiting;
+        self.invalidate_interaction_restyle();
     }
 
     fn allows_shrink_to_fit(&self) -> bool {

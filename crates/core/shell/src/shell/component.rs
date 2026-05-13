@@ -256,6 +256,7 @@ pub(super) struct FrontendSurfaceComponent {
     pub(super) keyboard_mode_override: Option<KeyboardMode>,
     pub(super) frontend_catalog: FrontendCatalog,
     pub(super) visible: bool,
+    surface_exiting: bool,
     dirty: bool,
     /// Set when only appearance changed (e.g. hover) without script-state
     /// changes. Triggers a paint via `wants_render`, but lets `paint` skip the
@@ -293,6 +294,7 @@ pub(super) struct FrontendSurfaceComponent {
     selection: Option<TextSelectionState>,
     input_values: HashMap<String, String>,
     slider_values: HashMap<String, f32>,
+    slider_script_values: HashMap<String, f32>,
     checked_values: HashMap<String, bool>,
     render_hooks_pending: bool,
     pub(super) scroll_offsets: HashMap<String, ScrollOffsetState>,
@@ -366,6 +368,7 @@ impl FrontendSurfaceComponent {
             keyboard_mode_override: None,
             frontend_catalog,
             visible: settings_state.layout.visible_on_start,
+            surface_exiting: false,
             dirty: true,
             style_only_dirty: false,
             dirty_types: ComponentDirtyFlags::TREE_REBUILD | ComponentDirtyFlags::SURFACE_CONFIG,
@@ -383,6 +386,7 @@ impl FrontendSurfaceComponent {
             selection: None,
             input_values: HashMap::new(),
             slider_values: HashMap::new(),
+            slider_script_values: HashMap::new(),
             checked_values: HashMap::new(),
             render_hooks_pending: true,
             scroll_offsets: HashMap::new(),

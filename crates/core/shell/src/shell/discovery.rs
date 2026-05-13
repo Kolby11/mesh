@@ -312,6 +312,7 @@ impl Shell {
             .entry(surface_id.clone())
             .or_insert_with(|| SurfaceState {
                 visible: initial_visibility,
+                closing_until: None,
             });
         self.surfaces.entry(surface_id.clone()).or_default();
         self.components.push(ComponentRuntime::new(component));

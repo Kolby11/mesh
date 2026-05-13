@@ -23,7 +23,7 @@ use mesh_core_module::ModuleInstance;
 use mesh_core_module::manifest::{
     CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
     ExportsSection, Manifest, ManifestSource, ModuleType, PackageSection, ProvidedInterface,
-    SurfaceLayoutSection,
+    SettingsSection, SurfaceLayoutSection,
 };
 use mesh_core_module::package::{
     InstalledModuleGraph, LoadedModuleManifest, ModuleManifestSource, ModulePackageManifest,
@@ -438,6 +438,103 @@ impl super::types::ShellComponent for FocusRecordingComponent {
 
 struct RecordingClipboard {
     writes: Arc<Mutex<Vec<String>>>,
+}
+
+#[derive(Debug, Default)]
+struct TransitionRecordingState {
+    exiting: Vec<bool>,
+}
+
+struct TransitionRecordingComponent {
+    surface_id: String,
+    hide_transition_ms: u64,
+    state: Arc<Mutex<TransitionRecordingState>>,
+}
+
+impl TransitionRecordingComponent {
+    fn new(
+        surface_id: &str,
+        hide_transition_ms: u64,
+        state: Arc<Mutex<TransitionRecordingState>>,
+    ) -> Self {
+        Self {
+            surface_id: surface_id.to_string(),
+            hide_transition_ms,
+            state,
+        }
+    }
+}
+
+impl super::types::ShellComponent for TransitionRecordingComponent {
+    fn id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn surface_id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn initial_visibility(&self) -> Option<bool> {
+        Some(true)
+    }
+
+    fn mount(
+        &mut self,
+        _ctx: super::types::ComponentContext,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_core_event(
+        &mut self,
+        _event: &super::types::CoreEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_service_event(
+        &mut self,
+        _event: &ServiceEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn tick(&mut self) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn wants_render(&self) -> bool {
+        false
+    }
+
+    fn render(
+        &mut self,
+        _surface: &mut dyn mesh_core_wayland::ShellSurface,
+    ) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn paint(
+        &mut self,
+        _theme: &mesh_core_theme::Theme,
+        _width: u32,
+        _height: u32,
+        _buffer: &mut mesh_core_render::PixelBuffer,
+    ) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn theme_changed(&mut self) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn hide_transition_ms(&self) -> u64 {
+        self.hide_transition_ms
+    }
+
+    fn set_surface_exiting(&mut self, exiting: bool) {
+        self.state.lock().unwrap().exiting.push(exiting);
+    }
 }
 
 impl ClipboardWriter for RecordingClipboard {
@@ -4545,6 +4642,114 @@ fn frontend_settings_override_surface_layout_defaults() {
     );
     assert!(settings.layout.visible_on_start);
     assert_eq!(settings.layout.size_policy, SurfaceSizePolicy::Fixed);
+}
+
+#[test]
+fn frontend_settings_load_surface_display_transition_defaults_and_overrides() {
+    let mut manifest = minimal_manifest("@mesh/base-surface");
+    manifest.settings = Some(SettingsSection {
+        namespace: Some("@mesh/base-surface".into()),
+        schema_path: None,
+        inline_schema: Some(serde_json::json!({
+            "surface": {
+                "type": "object",
+                "properties": {
+                    "display_transition": {
+                        "type": "object",
+                        "default": {
+                            "show_ms": 90,
+                            "hide_ms": 140
+                        }
+                    }
+                }
+            }
+        })),
+    });
+
+    let missing_path = unique_test_file("missing-surface-transition");
+    let default_settings = load_frontend_module_settings(&missing_path, &manifest);
+    assert_eq!(default_settings.layout.display_transition.show_ms, 90);
+    assert_eq!(default_settings.layout.display_transition.hide_ms, 140);
+
+    let path = unique_test_file("surface-transition");
+    fs::write(
+        &path,
+        r#"{
+  "surface": {
+    "display_transition": {
+      "show_ms": 25,
+      "hide_ms": 75
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let settings = load_frontend_module_settings(&path, &manifest);
+    fs::remove_file(&path).ok();
+
+    assert_eq!(settings.layout.display_transition.show_ms, 25);
+    assert_eq!(settings.layout.display_transition.hide_ms, 75);
+}
+
+#[test]
+fn hide_surface_uses_configured_exit_transition_before_unmapping() {
+    let state = Arc::new(Mutex::new(TransitionRecordingState::default()));
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(TransitionRecordingComponent::new(
+        "@test/transition",
+        120,
+        Arc::clone(&state),
+    )));
+
+    let emitted = shell
+        .apply_request(CoreRequest::HideSurface {
+            surface_id: "@test/transition".into(),
+        })
+        .unwrap();
+    assert!(
+        emitted.is_empty(),
+        "hide transition should not broadcast hidden until the timer elapses"
+    );
+    let surface = shell.core.surfaces.get("@test/transition").unwrap();
+    assert!(surface.visible);
+    assert!(surface.closing_until.is_some());
+    assert_eq!(state.lock().unwrap().exiting, vec![true]);
+
+    shell
+        .core
+        .surfaces
+        .get_mut("@test/transition")
+        .unwrap()
+        .closing_until = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
+    let emitted = shell.complete_due_surface_transitions().unwrap();
+    assert!(emitted.is_empty());
+    let surface = shell.core.surfaces.get("@test/transition").unwrap();
+    assert!(!surface.visible);
+    assert!(surface.closing_until.is_none());
+    assert_eq!(state.lock().unwrap().exiting, vec![true, false]);
+}
+
+#[test]
+fn hide_surface_without_transition_unmaps_immediately() {
+    let state = Arc::new(Mutex::new(TransitionRecordingState::default()));
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(TransitionRecordingComponent::new(
+        "@test/immediate",
+        0,
+        Arc::clone(&state),
+    )));
+
+    let emitted = shell
+        .apply_request(CoreRequest::HideSurface {
+            surface_id: "@test/immediate".into(),
+        })
+        .unwrap();
+    assert!(emitted.is_empty());
+    let surface = shell.core.surfaces.get("@test/immediate").unwrap();
+    assert!(!surface.visible);
+    assert!(surface.closing_until.is_none());
+    assert_eq!(state.lock().unwrap().exiting, vec![false]);
 }
 
 #[test]

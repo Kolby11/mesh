@@ -321,7 +321,7 @@ impl FrontendSurfaceComponent {
                             1.0
                         };
                         if let Some(value) = self.slider_step_value(&tree, &focused_key, delta) {
-                            self.slider_values.insert(focused_key.clone(), value);
+                            self.preserve_slider_value(&tree, &focused_key, value);
                             self.invalidate_interaction_restyle();
                             requests.extend(self.call_node_handler(
                                 &tree,

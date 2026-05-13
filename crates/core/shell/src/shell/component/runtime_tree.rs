@@ -463,8 +463,10 @@ pub(super) fn annotate_runtime_tree(
     focus_visible_key: &Option<String>,
     hovered_path: &[String],
     active_key: &Option<String>,
+    active_slider_key: &Option<String>,
     input_values: &HashMap<String, String>,
-    slider_values: &HashMap<String, f32>,
+    slider_values: &mut HashMap<String, f32>,
+    slider_script_values: &mut HashMap<String, f32>,
     checked_values: &HashMap<String, bool>,
     scroll_offsets: &HashMap<String, ScrollOffsetState>,
 ) {
@@ -526,16 +528,33 @@ pub(super) fn annotate_runtime_tree(
             node.attributes.insert("value".into(), value);
         }
         "slider" => {
-            let value = slider_values
-                .get(&key)
-                .copied()
-                .or_else(|| {
-                    node.attributes
-                        .get("value")
-                        .and_then(|value: &String| value.parse::<f32>().ok())
-                })
-                .unwrap_or(0.0);
-            node.attributes.insert("value".into(), value.to_string());
+            let script_value = node
+                .attributes
+                .get("value")
+                .and_then(|value: &String| value.parse::<f32>().ok());
+            let preserved_value = slider_values.get(&key).copied();
+            let value = if active_slider_key.as_deref() == Some(key_str) {
+                preserved_value.or(script_value).unwrap_or(0.0)
+            } else if let Some(script_value) = script_value {
+                match (preserved_value, slider_script_values.get(&key).copied()) {
+                    (Some(preserved), Some(previous_script))
+                        if float_eq(script_value, previous_script) =>
+                    {
+                        preserved
+                    }
+                    (Some(preserved), None) => preserved,
+                    (Some(_), Some(_)) => {
+                        slider_values.remove(&key);
+                        slider_script_values.remove(&key);
+                        script_value
+                    }
+                    (None, _) => script_value,
+                }
+            } else {
+                preserved_value.unwrap_or(0.0)
+            };
+            node.attributes
+                .insert("value".into(), format!("{value:.2}"));
         }
         "switch" | "checkbox" => {
             node.attributes.insert(
@@ -560,12 +579,18 @@ pub(super) fn annotate_runtime_tree(
             focus_visible_key,
             hovered_path,
             active_key,
+            active_slider_key,
             input_values,
             slider_values,
+            slider_script_values,
             checked_values,
             scroll_offsets,
         );
     }
+}
+
+fn float_eq(left: f32, right: f32) -> bool {
+    (left - right).abs() <= f32::EPSILON
 }
 
 fn truthy_attribute(value: &str) -> bool {
@@ -600,8 +625,10 @@ mod tests {
             &None,
             &[],
             &None,
+            &None,
             &HashMap::new(),
-            &HashMap::new(),
+            &mut HashMap::new(),
+            &mut HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
         );
@@ -612,8 +639,10 @@ mod tests {
             &None,
             &[],
             &None,
+            &None,
             &HashMap::new(),
-            &HashMap::new(),
+            &mut HashMap::new(),
+            &mut HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
         );
@@ -634,8 +663,10 @@ mod tests {
             &None,
             &[],
             &None,
+            &None,
             &HashMap::new(),
-            &HashMap::new(),
+            &mut HashMap::new(),
+            &mut HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
         );

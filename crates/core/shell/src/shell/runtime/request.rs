@@ -698,6 +698,84 @@ impl Shell {
         visible: bool,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         tracing::info!("set_surface_visibility surface_id={surface_id} visible={visible}");
+        if visible {
+            if let Some(state) = self.core.surfaces.get_mut(&surface_id) {
+                state.closing_until = None;
+            }
+            if let Some(runtime) = self
+                .components
+                .iter_mut()
+                .find(|runtime| runtime.surface_id == surface_id.as_str())
+            {
+                runtime.component.set_surface_exiting(false);
+            }
+            return self.set_surface_visibility_now(surface_id, true);
+        }
+
+        let hide_transition = self
+            .components
+            .iter()
+            .find(|runtime| runtime.surface_id == surface_id.as_str())
+            .map(|runtime| runtime.component.hide_transition_ms())
+            .unwrap_or(0);
+        let is_visible = self
+            .core
+            .surfaces
+            .get(&surface_id)
+            .map(|state| state.visible)
+            .unwrap_or_else(|| {
+                self.surfaces
+                    .get(&surface_id)
+                    .map(|surface| surface.visible)
+                    .unwrap_or(true)
+            });
+        let already_closing = self
+            .core
+            .surfaces
+            .get(&surface_id)
+            .and_then(|state| state.closing_until)
+            .is_some();
+        if hide_transition > 0 && is_visible && !already_closing {
+            let until =
+                std::time::Instant::now() + std::time::Duration::from_millis(hide_transition);
+            self.core
+                .surfaces
+                .entry(surface_id.clone())
+                .and_modify(|state| {
+                    state.visible = true;
+                    state.closing_until = Some(until);
+                })
+                .or_insert(SurfaceState {
+                    visible: true,
+                    closing_until: Some(until),
+                });
+            if self.keyboard_focus_surface.as_deref() == Some(surface_id.as_str()) {
+                self.keyboard_focus_surface = None;
+            }
+            if let Some(runtime) = self
+                .components
+                .iter_mut()
+                .find(|runtime| runtime.surface_id == surface_id.as_str())
+            {
+                runtime.component.set_keyboard_mode_override(None);
+                runtime.component.set_surface_exiting(true);
+            }
+            if let Some(previous_mode) = self.transfer_owned_keyboard_modes.remove(&surface_id) {
+                if let Some(surface) = self.surfaces.get_mut(&surface_id) {
+                    surface.keyboard_mode = previous_mode;
+                }
+            }
+            return Ok(VecDeque::new());
+        }
+
+        self.set_surface_visibility_now(surface_id, false)
+    }
+
+    fn set_surface_visibility_now(
+        &mut self,
+        surface_id: SurfaceId,
+        visible: bool,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         if !visible {
             if let Some(runtime) = self
                 .components
@@ -705,6 +783,7 @@ impl Shell {
                 .find(|runtime| runtime.surface_id == surface_id.as_str())
             {
                 runtime.component.set_keyboard_mode_override(None);
+                runtime.component.set_surface_exiting(false);
             }
             if let Some(previous_mode) = self.transfer_owned_keyboard_modes.remove(&surface_id) {
                 if let Some(surface) = self.surfaces.get_mut(&surface_id) {
@@ -718,8 +797,14 @@ impl Shell {
         self.core
             .surfaces
             .entry(surface_id.clone())
-            .and_modify(|state| state.visible = visible)
-            .or_insert(SurfaceState { visible });
+            .and_modify(|state| {
+                state.visible = visible;
+                state.closing_until = None;
+            })
+            .or_insert(SurfaceState {
+                visible,
+                closing_until: None,
+            });
         if !visible && self.keyboard_focus_surface.as_deref() == Some(surface_id.as_str()) {
             self.keyboard_focus_surface = None;
         }
@@ -728,6 +813,28 @@ impl Shell {
             surface_id,
             visible,
         })
+    }
+
+    pub(in crate::shell) fn complete_due_surface_transitions(
+        &mut self,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let now = std::time::Instant::now();
+        let due: Vec<_> = self
+            .core
+            .surfaces
+            .iter()
+            .filter_map(|(surface_id, state)| {
+                state
+                    .closing_until
+                    .is_some_and(|until| until <= now)
+                    .then(|| surface_id.clone())
+            })
+            .collect();
+        let mut emitted = VecDeque::new();
+        for surface_id in due {
+            emitted.extend(self.set_surface_visibility_now(surface_id, false)?);
+        }
+        Ok(emitted)
     }
 }
 

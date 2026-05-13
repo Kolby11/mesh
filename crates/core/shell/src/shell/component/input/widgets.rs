@@ -1,6 +1,23 @@
 use super::super::*;
 
 impl FrontendSurfaceComponent {
+    pub(super) fn preserve_slider_value(
+        &mut self,
+        tree: &WidgetNode,
+        slider_key: &str,
+        value: f32,
+    ) {
+        if let Some(script_value) = find_node_by_key(tree, slider_key).and_then(|node| {
+            node.attributes
+                .get("value")
+                .and_then(|value| value.parse::<f32>().ok())
+        }) {
+            self.slider_script_values
+                .insert(slider_key.to_string(), script_value);
+        }
+        self.slider_values.insert(slider_key.to_string(), value);
+    }
+
     pub(super) fn update_slider_from_position(
         &mut self,
         tree: &WidgetNode,
@@ -47,7 +64,7 @@ impl FrontendSurfaceComponent {
             (local_x / width).clamp(0.0, 1.0)
         };
         let value = min + (max - min) * pct;
-        self.slider_values.insert(slider_key.to_string(), value);
+        self.preserve_slider_value(tree, slider_key, value);
     }
 
     pub(super) fn slider_value(&self, tree: &WidgetNode, slider_key: &str) -> Option<f32> {

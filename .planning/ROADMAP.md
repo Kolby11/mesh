@@ -105,7 +105,7 @@ Planned work:
 Plans:
 
 - **31-01: Conservative CPU smoothness tuning and shipped-surface proof** *(Wave 1, executed 2026-05-13; verification gaps)* — tuned repaint-policy escalation, added Phase 31 benchmark proof rows, kept cache capacities unchanged based on evidence, and documented deferred live visual UAT for the five canonical shipped-surface scenarios.
-- **31-02: Close live audio surface UAT gaps** *(Wave 1, planned 2026-05-13; gap closure)* - targets the diagnosed popover close/focus/transition, slider synchronization, and audio mute/backend state reconciliation failures found during live UAT.
+- **31-02: Close live audio surface UAT gaps** *(Wave 1, complete 2026-05-13; pending live retest)* - implemented fixes for popover close/focus/transition, slider synchronization, and audio mute/backend reconciliation failures found during live UAT.
 
 Cross-cutting constraints:
 
@@ -165,4 +165,4 @@ Primary external sources:
 - Parallel paint/layout remains sequenced after this milestone proves the CPU retained pipeline is smooth enough.
 
 ---
-*Roadmap updated: 2026-05-13 after Phase 31 live UAT diagnosis*
+*Roadmap updated: 2026-05-13 after Phase 31 gap closure execution*

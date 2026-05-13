@@ -312,8 +312,10 @@ end
         &None,
         &[],
         &None,
+        &None,
         &HashMap::new(),
-        &HashMap::new(),
+        &mut HashMap::new(),
+        &mut HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
     );

@@ -181,11 +181,18 @@ impl FrontendSurfaceComponent {
             &self.focus_visible_key,
             &self.hovered_path,
             &self.pointer_down_key,
+            &self.active_slider_key,
             &self.input_values,
-            &self.slider_values,
+            &mut self.slider_values,
+            &mut self.slider_script_values,
             &self.checked_values,
             &self.scroll_offsets,
         );
+        if self.surface_exiting {
+            append_class(tree, "mesh-surface-exiting");
+            tree.attributes
+                .insert("_mesh_surface_exiting".into(), "true".into());
+        }
         self.annotate_surface_shortcuts(tree);
         annotate_overflow_tree(tree, "root", &mut self.scroll_offsets);
 
@@ -337,6 +344,20 @@ impl FrontendSurfaceComponent {
             self.record_runtime_style_diagnostics_for_node(child, rules, resolver, context);
         }
     }
+}
+
+fn append_class(node: &mut WidgetNode, class_name: &str) {
+    let class = node.attributes.entry("class".into()).or_default();
+    let has_class = class
+        .split_whitespace()
+        .any(|candidate| candidate == class_name);
+    if has_class {
+        return;
+    }
+    if !class.is_empty() {
+        class.push(' ');
+    }
+    class.push_str(class_name);
 }
 
 fn annotate_selection_node(

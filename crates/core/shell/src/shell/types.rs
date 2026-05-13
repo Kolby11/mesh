@@ -110,10 +110,14 @@ pub(super) struct ShellCoreState {
 #[derive(Debug, Clone)]
 pub(super) struct SurfaceState {
     pub(super) visible: bool,
+    pub(super) closing_until: Option<std::time::Instant>,
 }
 
 impl Default for SurfaceState {
     fn default() -> Self {
-        Self { visible: true }
+        Self {
+            visible: true,
+            closing_until: None,
+        }
     }
 }

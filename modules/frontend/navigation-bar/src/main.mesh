@@ -91,10 +91,6 @@ function onToggleAudioSurface(event)
         mesh.popover.activate(audio_surface_id, event, { focus = true })
     else
         audio_surface_hidden = true
-        mesh.events.publish("shell.hide-surface", {
-            surface_id = audio_surface_id
-        })
-        mesh.popover.hide(audio_surface_id)
     end
 end
 

@@ -58,6 +58,7 @@ impl Shell {
             }
 
             pending.extend(self.tick_components()?);
+            pending.extend(self.complete_due_surface_transitions()?);
             self.drain_requests(&mut pending)?;
             self.flush_throttled_commands();
             self.render_components()?;

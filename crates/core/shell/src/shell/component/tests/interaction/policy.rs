@@ -237,6 +237,305 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
 }
 
 #[test]
+fn audio_popover_first_slider_grab_dispatches_change() {
+    let mut component =
+        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    let theme = default_theme();
+    let width = 280;
+    let height = 180;
+    let mut buffer = PixelBuffer::new(width, height);
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 20,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
+        .expect("audio popover slider");
+    let drag_x = slider.layout.x + slider.layout.width * 0.7;
+    let drag_y = slider.layout.y + slider.layout.height * 0.5;
+    let requests = component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x: drag_x,
+                y: drag_y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+
+    match requests.as_slice() {
+        [
+            CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+                ..
+            },
+        ] => {
+            assert_eq!(interface, "mesh.audio");
+            assert_eq!(command, "set_volume");
+            let volume = payload["volume"].as_f64().expect("numeric volume payload");
+            assert!(
+                (volume - 0.7).abs() < 0.03,
+                "first slider grab should dispatch the grabbed value, got {volume}"
+            );
+        }
+        other => panic!("expected one set_volume request on first grab, got {other:?}"),
+    }
+}
+
+#[test]
+fn audio_popover_button_volume_updates_slider_after_drag() {
+    let mut component =
+        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    let theme = default_theme();
+    let width = 280;
+    let height = 180;
+    let mut buffer = PixelBuffer::new(width, height);
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
+        .expect("audio popover slider");
+    let drag_x = slider.layout.x + slider.layout.width * 0.8;
+    let drag_y = slider.layout.y + slider.layout.height * 0.5;
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x: drag_x,
+                y: drag_y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x: drag_x,
+                y: drag_y,
+                pressed: false,
+            },
+        )
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let requests = component
+        .call_namespaced_handler("onVolumeDown", &[])
+        .unwrap();
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ServiceCommand { command, payload, .. }
+                if command == "set_volume"
+                    && (payload["volume"].as_f64().unwrap_or_default() - 0.75).abs() < 0.03
+        )),
+        "volume-down button should send precise set_volume after drag: {requests:?}"
+    );
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
+        .and_then(|slider| slider.attributes.get("value"))
+        .and_then(|value| value.parse::<f32>().ok())
+        .expect("painted slider value");
+    assert!(
+        (rendered_value - 0.75).abs() < 0.03,
+        "button volume change should move visible slider after drag, got {rendered_value}"
+    );
+}
+
+#[test]
+fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
+    let mut component =
+        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    let theme = default_theme();
+    let width = 280;
+    let height = 180;
+    let mut buffer = PixelBuffer::new(width, height);
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
+        .expect("audio popover slider");
+    let drag_x = slider.layout.x + slider.layout.width * 0.8;
+    let drag_y = slider.layout.y + slider.layout.height * 0.5;
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x: drag_x,
+                y: drag_y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x: drag_x,
+                y: drag_y,
+                pressed: false,
+            },
+        )
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 80,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 35,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
+        .and_then(|slider| slider.attributes.get("value"))
+        .and_then(|value| value.parse::<f32>().ok())
+        .expect("painted slider value");
+    assert!(
+        (rendered_value - 0.35).abs() < 0.03,
+        "backend update should move visible slider after preserved state clears, got {rendered_value}"
+    );
+}
+
+#[test]
+fn audio_popover_mute_pending_waits_for_backend_confirmation() {
+    let mut component =
+        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    let theme = default_theme();
+    let width = 280;
+    let height = 180;
+    let mut buffer = PixelBuffer::new(width, height);
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 42,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let requests = component
+        .call_namespaced_handler("onToggleMute", &[])
+        .unwrap();
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ServiceCommand { command, .. } if command == "toggle_mute"
+        )),
+        "mute action should dispatch toggle_mute: {requests:?}"
+    );
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let optimistic_text = rendered_text(&component);
+    assert!(
+        optimistic_text.iter().any(|text| text == "Unmute"),
+        "optimistic mute state should render immediately: {optimistic_text:?}"
+    );
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 42,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let stale_backend_text = rendered_text(&component);
+    assert!(
+        stale_backend_text.iter().any(|text| text == "Unmute"),
+        "stale backend update should not invert optimistic mute state: {stale_backend_text:?}"
+    );
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 42,
+                "muted": true
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let confirmed_text = rendered_text(&component);
+    assert!(
+        confirmed_text.iter().any(|text| text == "Unmute"),
+        "confirmed mute state should keep popover and backend aligned: {confirmed_text:?}"
+    );
+}
+
+#[test]
 fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
     let mut component =
         real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
