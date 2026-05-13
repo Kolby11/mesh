@@ -32,6 +32,16 @@ Success criteria:
 3. Existing `@mesh/navigation-bar` mute shortcut remains compatible through the new declaration contract.
 4. Invalid declaration shapes produce diagnostics without blocking unrelated valid module data.
 
+Plans:
+
+- **32-01: Keybind declaration contract and compatibility bridge** *(Wave 1, ready)* - add normalized keybind declaration types, bridge current settings shortcuts through typed declarations, and prove navigation-bar compatibility.
+
+Cross-cutting constraints:
+
+- Preserve current navigation-bar `keyboard.shortcuts.mute` behavior and `KeyboardSettings.surface_shortcuts` override identity by action id.
+- Do not implement locale fallback, duplicate detection, or XDG portal/global shortcut behavior in Phase 32.
+- Shell-global shortcut and existing input precedence must remain unchanged.
+
 ### Phase 33: Locale-Aware Keybind Resolution
 
 **Goal:** Resolve effective keybinds from module defaults, active locale, and user overrides with deterministic precedence.

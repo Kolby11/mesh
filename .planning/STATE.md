@@ -9,7 +9,7 @@ last_activity: 2026-05-13
 progress:
   total_phases: 5
   completed_phases: 0
-  total_plans: 0
+  total_plans: 1
   completed_plans: 0
   percent: 0
 ---
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-13)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: -
-Status: Roadmap drafted
-Last activity: 2026-05-13 - Milestone v1.6 roadmap drafted
+Phase: 32 - Keybind Declaration Contract
+Plan: 32-01 ready
+Status: Ready to execute
+Last activity: 2026-05-13 - Phase 32 planned
 
 ## Decisions
 
@@ -207,5 +207,5 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 
 ## Operator Next Steps
 
-- Review and approve the v1.6 roadmap, then start Phase 32 planning.
+- Execute Phase 32 with `$gsd-execute-phase 32`.
 - Review deferred polish when planning future transition/smoothness work: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`
