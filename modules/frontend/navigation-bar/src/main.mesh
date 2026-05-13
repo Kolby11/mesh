@@ -86,9 +86,10 @@ function onToggleAudioSurface(event)
             margin_top = margin_top,
             margin_left = margin_left
         })
-        -- Register the trigger so Tab from the volume button transfers
-        -- focus into the popover, and Shift+Tab from inside returns here.
-        mesh.popover.activate(audio_surface_id, event, { focus = true })
+        -- Pointer activation should not steal focus before the user's first
+        -- interaction with the popover. Keyboard activation still enters it.
+        local should_focus = event.trigger ~= nil and event.trigger.type == "keyboard"
+        mesh.popover.activate(audio_surface_id, event, { focus = should_focus })
     else
         audio_surface_hidden = true
     end
@@ -96,7 +97,12 @@ end
 
 function onMuteShortcut()
     if audio_ok and audio and audio.available ~= false then
-        audio.toggle_mute()
+        local next_muted = not (audio.muted or false)
+        if type(audio.set_muted) == "function" then
+            audio.set_muted("default", next_muted)
+        else
+            audio.toggle_mute()
+        end
     end
 end
 </script>

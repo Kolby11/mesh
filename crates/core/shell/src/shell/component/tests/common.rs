@@ -44,6 +44,21 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                 coalesce: false,
             },
             InterfaceMethod {
+                name: "set_muted".into(),
+                args: vec![
+                    InterfaceArgument {
+                        name: "device_id".into(),
+                        arg_type: "string".into(),
+                    },
+                    InterfaceArgument {
+                        name: "muted".into(),
+                        arg_type: "boolean".into(),
+                    },
+                ],
+                returns: None,
+                coalesce: false,
+            },
+            InterfaceMethod {
                 name: "volume_up".into(),
                 args: Vec::new(),
                 returns: None,

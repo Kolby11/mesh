@@ -93,6 +93,7 @@ impl Shell {
             backend_runtimes: HashMap::new(),
             backend_runtime_statuses: HashMap::new(),
             latest_service_state: HashMap::new(),
+            pending_audio_muted: None,
             command_throttle: HashMap::new(),
             profiling: runtime::profiling::ProfilingRuntimeState::default(),
         }

@@ -383,6 +383,7 @@ pub struct Shell {
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,
     backend_runtime_statuses: HashMap<(String, String), BackendRuntimeStatusEntry>,
     latest_service_state: HashMap<String, LatestServiceState>,
+    pending_audio_muted: Option<bool>,
     command_throttle: HashMap<(String, String), CommandThrottleState>,
     profiling: runtime::profiling::ProfilingRuntimeState,
 }

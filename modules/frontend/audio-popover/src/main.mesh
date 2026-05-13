@@ -159,7 +159,11 @@ function onToggleMute()
         local next_muted = not audio_muted
         pending_muted_state = next_muted
         sync_audio_copy(slider_value * 100, next_muted)
-        audio.toggle_mute()
+        if type(audio.set_muted) == "function" then
+            audio.set_muted("default", next_muted)
+        else
+            audio.toggle_mute()
+        end
     else
         audio_status = "Audio controls unavailable"
     end

@@ -191,17 +191,30 @@ fn test_contract(interface: &str) -> InterfaceContract {
                 description: None,
             },
             ContractStateField {
+                name: "muted".to_string(),
+                field_type: "boolean".to_string(),
+                description: None,
+            },
+            ContractStateField {
                 name: "source_module".to_string(),
                 field_type: "string".to_string(),
                 description: None,
             },
         ],
-        methods: vec![InterfaceMethod {
-            name: "set_volume".to_string(),
-            args: Vec::new(),
-            returns: Some("Result".to_string()),
-            coalesce: false,
-        }],
+        methods: vec![
+            InterfaceMethod {
+                name: "set_volume".to_string(),
+                args: Vec::new(),
+                returns: Some("Result".to_string()),
+                coalesce: false,
+            },
+            InterfaceMethod {
+                name: "set_muted".to_string(),
+                args: Vec::new(),
+                returns: Some("Result".to_string()),
+                coalesce: false,
+            },
+        ],
         events: Vec::new(),
         types: HashMap::new(),
         capabilities: ContractCapabilities::default(),
@@ -1959,6 +1972,79 @@ fn profiling_disabled_backend_paths_do_not_fabricate_snapshots() {
     assert!(
         shell.build_debug_snapshot().profiling.is_none(),
         "profiling-disabled backend attribution paths must stay silent"
+    );
+}
+
+#[test]
+fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+    let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    shell.register_component(Box::new(RecordingComponent::new(events.clone())));
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.audio.control",
+    ));
+
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 42.0, "muted": true }),
+        ))
+        .unwrap();
+    events.lock().unwrap().clear();
+
+    let result = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_muted",
+        &serde_json::json!({ "device_id": "default", "muted": false }),
+        "@mesh/audio-popover",
+        &capabilities,
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(true));
+    assert_eq!(result["optimistic"], serde_json::json!(true));
+    assert_eq!(rx.try_recv().unwrap().command, "set_muted");
+    assert_eq!(
+        events.lock().unwrap().last().and_then(|event| match event {
+            ServiceEvent::Updated { payload, .. } => payload.get("muted").cloned(),
+        }),
+        Some(serde_json::json!(false)),
+        "optimistic set_muted(false) should update frontend consumers immediately"
+    );
+
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 42.0, "muted": true }),
+        ))
+        .unwrap();
+    assert_eq!(
+        events.lock().unwrap().last().and_then(|event| match event {
+            ServiceEvent::Updated { payload, .. } => payload.get("muted").cloned(),
+        }),
+        Some(serde_json::json!(false)),
+        "stale backend muted=true must not flip UI while set_muted(false) is pending"
+    );
+
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 42.0, "muted": false }),
+        ))
+        .unwrap();
+    assert_eq!(
+        shell.pending_audio_muted, None,
+        "matching backend confirmation should clear pending mute state"
     );
 }
 

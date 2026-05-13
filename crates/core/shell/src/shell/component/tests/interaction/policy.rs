@@ -487,9 +487,12 @@ fn audio_popover_mute_pending_waits_for_backend_confirmation() {
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ServiceCommand { command, .. } if command == "toggle_mute"
+            CoreRequest::ServiceCommand { command, payload, .. }
+                if command == "set_muted"
+                    && payload["device_id"] == serde_json::json!("default")
+                    && payload["muted"] == serde_json::json!(true)
         )),
-        "mute action should dispatch toggle_mute: {requests:?}"
+        "mute action should dispatch idempotent set_muted(true): {requests:?}"
     );
     component.paint(&theme, width, height, &mut buffer).unwrap();
     let optimistic_text = rendered_text(&component);
@@ -532,6 +535,44 @@ fn audio_popover_mute_pending_waits_for_backend_confirmation() {
     assert!(
         confirmed_text.iter().any(|text| text == "Unmute"),
         "confirmed mute state should keep popover and backend aligned: {confirmed_text:?}"
+    );
+
+    let requests = component
+        .call_namespaced_handler("onToggleMute", &[])
+        .unwrap();
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ServiceCommand { command, payload, .. }
+                if command == "set_muted"
+                    && payload["device_id"] == serde_json::json!("default")
+                    && payload["muted"] == serde_json::json!(false)
+        )),
+        "second mute action should dispatch idempotent set_muted(false): {requests:?}"
+    );
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let optimistic_unmute_text = rendered_text(&component);
+    assert!(
+        optimistic_unmute_text.iter().any(|text| text == "Mute"),
+        "optimistic unmute should render immediately: {optimistic_unmute_text:?}"
+    );
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 42,
+                "muted": true
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let stale_second_backend_text = rendered_text(&component);
+    assert!(
+        stale_second_backend_text.iter().any(|text| text == "Mute"),
+        "stale backend update after unmute request should not flip the popover back: {stale_second_backend_text:?}"
     );
 }
 

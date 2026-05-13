@@ -351,8 +351,11 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         .unwrap();
     assert!(matches!(
         shortcut_requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, .. }]
-            if interface == "mesh.audio" && command == "toggle_mute"
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+            if interface == "mesh.audio"
+                && command == "set_muted"
+                && payload["device_id"] == serde_json::json!("default")
+                && payload["muted"] == serde_json::json!(true)
     ));
 
     let tree = component
@@ -686,6 +689,70 @@ fn navigation_bar_keyboard_activation_opens_volume_surface_on_real_surface() {
                 if surface_id == "@mesh/audio-popover" && *focus
         )),
         "Enter on the focused volume button should activate the audio popover: {requests:?}"
+    );
+}
+
+#[test]
+fn navigation_bar_pointer_activation_opens_volume_surface_without_stealing_focus() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    let volume_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+    )
+    .expect("rendered volume button");
+    let volume_key = volume_button
+        .attributes
+        .get("_mesh_key")
+        .expect("volume button mesh key")
+        .clone();
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, &volume_key, 0.0, 0.0).expect("volume bounds");
+    let x = (left + right) * 0.5;
+    let y = (top + bottom) * 0.5;
+
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    let requests = component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: false,
+            },
+        )
+        .unwrap();
+
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ActivatePopover { surface_id, focus, .. }
+                if surface_id == "@mesh/audio-popover" && !*focus
+        )),
+        "pointer click should show/register the popover without transferring focus: {requests:?}"
     );
 }
 

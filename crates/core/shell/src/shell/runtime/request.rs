@@ -394,7 +394,7 @@ impl Shell {
             });
         }
 
-        if self.service_handlers.contains_key(interface) {
+        let mut dispatch_result = if self.service_handlers.contains_key(interface) {
             let coalesce = self.service_command_is_coalescable(interface, command);
             if coalesce {
                 let key = (interface.to_string(), command.to_string());
@@ -457,7 +457,21 @@ impl Shell {
                 "error": "service_unavailable",
                 "status": "service_unavailable",
             })
+        };
+
+        if dispatch_result
+            .get("ok")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+            && canonical_interface_name(interface) == "mesh.audio"
+            && command == "set_muted"
+            && let Some(muted) = payload.get("muted").and_then(|value| value.as_bool())
+        {
+            self.apply_optimistic_audio_muted_state(muted);
+            dispatch_result["optimistic"] = serde_json::json!(true);
         }
+
+        dispatch_result
     }
 
     fn send_service_command_message(

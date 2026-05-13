@@ -5,6 +5,7 @@ impl Shell {
         &mut self,
         event: ServiceEvent,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let event = self.normalize_service_event(event);
         let profiling_started = self
             .profiling_enabled()
             .then_some(std::time::Instant::now());
@@ -29,6 +30,30 @@ impl Shell {
             );
         }
         Ok(requests)
+    }
+
+    fn normalize_service_event(&mut self, event: ServiceEvent) -> ServiceEvent {
+        let ServiceEvent::Updated {
+            service,
+            source_module,
+            mut payload,
+        } = event;
+        let interface = canonical_interface_name(&service);
+        if interface == "mesh.audio"
+            && let Some(requested_muted) = self.pending_audio_muted
+        {
+            let backend_muted = payload.get("muted").and_then(|value| value.as_bool());
+            if backend_muted == Some(requested_muted) {
+                self.pending_audio_muted = None;
+            } else {
+                payload["muted"] = serde_json::json!(requested_muted);
+            }
+        }
+        ServiceEvent::Updated {
+            service,
+            source_module,
+            payload,
+        }
     }
 
     pub(in crate::shell) fn record_latest_service_state(&mut self, event: &ServiceEvent) -> bool {
@@ -69,7 +94,7 @@ impl Shell {
             );
             return false;
         }
-        self.validate_service_state_shape(&interface, source_module, payload);
+        self.validate_service_state_shape(&interface, source_module, &payload);
         self.latest_service_state.insert(
             interface.clone(),
             LatestServiceState {
@@ -79,6 +104,40 @@ impl Shell {
             },
         );
         true
+    }
+
+    pub(in crate::shell) fn apply_optimistic_audio_muted_state(&mut self, muted: bool) {
+        self.pending_audio_muted = Some(muted);
+        let interface = "mesh.audio".to_string();
+        let provider_id = self
+            .backend_runtimes
+            .get(&interface)
+            .map(|slot| slot.provider_id.clone())
+            .or_else(|| {
+                self.latest_service_state
+                    .get(&interface)
+                    .map(|latest| latest.provider_id.clone())
+            })
+            .unwrap_or_else(|| "@mesh/optimistic-audio".to_string());
+        let mut payload = self
+            .latest_service_state
+            .get(&interface)
+            .map(|latest| latest.state.clone())
+            .unwrap_or_else(|| serde_json::json!({ "available": true }));
+        payload["muted"] = serde_json::json!(muted);
+        self.latest_service_state.insert(
+            interface.clone(),
+            LatestServiceState {
+                interface: interface.clone(),
+                provider_id: provider_id.clone(),
+                state: payload.clone(),
+            },
+        );
+        let _ = self.deliver_service_event(&ServiceEvent::Updated {
+            service: interface,
+            source_module: provider_id,
+            payload,
+        });
     }
 
     pub(in crate::shell) fn deliver_service_event(
