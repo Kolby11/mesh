@@ -334,11 +334,7 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
     );
 
     let phase31_scenarios = [
-        (
-            "hover",
-            hover_records.as_slice(),
-            &hover_invalidation,
-        ),
+        ("hover", hover_records.as_slice(), &hover_invalidation),
         (
             "surface_open_close",
             surface_open_close_records.as_slice(),

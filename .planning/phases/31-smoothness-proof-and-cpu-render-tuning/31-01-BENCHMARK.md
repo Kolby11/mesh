@@ -3,7 +3,7 @@ phase: 31
 plan: 01
 title: Smoothness tuning benchmark proof
 created: 2026-05-13
-status: draft
+status: complete
 canonical_scenarios:
   - hover
   - surface_open_close
@@ -26,11 +26,11 @@ Captured with:
 
 | Scenario | Phase 26 baseline | Phase 30 cache proof | Phase 31 after | Policy/filtering | UAT result | Acceptance decision |
 | --- | --- | --- | --- | --- | --- | --- |
-| `hover` | paint 3244us, traversal 1877us, full rebuild | text hits 5/misses 0/shaping 0us; raster hits 2/misses 2/bypasses 0 | paint 1498us, traversal 484us, text hits 5/misses 0/shaping 0us, raster hits 2/misses 2/bypasses 0 | `full_surface`, filtered 66, skipped 0, spans 34, fallbacks 1 | pending | pending |
-| `surface_open_close` | paint 33449us, traversal 31240us, shaping 1251us, full rebuild | text hits 0/misses 6/shaping 1493us; raster hits 0/misses 1/bypasses 0 | paint 32414us, traversal 30352us, text hits 0/misses 6/shaping 1289us, raster hits 0/misses 1/bypasses 0 | `full_surface`, filtered 34, skipped 0, spans 18, fallbacks 1 | pending | pending |
-| `pointer_update` | paint 2005us, traversal 1094us, layout 106us, full rebuild | text hits 4/misses 2/shaping 272us; raster hits 1/misses 0/bypasses 0 | paint 929us, traversal 669us, text hits 4/misses 2/shaping 251us, raster hits 1/misses 0/bypasses 0 | `full_surface`, filtered 34, skipped 0, spans 18, fallbacks 1 | pending | pending |
-| `keyboard_traversal` | paint 3037us, traversal 1694us, full rebuild | text hits 5/misses 0/shaping 0us; raster hits 4/misses 0/bypasses 0 | paint 455us, traversal 445us, text hits 5/misses 0/shaping 0us, raster hits 4/misses 0/bypasses 0 | `full_surface`, filtered 66, skipped 0, spans 34, fallbacks 1 | pending | pending |
-| `backend_update` | paint 31468us, traversal 30011us, shaping 0us, full rebuild | text hits 3/misses 2/shaping 1365us; raster hits 4/misses 0/bypasses 0 | paint 33832us, traversal 32458us, text hits 3/misses 2/shaping 1367us, raster hits 4/misses 0/bypasses 0 | `full_surface`, filtered 66, skipped 0, spans 34, fallbacks 1 | pending | pending |
+| `hover` | paint 3244us, traversal 1877us, full rebuild | text hits 5/misses 0/shaping 0us; raster hits 2/misses 2/bypasses 0 | paint 1514us, traversal 480us, text hits 5/misses 0/shaping 0us, raster hits 2/misses 2/bypasses 0 | `full_surface`, filtered 66, skipped 0, spans 34, fallbacks 1 | skipped - visual UAT not run in this headless session | deferred |
+| `surface_open_close` | paint 33449us, traversal 31240us, shaping 1251us, full rebuild | text hits 0/misses 6/shaping 1493us; raster hits 0/misses 1/bypasses 0 | paint 32045us, traversal 29960us, text hits 0/misses 6/shaping 1312us, raster hits 0/misses 1/bypasses 0 | `full_surface`, filtered 34, skipped 0, spans 18, fallbacks 1 | skipped - visual UAT not run in this headless session | deferred |
+| `pointer_update` | paint 2005us, traversal 1094us, layout 106us, full rebuild | text hits 4/misses 2/shaping 272us; raster hits 1/misses 0/bypasses 0 | paint 884us, traversal 618us, text hits 4/misses 2/shaping 259us, raster hits 1/misses 0/bypasses 0 | `full_surface`, filtered 34, skipped 0, spans 18, fallbacks 1 | skipped - visual UAT not run in this headless session | deferred |
+| `keyboard_traversal` | paint 3037us, traversal 1694us, full rebuild | text hits 5/misses 0/shaping 0us; raster hits 4/misses 0/bypasses 0 | paint 451us, traversal 443us, text hits 5/misses 0/shaping 0us, raster hits 4/misses 0/bypasses 0 | `full_surface`, filtered 66, skipped 0, spans 34, fallbacks 1 | skipped - visual UAT not run in this headless session | deferred |
+| `backend_update` | paint 31468us, traversal 30011us, shaping 0us, full rebuild | text hits 3/misses 2/shaping 1365us; raster hits 4/misses 0/bypasses 0 | paint 33434us, traversal 32100us, text hits 3/misses 2/shaping 1327us, raster hits 4/misses 0/bypasses 0 | `full_surface`, filtered 66, skipped 0, spans 34, fallbacks 1 | skipped - visual UAT not run in this headless session | deferred |
 
 ## Repaint Policy Tuning Evidence
 
@@ -71,3 +71,7 @@ The canonical proof test emits one `PHASE31_PROOF` row per scenario with these f
 ## Acceptance Rule
 
 A row can be marked `accepted` only when the final Phase 31 proof row and the matching `31-UAT.md` result both support smoother visible behavior with no visual or interaction correctness regression. Counter-only wins are marked `rejected` or `deferred`.
+
+## Future Boundary
+
+All five rows are marked `deferred` rather than `accepted` because this execution environment produced automated benchmark proof but did not perform live visual UAT. The remaining acceptance work belongs to `$gsd-verify-work 31` or a manual UAT pass on the shipped shell surfaces. If live UAT still reports lag after these conservative CPU threshold changes, the next candidates remain the planned Skia/GPU renderer investigation, parallel paint/layout exploration after retained ownership boundaries are proven, or deeper diagnostics overlays for filtered command hits and overdraw.
