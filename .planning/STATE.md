@@ -7,7 +7,7 @@ stopped_at: defining v1.6 requirements and roadmap
 last_updated: "2026-05-13T21:15:00+02:00"
 last_activity: 2026-05-13
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -27,8 +27,8 @@ See: `.planning/PROJECT.md` (updated 2026-05-13)
 
 Phase: Not started (defining requirements)
 Plan: -
-Status: Defining requirements
-Last activity: 2026-05-13 - Milestone v1.6 started
+Status: Roadmap drafted
+Last activity: 2026-05-13 - Milestone v1.6 roadmap drafted
 
 ## Decisions
 
@@ -207,5 +207,5 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 
 ## Operator Next Steps
 
-- Define v1.6 requirements and roadmap for localized keybind management.
+- Review and approve the v1.6 roadmap, then start Phase 32 planning.
 - Review deferred polish when planning future transition/smoothness work: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`
