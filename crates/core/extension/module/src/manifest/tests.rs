@@ -118,6 +118,124 @@ fn parses_module_json_keybind_declarations() {
     assert_eq!(action.trigger.kind, KeybindTriggerKind::Shortcut);
     assert_eq!(action.trigger.key.as_deref(), Some("a"));
     assert_eq!(action.trigger.modifiers, vec!["ctrl"]);
+    assert!(action.localized_triggers.is_empty());
+}
+
+#[test]
+fn parses_module_json_localized_keybind_triggers() {
+    let content = r#"
+{
+  "id": "@mesh/panel",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "keybinds": {
+    "actions": {
+      "accept": {
+        "handler": "acceptSelection",
+        "scope": "surface",
+        "label_i18n_key": "actions.accept",
+        "trigger": {
+          "kind": "access_key",
+          "key": "a"
+        },
+        "localized_triggers": {
+          "sk": {
+            "kind": "access_key",
+            "key": "p"
+          },
+          "sk-SK": {
+            "kind": "access_key",
+            "key": "r"
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+    let parsed: JsonManifest = serde_json::from_str(content).unwrap();
+    let manifest = parsed.into_manifest();
+    manifest.validate_keybinds().unwrap();
+
+    let action = &manifest.keybinds.actions["accept"];
+    assert_eq!(action.localized_triggers["sk"].kind, KeybindTriggerKind::AccessKey);
+    assert_eq!(action.localized_triggers["sk"].key.as_deref(), Some("p"));
+    assert_eq!(
+        action.localized_triggers["sk-SK"].kind,
+        KeybindTriggerKind::AccessKey
+    );
+    assert_eq!(action.localized_triggers["sk-SK"].key.as_deref(), Some("r"));
+}
+
+#[test]
+fn localized_keybind_triggers_allow_blank_entries_for_runtime_fallback() {
+    let content = r#"
+{
+  "id": "@mesh/panel",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "keybinds": {
+    "actions": {
+      "accept": {
+        "handler": "acceptSelection",
+        "trigger": {
+          "kind": "access_key",
+          "key": "a"
+        },
+        "localized_triggers": {
+          "sk": {
+            "kind": "access_key",
+            "key": " "
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+    let parsed: JsonManifest = serde_json::from_str(content).unwrap();
+    let manifest = parsed.into_manifest();
+
+    manifest.validate_keybinds().unwrap();
+}
+
+#[test]
+fn invalid_localized_keybind_locale_is_rejected() {
+    let content = r#"
+{
+  "id": "@mesh/panel",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "keybinds": {
+    "actions": {
+      "accept": {
+        "handler": "acceptSelection",
+        "trigger": {
+          "kind": "access_key",
+          "key": "a"
+        },
+        "localized_triggers": {
+          " ": {
+            "kind": "access_key",
+            "key": "p"
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+    let parsed: JsonManifest = serde_json::from_str(content).unwrap();
+    let manifest = parsed.into_manifest();
+    let err = manifest.validate_keybinds().unwrap_err();
+
+    assert!(err.contains("localized_triggers cannot contain empty locale ids"));
 }
 
 #[test]

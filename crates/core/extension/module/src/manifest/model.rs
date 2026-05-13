@@ -428,6 +428,8 @@ pub struct KeybindAction {
     pub label_i18n_key: Option<String>,
     #[serde(default)]
     pub trigger: KeybindTrigger,
+    #[serde(default)]
+    pub localized_triggers: HashMap<String, KeybindTrigger>,
 }
 
 impl KeybindAction {
@@ -449,7 +451,15 @@ impl KeybindAction {
             &self.label_i18n_key,
             &format!("mesh.keybinds.actions.{action_id}.label_i18n_key"),
         )?;
-        self.trigger.validate(action_id)
+        self.trigger.validate(action_id)?;
+        for locale in self.localized_triggers.keys() {
+            if locale.trim().is_empty() {
+                return Err(format!(
+                    "mesh.keybinds.actions.{action_id}.localized_triggers cannot contain empty locale ids"
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
