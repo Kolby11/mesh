@@ -2020,6 +2020,25 @@ fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() 
         "optimistic set_muted(false) should update frontend consumers immediately"
     );
 
+    let delivered_events = events.lock().unwrap().len();
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/stale-audio",
+            serde_json::json!({ "available": true, "percent": 42.0, "muted": false }),
+        ))
+        .unwrap();
+    assert_eq!(
+        events.lock().unwrap().len(),
+        delivered_events,
+        "inactive providers must not deliver audio state while set_muted is pending"
+    );
+    assert_eq!(
+        shell.pending_audio_muted,
+        Some(false),
+        "inactive provider updates must not clear pending mute state"
+    );
+
     shell
         .broadcast_service_event(service_update(
             "mesh.audio",

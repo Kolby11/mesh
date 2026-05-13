@@ -39,6 +39,28 @@ impl Shell {
             mut payload,
         } = event;
         let interface = canonical_interface_name(&service);
+        let shell_authoritative_theme_update =
+            interface == "mesh.theme" && source_module == "@mesh/shell";
+        if self.backend_runtimes.get(&interface).is_some_and(|slot| {
+            slot.provider_id != source_module && !shell_authoritative_theme_update
+        }) || self
+            .backend_runtime_statuses
+            .get(&(interface.clone(), source_module.clone()))
+            .is_some_and(|entry| {
+                matches!(
+                    entry.status,
+                    BackendRuntimeStatus::InitFailed
+                        | BackendRuntimeStatus::Failed
+                        | BackendRuntimeStatus::Stopped
+                )
+            })
+        {
+            return ServiceEvent::Updated {
+                service,
+                source_module,
+                payload,
+            };
+        }
         if interface == "mesh.audio"
             && let Some(requested_muted) = self.pending_audio_muted
         {
