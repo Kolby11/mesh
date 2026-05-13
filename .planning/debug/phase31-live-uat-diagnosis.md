@@ -56,3 +56,22 @@ Fix direction for 31-03:
 - Make the first pointer event after popover activation deliver to the physical target after clearing transferred keyboard ownership.
 - Ensure newly visible fixed-size surfaces have configured geometry and a current tree before the first hit test.
 - Replace frontend mute toggles with requested-state `set_muted` calls where supported, and render nav/popover from the same pending/confirmed mute model.
+
+## Retest Update - 2026-05-13T20:08:13+02:00
+
+Plan 31-03 fixed the immediate slider grab path. Live retest now shows two remaining issues:
+
+- Test 2: the trigger can close the popover after pointer hover leaves and re-enters the button, but not immediately while the pointer remains hovering the button.
+- Test 5: the mute button/nav icon mismatch persists.
+
+Updated root causes:
+
+1. **Same-hover trigger close still depends on portal tick/interaction refresh.** The open path explicitly calls `mesh.popover.activate(...)`, but the close path only flips `audio_surface_hidden = true` and relies on the portal hidden binding to emit `HideSurface` later. The user's hover-out/back workaround indicates the same-position click path is still missing a shell-confirmed close action or a regression that forces the trigger to close without pointer movement.
+2. **Mute state still has two frontend reconciliation models.** Shell optimistic audio state now normalizes `mesh.audio.muted`, but the audio popover still has local `pending_muted_state`/`audio_muted` while the navigation volume button renders canonical service fields. Rapid mute true -> false changes can still leave the popover-local model and nav service model briefly disagreeing.
+
+Fix direction for 31-04:
+
+- Add a same-hover trigger regression: open the popover, keep pointer coordinates on the volume button, click again, and assert a hide request is emitted on the first release.
+- Make the close branch issue an explicit shell/popover hide request, while retaining shell visibility events as the source of truth for the portal hidden binding.
+- Remove competing popover-local mute pending state and render both popover and navigation from shell-normalized `mesh.audio.muted`.
+- Add a cross-component mute regression that verifies nav icon/status and popover mute label agree across false -> true -> false with stale backend updates.

@@ -1,21 +1,17 @@
 ---
-status: partial
+status: complete
 phase: 31-smoothness-proof-and-cpu-render-tuning
 source:
   - .planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-PLAN.md
 started: "2026-05-13T18:33:02+02:00"
-updated: "2026-05-13T19:48:18+02:00"
+updated: "2026-05-13T20:08:13+02:00"
 ---
 
 # Phase 31 UAT - Smoothness Proof and CPU Render Tuning
 
 ## Current Test
 
-number: 2
-name: surface_open_close
-expected: |
-  Audio popover opens and closes without a visible stall and keeps icon/text layout correct.
-awaiting: live retest after 31-03 gap closure
+[testing complete]
 
 ## Tests
 
@@ -31,16 +27,16 @@ severity: none
 expected: Audio popover opens and closes without a visible stall and keeps icon/text layout correct.
 benchmark_ref: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-BENCHMARK.md` scenario `surface_open_close`
 correctness_check: Popover content, icons, text, clipping, and background remain visually stable while opening and closing; no stale pixels remain after close.
-result: pending
-reported: "no when i open it iam unable to click buttons in the navigation bar on first try it take 3 attempts"
+result: issue
+reported: "it now works when i hover out of the button and back inside but not immediately without the hover lose"
 fix_evidence: "31-03 changed pointer-open popover activation to register without stealing focus, preserved keyboard activation focus transfer, and added a regression proving pointer activation emits ActivatePopover with focus=false. Awaiting live retest."
-severity: none
+severity: major
 
 ### 3. pointer_update
 expected: Audio slider/control pointer update tracks input without visible repaint lag and keeps control state correct.
 benchmark_ref: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-BENCHMARK.md` scenario `pointer_update`
 correctness_check: Slider thumb, filled track, displayed value, and command dispatch state remain synchronized during pointer movement.
-result: pending
+result: pass
 reported: "it does not lag but grabbing it right after we open the volume surface does not allow drag instantly we need to start dragging again for it to work"
 fix_evidence: "31-03 avoids pointer-open focus theft so the first popover pointer interaction can establish slider drag normally; existing first-grab and slider synchronization regressions pass. Awaiting live retest."
 severity: none
@@ -57,17 +53,17 @@ severity: none
 expected: Audio backend state update refreshes visible values without a stall and keeps service-driven UI state correct.
 benchmark_ref: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-BENCHMARK.md` scenario `backend_update`
 correctness_check: Backend-provided audio availability, volume percent, muted state, and visible labels update consistently without layout corruption or stale text.
-result: pending
-reported: "on first toggle it correcty mutes, then on the second it does not unmute in the navigation bar then it seems to work again but flipped since the second turn flipped it"
+result: issue
+reported: "the mute button mismatch persists"
 fix_evidence: "31-03 sends idempotent set_muted requests when supported and adds shell-level optimistic mute state that holds requested mute state across stale backend updates until confirmation. Awaiting live retest."
-severity: none
+severity: major
 
 ## Summary
 
 total: 5
-passed: 2
-issues: 0
-pending: 3
+passed: 3
+issues: 2
+pending: 0
 skipped: 0
 blocked: 0
 
@@ -181,11 +177,47 @@ blocked: 0
     - "Share pending mute confirmation state between navigation and popover, or derive both from a single frontend-owned audio UI state."
     - "Add regression coverage for mute false -> true -> false with stale/interleaved backend confirmations."
   debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
+- truth: "Audio popover opens and closes without a visible stall and keeps icon/text layout correct."
+  status: diagnosed
+  reason: "User reported: it now works when i hover out of the button and back inside but not immediately without the hover lose"
+  severity: major
+  test: 2
+  root_cause: "31-03 removed pointer-open focus theft, but the close path still relies on the navigation component's portal hidden binding/tick cycle after toggling local `audio_surface_hidden`. With the pointer still hovering the trigger, no new hover transition forces a fresh interaction/render cycle before the next click, so the same-button close can lag until pointer leave/re-enter updates interaction state."
+  artifacts:
+    - path: "modules/frontend/navigation-bar/src/main.mesh"
+      issue: "The open path calls `mesh.popover.activate(...)` immediately, but the close path only flips `audio_surface_hidden = true` and relies on portal bookkeeping to emit the hide."
+    - path: "crates/core/shell/src/shell/component/shell_component.rs"
+      issue: "Portal hidden bindings emit ShowSurface/HideSurface from `tick()`, so local state can be ahead of shell-confirmed surface visibility between pointer interactions."
+    - path: "crates/core/shell/src/shell/component/input/mod.rs"
+      issue: "Hover state is refreshed by pointer movement; the reported workaround indicates the same-position click path is not covered by the current regression."
+  missing:
+    - "Add a regression that opens the audio popover and immediately clicks the still-hovered volume trigger again without pointer leave/re-enter."
+    - "Make the trigger close path issue an explicit `mesh.popover.hide(audio_surface_id)` or shell-owned toggle request, not only a local portal state flip."
+    - "Keep shell-confirmed visibility events as the source of truth for `audio_surface_hidden` after explicit hide/show requests."
+  debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
+- truth: "Audio backend state update refreshes visible values without a stall and keeps service-driven UI state correct."
+  status: diagnosed
+  reason: "User reported: the mute button mismatch persists"
+  severity: major
+  test: 5
+  root_cause: "The shell now broadcasts an optimistic canonical audio state, but the audio popover still carries its own `pending_muted_state` and `audio_muted` display model while the navigation volume button renders directly from the service proxy. That leaves two frontend reconciliation paths that can disagree during rapid mute true -> false changes or stale backend confirmations."
+  artifacts:
+    - path: "modules/frontend/audio-popover/src/main.mesh"
+      issue: "Maintains local `pending_muted_state` and computes the next requested state from local `audio_muted`."
+    - path: "modules/frontend/navigation-bar/src/components/volume-button.mesh"
+      issue: "Renders only canonical service fields and has no knowledge of popover-local pending state."
+    - path: "crates/core/shell/src/shell/runtime/service_state.rs"
+      issue: "Owns the new canonical optimistic pending state; frontend-local pending state should not compete with it."
+  missing:
+    - "Remove or demote popover-local mute pending state so popover and nav both render from the shell-normalized `mesh.audio.muted` value."
+    - "Add a cross-component regression proving nav icon and popover mute label stay aligned across mute false -> true -> false with stale backend events."
+    - "Keep `set_muted` idempotent requests, but compute next state from the canonical shell-normalized audio state instead of an independent local model."
+  debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
 
 ## Completion Instructions
 
-Final Phase 31 acceptance requires tests 2, 3, and 5 to pass a live retest after the 31-03 gap-closure implementation. Automated regressions pass; live confirmation is still required.
+Final Phase 31 acceptance requires executing `31-04-PLAN.md`, then live retesting tests 2 and 5. Test 3 passed the 31-03 live retest.
 
 ## Acceptance Note
 
-Live UAT was performed against the shipped navigation/audio surfaces after Plan 31-02. Hover and keyboard traversal passed. Plan 31-03 implemented targeted fixes for tests 2, 3, and 5; final Phase 31 acceptance requires a live retest of those rows.
+Live UAT was performed against the shipped navigation/audio surfaces after Plans 31-02 and 31-03. Hover, pointer update, and keyboard traversal passed. Same-hover popover close and mute consistency remain open and are routed to Plan 31-04.

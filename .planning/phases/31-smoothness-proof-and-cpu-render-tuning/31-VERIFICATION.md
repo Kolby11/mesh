@@ -1,7 +1,7 @@
 ---
 phase: 31
 title: Smoothness proof and CPU render tuning verification
-status: human_needed
+status: gaps_found
 verified: 2026-05-13
 requirements: ["PERF-03", "SMTH-01", "SMTH-02", "SMTH-03"]
 ---
@@ -10,9 +10,9 @@ requirements: ["PERF-03", "SMTH-01", "SMTH-02", "SMTH-03"]
 
 ## Status
 
-`human_needed`
+`gaps_found`
 
-Automated CPU-render proof, conservative threshold tuning, and 31-02/31-03 gap-closure implementation are complete. Live manual UAT passed `hover` and `keyboard_traversal`; tests 2, 3, and 5 have fresh automated fixes and are reset for live retest before final acceptance.
+Automated CPU-render proof and conservative threshold tuning are complete. Live manual UAT now passes `hover`, `pointer_update`, and `keyboard_traversal`; tests 2 and 5 still have live issues after 31-03 and are covered by ready gap-closure plan `31-04-PLAN.md`.
 
 ## Commands
 
@@ -41,6 +41,8 @@ Automated CPU-render proof, conservative threshold tuning, and 31-02/31-03 gap-c
 - 31-03 keeps pointer-open audio popover activation from stealing focus while preserving keyboard-open focus transfer into the popover.
 - 31-03 uses idempotent `set_muted` when available and keeps an optimistic shell-level pending mute state across stale active-backend and inactive-provider updates until the requested state is confirmed.
 - `31-REVIEW.md` records the post-implementation review and the stale-provider pending mute guard fixed in `6e0dc0a`.
+- Live retest after 31-03 confirmed the immediate slider grab path now passes.
+- Live retest after 31-03 still found that same-hover trigger close needs pointer leave/re-enter and that the mute mismatch persists.
 
 ## Scope Boundary
 
@@ -48,17 +50,18 @@ No GPU backend, parallel paint/layout implementation, new benchmark harness, tra
 
 ## Residual Risk
 
-- `31-UAT.md` has three rows pending live retest after 31-03: first navigation click after popover open, first slider drag after popover open, and second mute-toggle reconciliation in the navigation bar.
+- `31-UAT.md` has two open issues after 31-03: same-hover audio trigger close and mute consistency between the popover and navigation bar.
 - `31-01-BENCHMARK.md` still marks acceptance decisions `deferred`; automated counters alone are not accepted as visible smoothness proof.
 - The current shipped-surface proof rows still report `full_surface` policy because the canonical scenarios reach full-rebuild paths. Smaller retained damage paths are protected by focused policy tests, but not yet proven as visible end-user smoothness wins.
 
 ## Gap Closure Plan
 
 - COMPLETE: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-03-PLAN.md`
-- Scope: first input after audio popover activation, first slider grab after show/focus transfer, and idempotent/shared mute pending-state reconciliation.
-- Final acceptance still requires live UAT confirmation for tests 2, 3, and 5 after 31-03.
+- READY: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-04-PLAN.md`
+- Scope: same-hover popover trigger close and single-source mute state across popover/navigation UI.
+- Final acceptance requires executing 31-04, then live UAT confirmation for tests 2 and 5.
 
 ## Follow-Up
 
-- Rerun `$gsd-verify-work 31` for tests 2, 3, and 5.
+- Run `$gsd-execute-phase 31 --gaps-only` to execute `31-04-PLAN.md`.
 - If visual lag remains after this conservative CPU threshold work, continue with the planned Skia/GPU renderer investigation or later parallel paint/layout work after retained ownership boundaries are proven.
