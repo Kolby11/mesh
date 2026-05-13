@@ -10,9 +10,9 @@ requirements: ["PERF-03", "SMTH-01", "SMTH-02", "SMTH-03"]
 
 ## Status
 
-`gaps_found`
+`human_needed`
 
-Automated CPU-render proof, conservative threshold tuning, and 31-02 gap-closure implementation are complete. Live manual UAT passed `hover` and `keyboard_traversal`; retesting the remaining rows found three narrower interaction/state failures. Plan 31-03 is ready to close those gaps before final acceptance.
+Automated CPU-render proof, conservative threshold tuning, and 31-02/31-03 gap-closure implementation are complete. Live manual UAT passed `hover` and `keyboard_traversal`; tests 2, 3, and 5 have fresh automated fixes and are reset for live retest before final acceptance.
 
 ## Commands
 
@@ -27,6 +27,8 @@ Automated CPU-render proof, conservative threshold tuning, and 31-02 gap-closure
 - PASS: `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell surface`
 - PASS: `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell slider`
 - PASS: `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell real_surfaces`
+- PASS: `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell activate_popover`
+- PASS: `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms`
 
 ## Evidence
 
@@ -36,6 +38,8 @@ Automated CPU-render proof, conservative threshold tuning, and 31-02 gap-closure
 - Existing retained display-list tests continue to prove filtered survivor ordering, root/background replay, scrollbar span inclusion, and full-surface fallback metrics.
 - Cache capacities were intentionally left unchanged: raster capacity remains `256`, text layout capacity remains `128`.
 - Existing icon and text cache tests continue to cover freshness, SVG external-resource bypass, tint/multicolor key separation, non-UTF path identity, opaque/translucent hit reporting, text layout hits, and layout-affecting misses.
+- 31-03 keeps pointer-open audio popover activation from stealing focus while preserving keyboard-open focus transfer into the popover.
+- 31-03 uses idempotent `set_muted` when available and keeps an optimistic shell-level pending mute state across stale backend updates until the requested state is confirmed.
 
 ## Scope Boundary
 
@@ -43,17 +47,17 @@ No GPU backend, parallel paint/layout implementation, new benchmark harness, tra
 
 ## Residual Risk
 
-- `31-UAT.md` is diagnosed with three failed rows after 31-02 retest: first navigation click after popover open, first slider drag after popover open, and second mute-toggle reconciliation in the navigation bar.
+- `31-UAT.md` has three rows pending live retest after 31-03: first navigation click after popover open, first slider drag after popover open, and second mute-toggle reconciliation in the navigation bar.
 - `31-01-BENCHMARK.md` still marks acceptance decisions `deferred`; automated counters alone are not accepted as visible smoothness proof.
 - The current shipped-surface proof rows still report `full_surface` policy because the canonical scenarios reach full-rebuild paths. Smaller retained damage paths are protected by focused policy tests, but not yet proven as visible end-user smoothness wins.
 
 ## Gap Closure Plan
 
-- READY: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-03-PLAN.md`
+- COMPLETE: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-03-PLAN.md`
 - Scope: first input after audio popover activation, first slider grab after show/focus transfer, and idempotent/shared mute pending-state reconciliation.
-- Final acceptance still requires live UAT confirmation for tests 2, 3, and 5 after 31-03 executes.
+- Final acceptance still requires live UAT confirmation for tests 2, 3, and 5 after 31-03.
 
 ## Follow-Up
 
-- Run `$gsd-execute-phase 31 --gaps-only` to execute Plan 31-03, then rerun `$gsd-verify-work 31` for tests 2, 3, and 5.
+- Rerun `$gsd-verify-work 31` for tests 2, 3, and 5.
 - If visual lag remains after this conservative CPU threshold work, continue with the planned Skia/GPU renderer investigation or later parallel paint/layout work after retained ownership boundaries are proven.
