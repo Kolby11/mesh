@@ -1,4 +1,6 @@
 use super::*;
+use std::collections::BTreeSet;
+
 use mesh_core_debug::ProfilingInvalidationSnapshot;
 
 fn stage_max_micros(
@@ -38,6 +40,32 @@ fn assert_raster_cache_reuse(label: &str, snapshot: &ProfilingInvalidationSnapsh
     assert!(
         snapshot.paint.raster_cache_hits > 0,
         "{label} should report warm icon/image raster cache reuse"
+    );
+}
+
+fn log_phase31_proof(
+    scenario: &str,
+    records: &[ComponentProfilingRecord],
+    snapshot: &ProfilingInvalidationSnapshot,
+) {
+    eprintln!(
+        "PHASE31_PROOF scenario={} paint_us={} traversal_us={} text_hits={} text_misses={} shaping_us={} raster_hits={} raster_misses={} raster_bypasses={} repaint_policy={} filtered_commands={} filtered_skipped={} filtered_spans={} filtered_fallbacks={} retained={} full_rebuild={}",
+        scenario,
+        stage_max_micros(records, mesh_core_debug::ProfilingStage::Paint),
+        stage_max_micros(records, mesh_core_debug::ProfilingStage::PaintTraversal),
+        snapshot.text.layout_hits,
+        snapshot.text.layout_misses,
+        snapshot.text.shaping_micros,
+        snapshot.paint.raster_cache_hits,
+        snapshot.paint.raster_cache_misses,
+        snapshot.paint.raster_cache_bypasses,
+        snapshot.paint.repaint_policy.as_str(),
+        snapshot.paint.filtered_command_count,
+        snapshot.paint.filtered_commands_skipped,
+        snapshot.paint.filtered_span_count,
+        snapshot.paint.filtered_fallback_count,
+        snapshot.retained_path,
+        snapshot.full_rebuild
     );
 }
 
@@ -304,6 +332,52 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         backend_update_invalidation.retained_path,
         backend_update_invalidation.full_rebuild
     );
+
+    let phase31_scenarios = [
+        (
+            "hover",
+            hover_records.as_slice(),
+            &hover_invalidation,
+        ),
+        (
+            "surface_open_close",
+            surface_open_close_records.as_slice(),
+            &surface_open_close_invalidation,
+        ),
+        (
+            "pointer_update",
+            pointer_update_records.as_slice(),
+            &pointer_update_invalidation,
+        ),
+        (
+            "keyboard_traversal",
+            keyboard_records.as_slice(),
+            &keyboard_invalidation,
+        ),
+        (
+            "backend_update",
+            backend_update_records.as_slice(),
+            &backend_update_invalidation,
+        ),
+    ];
+    let scenario_ids: BTreeSet<_> = phase31_scenarios
+        .iter()
+        .map(|(scenario, _, _)| *scenario)
+        .collect();
+    assert_eq!(
+        scenario_ids,
+        BTreeSet::from([
+            "backend_update",
+            "hover",
+            "keyboard_traversal",
+            "pointer_update",
+            "surface_open_close",
+        ]),
+        "Phase 31 proof must cover exactly the five canonical scenario IDs"
+    );
+    for (scenario, records, snapshot) in phase31_scenarios {
+        log_phase31_proof(scenario, records, snapshot);
+    }
 
     assert!(
         stage_max_micros(&hover_records, mesh_core_debug::ProfilingStage::Paint) > 0,
