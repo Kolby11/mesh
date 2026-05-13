@@ -1,7 +1,7 @@
 ---
 phase: 31
 title: Smoothness proof and CPU render tuning verification
-status: gaps_found
+status: human_needed
 verified: 2026-05-13
 requirements: ["PERF-03", "SMTH-01", "SMTH-02", "SMTH-03"]
 ---
@@ -10,9 +10,9 @@ requirements: ["PERF-03", "SMTH-01", "SMTH-02", "SMTH-03"]
 
 ## Status
 
-`gaps_found`
+`human_needed`
 
-Automated CPU-render proof and conservative threshold tuning are complete. Live manual UAT now passes `hover`, `pointer_update`, and `keyboard_traversal`; tests 2 and 5 still have live issues after 31-03 and are covered by ready gap-closure plan `31-04-PLAN.md`.
+Automated CPU-render proof and conservative threshold tuning are complete. Live manual UAT now passes `hover`, `pointer_update`, and `keyboard_traversal`; 31-04 implemented focused fixes for the remaining tests 2 and 5, which now require live retest before final acceptance.
 
 ## Commands
 
@@ -29,6 +29,8 @@ Automated CPU-render proof and conservative threshold tuning are complete. Live 
 - PASS: `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell real_surfaces`
 - PASS: `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell activate_popover`
 - PASS: `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms`
+- PASS: `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell navigation_bar_same_hover_volume_trigger_closes_popover_immediately`
+- PASS: `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell audio_popover_mute_renders_shell_normalized_state`
 
 ## Evidence
 
@@ -43,6 +45,8 @@ Automated CPU-render proof and conservative threshold tuning are complete. Live 
 - `31-REVIEW.md` records the post-implementation review and the stale-provider pending mute guard fixed in `6e0dc0a`.
 - Live retest after 31-03 confirmed the immediate slider grab path now passes.
 - Live retest after 31-03 still found that same-hover trigger close needs pointer leave/re-enter and that the mute mismatch persists.
+- 31-04 makes the same-hover trigger close publish an immediate `HideSurface` request and covers it with a navigation-bar regression.
+- 31-04 removes the popover-local mute pending model so popover display follows shell-normalized `mesh.audio.muted`, with shell optimistic stale-update coverage still passing.
 
 ## Scope Boundary
 
@@ -50,18 +54,18 @@ No GPU backend, parallel paint/layout implementation, new benchmark harness, tra
 
 ## Residual Risk
 
-- `31-UAT.md` has two open issues after 31-03: same-hover audio trigger close and mute consistency between the popover and navigation bar.
+- `31-UAT.md` has two rows pending live retest after 31-04: same-hover audio trigger close and mute consistency between the popover and navigation bar.
 - `31-01-BENCHMARK.md` still marks acceptance decisions `deferred`; automated counters alone are not accepted as visible smoothness proof.
 - The current shipped-surface proof rows still report `full_surface` policy because the canonical scenarios reach full-rebuild paths. Smaller retained damage paths are protected by focused policy tests, but not yet proven as visible end-user smoothness wins.
 
 ## Gap Closure Plan
 
 - COMPLETE: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-03-PLAN.md`
-- READY: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-04-PLAN.md`
+- COMPLETE: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-04-PLAN.md`
 - Scope: same-hover popover trigger close and single-source mute state across popover/navigation UI.
-- Final acceptance requires executing 31-04, then live UAT confirmation for tests 2 and 5.
+- Final acceptance requires live UAT confirmation for tests 2 and 5 after 31-04.
 
 ## Follow-Up
 
-- Run `$gsd-execute-phase 31 --gaps-only` to execute `31-04-PLAN.md`.
+- Rerun `$gsd-verify-work 31` for tests 2 and 5.
 - If visual lag remains after this conservative CPU threshold work, continue with the planned Skia/GPU renderer investigation or later parallel paint/layout work after retained ownership boundaries are proven.
