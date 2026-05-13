@@ -4,14 +4,24 @@ use super::super::*;
 pub(in crate::shell::component) struct ResolvedSurfaceShortcut {
     pub(in crate::shell::component) action_id: String,
     pub(in crate::shell::component) key: String,
+    pub(in crate::shell::component) trigger_kind: mesh_core_module::KeybindTriggerKind,
+    pub(in crate::shell::component) source: KeybindResolutionSource,
     pub(in crate::shell::component) handler: String,
     pub(in crate::shell::component) target_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum KeybindResolutionSource {
+    UserOverride,
+    LocaleDefault { locale: String },
+    ModuleDefault,
 }
 
 #[derive(Debug, Clone)]
 struct SurfaceShortcutDeclaration {
     action_id: String,
-    default_key: String,
+    generic_trigger: mesh_core_module::KeybindTrigger,
+    localized_triggers: HashMap<String, mesh_core_module::KeybindTrigger>,
     handler: String,
     target_ref: Option<String>,
 }
@@ -144,6 +154,7 @@ impl FrontendSurfaceComponent {
         }
 
         let overrides = keyboard_settings.surface_shortcuts.get(self.surface_id());
+        let active_locale = self.locale.current();
 
         declarations
             .into_iter()
@@ -151,17 +162,7 @@ impl FrontendSurfaceComponent {
                 let override_key = overrides
                     .and_then(|surface| surface.get(&declaration.action_id))
                     .and_then(|shortcut| shortcut.key.clone());
-                let effective_key = override_key.unwrap_or(declaration.default_key);
-                if effective_key.trim().is_empty() {
-                    return None;
-                }
-
-                Some(ResolvedSurfaceShortcut {
-                    action_id: declaration.action_id,
-                    key: effective_key,
-                    handler: declaration.handler,
-                    target_ref: declaration.target_ref,
-                })
+                resolve_surface_shortcut_declaration(declaration, override_key, active_locale)
             })
             .collect()
     }
@@ -187,18 +188,16 @@ impl FrontendSurfaceComponent {
             .actions
             .iter()
             .filter_map(|(action_id, action)| {
-                if action.scope != mesh_core_module::KeybindScope::Surface
-                    || action.trigger.kind != mesh_core_module::KeybindTriggerKind::Shortcut
-                {
+                if action.scope != mesh_core_module::KeybindScope::Surface {
                     return None;
                 }
-                let default_key = action.trigger.key.as_ref()?.to_string();
-                if action.handler.trim().is_empty() || default_key.trim().is_empty() {
+                if action.handler.trim().is_empty() {
                     return None;
                 }
                 Some(SurfaceShortcutDeclaration {
                     action_id: action_id.clone(),
-                    default_key,
+                    generic_trigger: action.trigger.clone(),
+                    localized_triggers: action.localized_triggers.clone(),
                     handler: action.handler.clone(),
                     target_ref: action.target_ref.clone(),
                 })
@@ -282,7 +281,12 @@ fn surface_shortcut_declarations_from_settings(
 
             Some(SurfaceShortcutDeclaration {
                 action_id: shortcut_id.clone(),
-                default_key,
+                generic_trigger: mesh_core_module::KeybindTrigger {
+                    kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                    key: Some(default_key),
+                    modifiers: Vec::new(),
+                },
+                localized_triggers: HashMap::new(),
                 handler,
                 target_ref: value
                     .get("target_ref")
@@ -291,6 +295,95 @@ fn surface_shortcut_declarations_from_settings(
             })
         })
         .collect()
+}
+
+fn resolve_surface_shortcut_declaration(
+    declaration: SurfaceShortcutDeclaration,
+    override_key: Option<String>,
+    active_locale: &str,
+) -> Option<ResolvedSurfaceShortcut> {
+    if let Some(key) = override_key {
+        let kind = declaration.generic_trigger.kind;
+        return resolved_surface_shortcut(
+            declaration,
+            key,
+            kind,
+            KeybindResolutionSource::UserOverride,
+        );
+    }
+
+    if declaration.generic_trigger.kind == mesh_core_module::KeybindTriggerKind::AccessKey {
+        for locale in keybind_locale_candidates(active_locale) {
+            let Some((key, trigger_kind)) =
+                declaration
+                    .localized_triggers
+                    .get(&locale)
+                    .and_then(|trigger| {
+                        if trigger.kind != mesh_core_module::KeybindTriggerKind::AccessKey {
+                            return None;
+                        }
+                        let key = trigger.key.as_ref()?;
+                        if key.trim().is_empty() {
+                            return None;
+                        }
+                        Some((key.clone(), trigger.kind))
+                    })
+            else {
+                continue;
+            };
+            return resolved_surface_shortcut(
+                declaration,
+                key,
+                trigger_kind,
+                KeybindResolutionSource::LocaleDefault { locale },
+            );
+        }
+    }
+
+    let kind = declaration.generic_trigger.kind;
+    let key = declaration.generic_trigger.key.clone()?;
+    resolved_surface_shortcut(
+        declaration,
+        key,
+        kind,
+        KeybindResolutionSource::ModuleDefault,
+    )
+}
+
+fn resolved_surface_shortcut(
+    declaration: SurfaceShortcutDeclaration,
+    key: String,
+    trigger_kind: mesh_core_module::KeybindTriggerKind,
+    source: KeybindResolutionSource,
+) -> Option<ResolvedSurfaceShortcut> {
+    if key.trim().is_empty() {
+        return None;
+    }
+
+    Some(ResolvedSurfaceShortcut {
+        action_id: declaration.action_id,
+        key,
+        trigger_kind,
+        source,
+        handler: declaration.handler,
+        target_ref: declaration.target_ref,
+    })
+}
+
+fn keybind_locale_candidates(locale: &str) -> Vec<String> {
+    let locale = locale.trim().replace('_', "-");
+    if locale.is_empty() {
+        return Vec::new();
+    }
+
+    let mut candidates = vec![locale.clone()];
+    if let Some((parent, _)) = locale.split_once('-')
+        && !parent.is_empty()
+        && parent != locale
+    {
+        candidates.push(parent.to_string());
+    }
+    candidates
 }
 
 fn normalize_key_name(value: &str) -> String {

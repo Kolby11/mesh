@@ -160,7 +160,10 @@ fn parses_module_json_localized_keybind_triggers() {
     manifest.validate_keybinds().unwrap();
 
     let action = &manifest.keybinds.actions["accept"];
-    assert_eq!(action.localized_triggers["sk"].kind, KeybindTriggerKind::AccessKey);
+    assert_eq!(
+        action.localized_triggers["sk"].kind,
+        KeybindTriggerKind::AccessKey
+    );
     assert_eq!(action.localized_triggers["sk"].key.as_deref(), Some("p"));
     assert_eq!(
         action.localized_triggers["sk-SK"].kind,

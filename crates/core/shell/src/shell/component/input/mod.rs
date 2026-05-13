@@ -4,6 +4,9 @@ mod focus;
 mod keyboard;
 mod widgets;
 
+#[cfg(test)]
+pub(crate) use keyboard::KeybindResolutionSource;
+
 impl FrontendSurfaceComponent {
     pub(in crate::shell::component) fn handle_component_input(
         &mut self,
