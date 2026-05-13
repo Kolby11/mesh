@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Localized Keybind Management
 status: active
-stopped_at: phase 32 complete
-last_updated: "2026-05-13T21:56:00+02:00"
+stopped_at: phase 33 context gathered
+last_updated: "2026-05-13T22:07:21+02:00"
 last_activity: 2026-05-13
 progress:
   total_phases: 5
@@ -28,7 +28,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-13)
 Phase: 33 - Locale-Aware Keybind Resolution
 Plan: Pending
 Status: Phase 32 complete; ready to plan Phase 33
-Last activity: 2026-05-13 - Phase 32 executed and verified
+Last activity: 2026-05-13 - Phase 33 context gathered
 
 ## Decisions
 
@@ -147,9 +147,9 @@ Last activity: 2026-05-13 - Phase 32 executed and verified
 
 ## Session
 
-Last session: 2026-05-13T21:56:00+02:00
-Stopped At: Phase 32 complete; ready to plan Phase 33
-Resume File: .planning/phases/32-keybind-declaration-contract/32-01-SUMMARY.md
+Last session: 2026-05-13T22:07:21+02:00
+Stopped At: Phase 33 context gathered; ready to plan Phase 33
+Resume File: .planning/phases/33-locale-aware-keybind-resolution/33-CONTEXT.md
 
 ## Accumulated Context
 
