@@ -28,28 +28,31 @@
 - `.planning/milestones/v1.5-REQUIREMENTS.md`
 - `.planning/milestones/v1.5-MILESTONE-AUDIT.md`
 
-## v1.6 Skia-Backed Rendering Performance Investigation
+## v1.6 Localized Keybind Management
 
-**Status:** planned next
+**Status:** planning
 **Starts after:** v1.5 CPU Rendering Performance Improvement
 
-**Goal:** Determine whether a Skia-backed renderer materially improves MESH rendering performance and, if it does, migrate the low-level paint backend behind the existing retained-rendering architecture.
+**Goal:** Let frontend modules declare semantic keybind actions that scripts can handle, while the shell resolves localized defaults, user overrides, conflicts, scope, and accessibility metadata.
 
-**Priority:** high. If v1.5 still leaves shipped shell surfaces feeling laggy, Skia becomes the next major rendering priority rather than a distant GPU-only idea.
+**Priority:** high. Plugin authors need declared, localizable keyboard actions before MESH expands into compositor-global shortcuts or broader settings UI.
 
 **Planned scope:**
 
-- Research Rust Skia integration options, build constraints, CPU/GPU backend support, Wayland presentation fit, and long-term maintenance cost
-- Build a benchmarkable Skia-backed painter spike for the existing retained display-list command stream
-- Compare Skia CPU and available GPU paths against the current custom/tiny-skia/resvg/cosmic-text/swash software stack on canonical scenarios
-- Decide whether to migrate `mesh-core-render` primitives to Skia wholesale, use Skia selectively for expensive primitives, or keep the current renderer
-- If the spike wins, plan the migration behind the existing retained widget tree, render-object tree, damage policy, profiling, and shell presentation boundaries
+- Add module manifest/settings support for semantic keybind actions with stable ids, handlers, labels, scopes, triggers, and target controls
+- Resolve effective keybinds from module defaults, active locale, and user overrides with deterministic precedence
+- Support localized access-key defaults such as English `Accept -> A` and Slovak `Prijat -> P`
+- Preserve existing shell-global shortcuts, text input, focus traversal, and focused widget key behavior
+- Emit non-fatal diagnostics for malformed, duplicate, or unresolved keybinds
+- Expose resolved keybind metadata through accessibility annotations and prove behavior on shipped surfaces
 
-**Out of scope for the spike:**
+**Out of scope:**
 
-- Replacing the `.mesh` compiler, layout engine, retained tree, module system, input handling, or shell service architecture
-- Removing v1.5 retained-pipeline work; Skia should consume the improved retained command stream rather than replace the architecture around it
-- Shipping a partial migration without benchmark proof and visual-correctness coverage
+- Compositor-global shortcuts through XDG Desktop Portal or compositor-specific APIs
+- Full user-facing keybind settings UI
+- Automatic translation or automatic access-key generation
+- Replacing existing keyboard focus traversal or widget activation behavior
+- Skia-backed rendering investigation, now deferred beyond v1.6
 
 ## v1.4 Major Performance Fixes
 
