@@ -158,6 +158,9 @@ impl FrontendSurfaceComponent {
         })?;
         script_ctx.set_interface_catalog(self.interface_catalog.clone());
         seed_service_state(script_ctx.state_mut());
+        script_ctx
+            .state_mut()
+            .set("keybinds", keybinds_state_from_manifest(manifest));
 
         for (key, value) in props {
             script_ctx.state_mut().set(key.clone(), value.clone());
@@ -462,4 +465,15 @@ impl FrontendSurfaceComponent {
 
         Ok(events)
     }
+}
+
+fn keybinds_state_from_manifest(manifest: &mesh_core_module::Manifest) -> serde_json::Value {
+    let mut keybinds = serde_json::Map::new();
+    for keybind_id in manifest.keybinds.actions.keys() {
+        keybinds.insert(
+            keybind_id.clone(),
+            serde_json::Value::String(keybind_id.clone()),
+        );
+    }
+    serde_json::Value::Object(keybinds)
 }

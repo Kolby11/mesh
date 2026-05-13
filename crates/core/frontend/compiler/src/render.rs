@@ -542,9 +542,12 @@ fn normalize_event_handler_name(name: &str) -> String {
 }
 
 fn is_event_handler_attribute(name: &str) -> bool {
+    if !name.starts_with("on") {
+        return false;
+    }
     matches!(
         normalize_event_handler_name(name).as_str(),
-        "click" | "change" | "release" | "focus" | "blur" | "keydown" | "keyup"
+        "click" | "change" | "release" | "focus" | "blur" | "keydown" | "keyup" | "keybind"
     )
 }
 

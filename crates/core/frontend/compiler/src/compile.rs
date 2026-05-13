@@ -446,6 +446,7 @@ fn component_allowed_symbols(
         "t".to_string(),
         "refs".to_string(),
         "settings".to_string(),
+        "keybinds".to_string(),
         "elements".to_string(),
     ]);
     allowed.extend(explicit_props.iter().cloned());

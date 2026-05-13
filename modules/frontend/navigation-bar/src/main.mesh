@@ -21,6 +21,7 @@
         <row class="control-button-cell">
           <VolumeButton
             onActivate={onToggleAudioSurface}
+            onMuteKeybind={onMuteShortcut}
           />
         </row>
         <row class="control-button-cell">

@@ -2,12 +2,10 @@ use super::super::*;
 
 #[derive(Debug, Clone)]
 pub(in crate::shell::component) struct ResolvedSurfaceShortcut {
-    pub(in crate::shell::component) action_id: String,
+    pub(in crate::shell::component) keybind_id: String,
     pub(in crate::shell::component) key: String,
     pub(in crate::shell::component) trigger_kind: mesh_core_module::KeybindTriggerKind,
     pub(in crate::shell::component) source: KeybindResolutionSource,
-    pub(in crate::shell::component) handler: String,
-    pub(in crate::shell::component) target_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,11 +17,16 @@ pub(crate) enum KeybindResolutionSource {
 
 #[derive(Debug, Clone)]
 struct SurfaceShortcutDeclaration {
-    action_id: String,
+    keybind_id: String,
     generic_trigger: mesh_core_module::KeybindTrigger,
     localized_triggers: HashMap<String, mesh_core_module::KeybindTrigger>,
-    handler: String,
-    target_ref: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::shell::component) struct KeybindSubscriber {
+    pub(in crate::shell::component) keybind_id: String,
+    pub(in crate::shell::component) node_key: String,
+    pub(in crate::shell::component) handler: String,
 }
 
 impl FrontendSurfaceComponent {
@@ -160,7 +163,7 @@ impl FrontendSurfaceComponent {
             .into_iter()
             .filter_map(|declaration| {
                 let override_key = overrides
-                    .and_then(|surface| surface.get(&declaration.action_id))
+                    .and_then(|surface| surface.get(&declaration.keybind_id))
                     .and_then(|shortcut| shortcut.key.clone());
                 resolve_surface_shortcut_declaration(declaration, override_key, active_locale)
             })
@@ -172,7 +175,7 @@ impl FrontendSurfaceComponent {
         for legacy in self.legacy_settings_surface_shortcut_declarations() {
             if declarations
                 .iter()
-                .any(|declaration| declaration.action_id == legacy.action_id)
+                .any(|declaration| declaration.keybind_id == legacy.keybind_id)
             {
                 continue;
             }
@@ -187,26 +190,25 @@ impl FrontendSurfaceComponent {
             .keybinds
             .actions
             .iter()
-            .filter_map(|(action_id, action)| {
-                if action.scope != mesh_core_module::KeybindScope::Surface {
-                    return None;
-                }
-                if action.handler.trim().is_empty() {
-                    return None;
-                }
-                Some(SurfaceShortcutDeclaration {
-                    action_id: action_id.clone(),
-                    generic_trigger: action.trigger.clone(),
-                    localized_triggers: action.localized_triggers.clone(),
-                    handler: action.handler.clone(),
-                    target_ref: action.target_ref.clone(),
-                })
+            .map(|(keybind_id, action)| SurfaceShortcutDeclaration {
+                keybind_id: keybind_id.clone(),
+                generic_trigger: action.trigger.clone(),
+                localized_triggers: action.localized_triggers.clone(),
             })
             .collect()
     }
 
     fn legacy_settings_surface_shortcut_declarations(&self) -> Vec<SurfaceShortcutDeclaration> {
         surface_shortcut_declarations_from_settings(&self.settings_json)
+    }
+
+    pub(in crate::shell::component) fn keybind_subscribers(
+        &self,
+        tree: &WidgetNode,
+    ) -> Vec<KeybindSubscriber> {
+        let mut subscribers = Vec::new();
+        collect_keybind_subscribers(tree, &mut subscribers);
+        subscribers
     }
 
     pub(super) fn dispatch_surface_shortcut(
@@ -224,35 +226,52 @@ impl FrontendSurfaceComponent {
             return Ok(None);
         };
 
-        let target_key = shortcut
-            .target_ref
-            .as_deref()
-            .and_then(|reference| find_node_key_by_reference(tree, reference))
-            .or_else(|| self.normalized_focused_key(tree))
-            .unwrap_or_else(|| "root".to_string());
-        let event = self.build_keyboard_event(tree, &target_key, "keydown", key, modifiers);
-        Ok(Some(
-            self.call_namespaced_handler(&shortcut.handler, &[event])?,
-        ))
+        let subscribers = self
+            .keybind_subscribers(tree)
+            .into_iter()
+            .filter(|subscriber| subscriber.keybind_id == shortcut.keybind_id)
+            .collect::<Vec<_>>();
+        let mut requests = Vec::new();
+        for subscriber in subscribers {
+            let mut event =
+                self.build_keyboard_event(tree, &subscriber.node_key, "keybind", key, modifiers);
+            if let Some(object) = event.as_object_mut() {
+                object.insert(
+                    "keybind".into(),
+                    serde_json::json!({
+                        "id": shortcut.keybind_id.clone(),
+                        "trigger_kind": match shortcut.trigger_kind {
+                            mesh_core_module::KeybindTriggerKind::Shortcut => "shortcut",
+                            mesh_core_module::KeybindTriggerKind::AccessKey => "access_key",
+                        },
+                        "source": match shortcut.source.clone() {
+                            KeybindResolutionSource::UserOverride => "user_override".to_string(),
+                            KeybindResolutionSource::LocaleDefault { locale } => {
+                                format!("locale:{locale}")
+                            }
+                            KeybindResolutionSource::ModuleDefault => "module_default".to_string(),
+                        },
+                    }),
+                );
+            }
+            requests.extend(self.call_namespaced_handler(&subscriber.handler, &[event])?);
+        }
+        Ok(Some(requests))
     }
 
     pub(in crate::shell::component) fn annotate_surface_shortcuts(&self, tree: &mut WidgetNode) {
         let keyboard_settings = self.current_keyboard_settings();
         for shortcut in self.resolved_surface_shortcuts(&keyboard_settings) {
-            let Some(target_ref) = shortcut.target_ref.as_deref() else {
-                continue;
-            };
-            let Some(node) = find_node_by_reference_mut(tree, target_ref) else {
-                continue;
-            };
-            match node.accessibility.keyboard_shortcut.as_deref() {
-                Some(existing) if existing == shortcut.key => {}
-                Some(existing) => {
-                    node.accessibility.keyboard_shortcut =
-                        Some(format!("{existing}, {}", shortcut.key));
-                }
-                None => {
-                    node.accessibility.keyboard_shortcut = Some(shortcut.key);
+            for node in find_nodes_by_keybind_mut(tree, &shortcut.keybind_id) {
+                match node.accessibility.keyboard_shortcut.as_deref() {
+                    Some(existing) if existing == shortcut.key => {}
+                    Some(existing) => {
+                        node.accessibility.keyboard_shortcut =
+                            Some(format!("{existing}, {}", shortcut.key));
+                    }
+                    None => {
+                        node.accessibility.keyboard_shortcut = Some(shortcut.key.clone());
+                    }
                 }
             }
         }
@@ -273,25 +292,19 @@ fn surface_shortcut_declarations_from_settings(
     shortcuts
         .iter()
         .filter_map(|(shortcut_id, value)| {
-            let handler = value.get("handler")?.as_str()?.to_string();
             let default_key = value.get("key")?.as_str()?.to_string();
-            if handler.trim().is_empty() || default_key.trim().is_empty() {
+            if default_key.trim().is_empty() {
                 return None;
             }
 
             Some(SurfaceShortcutDeclaration {
-                action_id: shortcut_id.clone(),
+                keybind_id: shortcut_id.clone(),
                 generic_trigger: mesh_core_module::KeybindTrigger {
                     kind: mesh_core_module::KeybindTriggerKind::Shortcut,
                     key: Some(default_key),
                     modifiers: Vec::new(),
                 },
                 localized_triggers: HashMap::new(),
-                handler,
-                target_ref: value
-                    .get("target_ref")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string),
             })
         })
         .collect()
@@ -312,32 +325,27 @@ fn resolve_surface_shortcut_declaration(
         );
     }
 
-    if declaration.generic_trigger.kind == mesh_core_module::KeybindTriggerKind::AccessKey {
-        for locale in keybind_locale_candidates(active_locale) {
-            let Some((key, trigger_kind)) =
-                declaration
-                    .localized_triggers
-                    .get(&locale)
-                    .and_then(|trigger| {
-                        if trigger.kind != mesh_core_module::KeybindTriggerKind::AccessKey {
-                            return None;
-                        }
-                        let key = trigger.key.as_ref()?;
-                        if key.trim().is_empty() {
-                            return None;
-                        }
-                        Some((key.clone(), trigger.kind))
-                    })
-            else {
-                continue;
-            };
-            return resolved_surface_shortcut(
-                declaration,
-                key,
-                trigger_kind,
-                KeybindResolutionSource::LocaleDefault { locale },
-            );
-        }
+    for locale in keybind_locale_candidates(active_locale) {
+        let Some((key, trigger_kind)) =
+            declaration
+                .localized_triggers
+                .get(&locale)
+                .and_then(|trigger| {
+                    let key = trigger.key.as_ref()?;
+                    if key.trim().is_empty() {
+                        return None;
+                    }
+                    Some((key.clone(), trigger.kind))
+                })
+        else {
+            continue;
+        };
+        return resolved_surface_shortcut(
+            declaration,
+            key,
+            trigger_kind,
+            KeybindResolutionSource::LocaleDefault { locale },
+        );
     }
 
     let kind = declaration.generic_trigger.kind;
@@ -361,12 +369,10 @@ fn resolved_surface_shortcut(
     }
 
     Some(ResolvedSurfaceShortcut {
-        action_id: declaration.action_id,
+        keybind_id: declaration.keybind_id,
         key,
         trigger_kind,
         source,
-        handler: declaration.handler,
-        target_ref: declaration.target_ref,
     })
 }
 
@@ -393,45 +399,48 @@ fn normalize_key_name(value: &str) -> String {
     }
 }
 
-fn find_node_key_by_reference(node: &WidgetNode, reference: &str) -> Option<String> {
-    if node
-        .attributes
-        .get("id")
-        .is_some_and(|value| value == reference)
-        || node
-            .attributes
-            .get("ref")
-            .is_some_and(|value| value == reference)
-    {
-        return node.attributes.get("_mesh_key").cloned();
+fn collect_keybind_subscribers(node: &WidgetNode, subscribers: &mut Vec<KeybindSubscriber>) {
+    if let (Some(keybind_id), Some(node_key), Some(handler)) = (
+        node.attributes.get("keybind"),
+        node.attributes.get("_mesh_key"),
+        node.event_handlers.get("keybind"),
+    ) {
+        subscribers.push(KeybindSubscriber {
+            keybind_id: keybind_id.clone(),
+            node_key: node_key.clone(),
+            handler: handler.clone(),
+        });
     }
 
-    node.children
-        .iter()
-        .find_map(|child| find_node_key_by_reference(child, reference))
+    for child in &node.children {
+        collect_keybind_subscribers(child, subscribers);
+    }
 }
 
-fn find_node_by_reference_mut<'a>(
+fn find_nodes_by_keybind_mut<'a>(
     node: &'a mut WidgetNode,
-    reference: &str,
-) -> Option<&'a mut WidgetNode> {
+    keybind_id: &str,
+) -> Vec<&'a mut WidgetNode> {
+    let mut found = Vec::new();
+    collect_nodes_by_keybind_mut(node, keybind_id, &mut found);
+    found
+}
+
+fn collect_nodes_by_keybind_mut<'a>(
+    node: &'a mut WidgetNode,
+    keybind_id: &str,
+    found: &mut Vec<&'a mut WidgetNode>,
+) {
     if node
         .attributes
-        .get("id")
-        .is_some_and(|value| value == reference)
-        || node
-            .attributes
-            .get("ref")
-            .is_some_and(|value| value == reference)
+        .get("keybind")
+        .is_some_and(|value| value == keybind_id)
     {
-        return Some(node);
+        found.push(node);
+        return;
     }
 
     for child in &mut node.children {
-        if let Some(found) = find_node_by_reference_mut(child, reference) {
-            return Some(found);
-        }
+        collect_nodes_by_keybind_mut(child, keybind_id, found);
     }
-
-    None
 }

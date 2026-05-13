@@ -89,17 +89,11 @@ fn parses_module_json_keybind_declarations() {
   "type": "surface",
   "api_version": "0.1",
   "keybinds": {
-    "actions": {
-      "accept": {
-        "handler": "acceptSelection",
-        "target_ref": "accept-button",
-        "scope": "surface",
-        "label_i18n_key": "actions.accept",
-        "trigger": {
-          "kind": "shortcut",
-          "key": "a",
-          "modifiers": ["ctrl"]
-        }
+    "accept": {
+      "trigger": {
+        "kind": "shortcut",
+        "key": "a",
+        "modifiers": ["ctrl"]
       }
     }
   }
@@ -111,10 +105,6 @@ fn parses_module_json_keybind_declarations() {
     manifest.validate_keybinds().unwrap();
 
     let action = &manifest.keybinds.actions["accept"];
-    assert_eq!(action.handler, "acceptSelection");
-    assert_eq!(action.target_ref.as_deref(), Some("accept-button"));
-    assert_eq!(action.scope, KeybindScope::Surface);
-    assert_eq!(action.label_i18n_key.as_deref(), Some("actions.accept"));
     assert_eq!(action.trigger.kind, KeybindTriggerKind::Shortcut);
     assert_eq!(action.trigger.key.as_deref(), Some("a"));
     assert_eq!(action.trigger.modifiers, vec!["ctrl"]);
@@ -130,24 +120,19 @@ fn parses_module_json_localized_keybind_triggers() {
   "type": "surface",
   "api_version": "0.1",
   "keybinds": {
-    "actions": {
-      "accept": {
-        "handler": "acceptSelection",
-        "scope": "surface",
-        "label_i18n_key": "actions.accept",
-        "trigger": {
+    "accept": {
+      "trigger": {
+        "kind": "access_key",
+        "key": "a"
+      },
+      "localized_triggers": {
+        "sk": {
           "kind": "access_key",
-          "key": "a"
+          "key": "p"
         },
-        "localized_triggers": {
-          "sk": {
-            "kind": "access_key",
-            "key": "p"
-          },
-          "sk-SK": {
-            "kind": "access_key",
-            "key": "r"
-          }
+        "sk-SK": {
+          "kind": "access_key",
+          "key": "r"
         }
       }
     }
@@ -183,18 +168,15 @@ fn localized_keybind_trigger_blank_key_is_manifest_valid() {
   "type": "surface",
   "api_version": "0.1",
   "keybinds": {
-    "actions": {
-      "accept": {
-        "handler": "acceptSelection",
-        "trigger": {
+    "accept": {
+      "trigger": {
+        "kind": "access_key",
+        "key": "a"
+      },
+      "localized_triggers": {
+        "sk": {
           "kind": "access_key",
-          "key": "a"
-        },
-        "localized_triggers": {
-          "sk": {
-            "kind": "access_key",
-            "key": " "
-          }
+          "key": " "
         }
       }
     }
@@ -221,18 +203,15 @@ fn localized_keybind_trigger_empty_locale_is_rejected() {
   "type": "surface",
   "api_version": "0.1",
   "keybinds": {
-    "actions": {
-      "accept": {
-        "handler": "acceptSelection",
-        "trigger": {
+    "accept": {
+      "trigger": {
+        "kind": "access_key",
+        "key": "a"
+      },
+      "localized_triggers": {
+        " ": {
           "kind": "access_key",
-          "key": "a"
-        },
-        "localized_triggers": {
-          " ": {
-            "kind": "access_key",
-            "key": "p"
-          }
+          "key": "p"
         }
       }
     }
@@ -266,6 +245,27 @@ fn module_json_without_keybinds_has_empty_keybinds() {
 }
 
 #[test]
+fn keybind_declaration_without_default_trigger_is_valid() {
+    let content = r#"
+{
+  "id": "@mesh/panel",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "keybinds": {
+    "mute": {}
+  }
+}
+"#;
+
+    let parsed: JsonManifest = serde_json::from_str(content).unwrap();
+    let manifest = parsed.into_manifest();
+
+    manifest.validate_keybinds().unwrap();
+    assert_eq!(manifest.keybinds.actions["mute"].trigger.key, None);
+}
+
+#[test]
 fn package_json_keybinds_round_trip_to_runtime_manifest() {
     let input = r#"{
   "name": "@mesh/panel",
@@ -274,14 +274,8 @@ fn package_json_keybinds_round_trip_to_runtime_manifest() {
     "apiVersion": "0.1",
     "kind": "frontend",
     "keybinds": {
-      "actions": {
-        "mute": {
-          "handler": "toggleMute",
-          "target_ref": "mute-button",
-          "scope": "surface",
-          "label_i18n_key": "nav.volume",
-          "trigger": { "kind": "shortcut", "key": "m" }
-        }
+      "mute": {
+        "trigger": { "kind": "shortcut", "key": "m" }
       }
     }
   }
@@ -291,9 +285,6 @@ fn package_json_keybinds_round_trip_to_runtime_manifest() {
     let manifest = parsed.into_runtime_manifest();
     let action = &manifest.keybinds.actions["mute"];
 
-    assert_eq!(action.handler, "toggleMute");
-    assert_eq!(action.target_ref.as_deref(), Some("mute-button"));
-    assert_eq!(action.label_i18n_key.as_deref(), Some("nav.volume"));
     assert_eq!(action.trigger.key.as_deref(), Some("m"));
 }
 
@@ -306,11 +297,8 @@ fn invalid_keybind_declaration_is_rejected() {
     "apiVersion": "0.1",
     "kind": "frontend",
     "keybinds": {
-      "actions": {
-        "mute": {
-          "handler": "   ",
-          "trigger": { "kind": "shortcut", "key": "m" }
-        }
+      "mute": {
+        "trigger": { "kind": "shortcut", "key": " " }
       }
     }
   }
@@ -318,7 +306,7 @@ fn invalid_keybind_declaration_is_rejected() {
 
     let err = crate::package::ModulePackageManifest::from_json_str(input).unwrap_err();
 
-    assert!(err.to_string().contains("handler cannot be empty"));
+    assert!(err.to_string().contains("trigger.key cannot be empty"));
 }
 
 #[test]

@@ -395,7 +395,7 @@ pub struct SettingsSection {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct KeybindsSection {
-    #[serde(default)]
+    #[serde(default, flatten)]
     pub actions: HashMap<String, KeybindAction>,
 }
 
@@ -407,7 +407,7 @@ impl KeybindsSection {
     pub fn validate(&self) -> Result<(), String> {
         for (action_id, action) in &self.actions {
             if action_id.trim().is_empty() {
-                return Err("mesh.keybinds.actions cannot contain empty action ids".into());
+                return Err("mesh.keybinds cannot contain empty action ids".into());
             }
             action.validate(action_id)?;
         }
@@ -417,15 +417,6 @@ impl KeybindsSection {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeybindAction {
-    pub handler: String,
-    #[serde(default)]
-    pub target_ref: Option<String>,
-    #[serde(default)]
-    pub scope: KeybindScope,
-    #[serde(default)]
-    pub label: Option<String>,
-    #[serde(default)]
-    pub label_i18n_key: Option<String>,
     #[serde(default)]
     pub trigger: KeybindTrigger,
     #[serde(default)]
@@ -434,42 +425,16 @@ pub struct KeybindAction {
 
 impl KeybindAction {
     fn validate(&self, action_id: &str) -> Result<(), String> {
-        if self.handler.trim().is_empty() {
-            return Err(format!(
-                "mesh.keybinds.actions.{action_id}.handler cannot be empty"
-            ));
-        }
-        validate_optional_keybind_string(
-            &self.target_ref,
-            &format!("mesh.keybinds.actions.{action_id}.target_ref"),
-        )?;
-        validate_optional_keybind_string(
-            &self.label,
-            &format!("mesh.keybinds.actions.{action_id}.label"),
-        )?;
-        validate_optional_keybind_string(
-            &self.label_i18n_key,
-            &format!("mesh.keybinds.actions.{action_id}.label_i18n_key"),
-        )?;
         self.trigger.validate(action_id)?;
         for locale in self.localized_triggers.keys() {
             if locale.trim().is_empty() {
                 return Err(format!(
-                    "mesh.keybinds.actions.{action_id}.localized_triggers cannot contain empty locale ids"
+                    "mesh.keybinds.{action_id}.localized_triggers cannot contain empty locale ids"
                 ));
             }
         }
         Ok(())
     }
-}
-
-fn validate_optional_keybind_string(value: &Option<String>, field: &str) -> Result<(), String> {
-    if let Some(value) = value
-        && value.trim().is_empty()
-    {
-        return Err(format!("{field} cannot be empty"));
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -486,9 +451,9 @@ impl KeybindTrigger {
     fn validate(&self, action_id: &str) -> Result<(), String> {
         match self.kind {
             KeybindTriggerKind::Shortcut | KeybindTriggerKind::AccessKey => {
-                if self.key.as_ref().is_none_or(|key| key.trim().is_empty()) {
+                if self.key.as_ref().is_some_and(|key| key.trim().is_empty()) {
                     return Err(format!(
-                        "mesh.keybinds.actions.{action_id}.trigger.key cannot be empty"
+                        "mesh.keybinds.{action_id}.trigger.key cannot be empty"
                     ));
                 }
             }
@@ -497,7 +462,7 @@ impl KeybindTrigger {
         for modifier in &self.modifiers {
             if modifier.trim().is_empty() {
                 return Err(format!(
-                    "mesh.keybinds.actions.{action_id}.trigger.modifiers cannot contain empty values"
+                    "mesh.keybinds.{action_id}.trigger.modifiers cannot contain empty values"
                 ));
             }
         }

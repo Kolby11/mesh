@@ -263,9 +263,7 @@ end
         "keyboard": {
             "shortcuts": {
                 "mute": {
-                    "key": "m",
-                    "handler": "onMuteShortcut",
-                    "target_ref": "volume-button"
+                    "key": "m"
                 }
             }
         }
@@ -277,8 +275,8 @@ end
         0.0,
         40.0,
         24.0,
-        &[("ref", "volume-button")],
-        &[],
+        &[("keybind", "mute")],
+        &[("keybind", "onMuteShortcut")],
     )]));
 
     let theme = default_theme();
@@ -302,8 +300,8 @@ end
         0.0,
         40.0,
         24.0,
-        &[("ref", "volume-button")],
-        &[],
+        &[("keybind", "mute")],
+        &[("keybind", "onMuteShortcut")],
     )]);
     annotate_runtime_tree(
         &mut tree,
@@ -330,7 +328,7 @@ end
 }
 
 #[test]
-fn keyboard_shortcuts_manifest_keybind_action_resolves_user_override_by_action_id() {
+fn keyboard_shortcuts_manifest_keybind_subscriber_resolves_user_override_by_id() {
     let mut component = test_frontend_component(
         r#"
 <template><box /></template>
@@ -345,11 +343,6 @@ end
     component.compiled.manifest.keybinds.actions.insert(
         "mute".into(),
         mesh_core_module::KeybindAction {
-            handler: "onMuteShortcut".into(),
-            target_ref: Some("volume-button".into()),
-            scope: mesh_core_module::KeybindScope::Surface,
-            label: None,
-            label_i18n_key: Some("nav.volume".into()),
             trigger: mesh_core_module::KeybindTrigger {
                 kind: mesh_core_module::KeybindTriggerKind::Shortcut,
                 key: Some("m".into()),
@@ -365,8 +358,8 @@ end
         0.0,
         40.0,
         24.0,
-        &[("ref", "volume-button")],
-        &[],
+        &[("keybind", "mute")],
+        &[("keybind", "onMuteShortcut")],
     )]));
 
     let theme = default_theme();
@@ -398,15 +391,18 @@ end
     let resolved = component.resolved_surface_shortcuts(&keyboard_settings);
 
     assert_eq!(resolved.len(), 1);
-    assert_eq!(resolved[0].action_id, "mute");
+    assert_eq!(resolved[0].keybind_id, "mute");
     assert_eq!(resolved[0].key, "u");
     assert_eq!(
         resolved[0].trigger_kind,
         mesh_core_module::KeybindTriggerKind::Shortcut
     );
     assert_eq!(resolved[0].source, KeybindResolutionSource::UserOverride);
-    assert_eq!(resolved[0].handler, "onMuteShortcut");
-    assert_eq!(resolved[0].target_ref.as_deref(), Some("volume-button"));
+    let tree = component.last_tree.as_ref().unwrap();
+    let subscribers = component.keybind_subscribers(tree);
+    assert_eq!(subscribers.len(), 1);
+    assert_eq!(subscribers[0].keybind_id, "mute");
+    assert_eq!(subscribers[0].handler, "onMuteShortcut");
 }
 
 #[test]
@@ -426,11 +422,6 @@ end
     component.compiled.manifest.keybinds.actions.insert(
         "accept".into(),
         mesh_core_module::KeybindAction {
-            handler: "onAccept".into(),
-            target_ref: Some("accept-button".into()),
-            scope: mesh_core_module::KeybindScope::Surface,
-            label: None,
-            label_i18n_key: Some("actions.accept".into()),
             trigger: mesh_core_module::KeybindTrigger {
                 kind: mesh_core_module::KeybindTriggerKind::AccessKey,
                 key: Some("a".into()),
@@ -491,11 +482,6 @@ end
     component.compiled.manifest.keybinds.actions.insert(
         "accept".into(),
         mesh_core_module::KeybindAction {
-            handler: "onAccept".into(),
-            target_ref: Some("accept-button".into()),
-            scope: mesh_core_module::KeybindScope::Surface,
-            label: None,
-            label_i18n_key: Some("actions.accept".into()),
             trigger: mesh_core_module::KeybindTrigger {
                 kind: mesh_core_module::KeybindTriggerKind::AccessKey,
                 key: Some("a".into()),
@@ -542,11 +528,6 @@ end
     component.compiled.manifest.keybinds.actions.insert(
         "accept".into(),
         mesh_core_module::KeybindAction {
-            handler: "onAccept".into(),
-            target_ref: Some("accept-button".into()),
-            scope: mesh_core_module::KeybindScope::Surface,
-            label: None,
-            label_i18n_key: Some("actions.accept".into()),
             trigger: mesh_core_module::KeybindTrigger {
                 kind: mesh_core_module::KeybindTriggerKind::AccessKey,
                 key: Some("a".into()),
@@ -583,7 +564,7 @@ end
 }
 
 #[test]
-fn keybind_locale_shortcut_ignores_localized_trigger() {
+fn keybind_locale_shortcut_uses_localized_trigger() {
     let mut component = test_frontend_component(
         r#"
 <template><box /></template>
@@ -599,11 +580,6 @@ end
     component.compiled.manifest.keybinds.actions.insert(
         "accept".into(),
         mesh_core_module::KeybindAction {
-            handler: "onAccept".into(),
-            target_ref: Some("accept-button".into()),
-            scope: mesh_core_module::KeybindScope::Surface,
-            label: None,
-            label_i18n_key: Some("actions.accept".into()),
             trigger: mesh_core_module::KeybindTrigger {
                 kind: mesh_core_module::KeybindTriggerKind::Shortcut,
                 key: Some("a".into()),
@@ -624,12 +600,17 @@ end
         component.resolved_surface_shortcuts(&mesh_core_config::KeyboardSettings::default());
 
     assert_eq!(resolved.len(), 1);
-    assert_eq!(resolved[0].key, "a");
+    assert_eq!(resolved[0].key, "p");
     assert_eq!(
         resolved[0].trigger_kind,
-        mesh_core_module::KeybindTriggerKind::Shortcut
+        mesh_core_module::KeybindTriggerKind::AccessKey
     );
-    assert_eq!(resolved[0].source, KeybindResolutionSource::ModuleDefault);
+    assert_eq!(
+        resolved[0].source,
+        KeybindResolutionSource::LocaleDefault {
+            locale: "sk".into()
+        }
+    );
 }
 
 #[test]
@@ -649,11 +630,6 @@ end
     component.compiled.manifest.keybinds.actions.insert(
         "accept".into(),
         mesh_core_module::KeybindAction {
-            handler: "onAccept".into(),
-            target_ref: Some("accept-button".into()),
-            scope: mesh_core_module::KeybindScope::Surface,
-            label: None,
-            label_i18n_key: Some("actions.accept".into()),
             trigger: mesh_core_module::KeybindTrigger {
                 kind: mesh_core_module::KeybindTriggerKind::AccessKey,
                 key: Some("a".into()),
@@ -687,6 +663,20 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component.paint(&theme, width, height, &mut buffer).unwrap();
+    {
+        let tree = component
+            .last_tree
+            .as_ref()
+            .expect("rendered navigation tree");
+        let subscribers = component.keybind_subscribers(tree);
+        assert!(
+            subscribers
+                .iter()
+                .any(|subscriber| subscriber.keybind_id == "mute"
+                    && subscriber.handler.contains("onMuteShortcut")),
+            "navigation mute keybind should expose its subscribed handler"
+        );
+    }
     let shortcut_requests = component
         .handle_input(
             &theme,

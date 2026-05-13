@@ -2,7 +2,9 @@
   <button
     ref="volume-button"
     class="nav-button"
+    keybind="{keybinds.mute}"
     onclick={onActivate}
+    onkeybind={onMuteKeybind}
     title="{audio_tooltip}"
     aria-label="{t('nav.open_audio')}"
   >
