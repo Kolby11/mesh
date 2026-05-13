@@ -62,6 +62,10 @@ Success criteria:
 3. Missing locale data falls back to the generic declaration without disabling the action.
 4. Override identity never depends on translated label text.
 
+Plans:
+
+- **33-01: Locale-aware access-key resolution** *(Wave 1, ready)* - extend keybind declarations with `localized_triggers`, resolve access-key defaults by user override, exact locale, parent locale, and generic fallback, and prove shortcut compatibility.
+
 ### Phase 34: Script Dispatch and Input Precedence
 
 **Goal:** Dispatch resolved keybind actions into module scripts while preserving existing shell-global, text-input, focus traversal, and widget-control behavior.
