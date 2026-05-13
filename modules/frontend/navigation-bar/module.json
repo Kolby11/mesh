@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "surface",
   "api_version": "0.1",
-  "description": "Top-edge navigation bar surface.",
+  "description": "Top-edge navigation bar surface with declarative keybind metadata for localized shortcut labels.",
   "authors": [
     "MESH Project"
   ],
@@ -46,6 +46,20 @@
   },
   "entrypoints": {
     "main": "src/main.mesh"
+  },
+  "keybinds": {
+    "actions": {
+      "mute": {
+        "handler": "onMuteShortcut",
+        "target_ref": "volume-button",
+        "scope": "surface",
+        "label_i18n_key": "nav.volume",
+        "trigger": {
+          "kind": "shortcut",
+          "key": "m"
+        }
+      }
+    }
   },
   "settings": {
     "namespace": "@mesh/navigation-bar",
@@ -116,7 +130,7 @@
       },
       "keyboard": {
         "type": "object",
-        "description": "Focused-surface keyboard defaults for the navigation bar.",
+        "description": "Focused-surface keyboard defaults for the navigation bar. The manifest keybinds section declares action ids, handlers, labels, scopes, and default triggers; shell settings may remap keys by action id.",
         "properties": {
           "shortcuts": {
             "type": "object",

@@ -20,7 +20,9 @@
       "mute": {
         "key": "m",
         "handler": "onMuteShortcut",
-        "target_ref": "volume-button"
+        "target_ref": "volume-button",
+        "scope": "surface",
+        "label_i18n_key": "nav.volume"
       }
     }
   }
