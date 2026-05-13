@@ -1,6 +1,6 @@
 # Roadmap: MESH v1.6 Localized Keybind Management
 
-**Status:** Active milestone planning
+**Status:** Active milestone execution
 **Phases:** 32-36
 **Total Phases:** 5
 
@@ -34,7 +34,7 @@ Success criteria:
 
 Plans:
 
-- **32-01: Keybind declaration contract and compatibility bridge** *(Wave 1, ready)* - add normalized keybind declaration types, bridge current settings shortcuts through typed declarations, and prove navigation-bar compatibility.
+- **32-01: Keybind declaration contract and compatibility bridge** *(Wave 1, complete)* - added normalized keybind declaration types, bridged current settings shortcuts through typed declarations, and proved navigation-bar compatibility.
 
 Cross-cutting constraints:
 

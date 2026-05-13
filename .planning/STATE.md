@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Localized Keybind Management
-status: planning
-stopped_at: defining v1.6 requirements and roadmap
-last_updated: "2026-05-13T21:15:00+02:00"
+status: active
+stopped_at: phase 32 complete
+last_updated: "2026-05-13T21:56:00+02:00"
 last_activity: 2026-05-13
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 1
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 20
 ---
 
 # State: MESH v1.6
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-13)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Planning v1.6 localized keybind management
+**Current focus:** Executing v1.6 localized keybind management
 
 ## Current Position
 
-Phase: 32 - Keybind Declaration Contract
-Plan: 32-01 ready
-Status: Ready to execute
-Last activity: 2026-05-13 - Phase 32 planned
+Phase: 33 - Locale-Aware Keybind Resolution
+Plan: Pending
+Status: Phase 32 complete; ready to plan Phase 33
+Last activity: 2026-05-13 - Phase 32 executed and verified
 
 ## Decisions
 
@@ -104,6 +104,9 @@ Last activity: 2026-05-13 - Phase 32 planned
 - [v1.5]: Milestone archived with all 17 requirements satisfied; accepted tech debt is the deferred audio popover transition polish and missing retroactive Nyquist validation artifacts for phases 26 and 30.
 - [v1.6]: Localized keybind management takes priority over the previously planned Skia investigation. Frontend modules should be able to declare semantic keybind actions with localized defaults, user overrides, conflict diagnostics, script dispatch, and accessibility metadata.
 - [v1.6]: Compositor-global shortcuts via XDG desktop portals are deferred until module/surface-scoped keybinds are stable.
+- [Phase 32]: Keybind declarations live in normalized module manifests as stable action-id keyed `keybinds.actions`, with handler, target reference, scope, label/i18n key, and trigger metadata available to shell code.
+- [Phase 32]: Existing `settings.keyboard.shortcuts` remains a compatibility source, but shell runtime resolves it through the same surface shortcut declaration bridge used by manifest keybinds.
+- [Phase 32]: User surface shortcut overrides remain keyed by surface id and action id; localized labels are metadata only and do not affect override identity.
 
 ## Performance Metrics
 
@@ -144,9 +147,9 @@ Last activity: 2026-05-13 - Phase 32 planned
 
 ## Session
 
-Last session: 2026-05-13T20:45:00+02:00
-Stopped At: v1.5 archived; ready for next milestone planning
-Resume File: .planning/milestones/v1.5-MILESTONE-AUDIT.md
+Last session: 2026-05-13T21:56:00+02:00
+Stopped At: Phase 32 complete; ready to plan Phase 33
+Resume File: .planning/phases/32-keybind-declaration-contract/32-01-SUMMARY.md
 
 ## Accumulated Context
 
@@ -199,13 +202,14 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | v1.5 audit | `.planning/milestones/v1.5-MILESTONE-AUDIT.md` |
 | Research summary | `.planning/research/SUMMARY.md` |
 | v1.6 keybind research | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
+| Phase 32 summary | `.planning/phases/32-keybind-declaration-contract/32-01-SUMMARY.md` |
 | v1.4 research | `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-13 after starting v1.6*
+*State updated: 2026-05-13 after Phase 32 completion*
 
 ## Operator Next Steps
 
-- Execute Phase 32 with `$gsd-execute-phase 32`.
+- Plan Phase 33 with `$gsd-plan-phase 33`.
 - Review deferred polish when planning future transition/smoothness work: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`

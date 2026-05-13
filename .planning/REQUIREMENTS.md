@@ -7,9 +7,9 @@
 
 ### Declaration Contract
 
-- [ ] **KEYB-01**: Frontend modules can declare semantic keybind actions with stable action ids.
-- [ ] **KEYB-02**: Each keybind action can define handler, target control reference, scope, label/i18n key, and default trigger metadata.
-- [ ] **KEYB-03**: Manifest/settings parsing validates keybind declarations into typed Rust structures instead of relying on ad hoc JSON at dispatch time.
+- [x] **KEYB-01**: Frontend modules can declare semantic keybind actions with stable action ids.
+- [x] **KEYB-02**: Each keybind action can define handler, target control reference, scope, label/i18n key, and default trigger metadata.
+- [x] **KEYB-03**: Manifest/settings parsing validates keybind declarations into typed Rust structures instead of relying on ad hoc JSON at dispatch time.
 
 ### Locale Resolution
 
@@ -60,9 +60,9 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| KEYB-01 | Phase 32 | Pending |
-| KEYB-02 | Phase 32 | Pending |
-| KEYB-03 | Phase 32 | Pending |
+| KEYB-01 | Phase 32 | Complete |
+| KEYB-02 | Phase 32 | Complete |
+| KEYB-03 | Phase 32 | Complete |
 | LOCL-01 | Phase 33 | Pending |
 | LOCL-02 | Phase 33 | Pending |
 | LOCL-03 | Phase 33 | Pending |
@@ -82,4 +82,4 @@
 
 ---
 *Requirements defined: 2026-05-13*
-*Last updated: 2026-05-13 after v1.6 requirements approval*
+*Last updated: 2026-05-13 after Phase 32 completion*
