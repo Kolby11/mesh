@@ -1,158 +1,103 @@
-# Architecture Research
+# Research: v1.6 Localized Keybind Management - Architecture
 
-**Domain:** Retained CPU rendering pipeline for a Wayland shell UI framework
-**Researched:** 2026-05-10
-**Confidence:** HIGH
+## Existing Architecture Fit
 
-## Standard Architecture
+MESH already has most of the event path:
 
-### System Overview
+1. Wayland keyboard events enter `Shell::dispatch_wayland`.
+2. Shell-global debug shortcuts are checked first.
+3. Events are routed to the keyboard-focus surface.
+4. `FrontendSurfaceComponent::handle_input` processes focused navigation, clipboard, surface shortcuts, and focused handlers.
+5. Surface shortcut dispatch calls a named script handler and can target a referenced node.
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                 Runtime / Component Invalidations           │
-├─────────────────────────────────────────────────────────────┤
-│  Script state │ Hover/focus │ Layout inputs │ Theme/state  │
-└───────────────┬─────────────┬───────────────┬──────────────┘
-                │             │               │
-┌───────────────▼─────────────────────────────────────────────┐
-│                 Retained Widget / Style Tree               │
-├─────────────────────────────────────────────────────────────┤
-│ Stable node ids │ dirty summaries │ restyle/layout outputs │
-└───────────────┬─────────────────────────────────────────────┘
-                │
-┌───────────────▼─────────────────────────────────────────────┐
-│                  Retained Render / Paint Data              │
-├─────────────────────────────────────────────────────────────┤
-│ render-object slots │ retained command blocks │ cache keys │
-└───────────────┬─────────────────────────────────────────────┘
-                │
-┌───────────────▼─────────────────────────────────────────────┐
-│             Damage / Visibility / Raster Execution         │
-├─────────────────────────────────────────────────────────────┤
-│ cull policy │ damage query │ text/icon/image caches │ paint │
-└───────────────┬─────────────────────────────────────────────┘
-                │
-┌───────────────▼─────────────────────────────────────────────┐
-│                 Pixel Buffer / Presentation                │
-└─────────────────────────────────────────────────────────────┘
+The milestone should insert a typed keybind resolver into step 4 and replace direct ad hoc JSON parsing with structured declarations.
+
+## Proposed Data Model
+
+### Module keybind declaration
+
+Each frontend module can declare actions under a manifest/settings key such as:
+
+```json
+{
+  "keybinds": {
+    "accept": {
+      "label": "action.accept",
+      "handler": "onAccept",
+      "target_ref": "accept-button",
+      "scope": "surface",
+      "shortcut": { "key": "Enter" },
+      "access_key": {
+        "default": "A",
+        "locales": { "sk": "P" }
+      }
+    }
+  }
+}
 ```
 
-### Component Responsibilities
+Exact file placement should follow existing module settings patterns, but the implementation should parse it into typed Rust structs before runtime dispatch.
 
-| Component | Responsibility | Typical Implementation |
-|-----------|----------------|------------------------|
-| Retained widget tree | Preserve stable UI identity and dirty classifications | Existing `WidgetNode` tree plus retained restyle/layout fast paths |
-| Render-object layer | Track paint-facing slots and subtree ownership | Existing `RenderObjectTree`, extended with narrower dirty propagation |
-| Retained paint-command cache | Own command blocks/ranges keyed by retained subtree identity | Evolved `RetainedDisplayList` rather than rebuilding a full flat command list |
-| Damage execution index | Map changed regions to affected commands | Node ranges, spatial buckets, or similar local index |
-| Raster caches | Reuse text, glyph, SVG, image, and icon outputs | Existing text/glyph caches plus new retained SVG/bitmap caches |
+### Resolved keybind
 
-## Recommended Project Structure
+The shell resolver should produce:
 
-```text
-crates/core/shell/src/shell/component/
-├── rendering.rs          # Stage timing and render pipeline orchestration
-├── shell_component.rs    # Surface paint flow and damage selection
-└── runtime_tree.rs       # Dirty/runtime annotation into retained tree
+- `module_id`
+- `surface_id`
+- `action_id`
+- `label`
+- `handler`
+- `target_ref`
+- `scope`
+- `trigger_kind` (`shortcut`, `access_key`)
+- `key`
+- `modifiers`
+- `source` (`user_override`, `locale_default`, `module_default`)
 
-crates/core/frontend/render/src/
-├── render_object.rs      # Retained paint-facing object diff
-├── display_list.rs       # Retained command cache and damage metrics
-└── surface/
-    ├── painter/tree.rs   # CPU command execution
-    ├── icon.rs           # SVG/bitmap/icon raster path
-    ├── glyph.rs          # Font glyph cache
-    └── text.rs           # Text layout and shaping cache
-```
+## Resolution Precedence
 
-### Structure Rationale
+1. User override in shell settings.
+2. Locale-specific module default for the active locale.
+3. Generic module default.
+4. No binding if explicitly disabled.
 
-- **`shell/component/`** owns orchestration, profiling, and invalidation policy because it already coordinates runtime, frontend, render, and presentation.
-- **`mesh-core-render`** should keep renderer-specific retained structures and caches so frontend compiler/runtime crates do not absorb paint-specific concerns.
+## Dispatch Order
 
-## Architectural Patterns
+1. Shell-global shortcuts stay highest priority.
+2. Text input and built-in focused-control behavior stays protected.
+3. Surface/module keybinds run when their scope matches.
+4. Focused node `keydown`/`keyup` handlers remain fallback behavior.
 
-### Pattern 1: Dirty-Subtree Synchronization
+This preserves existing debug shortcut precedence and prevents keybind declarations from breaking text entry.
 
-**What:** Update only the affected retained subtree when style/layout/content changes stay local.  
-**When to use:** Any time stable node IDs and dirty summaries prove that unrelated branches are unchanged.  
-**Trade-offs:** Requires more bookkeeping, but prevents whole-tree command recollection.
+## Locale and Scope
 
-### Pattern 2: Damage-Scoped Command Execution
+- Locale resolution should use existing module i18n configuration and active shell locale.
+- Access-key collision checks must run per scope, not globally across every surface.
+- Duplicates across separate scopes can be valid, matching Microsoft and Office-style access key scoping.
 
-**What:** Keep a fast mapping from damaged regions to command ranges so partial paints skip unrelated commands.  
-**When to use:** Any surface where local state changes are common and full traversal becomes visible to users.  
-**Trade-offs:** Needs careful ordering and clip correctness guarantees.
+## Diagnostics
 
-### Pattern 3: Retained Raster Outputs
+Diagnostics should be non-fatal:
 
-**What:** Cache rasterized text/glyph/icon/image outputs with invalidation keyed to the actual visual inputs.  
-**When to use:** Repeated paints of unchanged content, especially text-heavy or icon-heavy surfaces.  
-**Trade-offs:** More memory usage and eviction policy work in exchange for less CPU raster work.
+- malformed trigger
+- unknown modifier/key name
+- missing handler
+- missing `target_ref`
+- duplicate action id
+- duplicate trigger in the same scope
+- locale access key references a missing locale label
 
-## Data Flow
+The shell should keep dispatching valid keybinds even when one declaration is invalid.
 
-### Request Flow
+## Proof Surface
 
-```text
-User/state change
-    ↓
-Dirty flags + retained tree mutation
-    ↓
-Render-object diff
-    ↓
-Retained command update
-    ↓
-Damage selection + command filtering
-    ↓
-CPU paint into PixelBuffer
-    ↓
-Present with damage
-```
+Navigation bar and audio popover are good proof surfaces because they already use:
 
-### Key Data Flows
+- `keyboard.shortcuts.mute`
+- localized navigation strings
+- surface/popover activation handlers
+- audio service command dispatch
+- accessibility metadata
 
-1. **Hover/restyle flow:** stateful key update -> retained restyle -> maybe layout reuse -> render-object diff -> filtered paint.
-2. **Scroll/animation flow:** transform/scroll offset update -> retained command reuse -> damage-scoped repaint -> present.
-3. **Text/icon flow:** retained command reuse -> text/glyph/icon cache lookup -> raster on miss only.
-
-## Anti-Patterns
-
-### Anti-Pattern 1: “Partial rendering” that still walks everything
-
-**What people do:** Keep damage rectangles but still rebuild or rescan the full command tree every update.  
-**Why it's wrong:** Users still pay most of the CPU cost, so rendering remains laggy.  
-**Do this instead:** Retain subtree ownership and add command filtering before paint.
-
-### Anti-Pattern 2: Reparsing SVGs and resizing bitmaps during steady-state paint
-
-**What people do:** Cache source files but not raster outputs.  
-**Why it's wrong:** Decode, parse, and resize cost returns every frame.  
-**Do this instead:** Cache raster variants keyed by size, tint, and source identity.
-
-## Integration Points
-
-### Internal Boundaries
-
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| `mesh-core-shell` ↔ `mesh-core-render` | Direct Rust API calls | Keep orchestration/policy in shell, render-specific caches in render crate |
-| Retained tree ↔ render objects | Stable node ids + dirty summaries | Existing boundary is correct; granularity needs tightening |
-| Display list ↔ painter | Retained commands + damage/clip metadata | Add range/index data so the painter can skip unrelated work cheaply |
-
-## Sources
-
-- Qt Quick Scene Graph Default Renderer
-- Qt Quick Performance Considerations
-- Local MESH renderer code:
-  - `crates/core/shell/src/shell/component/rendering.rs`
-  - `crates/core/shell/src/shell/component/shell_component.rs`
-  - `crates/core/frontend/render/src/render_object.rs`
-  - `crates/core/frontend/render/src/display_list.rs`
-  - `crates/core/frontend/render/src/surface/painter/tree.rs`
-  - `crates/core/frontend/render/src/surface/icon.rs`
-
----
-*Architecture research for: retained CPU rendering pipeline*
-*Researched: 2026-05-10*
+Use them to prove a localized English/Slovak binding and a user override.

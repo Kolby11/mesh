@@ -1,151 +1,49 @@
-# Pitfalls Research
+# Research: v1.6 Localized Keybind Management - Pitfalls
 
-**Domain:** CPU-side retained renderer optimization for shell UI
-**Researched:** 2026-05-10
-**Confidence:** HIGH
+## Pitfall: Collapsing Shortcuts and Access Keys
 
-## Critical Pitfalls
+Microsoft, GNOME, and GTK all distinguish broader shortcuts/accelerators from access keys/mnemonics and focused widget key bindings. If MESH uses one untyped "keybind" shape for everything, authors will not know when a key should be scoped, localized, or focus-local.
 
-### Pitfall 1: Whole-tree retention in name only
+Prevention: encode trigger kind explicitly and test dispatch order for each kind.
 
-**What goes wrong:**  
-The renderer keeps “retained” structures, but every local change still recollects display entries and paint commands across the tree.
+## Pitfall: Localized Keys Without Scope
 
-**Why it happens:**  
-Dirty summaries stop at the render-object layer while retained paint-command ownership stays surface-wide.
+Localized access keys naturally collide because translated labels often share first letters. Microsoft recommends scopes, and GNOME warns that collisions can appear only after translation.
 
-**How to avoid:**  
-Add subtree-level retained command ownership keyed by stable node IDs and only rebuild affected branches.
+Prevention: validate collisions per surface/scope and expose diagnostics. Do not make duplicates fatal across unrelated scopes.
 
-**Warning signs:**  
-Small hover or slider updates still show large display-list rebuild time or command churn.
+## Pitfall: Breaking Text Input
 
-**Phase to address:**  
-Phase 28
+Single-letter localized access keys can conflict with typing if they are handled as raw key presses in text fields.
 
----
+Prevention: reserve access-key activation for an explicit access-key mode/modifier or scoped command context. Preserve text-input and focused-control behavior before module shortcuts.
 
-### Pitfall 2: Partial damage that still scans the full command list
+## Pitfall: User Overrides Drift When Labels Change
 
-**What goes wrong:**  
-Damage rects are correct, but painting still loops over every command and clips late, so CPU cost stays high.
+If overrides are keyed by localized label text, changing a translation breaks user settings.
 
-**Why it happens:**  
-Damage is tracked as geometry but not indexed back to retained commands.
+Prevention: key all overrides by stable `module_id + action_id`, never by display text.
 
-**How to avoid:**  
-Build a node-range or spatial lookup so partial paints visit only intersecting commands plus required overlays.
+## Pitfall: Wayland Global Shortcut Scope Creep
 
-**Warning signs:**  
-Tiny damage areas still produce paint times that scale with total node count instead of changed-region size.
+Global shortcuts on Wayland are permissioned and compositor-mediated. XDG Desktop Portal GlobalShortcuts requires sessions, binding/configuration flows, and activation signals.
 
-**Phase to address:**  
-Phase 29
+Prevention: defer compositor-global registration. Define the action model so a later milestone can export eligible actions to a portal backend.
 
----
+## Pitfall: Locale Auto-Guessing
 
-### Pitfall 3: Raster-cache gaps in icon and image paths
+Generating keys automatically from translated labels can produce unusable keys, duplicate keys, or keys not present on the user's keyboard.
 
-**What goes wrong:**  
-SVG icons get reparsed/rerasterized and bitmap images get resized repeatedly during steady-state paints.
+Prevention: modules/localizers provide explicit locale key hints; MESH validates and falls back rather than guessing silently.
 
-**Why it happens:**  
-Source assets may be cached, but rasterized outputs are not retained by visual inputs such as size and tint.
+## Pitfall: Diagnostics Hidden From Authors
 
-**How to avoid:**  
-Cache rasterized SVG/icon/bitmap variants and retain opaque/translucent metadata with the cache entry.
+Keybind bugs are easy to miss if only runtime dispatch fails.
 
-**Warning signs:**  
-Icon-heavy surfaces stay expensive even when layout/style work is low; cache-hit metrics are missing or near zero.
+Prevention: publish diagnostics during module load and runtime resolution, and add tests with malformed bindings, duplicate bindings, missing handlers, and missing target refs.
 
-**Phase to address:**  
-Phase 30
+## Pitfall: Accessibility Metadata Lags Effective Binding
 
----
+If accessibility metadata uses default keys while dispatch uses overrides, assistive technology and visible hints become misleading.
 
-### Pitfall 4: Treating clipping as a free optimization
-
-**What goes wrong:**  
-Developers add more per-item clipping to constrain paint, but overall CPU work and batching opportunities get worse.
-
-**Why it happens:**  
-Clipping looks like an obvious way to reduce drawing, but Qt explicitly warns it adds render-state complexity and can break batching.
-
-**How to avoid:**  
-Prefer viewport-aware omission, layout/elision, and coarser clip boundaries instead of defaulting to per-item clip.
-
-**Warning signs:**  
-Small delegates or labels start carrying clip state and paint metrics regress even when visible output is unchanged.
-
-**Phase to address:**  
-Phase 27
-
----
-
-### Pitfall 5: Winning the benchmark and losing the product
-
-**What goes wrong:**  
-Numbers improve on isolated counters, but real shell surfaces still feel laggy to the user.
-
-**Why it happens:**  
-Optimization gets anchored to synthetic or internal metrics without visible proof on shipped surfaces.
-
-**How to avoid:**  
-Keep canonical benchmark results tied to navigation-bar, audio-popover, and other shipped proof surfaces, with explicit visible-smoothness checks.
-
-**Warning signs:**  
-Stage timings move, but hover/open-close/slider interactions do not feel noticeably better.
-
-**Phase to address:**  
-Phase 31
-
-## Technical Debt Patterns
-
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Full-surface repaint fallback for every ambiguous change | Simple correctness | Masks where retained work is still too broad | Only as a temporary fallback with explicit metrics |
-| Caching source files but not raster outputs | Easy first cache | Repeats parse/resize cost on every paint | Only for rarely used assets |
-| Adding a new benchmark harness instead of using the existing one | Freedom to prototype | Splits proof paths and weakens regression history | Never for this milestone |
-
-## Performance Traps
-
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| Full command-list scans under partial damage | Paint time tracks total command count | Add damage-indexed command filtering | As surfaces become moderately complex |
-| Repeated SVG parsing and bitmap resizing | Icon-heavy paints remain expensive | Add retained raster caches | Immediately noticeable on recurring paints |
-| Per-item clip proliferation | More state churn and less merging | Push clip decisions outward and prune earlier | On delegate-heavy or text-heavy surfaces |
-
-## UX Pitfalls
-
-| Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| Benchmark-only improvements | UI still feels laggy despite “faster” reports | Require visible-smoothness proof on shipped surfaces |
-| Aggressive repaint pruning with stale visuals | Users see incorrect or delayed updates | Keep full-repaint fallbacks and verify correctness per phase |
-| Cache-heavy optimization with no eviction policy | Smoothness regresses over time or memory balloons | Add bounded caches and profiler-visible hit/miss metrics |
-
-## "Looks Done But Isn't" Checklist
-
-- [ ] **Dirty-subtree retention:** Verify local updates do not still recollect the entire surface command set.
-- [ ] **Partial damage:** Verify small damage regions do not still scan every command before clipping.
-- [ ] **Raster caches:** Verify unchanged icons/images/text hit caches on repeated paints.
-- [ ] **Smoothness proof:** Verify shipped surfaces feel smoother, not just benchmark counters.
-
-## Pitfall-to-Phase Mapping
-
-| Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| Whole-tree retention in name only | Phase 28 | Display-list rebuild work stays local on scoped updates |
-| Partial damage still scans everything | Phase 29 | Paint traversal cost scales with changed region, not total surface size |
-| Raster-cache gaps | Phase 30 | Repeated paints show sustained cache hits and lower raster cost |
-| Clipping as a free optimization | Phase 27 | Clip-heavy surfaces do not regress and unnecessary per-item clips are avoided |
-| Benchmark win but no product win | Phase 31 | Canonical proof surfaces look visibly smoother to the user |
-
-## Sources
-
-- Qt Quick Scene Graph Default Renderer
-- Qt Quick Performance Considerations
-- Local renderer and shell orchestration code in `mesh-core-render` and `mesh-core-shell`
-
----
-*Pitfalls research for: CPU-side retained renderer optimization*
-*Researched: 2026-05-10*
+Prevention: accessibility annotation must use the same resolved keybind records as dispatch.
