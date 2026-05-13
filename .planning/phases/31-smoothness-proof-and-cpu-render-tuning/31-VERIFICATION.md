@@ -12,7 +12,7 @@ requirements: ["PERF-03", "SMTH-01", "SMTH-02", "SMTH-03"]
 
 `gaps_found`
 
-Automated CPU-render proof, conservative threshold tuning, and 31-02 gap-closure implementation are complete. Live manual UAT previously passed `hover` and `keyboard_traversal`; the three failed rows now have automated fixes and regression coverage, but still require live retest before Phase 31 can be accepted.
+Automated CPU-render proof, conservative threshold tuning, and 31-02 gap-closure implementation are complete. Live manual UAT passed `hover` and `keyboard_traversal`; retesting the remaining rows found three narrower interaction/state failures. Plan 31-03 is ready to close those gaps before final acceptance.
 
 ## Commands
 
@@ -43,11 +43,17 @@ No GPU backend, parallel paint/layout implementation, new benchmark harness, tra
 
 ## Residual Risk
 
-- `31-UAT.md` has three rows reset to pending live retest after automated gap closure: popover close/focus/transition behavior, slider value synchronization, and audio mute/backend state reconciliation.
+- `31-UAT.md` is diagnosed with three failed rows after 31-02 retest: first navigation click after popover open, first slider drag after popover open, and second mute-toggle reconciliation in the navigation bar.
 - `31-01-BENCHMARK.md` still marks acceptance decisions `deferred`; automated counters alone are not accepted as visible smoothness proof.
 - The current shipped-surface proof rows still report `full_surface` policy because the canonical scenarios reach full-rebuild paths. Smaller retained damage paths are protected by focused policy tests, but not yet proven as visible end-user smoothness wins.
 
+## Gap Closure Plan
+
+- READY: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-03-PLAN.md`
+- Scope: first input after audio popover activation, first slider grab after show/focus transfer, and idempotent/shared mute pending-state reconciliation.
+- Final acceptance still requires live UAT confirmation for tests 2, 3, and 5 after 31-03 executes.
+
 ## Follow-Up
 
-- Rerun `$gsd-verify-work 31` for the three pending live UAT rows.
+- Run `$gsd-execute-phase 31 --gaps-only` to execute Plan 31-03, then rerun `$gsd-verify-work 31` for tests 2, 3, and 5.
 - If visual lag remains after this conservative CPU threshold work, continue with the planned Skia/GPU renderer investigation or later parallel paint/layout work after retained ownership boundaries are proven.

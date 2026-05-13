@@ -1,21 +1,17 @@
 ---
-status: partial
+status: diagnosed
 phase: 31-smoothness-proof-and-cpu-render-tuning
 source:
   - .planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-PLAN.md
 started: "2026-05-13T18:33:02+02:00"
-updated: "2026-05-13T19:17:33+02:00"
+updated: "2026-05-13T19:37:08+02:00"
 ---
 
 # Phase 31 UAT - Smoothness Proof and CPU Render Tuning
 
 ## Current Test
 
-number: 2
-name: surface_open_close
-expected: |
-  Audio popover opens and closes without a visible stall and keeps icon/text layout correct.
-awaiting: live retest after 31-02 gap closure
+[testing complete]
 
 ## Tests
 
@@ -31,19 +27,19 @@ severity: none
 expected: Audio popover opens and closes without a visible stall and keeps icon/text layout correct.
 benchmark_ref: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-BENCHMARK.md` scenario `surface_open_close`
 correctness_check: Popover content, icons, text, clipping, and background remain visually stable while opening and closing; no stale pixels remain after close.
-result: pending
-reported: "it does open on the correct place but when i want to close it using the button that i opened it with i need to click it three times, also the slider does not allow drag on the initial grab, i need to grab it again so this indicates some problem with focus, also the surface fades in but on close instantly disappears we should be able to configure the display transition using css and maybe component and shell config"
+result: issue
+reported: "no when i open it iam unable to click buttons in the navigation bar on first try it take 3 attempts"
 fix_evidence: "31-02 implemented portal-only close toggling, first-grab slider regression coverage, and configurable surface hide transition lifecycle. Awaiting live retest."
-severity: none
+severity: major
 
 ### 3. pointer_update
 expected: Audio slider/control pointer update tracks input without visible repaint lag and keeps control state correct.
 benchmark_ref: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-BENCHMARK.md` scenario `pointer_update`
 correctness_check: Slider thumb, filled track, displayed value, and command dispatch state remain synchronized during pointer movement.
-result: pending
-reported: "it has a slight lag espetially on bigger value changes, also increasing the values using the buttons does not move the slider"
+result: issue
+reported: "it does not lag but grabbing it right after we open the volume surface does not allow drag instantly we need to start dragging again for it to work"
 fix_evidence: "31-02 reconciled preserved shell slider values with script-owned values and added button/backend slider synchronization regression coverage. Awaiting live retest."
-severity: none
+severity: major
 
 ### 4. keyboard_traversal
 expected: Tab focus traversal moves focus visibly without lag and keeps focus-visible styling correct.
@@ -57,17 +53,17 @@ severity: none
 expected: Audio backend state update refreshes visible values without a stall and keeps service-driven UI state correct.
 benchmark_ref: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-BENCHMARK.md` scenario `backend_update`
 correctness_check: Backend-provided audio availability, volume percent, muted state, and visible labels update consistently without layout corruption or stale text.
-result: pending
-reported: "mostly yes but when i mute the volume the volume button in the navigation bar sometimes does not react, even acts as inverted, also the slider does not respond to the button volume change"
+result: issue
+reported: "on first toggle it correcty mutes, then on the second it does not unmute in the navigation bar then it seems to work again but flipped since the second turn flipped it"
 fix_evidence: "31-02 added pending mute confirmation behavior, precise button volume updates, and backend reconciliation coverage. Awaiting live retest."
-severity: none
+severity: major
 
 ## Summary
 
 total: 5
 passed: 2
-issues: 0
-pending: 3
+issues: 3
+pending: 0
 skipped: 0
 blocked: 0
 
@@ -91,6 +87,24 @@ blocked: 0
     - "Preserve first pointer-down interaction after popover focus transfer so the slider drag starts on the initial grab."
     - "Add configurable surface show/hide transition support so close can keep the surface mapped until the display transition completes."
   debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
+- truth: "Audio popover opens and closes without a visible stall and keeps icon/text layout correct."
+  status: failed
+  reason: "User reported: no when i open it iam unable to click buttons in the navigation bar on first try it take 3 attempts"
+  severity: major
+  test: 2
+  root_cause: "31-02 fixed the parent portal toggle path, but live pointer activation still crosses surfaces while the audio popover owns keyboard focus and may still be mapped or transitioning. The shell clears keyboard ownership on the first pointer press, and the navigation component only observes final `SurfaceVisibilityChanged` events, so the first click after opening can be consumed by focus/ownership reconciliation instead of completing the intended button action."
+  artifacts:
+    - path: "crates/core/shell/src/shell/runtime/wayland.rs"
+      issue: "Pointer press claims keyboard focus before component click dispatch, but the first press after popover activation can be used to clear transferred popover ownership."
+    - path: "crates/core/shell/src/shell/runtime/request.rs"
+      issue: "Transferred keyboard ownership and closing transition state are managed separately from pointer click delivery."
+    - path: "modules/frontend/navigation-bar/src/main.mesh"
+      issue: "Navigation toggle state is local to `audio_surface_hidden` and does not model an opening/open/closing shell-confirmed lifecycle."
+  missing:
+    - "Add a full shell-level regression for opening the audio popover, then clicking navigation buttons immediately on the first try."
+    - "Make pointer clicks outside a transferred popover both clear popover keyboard ownership and still deliver the original click to the physical target."
+    - "Expose shell-confirmed popover open/closing state to the trigger so it cannot require multiple clicks while transition/focus state settles."
+  debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
 - truth: "Audio slider/control pointer update tracks input without visible repaint lag and keeps control state correct."
   status: fixed_pending_uat
   reason: "User reported: it has a slight lag espetially on bigger value changes, also increasing the values using the buttons does not move the slider"
@@ -108,6 +122,24 @@ blocked: 0
     - "Reconcile or clear preserved slider state when the reactive `value` attribute changes outside an active drag."
     - "Add regression coverage proving popover +/- buttons and backend updates move the visible slider after prior slider interaction."
     - "Keep active-drag preservation intact so stale backend updates do not snap the slider during a drag."
+  debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
+- truth: "Audio slider/control pointer update tracks input without visible repaint lag and keeps control state correct."
+  status: failed
+  reason: "User reported: it does not lag but grabbing it right after we open the volume surface does not allow drag instantly we need to start dragging again for it to work"
+  severity: major
+  test: 3
+  root_cause: "The automated first-grab test covers the audio-popover component after it is already painted, but the live failure happens immediately after shell activation. The first pointer press can arrive before the popover has a stable painted tree/surface size or while transferred keyboard ownership is being cleared, so hit testing does not establish `active_slider_key`; the second drag works after the surface has painted and focus state is settled."
+  artifacts:
+    - path: "crates/core/shell/src/shell/runtime/wayland.rs"
+      issue: "Pointer events are routed with fallback surface sizing when a newly visible surface may not have a known paint buffer yet."
+    - path: "crates/core/shell/src/shell/component/input/mod.rs"
+      issue: "Slider drag only starts when the pointer-down hit test finds the slider and sets `active_slider_key` on that first press."
+    - path: "crates/core/shell/src/shell/component/tests/interaction/policy.rs"
+      issue: "Current first-grab regression bypasses the live shell activation path and starts from an already rendered component."
+  missing:
+    - "Add a shell integration test that opens the popover and immediately presses/moves on the slider before an extra user interaction."
+    - "Ensure first input after surface show uses the configured surface size and a current painted tree before hit testing."
+    - "Keep slider `active_slider_key` establishment independent of focus-transfer cleanup."
   debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
 - truth: "Audio backend state update refreshes visible values without a stall and keeps service-driven UI state correct."
   status: fixed_pending_uat
@@ -127,11 +159,29 @@ blocked: 0
     - "Add tests for mute toggle/backend update ordering and for volume button changes propagating to the popover slider."
     - "Ensure service updates clear stale pending state only when they confirm the requested mute/volume value."
   debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
+- truth: "Audio backend state update refreshes visible values without a stall and keeps service-driven UI state correct."
+  status: failed
+  reason: "User reported: on first toggle it correcty mutes, then on the second it does not unmute in the navigation bar then it seems to work again but flipped since the second turn flipped it"
+  severity: major
+  test: 5
+  root_cause: "The popover has pending mute state, but the navigation volume button still renders raw backend `audio.muted`. The command sent by the popover is also `toggle_mute`, so a delayed or stale backend update can leave the nav button showing the old state while the user's second click has already flipped the requested state, making subsequent displays appear inverted."
+  artifacts:
+    - path: "modules/frontend/navigation-bar/src/components/volume-button.mesh"
+      issue: "Reads backend `audio.muted` directly and has no pending requested mute state."
+    - path: "modules/frontend/audio-popover/src/main.mesh"
+      issue: "Tracks pending mute state locally and sends non-idempotent `audio.toggle_mute()` commands."
+    - path: "modules/interfaces/audio.toml"
+      issue: "Provides idempotent `set_muted(device_id, muted)` but the frontend still uses `toggle_mute` for the popover mute action."
+  missing:
+    - "Use an idempotent requested mute value for frontend mute actions where the interface supports `set_muted`."
+    - "Share pending mute confirmation state between navigation and popover, or derive both from a single frontend-owned audio UI state."
+    - "Add regression coverage for mute false -> true -> false with stale/interleaved backend confirmations."
+  debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
 
 ## Completion Instructions
 
-Final Phase 31 acceptance requires each scenario result to be set to `pass`, `issue`, `blocked`, or `skipped` before verification. Update the summary totals so they add up to `total: 5`. Set frontmatter `status: complete` only when no test remains awaiting manual action or blocked.
+Final Phase 31 acceptance requires tests 2, 3, and 5 to pass a live retest after the next gap-closure implementation. The current UAT is diagnosed and ready for gap planning.
 
 ## Acceptance Note
 
-Live UAT was performed against the shipped navigation/audio surfaces. Two scenarios passed and three major interaction/state gaps were diagnosed. Plan 31-02 implemented automated fixes and regression coverage for those gaps; final Phase 31 acceptance requires live retest of tests 2, 3, and 5.
+Live UAT was performed against the shipped navigation/audio surfaces after Plan 31-02. Hover and keyboard traversal passed. Tests 2, 3, and 5 still fail with narrower input-routing and mute-reconciliation issues; Plan 31-03 should close those gaps before another live retest.

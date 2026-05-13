@@ -2,7 +2,7 @@
 phase: 31
 type: uat-diagnosis
 created: "2026-05-13T19:01:41+02:00"
-status: complete
+status: updated
 ---
 
 # Phase 31 Live UAT Diagnosis
@@ -35,3 +35,24 @@ status: complete
 - Reconcile slider preservation with script-owned value changes while preserving active-drag protection against stale backend updates.
 - Add a shared audio pending/confirmation rule for mute and volume controls so nav icon, mute button label, percent text, and slider stay in sync.
 - Introduce surface display transition config for show/hide, with close keeping the surface mapped until the configured exit transition completes.
+
+## Retest Update - 2026-05-13T19:37:08+02:00
+
+Plan 31-02 improved the broad repaint and stale slider preservation symptoms, but live retest still found three narrower failures:
+
+- Test 2: after opening the volume surface, navigation-bar buttons do not respond on the first click and can require three attempts.
+- Test 3: slider value changes no longer visibly lag, but a drag started immediately after opening the volume surface does not bind on the first grab.
+- Test 5: first mute toggle updates correctly, but the second toggle does not unmute in the navigation bar, after which state appears flipped.
+
+Updated root causes:
+
+1. **First pointer after popover activation is still a focus/input ownership boundary.** The existing tests cover parent portal toggling and component-local first-grab behavior, but not the full shell path where a newly visible popover owns transferred keyboard focus and another surface receives the next pointer press. The first press can be consumed by ownership cleanup or by hit testing before the newly visible surface has stable paint/size state.
+2. **First-grab slider coverage is too low level.** `audio_popover_first_slider_grab_dispatches_change` starts from an already painted component, so it misses the live activation sequence: show surface, focus transfer, first pointer-down, and first pointer-move on a newly mapped surface.
+3. **Mute reconciliation is still split.** The popover uses local pending mute state and sends `toggle_mute`; the navigation button renders raw backend state only. A delayed backend event after the second toggle can make the nav icon lag or appear inverted. The audio interface already exposes idempotent `set_muted(device_id, muted)`, which is safer than a second `toggle_mute` when UI state is pending.
+
+Fix direction for 31-03:
+
+- Add shell-level regressions that open the popover and immediately click another nav button or drag the slider without an intervening paint/user retry.
+- Make the first pointer event after popover activation deliver to the physical target after clearing transferred keyboard ownership.
+- Ensure newly visible fixed-size surfaces have configured geometry and a current tree before the first hit test.
+- Replace frontend mute toggles with requested-state `set_muted` calls where supported, and render nav/popover from the same pending/confirmed mute model.
