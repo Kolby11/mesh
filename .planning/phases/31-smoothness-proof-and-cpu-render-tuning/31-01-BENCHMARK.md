@@ -38,6 +38,15 @@ Captured with:
 - Focused shell tests prove zero-area damage stays `minimal_damage`, small single damage stays `minimal_damage`, below-threshold extra damage stays `bounding_rect`, two-thirds damage promotes to `full_surface`, and tree rebuilds below the entry threshold stay non-full-surface.
 - The current shipped-surface proof rows still report `full_surface` because each canonical scenario currently reaches the full-rebuild path. That is accepted as proof that the new threshold is conservative for real surfaces while still allowing smaller retained damage paths to avoid premature full-surface repaint.
 
+## Cache Capacity and Clear Behavior Decision
+
+- raster capacity unchanged: `RASTER_CACHE_CAPACITY` remains `256` in `crates/core/frontend/render/src/surface/icon.rs`.
+- text capacity unchanged: `TEXT_LAYOUT_CACHE_CAPACITY` remains `128` in `crates/core/frontend/render/src/surface/text.rs`.
+- Evidence: warm steady-state `pointer_update`, `keyboard_traversal`, and `backend_update` rows report raster hits with `raster_misses=0`; `surface_open_close` has the expected cold first-paint miss; `hover` has visual-state key separation with both hits and misses.
+- Evidence: `hover` and `keyboard_traversal` report text hits 5/misses 0/shaping 0us, while `surface_open_close`, `pointer_update`, and `backend_update` include expected text misses for first paint or changed content. The rows do not show text layout invalidations or repeated shaping for unchanged text inputs.
+- Clear behavior unchanged: full-surface policy still clears the full buffer, and non-full-surface policy still clears only the effective damage rect in `shell_component.rs`. Direct buffer-clear assertions would be more invasive than the current Phase 31 threshold scope, so this behavior remains protected by the existing repaint policy, retained display-list, and profiling regression tests.
+- Guardrails preserved: file freshness checks, SVG external-resource bypass, tint and multicolor key separation, non-UTF path identity preservation, and opaque/translucent raster hit reporting remain covered by the existing `icon` test filter.
+
 ## Machine-Readable Phase 31 Rows
 
 The canonical proof test emits one `PHASE31_PROOF` row per scenario with these fields:
