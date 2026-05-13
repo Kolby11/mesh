@@ -772,6 +772,11 @@ fn select_damage_policy(
     has_extra_damage_sources: bool,
     candidate_area: u64,
 ) -> DisplayListRepaintPolicy {
+    const FULL_SURFACE_DAMAGE_NUMERATOR: u64 = 2;
+    const FULL_SURFACE_DAMAGE_DENOMINATOR: u64 = 3;
+    const MOSTLY_CHANGED_ENTRIES_NUMERATOR: u64 = 3;
+    const MOSTLY_CHANGED_ENTRIES_DENOMINATOR: u64 = 4;
+
     if candidate_area == 0 {
         return DisplayListRepaintPolicy::MinimalDamage;
     }
@@ -779,9 +784,13 @@ fn select_damage_policy(
     let changed_entries = metrics
         .entries_rebuilt
         .saturating_add(metrics.entries_removed);
-    let mostly_changed_entries =
-        metrics.entries_total > 0 && changed_entries * 4 >= metrics.entries_total * 3;
-    let large_damage = metrics.surface_area > 0 && candidate_area * 2 >= metrics.surface_area;
+    let mostly_changed_entries = metrics.entries_total > 0
+        && changed_entries * MOSTLY_CHANGED_ENTRIES_DENOMINATOR
+            >= metrics.entries_total * MOSTLY_CHANGED_ENTRIES_NUMERATOR;
+    // Acceptance guard: candidate_area * FULL_SURFACE_DAMAGE_DENOMINATOR >= metrics.surface_area * FULL_SURFACE_DAMAGE_NUMERATOR.
+    let large_damage = metrics.surface_area > 0
+        && candidate_area * FULL_SURFACE_DAMAGE_DENOMINATOR
+            >= metrics.surface_area * FULL_SURFACE_DAMAGE_NUMERATOR;
 
     if large_damage || (requires_tree_rebuild && mostly_changed_entries) {
         DisplayListRepaintPolicy::FullSurface
@@ -925,12 +934,30 @@ mod tests {
         }
     }
 
+    fn metrics(surface_area: u64) -> DisplayListMetrics {
+        DisplayListMetrics {
+            surface_area,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn policy_keeps_zero_candidate_area_minimal() {
+        let policy = select_damage_policy(metrics(10_000), false, false, 0);
+
+        assert_eq!(policy, DisplayListRepaintPolicy::MinimalDamage);
+    }
+
+    #[test]
+    fn policy_keeps_small_single_damage_minimal() {
+        let policy = select_damage_policy(metrics(10_000), false, false, 900);
+
+        assert_eq!(policy, DisplayListRepaintPolicy::MinimalDamage);
+    }
+
     #[test]
     fn policy_keeps_small_overlay_damage_as_bounding_rect() {
-        let metrics = DisplayListMetrics {
-            surface_area: 10_000,
-            ..Default::default()
-        };
+        let metrics = metrics(10_000);
         let tooltip = Some(DamageRect {
             x: 10,
             y: 10,
@@ -949,6 +976,30 @@ mod tests {
     }
 
     #[test]
+    fn policy_keeps_below_threshold_extra_damage_as_bounding_rect() {
+        let policy = select_damage_policy(metrics(10_000), false, true, 6_600);
+
+        assert_eq!(policy, DisplayListRepaintPolicy::BoundingRect);
+    }
+
+    #[test]
+    fn policy_promotes_two_thirds_surface_damage_to_full_repaint() {
+        let metrics = metrics(9_000);
+        let reorder = Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 60,
+            height: 100,
+        });
+
+        let effective = select_effective_damage(metrics, surface(90, 100), false, reorder, None);
+
+        assert!(effective.full_surface);
+        assert_eq!(effective.rect, Some(surface(90, 100)));
+        assert_eq!(effective.policy, DisplayListRepaintPolicy::FullSurface);
+    }
+
+    #[test]
     fn policy_promotes_large_bounding_damage_to_full_repaint() {
         let metrics = DisplayListMetrics {
             surface_area: 10_000,
@@ -957,8 +1008,8 @@ mod tests {
         let reorder = Some(DamageRect {
             x: 0,
             y: 0,
-            width: 80,
-            height: 80,
+            width: 82,
+            height: 82,
         });
 
         let effective = select_effective_damage(metrics, surface(100, 100), false, reorder, None);
@@ -966,5 +1017,35 @@ mod tests {
         assert!(effective.full_surface);
         assert_eq!(effective.rect, Some(surface(100, 100)));
         assert_eq!(effective.policy, DisplayListRepaintPolicy::FullSurface);
+    }
+
+    #[test]
+    fn policy_promotes_tree_rebuild_when_three_quarters_entries_changed() {
+        let metrics = DisplayListMetrics {
+            surface_area: 10_000,
+            entries_total: 8,
+            entries_rebuilt: 5,
+            entries_removed: 1,
+            ..Default::default()
+        };
+
+        let policy = select_damage_policy(metrics, true, false, 1_000);
+
+        assert_eq!(policy, DisplayListRepaintPolicy::FullSurface);
+    }
+
+    #[test]
+    fn policy_keeps_tree_rebuild_below_entry_threshold_non_full_surface() {
+        let metrics = DisplayListMetrics {
+            surface_area: 10_000,
+            entries_total: 8,
+            entries_rebuilt: 5,
+            entries_removed: 0,
+            ..Default::default()
+        };
+
+        let policy = select_damage_policy(metrics, true, false, 1_000);
+
+        assert_eq!(policy, DisplayListRepaintPolicy::MinimalDamage);
     }
 }
