@@ -12,7 +12,7 @@ requirements: ["PERF-03", "SMTH-01", "SMTH-02", "SMTH-03"]
 
 `gaps_found`
 
-Automated CPU-render proof and conservative threshold tuning are complete. Final visible smoothness acceptance remains deferred because live manual UAT was not run in this headless terminal session.
+Automated CPU-render proof and conservative threshold tuning are complete. Live manual UAT was run after the original verification pass: `hover` and `keyboard_traversal` passed, while `surface_open_close`, `pointer_update`, and `backend_update` exposed major interaction/state gaps. Those gaps are diagnosed in `31-UAT.md` and have a gap-closure plan in `31-02-PLAN.md`.
 
 ## Commands
 
@@ -38,11 +38,11 @@ No GPU backend, parallel paint/layout implementation, new benchmark harness, tra
 
 ## Residual Risk
 
-- `31-UAT.md` has all five canonical manual checks marked `skipped`, not `pass`, because no live visual shell UAT was performed in this session.
-- `31-01-BENCHMARK.md` marks all five acceptance decisions `deferred`; automated counters alone are not accepted as visible smoothness proof.
+- `31-UAT.md` has three major live UAT issues pending gap-closure execution and retest: popover close/focus/transition behavior, slider value synchronization, and audio mute/backend state reconciliation.
+- `31-01-BENCHMARK.md` still marks acceptance decisions `deferred`; automated counters alone are not accepted as visible smoothness proof.
 - The current shipped-surface proof rows still report `full_surface` policy because the canonical scenarios reach full-rebuild paths. Smaller retained damage paths are protected by focused policy tests, but not yet proven as visible end-user smoothness wins.
 
 ## Follow-Up
 
-- Run `$gsd-verify-work 31` or a live manual UAT pass to exercise `hover`, `surface_open_close`, `pointer_update`, `keyboard_traversal`, and `backend_update` on shipped shell surfaces.
+- Run `$gsd-execute-phase 31 --gaps-only` to execute `31-02-PLAN.md`, then rerun `$gsd-verify-work 31` for the three failed live UAT rows.
 - If visual lag remains after this conservative CPU threshold work, continue with the planned Skia/GPU renderer investigation or later parallel paint/layout work after retained ownership boundaries are proven.

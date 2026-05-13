@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: CPU Rendering Performance Improvement
 status: verification_gaps
-stopped_at: Phase 31 executed; live visual UAT deferred
-last_updated: "2026-05-13T16:41:21Z"
+stopped_at: Phase 31 live UAT diagnosed; gap-closure plan 31-02 ready
+last_updated: "2026-05-13T17:01:41Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 6
@@ -26,8 +26,8 @@ See: `.planning/PROJECT.md` (updated 2026-05-10)
 ## Current Position
 
 Phase: 31
-Plan: 1 of 1
-Status: Executed with verification gaps
+Plan: 2 of 2
+Status: Live UAT gaps diagnosed; gap closure planned
 Last activity: 2026-05-13
 
 ## Decisions
@@ -99,7 +99,7 @@ Last activity: 2026-05-13
 - [Phase 29]: The debug-inspector Surfaces view renders retained paint policy, filtered command, skipped command, span, and fallback counters directly; partial payloads must render unavailable labels rather than zero-like proof.
 - [Phase 31]: Full-surface repaint promotion now uses a two-thirds surface-area threshold while preserving the three-quarters changed-entry tree rebuild fallback. — Keeps policy tuning conservative and testable.
 - [Phase 31]: Raster and text cache capacities remain unchanged because current shipped-surface proof rows do not show capacity-driven warm-path misses. — Avoids speculative cache growth without visible-smoothness proof.
-- [Phase 31]: Visible smoothness acceptance remains deferred until live visual UAT runs on shipped shell surfaces. — Automated counters alone are not sufficient for PERF-03/SMTH-01 acceptance.
+- [Phase 31]: Live visual UAT passed hover and keyboard traversal but found three major audio surface interaction/state gaps. Automated counters alone are not sufficient for PERF-03/SMTH-01 acceptance, so 31-02 is the required gap-closure path.
 
 ## Performance Metrics
 
@@ -140,9 +140,9 @@ Last activity: 2026-05-13
 
 ## Session
 
-Last session: 2026-05-13T16:41:21Z
-Stopped At: Phase 31 executed; live visual UAT deferred
-Resume File: .planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-VERIFICATION.md
+Last session: 2026-05-13T17:01:41Z
+Stopped At: Phase 31 live UAT diagnosed; gap-closure plan 31-02 ready
+Resume File: .planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-02-PLAN.md
 
 ## Accumulated Context
 
@@ -194,8 +194,8 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-13 after Phase 31 execution*
+*State updated: 2026-05-13 after Phase 31 live UAT diagnosis*
 
 ## Operator Next Steps
 
-- Verify Phase 31 live visual smoothness: `$gsd-verify-work 31`
+- Execute diagnosed Phase 31 gap closure: `$gsd-execute-phase 31 --gaps-only`
