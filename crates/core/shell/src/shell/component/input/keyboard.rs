@@ -207,35 +207,7 @@ impl FrontendSurfaceComponent {
     }
 
     fn legacy_settings_surface_shortcut_declarations(&self) -> Vec<SurfaceShortcutDeclaration> {
-        let Some(shortcuts) = self
-            .settings_json
-            .get("keyboard")
-            .and_then(|value| value.get("shortcuts"))
-            .and_then(serde_json::Value::as_object)
-        else {
-            return Vec::new();
-        };
-
-        shortcuts
-            .iter()
-            .filter_map(|(shortcut_id, value)| {
-                let handler = value.get("handler")?.as_str()?.to_string();
-                let default_key = value.get("key")?.as_str()?.to_string();
-                if handler.trim().is_empty() || default_key.trim().is_empty() {
-                    return None;
-                }
-
-                Some(SurfaceShortcutDeclaration {
-                    action_id: shortcut_id.clone(),
-                    default_key,
-                    handler,
-                    target_ref: value
-                        .get("target_ref")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string),
-                })
-            })
-            .collect()
+        surface_shortcut_declarations_from_settings(&self.settings_json)
     }
 
     pub(super) fn dispatch_surface_shortcut(
@@ -286,6 +258,39 @@ impl FrontendSurfaceComponent {
             }
         }
     }
+}
+
+fn surface_shortcut_declarations_from_settings(
+    settings_json: &serde_json::Value,
+) -> Vec<SurfaceShortcutDeclaration> {
+    let Some(shortcuts) = settings_json
+        .get("keyboard")
+        .and_then(|value| value.get("shortcuts"))
+        .and_then(serde_json::Value::as_object)
+    else {
+        return Vec::new();
+    };
+
+    shortcuts
+        .iter()
+        .filter_map(|(shortcut_id, value)| {
+            let handler = value.get("handler")?.as_str()?.to_string();
+            let default_key = value.get("key")?.as_str()?.to_string();
+            if handler.trim().is_empty() || default_key.trim().is_empty() {
+                return None;
+            }
+
+            Some(SurfaceShortcutDeclaration {
+                action_id: shortcut_id.clone(),
+                default_key,
+                handler,
+                target_ref: value
+                    .get("target_ref")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+            })
+        })
+        .collect()
 }
 
 fn normalize_key_name(value: &str) -> String {
