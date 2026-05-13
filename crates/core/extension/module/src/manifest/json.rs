@@ -2,9 +2,9 @@ use super::{
     AccessibilitySection, AssetsSection, BinaryDependency, CapabilitiesSection,
     CompatibilitySection, DependenciesSection, DependencySpec, EntrypointsSection, ExportsSection,
     ExtensionSection, FontDependency, I18nSection, IconPackSection, IconRequirementsSection,
-    IconsSection, InterfaceDependency, InterfaceSection, Manifest, ModuleType, NativeDependency,
-    OptionalDependencyGroup, PackageSection, ProvidedInterface, SettingsSection, SlotContribution,
-    SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
+    IconsSection, InterfaceDependency, InterfaceSection, KeybindsSection, Manifest, ModuleType,
+    NativeDependency, OptionalDependencyGroup, PackageSection, ProvidedInterface, SettingsSection,
+    SlotContribution, SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
 };
 use mesh_core_theme::TokenValue;
 use serde::Deserialize;
@@ -39,6 +39,8 @@ pub(super) struct JsonManifest {
     accessibility: Option<AccessibilitySection>,
     #[serde(default)]
     settings: Option<JsonSettingsSection>,
+    #[serde(default)]
+    keybinds: KeybindsSection,
     #[serde(default)]
     i18n: Option<JsonI18nSection>,
     #[serde(default)]
@@ -89,6 +91,7 @@ impl JsonManifest {
             entrypoints: self.entrypoints,
             accessibility: self.accessibility,
             settings: self.settings.map(JsonSettingsSection::into_settings),
+            keybinds: self.keybinds,
             i18n: self.i18n.map(JsonI18nSection::into_i18n),
             theme: self.theme.map(JsonThemeSection::into_theme),
             service: None,

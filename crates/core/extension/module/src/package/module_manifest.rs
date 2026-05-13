@@ -146,6 +146,7 @@ impl ModulePackageManifest {
             },
             accessibility: None,
             settings,
+            keybinds: mesh.keybinds,
             i18n,
             theme: manifest_theme,
             service: None,
@@ -249,6 +250,7 @@ impl ModulePackageManifest {
         let dependencies = MeshDependencies::from_manifest_dependencies(manifest.dependencies);
         let icons = manifest.icons.clone();
         let icon_pack = manifest.icon_pack.clone();
+        let keybinds = manifest.keybinds.clone();
 
         Self {
             name: package.id,
@@ -278,6 +280,7 @@ impl ModulePackageManifest {
                     main: manifest.entrypoints.main,
                     settings_ui: manifest.entrypoints.settings_ui,
                 },
+                keybinds,
                 dependencies,
                 provides,
                 implements: Vec::new(),
@@ -303,6 +306,8 @@ pub struct MeshModuleSection {
     pub i18n: MeshI18nSupport,
     #[serde(default)]
     pub entrypoints: MeshEntrypoints,
+    #[serde(default)]
+    pub keybinds: manifest::KeybindsSection,
     #[serde(default)]
     pub dependencies: MeshDependencies,
     #[serde(default)]
@@ -359,6 +364,9 @@ impl MeshModuleSection {
             }
             theme.validate().map_err(PackageManifestError::Validation)?;
         }
+        self.keybinds
+            .validate()
+            .map_err(PackageManifestError::Validation)?;
         for provided in self.implementations() {
             provided.validate()?;
         }

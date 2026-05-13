@@ -350,6 +350,7 @@ fn loaded_module(
                 capabilities: CapabilitiesSection::default(),
                 i18n: MeshI18nSupport::default(),
                 entrypoints: MeshEntrypoints::default(),
+                keybinds: crate::manifest::KeybindsSection::default(),
                 dependencies,
                 provides,
                 implements: Vec::new(),

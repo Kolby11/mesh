@@ -2,8 +2,8 @@ use super::{
     AccessibilitySection, AssetsSection, CapabilitiesSection, CompatibilitySection,
     DependenciesSection, DependencySpec, EntrypointsSection, ExportsSection, ExtensionSection,
     I18nSection, IconPackSection, IconRequirementsSection, IconsSection, InterfaceSection,
-    Manifest, PackageSection, ProvidedInterface, ServiceSection, SettingsSection, SlotContribution,
-    SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
+    KeybindsSection, Manifest, PackageSection, ProvidedInterface, ServiceSection, SettingsSection,
+    SlotContribution, SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
 };
 use mesh_core_theme::TokenValue;
 use serde::Deserialize;
@@ -24,6 +24,8 @@ pub(super) struct TomlManifest {
     accessibility: Option<AccessibilitySection>,
     #[serde(default)]
     settings: Option<TomlSettingsSection>,
+    #[serde(default)]
+    keybinds: KeybindsSection,
     #[serde(default)]
     i18n: Option<TomlI18nSection>,
     #[serde(default)]
@@ -69,6 +71,7 @@ impl TomlManifest {
             entrypoints: self.entrypoints,
             accessibility: self.accessibility,
             settings: self.settings.map(TomlSettingsSection::into_settings),
+            keybinds: self.keybinds,
             i18n: self.i18n.map(TomlI18nSection::into_i18n),
             theme: self.theme.map(TomlThemeSection::into_theme),
             service: self.service,

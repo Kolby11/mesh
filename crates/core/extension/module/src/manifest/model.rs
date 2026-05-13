@@ -21,6 +21,8 @@ pub struct Manifest {
     #[serde(default)]
     pub settings: Option<SettingsSection>,
     #[serde(default)]
+    pub keybinds: KeybindsSection,
+    #[serde(default)]
     pub i18n: Option<I18nSection>,
     #[serde(default)]
     pub theme: Option<ThemeSection>,
@@ -112,6 +114,10 @@ impl Manifest {
             .component
             .as_ref()
             .map(|component| component.tag.as_str())
+    }
+
+    pub fn validate_keybinds(&self) -> Result<(), String> {
+        self.keybinds.validate()
     }
 }
 
@@ -385,6 +391,125 @@ pub struct SettingsSection {
     pub schema_path: Option<String>,
     #[serde(default)]
     pub inline_schema: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct KeybindsSection {
+    #[serde(default)]
+    pub actions: HashMap<String, KeybindAction>,
+}
+
+impl KeybindsSection {
+    pub fn is_empty(&self) -> bool {
+        self.actions.is_empty()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        for (action_id, action) in &self.actions {
+            if action_id.trim().is_empty() {
+                return Err("mesh.keybinds.actions cannot contain empty action ids".into());
+            }
+            action.validate(action_id)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeybindAction {
+    pub handler: String,
+    #[serde(default)]
+    pub target_ref: Option<String>,
+    #[serde(default)]
+    pub scope: KeybindScope,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub label_i18n_key: Option<String>,
+    #[serde(default)]
+    pub trigger: KeybindTrigger,
+}
+
+impl KeybindAction {
+    fn validate(&self, action_id: &str) -> Result<(), String> {
+        if self.handler.trim().is_empty() {
+            return Err(format!(
+                "mesh.keybinds.actions.{action_id}.handler cannot be empty"
+            ));
+        }
+        validate_optional_keybind_string(
+            &self.target_ref,
+            &format!("mesh.keybinds.actions.{action_id}.target_ref"),
+        )?;
+        validate_optional_keybind_string(
+            &self.label,
+            &format!("mesh.keybinds.actions.{action_id}.label"),
+        )?;
+        validate_optional_keybind_string(
+            &self.label_i18n_key,
+            &format!("mesh.keybinds.actions.{action_id}.label_i18n_key"),
+        )?;
+        self.trigger.validate(action_id)
+    }
+}
+
+fn validate_optional_keybind_string(value: &Option<String>, field: &str) -> Result<(), String> {
+    if let Some(value) = value
+        && value.trim().is_empty()
+    {
+        return Err(format!("{field} cannot be empty"));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct KeybindTrigger {
+    #[serde(default)]
+    pub kind: KeybindTriggerKind,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub modifiers: Vec<String>,
+}
+
+impl KeybindTrigger {
+    fn validate(&self, action_id: &str) -> Result<(), String> {
+        match self.kind {
+            KeybindTriggerKind::Shortcut | KeybindTriggerKind::AccessKey => {
+                if self.key.as_ref().is_none_or(|key| key.trim().is_empty()) {
+                    return Err(format!(
+                        "mesh.keybinds.actions.{action_id}.trigger.key cannot be empty"
+                    ));
+                }
+            }
+        }
+
+        for modifier in &self.modifiers {
+            if modifier.trim().is_empty() {
+                return Err(format!(
+                    "mesh.keybinds.actions.{action_id}.trigger.modifiers cannot contain empty values"
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeybindScope {
+    #[default]
+    Surface,
+    Access,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeybindTriggerKind {
+    #[default]
+    Shortcut,
+    AccessKey,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

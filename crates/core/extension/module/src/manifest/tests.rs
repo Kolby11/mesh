@@ -81,6 +81,120 @@ fn parses_module_json_manifest() {
 }
 
 #[test]
+fn parses_module_json_keybind_declarations() {
+    let content = r#"
+{
+  "id": "@mesh/panel",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "keybinds": {
+    "actions": {
+      "accept": {
+        "handler": "acceptSelection",
+        "target_ref": "accept-button",
+        "scope": "surface",
+        "label_i18n_key": "actions.accept",
+        "trigger": {
+          "kind": "shortcut",
+          "key": "a",
+          "modifiers": ["ctrl"]
+        }
+      }
+    }
+  }
+}
+"#;
+
+    let parsed: JsonManifest = serde_json::from_str(content).unwrap();
+    let manifest = parsed.into_manifest();
+    manifest.validate_keybinds().unwrap();
+
+    let action = &manifest.keybinds.actions["accept"];
+    assert_eq!(action.handler, "acceptSelection");
+    assert_eq!(action.target_ref.as_deref(), Some("accept-button"));
+    assert_eq!(action.scope, KeybindScope::Surface);
+    assert_eq!(action.label_i18n_key.as_deref(), Some("actions.accept"));
+    assert_eq!(action.trigger.kind, KeybindTriggerKind::Shortcut);
+    assert_eq!(action.trigger.key.as_deref(), Some("a"));
+    assert_eq!(action.trigger.modifiers, vec!["ctrl"]);
+}
+
+#[test]
+fn module_json_without_keybinds_has_empty_keybinds() {
+    let content = r#"
+{
+  "id": "@mesh/panel",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1"
+}
+"#;
+
+    let parsed: JsonManifest = serde_json::from_str(content).unwrap();
+    let manifest = parsed.into_manifest();
+
+    assert!(manifest.keybinds.is_empty());
+    manifest.validate_keybinds().unwrap();
+}
+
+#[test]
+fn package_json_keybinds_round_trip_to_runtime_manifest() {
+    let input = r#"{
+  "name": "@mesh/panel",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "keybinds": {
+      "actions": {
+        "mute": {
+          "handler": "toggleMute",
+          "target_ref": "mute-button",
+          "scope": "surface",
+          "label_i18n_key": "nav.volume",
+          "trigger": { "kind": "shortcut", "key": "m" }
+        }
+      }
+    }
+  }
+}"#;
+
+    let parsed = crate::package::ModulePackageManifest::from_json_str(input).unwrap();
+    let manifest = parsed.into_runtime_manifest();
+    let action = &manifest.keybinds.actions["mute"];
+
+    assert_eq!(action.handler, "toggleMute");
+    assert_eq!(action.target_ref.as_deref(), Some("mute-button"));
+    assert_eq!(action.label_i18n_key.as_deref(), Some("nav.volume"));
+    assert_eq!(action.trigger.key.as_deref(), Some("m"));
+}
+
+#[test]
+fn invalid_keybind_declaration_is_rejected() {
+    let input = r#"{
+  "name": "@mesh/panel",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "keybinds": {
+      "actions": {
+        "mute": {
+          "handler": "   ",
+          "trigger": { "kind": "shortcut", "key": "m" }
+        }
+      }
+    }
+  }
+}"#;
+
+    let err = crate::package::ModulePackageManifest::from_json_str(input).unwrap_err();
+
+    assert!(err.to_string().contains("handler cannot be empty"));
+}
+
+#[test]
 fn parses_package_json_module_manifest() {
     let dir = std::env::temp_dir().join(format!("mesh-package-json-module-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -290,6 +404,7 @@ fn manifest_with_dependencies(
         },
         accessibility: None,
         settings: None,
+        keybinds: KeybindsSection::default(),
         i18n: None,
         theme: None,
         service: None,

@@ -101,6 +101,7 @@ fn minimal_manifest(id: &str) -> Manifest {
         entrypoints: EntrypointsSection::default(),
         accessibility: None,
         settings: None,
+        keybinds: mesh_core_module::KeybindsSection::default(),
         i18n: None,
         theme: None,
         service: None,

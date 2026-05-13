@@ -586,6 +586,7 @@ mod tests {
             entrypoints: Default::default(),
             accessibility: None,
             settings: None,
+            keybinds: Default::default(),
             i18n: None,
             theme: None,
             service: None,
