@@ -13,9 +13,9 @@
 
 ### Locale Resolution
 
-- [ ] **LOCL-01**: The shell resolves keybinds from user overrides, locale-specific defaults, and generic module defaults in deterministic precedence order.
-- [ ] **LOCL-02**: Modules can define localized access keys, including English `Accept -> A` and Slovak `Prijat -> P` style mappings.
-- [ ] **LOCL-03**: Missing locale-specific bindings fall back to generic defaults without breaking the action.
+- [x] **LOCL-01**: The shell resolves keybinds from user overrides, locale-specific defaults, and generic module defaults in deterministic precedence order.
+- [x] **LOCL-02**: Modules can define localized access keys, including English `Accept -> A` and Slovak `Prijat -> P` style mappings.
+- [x] **LOCL-03**: Missing locale-specific bindings fall back to generic defaults without breaking the action.
 
 ### Runtime Dispatch
 
@@ -63,9 +63,9 @@
 | KEYB-01 | Phase 32 | Complete |
 | KEYB-02 | Phase 32 | Complete |
 | KEYB-03 | Phase 32 | Complete |
-| LOCL-01 | Phase 33 | Pending |
-| LOCL-02 | Phase 33 | Pending |
-| LOCL-03 | Phase 33 | Pending |
+| LOCL-01 | Phase 33 | Complete |
+| LOCL-02 | Phase 33 | Complete |
+| LOCL-03 | Phase 33 | Complete |
 | DISP-01 | Phase 34 | Pending |
 | DISP-02 | Phase 34 | Pending |
 | DISP-03 | Phase 34 | Pending |
@@ -82,4 +82,4 @@
 
 ---
 *Requirements defined: 2026-05-13*
-*Last updated: 2026-05-13 after Phase 32 completion*
+*Last updated: 2026-05-13 after Phase 33 completion*

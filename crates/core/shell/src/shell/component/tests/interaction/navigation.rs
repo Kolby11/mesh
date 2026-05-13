@@ -410,7 +410,7 @@ end
 }
 
 #[test]
-fn keybind_locale_exact_locale_default_resolves_access_key() {
+fn keybind_locale_exact_locale_wins_over_parent_and_generic() {
     let mut component = test_frontend_component(
         r#"
 <template><box /></template>
@@ -475,7 +475,7 @@ end
 }
 
 #[test]
-fn keybind_locale_parent_locale_fallback_resolves_access_key() {
+fn keybind_locale_parent_locale_wins_over_generic() {
     let mut component = test_frontend_component(
         r#"
 <template><box /></template>
@@ -526,7 +526,7 @@ end
 }
 
 #[test]
-fn keybind_locale_user_override_wins_over_localized_default() {
+fn keybind_locale_user_override_wins_over_locale_and_generic() {
     let mut component = test_frontend_component(
         r#"
 <template><box /></template>
@@ -583,7 +583,7 @@ end
 }
 
 #[test]
-fn keybind_locale_shortcut_ignores_localized_access_key_default() {
+fn keybind_locale_shortcut_ignores_localized_trigger() {
     let mut component = test_frontend_component(
         r#"
 <template><box /></template>
@@ -633,7 +633,7 @@ end
 }
 
 #[test]
-fn keybind_locale_blank_localized_default_falls_back_to_generic_trigger() {
+fn keybind_locale_blank_localized_trigger_falls_back_to_generic() {
     let mut component = test_frontend_component(
         r#"
 <template><box /></template>

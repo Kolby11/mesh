@@ -64,7 +64,7 @@ Success criteria:
 
 Plans:
 
-- **33-01: Locale-aware access-key resolution** *(Wave 1, ready)* - extend keybind declarations with `localized_triggers`, resolve access-key defaults by user override, exact locale, parent locale, and generic fallback, and prove shortcut compatibility.
+- **33-01: Locale-aware access-key resolution** *(Wave 1, complete)* - added per-action `localized_triggers`, resolved access-key defaults by user override, exact locale, parent locale, and generic fallback, and proved shortcut compatibility.
 
 ### Phase 34: Script Dispatch and Input Precedence
 
@@ -185,4 +185,4 @@ Primary external sources:
 - The slight audio popover transition delay from Phase 31 remains deferred polish: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`.
 
 ---
-*Roadmap updated: 2026-05-13 after defining v1.6 requirements*
+*Roadmap updated: 2026-05-13 after Phase 33 completion*

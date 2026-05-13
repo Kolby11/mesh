@@ -160,6 +160,8 @@ fn parses_module_json_localized_keybind_triggers() {
     manifest.validate_keybinds().unwrap();
 
     let action = &manifest.keybinds.actions["accept"];
+    assert_eq!(action.trigger.kind, KeybindTriggerKind::AccessKey);
+    assert_eq!(action.trigger.key.as_deref(), Some("a"));
     assert_eq!(
         action.localized_triggers["sk"].kind,
         KeybindTriggerKind::AccessKey
@@ -173,7 +175,7 @@ fn parses_module_json_localized_keybind_triggers() {
 }
 
 #[test]
-fn localized_keybind_triggers_allow_blank_entries_for_runtime_fallback() {
+fn localized_keybind_trigger_blank_key_is_manifest_valid() {
     let content = r#"
 {
   "id": "@mesh/panel",
@@ -204,10 +206,14 @@ fn localized_keybind_triggers_allow_blank_entries_for_runtime_fallback() {
     let manifest = parsed.into_manifest();
 
     manifest.validate_keybinds().unwrap();
+    assert_eq!(
+        manifest.keybinds.actions["accept"].trigger.key.as_deref(),
+        Some("a")
+    );
 }
 
 #[test]
-fn invalid_localized_keybind_locale_is_rejected() {
+fn localized_keybind_trigger_empty_locale_is_rejected() {
     let content = r#"
 {
   "id": "@mesh/panel",

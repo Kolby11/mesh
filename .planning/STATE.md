@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Localized Keybind Management
 status: active
-stopped_at: phase 33 planned
-last_updated: "2026-05-13T22:18:00+02:00"
+stopped_at: phase 33 complete
+last_updated: "2026-05-13T22:21:03+02:00"
 last_activity: 2026-05-13
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 2
-  completed_plans: 1
-  percent: 20
+  completed_plans: 2
+  percent: 40
 ---
 
 # State: MESH v1.6
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-13)
 
 ## Current Position
 
-Phase: 33 - Locale-Aware Keybind Resolution
-Plan: 33-01 ready
-Status: Ready to execute
-Last activity: 2026-05-13 - Phase 33 planned
+Phase: 34 - Script Dispatch and Input Precedence
+Plan: pending
+Status: Pending planning
+Last activity: 2026-05-13 - Phase 33 completed
 
 ## Decisions
 
@@ -107,6 +107,9 @@ Last activity: 2026-05-13 - Phase 33 planned
 - [Phase 32]: Keybind declarations live in normalized module manifests as stable action-id keyed `keybinds.actions`, with handler, target reference, scope, label/i18n key, and trigger metadata available to shell code.
 - [Phase 32]: Existing `settings.keyboard.shortcuts` remains a compatibility source, but shell runtime resolves it through the same surface shortcut declaration bridge used by manifest keybinds.
 - [Phase 32]: User surface shortcut overrides remain keyed by surface id and action id; localized labels are metadata only and do not affect override identity.
+- [Phase 33]: Localized keybind defaults live as per-action `localized_triggers` and override only trigger data, not handler, target, scope, or label metadata.
+- [Phase 33]: Effective keybind precedence is user override, exact active locale, parent locale, generic module trigger, then no binding.
+- [Phase 33]: Localized trigger defaults apply only to `access_key` actions; shortcut actions keep their generic shortcut defaults unless a user override is present.
 
 ## Performance Metrics
 
@@ -147,9 +150,9 @@ Last activity: 2026-05-13 - Phase 33 planned
 
 ## Session
 
-Last session: 2026-05-13T22:18:00+02:00
-Stopped At: Phase 33 planned; ready to execute
-Resume File: .planning/phases/33-locale-aware-keybind-resolution/33-01-PLAN.md
+Last session: 2026-05-13T22:21:03+02:00
+Stopped At: Phase 33 complete; Phase 34 pending planning
+Resume File: .planning/phases/33-locale-aware-keybind-resolution/33-01-SUMMARY.md
 
 ## Accumulated Context
 
@@ -203,13 +206,14 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | Research summary | `.planning/research/SUMMARY.md` |
 | v1.6 keybind research | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
 | Phase 32 summary | `.planning/phases/32-keybind-declaration-contract/32-01-SUMMARY.md` |
+| Phase 33 summary | `.planning/phases/33-locale-aware-keybind-resolution/33-01-SUMMARY.md` |
 | v1.4 research | `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-13 after Phase 33 planning*
+*State updated: 2026-05-13 after Phase 33 completion*
 
 ## Operator Next Steps
 
-- Execute Phase 33 with `$gsd-execute-phase 33`.
+- Plan Phase 34 with `$gsd-plan-phase 34`.
 - Review deferred polish when planning future transition/smoothness work: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`
