@@ -102,6 +102,16 @@ Planned work:
 - Validate that visuals and interactions remain correct apart from smoother rendering behavior.
 - Document what still belongs to future GPU or parallel milestones after the CPU path is improved.
 
+Plans:
+
+- **31-01: Conservative CPU smoothness tuning and shipped-surface proof** *(Wave 1, planned 2026-05-13)* — tune repaint-policy and evidence-gated cache/clear heuristics conservatively, add Phase 31 benchmark proof rows, complete focused UAT for the five canonical shipped-surface scenarios, and document future GPU/parallel boundaries.
+
+Cross-cutting constraints:
+
+- Phase 31 acceptance requires mixed proof: canonical benchmark evidence plus focused manual UAT notes on shipped surfaces.
+- Counter-only wins are not accepted unless visible smoothness and interaction correctness hold on `hover`, `surface_open_close`, `pointer_update`, `keyboard_traversal`, and `backend_update`.
+- GPU backend work, parallel paint/layout, new benchmark harnesses, trace persistence, and broad shell UI redesign remain out of scope.
+
 ## Milestone Boundaries
 
 ### Included
@@ -154,4 +164,4 @@ Primary external sources:
 - Parallel paint/layout remains sequenced after this milestone proves the CPU retained pipeline is smooth enough.
 
 ---
-*Roadmap updated: 2026-05-12 after Phase 29 verification and transition*
+*Roadmap updated: 2026-05-13 after Phase 31 planning*
