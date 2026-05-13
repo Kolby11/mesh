@@ -22,8 +22,11 @@ key-files:
   modified:
     - modules/frontend/navigation-bar/src/main.mesh
     - modules/frontend/audio-popover/src/main.mesh
+    - crates/core/shell/src/shell/mod.rs
+    - crates/core/shell/src/shell/discovery.rs
     - crates/core/shell/src/shell/runtime/service_state.rs
     - crates/core/shell/src/shell/runtime/request.rs
+    - crates/core/shell/src/shell/component/tests/common.rs
     - crates/core/shell/src/shell/component/tests/interaction/navigation.rs
     - crates/core/shell/src/shell/component/tests/interaction/policy.rs
     - crates/core/shell/src/shell/tests.rs
@@ -43,23 +46,25 @@ completed: 2026-05-13
 
 ## Performance
 
-- **Duration:** 16 min
+- **Duration:** 34 min
 - **Started:** 2026-05-13T17:32:00Z
-- **Completed:** 2026-05-13T17:48:18Z
+- **Completed:** 2026-05-13T18:06:00Z
 - **Tasks:** 4
-- **Files modified:** 14
+- **Files modified:** 15
 
 ## Accomplishments
 
 - Changed pointer-triggered audio popover opens to register the popover without stealing focus, while preserving keyboard activation focus transfer.
 - Replaced frontend mute actions with idempotent `set_muted("default", desired)` when the audio interface supports it, retaining `toggle_mute` fallback.
 - Added shell-level optimistic mute state so stale backend `muted` events cannot flip navigation/popover UI while a requested mute state is pending.
+- Tightened optimistic mute reconciliation so stale inactive providers cannot clear pending mute state before being rejected.
 - Reset Phase 31 UAT tests 2, 3, and 5 for live retest with updated fix evidence.
 
 ## Task Commits
 
 1. **Tasks 31-03-01 through 31-03-03: audio interaction fixes and regressions** - `bfc6cd4` (fix)
-2. **Task 31-03-04: UAT and verification artifacts** - docs commit following implementation
+2. **Review fix: stale provider pending mute guard** - `6e0dc0a` (fix)
+3. **Task 31-03-04: UAT and verification artifacts** - `8926dad` (docs)
 
 ## Files Created/Modified
 
@@ -67,11 +72,15 @@ completed: 2026-05-13
 - `modules/frontend/audio-popover/src/main.mesh` - Mute button sends requested muted state via `set_muted` when available.
 - `crates/core/shell/src/shell/runtime/service_state.rs` - Adds optimistic pending mute-state normalization for audio service updates.
 - `crates/core/shell/src/shell/runtime/request.rs` - Applies optimistic mute state after successful `set_muted` service command dispatch.
+- `crates/core/shell/src/shell/mod.rs` - Stores pending optimistic audio mute state.
+- `crates/core/shell/src/shell/discovery.rs` - Initializes pending optimistic audio mute state.
+- `crates/core/shell/src/shell/component/tests/common.rs` - Extends test audio interface contract with `set_muted`.
 - `crates/core/shell/src/shell/component/tests/interaction/navigation.rs` - Covers pointer-open no-focus behavior and updated idempotent mute command.
 - `crates/core/shell/src/shell/component/tests/interaction/policy.rs` - Covers true -> false mute request sequence and stale backend protection in the popover.
 - `crates/core/shell/src/shell/tests.rs` - Covers shell optimistic mute broadcast and stale backend suppression.
 - `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-UAT.md` - Resets tests 2, 3, and 5 for live retest.
 - `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-VERIFICATION.md` - Records 31-03 verification status and commands.
+- `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-REVIEW.md` - Records code review outcome and fixed review finding.
 
 ## Decisions Made
 
@@ -86,6 +95,7 @@ None - plan executed exactly as written.
 ## Issues Encountered
 
 - Existing navigation shortcut tests expected `toggle_mute`; updated them to assert the safer `set_muted` request and payload.
+- Code review found that inactive provider updates could clear pending mute state before being ignored; fixed and covered with a regression assertion.
 - Parallel cargo test invocations briefly contended on Cargo/Nix locks; reran the filters sequentially.
 
 ## Verification

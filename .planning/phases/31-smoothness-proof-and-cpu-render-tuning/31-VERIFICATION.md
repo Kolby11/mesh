@@ -39,7 +39,8 @@ Automated CPU-render proof, conservative threshold tuning, and 31-02/31-03 gap-c
 - Cache capacities were intentionally left unchanged: raster capacity remains `256`, text layout capacity remains `128`.
 - Existing icon and text cache tests continue to cover freshness, SVG external-resource bypass, tint/multicolor key separation, non-UTF path identity, opaque/translucent hit reporting, text layout hits, and layout-affecting misses.
 - 31-03 keeps pointer-open audio popover activation from stealing focus while preserving keyboard-open focus transfer into the popover.
-- 31-03 uses idempotent `set_muted` when available and keeps an optimistic shell-level pending mute state across stale backend updates until the requested state is confirmed.
+- 31-03 uses idempotent `set_muted` when available and keeps an optimistic shell-level pending mute state across stale active-backend and inactive-provider updates until the requested state is confirmed.
+- `31-REVIEW.md` records the post-implementation review and the stale-provider pending mute guard fixed in `6e0dc0a`.
 
 ## Scope Boundary
 
