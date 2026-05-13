@@ -104,12 +104,14 @@ Planned work:
 
 Plans:
 
-- **31-01: Conservative CPU smoothness tuning and shipped-surface proof** *(Wave 1, executed 2026-05-13; verification gaps)* — tuned repaint-policy escalation, added Phase 31 benchmark proof rows, kept cache capacities unchanged based on evidence, and documented deferred live visual UAT for the five canonical shipped-surface scenarios.
-- **31-02: Close live audio surface UAT gaps** *(Wave 1, complete 2026-05-13; pending live retest)* - implemented fixes for popover close/focus/transition, slider synchronization, and audio mute/backend reconciliation failures found during live UAT.
+- **31-01: Conservative CPU smoothness tuning and shipped-surface proof** *(Wave 1, complete 2026-05-13)* — tuned repaint-policy escalation, added Phase 31 benchmark proof rows, kept cache capacities unchanged based on evidence, and documented live visual UAT for the five canonical shipped-surface scenarios.
+- **31-02: Close live audio surface UAT gaps** *(Wave 1, complete 2026-05-13)* - implemented fixes for popover close/focus/transition, slider synchronization, and audio mute/backend reconciliation failures found during live UAT.
+- **31-03: Close remaining live audio interaction gaps** *(Wave 1, complete 2026-05-13)* - fixed pointer-open focus theft, immediate slider grab behavior, and idempotent shell-normalized mute state.
+- **31-04: Close retest audio trigger and mute consistency gaps** *(Wave 1, complete 2026-05-13)* - fixed same-hover trigger close and removed duplicate popover-local mute pending state; slight popover transition delay deferred as polish.
 
 Cross-cutting constraints:
 
-- Phase 31 acceptance requires mixed proof: canonical benchmark evidence plus focused manual UAT notes on shipped surfaces.
+- Phase 31 acceptance used mixed proof: canonical benchmark evidence plus focused manual UAT notes on shipped surfaces.
 - Counter-only wins are not accepted unless visible smoothness and interaction correctness hold on `hover`, `surface_open_close`, `pointer_update`, `keyboard_traversal`, and `backend_update`.
 - GPU backend work, parallel paint/layout, new benchmark harnesses, trace persistence, and broad shell UI redesign remain out of scope.
 
@@ -165,4 +167,4 @@ Primary external sources:
 - Parallel paint/layout remains sequenced after this milestone proves the CPU retained pipeline is smooth enough.
 
 ---
-*Roadmap updated: 2026-05-13 after Phase 31 gap closure execution*
+*Roadmap updated: 2026-05-13 after Phase 31 UAT completion*

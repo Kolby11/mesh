@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: CPU Rendering Performance Improvement
-status: human_needed
-stopped_at: Phase 31 gap closure implemented; live retest pending
+status: complete
+stopped_at: Phase 31 complete; audio popover transition delay deferred as polish
 last_updated: "2026-05-13T17:17:33Z"
 last_activity: 2026-05-13
 progress:
@@ -27,7 +27,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-10)
 
 Phase: 31
 Plan: 2 of 2
-Status: Gap closure implemented; live UAT retest pending
+Status: Complete with deferred transition polish
 Last activity: 2026-05-13
 
 ## Decisions
@@ -100,6 +100,7 @@ Last activity: 2026-05-13
 - [Phase 31]: Full-surface repaint promotion now uses a two-thirds surface-area threshold while preserving the three-quarters changed-entry tree rebuild fallback. — Keeps policy tuning conservative and testable.
 - [Phase 31]: Raster and text cache capacities remain unchanged because current shipped-surface proof rows do not show capacity-driven warm-path misses. — Avoids speculative cache growth without visible-smoothness proof.
 - [Phase 31]: Plan 31-02 fixed diagnosed audio surface interaction/state gaps in code and tests, but final acceptance still requires live retest. Automated counters alone are not sufficient for PERF-03/SMTH-01 acceptance.
+- [Phase 31]: Live UAT accepted hover, pointer update, keyboard traversal, and backend mute consistency; remaining slight audio popover transition delay is deferred as polish by user request.
 
 ## Performance Metrics
 
@@ -141,7 +142,7 @@ Last activity: 2026-05-13
 ## Session
 
 Last session: 2026-05-13T17:17:33Z
-Stopped At: Phase 31 gap closure implemented; live retest pending
+Stopped At: Phase 31 complete; audio popover transition delay deferred as polish
 Resume File: .planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-UAT.md
 
 ## Accumulated Context
@@ -194,8 +195,8 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-13 after Phase 31 gap closure execution*
+*State updated: 2026-05-13 after Phase 31 UAT completion*
 
 ## Operator Next Steps
 
-- Retest Phase 31 live visual smoothness: `$gsd-verify-work 31`
+- Review deferred polish when planning future transition/smoothness work: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`

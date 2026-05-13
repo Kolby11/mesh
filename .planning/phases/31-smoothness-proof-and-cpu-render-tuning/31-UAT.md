@@ -1,21 +1,17 @@
 ---
-status: partial
+status: complete
 phase: 31-smoothness-proof-and-cpu-render-tuning
 source:
   - .planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-PLAN.md
 started: "2026-05-13T18:33:02+02:00"
-updated: "2026-05-13T20:13:34+02:00"
+updated: "2026-05-13T20:24:23+02:00"
 ---
 
 # Phase 31 UAT - Smoothness Proof and CPU Render Tuning
 
 ## Current Test
 
-number: 2
-name: surface_open_close
-expected: |
-  Audio popover opens and closes without a visible stall and keeps icon/text layout correct.
-awaiting: live retest after 31-04 gap closure
+[testing complete]
 
 ## Tests
 
@@ -31,10 +27,11 @@ severity: none
 expected: Audio popover opens and closes without a visible stall and keeps icon/text layout correct.
 benchmark_ref: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-BENCHMARK.md` scenario `surface_open_close`
 correctness_check: Popover content, icons, text, clipping, and background remain visually stable while opening and closing; no stale pixels remain after close.
-result: pending
-reported: "it now works when i hover out of the button and back inside but not immediately without the hover lose"
+result: skipped
+reported: "it does have a slight delay but it works, now i dont want to play with this anymore keep it for later"
+reason: "Deferred by user for later polish; functional close now works but slight delay remains."
 fix_evidence: "31-04 makes the close branch publish mesh.popover.hide(audio_surface_id) immediately and adds a same-hover regression proving the second click emits HideSurface without pointer leave/re-enter. Awaiting live retest."
-severity: none
+severity: deferred
 
 ### 3. pointer_update
 expected: Audio slider/control pointer update tracks input without visible repaint lag and keeps control state correct.
@@ -57,7 +54,7 @@ severity: none
 expected: Audio backend state update refreshes visible values without a stall and keeps service-driven UI state correct.
 benchmark_ref: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-BENCHMARK.md` scenario `backend_update`
 correctness_check: Backend-provided audio availability, volume percent, muted state, and visible labels update consistently without layout corruption or stale text.
-result: pending
+result: pass
 reported: "the mute button mismatch persists"
 fix_evidence: "31-04 removes the popover-local pending muted model so the popover renders shell-normalized mesh.audio.muted, while keeping idempotent set_muted requests and shell stale-update suppression. Awaiting live retest."
 severity: none
@@ -65,10 +62,10 @@ severity: none
 ## Summary
 
 total: 5
-passed: 3
+passed: 4
 issues: 0
-pending: 2
-skipped: 0
+pending: 0
+skipped: 1
 blocked: 0
 
 ## Gaps
@@ -219,11 +216,25 @@ blocked: 0
     - "Keep `set_muted` idempotent requests, but compute next state from the canonical shell-normalized audio state instead of an independent local model."
   fix_evidence: "31-04 removed popover-local `pending_muted_state`, computes `set_muted` from canonical `audio.muted`, and updated popover coverage to wait for shell-normalized service state."
   debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
+- truth: "Audio popover opens and closes without a visible stall and keeps icon/text layout correct."
+  status: deferred_by_user
+  reason: "User reported: it does have a slight delay but it works, now i dont want to play with this anymore keep it for later"
+  severity: minor
+  test: 2
+  root_cause: "31-04 fixed functional same-hover close behavior, but the remaining close/open delay is visible enough to defer as future transition/smoothness work rather than continue this gap-closure loop."
+  artifacts:
+    - path: "modules/frontend/audio-popover/src/main.mesh"
+      issue: "Popover visual close/open timing still has a slight delay in live use."
+    - path: "crates/core/shell/src/shell/runtime/request.rs"
+      issue: "Surface hide still uses immediate shell visibility/hide plumbing; richer transition lifecycle remains future work."
+  missing:
+    - "Defer configurable surface show/hide transition lifecycle and timing polish to a later phase."
+  debug_session: ".planning/debug/phase31-live-uat-diagnosis.md"
 
 ## Completion Instructions
 
-Final Phase 31 acceptance requires live retesting tests 2 and 5 after the 31-04 gap-closure implementation. Test 3 passed the 31-03 live retest.
+Phase 31 UAT is complete. Test 2 has a user-approved deferred polish item for slight popover delay; test 5 passed after 31-04.
 
 ## Acceptance Note
 
-Live UAT was performed against the shipped navigation/audio surfaces after Plans 31-02 and 31-03. Hover, pointer update, and keyboard traversal passed. Plan 31-04 implemented targeted fixes for same-hover popover close and mute consistency; final Phase 31 acceptance requires a live retest of tests 2 and 5.
+Live UAT was performed against the shipped navigation/audio surfaces after Plans 31-02, 31-03, and 31-04. Hover, pointer update, keyboard traversal, and backend mute consistency passed. Surface open/close now works, with slight remaining delay deferred by user for later polish.

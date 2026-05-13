@@ -1,7 +1,7 @@
 ---
 phase: 31
 title: Smoothness proof and CPU render tuning verification
-status: human_needed
+status: complete
 verified: 2026-05-13
 requirements: ["PERF-03", "SMTH-01", "SMTH-02", "SMTH-03"]
 ---
@@ -10,9 +10,9 @@ requirements: ["PERF-03", "SMTH-01", "SMTH-02", "SMTH-03"]
 
 ## Status
 
-`human_needed`
+`complete`
 
-Automated CPU-render proof and conservative threshold tuning are complete. Live manual UAT now passes `hover`, `pointer_update`, and `keyboard_traversal`; 31-04 implemented focused fixes for the remaining tests 2 and 5, which now require live retest before final acceptance.
+Automated CPU-render proof and conservative threshold tuning are complete. Live manual UAT passes `hover`, `pointer_update`, `keyboard_traversal`, and `backend_update`; `surface_open_close` works with a slight remaining delay explicitly deferred by the user for later polish.
 
 ## Commands
 
@@ -47,6 +47,8 @@ Automated CPU-render proof and conservative threshold tuning are complete. Live 
 - Live retest after 31-03 still found that same-hover trigger close needs pointer leave/re-enter and that the mute mismatch persists.
 - 31-04 makes the same-hover trigger close publish an immediate `HideSurface` request and covers it with a navigation-bar regression.
 - 31-04 removes the popover-local mute pending model so popover display follows shell-normalized `mesh.audio.muted`, with shell optimistic stale-update coverage still passing.
+- Live retest after 31-04 confirmed backend mute consistency now passes.
+- Live retest after 31-04 confirmed surface open/close works; a slight visual delay remains and is deferred to future transition/smoothness polish by user request.
 
 ## Scope Boundary
 
@@ -54,7 +56,7 @@ No GPU backend, parallel paint/layout implementation, new benchmark harness, tra
 
 ## Residual Risk
 
-- `31-UAT.md` has two rows pending live retest after 31-04: same-hover audio trigger close and mute consistency between the popover and navigation bar.
+- `31-UAT.md` records one deferred minor polish item: slight audio popover open/close delay after functional close behavior was fixed.
 - `31-01-BENCHMARK.md` still marks acceptance decisions `deferred`; automated counters alone are not accepted as visible smoothness proof.
 - The current shipped-surface proof rows still report `full_surface` policy because the canonical scenarios reach full-rebuild paths. Smaller retained damage paths are protected by focused policy tests, but not yet proven as visible end-user smoothness wins.
 
@@ -63,9 +65,9 @@ No GPU backend, parallel paint/layout implementation, new benchmark harness, tra
 - COMPLETE: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-03-PLAN.md`
 - COMPLETE: `.planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-04-PLAN.md`
 - Scope: same-hover popover trigger close and single-source mute state across popover/navigation UI.
-- Final acceptance requires live UAT confirmation for tests 2 and 5 after 31-04.
+- Final live UAT is complete with user-approved deferral for popover transition delay polish.
 
 ## Follow-Up
 
-- Rerun `$gsd-verify-work 31` for tests 2 and 5.
+- Track deferred popover transition delay polish in `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`.
 - If visual lag remains after this conservative CPU threshold work, continue with the planned Skia/GPU renderer investigation or later parallel paint/layout work after retained ownership boundaries are proven.
