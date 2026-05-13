@@ -2,12 +2,13 @@
 
 ## v1.5 CPU Rendering Performance Improvement
 
-**Status:** active
+**Status:** shipped
 **Started:** 2026-05-10
+**Archived:** 2026-05-13
 
 **Goal:** Research Qt Quick renderer patterns and current MESH CPU bottlenecks, then implement the retained pipeline, culling, and caching improvements needed to make shipped shell surfaces feel visibly smoother on the software renderer.
 
-**Planned scope:**
+**Delivered:**
 
 - Attribute CPU render cost across canonical benchmark scenarios and shipped proof surfaces
 - Prune offscreen, hidden, and clip-excluded content earlier in the retained paint pipeline
@@ -15,20 +16,17 @@
 - Restrict partial-damage paints to commands that actually intersect the changed region
 - Cache expensive SVG, bitmap, icon, text, and glyph raster work more aggressively
 - Tune repaint heuristics for visible smoothness while keeping GPU and parallel rendering out of scope
+- Close live audio surface UAT regressions in popover open/close, slider grabbing, and mute-state reconciliation
 
-**Planned phases:** 26-31
+**Stats:** 6 phases, 10 plans, 17 requirements shipped
 
-**Active artifacts:**
+**Deferred at close:** Slight audio popover transition delay accepted as polish by user request.
 
-- `.planning/PROJECT.md`
-- `.planning/REQUIREMENTS.md`
-- `.planning/ROADMAP.md`
-- `.planning/STATE.md`
-- `.planning/research/STACK.md`
-- `.planning/research/FEATURES.md`
-- `.planning/research/ARCHITECTURE.md`
-- `.planning/research/PITFALLS.md`
-- `.planning/research/SUMMARY.md`
+**Archive artifacts:**
+
+- `.planning/milestones/v1.5-ROADMAP.md`
+- `.planning/milestones/v1.5-REQUIREMENTS.md`
+- `.planning/milestones/v1.5-MILESTONE-AUDIT.md`
 
 ## v1.6 Skia-Backed Rendering Performance Investigation
 

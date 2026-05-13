@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: CPU Rendering Performance Improvement
-status: complete
-stopped_at: Phase 31 complete; audio popover transition delay deferred as polish
-last_updated: "2026-05-13T17:17:33Z"
+status: milestone_archived
+stopped_at: v1.5 archived; ready for v1.6 planning
+last_updated: "2026-05-13T20:45:00+02:00"
 last_activity: 2026-05-13
 progress:
   total_phases: 6
-  completed_phases: 5
-  total_plans: 7
-  completed_plans: 7
+  completed_phases: 6
+  total_plans: 10
+  completed_plans: 10
   percent: 100
 ---
 
@@ -18,16 +18,15 @@ progress:
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-10)
+See: `.planning/PROJECT.md` (updated 2026-05-13)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 31 — smoothness-proof-and-cpu-render-tuning
+**Current focus:** Planning v1.6 Skia-backed rendering performance investigation
 
 ## Current Position
 
-Phase: 31
-Plan: 2 of 2
-Status: Complete with deferred transition polish
+Milestone: v1.5
+Status: Archived with accepted tech debt
 Last activity: 2026-05-13
 
 ## Decisions
@@ -101,6 +100,7 @@ Last activity: 2026-05-13
 - [Phase 31]: Raster and text cache capacities remain unchanged because current shipped-surface proof rows do not show capacity-driven warm-path misses. — Avoids speculative cache growth without visible-smoothness proof.
 - [Phase 31]: Plan 31-02 fixed diagnosed audio surface interaction/state gaps in code and tests, but final acceptance still requires live retest. Automated counters alone are not sufficient for PERF-03/SMTH-01 acceptance.
 - [Phase 31]: Live UAT accepted hover, pointer update, keyboard traversal, and backend mute consistency; remaining slight audio popover transition delay is deferred as polish by user request.
+- [v1.5]: Milestone archived with all 17 requirements satisfied; accepted tech debt is the deferred audio popover transition polish and missing retroactive Nyquist validation artifacts for phases 26 and 30.
 
 ## Performance Metrics
 
@@ -141,9 +141,9 @@ Last activity: 2026-05-13
 
 ## Session
 
-Last session: 2026-05-13T17:17:33Z
-Stopped At: Phase 31 complete; audio popover transition delay deferred as polish
-Resume File: .planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-UAT.md
+Last session: 2026-05-13T20:45:00+02:00
+Stopped At: v1.5 archived; ready for next milestone planning
+Resume File: .planning/milestones/v1.5-MILESTONE-AUDIT.md
 
 ## Accumulated Context
 
@@ -153,6 +153,7 @@ Resume File: .planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-UAT.m
 - v1.1 reset roadmap focuses on backend plugin MVP stability.
 - v1.4 continues phase numbering after v1.3 and starts at Phase 19.
 - v1.5 continues phase numbering after v1.4 and starts at Phase 26.
+- v1.5 archived on 2026-05-13; v1.6 Skia-backed rendering investigation is the next planned milestone.
 
 ## Deferred Items
 
@@ -186,17 +187,20 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | Artifact | Path |
 |----------|------|
 | Project context | `.planning/PROJECT.md` |
-| Active requirements | `.planning/REQUIREMENTS.md` |
 | Roadmap | `.planning/ROADMAP.md` |
 | State | `.planning/STATE.md` |
+| v1.5 archived requirements | `.planning/milestones/v1.5-REQUIREMENTS.md` |
+| v1.5 archived roadmap | `.planning/milestones/v1.5-ROADMAP.md` |
+| v1.5 audit | `.planning/milestones/v1.5-MILESTONE-AUDIT.md` |
 | Research summary | `.planning/research/SUMMARY.md` |
 | Qt CPU rendering research | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
 | v1.4 research | `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-13 after Phase 31 UAT completion*
+*State updated: 2026-05-13 after archiving v1.5*
 
 ## Operator Next Steps
 
+- Start v1.6 planning with `$gsd-new-milestone` or `$gsd-plan-phase` after requirements are defined.
 - Review deferred polish when planning future transition/smoothness work: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`

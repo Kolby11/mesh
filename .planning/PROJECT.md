@@ -53,22 +53,31 @@ The project now also has the first retained-rendering pipeline passes with:
 - Text layout caching, selector indexing, and batching barrier metrics
 - Debug inspector metrics showing retained rendering, damage, text cache, and batching behavior
 
-Even with those foundations, the software CPU renderer still feels laggy on real shell surfaces. The next milestone focuses on the remaining CPU-side pipeline bottlenecks before any GPU backend work.
+`v1.5` shipped on 2026-05-13.
 
-Skia-backed rendering is now a high-priority next-milestone candidate. After `v1.5` finishes the retained CPU pipeline work, `v1.6` should investigate whether Skia can materially improve MESH rendering performance and, if so, migrate the low-level painter behind the existing retained-rendering architecture.
+The project now also has CPU rendering performance improvements with:
 
-## Current Milestone: v1.5 CPU Rendering Performance Improvement
+- CPU render cost attribution across the canonical shipped-surface benchmark scenarios
+- Viewport, visibility, and clip-aware pruning for retained paint work
+- Incremental retained paint-command updates for dirty subtrees
+- Damage-indexed paint execution with measured repaint-policy thresholds
+- Hardened SVG, bitmap, icon, text, and glyph cache behavior on the software path
+- Smoothness proof on shipped shell surfaces, including focused live UAT on the navigation bar and audio popover
 
-**Goal:** Use Qt Quick renderer research plus live MESH profiling to identify the remaining CPU rendering bottlenecks, then implement retained pipeline improvements that make shipped shell surfaces feel visibly smoother on the software renderer.
+The v1.5 milestone closed the visible interaction regressions found during live UAT. One slight audio popover transition delay remains accepted polish debt by user request.
+
+Skia-backed rendering is now the high-priority next-milestone candidate. `v1.6` should investigate whether Skia can materially improve MESH rendering performance and, if so, migrate the low-level painter behind the existing retained-rendering architecture.
+
+## Current Milestone: v1.6 Skia-Backed Rendering Performance Investigation
+
+**Goal:** Determine whether a Skia-backed renderer materially improves MESH rendering performance and, if it does, migrate the low-level paint backend behind the existing retained-rendering architecture.
 
 **Target features:**
-- Qt Quick scene-graph and performance guidance translated into MESH-specific CPU rendering requirements
-- Benchmark-visible attribution for tree build, restyle, layout, render-object sync, retained display-list rebuild, command traversal, text shaping, glyph work, and icon/image raster work
-- Viewport- and visibility-aware pruning so offscreen or hidden content stops generating unnecessary CPU paint work
-- Incremental retained paint-command updates that avoid recollecting the full surface command set for local changes
-- Damage-scoped paint execution that touches only commands relevant to the changed region and overlays
-- Hardened SVG, bitmap, icon, text, and glyph caching for repeated CPU paints
-- Heuristic tuning and proof on shipped surfaces using the existing canonical benchmark scenarios
+- Rust Skia integration research covering build constraints, CPU/GPU backend support, Wayland presentation fit, and maintenance cost
+- A benchmarkable Skia-backed painter spike for the existing retained display-list command stream
+- Canonical scenario comparison against the current custom/tiny-skia/resvg/cosmic-text/swash software stack
+- A migration decision: Skia wholesale, Skia selectively for expensive primitives, or keep the current renderer
+- Visual-correctness and performance evidence before any partial renderer migration ships
 
 ## Requirements
 
@@ -78,20 +87,21 @@ Skia-backed rendering is now a high-priority next-milestone candidate. After `v1
 - `v1.2`: The renderer supports practical CSS-like styling, interaction reactivity, selection, keyboard navigation, and animation on shipped shell surfaces.
 - `v1.3`: Canonical benchmark scenarios, profiling snapshots, debug inspector views, and retained widget-tree identity/dirty summaries are available for measuring real responsiveness work.
 - `v1.4`: The renderer has typed invalidation, retained render objects, retained display data, damage tracking, text caching, selector indexing, and batching metrics on the software path.
+- `v1.5`: The CPU renderer has profiling attribution, visibility pruning, incremental retained paint-command updates, damage-indexed paint execution, raster cache hardening, and shipped-surface smoothness proof.
 
 ### Active
 
-- Make the CPU renderer visibly smoother on real shipped surfaces before investigating any GPU backend milestone.
-- Use profiling and benchmark proof to target the highest-cost retained rendering stages instead of optimizing blindly.
-- Stop whole-tree retained paint-command rebuilds and whole-command-list scans when only a local region changed.
-- Prune offscreen, hidden, or clip-excluded content earlier so the CPU painter does less work.
-- Retain more raster work for text, glyphs, SVGs, images, and icons so repeated paints avoid re-decoding or re-rasterizing unchanged assets.
-- Prioritize a Skia-backed renderer investigation as the next milestone if v1.5 retained CPU work does not make shipped surfaces feel smooth enough.
+- Prove whether Skia materially improves the existing retained display-list command stream before committing to a renderer migration.
+- Keep the retained widget tree, render-object tree, damage policy, profiling, and shell presentation boundaries intact during the Skia investigation.
+- Compare Skia CPU and available GPU paths against canonical shipped-surface scenarios with visual-correctness coverage.
+- Decide explicitly whether to migrate primitives to Skia wholesale, use Skia selectively, or keep the current renderer.
 
 ### Out of Scope
 
-- GPU backend implementation — the CPU retained pipeline must feel smooth first.
-- Parallel paint/layout — ownership and retained CPU data boundaries should be proven before parallel work.
+- Replacing the `.mesh` compiler, layout engine, retained tree, module system, input handling, or shell service architecture.
+- Removing v1.5 retained-pipeline work; Skia should consume the improved retained command stream rather than replace the architecture around it.
+- Shipping a partial migration without benchmark proof and visual-correctness coverage.
+- Parallel paint/layout — renderer ownership and retained data boundaries should stay simple until the backend decision is clear.
 - Broad shell UI redesign — shipped surfaces remain the proof targets.
 - A second benchmark system distinct from the canonical debug scenarios — the existing benchmarks remain the acceptance harness.
 - Full trace persistence or telemetry export — milestone proof stays inspector- and benchmark-driven.
@@ -116,11 +126,16 @@ Skia-backed rendering is now a high-priority next-milestone candidate. After `v1
 | Qt research should inform implementation, not force a literal Qt clone | MESH needs the same retained-rendering principles, but applied to its existing Rust software-renderer architecture | Locked for v1.5 |
 | Visible smoothness on shipped surfaces outranks microbenchmark-only wins | The user reports real lag everywhere; optimization must improve lived interaction quality, not just synthetic numbers | Locked for v1.5 |
 | Skia-backed rendering is the next major performance priority after v1.5 | Skia may provide a faster and more complete low-level 2D paint backend than the current custom/tiny-skia/resvg/cosmic-text/swash software path, but it must be proven against MESH's shipped surfaces before migration | Planned for v1.6 |
+| v1.5 can ship with the slight audio popover transition delay deferred | Functional audio popover interaction, slider behavior, and mute state now pass; the user explicitly asked to keep the remaining delay polish for later | Accepted at v1.5 archive |
 
 <details>
 <summary>Archived milestone framing</summary>
 
 ## Previous Milestone Framing
+
+### v1.5 CPU Rendering Performance Improvement
+
+The `v1.5` milestone centered on removing remaining CPU-side retained-rendering bottlenecks before any GPU backend work: profiling attribution, visibility pruning, incremental retained paint commands, damage-indexed paint execution, raster cache hardening, and shipped-surface smoothness proof.
 
 ### v1.4 Major Performance Fixes
 
@@ -158,4 +173,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-10 after starting milestone v1.5*
+*Last updated: 2026-05-13 after archiving milestone v1.5*

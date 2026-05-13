@@ -1,170 +1,80 @@
-# Roadmap: MESH v1.5 CPU Rendering Performance Improvement
+# Roadmap: MESH
 
-**Status:** Active milestone planning
-**Phases:** 26-31
-**Total Phases:** 6
+## Milestones
 
-## Overview
+- [x] **v1.5 CPU Rendering Performance Improvement** - Phases 26-31 shipped 2026-05-13.
+- [ ] **v1.6 Skia-Backed Rendering Performance Investigation** - planned next.
 
-`v1.5` keeps the focus on the software CPU renderer. The user reports that everything still feels laggy, so this milestone does not broaden into GPU backend work or parallel paint/layout. Instead it uses Qt Quick renderer research and the existing MESH benchmark harness to find and remove the remaining full-tree, full-command-list, and repeat-rasterization bottlenecks on real shell surfaces.
+## Completed Phases
 
-The milestone specifically targets the gaps left after `v1.4`: retained render objects and display data exist, but local changes can still trigger surface-wide command recollection, partial-damage paints still scan the entire command list, and the icon/image/SVG pipeline still repeats expensive raster work. The end goal is a software renderer that feels visibly smoother on the shipped proof surfaces before any later GPU milestone.
+<details>
+<summary>v1.5 CPU Rendering Performance Improvement (Phases 26-31) - SHIPPED 2026-05-13</summary>
 
-## Phases
+- [x] Phase 26: CPU Render Profiling and Baseline Proof (1/1 plan) - completed 2026-05-10.
+- [x] Phase 27: Viewport Culling and Visibility Elision (1/1 plan) - completed 2026-05-11.
+- [x] Phase 28: Incremental Paint Command Retention (1/1 plan) - completed 2026-05-11.
+- [x] Phase 29: Damage-Indexed Paint Execution and Repaint Policy (2/2 plans) - completed 2026-05-12.
+- [x] Phase 30: Raster Cache Hardening for Icons, Images, and Text (1/1 plan) - completed 2026-05-12.
+- [x] Phase 31: Smoothness Proof and CPU Render Tuning (4/4 plans) - completed 2026-05-13.
 
-### Phase 26: CPU Render Profiling and Baseline Proof
+Archive artifacts:
 
-**Goal:** Attribute the remaining CPU rendering cost on shipped surfaces and canonical benchmark scenarios before implementation phases begin.
-**Depends on:** Phase 25
-**Requirements:** `PERF-01`, `PERF-02`
+- `.planning/milestones/v1.5-ROADMAP.md`
+- `.planning/milestones/v1.5-REQUIREMENTS.md`
+- `.planning/milestones/v1.5-MILESTONE-AUDIT.md`
 
-Planned work:
+Accepted tech debt:
 
-- Attribute CPU render cost across tree build, style restyle, layout, render-object sync, retained display-list rebuild, paint traversal, text shaping, glyph work, and icon/image raster work.
-- Record baseline benchmark numbers and visible-smoothness notes for shipped surfaces such as `@mesh/navigation-bar` and `@mesh/audio-popover`.
-- Surface the new counters through the existing debug inspector and benchmark payloads rather than building a new benchmark system.
-- Document which stages dominate the current “everything is laggy” report so later phases target the right bottlenecks.
+- Slight audio popover transition delay remains as deferred polish by user request.
+- Phase 26 and Phase 30 are missing retroactive `VALIDATION.md` artifacts; verification passed.
 
-### Phase 27: Viewport Culling and Visibility Elision
+</details>
 
-**Goal:** Prune offscreen, hidden, or clip-excluded work earlier so the CPU renderer stops generating unnecessary paint work.
-**Depends on:** Phase 26
-**Requirements:** `CULL-01`, `CULL-02`, `CULL-04`
+## Planned Phases
 
-Planned work:
+### v1.6 Skia-Backed Rendering Performance Investigation
 
-- Introduce viewport- and clip-aware subtree omission for scrollable and clipped content where children are fully outside the visible region.
-- Short-circuit render work for nodes hidden by explicit visibility or ineffective opacity rules.
-- Replace expensive per-item clipping cases with cheaper omission or elision strategies where possible.
-- Keep pruning decisions observable in debug metrics so false positives can be caught early.
+**Goal:** Determine whether a Skia-backed renderer materially improves MESH rendering performance and, if it does, migrate the low-level paint backend behind the existing retained-rendering architecture.
 
-### Phase 28: Incremental Paint Command Retention
+Planned scope:
 
-**Goal:** Stop local retained-tree changes from forcing whole-surface paint-command recollection.
-**Depends on:** Phase 26, Phase 27
-**Requirements:** `PIPE-01`, `PIPE-02`
+- Research Rust Skia integration options, build constraints, CPU/GPU backend support, Wayland presentation fit, and long-term maintenance cost.
+- Build a benchmarkable Skia-backed painter spike for the existing retained display-list command stream.
+- Compare Skia CPU and available GPU paths against the current custom/tiny-skia/resvg/cosmic-text/swash software stack on canonical scenarios.
+- Decide whether to migrate `mesh-core-render` primitives to Skia wholesale, use Skia selectively for expensive primitives, or keep the current renderer.
+- If the spike wins, plan the migration behind the existing retained widget tree, render-object tree, damage policy, profiling, and shell presentation boundaries.
 
-Planned work:
+Out of scope for the spike:
 
-- Refactor retained display data so command ownership is tracked per dirty subtree rather than as one surface-wide flat rebuild step.
-- Update transform-, scroll-, and reorder-only paths so they preserve unrelated descendant paint data.
-- Reduce z-order and command-signature churn for unchanged branches.
-- Preserve full-surface fallbacks when dirty summaries are too broad for safe local reuse.
+- Replacing the `.mesh` compiler, layout engine, retained tree, module system, input handling, or shell service architecture.
+- Removing v1.5 retained-pipeline work; Skia should consume the improved retained command stream rather than replace the architecture around it.
+- Shipping a partial migration without benchmark proof and visual-correctness coverage.
 
-### Phase 29: Damage-Indexed Paint Execution and Repaint Policy
+## Progress
 
-**Goal:** Make partial-damage paints proportional to the changed region instead of total surface complexity.
-**Depends on:** Phase 28
-**Requirements:** `PIPE-03`, `PIPE-04`, `CULL-03`
-
-Planned work:
-
-- Add a retained mapping from damage regions to affected command ranges, nodes, or buckets.
-- Restrict partial paints to commands intersecting the damage region plus required overlays such as tooltips or scrollbars.
-- Add a measured repaint-policy switch between minimal damage, bounding-rect repaint, and full-surface repaint.
-- Verify ordering, clipping, and correctness when filtered execution skips unrelated commands.
-
-Plans:
-
-- **29-01: Damage-indexed retained paint execution and repaint-policy proof** *(Wave 1, complete 2026-05-11)* — added retained command-span metadata, routed partial paints through ordered filtered command inputs, exposed repaint-policy and filtered-execution counters, and recorded canonical benchmark evidence.
-- **29-02: Debug-inspector retained paint counter readability** *(Wave 1, complete 2026-05-12)* — closed the UAT observability gap by rendering retained paint policy, filtered command, skipped command, span, and fallback counters in the shipped debug inspector.
-
-Cross-cutting constraints:
-
-- Preserve retained subtree ownership as the primary damage lookup authority; do not introduce a new global flat command index.
-- Preserve display-list ordering, clipping, scrollbar inclusion, and tooltip overlay separation when filtering paint execution.
-- Prefer bounding-rect or full-surface fallback whenever dirty summaries, clip/state ancestry, or span selection cannot cheaply prove correctness.
-- Publish aggregate proof through the existing `invalidation.paint` debug payload only.
-
-### Phase 30: Raster Cache Hardening for Icons, Images, and Text
-
-**Goal:** Remove repeat rasterization, resize, and parse cost from steady-state CPU painting.
-**Depends on:** Phase 26, Phase 28
-**Requirements:** `CACHE-01`, `CACHE-02`, `CACHE-03`
-
-Planned work:
-
-- Cache rasterized SVG/icon/image variants by the visual inputs that actually affect the output.
-- Eliminate repeated decode/resize churn for unchanged bitmap icons and images.
-- Preserve and extend text/glyph cache reuse across hover, animation, scroll, and state-driven updates.
-- Retain opaque/translucent metadata so the painter can avoid unnecessary blending and redundant background work.
-
-### Phase 31: Smoothness Proof and CPU Render Tuning
-
-**Goal:** Tune the new CPU rendering heuristics and prove that shipped shell surfaces feel visibly smoother.
-**Depends on:** Phase 27, Phase 29, Phase 30
-**Requirements:** `PERF-03`, `SMTH-01`, `SMTH-02`, `SMTH-03`
-
-Planned work:
-
-- Tune repaint-policy thresholds, cache behavior, clear/background rules, and culling heuristics using real benchmark data.
-- Re-run canonical benchmark scenarios on the shipped proof surfaces and compare against Phase 26 baselines.
-- Validate that visuals and interactions remain correct apart from smoother rendering behavior.
-- Document what still belongs to future GPU or parallel milestones after the CPU path is improved.
-
-Plans:
-
-- **31-01: Conservative CPU smoothness tuning and shipped-surface proof** *(Wave 1, complete 2026-05-13)* — tuned repaint-policy escalation, added Phase 31 benchmark proof rows, kept cache capacities unchanged based on evidence, and documented live visual UAT for the five canonical shipped-surface scenarios.
-- **31-02: Close live audio surface UAT gaps** *(Wave 1, complete 2026-05-13)* - implemented fixes for popover close/focus/transition, slider synchronization, and audio mute/backend reconciliation failures found during live UAT.
-- **31-03: Close remaining live audio interaction gaps** *(Wave 1, complete 2026-05-13)* - fixed pointer-open focus theft, immediate slider grab behavior, and idempotent shell-normalized mute state.
-- **31-04: Close retest audio trigger and mute consistency gaps** *(Wave 1, complete 2026-05-13)* - fixed same-hover trigger close and removed duplicate popover-local mute pending state; slight popover transition delay deferred as polish.
-
-Cross-cutting constraints:
-
-- Phase 31 acceptance used mixed proof: canonical benchmark evidence plus focused manual UAT notes on shipped surfaces.
-- Counter-only wins are not accepted unless visible smoothness and interaction correctness hold on `hover`, `surface_open_close`, `pointer_update`, `keyboard_traversal`, and `backend_update`.
-- GPU backend work, parallel paint/layout, new benchmark harnesses, trace persistence, and broad shell UI redesign remain out of scope.
-
-## Milestone Boundaries
-
-### Included
-
-- Research-backed CPU render hotspot attribution
-- Viewport/visibility pruning for retained rendering
-- Dirty-subtree retained paint-command updates
-- Damage-indexed CPU paint execution
-- Retained raster caches for SVG/icons/images/text where profiling justifies them
-- Visible-smoothness proof on shipped shell surfaces
-
-### Excluded
-
-- GPU backend implementation
-- Parallel paint/layout implementation
-- Broad shell UI redesign
-- A second benchmark/profiling system
-- Trace persistence or external telemetry export
-
-## Research Basis
-
-This roadmap follows Qt Quick’s retained-rendering guidance rather than browser-engine architecture. The most important lessons carried forward are: retain paint-facing data separately from UI-facing state, make visibility explicit, avoid assuming clipping is a free optimization, keep repeated motion cheap through retention, and treat repaint region selection as a measured policy decision.
-
-Primary research artifacts:
-
-- `.planning/research/STACK.md`
-- `.planning/research/FEATURES.md`
-- `.planning/research/ARCHITECTURE.md`
-- `.planning/research/PITFALLS.md`
-- `.planning/research/SUMMARY.md`
-
-Primary external sources:
-
-- https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph-renderer.html
-- https://doc.qt.io/qt-6/qtquick-performance.html
-- https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 26. CPU Render Profiling and Baseline Proof | v1.5 | 1/1 | Complete | 2026-05-10 |
+| 27. Viewport Culling and Visibility Elision | v1.5 | 1/1 | Complete | 2026-05-11 |
+| 28. Incremental Paint Command Retention | v1.5 | 1/1 | Complete | 2026-05-11 |
+| 29. Damage-Indexed Paint Execution and Repaint Policy | v1.5 | 2/2 | Complete | 2026-05-12 |
+| 30. Raster Cache Hardening for Icons, Images, and Text | v1.5 | 1/1 | Complete | 2026-05-12 |
+| 31. Smoothness Proof and CPU Render Tuning | v1.5 | 4/4 | Complete | 2026-05-13 |
 
 ## Archived Milestones
 
-- `v1.4` Major Performance Fixes — shipped 2026-05-09.
-- `v1.3` Performance Instrumentation and Responsiveness — shipped 2026-05-09.
-- `v1.2` Rendering System Upgrade — shipped 2026-05-08.
-- `v1.1` Backend Plugin MVP — shipped 2026-05-05.
+- `v1.5` CPU Rendering Performance Improvement - shipped 2026-05-13.
+- `v1.4` Major Performance Fixes - shipped 2026-05-09.
+- `v1.3` Performance Instrumentation and Responsiveness - shipped 2026-05-09.
+- `v1.2` Rendering System Upgrade - shipped 2026-05-08.
+- `v1.1` Backend Plugin MVP - shipped 2026-05-05.
 
 ## Backlog and Carryover
 
-- Deferred validation/UAT cleanup from older milestones remains backlog work outside `v1.5`.
-- The pending unified package/module manifest phase idea remains future planning work and is not part of CPU rendering optimization.
-- Skia-backed rendering is now the high-priority next milestone candidate after `v1.5`: first as a benchmarkable painter/backend spike against the retained display-list command stream, then as a migration only if it clearly improves shipped-surface performance.
-- Parallel paint/layout remains sequenced after this milestone proves the CPU retained pipeline is smooth enough.
+- Deferred validation/UAT cleanup from older milestones remains backlog work outside `v1.6`.
+- The pending unified package/module manifest phase idea remains future planning work and is not part of renderer optimization.
+- The slight audio popover transition delay from Phase 31 remains deferred polish: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`.
+- Parallel paint/layout remains sequenced after the retained CPU pipeline and any Skia investigation clarify the next rendering boundary.
 
 ---
-*Roadmap updated: 2026-05-13 after Phase 31 UAT completion*
+*Roadmap updated: 2026-05-13 after archiving v1.5*
