@@ -104,7 +104,7 @@ Planned work:
 
 Plans:
 
-- **31-01: Conservative CPU smoothness tuning and shipped-surface proof** *(Wave 1, planned 2026-05-13)* — tune repaint-policy and evidence-gated cache/clear heuristics conservatively, add Phase 31 benchmark proof rows, complete focused UAT for the five canonical shipped-surface scenarios, and document future GPU/parallel boundaries.
+- **31-01: Conservative CPU smoothness tuning and shipped-surface proof** *(Wave 1, executed 2026-05-13; verification gaps)* — tuned repaint-policy escalation, added Phase 31 benchmark proof rows, kept cache capacities unchanged based on evidence, and documented deferred live visual UAT for the five canonical shipped-surface scenarios.
 
 Cross-cutting constraints:
 
@@ -164,4 +164,4 @@ Primary external sources:
 - Parallel paint/layout remains sequenced after this milestone proves the CPU retained pipeline is smooth enough.
 
 ---
-*Roadmap updated: 2026-05-13 after Phase 31 planning*
+*Roadmap updated: 2026-05-13 after Phase 31 execution*

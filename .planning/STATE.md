@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: CPU Rendering Performance Improvement
-status: planned
-stopped_at: Phase 31 planned
-last_updated: "2026-05-13T18:21:58+02:00"
+status: verification_gaps
+stopped_at: Phase 31 executed; live visual UAT deferred
+last_updated: "2026-05-13T16:41:21Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 6
   completed_phases: 5
   total_plans: 7
-  completed_plans: 6
-  percent: 86
+  completed_plans: 7
+  percent: 100
 ---
 
 # State: MESH v1.5
@@ -27,7 +27,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-10)
 
 Phase: 31
 Plan: 1 of 1
-Status: Ready to execute
+Status: Executed with verification gaps
 Last activity: 2026-05-13
 
 ## Decisions
@@ -97,6 +97,9 @@ Last activity: 2026-05-13
 - [Phase 29]: Repaint-policy proof is published only through existing `invalidation.paint` profiling payloads with aggregate filtered-span, filtered-command, skipped-command, and fallback counters.
 - [Phase 29]: Benchmark evidence continues to reuse the Phase 26 canonical scenario IDs and harness; visible smoothness and threshold tuning remain Phase 31 responsibilities.
 - [Phase 29]: The debug-inspector Surfaces view renders retained paint policy, filtered command, skipped command, span, and fallback counters directly; partial payloads must render unavailable labels rather than zero-like proof.
+- [Phase 31]: Full-surface repaint promotion now uses a two-thirds surface-area threshold while preserving the three-quarters changed-entry tree rebuild fallback. — Keeps policy tuning conservative and testable.
+- [Phase 31]: Raster and text cache capacities remain unchanged because current shipped-surface proof rows do not show capacity-driven warm-path misses. — Avoids speculative cache growth without visible-smoothness proof.
+- [Phase 31]: Visible smoothness acceptance remains deferred until live visual UAT runs on shipped shell surfaces. — Automated counters alone are not sufficient for PERF-03/SMTH-01 acceptance.
 
 ## Performance Metrics
 
@@ -133,12 +136,13 @@ Last activity: 2026-05-13
 | Phase 17 P04 | 7min | 3 tasks | 2 files |
 | Phase 29 P01 | 27min | 3 tasks | 12 files |
 | Phase 29 P02 | 16min | 1 task | 4 files |
+| Phase 31 P01 | 48min | 5 tasks | 6 files |
 
 ## Session
 
-Last session: 2026-05-13T18:21:58+02:00
-Stopped At: Phase 31 planned
-Resume File: .planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-01-PLAN.md
+Last session: 2026-05-13T16:41:21Z
+Stopped At: Phase 31 executed; live visual UAT deferred
+Resume File: .planning/phases/31-smoothness-proof-and-cpu-render-tuning/31-VERIFICATION.md
 
 ## Accumulated Context
 
@@ -190,8 +194,8 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-13 after Phase 31 planning*
+*State updated: 2026-05-13 after Phase 31 execution*
 
 ## Operator Next Steps
 
-- Execute Phase 31: Smoothness Proof and CPU Render Tuning
+- Verify Phase 31 live visual smoothness: `$gsd-verify-work 31`
