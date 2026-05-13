@@ -460,7 +460,7 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
 }
 
 #[test]
-fn audio_popover_mute_pending_waits_for_backend_confirmation() {
+fn audio_popover_mute_renders_shell_normalized_state() {
     let mut component =
         real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
     let theme = default_theme();
@@ -495,28 +495,10 @@ fn audio_popover_mute_pending_waits_for_backend_confirmation() {
         "mute action should dispatch idempotent set_muted(true): {requests:?}"
     );
     component.paint(&theme, width, height, &mut buffer).unwrap();
-    let optimistic_text = rendered_text(&component);
+    let pre_optimistic_text = rendered_text(&component);
     assert!(
-        optimistic_text.iter().any(|text| text == "Unmute"),
-        "optimistic mute state should render immediately: {optimistic_text:?}"
-    );
-
-    component
-        .handle_service_event(&ServiceEvent::Updated {
-            service: "mesh.audio".into(),
-            source_module: "@mesh/pipewire-audio".into(),
-            payload: serde_json::json!({
-                "available": true,
-                "percent": 42,
-                "muted": false
-            }),
-        })
-        .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
-    let stale_backend_text = rendered_text(&component);
-    assert!(
-        stale_backend_text.iter().any(|text| text == "Unmute"),
-        "stale backend update should not invert optimistic mute state: {stale_backend_text:?}"
+        pre_optimistic_text.iter().any(|text| text == "Mute"),
+        "popover should wait for shell-normalized optimistic service state: {pre_optimistic_text:?}"
     );
 
     component
@@ -531,10 +513,10 @@ fn audio_popover_mute_pending_waits_for_backend_confirmation() {
         })
         .unwrap();
     component.paint(&theme, width, height, &mut buffer).unwrap();
-    let confirmed_text = rendered_text(&component);
+    let optimistic_text = rendered_text(&component);
     assert!(
-        confirmed_text.iter().any(|text| text == "Unmute"),
-        "confirmed mute state should keep popover and backend aligned: {confirmed_text:?}"
+        optimistic_text.iter().any(|text| text == "Unmute"),
+        "shell-normalized mute state should drive popover text: {optimistic_text:?}"
     );
 
     let requests = component
@@ -551,10 +533,10 @@ fn audio_popover_mute_pending_waits_for_backend_confirmation() {
         "second mute action should dispatch idempotent set_muted(false): {requests:?}"
     );
     component.paint(&theme, width, height, &mut buffer).unwrap();
-    let optimistic_unmute_text = rendered_text(&component);
+    let pre_unmute_text = rendered_text(&component);
     assert!(
-        optimistic_unmute_text.iter().any(|text| text == "Mute"),
-        "optimistic unmute should render immediately: {optimistic_unmute_text:?}"
+        pre_unmute_text.iter().any(|text| text == "Unmute"),
+        "popover should keep rendering canonical muted state until shell optimistic update arrives: {pre_unmute_text:?}"
     );
 
     component
@@ -564,15 +546,15 @@ fn audio_popover_mute_pending_waits_for_backend_confirmation() {
             payload: serde_json::json!({
                 "available": true,
                 "percent": 42,
-                "muted": true
+                "muted": false
             }),
         })
         .unwrap();
     component.paint(&theme, width, height, &mut buffer).unwrap();
-    let stale_second_backend_text = rendered_text(&component);
+    let optimistic_unmute_text = rendered_text(&component);
     assert!(
-        stale_second_backend_text.iter().any(|text| text == "Mute"),
-        "stale backend update after unmute request should not flip the popover back: {stale_second_backend_text:?}"
+        optimistic_unmute_text.iter().any(|text| text == "Mute"),
+        "shell-normalized unmute state should drive popover text: {optimistic_unmute_text:?}"
     );
 }
 

@@ -47,7 +47,6 @@ mute_button_text = "Mute"
 mute_button_label = "Toggle mute"
 volume_dragging = false
 pending_slider_value = nil
-pending_muted_state = nil
 audio_muted = false
 last_sent_slider_value = nil
 
@@ -105,32 +104,23 @@ function onRender()
         mute_button_label = "Audio unavailable"
         volume_dragging = false
         pending_slider_value = nil
-        pending_muted_state = nil
         return
     end
 
     local percent = clamp_percent(audio.percent)
     local muted = audio.muted or false
-    local display_muted = muted
-    if pending_muted_state ~= nil then
-        if muted == pending_muted_state then
-            pending_muted_state = nil
-        else
-            display_muted = pending_muted_state
-        end
-    end
 
     local backend_value = clamp_unit(percent / 100)
     if pending_slider_value ~= nil then
         if math.abs(backend_value - pending_slider_value) <= 0.02 then
             pending_slider_value = nil
         else
-            sync_audio_copy(pending_slider_value * 100, display_muted)
+            sync_audio_copy(pending_slider_value * 100, muted)
             return
         end
     end
 
-    sync_audio_copy(percent, display_muted)
+    sync_audio_copy(percent, muted)
 end
 
 function onVolumeChange(value)
@@ -156,9 +146,7 @@ end
 
 function onToggleMute()
     if audio_ok and audio and audio.available ~= false then
-        local next_muted = not audio_muted
-        pending_muted_state = next_muted
-        sync_audio_copy(slider_value * 100, next_muted)
+        local next_muted = not (audio.muted or false)
         if type(audio.set_muted) == "function" then
             audio.set_muted("default", next_muted)
         else

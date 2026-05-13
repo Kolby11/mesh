@@ -757,6 +757,101 @@ fn navigation_bar_pointer_activation_opens_volume_surface_without_stealing_focus
 }
 
 #[test]
+fn navigation_bar_same_hover_volume_trigger_closes_popover_immediately() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    let volume_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+    )
+    .expect("rendered volume button");
+    let volume_key = volume_button
+        .attributes
+        .get("_mesh_key")
+        .expect("volume button mesh key")
+        .clone();
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, &volume_key, 0.0, 0.0).expect("volume bounds");
+    let x = (left + right) * 0.5;
+    let y = (top + bottom) * 0.5;
+
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    let open_requests = component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: false,
+            },
+        )
+        .unwrap();
+    assert!(
+        open_requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ActivatePopover { surface_id, .. }
+                if surface_id == "@mesh/audio-popover"
+        )),
+        "first click should open the audio popover: {open_requests:?}"
+    );
+
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    let close_requests = component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: false,
+            },
+        )
+        .unwrap();
+    assert!(
+        close_requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/audio-popover"
+        )),
+        "second click at the same hovered coordinates should hide immediately: {close_requests:?}"
+    );
+}
+
+#[test]
 fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
     let mut component =
         real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
