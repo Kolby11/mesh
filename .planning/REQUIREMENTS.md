@@ -9,19 +9,19 @@
 
 - [x] **PERF-01**: Developers can inspect CPU render cost for tree build, style restyle, layout, render-object sync, retained display-list rebuild, paint traversal, text shaping, and icon/image raster work on each canonical benchmark scenario.
 - [x] **PERF-02**: Every v1.5 optimization phase records before/after benchmark evidence on shipped surfaces using the existing canonical benchmark scenarios.
-- [ ] **PERF-03**: Optimization decisions are accepted only when they improve visible smoothness on shipped shell surfaces, not merely aggregate internal counters.
+- [x] **PERF-03**: Optimization decisions are accepted only when they improve visible smoothness on shipped shell surfaces, not merely aggregate internal counters.
 
 ### Visibility and Culling
 
-- [ ] **CULL-01**: Fully offscreen descendants inside clipped or scrollable regions are omitted from retained paint-command generation or execution on the CPU path.
-- [ ] **CULL-02**: Nodes hidden by explicit visibility, surface state, or fully ineffective opacity stop generating unnecessary CPU paint work until they become visible again.
+- [x] **CULL-01**: Fully offscreen descendants inside clipped or scrollable regions are omitted from retained paint-command generation or execution on the CPU path.
+- [x] **CULL-02**: Nodes hidden by explicit visibility, surface state, or fully ineffective opacity stop generating unnecessary CPU paint work until they become visible again.
 - [x] **CULL-03**: The renderer can choose between minimal-damage, bounding-rect, and full-surface repaint policies based on measured CPU cost instead of assuming the smallest region is always cheapest.
-- [ ] **CULL-04**: Clipping and viewport rules avoid per-item CPU overhead on small primitives when a cheaper elision or coarser-boundary alternative exists.
+- [x] **CULL-04**: Clipping and viewport rules avoid per-item CPU overhead on small primitives when a cheaper elision or coarser-boundary alternative exists.
 
 ### Retained Paint Pipeline
 
-- [ ] **PIPE-01**: Local retained-tree changes rebuild only the affected render-object and paint-command subtrees instead of recollecting the full surface command set.
-- [ ] **PIPE-02**: Transforms, scroll offsets, and reorder-only changes can update retained paint data without invalidating unrelated descendant geometry or style state.
+- [x] **PIPE-01**: Local retained-tree changes rebuild only the affected render-object and paint-command subtrees instead of recollecting the full surface command set.
+- [x] **PIPE-02**: Transforms, scroll offsets, and reorder-only changes can update retained paint data without invalidating unrelated descendant geometry or style state.
 - [x] **PIPE-03**: Partial-damage paints visit only commands that intersect the damaged region or explicitly depend on global overlays such as tooltips or scrollbars.
 - [x] **PIPE-04**: Command ordering, clipping, and visual correctness remain stable when filtered execution skips unrelated commands.
 
@@ -33,9 +33,9 @@
 
 ### Smoothness Guardrails
 
-- [ ] **SMTH-01**: Canonical hover, surface open/close, pointer update, keyboard traversal, and backend update scenarios look visibly smoother on shipped surfaces after the milestone.
-- [ ] **SMTH-02**: Normal shell visuals and interaction correctness remain unchanged apart from smoother rendering behavior.
-- [ ] **SMTH-03**: GPU backend and parallel paint/layout remain out of scope until the CPU retained pipeline is demonstrably smooth on real surfaces.
+- [x] **SMTH-01**: Canonical hover, surface open/close, pointer update, keyboard traversal, and backend update scenarios look visibly smoother on shipped surfaces after the milestone.
+- [x] **SMTH-02**: Normal shell visuals and interaction correctness remain unchanged apart from smoother rendering behavior.
+- [x] **SMTH-03**: GPU backend and parallel paint/layout remain out of scope until the CPU retained pipeline is demonstrably smooth on real surfaces.
 
 ## Future Requirements
 
@@ -65,21 +65,21 @@
 |-------------|-------|--------|
 | PERF-01 | Phase 26 | Complete |
 | PERF-02 | Phase 26 | Complete |
-| CULL-01 | Phase 27 | Pending |
-| CULL-02 | Phase 27 | Pending |
-| CULL-04 | Phase 27 | Pending |
-| PIPE-01 | Phase 28 | Pending |
-| PIPE-02 | Phase 28 | Pending |
+| CULL-01 | Phase 27 | Complete |
+| CULL-02 | Phase 27 | Complete |
+| CULL-04 | Phase 27 | Complete |
+| PIPE-01 | Phase 28 | Complete |
+| PIPE-02 | Phase 28 | Complete |
 | PIPE-03 | Phase 29 | Complete |
 | PIPE-04 | Phase 29 | Complete |
 | CULL-03 | Phase 29 | Complete |
 | CACHE-01 | Phase 30 | Complete |
 | CACHE-02 | Phase 30 | Complete |
 | CACHE-03 | Phase 30 | Complete |
-| PERF-03 | Phase 31 | Pending |
-| SMTH-01 | Phase 31 | Pending |
-| SMTH-02 | Phase 31 | Pending |
-| SMTH-03 | Phase 31 | Pending |
+| PERF-03 | Phase 31 | Complete |
+| SMTH-01 | Phase 31 | Complete |
+| SMTH-02 | Phase 31 | Complete |
+| SMTH-03 | Phase 31 | Complete |
 
 **Coverage:**
 - v1.5 requirements: 17 total
@@ -88,4 +88,4 @@
 
 ---
 *Requirements defined: 2026-05-10*
-*Last updated: 2026-05-12 after Phase 30 execution completed*
+*Last updated: 2026-05-13 after v1.5 milestone audit*
