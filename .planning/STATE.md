@@ -1,33 +1,34 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.5
-milestone_name: CPU Rendering Performance Improvement
-status: milestone_archived
-stopped_at: v1.5 archived; ready for v1.6 planning
-last_updated: "2026-05-13T20:45:00+02:00"
+milestone: v1.6
+milestone_name: Localized Keybind Management
+status: planning
+stopped_at: defining v1.6 requirements and roadmap
+last_updated: "2026-05-13T21:15:00+02:00"
 last_activity: 2026-05-13
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 10
-  completed_plans: 10
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: MESH v1.5
+# State: MESH v1.6
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-05-13)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Planning v1.6 Skia-backed rendering performance investigation
+**Current focus:** Planning v1.6 localized keybind management
 
 ## Current Position
 
-Milestone: v1.5
-Status: Archived with accepted tech debt
-Last activity: 2026-05-13
+Phase: Not started (defining requirements)
+Plan: -
+Status: Defining requirements
+Last activity: 2026-05-13 - Milestone v1.6 started
 
 ## Decisions
 
@@ -101,6 +102,8 @@ Last activity: 2026-05-13
 - [Phase 31]: Plan 31-02 fixed diagnosed audio surface interaction/state gaps in code and tests, but final acceptance still requires live retest. Automated counters alone are not sufficient for PERF-03/SMTH-01 acceptance.
 - [Phase 31]: Live UAT accepted hover, pointer update, keyboard traversal, and backend mute consistency; remaining slight audio popover transition delay is deferred as polish by user request.
 - [v1.5]: Milestone archived with all 17 requirements satisfied; accepted tech debt is the deferred audio popover transition polish and missing retroactive Nyquist validation artifacts for phases 26 and 30.
+- [v1.6]: Localized keybind management takes priority over the previously planned Skia investigation. Frontend modules should be able to declare semantic keybind actions with localized defaults, user overrides, conflict diagnostics, script dispatch, and accessibility metadata.
+- [v1.6]: Compositor-global shortcuts via XDG desktop portals are deferred until module/surface-scoped keybinds are stable.
 
 ## Performance Metrics
 
@@ -153,7 +156,8 @@ Resume File: .planning/milestones/v1.5-MILESTONE-AUDIT.md
 - v1.1 reset roadmap focuses on backend plugin MVP stability.
 - v1.4 continues phase numbering after v1.3 and starts at Phase 19.
 - v1.5 continues phase numbering after v1.4 and starts at Phase 26.
-- v1.5 archived on 2026-05-13; v1.6 Skia-backed rendering investigation is the next planned milestone.
+- v1.5 archived on 2026-05-13.
+- v1.6 continues phase numbering after v1.5 and focuses on localized module keybind management.
 
 ## Deferred Items
 
@@ -181,6 +185,7 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 ## Pending Todos
 
 - Create unified package and module manifest phase — captured 2026-05-08; separate future phase for package/module manifest structure, module management, icon pack installation, and interface declarations.
+- Audio popover transition delay polish — captured 2026-05-13; accepted v1.5 polish debt.
 
 ## Artifact Index
 
@@ -193,14 +198,14 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | v1.5 archived roadmap | `.planning/milestones/v1.5-ROADMAP.md` |
 | v1.5 audit | `.planning/milestones/v1.5-MILESTONE-AUDIT.md` |
 | Research summary | `.planning/research/SUMMARY.md` |
-| Qt CPU rendering research | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
+| v1.6 keybind research | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
 | v1.4 research | `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-13 after archiving v1.5*
+*State updated: 2026-05-13 after starting v1.6*
 
 ## Operator Next Steps
 
-- Start v1.6 planning with `$gsd-new-milestone` or `$gsd-plan-phase` after requirements are defined.
+- Define v1.6 requirements and roadmap for localized keybind management.
 - Review deferred polish when planning future transition/smoothness work: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`

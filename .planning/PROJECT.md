@@ -66,18 +66,19 @@ The project now also has CPU rendering performance improvements with:
 
 The v1.5 milestone closed the visible interaction regressions found during live UAT. One slight audio popover transition delay remains accepted polish debt by user request.
 
-Skia-backed rendering is now the high-priority next-milestone candidate. `v1.6` should investigate whether Skia can materially improve MESH rendering performance and, if so, migrate the low-level painter behind the existing retained-rendering architecture.
+Keybind management is now the active next milestone. `v1.6` should let frontend modules declare semantic keybind actions that scripts can handle, while the shell resolves localized defaults, user overrides, conflicts, scope, and accessibility metadata.
 
-## Current Milestone: v1.6 Skia-Backed Rendering Performance Investigation
+## Current Milestone: v1.6 Localized Keybind Management
 
-**Goal:** Determine whether a Skia-backed renderer materially improves MESH rendering performance and, if it does, migrate the low-level paint backend behind the existing retained-rendering architecture.
+**Goal:** Let frontend modules declare semantic keybind actions that scripts can handle, while the shell resolves localized defaults, user overrides, conflicts, scope, and accessibility metadata.
 
 **Target features:**
-- Rust Skia integration research covering build constraints, CPU/GPU backend support, Wayland presentation fit, and maintenance cost
-- A benchmarkable Skia-backed painter spike for the existing retained display-list command stream
-- Canonical scenario comparison against the current custom/tiny-skia/resvg/cosmic-text/swash software stack
-- A migration decision: Skia wholesale, Skia selectively for expensive primitives, or keep the current renderer
-- Visual-correctness and performance evidence before any partial renderer migration ships
+- Module manifest/schema support for semantic keybind declarations: action id, label or i18n key, default trigger, localized triggers, handler, scope, and target control
+- Runtime resolution that combines module defaults, active locale, and user overrides deterministically
+- Localized access-key support so actions can use language-appropriate bindings, such as English `Accept -> A` and Slovak `Prijat -> P`
+- Conflict detection and diagnostics for duplicate bindings in the same surface or scope
+- Script-facing dispatch so modules can activate functions, buttons, popovers, and service commands through named keybind actions
+- Accessibility and discoverability metadata so controls expose resolved shortcut/access-key information
 
 ## Requirements
 
@@ -91,20 +92,18 @@ Skia-backed rendering is now the high-priority next-milestone candidate. `v1.6` 
 
 ### Active
 
-- Prove whether Skia materially improves the existing retained display-list command stream before committing to a renderer migration.
-- Keep the retained widget tree, render-object tree, damage policy, profiling, and shell presentation boundaries intact during the Skia investigation.
-- Compare Skia CPU and available GPU paths against canonical shipped-surface scenarios with visual-correctness coverage.
-- Decide explicitly whether to migrate primitives to Skia wholesale, use Skia selectively, or keep the current renderer.
+- Frontend modules can declare semantic keybind actions and script handlers without relying on ad hoc settings JSON only.
+- Keybind resolution combines module defaults, active locale, and user overrides with deterministic precedence.
+- Localized access keys can follow translated button/action purpose while remaining conflict-checked within the current scope.
+- Resolved keybinds are exposed to scripts, accessibility metadata, diagnostics, and shipped proof surfaces.
 
 ### Out of Scope
 
-- Replacing the `.mesh` compiler, layout engine, retained tree, module system, input handling, or shell service architecture.
-- Removing v1.5 retained-pipeline work; Skia should consume the improved retained command stream rather than replace the architecture around it.
-- Shipping a partial migration without benchmark proof and visual-correctness coverage.
-- Parallel paint/layout — renderer ownership and retained data boundaries should stay simple until the backend decision is clear.
-- Broad shell UI redesign — shipped surfaces remain the proof targets.
-- A second benchmark system distinct from the canonical debug scenarios — the existing benchmarks remain the acceptance harness.
-- Full trace persistence or telemetry export — milestone proof stays inspector- and benchmark-driven.
+- Compositor-global shortcuts via XDG desktop portals or compositor-specific APIs — module/surface-scoped keybinds come first.
+- Replacing keyboard focus traversal, existing button/toggle/slider focused-control bindings, or text-input behavior.
+- Broad shell UI redesign or a full keybind settings application; this milestone may expose data needed for such UI later.
+- Skia-backed rendering investigation — still a future rendering backlog candidate, but not the active v1.6 scope.
+- Locale auto-translation of labels; modules must still provide localized strings and keybind/access-key hints.
 
 ## Key Decisions
 
@@ -127,6 +126,8 @@ Skia-backed rendering is now the high-priority next-milestone candidate. `v1.6` 
 | Visible smoothness on shipped surfaces outranks microbenchmark-only wins | The user reports real lag everywhere; optimization must improve lived interaction quality, not just synthetic numbers | Locked for v1.5 |
 | Skia-backed rendering is the next major performance priority after v1.5 | Skia may provide a faster and more complete low-level 2D paint backend than the current custom/tiny-skia/resvg/cosmic-text/swash software path, but it must be proven against MESH's shipped surfaces before migration | Planned for v1.6 |
 | v1.5 can ship with the slight audio popover transition delay deferred | Functional audio popover interaction, slider behavior, and mute state now pass; the user explicitly asked to keep the remaining delay polish for later | Accepted at v1.5 archive |
+| Module keybind management takes priority for v1.6 | Plugin authors need declared, localizable keyboard actions before expanding to compositor-global shortcut plumbing or more rendering work | Active for v1.6 |
+| Skia-backed rendering is deferred beyond v1.6 | The next user-requested capability is frontend module keybind management; Skia remains a future rendering investigation candidate | Deferred |
 
 <details>
 <summary>Archived milestone framing</summary>
@@ -173,4 +174,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-13 after archiving milestone v1.5*
+*Last updated: 2026-05-13 after starting milestone v1.6*
