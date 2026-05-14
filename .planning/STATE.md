@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Localized Keybind Management
-status: active
-stopped_at: phase 33 complete
-last_updated: "2026-05-13T22:21:03+02:00"
-last_activity: 2026-05-13
+status: planning
+stopped_at: Phase 34 context gathered
+last_updated: "2026-05-14T16:53:11.300Z"
+last_activity: 2026-05-13 - Phase 33 completed
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 2
   completed_plans: 2
-  percent: 40
+  percent: 100
 ---
 
 # State: MESH v1.6
@@ -150,9 +150,9 @@ Last activity: 2026-05-13 - Phase 33 completed
 
 ## Session
 
-Last session: 2026-05-13T22:21:03+02:00
-Stopped At: Phase 33 complete; Phase 34 pending planning
-Resume File: .planning/phases/33-locale-aware-keybind-resolution/33-01-SUMMARY.md
+Last session: 2026-05-14T16:53:11.287Z
+Stopped At: Phase 34 context gathered
+Resume File: .planning/phases/34-script-dispatch-and-input-precedence/34-CONTEXT.md
 
 ## Accumulated Context
 
