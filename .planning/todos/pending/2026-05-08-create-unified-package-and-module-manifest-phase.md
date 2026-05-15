@@ -2,6 +2,7 @@
 created: 2026-05-08T10:02:41.147Z
 title: Create unified package and module manifest phase
 area: planning
+resolves_phase: 38
 files:
   - .planning/ROADMAP.md
   - config/package.json

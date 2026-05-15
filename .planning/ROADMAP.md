@@ -1,188 +1,106 @@
-# Roadmap: MESH v1.6 Localized Keybind Management
+# Roadmap: MESH v1.7 Rethink Modularity and Extensibility Concepts
 
-**Status:** Active milestone execution
-**Phases:** 32-36
-**Total Phases:** 5
+**Milestone goal:** Rework MESH's modularity model so frontend modules, backend providers, manifests, service contracts, capabilities, and extension points form a coherent author-facing architecture instead of a set of separate milestone-grown mechanisms.
 
-## Overview
-
-`v1.6` turns MESH's early surface shortcut support into a formal localized keybind management system for frontend modules. Modules should be able to declare semantic actions once, map those actions to handlers and target controls, provide locale-specific access-key defaults, allow stable user overrides, and expose resolved shortcut metadata to scripts, diagnostics, and accessibility.
-
-The milestone deliberately stays module/surface-scoped. Compositor-global shortcuts through XDG Desktop Portal remain future work because they require portal sessions, user permission/configuration flows, and activation signal handling beyond the first stable module keybind contract.
+**Starting phase:** Phase 37, continuing from v1.6's planned Phase 36.
 
 ## Phases
 
-### Phase 32: Keybind Declaration Contract
+### Phase 37: Concept Inventory and Vocabulary Lock
 
-**Goal:** Add a typed module keybind declaration model so frontend modules can declare stable semantic actions without relying on ad hoc runtime JSON parsing.
-**Depends on:** Phase 31
-**Requirements:** `KEYB-01`, `KEYB-02`, `KEYB-03`
+**Goal:** Define the canonical module/extensibility vocabulary and map every current term to runtime structures, docs, diagnostics, or compatibility aliases.
 
-Planned work:
+**Requirements:** CONC-01, CONC-02, CONC-03
 
-- Define typed Rust structures for frontend keybind action declarations with stable action ids.
-- Support handler, target control reference, scope, label or i18n key, trigger kind, and default trigger metadata.
-- Parse declarations from existing module manifest/settings paths in a way that preserves current navigation-bar shortcut behavior.
-- Validate malformed declarations early and make valid declarations available to shell runtime.
+**Depends on:** v1.6 Phase 33 context
 
-Success criteria:
+**Success criteria:**
+1. Canonical definitions exist for package/module identity, frontend, backend provider, interface, library, resource pack, contribution, capability, and dependency.
+2. Existing docs and code terms are inventoried with either canonical names or compatibility aliases.
+3. v1.1 backend provider decisions and v1.6 keybind declaration/resolution decisions are reconciled into the vocabulary.
+4. Diagnostics and docs have a clear target vocabulary for later phases.
 
-1. A frontend module can declare at least one semantic keybind action with a stable id.
-2. The parser exposes typed declarations to shell/component code without direct ad hoc JSON lookup during dispatch.
-3. Existing `@mesh/navigation-bar` mute shortcut remains compatible through the new declaration contract.
-4. Invalid declaration shapes produce diagnostics without blocking unrelated valid module data.
+### Phase 38: Canonical Manifest Normalization
 
-Plans:
+**Goal:** Align package manifest parsing and runtime manifest normalization around the canonical `package.json.mesh` contract while preserving existing behavior.
 
-- **32-01: Keybind declaration contract and compatibility bridge** *(Wave 1, complete)* - added normalized keybind declaration types, bridged current settings shortcuts through typed declarations, and proved navigation-bar compatibility.
+**Requirements:** MAN-01, MAN-02, MAN-03
 
-Cross-cutting constraints:
+**Depends on:** Phase 37
 
-- Preserve current navigation-bar `keyboard.shortcuts.mute` behavior and `KeyboardSettings.surface_shortcuts` override identity by action id.
-- Do not implement locale fallback, duplicate detection, or XDG portal/global shortcut behavior in Phase 32.
-- Shell-global shortcut and existing input precedence must remain unchanged.
+**Success criteria:**
+1. The canonical manifest schema is documented and represented in Rust normalization code.
+2. Legacy manifest forms load through explicit compatibility paths without silently dropping supported data.
+3. v1.6 keybind declarations and v1.1 provider declarations survive normalization.
+4. Manifest validation emits field-path diagnostics with actionable migration guidance.
 
-### Phase 33: Locale-Aware Keybind Resolution
+### Phase 39: Contribution and Interface Extension Index
 
-**Goal:** Resolve effective keybinds from module defaults, active locale, and user overrides with deterministic precedence.
-**Depends on:** Phase 32
-**Requirements:** `LOCL-01`, `LOCL-02`, `LOCL-03`
+**Goal:** Make extension points inspectable through typed installed-graph contributions and contract-aware interface/provider validation.
 
-Planned work:
+**Requirements:** EXT-01, EXT-02, EXT-03, EXT-04
 
-- Add a keybind resolver that merges generic module defaults, locale-specific defaults, and shell user overrides.
-- Add support for localized access-key defaults such as English `Accept -> A` and Slovak `Prijat -> P`.
-- Preserve stable override identity by module id and action id.
-- Fall back to generic defaults when locale-specific entries are missing or invalid.
+**Depends on:** Phase 38
 
-Success criteria:
+**Success criteria:**
+1. Interface relationship metadata supports base, extension, and independent contracts.
+2. Provider declarations, interface dependencies, and host capability requests are validated as separate concepts.
+3. Installed graph contribution indexing covers frontend entrypoints, slots, libraries, settings, keybinds, resources, interfaces, and providers.
+4. Tests prove new extension behavior routes through manifests, contracts, libraries, and providers without service-specific Rust branches.
 
-1. Resolver tests prove user overrides win over locale defaults and locale defaults win over generic defaults.
-2. A Slovak locale binding can resolve to a different access key than English for the same action id.
-3. Missing locale data falls back to the generic declaration without disabling the action.
-4. Override identity never depends on translated label text.
+### Phase 40: Compatibility Migration and Author Diagnostics
 
-Plans:
+**Goal:** Turn compatibility behavior into visible, author-facing migration guidance across bundled docs, examples, and diagnostics.
 
-- **33-01: Locale-aware access-key resolution** *(Wave 1, complete)* - added per-action `localized_triggers`, resolved access-key defaults by user override, exact locale, parent locale, and generic fallback, and proved shortcut compatibility.
+**Requirements:** MIGR-01, MIGR-02
 
-### Phase 34: Script Dispatch and Input Precedence
+**Depends on:** Phase 38, Phase 39
 
-**Goal:** Dispatch resolved keybind actions into module scripts while preserving existing shell-global, text-input, focus traversal, and widget-control behavior.
-**Depends on:** Phase 33
-**Requirements:** `DISP-01`, `DISP-02`, `DISP-03`
+**Success criteria:**
+1. Legacy terminology and manifest shapes in bundled modules/docs are updated or explicitly marked as compatibility.
+2. Diagnostics distinguish blocking load errors from migration warnings.
+3. Existing v1.6 keybind declaration/resolution data remains addressable under the canonical contribution model.
+4. Module authors have a documented migration path from old examples to the new package model.
 
-Planned work:
+### Phase 41: Shipped Module Proof and Documentation
 
-- Replace the current surface shortcut runtime lookup with resolved keybind records.
-- Dispatch script handlers with action id, trigger kind, key/modifier data, locale, target metadata, and resolved label.
-- Preserve shell-global debug shortcuts as the highest-priority shortcut path.
-- Preserve Tab/Escape traversal, Ctrl+C text selection copy, text input, and focused button/toggle/slider behavior.
-- Prove keybind handlers can activate existing functions, buttons, popovers, and service commands.
+**Goal:** Prove the consolidated model on a real bundled module/provider path with tests, docs, and diagnostics.
 
-Success criteria:
+**Requirements:** PROOF-01
 
-1. Keybind handler events include action id, trigger metadata, locale, target metadata, and resolved label.
-2. Navigation-bar/audio actions can be activated through resolved keybind dispatch.
-3. Existing shell-global debug shortcuts still win before module keybinds.
-4. Text input and focused-control keyboard behavior are not captured by single-letter module access keys.
+**Depends on:** Phase 39, Phase 40
 
-### Phase 35: Conflict Diagnostics and Override Safety
+**Success criteria:**
+1. A bundled module/provider path uses the canonical manifest and contribution model end to end.
+2. The proof includes interface/provider/library/resource or settings/keybind behavior without adding service-specific Rust APIs.
+3. Automated tests cover manifest normalization, contribution indexing, diagnostics, and proof-module behavior.
+4. Author documentation shows the final workflow for adding or extending a MESH module.
 
-**Goal:** Make keybind authoring failures visible and non-fatal, especially duplicate bindings inside the same scope.
-**Depends on:** Phase 33, Phase 34
-**Requirements:** `DIAG-01`, `DIAG-02`, `DIAG-03`
+## Requirement Coverage
 
-Planned work:
+| Requirement | Phase |
+|-------------|-------|
+| CONC-01 | Phase 37 |
+| CONC-02 | Phase 37 |
+| CONC-03 | Phase 37 |
+| MAN-01 | Phase 38 |
+| MAN-02 | Phase 38 |
+| MAN-03 | Phase 38 |
+| EXT-01 | Phase 39 |
+| EXT-02 | Phase 39 |
+| EXT-03 | Phase 39 |
+| EXT-04 | Phase 39 |
+| MIGR-01 | Phase 40 |
+| MIGR-02 | Phase 40 |
+| PROOF-01 | Phase 41 |
 
-- Detect duplicate keybinds in the same surface/scope after locale and override resolution.
-- Diagnose malformed triggers, unknown keys/modifiers, missing handlers, missing target refs, and invalid locale bindings.
-- Keep valid keybinds active when unrelated declarations fail validation.
-- Add regression coverage for stable user override keys by module id and action id.
+**Coverage:** 13/13 requirements mapped.
 
-Success criteria:
+## Deferred Context
 
-1. Duplicate bindings in one scope emit visible diagnostics.
-2. Malformed declarations are non-fatal and do not disable unrelated valid keybinds.
-3. Missing handler and missing target reference cases are diagnosed clearly.
-4. User override tests prove translated label changes do not affect override lookup.
-
-### Phase 36: Accessibility Metadata and Shipped-Surface Proof
-
-**Goal:** Expose resolved keybind metadata through accessibility annotations and prove localized module keybinds on shipped surfaces.
-**Depends on:** Phase 34, Phase 35
-**Requirements:** `A11Y-01`, `PROOF-01`
-
-Planned work:
-
-- Drive accessibility shortcut/access-key annotations from the same resolved records used by dispatch.
-- Update `@mesh/navigation-bar` and `@mesh/audio-popover` to prove localized keybind declarations and script dispatch.
-- Add English and Slovak proof data for at least one localized access-key action.
-- Add proof for user override behavior and conflict diagnostics on a shipped surface.
-- Document authoring guidance for module keybind declarations and localization hints.
-
-Success criteria:
-
-1. Accessibility metadata shows the effective resolved binding, including user overrides.
-2. Navigation bar and audio popover pass real-surface regression tests for localized keybind behavior.
-3. English and Slovak bindings are covered by automated tests.
-4. Author documentation explains shortcuts, access keys, scopes, localization, and out-of-scope global shortcuts.
-
-## Milestone Boundaries
-
-### Included
-
-- Typed frontend module keybind declarations
-- Locale-aware access-key defaults and deterministic fallback
-- User override precedence by module id and action id
-- Script dispatch for resolved module actions
-- Conflict and malformed-binding diagnostics
-- Accessibility metadata for resolved bindings
-- Shipped-surface proof on navigation bar/audio popover
-
-### Excluded
-
-- Compositor-global shortcuts through XDG Desktop Portal
-- Full keybind settings UI
-- Automatic translation or automatic access-key generation
-- Replacement of focus traversal, text input, or built-in widget activation behavior
-- Skia-backed rendering investigation
-
-## Research Basis
-
-This roadmap follows Microsoft, GNOME, and GTK guidance that shortcuts/accelerators, access keys/mnemonics, and focused-widget key bindings should remain distinct concepts. Localized action names should be able to localize access keys, but collision handling must be scoped and diagnostics must be visible. Wayland compositor-global shortcuts are intentionally deferred because XDG Desktop Portal GlobalShortcuts is a separate permissioned session API.
-
-Primary research artifacts:
-
-- `.planning/research/STACK.md`
-- `.planning/research/FEATURES.md`
-- `.planning/research/ARCHITECTURE.md`
-- `.planning/research/PITFALLS.md`
-- `.planning/research/SUMMARY.md`
-
-Primary external sources:
-
-- https://learn.microsoft.com/en-us/globalization/input/hotkeys-accelerators
-- https://learn.microsoft.com/en-us/windows/apps/develop/input/access-keys
-- https://learn.microsoft.com/en-us/windows/apps/develop/input/keyboard-accelerators
-- https://developer.gnome.org/hig/guidelines/keyboard.html
-- https://gnome.pages.gitlab.gnome.org/gtk/gtk4/input-handling.html
-- https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html
-
-## Archived Milestones
-
-- `v1.5` CPU Rendering Performance Improvement - shipped 2026-05-13.
-- `v1.4` Major Performance Fixes - shipped 2026-05-09.
-- `v1.3` Performance Instrumentation and Responsiveness - shipped 2026-05-09.
-- `v1.2` Rendering System Upgrade - shipped 2026-05-08.
-- `v1.1` Backend Plugin MVP - shipped 2026-05-05.
-
-## Backlog and Carryover
-
-- Skia-backed rendering remains a future rendering investigation candidate after localized keybind management.
-- Deferred validation/UAT cleanup from older milestones remains backlog work outside `v1.6`.
-- The pending unified package/module manifest phase idea remains future planning work and is not part of keybind management.
-- The slight audio popover transition delay from Phase 31 remains deferred polish: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`.
+- v1.6 phases 34-36 are paused, not shipped. Resume keybind dispatch/conflict/accessibility work after v1.7 stabilizes the module model.
+- The slight audio popover transition delay from v1.5 remains accepted polish debt: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`.
+- Marketplace, signing, remote distribution, installer UX, compositor-global shortcuts, and Skia remain future milestones.
 
 ---
-*Roadmap updated: 2026-05-13 after Phase 33 completion*
+*Roadmap created: 2026-05-15 for milestone v1.7*

@@ -6,28 +6,28 @@ status: planning
 last_updated: "2026-05-15T21:43:32.520Z"
 last_activity: 2026-05-15
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
   percent: 0
 ---
 
-# State: MESH v1.6
+# State: MESH v1.7
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-13)
+See: `.planning/PROJECT.md` (updated 2026-05-15)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Executing v1.6 localized keybind management
+**Current focus:** Planning v1.7 modularity and extensibility concept consolidation
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 37 - Concept Inventory and Vocabulary Lock
 Plan: —
-Status: Defining requirements
-Last activity: 2026-05-15 — Milestone v1.7 started
+Status: Ready for phase planning
+Last activity: 2026-05-15 — Milestone v1.7 roadmap created
 
 ## Decisions
 
@@ -109,6 +109,8 @@ Last activity: 2026-05-15 — Milestone v1.7 started
 - [Phase 33]: Localized keybind defaults live as per-action `localized_triggers` and override only trigger data, not handler, target, scope, or label metadata.
 - [Phase 33]: Effective keybind precedence is user override, exact active locale, parent locale, generic module trigger, then no binding.
 - [Phase 33]: Localized trigger defaults apply only to `access_key` actions; shortcut actions keep their generic shortcut defaults unless a user override is present.
+- [v1.7]: v1.6 keybind work is paused after phases 32 and 33 so the broader module/package/interface/provider/contribution model can be consolidated before dispatch and proof work continue.
+- [v1.7]: Modularity consolidation should preserve existing backend provider and keybind declaration behavior while aligning manifests, contributions, capabilities, diagnostics, and author docs around one canonical model.
 
 ## Performance Metrics
 
@@ -149,9 +151,9 @@ Last activity: 2026-05-15 — Milestone v1.7 started
 
 ## Session
 
-Last session: 2026-05-14T16:53:11.287Z
-Stopped At: Phase 34 context gathered
-Resume File: .planning/phases/34-script-dispatch-and-input-precedence/34-CONTEXT.md
+Last session: 2026-05-15T21:43:32.520Z
+Stopped At: Milestone v1.7 initialized
+Resume File: —
 
 ## Accumulated Context
 
@@ -163,6 +165,8 @@ Resume File: .planning/phases/34-script-dispatch-and-input-precedence/34-CONTEXT
 - v1.5 continues phase numbering after v1.4 and starts at Phase 26.
 - v1.5 archived on 2026-05-13.
 - v1.6 continues phase numbering after v1.5 and focuses on localized module keybind management.
+- v1.6 paused after phases 32 and 33 by user request to rethink modularity and extensibility concepts.
+- v1.7 continues phase numbering after the v1.6 planned roadmap and starts at Phase 37.
 
 ## Deferred Items
 
@@ -191,6 +195,7 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 
 - Create unified package and module manifest phase — captured 2026-05-08; separate future phase for package/module manifest structure, module management, icon pack installation, and interface declarations.
 - Audio popover transition delay polish — captured 2026-05-13; accepted v1.5 polish debt.
+- Resume v1.6 keybind dispatch/conflict/accessibility work after v1.7 stabilizes the module model.
 
 ## Artifact Index
 
@@ -202,17 +207,15 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | v1.5 archived requirements | `.planning/milestones/v1.5-REQUIREMENTS.md` |
 | v1.5 archived roadmap | `.planning/milestones/v1.5-ROADMAP.md` |
 | v1.5 audit | `.planning/milestones/v1.5-MILESTONE-AUDIT.md` |
-| Research summary | `.planning/research/SUMMARY.md` |
-| v1.6 keybind research | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
-| Phase 32 summary | `.planning/phases/32-keybind-declaration-contract/32-01-SUMMARY.md` |
-| Phase 33 summary | `.planning/phases/33-locale-aware-keybind-resolution/33-01-SUMMARY.md` |
+| v1.7 research summary | `.planning/research/SUMMARY.md` |
+| v1.7 research details | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
 | v1.4 research | `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-13 after Phase 33 completion*
+*State updated: 2026-05-15 after milestone v1.7 initialization*
 
 ## Operator Next Steps
 
-- Plan Phase 34 with `$gsd-plan-phase 34`.
+- Plan Phase 37 with `$gsd-plan-phase 37`.
 - Review deferred polish when planning future transition/smoothness work: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`

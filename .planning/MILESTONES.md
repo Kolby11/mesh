@@ -28,12 +28,47 @@
 - `.planning/milestones/v1.5-REQUIREMENTS.md`
 - `.planning/milestones/v1.5-MILESTONE-AUDIT.md`
 
-## v1.6 Localized Keybind Management
+## v1.7 Rethink Modularity and Extensibility Concepts
 
 **Status:** planning
+**Starts after:** v1.6 Localized Keybind Management pause
+
+**Goal:** Rework MESH's modularity model so frontend modules, backend providers, manifests, service contracts, capabilities, and extension points form a coherent author-facing architecture instead of a set of separate milestone-grown mechanisms.
+
+**Priority:** high. MESH now has useful extension pieces across manifests, backend providers, interfaces, capabilities, resources, keybinds, diagnostics, and docs; consolidating the model will reduce friction before more extension features are added.
+
+**Planned scope:**
+
+- Define canonical vocabulary for package/module identity, frontend surfaces, backend providers, interface contracts, libraries, resource packs, contributions, capabilities, and dependencies
+- Normalize `package.json.mesh` manifest schema and compatibility behavior for existing manifests
+- Index typed contributions for UI entrypoints, slots, libraries, settings, keybinds, resources, interfaces, and providers
+- Preserve v1.1 backend provider behavior and v1.6 keybind declaration/resolution behavior during migration
+- Prove the model with docs, diagnostics, tests, and at least one real bundled module/provider path
+
+**Out of scope:**
+
+- Remote marketplace, signing, trust policy, or installer UX
+- Compositor-global shortcuts
+- Completing all paused keybind dispatch/conflict/accessibility runtime work
+- Service-specific Rust APIs
+- Skia-backed rendering investigation
+
+## v1.6 Localized Keybind Management
+
+**Status:** paused
 **Starts after:** v1.5 CPU Rendering Performance Improvement
 
 **Goal:** Let frontend modules declare semantic keybind actions that scripts can handle, while the shell resolves localized defaults, user overrides, conflicts, scope, and accessibility metadata.
+
+**Paused:** 2026-05-15 after phases 32 and 33 to prioritize v1.7 modularity and extensibility concept consolidation.
+
+**Delivered before pause:**
+
+- Manifest-backed semantic keybind declarations with stable action ids, handlers, target references, scopes, labels/i18n keys, and trigger metadata
+- Compatibility bridge from `settings.keyboard.shortcuts` into the same declaration model
+- User overrides keyed by surface id and action id rather than localized labels
+- Locale-aware trigger resolution with user override, exact locale, parent locale, generic trigger, then no-binding precedence
+- Localized trigger defaults scoped to `access_key` actions while shortcut actions retain generic defaults unless overridden
 
 **Priority:** high. Plugin authors need declared, localizable keyboard actions before MESH expands into compositor-global shortcuts or broader settings UI.
 
