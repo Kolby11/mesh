@@ -195,6 +195,7 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 
 - Create unified package and module manifest phase — captured 2026-05-08; separate future phase for package/module manifest structure, module management, icon pack installation, and interface declarations.
 - Audio popover transition delay polish — captured 2026-05-13; accepted v1.5 polish debt.
+- Define module install requirement resolution — captured 2026-05-15; clarify interface/provider matching, contradictory backend handling, resource requirements, and missing icon/font/sound diagnostics for v1.7 Phase 38/39.
 - Resume v1.6 keybind dispatch/conflict/accessibility work after v1.7 stabilizes the module model.
 
 ## Artifact Index
