@@ -3,6 +3,7 @@ created: 2026-05-15T22:30:23.194Z
 title: Define module install requirement resolution
 area: planning
 related_phases:
+  - core-restructure
   - 38
   - 39
 files:
@@ -12,7 +13,9 @@ files:
 
 ## Problem
 
-The v1.7 module model needs to make install-time dependency and contribution resolution concrete, not just normalize manifest shape. The user clarified that frontend modules should not depend directly on backend modules. A frontend should require an interface contract, and one or more user-installed backends should implement that interface. The open design question is how MESH handles contradictory backend implementations, provider conflicts, and missing resources without tying surfaces to implementation packages.
+The v1.7 module model and core restructure need to make install-time dependency and contribution resolution concrete, not just normalize manifest shape. This is core architecture work: the Rust core should own typed registries, graph resolution, provider/interface matching, diagnostics, and runtime lookup boundaries, while modules provide all policy/data/UI.
+
+The user clarified that frontend modules should not depend directly on backend modules. A frontend should require an interface contract, and one or more user-installed backends should implement that interface. The open design question is how MESH handles contradictory backend implementations, provider conflicts, and missing resources without tying surfaces to implementation packages.
 
 The same issue applies to resource packs. A module may reference icons, sounds, fonts, keybinds, languages, themes, and interface contracts, but the currently selected icon pack or font pack may not contain the requested symbolic resource. Each module package should declare what it needs and what it contributes so the installed graph can resolve or diagnose those relationships during module installation and graph rebuilds.
 
@@ -20,8 +23,11 @@ The capture also includes the broader configuration direction: every top-level r
 
 ## Solution
 
-Design Phase 38/39 around explicit requirement and contribution declarations in the canonical package manifest:
+Design the core restructure and Phase 38/39 around explicit requirement and contribution declarations in the canonical package manifest:
 
+- Rust core owns the installed graph, typed contribution registries, interface/provider compatibility checks, cascade resolver, resource lookup, and author/user diagnostics.
+- Core should remain mechanism-only: no built-in user-visible categories, strings, theme values, icons, fonts, sounds, or UI. Those arrive through modules and resource packs.
+- Core runtime APIs should expose resolved interfaces and resources by contract/id, not concrete package names, so frontend code binds to interface contracts and symbolic resources.
 - Frontend/surface packages declare required interfaces by contract id and version range, never concrete backend packages.
 - Backend/provider packages declare implemented interfaces, provider ids, capability needs, priority/default metadata, and whether multiple providers may coexist.
 - The installed graph validates interface requirements against installed provider contributions, reports missing providers, and reports contradictory exclusive providers as install/load diagnostics that the user can resolve by choosing a provider.
