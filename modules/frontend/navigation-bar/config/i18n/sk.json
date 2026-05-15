@@ -4,5 +4,8 @@
   "nav.settings": "Nastavenia",
   "nav.open_settings": "Otvorit rychle nastavenia",
   "nav.volume": "Hlasitost",
-  "nav.open_audio": "Otvorit ovladanie zvuku"
+  "nav.open_audio": "Otvorit ovladanie zvuku",
+  "keybind.mute.label": "Stlmit zvuk",
+  "keybind.mute.description": "Prepnut stlmenie zvuku",
+  "keybind.category.audio": "Zvuk"
 }

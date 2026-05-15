@@ -283,6 +283,40 @@ pub(super) fn test_frontend_component(source: &str) -> FrontendSurfaceComponent 
     test_frontend_component_with_catalog(source, InterfaceCatalog::default(), &[])
 }
 
+pub(super) fn test_frontend_component_with_manifest(
+    source: &str,
+    manifest: Manifest,
+) -> FrontendSurfaceComponent {
+    let component_id = manifest.package.id.clone();
+    let compiled = CompiledFrontendModule {
+        manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: parse_component(source).unwrap(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
+    let catalog = FrontendCatalog {
+        modules: HashMap::new(),
+        slot_contributions: HashMap::new(),
+    };
+    let mut component = FrontendSurfaceComponent::new(
+        compiled,
+        PathBuf::from("."),
+        catalog,
+        InterfaceCatalog::default(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: component_id.clone(),
+            surface_id: component_id.clone(),
+            diagnostics: Diagnostics::new(component_id),
+        })
+        .unwrap();
+    component.visible = true;
+    component
+}
+
 pub(super) fn buffer_pixel(buffer: &PixelBuffer, x: u32, y: u32) -> [u8; 4] {
     let offset = (y * buffer.stride + x * 4) as usize;
     [

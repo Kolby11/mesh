@@ -418,13 +418,24 @@ impl KeybindsSection {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeybindAction {
     #[serde(default)]
-    pub trigger: KeybindTrigger,
+    pub scope: KeybindScope,
     #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub trigger: KeybindTrigger,
+    #[serde(default, alias = "localizedTriggers")]
     pub localized_triggers: HashMap<String, KeybindTrigger>,
 }
 
 impl KeybindAction {
     fn validate(&self, action_id: &str) -> Result<(), String> {
+        validate_optional_keybind_text_key(action_id, "label", self.label.as_deref())?;
+        validate_optional_keybind_text_key(action_id, "description", self.description.as_deref())?;
+        validate_optional_keybind_text_key(action_id, "category", self.category.as_deref())?;
         self.trigger.validate(action_id)?;
         for locale in self.localized_triggers.keys() {
             if locale.trim().is_empty() {
@@ -435,6 +446,30 @@ impl KeybindAction {
         }
         Ok(())
     }
+}
+
+impl Default for KeybindAction {
+    fn default() -> Self {
+        Self {
+            scope: KeybindScope::default(),
+            label: None,
+            description: None,
+            category: None,
+            trigger: KeybindTrigger::default(),
+            localized_triggers: HashMap::new(),
+        }
+    }
+}
+
+fn validate_optional_keybind_text_key(
+    action_id: &str,
+    field: &str,
+    value: Option<&str>,
+) -> Result<(), String> {
+    if value.is_some_and(|value| value.trim().is_empty()) {
+        return Err(format!("mesh.keybinds.{action_id}.{field} cannot be empty"));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

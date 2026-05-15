@@ -159,9 +159,11 @@ impl FrontendSurfaceComponent {
         script_ctx.set_interface_catalog(self.interface_catalog.clone());
         seed_service_state(script_ctx.state_mut());
         script_ctx
-            .state_mut()
-            .set("keybinds", keybinds_state_from_manifest(manifest));
-
+            .set_global_state("this", module_descriptor_from_manifest(manifest))
+            .map_err(|source| ComponentError::Script {
+                component_id: component_id.clone(),
+                source,
+            })?;
         for (key, value) in props {
             script_ctx.state_mut().set(key.clone(), value.clone());
         }
@@ -467,13 +469,80 @@ impl FrontendSurfaceComponent {
     }
 }
 
-fn keybinds_state_from_manifest(manifest: &mesh_core_module::Manifest) -> serde_json::Value {
-    let mut keybinds = serde_json::Map::new();
-    for keybind_id in manifest.keybinds.actions.keys() {
-        keybinds.insert(
-            keybind_id.clone(),
-            serde_json::Value::String(keybind_id.clone()),
-        );
-    }
-    serde_json::Value::Object(keybinds)
+fn module_descriptor_from_manifest(manifest: &mesh_core_module::Manifest) -> serde_json::Value {
+    let keybinds = manifest
+        .keybinds
+        .actions
+        .iter()
+        .map(|(keybind_id, action)| {
+            let mut descriptor = serde_json::Map::new();
+            descriptor.insert("id".into(), serde_json::json!(keybind_id));
+            descriptor.insert(
+                "scope".into(),
+                serde_json::json!(match action.scope {
+                    mesh_core_module::KeybindScope::Surface => "surface",
+                    mesh_core_module::KeybindScope::Access => "access",
+                }),
+            );
+            descriptor.insert(
+                "label".into(),
+                serde_json::json!(
+                    action
+                        .label
+                        .clone()
+                        .unwrap_or_else(|| format!("keybind.{keybind_id}.label"))
+                ),
+            );
+            descriptor.insert(
+                "description".into(),
+                serde_json::json!(
+                    action
+                        .description
+                        .clone()
+                        .unwrap_or_else(|| format!("keybind.{keybind_id}.description"))
+                ),
+            );
+            if let Some(category) = &action.category {
+                descriptor.insert("category".into(), serde_json::json!(category));
+            }
+            descriptor.insert(
+                "trigger".into(),
+                keybind_trigger_descriptor(&action.trigger),
+            );
+            descriptor.insert(
+                "localized_triggers".into(),
+                serde_json::Value::Object(
+                    action
+                        .localized_triggers
+                        .iter()
+                        .map(|(locale, trigger)| {
+                            (locale.clone(), keybind_trigger_descriptor(trigger))
+                        })
+                        .collect(),
+                ),
+            );
+            (keybind_id.clone(), serde_json::Value::Object(descriptor))
+        })
+        .collect::<serde_json::Map<_, _>>();
+
+    serde_json::json!({
+        "id": manifest.package.id.clone(),
+        "name": manifest.package.name.clone(),
+        "version": manifest.package.version.clone(),
+        "type": manifest.package.module_type,
+        "api_version": manifest.package.api_version.clone(),
+        "description": manifest.package.description.clone(),
+        "keybinds": keybinds,
+    })
+}
+
+fn keybind_trigger_descriptor(trigger: &mesh_core_module::KeybindTrigger) -> serde_json::Value {
+    serde_json::json!({
+        "kind": match trigger.kind {
+            mesh_core_module::KeybindTriggerKind::Shortcut => "shortcut",
+            mesh_core_module::KeybindTriggerKind::AccessKey => "access_key",
+        },
+        "key": trigger.key.clone(),
+        "modifiers": trigger.modifiers.clone(),
+    })
 }

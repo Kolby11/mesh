@@ -2,7 +2,7 @@
   <button
     ref="volume-button"
     class="nav-button"
-    keybind="{keybinds.mute}"
+    keybind="{this.keybinds.mute.id}"
     onclick={onActivate}
     onkeybind={onMuteKeybind}
     title="{audio_tooltip}"

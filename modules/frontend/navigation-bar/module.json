@@ -49,6 +49,9 @@
   },
   "keybinds": {
     "mute": {
+      "label": "keybind.mute.label",
+      "description": "keybind.mute.description",
+      "category": "keybind.category.audio",
       "trigger": {
         "kind": "shortcut",
         "key": "m"

@@ -160,6 +160,50 @@ fn parses_module_json_localized_keybind_triggers() {
 }
 
 #[test]
+fn parses_module_json_keybind_display_keys() {
+    let content = r#"
+{
+  "id": "@mesh/panel",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "keybinds": {
+    "mute": {
+      "scope": "surface",
+      "label": "keybind.mute.label",
+      "description": "keybind.mute.description",
+      "category": "keybind.category.audio",
+      "trigger": {
+        "kind": "shortcut",
+        "key": "m"
+      },
+      "localizedTriggers": {
+        "sk": {
+          "kind": "shortcut",
+          "key": "s"
+        }
+      }
+    }
+  }
+}
+"#;
+
+    let parsed: JsonManifest = serde_json::from_str(content).unwrap();
+    let manifest = parsed.into_manifest();
+    manifest.validate_keybinds().unwrap();
+
+    let action = &manifest.keybinds.actions["mute"];
+    assert_eq!(action.scope, KeybindScope::Surface);
+    assert_eq!(action.label.as_deref(), Some("keybind.mute.label"));
+    assert_eq!(
+        action.description.as_deref(),
+        Some("keybind.mute.description")
+    );
+    assert_eq!(action.category.as_deref(), Some("keybind.category.audio"));
+    assert_eq!(action.localized_triggers["sk"].key.as_deref(), Some("s"));
+}
+
+#[test]
 fn localized_keybind_trigger_blank_key_is_manifest_valid() {
     let content = r#"
 {

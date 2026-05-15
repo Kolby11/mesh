@@ -444,9 +444,9 @@ fn component_allowed_symbols(
 ) -> HashSet<String> {
     let mut allowed = HashSet::from([
         "t".to_string(),
+        "this".to_string(),
         "refs".to_string(),
         "settings".to_string(),
-        "keybinds".to_string(),
         "elements".to_string(),
     ]);
     allowed.extend(explicit_props.iter().cloned());

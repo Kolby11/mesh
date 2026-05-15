@@ -349,6 +349,7 @@ end
                 modifiers: Vec::new(),
             },
             localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
         },
     );
     component.last_tree = Some(root_with(vec![event_node_with_attrs(
@@ -406,6 +407,51 @@ end
 }
 
 #[test]
+fn manifest_descriptor_exposes_keybind_i18n_keys_to_lua_and_markup() {
+    let mut manifest = minimal_test_manifest("@test/keybind-descriptor");
+    manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            label: Some("keybind.mute.label".into()),
+            description: Some("keybind.mute.description".into()),
+            category: Some("keybind.category.audio".into()),
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+    let mut component = test_frontend_component_with_manifest(
+        r#"
+<template>
+  <box>
+    <text>{t(this.keybinds.mute.label)}</text>
+    <text>{lua_label}</text>
+    <text>{this.keybinds.mute.trigger.key}</text>
+  </box>
+</template>
+<script lang="luau">
+lua_label = this.keybinds.mute.label
+</script>
+"#,
+        manifest,
+    );
+
+    let tree = component.build_tree(&default_theme(), 240, 160);
+    let mut text = Vec::new();
+    collect_text_content(&tree, &mut text);
+
+    assert_eq!(
+        runtime_value(&component, "lua_label").and_then(|value| value.as_str().map(str::to_string)),
+        Some("keybind.mute.label".into())
+    );
+    assert!(text.iter().any(|line| line == "keybind.mute.label"));
+    assert!(text.iter().any(|line| line == "m"));
+}
+
+#[test]
 fn keybind_locale_exact_locale_wins_over_parent_and_generic() {
     let mut component = test_frontend_component(
         r#"
@@ -445,6 +491,7 @@ end
                     },
                 ),
             ]),
+            ..mesh_core_module::KeybindAction::default()
         },
     );
 
@@ -495,6 +542,7 @@ end
                     modifiers: Vec::new(),
                 },
             )]),
+            ..mesh_core_module::KeybindAction::default()
         },
     );
 
@@ -541,6 +589,7 @@ end
                     modifiers: Vec::new(),
                 },
             )]),
+            ..mesh_core_module::KeybindAction::default()
         },
     );
     let keyboard_settings = mesh_core_config::KeyboardSettings {
@@ -593,6 +642,7 @@ end
                     modifiers: Vec::new(),
                 },
             )]),
+            ..mesh_core_module::KeybindAction::default()
         },
     );
 
@@ -643,6 +693,7 @@ end
                     modifiers: Vec::new(),
                 },
             )]),
+            ..mesh_core_module::KeybindAction::default()
         },
     );
 
