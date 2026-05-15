@@ -66,19 +66,18 @@ The project now also has CPU rendering performance improvements with:
 
 The v1.5 milestone closed the visible interaction regressions found during live UAT. One slight audio popover transition delay remains accepted polish debt by user request.
 
-Keybind management is now the active next milestone. `v1.6` should let frontend modules declare semantic keybind actions that scripts can handle, while the shell resolves localized defaults, user overrides, conflicts, scope, and accessibility metadata.
+The v1.6 keybind milestone established semantic keybind declarations and locale-aware trigger resolution through phases 32 and 33. It was paused before script dispatch, conflict diagnostics, and accessibility proof so v1.7 can consolidate the broader module and extension model those features depend on.
 
-## Current Milestone: v1.6 Localized Keybind Management
+## Current Milestone: v1.7 Rethink Modularity and Extensibility Concepts
 
-**Goal:** Let frontend modules declare semantic keybind actions that scripts can handle, while the shell resolves localized defaults, user overrides, conflicts, scope, and accessibility metadata.
+**Goal:** Rework MESH's modularity model so frontend modules, backend providers, manifests, service contracts, capabilities, and extension points form a coherent author-facing architecture instead of a set of separate milestone-grown mechanisms.
 
 **Target features:**
-- Module manifest/schema support for semantic keybind declarations: action id, label or i18n key, default trigger, localized triggers, handler, scope, and target control
-- Runtime resolution that combines module defaults, active locale, and user overrides deterministically
-- Localized access-key support so actions can use language-appropriate bindings, such as English `Accept -> A` and Slovak `Prijat -> P`
-- Conflict detection and diagnostics for duplicate bindings in the same surface or scope
-- Script-facing dispatch so modules can activate functions, buttons, popovers, and service commands through named keybind actions
-- Accessibility and discoverability metadata so controls expose resolved shortcut/access-key information
+- Clarified vocabulary and boundaries for package, module, frontend surface, backend provider, interface contract, library, resource pack, and contribution.
+- A normalized manifest schema that unifies module identity, dependencies, capabilities, entrypoints, contributions, interface declarations, provider declarations, keybinds, assets, settings, and migration metadata.
+- Extensibility contracts that let third-party modules add new interfaces, providers, UI entrypoints, resources, and libraries without service-specific Rust branches.
+- Compatibility and migration handling for existing package graph, legacy manifests, v1.1 backend provider declarations, and v1.6 keybind declarations.
+- Author-facing proof through docs, diagnostics, validation, and at least one real module/provider path.
 
 ## Requirements
 
@@ -92,18 +91,19 @@ Keybind management is now the active next milestone. `v1.6` should let frontend 
 
 ### Active
 
-- Frontend modules can declare semantic keybind actions and script handlers without relying on ad hoc settings JSON only.
-- Keybind resolution combines module defaults, active locale, and user overrides with deterministic precedence.
-- Localized access keys can follow translated button/action purpose while remaining conflict-checked within the current scope.
-- Resolved keybinds are exposed to scripts, accessibility metadata, diagnostics, and shipped proof surfaces.
+- Module authors can rely on one coherent package and manifest model for frontend, backend, interface, library, theme, icon, font, and language modules.
+- Interface contracts, provider implementations, dependency declarations, capabilities, settings, keybinds, assets, and UI contributions use consistent vocabulary and validation paths.
+- Third-party modules can extend MESH by adding interfaces, providers, libraries, resources, and UI entrypoints without service-specific Rust branches.
+- Existing v1.1 backend package graph behavior and v1.6 keybind declaration/resolution behavior remain compatible or receive explicit migration diagnostics.
 
 ### Out of Scope
 
 - Compositor-global shortcuts via XDG desktop portals or compositor-specific APIs — module/surface-scoped keybinds come first.
-- Replacing keyboard focus traversal, existing button/toggle/slider focused-control bindings, or text-input behavior.
-- Broad shell UI redesign or a full keybind settings application; this milestone may expose data needed for such UI later.
-- Skia-backed rendering investigation — still a future rendering backlog candidate, but not the active v1.6 scope.
-- Locale auto-translation of labels; modules must still provide localized strings and keybind/access-key hints.
+- Broad shell UI redesign, marketplace/distribution service work, remote package signing, or installer UX.
+- Compositor-global shortcuts via XDG desktop portals or compositor-specific APIs.
+- Replacing keyboard focus traversal, text-input behavior, or shipped widget activation semantics.
+- Skia-backed rendering investigation — still a future rendering backlog candidate, but not the active v1.7 scope.
+- Finishing all paused v1.6 keybind runtime behavior; this milestone only preserves and migrates the declaration/resolution model where it intersects modularity.
 
 ## Key Decisions
 
@@ -128,6 +128,8 @@ Keybind management is now the active next milestone. `v1.6` should let frontend 
 | v1.5 can ship with the slight audio popover transition delay deferred | Functional audio popover interaction, slider behavior, and mute state now pass; the user explicitly asked to keep the remaining delay polish for later | Accepted at v1.5 archive |
 | Module keybind management takes priority for v1.6 | Plugin authors need declared, localizable keyboard actions before expanding to compositor-global shortcut plumbing or more rendering work | Active for v1.6 |
 | Skia-backed rendering is deferred beyond v1.6 | The next user-requested capability is frontend module keybind management; Skia remains a future rendering investigation candidate | Deferred |
+| v1.6 keybind work is paused after phases 32 and 33 | The next user request is to rethink modularity and extensibility concepts, and the remaining keybind phases depend on the broader module contract vocabulary | Paused |
+| v1.7 prioritizes conceptual coherence over new feature breadth | MESH now has manifests, providers, interfaces, capabilities, resources, keybinds, docs, and diagnostics grown across multiple milestones; consolidating those contracts reduces future extension friction | Active for v1.7 |
 
 <details>
 <summary>Archived milestone framing</summary>
@@ -174,4 +176,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-13 after starting milestone v1.6*
+*Last updated: 2026-05-15 after starting milestone v1.7*
