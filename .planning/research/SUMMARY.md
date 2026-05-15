@@ -1,49 +1,45 @@
-# Research Summary: v1.6 Localized Keybind Management
+# Research Summary: v1.7 Modularity and Extensibility
 
 ## Recommendation
 
-Build a typed, locale-aware module keybind system on top of MESH's existing surface shortcut path. Keep compositor-global shortcuts out of v1.6.
+Make v1.7 a consolidation milestone: define one module/package/contribution model, align runtime validation and diagnostics with that model, and prove that third-party extension paths stay generic.
 
-## Key Findings
+## Stack Additions
 
-- MESH already has a narrow surface shortcut mechanism: `settings_json.keyboard.shortcuts`, shell user overrides, named handler dispatch, and accessibility shortcut annotation.
-- Microsoft, GNOME, and GTK all separate three concepts that MESH should model explicitly:
-  - shortcuts/accelerators for command activation
-  - access keys/mnemonics for localized labelled controls
-  - focused-widget key bindings for controls and text input
-- Microsoft recommends localizing shortcut keys when action names are localized, while keeping common command conventions consistent per language.
-- Localized access keys need scoped collision detection. Duplicates in the same scope should be diagnosed; duplicates in unrelated scopes can be acceptable.
-- XDG Desktop Portal GlobalShortcuts is the right future path for compositor-wide shortcuts on Wayland, but it is a separate permission/session problem and should not block module-scoped keybind management.
+- Canonical `mesh` manifest schema documentation and normalized Rust model updates.
+- Typed contribution indexing for UI entrypoints, libraries, resources, settings, keybinds, interface declarations, and provider declarations.
+- Compatibility diagnostics for legacy manifests and milestone-grown fields.
+- Contract/capability validation that keeps service behavior out of Rust core.
 
-## Implementation Direction
+## Feature Table Stakes
 
-1. Add typed keybind declarations to module manifest/settings parsing.
-2. Add a resolver that merges module defaults, locale defaults, and user overrides.
-3. Preserve dispatch order: shell-global shortcuts, protected text/focused-control behavior, module keybinds, then focused handlers.
-4. Dispatch script events with action id, trigger metadata, locale, target metadata, and resolved label.
-5. Drive accessibility annotation and diagnostics from the same resolved keybind records.
-6. Prove the system on navigation bar/audio popover with English and Slovak bindings.
+- One vocabulary: package/module, interface, provider, frontend, library, resource pack, contribution, capability, dependency.
+- One manifest model under `package.json.mesh`.
+- Explicit dependency/capability/provider rules.
+- Migration support for current backend graph and keybind declarations.
+- Author docs and proof module path.
 
-## Suggested Requirement Categories
+## Watch Out For
 
-- Declaration Contract
-- Locale Resolution
-- Runtime Dispatch
-- Diagnostics and Conflict Handling
-- Accessibility and Proof Surfaces
+- Do not rename docs without updating diagnostics and structs.
+- Do not break existing manifests silently.
+- Do not let capabilities become identity or provider selection.
+- Do not let new extension points bypass the installed graph.
+- Do not add service-specific Rust APIs during the proof.
 
-## Out of Scope
+## Useful External Lessons
 
-- Full user-facing keybind settings UI.
-- Compositor-global shortcuts through XDG Desktop Portal.
-- Automatic translation or automatic access-key generation.
-- Replacing existing keyboard focus traversal and control activation behavior.
+- VS Code keeps extension behavior in manifest fields such as `contributes`, `activationEvents`, and `capabilities`, while preserving standard package metadata.
+- WebExtensions separate manifest functionality from explicit permissions, including install-time and optional permission concepts.
+- GNOME Shell extensions show that simple packaging is useful, but direct shell-internal coupling makes compatibility fragile.
+- Kubernetes custom resources reinforce that extensibility contracts should extend the platform API, not store arbitrary private application state.
 
 ## Sources
 
-- Microsoft keyboard shortcuts and localization: https://learn.microsoft.com/en-us/globalization/input/hotkeys-accelerators
-- Microsoft access keys: https://learn.microsoft.com/en-us/windows/apps/develop/input/access-keys
-- Microsoft keyboard accelerators: https://learn.microsoft.com/en-us/windows/apps/develop/input/keyboard-accelerators
-- GNOME keyboard HIG: https://developer.gnome.org/hig/guidelines/keyboard.html
-- GTK input handling: https://gnome.pages.gitlab.gnome.org/gtk/gtk4/input-handling.html
-- XDG Desktop Portal GlobalShortcuts: https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html
+- VS Code Extension Manifest: https://code.visualstudio.com/api/references/extension-manifest
+- VS Code Contribution Points: https://code.visualstudio.com/api/references/contribution-points
+- VS Code Activation Events: https://code.visualstudio.com/api/references/activation-events
+- MDN WebExtensions manifest: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json
+- MDN WebExtensions permissions: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/permissions
+- GNOME Shell extension anatomy: https://gjs.guide/extensions/overview/anatomy.html
+- Kubernetes custom resources: https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/

@@ -1,38 +1,36 @@
-# Research: v1.6 Localized Keybind Management - Stack
-
-## Scope
-
-This milestone should build on MESH's existing keyboard and localization stack rather than introduce a new shortcut subsystem from scratch.
+# Stack Research: v1.7 Modularity and Extensibility
 
 ## Existing MESH Stack
 
-- `crates/core/shell/src/shell/component/input/keyboard.rs` already resolves surface shortcuts from `settings_json.keyboard.shortcuts`, applies user overrides from `mesh_core_config::KeyboardSettings`, dispatches named handlers, and annotates `accessibility.keyboard_shortcut`.
-- `crates/core/foundation/config/src/lib.rs` already has `KeyboardSettings` with standard button/toggle/slider keys and `surface_shortcuts` overrides keyed by surface id and shortcut id.
-- `crates/core/shell/src/shell/runtime/wayland.rs` routes keyboard events to the focused surface and lets shell-global debug shortcuts win before component handling.
-- `modules/frontend/navigation-bar/config/settings.json` already declares a `keyboard.shortcuts.mute` default bound to `m`.
-- `modules/frontend/navigation-bar/config/i18n/en.json` and `sk.json` prove frontend modules already ship locale resources.
+- Rust core crates already separate module loading (`mesh-core-module`), service contracts/registry (`mesh-core-service`), capabilities, config, diagnostics, scripting, frontend compiler, shell, and UI/runtime layers.
+- Luau is the extension language for backend service scripts and frontend component scripts. Host APIs are generic (`mesh.exec`, config, service state/commands, events), which fits the rule that Rust should not grow service-specific branches.
+- `package.json` with a top-level `mesh` section is the intended module manifest shape, while legacy manifest loaders still exist for compatibility.
+- Existing docs already define the key conceptual target: a module is a package, an interface is the contract, a provider implements it, a frontend consumes it, and libraries carry reusable patterns.
+- Current runtime structures have grown independently: module manifests include package identity, dependencies, capabilities, entrypoints, settings, keybinds, i18n, theme, service/provides/interface data, slots, assets, icons, and layout.
 
-## External Stack Guidance
+## External Patterns
 
-- Microsoft separates access keys from shortcut keys. Access keys are Alt-style key sequences tied to labelled controls, while shortcut keys/accelerators invoke common actions without navigating the UI.
-- Microsoft recommends localizing shortcut keys when action names are localized, while preserving common conventions per language.
-- Microsoft and GNOME both recommend scoping access keys to avoid cognitive load and collisions.
-- GTK models accelerators, mnemonics, and widget key bindings as distinct concepts; that maps cleanly to MESH's current global shell shortcut, surface shortcut, and focused-widget input paths.
-- XDG Desktop Portal GlobalShortcuts is the relevant later stack for compositor-wide shortcuts on Wayland, but it has session, binding, permission, and configuration flows that are larger than this milestone.
+- VS Code uses `package.json` as the extension manifest, with normal package metadata plus product-specific fields such as `contributes`, `activationEvents`, `capabilities`, dependencies, and extension kind. This validates MESH's choice to keep standard package metadata separate from MESH-specific behavior.
+- VS Code contribution points are static manifest declarations. Commands, configuration, keybindings, menus, themes, languages, grammars, icons, and other capabilities are registered through one contribution namespace rather than scattered top-level concepts.
+- VS Code activation events show the value of lazy runtime entrypoints: extension code starts in response to declared events instead of every extension becoming always-on.
+- WebExtensions use a mandatory `manifest.json` that declares metadata and functionality, while permissions are explicit capability requests. MDN separates install-time, optional, host, and API permissions, which is useful vocabulary for MESH capability design.
+- GNOME Shell extensions are simple directory packages with required metadata and code entrypoints, but they are tightly coupled to shell internals. MESH should avoid that failure mode by keeping stable contracts and diagnostics ahead of raw internal access.
+- Kubernetes custom resources show a useful distinction between extending a platform API and using the platform as arbitrary application storage. MESH interfaces should extend runtime contracts, not become a dumping ground for module-private data.
 
-## Recommended Stack Additions
+## Stack Additions Needed
 
-- Add typed keybind manifest/config models in `mesh-core-extension-module` and `mesh-core-foundation-config` instead of reading arbitrary JSON at dispatch time.
-- Add a resolver module in shell/component input that produces `ResolvedKeybind` records from module defaults, locale defaults, and user overrides.
-- Add manifest validation diagnostics for malformed triggers, missing handlers, missing i18n labels, and duplicate action ids.
-- Extend accessibility metadata with resolved shortcut/access-key text and a stable action id.
-- Keep key capture and dispatch inside the existing shell/component keyboard pipeline.
+- A canonical manifest-schema layer in `mesh-core-module` that describes all MESH-specific sections under one normalized `mesh` namespace.
+- A migration/compatibility diagnostic layer that reports legacy manifest shapes, deprecated terms, and lossless/lossy conversions.
+- A contribution index that treats UI entrypoints, slots, libraries, resources, keybinds, settings, and interface/provider declarations as typed contributions.
+- Contract-driven validation between interface declarations, provider implementations, frontend dependencies, capability requests, and generated scripting/LSP metadata.
+- No new foundational runtime language is needed. The milestone should consolidate Rust schemas, diagnostics, docs, examples, and Luau-facing metadata around the existing stack.
 
 ## Sources
 
-- Microsoft keyboard shortcuts and localization: https://learn.microsoft.com/en-us/globalization/input/hotkeys-accelerators
-- Microsoft access keys: https://learn.microsoft.com/en-us/windows/apps/develop/input/access-keys
-- Microsoft keyboard accelerators: https://learn.microsoft.com/en-us/windows/apps/develop/input/keyboard-accelerators
-- GNOME keyboard HIG: https://developer.gnome.org/hig/guidelines/keyboard.html
-- GTK input handling: https://gnome.pages.gitlab.gnome.org/gtk/gtk4/input-handling.html
-- XDG Desktop Portal GlobalShortcuts: https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html
+- VS Code Extension Manifest: https://code.visualstudio.com/api/references/extension-manifest
+- VS Code Contribution Points: https://code.visualstudio.com/api/references/contribution-points
+- VS Code Activation Events: https://code.visualstudio.com/api/references/activation-events
+- MDN WebExtensions manifest: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json
+- MDN WebExtensions permissions: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/permissions
+- GNOME Shell extension anatomy: https://gjs.guide/extensions/overview/anatomy.html
+- Kubernetes custom resources: https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/

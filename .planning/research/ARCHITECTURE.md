@@ -1,103 +1,37 @@
-# Research: v1.6 Localized Keybind Management - Architecture
+# Architecture Research: v1.7 Modularity and Extensibility
 
-## Existing Architecture Fit
+## Current Integration Points
 
-MESH already has most of the event path:
+- `crates/core/extension/module/src/package/module_manifest.rs` parses the target `package.json` shape and converts it into the runtime manifest model.
+- `crates/core/extension/module/src/manifest/model.rs` is the normalized runtime manifest model, but it still exposes several organically grown sections and legacy compatibility concepts.
+- `crates/core/extension/module/src/package/installed_graph.rs` builds the installed module graph, active providers, interface declarations, contribution index, and layout entrypoint.
+- `crates/core/extension/service/src/lib.rs` and its submodules own interface contracts, interface/provider resolution, and registry behavior.
+- `docs/module-system.md`, `docs/extensibility.md`, `docs/modules/README.md`, backend/frontend module docs, and codebase maps already describe most of the desired model, but the docs and structs are not yet fully aligned.
+- v1.6 added keybind declaration and locale-resolution concepts that need to fit the broader contribution/capability vocabulary before dispatch and accessibility proof continue.
 
-1. Wayland keyboard events enter `Shell::dispatch_wayland`.
-2. Shell-global debug shortcuts are checked first.
-3. Events are routed to the keyboard-focus surface.
-4. `FrontendSurfaceComponent::handle_input` processes focused navigation, clipboard, surface shortcuts, and focused handlers.
-5. Surface shortcut dispatch calls a named script handler and can target a referenced node.
+## Suggested Build Order
 
-The milestone should insert a typed keybind resolver into step 4 and replace direct ad hoc JSON parsing with structured declarations.
+1. Inventory and freeze vocabulary before changing schemas.
+2. Normalize manifest/package models around a canonical `mesh` schema while keeping compatibility loaders.
+3. Unify typed contribution indexing and validation for declarations that already exist in separate sections.
+4. Add migration and compatibility diagnostics so older docs/examples keep loading visibly.
+5. Prove the model with real bundled module paths and author documentation.
 
-## Proposed Data Model
+## New vs Modified Components
 
-### Module keybind declaration
+| Area | Work Type | Notes |
+|------|-----------|-------|
+| Manifest schema | Modified | Consolidate existing fields, add canonical docs/schema, preserve load compatibility. |
+| Installed graph | Modified | Ensure contribution index covers the normalized extension points and exposes useful diagnostics. |
+| Interface registry | Modified | Align interface/provider declarations with dependency/capability vocabulary. |
+| Diagnostics | Modified/New | Add author-facing migration and validation diagnostics. |
+| Docs/examples | Modified | Update module-system, extensibility, backend/frontend module docs, and examples to one model. |
+| LSP metadata | Optional/New | Generate or expose contract metadata only if bounded by the plan. |
 
-Each frontend module can declare actions under a manifest/settings key such as:
+## Architectural Guardrails
 
-```json
-{
-  "keybinds": {
-    "accept": {
-      "label": "action.accept",
-      "handler": "onAccept",
-      "target_ref": "accept-button",
-      "scope": "surface",
-      "shortcut": { "key": "Enter" },
-      "access_key": {
-        "default": "A",
-        "locales": { "sk": "P" }
-      }
-    }
-  }
-}
-```
-
-Exact file placement should follow existing module settings patterns, but the implementation should parse it into typed Rust structs before runtime dispatch.
-
-### Resolved keybind
-
-The shell resolver should produce:
-
-- `module_id`
-- `surface_id`
-- `action_id`
-- `label`
-- `handler`
-- `target_ref`
-- `scope`
-- `trigger_kind` (`shortcut`, `access_key`)
-- `key`
-- `modifiers`
-- `source` (`user_override`, `locale_default`, `module_default`)
-
-## Resolution Precedence
-
-1. User override in shell settings.
-2. Locale-specific module default for the active locale.
-3. Generic module default.
-4. No binding if explicitly disabled.
-
-## Dispatch Order
-
-1. Shell-global shortcuts stay highest priority.
-2. Text input and built-in focused-control behavior stays protected.
-3. Surface/module keybinds run when their scope matches.
-4. Focused node `keydown`/`keyup` handlers remain fallback behavior.
-
-This preserves existing debug shortcut precedence and prevents keybind declarations from breaking text entry.
-
-## Locale and Scope
-
-- Locale resolution should use existing module i18n configuration and active shell locale.
-- Access-key collision checks must run per scope, not globally across every surface.
-- Duplicates across separate scopes can be valid, matching Microsoft and Office-style access key scoping.
-
-## Diagnostics
-
-Diagnostics should be non-fatal:
-
-- malformed trigger
-- unknown modifier/key name
-- missing handler
-- missing `target_ref`
-- duplicate action id
-- duplicate trigger in the same scope
-- locale access key references a missing locale label
-
-The shell should keep dispatching valid keybinds even when one declaration is invalid.
-
-## Proof Surface
-
-Navigation bar and audio popover are good proof surfaces because they already use:
-
-- `keyboard.shortcuts.mute`
-- localized navigation strings
-- surface/popover activation handlers
-- audio service command dispatch
-- accessibility metadata
-
-Use them to prove a localized English/Slovak binding and a user override.
+- Rust core remains a generic validator, router, loader, and diagnostics layer.
+- Services remain interface contracts plus providers, not hardcoded Rust service APIs.
+- Module identity should be stable package identity. Localized labels, display names, and resources must not become identity.
+- Capabilities are host powers. Interface implementation and interface consumption are separate declarations.
+- Contributions should be inspectable from the installed graph so tools, diagnostics, and docs do not need separate discovery paths.
