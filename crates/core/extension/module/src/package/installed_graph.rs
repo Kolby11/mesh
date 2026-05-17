@@ -357,6 +357,46 @@ impl InstalledModuleGraph {
     pub fn settings_schemas(&self) -> &[ContributedSettingsSchema] {
         &self.contributions.settings
     }
+
+    pub fn frontend_entrypoints(&self) -> &[ContributedFrontendEntrypoint] {
+        &self.contributions.frontend_entrypoints
+    }
+
+    pub fn keybind_actions(&self) -> &[ContributedKeybindAction] {
+        &self.contributions.keybinds
+    }
+
+    pub fn icon_requirements(&self) -> &[ContributedIconRequirement] {
+        &self.contributions.icon_requirements
+    }
+
+    pub fn icon_pack_contributions(&self) -> &[ContributedIconPack] {
+        &self.contributions.icon_packs
+    }
+
+    pub fn declared_interfaces(&self) -> Vec<&InterfaceDeclarationNode> {
+        let mut interfaces = self.interface_declarations.values().collect::<Vec<_>>();
+        interfaces.sort_by(|a, b| {
+            a.name
+                .cmp(&b.name)
+                .then_with(|| a.module_id.cmp(&b.module_id))
+        });
+        interfaces
+    }
+
+    pub fn backend_provider_contributions(&self) -> Vec<&BackendProviderNode> {
+        let mut providers = self
+            .backend_providers
+            .values()
+            .flat_map(|providers| providers.iter())
+            .collect::<Vec<_>>();
+        providers.sort_by(|a, b| {
+            a.interface
+                .cmp(&b.interface)
+                .then_with(|| a.module_id.cmp(&b.module_id))
+        });
+        providers
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -519,6 +559,7 @@ impl FrontendRequirementSet {
 
 #[derive(Debug, Clone, Default)]
 pub struct ModuleContributionIndex {
+    frontend_entrypoints: Vec<ContributedFrontendEntrypoint>,
     layout: Vec<ContributedLayout>,
     themes: Vec<ContributedTheme>,
     icons: Vec<ContributedPathResource>,
@@ -526,12 +567,37 @@ pub struct ModuleContributionIndex {
     i18n: Vec<ContributedI18n>,
     libraries: Vec<ContributedLibrary>,
     settings: Vec<ContributedSettingsSchema>,
+    keybinds: Vec<ContributedKeybindAction>,
+    icon_requirements: Vec<ContributedIconRequirement>,
+    icon_packs: Vec<ContributedIconPack>,
 }
 
 impl ModuleContributionIndex {
     fn index_module(&mut self, module: &InstalledModuleNode) -> Result<(), ModuleManifestError> {
         let module_id = module.id.as_str();
         let manifest = &module.manifest;
+        if module.kind == ModuleKind::Frontend {
+            if let Some(path) = &manifest.mesh.entrypoints.main {
+                validate_relative_path("frontend main entrypoint", path)?;
+                self.frontend_entrypoints
+                    .push(ContributedFrontendEntrypoint {
+                        source: ContributionSource::new(module, "main"),
+                        module_id: module_id.into(),
+                        kind: FrontendEntrypointKind::Main,
+                        path: path.clone(),
+                    });
+            }
+            if let Some(path) = &manifest.mesh.entrypoints.settings_ui {
+                validate_relative_path("frontend settings entrypoint", path)?;
+                self.frontend_entrypoints
+                    .push(ContributedFrontendEntrypoint {
+                        source: ContributionSource::new(module, "settings-ui"),
+                        module_id: module_id.into(),
+                        kind: FrontendEntrypointKind::SettingsUi,
+                        path: path.clone(),
+                    });
+            }
+        }
         for contribution in &manifest.mesh.contributes.layout {
             validate_relative_path("layout entrypoint", &contribution.entrypoint)?;
             self.layout.push(ContributedLayout {
@@ -594,8 +660,57 @@ impl ModuleContributionIndex {
                 schema: settings.schema.clone(),
             });
         }
+        for (action_id, action) in &manifest.mesh.keybinds.actions {
+            self.keybinds.push(ContributedKeybindAction {
+                source: ContributionSource::new(module, action_id),
+                module_id: module_id.into(),
+                action_id: action_id.clone(),
+                scope: action.scope,
+                label: action.label.clone(),
+                description: action.description.clone(),
+                category: action.category.clone(),
+            });
+        }
+        for icon in &manifest.mesh.icon_requirements.required {
+            self.icon_requirements.push(ContributedIconRequirement {
+                source: ContributionSource::new(module, &format!("required:{icon}")),
+                module_id: module_id.into(),
+                name: icon.clone(),
+                required: true,
+            });
+        }
+        for icon in &manifest.mesh.icon_requirements.optional {
+            self.icon_requirements.push(ContributedIconRequirement {
+                source: ContributionSource::new(module, &format!("optional:{icon}")),
+                module_id: module_id.into(),
+                name: icon.clone(),
+                required: false,
+            });
+        }
+        if let Some(icon_pack) = &manifest.mesh.icon_pack {
+            self.icon_packs.push(ContributedIconPack {
+                source: ContributionSource::new(module, &icon_pack.id),
+                module_id: module_id.into(),
+                id: icon_pack.id.clone(),
+                mappings: icon_pack.mappings.clone(),
+            });
+        }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrontendEntrypointKind {
+    Main,
+    SettingsUi,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedFrontendEntrypoint {
+    pub source: ContributionSource,
+    pub module_id: String,
+    pub kind: FrontendEntrypointKind,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -678,6 +793,33 @@ pub struct ContributedSettingsSchema {
     pub module_id: String,
     pub namespace: String,
     pub schema: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedKeybindAction {
+    pub source: ContributionSource,
+    pub module_id: String,
+    pub action_id: String,
+    pub scope: manifest::KeybindScope,
+    pub label: Option<String>,
+    pub description: Option<String>,
+    pub category: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedIconRequirement {
+    pub source: ContributionSource,
+    pub module_id: String,
+    pub name: String,
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedIconPack {
+    pub source: ContributionSource,
+    pub module_id: String,
+    pub id: String,
+    pub mappings: HashMap<String, String>,
 }
 
 pub fn load_installed_module_graph(

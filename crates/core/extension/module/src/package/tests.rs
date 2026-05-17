@@ -1159,6 +1159,110 @@ fn contribution_index_records_source_metadata_and_scoped_ids() {
 }
 
 #[test]
+fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_records() {
+    let mut frontend_contributes = MeshContributes::default();
+    frontend_contributes.settings = Some(SettingsContribution {
+        namespace: "@mesh/example-widget".into(),
+        schema: serde_json::json!({ "type": "object" }),
+    });
+    let mut frontend = loaded_module(
+        "@mesh/example-widget",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        frontend_contributes,
+    );
+    frontend.manifest.mesh.entrypoints.main = Some("src/main.mesh".into());
+    frontend.manifest.mesh.entrypoints.settings_ui = Some("src/settings.mesh".into());
+    frontend.manifest.mesh.keybinds.actions.insert(
+        "toggle".into(),
+        crate::manifest::KeybindAction {
+            label: Some("Toggle".into()),
+            scope: crate::manifest::KeybindScope::Surface,
+            ..crate::manifest::KeybindAction::default()
+        },
+    );
+    frontend.manifest.mesh.icon_requirements.required = vec!["audio-volume-high".into()];
+
+    let mut icon_pack = loaded_module(
+        "@mesh/icons-material",
+        ModuleKind::IconPack,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    icon_pack.manifest.mesh.icon_pack = Some(crate::manifest::IconPackSection {
+        id: "material".into(),
+        mappings: HashMap::from([(
+            "audio-volume-high".into(),
+            "material-symbols/volume_up".into(),
+        )]),
+        ..crate::manifest::IconPackSection::default()
+    });
+
+    let backend = loaded_module(
+        "@mesh/example-backend",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.0".into()),
+            base_module: Some("@mesh/example-interface".into()),
+            provider: Some("example".into()),
+            label: None,
+            priority: 10,
+        }],
+        MeshContributes::default(),
+    );
+    let interface = interface_module(
+        "@mesh/example-interface",
+        "mesh.example",
+        "example",
+        InterfaceRelationship::Base,
+        None,
+    );
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-widget", ModuleKind::Frontend),
+            ("@mesh/icons-material", ModuleKind::IconPack),
+            ("@mesh/example-backend", ModuleKind::Backend),
+            ("@mesh/example-interface", ModuleKind::Interface),
+        ],
+        &[("mesh.example", "@mesh/example-backend")],
+        None,
+    );
+
+    let graph =
+        InstalledModuleGraph::from_parts(root, vec![frontend, icon_pack, backend, interface])
+            .unwrap();
+
+    assert_eq!(graph.frontend_entrypoints().len(), 2);
+    assert!(graph.frontend_entrypoints().iter().any(|entrypoint| {
+        entrypoint.kind == FrontendEntrypointKind::Main && entrypoint.path == "src/main.mesh"
+    }));
+    assert_eq!(
+        graph.settings_schemas()[0].namespace,
+        "@mesh/example-widget"
+    );
+    assert_eq!(graph.keybind_actions()[0].action_id, "toggle");
+    assert_eq!(graph.icon_requirements()[0].name, "audio-volume-high");
+    assert!(graph.icon_requirements()[0].required);
+    assert_eq!(graph.icon_pack_contributions()[0].id, "material");
+    assert_eq!(
+        graph.icon_pack_contributions()[0]
+            .mappings
+            .get("audio-volume-high")
+            .map(String::as_str),
+        Some("material-symbols/volume_up")
+    );
+    assert_eq!(graph.declared_interfaces()[0].name, "mesh.example");
+    assert_eq!(
+        graph.backend_provider_contributions()[0].interface,
+        "mesh.example"
+    );
+}
+
+#[test]
 fn installed_module_graph_indexes_library_contributions() {
     let contributes = MeshContributes {
         libraries: vec![LibraryContribution {
