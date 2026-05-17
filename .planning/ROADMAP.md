@@ -8,15 +8,15 @@
 
 ### Phase 37: Concept Inventory and Vocabulary Lock
 
-**Goal:** Define the canonical module/extensibility vocabulary and map every current term to runtime structures, docs, diagnostics, or compatibility aliases.
+**Goal:** Define the canonical module/extensibility vocabulary and map every current term to runtime structures, docs, diagnostics, canonical replacements, or internal-only migration paths.
 
 **Requirements:** CONC-01, CONC-02, CONC-03
 
 **Depends on:** v1.6 Phase 33 context
 
 **Success criteria:**
-1. Canonical definitions exist for package/module identity, frontend, backend provider, interface, library, resource pack, contribution, capability, and dependency.
-2. Existing docs and code terms are inventoried with either canonical names or compatibility aliases.
+1. Canonical definitions exist for module identity, frontend, backend provider, interface, library, resource pack, contribution, capability, and dependency.
+2. Existing docs and code terms are inventoried with canonical replacements, removal targets, or internal-only migration paths.
 3. v1.1 backend provider decisions and v1.6 keybind declaration/resolution decisions are reconciled into the vocabulary.
 4. Diagnostics and docs have a clear target vocabulary for later phases.
 

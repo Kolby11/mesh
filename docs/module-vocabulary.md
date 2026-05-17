@@ -35,3 +35,16 @@ Use the canonical term in new public docs, examples, diagnostics, and plans.
 When old syntax still exists during migration, diagnostics should say what to
 replace it with, name the exact module id and field path, and avoid claiming
 that the old and new names are interchangeable.
+
+## Old-Term Inventory
+
+| Old term or shape | Found in | Canonical replacement | Disposition | Follow-up |
+| ----------------- | -------- | --------------------- | ----------- | --------- |
+| package | Docs, Rust type names, manifest loader names, planning artifacts | module | replace | Rename public docs and diagnostics first; later phases can rename runtime types when practical. |
+| plugin | Older planning language and some developer-facing descriptions | module | replace | Remove from public author docs unless describing historical artifacts. |
+| package.json | Current author docs, root installed graph config, bundled backend manifests | module.json | internal-only migration | Phase 38 defines and implements the canonical manifest path, then migrates shipped artifacts before old loader removal. |
+| plugin.json | Older concept drafts or third-party vocabulary risk | module.json | remove | Reject or document only as an unsupported historical name if encountered. |
+| trait | Earlier extensibility docs and `mesh-core-service` framing | interface | replace | Public docs should say interface; runtime/code names can be inventoried for later rename. |
+| service category | Earlier backend/service grouping language | interface domain or module kind | replace | Use interface domain when grouping contracts; use module kind when describing installable roles. |
+| provides | Legacy provider declaration field and examples | implements or contributes.providers | internal-only migration | Phase 38/39 should normalize to provider/interface contributions with diagnostics. |
+| compatibility alias | Stale planning language | replacement or internal-only migration | remove | Do not document old names as synonyms; diagnostics should say replace with the canonical term. |

@@ -8,7 +8,7 @@
 ### Conceptual Model
 
 - [ ] **CONC-01**: Module authors can read one canonical vocabulary that distinguishes package/module identity, frontend surface, backend provider, interface contract, library, resource pack, contribution, capability, and dependency.
-- [ ] **CONC-02**: Runtime structs, diagnostics, docs, and examples use the same canonical names or explicit compatibility aliases for legacy names.
+- [ ] **CONC-02**: Runtime structs, diagnostics, docs, and examples use the same canonical names, with old names handled only as replacement debt or internal-only migration paths until removal.
 - [ ] **CONC-03**: Existing v1.1 and v1.6 decisions are reconciled into the model so keybind declarations, provider selection, interfaces, and installed-module graph behavior do not contradict each other.
 
 ### Manifest Contract
