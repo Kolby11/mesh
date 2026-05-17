@@ -1263,6 +1263,95 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
 }
 
 #[test]
+fn disabled_modules_remain_catalog_nodes_but_not_runtime_contributions() {
+    let mut deps = MeshDependencies::default();
+    deps.backend.insert("mesh.example".into(), ">=1.0.0".into());
+    let frontend = loaded_module(
+        "@mesh/disabled-widget",
+        ModuleKind::Frontend,
+        deps,
+        vec![],
+        MeshContributes {
+            layout: vec![LayoutContribution {
+                id: "main".into(),
+                entrypoint: "src/main.mesh".into(),
+                label: None,
+            }],
+            ..MeshContributes::default()
+        },
+    );
+    let backend = loaded_module(
+        "@mesh/disabled-backend",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: None,
+            base_module: None,
+            provider: Some("disabled".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+    let interface = interface_module(
+        "@mesh/disabled-interface",
+        "mesh.example",
+        "example",
+        InterfaceRelationship::Base,
+        None,
+    );
+    let root = RootModuleGraphManifest {
+        schema_version: 1,
+        modules_dir: "modules".into(),
+        modules: [
+            ("@mesh/disabled-widget", ModuleKind::Frontend),
+            ("@mesh/disabled-backend", ModuleKind::Backend),
+            ("@mesh/disabled-interface", ModuleKind::Interface),
+        ]
+        .into_iter()
+        .map(|(id, kind)| {
+            (
+                id.to_string(),
+                InstalledModuleEntry {
+                    kind,
+                    path: format!("modules/{id}"),
+                    enabled: false,
+                },
+            )
+        })
+        .collect(),
+        providers: HashMap::new(),
+        layout: None,
+        theme: None,
+    };
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend, backend, interface]).unwrap();
+
+    assert!(!graph.module("@mesh/disabled-widget").unwrap().enabled);
+    assert!(!graph.module("@mesh/disabled-backend").unwrap().enabled);
+    assert!(graph.frontend_modules().is_empty());
+    assert!(graph.backend_modules().is_empty());
+    assert!(graph.interface_modules().is_empty());
+    assert!(
+        graph
+            .requirements_for_frontend("@mesh/disabled-widget")
+            .is_none()
+    );
+    assert!(
+        graph
+            .backend_providers_for_interface("mesh.example")
+            .is_empty()
+    );
+    assert!(graph.declared_interface("mesh.example").is_none());
+    assert!(graph.frontend_entrypoints().is_empty());
+    assert!(graph.contributed_themes().is_empty());
+    assert!(graph.contributed_icons().is_empty());
+    assert!(graph.keybind_actions().is_empty());
+    assert!(graph.layout_entrypoint().is_none());
+}
+
+#[test]
 fn installed_module_graph_indexes_library_contributions() {
     let contributes = MeshContributes {
         libraries: vec![LibraryContribution {
