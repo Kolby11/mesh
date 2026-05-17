@@ -707,7 +707,7 @@ fn installed_module_graph_keeps_multiple_audio_providers() {
 }
 
 #[test]
-fn installed_module_graph_records_interface_extension_guidance() {
+fn installed_module_graph_records_interface_guidance_for_independent_domain_peer() {
     let root = root_with_modules(
         &[
             ("@mesh/audio-interface", ModuleKind::Interface),
@@ -739,12 +739,20 @@ fn installed_module_graph_records_interface_extension_guidance() {
 
     let guidance = graph.interface_guidance();
     assert_eq!(guidance.len(), 1);
+    assert_eq!(guidance[0].status, "consider_extending_base_interface");
     assert_eq!(guidance[0].interface, "alice.audio-mixer");
     assert_eq!(guidance[0].recommended_base, "mesh.audio");
+    assert_eq!(
+        graph
+            .declared_interface("alice.audio-mixer")
+            .unwrap()
+            .relationship,
+        InterfaceRelationship::Independent
+    );
 }
 
 #[test]
-fn installed_module_graph_does_not_warn_for_declared_interface_extension() {
+fn installed_module_graph_interface_guidance_ignores_declared_interface_extension() {
     let root = root_with_modules(
         &[
             ("@mesh/audio-interface", ModuleKind::Interface),
@@ -775,14 +783,9 @@ fn installed_module_graph_does_not_warn_for_declared_interface_extension() {
     .unwrap();
 
     assert!(graph.interface_guidance().is_empty());
-    assert_eq!(
-        graph
-            .declared_interface("alice.audio-streams")
-            .unwrap()
-            .extends
-            .as_deref(),
-        Some("mesh.audio")
-    );
+    let declared = graph.declared_interface("alice.audio-streams").unwrap();
+    assert_eq!(declared.extends.as_deref(), Some("mesh.audio"));
+    assert_eq!(declared.relationship, InterfaceRelationship::Extension);
 }
 
 #[test]
