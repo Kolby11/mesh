@@ -19,8 +19,8 @@ FreeDesktop Icon Theme Specification rather than a MESH-only pack format.
    <icon name="network-wifi"/>
    ```
 
-2. **Icon packs are XDG icon themes.** A MESH icon-pack module contributes or
-   selects a FreeDesktop-compatible theme directory, not a custom asset map.
+2. **Icon packs are XDG icon themes.** MESH resource-pack modules contribute
+   or select FreeDesktop-compatible theme directories, not custom asset maps.
 
 3. **Rendering parameters are tokens.** Colour, size, and the variable axes
    live in the theme, not in the icon call site.
@@ -29,9 +29,9 @@ FreeDesktop Icon Theme Specification rather than a MESH-only pack format.
    (like text does with `currentColor`). Tinting a whole area tints the
    icons inside it for free — no per-state assets.
 
-5. **Semantic aliases are a compatibility layer.** MESH may map its stable UI
+5. **Icon resolver aliasing is profile data.** MESH may map its stable UI
    names to several XDG names, but the resolved files still come from XDG
-   themes.
+   themes. Icon resolver aliases are resource lookup rules, not vocabulary compatibility aliases.
 
 ## XDG Theme Contract
 
@@ -41,7 +41,7 @@ have a matching section in that file.
 
 ```text
 @mesh/symbols/
-  package.json
+  module.json
   icons/
     mesh-symbols/
       index.theme
@@ -123,11 +123,11 @@ names unless a surface intentionally requires a particular icon theme.
 Misses produce a visible placeholder and a diagnostic listing every attempted
 XDG name.
 
-### Aliases
+### Icon resolver aliasing
 
-Aliases are MESH profile data, not custom icon-pack behavior. They translate a
-stable Mesh name to one or more XDG icon names, then the normal XDG resolver
-does the rest.
+Icon resolver aliasing is MESH profile data, not custom icon-pack behavior and
+not old-name vocabulary compatibility. It translates a stable MESH UI name to
+one or more XDG icon names, then the normal XDG resolver does the rest.
 
 ## Declaring icon-pack dependencies
 

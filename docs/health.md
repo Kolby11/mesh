@@ -7,9 +7,10 @@ something the user sees as "Audio unavailable: install `playerctl`" rather
 than a silent broken widget.
 
 Health and installation share one source of truth: the **same dependency
-declaration** in `package.json` drives the installer's pre-flight check
+declaration** in `module.json` drives the installer's pre-flight check
 *and* the module's runtime self-check. There is no duplication between
 "what the installer looks for" and "what the module verifies on start".
+Operating-system package names are not MESH module names.
 
 ## States
 
@@ -66,7 +67,9 @@ Fields:
 `reason` and `fix_suggestion` come from the module's dependency
 declaration — the `reason` field on each `native_libs` / `binaries` /
 `fonts` entry, plus the per-distro `packages` map. Module authors write
-this once, in `package.json`; the installer and the runtime both use it.
+this once, in `module.json`; the installer and the runtime both use it.
+The per-distro `packages` map names operating-system packages that can satisfy
+native dependencies; it does not rename or identify MESH modules.
 
 ## How health is set
 
@@ -256,7 +259,7 @@ Surfaces
 
 - Health is a first-class runtime primitive with three states and a
   structured reason.
-- The same `package.json` dep declaration drives both install-time probes
+- The same `module.json` dep declaration drives both install-time probes
   and runtime self-checks. No duplicated reason strings.
 - Unavailable backends don't register; the registry and frontends see a
   single "no active provider" story.
