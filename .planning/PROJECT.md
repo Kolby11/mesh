@@ -73,13 +73,18 @@ hard replacement rule for old public names, author docs aligned to
 `module.json`, and a runtime/future-phase inventory for manifest
 normalization, contribution indexing, migration diagnostics, and shipped proof.
 
+Phase 38 of v1.7 is complete. The runtime now treats canonical `module.json`
+as the target manifest contract, routes old manifest forms through explicit
+internal migration diagnostics, and loads the checked-in root module graph from
+`config/module.json` while preserving active provider and keybind data.
+
 ## Current Milestone: v1.7 Rethink Modularity and Extensibility Concepts
 
 **Goal:** Rework MESH's modularity model so frontend modules, backend providers, manifests, service contracts, capabilities, and extension points form a coherent author-facing architecture instead of a set of separate milestone-grown mechanisms.
 
 **Target features:**
-- Clarified vocabulary and boundaries for package, module, frontend surface, backend provider, interface contract, library, resource pack, and contribution.
-- A normalized manifest schema that unifies module identity, dependencies, capabilities, entrypoints, contributions, interface declarations, provider declarations, keybinds, assets, settings, and migration metadata.
+- Clarified vocabulary and boundaries for module, frontend surface, backend provider, interface contract, library, resource pack, and contribution.
+- A canonical `module.json` manifest schema that unifies module identity, dependencies, capabilities, entrypoints, contributions, interface declarations, provider declarations, keybinds, assets, settings, and migration metadata.
 - Extensibility contracts that let third-party modules add new interfaces, providers, UI entrypoints, resources, and libraries without service-specific Rust branches.
 - Compatibility and migration handling for existing package graph, legacy manifests, v1.1 backend provider declarations, and v1.6 keybind declarations.
 - Author-facing proof through docs, diagnostics, validation, and at least one real module/provider path.
@@ -94,13 +99,14 @@ normalization, contribution indexing, migration diagnostics, and shipped proof.
 - `v1.4`: The renderer has typed invalidation, retained render objects, retained display data, damage tracking, text caching, selector indexing, and batching metrics on the software path.
 - `v1.5`: The CPU renderer has profiling attribution, visibility pruning, incremental retained paint-command updates, damage-indexed paint execution, raster cache hardening, and shipped-surface smoothness proof.
 - `v1.7 Phase 37`: The canonical module vocabulary is locked: old public names are replacement debt, temporary old loaders are internal migration details, and v1.1 provider plus v1.6 keybind decisions are reconciled into the module/interface/provider/contribution model.
+- `v1.7 Phase 38`: Canonical `module.json` normalization is implemented in Rust, old manifest forms produce explicit migration diagnostics, checked-in root/module fixtures use canonical paths, and v1.1 provider plus v1.6 keybind data survive normalization.
 
 ### Active
 
 - Module authors can rely on one coherent module and manifest model for frontend, backend, interface, library, theme, icon, font, and language modules.
 - Interface contracts, provider implementations, dependency declarations, capabilities, settings, keybinds, assets, and UI contributions use consistent vocabulary and validation paths.
 - Third-party modules can extend MESH by adding interfaces, providers, libraries, resources, and UI entrypoints without service-specific Rust branches.
-- Existing v1.1 backend package graph behavior and v1.6 keybind declaration/resolution behavior remain compatible or receive explicit migration diagnostics.
+- Existing v1.1 backend provider behavior and v1.6 keybind declaration/resolution behavior remain preserved through explicit migration diagnostics.
 
 ### Out of Scope
 
