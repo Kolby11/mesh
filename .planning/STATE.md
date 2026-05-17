@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Rethink Modularity and Extensibility Concepts
 status: ready_to_plan
-stopped_at: Phase 38 context gathered
-last_updated: "2026-05-17T19:05:21.325Z"
-last_activity: 2026-05-17 -- Phase 38 execution started
+stopped_at: Phase 39 ready to plan
+last_updated: "2026-05-17T19:08:54Z"
+last_activity: 2026-05-17 -- Phase 38 execution completed
 progress:
   total_phases: 5
   completed_phases: 3
@@ -18,10 +18,10 @@ progress:
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-15)
+See: `.planning/PROJECT.md` (updated 2026-05-17)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 38 — Canonical Manifest Normalization
+**Current focus:** Phase 39 - Contribution and Interface Extension Index
 
 ## Current Position
 
@@ -112,6 +112,8 @@ Last activity: 2026-05-17
 - [Phase 33]: Localized trigger defaults apply only to `access_key` actions; shortcut actions keep their generic shortcut defaults unless a user override is present.
 - [v1.7]: v1.6 keybind work is paused after phases 32 and 33 so the broader module/package/interface/provider/contribution model can be consolidated before dispatch and proof work continue.
 - [v1.7]: Modularity consolidation should preserve existing backend provider and keybind declaration behavior while aligning manifests, contributions, capabilities, diagnostics, and author docs around one canonical model.
+- [Phase 38]: Canonical `module.json` is the runtime manifest target for both checked-in modules and the root module graph at `config/module.json`.
+- [Phase 38]: Old manifest files and public package names are replacement debt only; runtime handling is limited to explicit internal migration diagnostics, not compatibility aliases.
 
 ## Performance Metrics
 
@@ -153,8 +155,8 @@ Last activity: 2026-05-17
 ## Session
 
 Last session: 2026-05-17T18:45:26.951Z
-Stopped At: Phase 38 context gathered
-Resume File: .planning/phases/38-canonical-manifest-normalization/38-CONTEXT.md
+Stopped At: Phase 39 ready to plan after Phase 38 execution
+Resume File: (none; phase 39 context not gathered)
 
 ## Accumulated Context
 
@@ -183,7 +185,7 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 
 | Category | Item | Status |
 |----------|------|--------|
-| todo | 2026-05-08-create-unified-package-and-module-manifest-phase.md | deferred |
+| todo | 2026-05-08-create-unified-package-and-module-manifest-phase.md | completed by Phase 38 |
 | uat | Phase 11 / 11-HUMAN-UAT.md | partial |
 | verification | Phase 11 / 11-VERIFICATION.md | human_needed |
 | planning | v1.2 requirements checkbox and traceability drift for KEY-01 through KEY-04 and ANIM-01 through ANIM-05 despite completed phases | deferred |
@@ -194,9 +196,8 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 
 ## Pending Todos
 
-- Create unified package and module manifest phase — captured 2026-05-08; separate future phase for package/module manifest structure, module management, icon pack installation, and interface declarations.
 - Audio popover transition delay polish — captured 2026-05-13; accepted v1.5 polish debt.
-- Define module install requirement resolution — captured 2026-05-15; core restructure input for typed registries, interface/provider matching, contradictory backend handling, resource requirements, shell-settings module override format, and missing icon/font/sound diagnostics for v1.7 Phase 38/39.
+- Define module install requirement resolution — captured 2026-05-15; remaining v1.7 input for typed registries, interface/provider matching, contradictory backend handling, resource requirements, shell-settings module override format, and missing icon/font/sound diagnostics.
 - Resume v1.6 keybind dispatch/conflict/accessibility work after v1.7 stabilizes the module model.
 
 ## Artifact Index
