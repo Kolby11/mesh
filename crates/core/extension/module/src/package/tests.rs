@@ -830,6 +830,45 @@ fn provider_capability_metadata_comes_only_from_backend_manifest() {
 }
 
 #[test]
+fn installed_module_graph_routes_generic_interface_provider_without_service_branch() {
+    let backend = loaded_module(
+        "@mesh/example-backend",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example.alt".into(),
+            version: Some("1.0.0".into()),
+            base_module: None,
+            provider: Some("example-alt".into()),
+            label: Some("Example Alt".into()),
+            priority: 25,
+        }],
+        MeshContributes::default(),
+    );
+    let root = root_with_modules(
+        &[("@mesh/example-backend", ModuleKind::Backend)],
+        &[("mesh.example.alt", "@mesh/example-backend")],
+        None,
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
+    let provider = graph.active_provider("mesh.example.alt").unwrap();
+    assert_eq!(provider.module_id, "@mesh/example-backend");
+    assert_eq!(provider.provider.as_deref(), Some("example-alt"));
+    assert_eq!(
+        graph
+            .backend_providers_for_interface("mesh.example.alt")
+            .len(),
+        1
+    );
+    assert!(
+        graph
+            .backend_providers_for_interface("mesh.audio")
+            .is_empty()
+    );
+}
+
+#[test]
 fn installed_module_graph_keeps_multiple_audio_providers() {
     let root = root_with_modules(
         &[
