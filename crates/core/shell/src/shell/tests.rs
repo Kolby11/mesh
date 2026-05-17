@@ -1511,6 +1511,101 @@ fn shell_registers_theme_provider_for_frontend_theme_proxy() {
 }
 
 #[test]
+fn shell_registers_interface_contracts_and_providers_from_installed_graph() {
+    let interface_dir = tempfile::tempdir().unwrap();
+    fs::write(
+        interface_dir.path().join("interface.toml"),
+        r#"
+[[methods]]
+name = "read"
+returns = "boolean"
+
+[capabilities]
+required = ["service.example.read"]
+"#,
+    )
+    .unwrap();
+    let root = RootModuleGraphManifest::from_json_str(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/example-interface": { "kind": "interface", "path": "@mesh/example-interface", "enabled": true },
+                "@mesh/example-backend": { "kind": "backend", "path": "@mesh/example-backend", "enabled": true }
+              },
+              "providers": { "mesh.example": "@mesh/example-backend" }
+            }"#,
+    )
+    .unwrap();
+    let interface = LoadedModuleManifest {
+        manifest: ModuleManifest::from_json_str(
+            r#"{
+                  "name": "@mesh/example-interface",
+                  "version": "1.0.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "interface",
+                    "interface": {
+                      "name": "mesh.example",
+                      "version": "1.0",
+                      "file": "interface.toml",
+                      "domain": "example",
+                      "relationship": "base"
+                    }
+                  }
+                }"#,
+        )
+        .unwrap(),
+        path: interface_dir.path().join("module.json"),
+        source: ModuleManifestSource::CanonicalModuleJson,
+        diagnostics: Vec::new(),
+    };
+    let backend = LoadedModuleManifest {
+        manifest: ModuleManifest::from_json_str(
+            r#"{
+                  "name": "@mesh/example-backend",
+                  "version": "1.0.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": { "main": "src/main.luau" },
+                    "implements": [
+                      {
+                        "interface": "mesh.example",
+                        "version": "1.0",
+                        "baseModule": "@mesh/example-interface",
+                        "provider": "example",
+                        "priority": 10
+                      }
+                    ]
+                  }
+                }"#,
+        )
+        .unwrap(),
+        path: PathBuf::from("<test>/backend/module.json"),
+        source: ModuleManifestSource::CanonicalModuleJson,
+        diagnostics: Vec::new(),
+    };
+    let graph = InstalledModuleGraph::from_parts(root, vec![interface, backend]).unwrap();
+    let mut shell = Shell::new();
+
+    shell.register_interfaces_from_graph(&graph);
+
+    let contracts = shell.interfaces.contracts_for("mesh.example");
+    assert_eq!(contracts.len(), 1);
+    assert_eq!(
+        contracts[0].capabilities.required,
+        vec!["service.example.read".to_string()]
+    );
+    let providers = shell.interfaces.providers_for("mesh.example");
+    assert!(providers.iter().any(|provider| {
+        provider.provider_module == "@mesh/example-backend"
+            && provider.backend_name == "example"
+            && provider.base_module.as_deref() == Some("@mesh/example-interface")
+    }));
+}
+
+#[test]
 fn debug_snapshot_publish_delivers_mesh_debug_service_event() {
     let mut shell = Shell::new();
     shell.debug.enabled = true;

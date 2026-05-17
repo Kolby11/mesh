@@ -107,7 +107,61 @@ impl Shell {
             }
             self.scan_module_dir(&dir);
         }
+        self.register_installed_graph_interfaces();
         tracing::info!("discovered {} modules", self.modules.len());
+    }
+
+    fn register_installed_graph_interfaces(&mut self) {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let graph_path = workspace_root.join("config/module.json");
+        let graph = match load_installed_module_graph(&graph_path) {
+            Ok(graph) => graph,
+            Err(err) => {
+                tracing::warn!(
+                    "failed to load installed module graph from {}; keeping legacy interface discovery: {err}",
+                    graph_path.display()
+                );
+                return;
+            }
+        };
+        self.register_interfaces_from_graph(&graph);
+    }
+
+    pub(in crate::shell) fn register_interfaces_from_graph(
+        &mut self,
+        graph: &InstalledModuleGraph,
+    ) {
+        for declaration in graph.declared_interfaces() {
+            let (Some(version), Some(file)) = (&declaration.version, &declaration.file) else {
+                continue;
+            };
+            let contract_dir = declaration
+                .source
+                .manifest_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."));
+            match load_interface_contract(contract_dir, &declaration.name, version, file) {
+                Ok(contract) => self.interfaces.register_contract(contract),
+                Err(err) => tracing::warn!(
+                    "failed to load graph interface contract for module {}: {err}",
+                    declaration.module_id
+                ),
+            }
+        }
+
+        for provider in graph.backend_provider_contributions() {
+            self.interfaces.register(InterfaceProvider {
+                interface: canonical_interface_name(&provider.interface),
+                version: provider.version.clone(),
+                base_module: provider.base_module.clone(),
+                provider_module: provider.module_id.clone(),
+                backend_name: provider
+                    .provider
+                    .clone()
+                    .unwrap_or_else(|| provider.module_id.clone()),
+                priority: provider.priority,
+            });
+        }
     }
 
     fn scan_module_dir(&mut self, dir: &Path) {
