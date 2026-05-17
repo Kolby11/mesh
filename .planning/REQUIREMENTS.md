@@ -7,9 +7,9 @@
 
 ### Conceptual Model
 
-- [ ] **CONC-01**: Module authors can read one canonical vocabulary that distinguishes package/module identity, frontend surface, backend provider, interface contract, library, resource pack, contribution, capability, and dependency.
-- [ ] **CONC-02**: Runtime structs, diagnostics, docs, and examples use the same canonical names, with old names handled only as replacement debt or internal-only migration paths until removal.
-- [ ] **CONC-03**: Existing v1.1 and v1.6 decisions are reconciled into the model so keybind declarations, provider selection, interfaces, and installed-module graph behavior do not contradict each other.
+- [x] **CONC-01**: Module authors can read one canonical vocabulary that distinguishes package/module identity, frontend surface, backend provider, interface contract, library, resource pack, contribution, capability, and dependency.
+- [x] **CONC-02**: Runtime structs, diagnostics, docs, and examples use the same canonical names, with old names handled only as replacement debt or internal-only migration paths until removal.
+- [x] **CONC-03**: Existing v1.1 and v1.6 decisions are reconciled into the model so keybind declarations, provider selection, interfaces, and installed-module graph behavior do not contradict each other.
 
 ### Manifest Contract
 
@@ -62,9 +62,9 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONC-01 | Phase 37 | Pending |
-| CONC-02 | Phase 37 | Pending |
-| CONC-03 | Phase 37 | Pending |
+| CONC-01 | Phase 37 | Complete |
+| CONC-02 | Phase 37 | Complete |
+| CONC-03 | Phase 37 | Complete |
 | MAN-01 | Phase 38 | Pending |
 | MAN-02 | Phase 38 | Pending |
 | MAN-03 | Phase 38 | Pending |
