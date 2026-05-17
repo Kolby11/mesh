@@ -22,7 +22,7 @@
 
 ### Phase 38: Canonical Manifest Normalization
 
-**Goal:** Align package manifest parsing and runtime manifest normalization around the canonical `package.json.mesh` contract while preserving existing behavior.
+**Goal:** Align manifest parsing and runtime manifest normalization around the canonical `module.json` contract while preserving existing behavior.
 
 **Requirements:** MAN-01, MAN-02, MAN-03
 
@@ -48,19 +48,19 @@
 3. Installed graph contribution indexing covers frontend entrypoints, slots, libraries, settings, keybinds, resources, interfaces, and providers.
 4. Tests prove new extension behavior routes through manifests, contracts, libraries, and providers without service-specific Rust branches.
 
-### Phase 40: Compatibility Migration and Author Diagnostics
+### Phase 40: Migration Diagnostics and Author Docs
 
-**Goal:** Turn compatibility behavior into visible, author-facing migration guidance across bundled docs, examples, and diagnostics.
+**Goal:** Turn old terminology and manifest shapes into visible, author-facing replacement/removal guidance across bundled docs, examples, and diagnostics.
 
 **Requirements:** MIGR-01, MIGR-02
 
 **Depends on:** Phase 38, Phase 39
 
 **Success criteria:**
-1. Legacy terminology and manifest shapes in bundled modules/docs are updated or explicitly marked as compatibility.
+1. Legacy terminology and manifest shapes in bundled modules/docs are updated or receive replacement/removal guidance with concrete removal targets.
 2. Diagnostics distinguish blocking load errors from migration warnings.
 3. Existing v1.6 keybind declaration/resolution data remains addressable under the canonical contribution model.
-4. Module authors have a documented migration path from old examples to the new package model.
+4. Module authors have a documented migration path from old examples to the new module model.
 
 ### Phase 41: Shipped Module Proof and Documentation
 
@@ -99,6 +99,7 @@
 ## Deferred Context
 
 - v1.6 phases 34-36 are paused, not shipped. Resume keybind dispatch/conflict/accessibility work after v1.7 stabilizes the module model.
+- Phase 37 locks the migration rule: old public names are replacement debt, and internal loader migration is implementation detail only.
 - The slight audio popover transition delay from v1.5 remains accepted polish debt: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`.
 - Marketplace, signing, remote distribution, installer UX, compositor-global shortcuts, and Skia remain future milestones.
 
