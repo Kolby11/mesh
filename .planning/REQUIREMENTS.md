@@ -13,9 +13,9 @@
 
 ### Manifest Contract
 
-- [ ] **MAN-01**: New modules can use a documented canonical `module.json` plus `mesh` schema for identity, dependencies, capabilities, entrypoints, contributions, interfaces, providers, settings, keybinds, assets, i18n, and compatibility metadata.
-- [ ] **MAN-02**: The runtime normalizes legacy manifest shapes into the canonical model without losing supported v1.1 backend provider behavior or v1.6 keybind declaration/resolution data.
-- [ ] **MAN-03**: Invalid, deprecated, duplicate, or ambiguous manifest fields produce actionable author-facing diagnostics with module id, field path, severity, and suggested migration.
+- [x] **MAN-01**: New modules can use a documented canonical `module.json` plus `mesh` schema for identity, dependencies, capabilities, entrypoints, contributions, interfaces, providers, settings, keybinds, assets, i18n, and compatibility metadata.
+- [x] **MAN-02**: The runtime normalizes legacy manifest shapes into the canonical model without losing supported v1.1 backend provider behavior or v1.6 keybind declaration/resolution data.
+- [x] **MAN-03**: Invalid, deprecated, duplicate, or ambiguous manifest fields produce actionable author-facing diagnostics with module id, field path, severity, and suggested migration.
 
 ### Extensibility Contracts
 
@@ -65,9 +65,9 @@
 | CONC-01 | Phase 37 | Complete |
 | CONC-02 | Phase 37 | Complete |
 | CONC-03 | Phase 37 | Complete |
-| MAN-01 | Phase 38 | Pending |
-| MAN-02 | Phase 38 | Pending |
-| MAN-03 | Phase 38 | Pending |
+| MAN-01 | Phase 38 | Complete |
+| MAN-02 | Phase 38 | Complete |
+| MAN-03 | Phase 38 | Complete |
 | EXT-01 | Phase 39 | Pending |
 | EXT-02 | Phase 39 | Pending |
 | EXT-03 | Phase 39 | Pending |
