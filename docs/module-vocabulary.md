@@ -107,3 +107,39 @@ they are reference modules that use the same model third-party authors use.
 | v1.6 keybind manifest data | `localized_triggers` | keybind contribution metadata | already canonical | Phase 40 | Preserve locale-specific default trigger resolution and user override precedence. |
 | v1.6 compatibility settings | `settings.keyboard.shortcuts` | keybind contributions plus settings overrides | internal-only migration | Phase 40 | Preserve existing shortcuts as migration input to the contribution model. |
 | `config/package.json` | root package manifest file | root module graph manifest | internal-only migration | Phase 38 | Preserve active module graph, active providers, enabled flags, paths, and layout entrypoint. |
+
+## Future-Phase Handoff
+
+### Phase 38: Manifest Normalization
+
+Phase 38 should define `module.json` as the canonical author-facing manifest
+and move runtime normalization toward module-named structs and diagnostics.
+Any old manifest loader should be described as internal-only migration loaders,
+not public compatibility aliases. The normalization path must preserve active
+provider declarations, interface declarations, keybind declarations,
+capabilities, dependencies, entrypoints, settings, and resource requirements.
+
+### Phase 39: Contribution And Interface Index
+
+Phase 39 should make extension behavior inspectable through typed contribution indexes for providers, interfaces, libraries, settings, keybinds, resources,
+and frontend entrypoints. Interface/provider validation must keep dependency,
+capability, and contribution separate while allowing base, extension, and
+independent interface relationships. New extension behavior should route
+through manifests, contracts, libraries, providers, and resource packs without
+service-specific Rust branches.
+
+### Phase 40: Migration Diagnostics And Docs
+
+Phase 40 should migrate bundled docs, examples, and diagnostics away from old
+public names. Diagnostics should say `replace with` or `remove`, not `alias`.
+If old loaders or fields still exist internally for sequencing, they should be
+visible as migration warnings with removal targets and exact field paths.
+Resource lookup aliases and operating-system package names remain separate
+mechanics, not vocabulary aliases.
+
+### Phase 41: Shipped Proof
+
+Phase 41 should prove the model on a bundled module/provider path using
+canonical module vocabulary end to end. The proof should include a canonical
+manifest, interface/provider behavior, typed contributions, diagnostics, and
+tests without adding service-specific Rust APIs.
