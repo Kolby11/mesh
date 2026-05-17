@@ -3,6 +3,8 @@
 This directory contains the modules shipped with MESH under the `@mesh`
 scope. They provide the default shell experience, reference implementations
 for system service integrations, and example compositions for module authors.
+The canonical vocabulary for these docs is
+[`docs/module-vocabulary.md`](../module-vocabulary.md).
 
 Modules are split into two kinds, enforced by the architecture described in
 [`spec/pluggable-backend.md`](../../spec/pluggable-backend.md):
@@ -15,8 +17,8 @@ Modules are split into two kinds, enforced by the architecture described in
   register with the interface registry and are looked up by interface name, not
   by module ID.
 
-Core contract packages now live alongside the default backends under the
-backend tree as ordinary `type = "interface"` modules. The shell core does
+Core interface modules live alongside the default backends under the
+backend tree as ordinary `kind = "interface"` modules. The shell core does
 not define service behavior; it only discovers contracts, validates them, and
 bridges providers to consumers.
 
@@ -24,8 +26,8 @@ The interface registry is the only bridge between the two.
 
 > **Full extensibility is a first-class goal.** The defaults below are
 > ordinary modules with no privileged status. Anyone can ship a backend, a
-> frontend, or an entirely new service *category* by declaring a contract
-> package. See [`docs/extensibility.md`](../extensibility.md) for the
+> frontend, or an entirely new interface domain by declaring an interface
+> module. See [`docs/extensibility.md`](../extensibility.md) for the
 > dynamic, D-Bus-style interface registry that powers this.
 
 ## Layout
@@ -71,18 +73,17 @@ small proof modules rather than part of the default daily shell chrome.
 
 ## Module anatomy
 
-New modules should use `package.json` with MESH-specific declarations under
-the `mesh` key. The top level remains npm-compatible package metadata; use
-`mesh.kind`, `mesh.dependencies`, `mesh.capabilities`, `mesh.entrypoints`, and
-`mesh.contributes` for shell behavior. Legacy `package.json`, `package.json`,
-and `mesh.toml` manifests are still loadable during migration, but new
-examples should prefer `package.json`.
+New modules should use `module.json` with MESH-specific declarations under
+the `mesh` key. Use `mesh.kind`, `mesh.dependencies`, `mesh.capabilities`,
+`mesh.entrypoints`, and `mesh.contributes` for shell behavior. Old manifest
+names are listed in the vocabulary inventory as replacement/internal migration
+debt; new examples should prefer `module.json`.
 
 Frontend surfaces have a
 `src/main.mesh` single-file component (`<template>`, `<script lang="luau">`,
 `<style>`). Backends have a `src/main.luau` entrypoint
 that registers an interface implementation with the interface registry.
-Interface packages ship an `interface.toml` declaration instead of an
+Interface modules ship an `interface.toml` declaration instead of an
 executable entrypoint.
 
 See [`spec/pluggable-backend.md`](../../spec/pluggable-backend.md) for the

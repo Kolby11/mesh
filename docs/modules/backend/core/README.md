@@ -3,7 +3,7 @@
 Backend modules implement interface contracts such as `mesh.audio`,
 `mesh.network`, `mesh.power`, and `mesh.media`. Frontend and shell-side Lua
 code consume the active provider through the interface import, not by reaching
-for a concrete backend package id.
+for a concrete backend module id. Frontend modules never depend on backend provider modules.
 
 See [`../../../extensibility.md`](../../../extensibility.md) for the broader
 model. This page documents the bundled backend contracts and the current MVP
@@ -11,7 +11,7 @@ authoring path.
 
 ## Base interface module model
 
-Each service area has a base interface module (`type = "interface"`) that
+Each service area has a base interface module (`kind = "interface"`) that
 ships an `interface.toml`. That contract declares:
 
 - `[[state_fields]]` — required public state fields
@@ -19,8 +19,9 @@ ships an `interface.toml`. That contract declares:
 - `[[events]]` — typed interface event channels
 - `[types]` — shared types
 
-Providers implement that contract through an `implements` entry in `package.json`.
-Legacy `package.json` manifests may still use `provides` during migration:
+Backend docs rule: provider modules implement interfaces through an
+`implements` entry in `module.json`. Old `provides` and `package` wording is
+vocabulary inventory and internal migration debt, not normal author guidance:
 
 ```json
 {
@@ -76,8 +77,8 @@ path rooted in the base contract's `state` fields.
 
 Two module kinds live side by side in the backend core tree:
 
-- `type = "interface"` packages that ship `interface.toml`
-- `type = "backend"` providers that implement one of those interfaces
+- `kind = "interface"` modules that ship `interface.toml`
+- `kind = "backend"` provider modules that implement one of those interfaces
 
 ## Backend script ergonomics
 
