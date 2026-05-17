@@ -1095,6 +1095,70 @@ fn installed_module_graph_indexes_theme_icon_font_i18n_contributions() {
 }
 
 #[test]
+fn contribution_index_records_source_metadata_and_scoped_ids() {
+    let icon_pack = |module_id: &str| {
+        loaded_module(
+            module_id,
+            ModuleKind::IconPack,
+            MeshDependencies::default(),
+            vec![],
+            MeshContributes {
+                icons: vec![PathContribution {
+                    id: "shared".into(),
+                    path: "icons".into(),
+                    label: None,
+                }],
+                ..MeshContributes::default()
+            },
+        )
+    };
+    let root = root_with_modules(
+        &[
+            ("@mesh/icons-a", ModuleKind::IconPack),
+            ("@mesh/icons-b", ModuleKind::IconPack),
+        ],
+        &[],
+        None,
+    );
+
+    let graph = InstalledModuleGraph::from_parts(
+        root,
+        vec![icon_pack("@mesh/icons-a"), icon_pack("@mesh/icons-b")],
+    )
+    .unwrap();
+    let mut scoped_ids = graph
+        .contributed_icons()
+        .iter()
+        .map(|icon| icon.source.scoped_id.clone())
+        .collect::<Vec<_>>();
+    scoped_ids.sort();
+
+    assert_eq!(
+        scoped_ids,
+        vec![
+            "@mesh/icons-a:shared".to_string(),
+            "@mesh/icons-b:shared".to_string()
+        ]
+    );
+    let icon = graph
+        .contributed_icons()
+        .iter()
+        .find(|icon| icon.module_id == "@mesh/icons-a")
+        .unwrap();
+    assert_eq!(icon.source.module_kind, ModuleKind::IconPack);
+    assert_eq!(icon.source.local_id, "shared");
+    assert_eq!(
+        icon.source.manifest_source,
+        ModuleManifestSource::LegacyPackageJson
+    );
+    assert!(
+        icon.source
+            .manifest_path
+            .ends_with("@mesh/icons-a/package.json")
+    );
+}
+
+#[test]
 fn installed_module_graph_indexes_library_contributions() {
     let contributes = MeshContributes {
         libraries: vec![LibraryContribution {
@@ -1118,13 +1182,13 @@ fn installed_module_graph_indexes_library_contributions() {
 
     assert_eq!(graph.library_modules().len(), 1);
     assert_eq!(graph.contributed_libraries().len(), 1);
+    let library = &graph.contributed_libraries()[0];
+    assert_eq!(library.module_id, "@mesh/backend-kit");
+    assert_eq!(library.namespace, "@mesh/backend-kit");
+    assert_eq!(library.path, "lib");
     assert_eq!(
-        graph.contributed_libraries()[0],
-        ContributedLibrary {
-            module_id: "@mesh/backend-kit".into(),
-            namespace: "@mesh/backend-kit".into(),
-            path: "lib".into(),
-        }
+        library.source.scoped_id,
+        "@mesh/backend-kit:@mesh/backend-kit"
     );
 }
 

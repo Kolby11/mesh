@@ -78,6 +78,8 @@ impl InstalledModuleGraph {
                 kind: entry.kind,
                 path: entry.path.clone(),
                 enabled: entry.enabled,
+                manifest_path: loaded.path.clone(),
+                manifest_source: loaded.source,
                 manifest: loaded.manifest.clone(),
             };
 
@@ -96,6 +98,7 @@ impl InstalledModuleGraph {
                     && let Some(interface) = &node.manifest.mesh.interface
                 {
                     let declaration = InterfaceDeclarationNode {
+                        source: ContributionSource::new(&node, &interface.name),
                         module_id: module_id.clone(),
                         name: interface.name.clone(),
                         version: interface.version.clone(),
@@ -110,6 +113,10 @@ impl InstalledModuleGraph {
                 if entry.kind == ModuleKind::Backend {
                     for provided in node.manifest.mesh.implementations() {
                         let provider = BackendProviderNode {
+                            source: ContributionSource::new(
+                                &node,
+                                provided.provider.as_deref().unwrap_or(&provided.interface),
+                            ),
                             module_id: module_id.clone(),
                             interface: provided.interface.clone(),
                             version: provided.version.clone(),
@@ -127,7 +134,7 @@ impl InstalledModuleGraph {
                     }
                 }
 
-                contributions.index_module(module_id, &node.manifest)?;
+                contributions.index_module(&node)?;
             }
 
             graph_modules.insert(module_id.clone(), node);
@@ -358,11 +365,39 @@ pub struct InstalledModuleNode {
     pub kind: ModuleKind,
     pub path: String,
     pub enabled: bool,
+    pub manifest_path: PathBuf,
+    pub manifest_source: ModuleManifestSource,
     pub manifest: ModuleManifest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributionSource {
+    pub module_id: String,
+    pub module_kind: ModuleKind,
+    pub module_path: String,
+    pub manifest_path: PathBuf,
+    pub manifest_source: ModuleManifestSource,
+    pub local_id: String,
+    pub scoped_id: String,
+}
+
+impl ContributionSource {
+    fn new(module: &InstalledModuleNode, local_id: &str) -> Self {
+        Self {
+            module_id: module.id.clone(),
+            module_kind: module.kind,
+            module_path: module.path.clone(),
+            manifest_path: module.manifest_path.clone(),
+            manifest_source: module.manifest_source,
+            local_id: local_id.into(),
+            scoped_id: format!("{}:{local_id}", module.id),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendProviderNode {
+    pub source: ContributionSource,
     pub module_id: String,
     pub interface: String,
     pub version: Option<String>,
@@ -376,6 +411,7 @@ pub struct BackendProviderNode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceDeclarationNode {
+    pub source: ContributionSource,
     pub module_id: String,
     pub name: String,
     pub version: Option<String>,
@@ -493,14 +529,13 @@ pub struct ModuleContributionIndex {
 }
 
 impl ModuleContributionIndex {
-    fn index_module(
-        &mut self,
-        module_id: &str,
-        manifest: &ModuleManifest,
-    ) -> Result<(), ModuleManifestError> {
+    fn index_module(&mut self, module: &InstalledModuleNode) -> Result<(), ModuleManifestError> {
+        let module_id = module.id.as_str();
+        let manifest = &module.manifest;
         for contribution in &manifest.mesh.contributes.layout {
             validate_relative_path("layout entrypoint", &contribution.entrypoint)?;
             self.layout.push(ContributedLayout {
+                source: ContributionSource::new(module, &contribution.id),
                 module_id: module_id.into(),
                 id: contribution.id.clone(),
                 path: contribution.entrypoint.clone(),
@@ -512,6 +547,7 @@ impl ModuleContributionIndex {
                 validate_relative_path("theme mode", path)?;
             }
             self.themes.push(ContributedTheme {
+                source: ContributionSource::new(module, &contribution.id),
                 module_id: module_id.into(),
                 id: contribution.id.clone(),
                 label: contribution.label.clone(),
@@ -521,19 +557,20 @@ impl ModuleContributionIndex {
         }
         for contribution in &manifest.mesh.contributes.icons {
             self.icons.push(ContributedPathResource::from_contribution(
-                module_id,
+                module,
                 contribution,
             )?);
         }
         for contribution in &manifest.mesh.contributes.fonts {
             self.fonts.push(ContributedPathResource::from_contribution(
-                module_id,
+                module,
                 contribution,
             )?);
         }
         for contribution in &manifest.mesh.contributes.i18n {
             validate_relative_path("i18n contribution", &contribution.path)?;
             self.i18n.push(ContributedI18n {
+                source: ContributionSource::new(module, &contribution.id),
                 module_id: module_id.into(),
                 id: contribution.id.clone(),
                 locale: contribution.locale.clone(),
@@ -543,6 +580,7 @@ impl ModuleContributionIndex {
         for contribution in &manifest.mesh.contributes.libraries {
             contribution.validate()?;
             self.libraries.push(ContributedLibrary {
+                source: ContributionSource::new(module, &contribution.namespace),
                 module_id: module_id.into(),
                 namespace: contribution.namespace.clone(),
                 path: contribution.path.clone(),
@@ -550,6 +588,7 @@ impl ModuleContributionIndex {
         }
         if let Some(settings) = &manifest.mesh.contributes.settings {
             self.settings.push(ContributedSettingsSchema {
+                source: ContributionSource::new(module, &settings.namespace),
                 module_id: module_id.into(),
                 namespace: settings.namespace.clone(),
                 schema: settings.schema.clone(),
@@ -574,6 +613,7 @@ pub struct ResolvedLayoutEntrypoint {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContributedLayout {
+    pub source: ContributionSource,
     pub module_id: String,
     pub id: String,
     pub path: String,
@@ -582,6 +622,7 @@ pub struct ContributedLayout {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContributedTheme {
+    pub source: ContributionSource,
     pub module_id: String,
     pub id: String,
     pub label: String,
@@ -591,6 +632,7 @@ pub struct ContributedTheme {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContributedPathResource {
+    pub source: ContributionSource,
     pub module_id: String,
     pub id: String,
     pub path: String,
@@ -599,12 +641,13 @@ pub struct ContributedPathResource {
 
 impl ContributedPathResource {
     fn from_contribution(
-        module_id: &str,
+        module: &InstalledModuleNode,
         contribution: &PathContribution,
     ) -> Result<Self, ModuleManifestError> {
         validate_relative_path("path contribution", &contribution.path)?;
         Ok(Self {
-            module_id: module_id.into(),
+            source: ContributionSource::new(module, &contribution.id),
+            module_id: module.id.clone(),
             id: contribution.id.clone(),
             path: contribution.path.clone(),
             label: contribution.label.clone(),
@@ -614,6 +657,7 @@ impl ContributedPathResource {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContributedI18n {
+    pub source: ContributionSource,
     pub module_id: String,
     pub id: String,
     pub locale: String,
@@ -622,6 +666,7 @@ pub struct ContributedI18n {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContributedLibrary {
+    pub source: ContributionSource,
     pub module_id: String,
     pub namespace: String,
     pub path: String,
@@ -629,6 +674,7 @@ pub struct ContributedLibrary {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContributedSettingsSchema {
+    pub source: ContributionSource,
     pub module_id: String,
     pub namespace: String,
     pub schema: serde_json::Value,
