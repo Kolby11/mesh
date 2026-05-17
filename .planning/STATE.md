@@ -198,6 +198,7 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 
 - Audio popover transition delay polish — captured 2026-05-13; accepted v1.5 polish debt.
 - Define module install requirement resolution — captured 2026-05-15; remaining v1.7 input for typed registries, interface/provider matching, contradictory backend handling, resource requirements, shell-settings module override format, and missing icon/font/sound diagnostics.
+- Evaluate Blitz crate dependencies — captured 2026-05-17; assess whether MESH should reuse Stylo, Taffy, Parley, AnyRender, html5ever/xml5ever, Winit, AccessKit, and Muda instead of reinventing future DOM/layout/rendering/shell layers.
 - Resume v1.6 keybind dispatch/conflict/accessibility work after v1.7 stabilizes the module model.
 
 ## Artifact Index
