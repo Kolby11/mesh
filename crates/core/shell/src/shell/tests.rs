@@ -3880,6 +3880,100 @@ fn service_contract_provider_declaration_requires_provider_pair() {
 }
 
 #[test]
+fn backend_lifecycle_reports_explicit_missing_provider_capability() {
+    let graph = graph_from_json(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/backend": { "kind": "backend", "path": "@mesh/backend", "enabled": true }
+              },
+              "providers": { "mesh.example": "@mesh/backend" }
+            }"#,
+        vec![
+            r#"{
+                  "name": "@mesh/backend",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": { "main": "src/main.luau" },
+                    "provides": [{ "interface": "mesh.example", "provider": "test" }]
+                  }
+                }"#,
+        ],
+    );
+    let (_dir, module) = module_instance("@mesh/backend", Some("src/main.luau"));
+    let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
+    let interfaces = InterfaceRegistry::new();
+    let mut contract = test_contract("mesh.example");
+    contract.capabilities.required = vec!["service.example.read".to_string()];
+    interfaces.register_contract(contract);
+    register_test_provider(&interfaces, "mesh.example", "@mesh/backend");
+
+    let (candidates, statuses) =
+        backend_launch_candidates_from_graph(&graph, &modules, &test_config(), &interfaces);
+
+    assert!(candidates.is_empty());
+    assert!(statuses.iter().any(|status| {
+        status.status == "missing_capability"
+            && status.interface == "mesh.example"
+            && status.provider_id.as_deref() == Some("@mesh/backend")
+            && status.message.contains("service.example.read")
+    }));
+}
+
+#[test]
+fn backend_lifecycle_accepts_explicit_provider_capability() {
+    let graph = graph_from_json(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/backend": { "kind": "backend", "path": "@mesh/backend", "enabled": true }
+              },
+              "providers": { "mesh.example": "@mesh/backend" }
+            }"#,
+        vec![
+            r#"{
+                  "name": "@mesh/backend",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "capabilities": { "required": ["service.example.read"] },
+                    "entrypoints": { "main": "src/main.luau" },
+                    "provides": [{ "interface": "mesh.example", "provider": "test" }]
+                  }
+                }"#,
+        ],
+    );
+    let (_dir, mut module) = module_instance("@mesh/backend", Some("src/main.luau"));
+    module.manifest.capabilities.required = vec!["service.example.read".to_string()];
+    let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
+    let interfaces = InterfaceRegistry::new();
+    let mut contract = test_contract("mesh.example");
+    contract.capabilities.required = vec!["service.example.read".to_string()];
+    interfaces.register_contract(contract);
+    register_test_provider(&interfaces, "mesh.example", "@mesh/backend");
+
+    let (candidates, statuses) =
+        backend_launch_candidates_from_graph(&graph, &modules, &test_config(), &interfaces);
+
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].interface, "mesh.example");
+    assert_eq!(
+        candidates[0].capabilities,
+        vec!["service.example.read".to_string()]
+    );
+    assert!(
+        statuses
+            .iter()
+            .all(|status| status.status != "missing_capability")
+    );
+}
+
+#[test]
 fn state_shape_mismatch_records_service_contract_warning() {
     let mut shell = Shell::new();
     shell
@@ -4361,6 +4455,7 @@ fn backend_lifecycle_status_names_match_phase_contract() {
         BackendRuntimeStatus::NoActiveProvider,
         BackendRuntimeStatus::UnmetBackendRequirement,
         BackendRuntimeStatus::InvalidManifest,
+        BackendRuntimeStatus::MissingCapability,
         BackendRuntimeStatus::MissingEntrypoint,
         BackendRuntimeStatus::MissingBinary,
         BackendRuntimeStatus::InitFailed,
@@ -4377,6 +4472,7 @@ fn backend_lifecycle_status_names_match_phase_contract() {
             "no_active_provider",
             "unmet_backend_requirement",
             "invalid_manifest",
+            "missing_capability",
             "missing_entrypoint",
             "missing_binary",
             "init_failed",

@@ -1,5 +1,6 @@
 use super::super::*;
 use super::{BackendLaunchCandidate, BackendLifecycleStatusRecord};
+use mesh_core_module::package::BackendProviderNode;
 
 pub(in crate::shell) fn backend_launch_candidates_from_graph(
     graph: &InstalledModuleGraph,
@@ -83,7 +84,7 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph(
         }
 
         if let Some(status) =
-            validate_backend_provider_contract(&interface, &active_provider.module_id, interfaces)
+            validate_backend_provider_contract(&interface, active_provider, interfaces)
         {
             statuses.push(status);
             continue;
@@ -208,22 +209,23 @@ fn backend_requirement_statuses(graph: &InstalledModuleGraph) -> Vec<BackendLife
 
 fn validate_backend_provider_contract(
     interface: &str,
-    provider_id: &str,
+    provider: &BackendProviderNode,
     interfaces: &InterfaceRegistry,
 ) -> Option<BackendLifecycleStatusRecord> {
     let resolution = interfaces.resolve(interface, None);
+    let provider_id = provider.module_id.as_str();
     if resolution.contract.is_none() && resolution.provider.is_none() {
         return None;
     }
 
-    if resolution.contract.is_none() {
+    let Some(contract) = resolution.contract.as_ref() else {
         return Some(BackendLifecycleStatusRecord {
             interface: canonical_interface_name(interface),
             provider_id: Some(provider_id.to_string()),
             status: "invalid_manifest",
             message: format!("active provider {provider_id} has no interface contract"),
         });
-    }
+    };
 
     if !interfaces
         .providers_for(interface)
@@ -237,6 +239,22 @@ fn validate_backend_provider_contract(
             message: format!(
                 "active provider {provider_id} is not registered for interface {}",
                 canonical_interface_name(interface)
+            ),
+        });
+    }
+
+    if let Some(required) = contract.capabilities.required.iter().find(|required| {
+        !provider
+            .required_capabilities
+            .iter()
+            .any(|capability| capability == *required)
+    }) {
+        return Some(BackendLifecycleStatusRecord {
+            interface: canonical_interface_name(interface),
+            provider_id: Some(provider_id.to_string()),
+            status: "missing_capability",
+            message: format!(
+                "active provider {provider_id} does not declare required capability {required}"
             ),
         });
     }
