@@ -1,23 +1,26 @@
 use super::{
-    InterfaceRelationship, MeshDependencies, ModuleKind, ModulePackageManifest,
-    PackageManifestError, PathContribution, RootPackageManifest, dependency_spec_to_string,
+    InterfaceRelationship, MeshDependencies, ModuleKind, ModuleManifest, ModuleManifestDiagnostic,
+    ModuleManifestError, PathContribution, RootModuleGraphManifest, dependency_spec_to_string,
     parse_module_entrypoint, validate_relative_path,
 };
-use crate::manifest::{self, ManifestSource};
+use crate::manifest;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct LoadedModuleManifest {
-    pub manifest: ModulePackageManifest,
+    pub manifest: ModuleManifest,
     pub path: PathBuf,
     pub source: ModuleManifestSource,
+    pub diagnostics: Vec<ModuleManifestDiagnostic>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModuleManifestSource {
-    PackageJson,
+    CanonicalModuleJson,
+    LegacyPackageJson,
     LegacyModuleJson,
+    LegacyMeshToml,
 }
 
 #[derive(Debug, Clone)]
@@ -34,9 +37,9 @@ pub struct InstalledModuleGraph {
 
 impl InstalledModuleGraph {
     pub fn from_parts(
-        root: RootPackageManifest,
+        root: RootModuleGraphManifest,
         modules: Vec<LoadedModuleManifest>,
-    ) -> Result<Self, PackageManifestError> {
+    ) -> Result<Self, ModuleManifestError> {
         root.validate()?;
         let mut loaded_by_id = HashMap::new();
         for loaded in modules {
@@ -45,7 +48,7 @@ impl InstalledModuleGraph {
                 .insert(loaded.manifest.name.clone(), loaded)
                 .is_some()
             {
-                return Err(PackageManifestError::Validation(
+                return Err(ModuleManifestError::Validation(
                     "duplicate loaded module package".into(),
                 ));
             }
@@ -59,12 +62,12 @@ impl InstalledModuleGraph {
 
         for (module_id, entry) in &root.modules {
             let loaded = loaded_by_id.get(module_id).ok_or_else(|| {
-                PackageManifestError::Validation(format!(
+                ModuleManifestError::Validation(format!(
                     "root package references module {module_id} but no module package was loaded"
                 ))
             })?;
             if loaded.manifest.mesh.kind != entry.kind {
-                return Err(PackageManifestError::Validation(format!(
+                return Err(ModuleManifestError::Validation(format!(
                     "module {module_id} kind mismatch: root has {:?}, package has {:?}",
                     entry.kind, loaded.manifest.mesh.kind
                 )));
@@ -134,17 +137,17 @@ impl InstalledModuleGraph {
 
         for (interface, module_id) in &root.providers {
             let Some(node) = graph_modules.get(module_id) else {
-                return Err(PackageManifestError::Validation(format!(
+                return Err(ModuleManifestError::Validation(format!(
                     "active provider {module_id} for {interface} is not installed"
                 )));
             };
             if !node.enabled {
-                return Err(PackageManifestError::Validation(format!(
+                return Err(ModuleManifestError::Validation(format!(
                     "active provider {module_id} for {interface} is disabled"
                 )));
             }
             if node.kind != ModuleKind::Backend {
-                return Err(PackageManifestError::Validation(format!(
+                return Err(ModuleManifestError::Validation(format!(
                     "active provider {module_id} for {interface} is not a backend module"
                 )));
             }
@@ -157,7 +160,7 @@ impl InstalledModuleGraph {
                 })
                 .unwrap_or(false);
             if !provides_interface {
-                return Err(PackageManifestError::Validation(format!(
+                return Err(ModuleManifestError::Validation(format!(
                     "active provider {module_id} does not provide {interface}"
                 )));
             }
@@ -167,18 +170,18 @@ impl InstalledModuleGraph {
             Some(layout) => {
                 let (module_id, entrypoint_id) = parse_module_entrypoint(&layout.entrypoint)
                     .ok_or_else(|| {
-                        PackageManifestError::Validation(format!(
+                        ModuleManifestError::Validation(format!(
                             "invalid layout entrypoint {}",
                             layout.entrypoint
                         ))
                     })?;
                 let node = graph_modules.get(module_id).ok_or_else(|| {
-                    PackageManifestError::Validation(format!(
+                    ModuleManifestError::Validation(format!(
                         "layout entrypoint module {module_id} is not installed"
                     ))
                 })?;
                 if !node.enabled || node.kind != ModuleKind::Frontend {
-                    return Err(PackageManifestError::Validation(format!(
+                    return Err(ModuleManifestError::Validation(format!(
                         "layout entrypoint module {module_id} must be an enabled frontend module"
                     )));
                 }
@@ -187,7 +190,7 @@ impl InstalledModuleGraph {
                     .iter()
                     .find(|item| item.module_id == module_id && item.id == entrypoint_id)
                     .ok_or_else(|| {
-                        PackageManifestError::Validation(format!(
+                        ModuleManifestError::Validation(format!(
                             "layout contribution {} not found",
                             layout.entrypoint
                         ))
@@ -349,7 +352,7 @@ pub struct InstalledModuleNode {
     pub kind: ModuleKind,
     pub path: String,
     pub enabled: bool,
-    pub manifest: ModulePackageManifest,
+    pub manifest: ModuleManifest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -483,8 +486,8 @@ impl ModuleContributionIndex {
     fn index_module(
         &mut self,
         module_id: &str,
-        manifest: &ModulePackageManifest,
-    ) -> Result<(), PackageManifestError> {
+        manifest: &ModuleManifest,
+    ) -> Result<(), ModuleManifestError> {
         for contribution in &manifest.mesh.contributes.layout {
             validate_relative_path("layout entrypoint", &contribution.entrypoint)?;
             self.layout.push(ContributedLayout {
@@ -588,7 +591,7 @@ impl ContributedPathResource {
     fn from_contribution(
         module_id: &str,
         contribution: &PathContribution,
-    ) -> Result<Self, PackageManifestError> {
+    ) -> Result<Self, ModuleManifestError> {
         validate_relative_path("path contribution", &contribution.path)?;
         Ok(Self {
             module_id: module_id.into(),
@@ -622,13 +625,13 @@ pub struct ContributedSettingsSchema {
 }
 
 pub fn load_installed_module_graph(
-    root_package_path: &Path,
-) -> Result<InstalledModuleGraph, PackageManifestError> {
-    let root = RootPackageManifest::from_path(root_package_path)?;
-    let root_dir = root_package_path.parent().ok_or_else(|| {
-        PackageManifestError::Validation(format!(
-            "root package path must have a parent directory: {}",
-            root_package_path.display()
+    root_module_graph_path: &Path,
+) -> Result<InstalledModuleGraph, ModuleManifestError> {
+    let root = RootModuleGraphManifest::from_path(root_module_graph_path)?;
+    let root_dir = root_module_graph_path.parent().ok_or_else(|| {
+        ModuleManifestError::Validation(format!(
+            "root module graph path must have a parent directory: {}",
+            root_module_graph_path.display()
         ))
     })?;
     let modules_dir = root_dir.join(&root.modules_dir);
@@ -643,41 +646,135 @@ pub fn load_installed_module_graph(
 
 pub fn load_module_manifest(
     module_dir: &Path,
-) -> Result<LoadedModuleManifest, PackageManifestError> {
-    let package_json = module_dir.join("package.json");
-    if package_json.exists() {
-        let manifest = ModulePackageManifest::from_path(&package_json)?;
-        return Ok(LoadedModuleManifest {
-            manifest,
-            path: package_json,
-            source: ModuleManifestSource::PackageJson,
+) -> Result<LoadedModuleManifest, ModuleManifestError> {
+    let plugin_json = module_dir.join("plugin.json");
+    if plugin_json.exists() {
+        return Err(ModuleManifestError::Diagnostic {
+            diagnostic: ModuleManifestDiagnostic::error(
+                plugin_json,
+                None,
+                None,
+                "plugin.json is not a supported MESH module manifest",
+                "remove plugin.json or replace it with module.json",
+            ),
         });
     }
 
     let module_json = module_dir.join("module.json");
+    let package_json = module_dir.join("package.json");
+    let mesh_toml = module_dir.join("mesh.toml");
+    let existing = [&module_json, &package_json, &mesh_toml]
+        .into_iter()
+        .filter(|path| path.exists())
+        .collect::<Vec<_>>();
+
+    if existing.len() > 1 {
+        let manifest_names = existing
+            .iter()
+            .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(ModuleManifestError::Diagnostic {
+            diagnostic: ModuleManifestDiagnostic::error(
+                module_dir,
+                None,
+                None,
+                format!("ambiguous module manifest files found: {manifest_names}"),
+                "keep canonical module.json and remove the old manifest file",
+            ),
+        });
+    }
+
     if module_json.exists() {
+        let content =
+            std::fs::read_to_string(&module_json).map_err(|source| ModuleManifestError::Io {
+                path: module_json.clone(),
+                source,
+            })?;
+        if is_canonical_module_json(&content).map_err(|source| ModuleManifestError::Json {
+            path: module_json.clone(),
+            source,
+        })? {
+            let manifest = ModuleManifest::from_path(&module_json)?;
+            return Ok(LoadedModuleManifest {
+                manifest,
+                path: module_json,
+                source: ModuleManifestSource::CanonicalModuleJson,
+                diagnostics: Vec::new(),
+            });
+        }
+
         let loaded = manifest::load_manifest(module_dir).map_err(|err| {
-            PackageManifestError::LegacyManifest {
+            ModuleManifestError::LegacyManifest {
                 path: module_dir.to_path_buf(),
                 message: err.to_string(),
             }
         })?;
         let path = loaded.path.clone();
-        let manifest = ModulePackageManifest::from_legacy_manifest(loaded.manifest);
+        let manifest = ModuleManifest::from_legacy_manifest(loaded.manifest);
+        let module_id = Some(manifest.name.clone());
         return Ok(LoadedModuleManifest {
             manifest,
             path,
-            source: match loaded.source {
-                ManifestSource::PackageJson => ModuleManifestSource::PackageJson,
-                ManifestSource::ModuleJson | ManifestSource::MeshToml => {
-                    ModuleManifestSource::LegacyModuleJson
-                }
-            },
+            source: ModuleManifestSource::LegacyModuleJson,
+            diagnostics: vec![ModuleManifestDiagnostic::warning(
+                &module_json,
+                module_id,
+                Some("$".into()),
+                "legacy module.json shape uses id/type/api_version fields",
+                "replace legacy module.json fields with name/version/mesh",
+            )],
         });
     }
 
-    Err(PackageManifestError::Validation(format!(
-        "no package.json or module.json found in {}",
+    if package_json.exists() {
+        let manifest = ModuleManifest::from_path(&package_json)?;
+        let module_id = Some(manifest.name.clone());
+        return Ok(LoadedModuleManifest {
+            manifest,
+            path: package_json.clone(),
+            source: ModuleManifestSource::LegacyPackageJson,
+            diagnostics: vec![ModuleManifestDiagnostic::warning(
+                package_json,
+                module_id,
+                None,
+                "package.json is a legacy MESH module manifest path",
+                "replace package.json with module.json",
+            )],
+        });
+    }
+
+    if mesh_toml.exists() {
+        let loaded = manifest::load_manifest(module_dir).map_err(|err| {
+            ModuleManifestError::LegacyManifest {
+                path: module_dir.to_path_buf(),
+                message: err.to_string(),
+            }
+        })?;
+        let path = loaded.path.clone();
+        let manifest = ModuleManifest::from_legacy_manifest(loaded.manifest);
+        let module_id = Some(manifest.name.clone());
+        return Ok(LoadedModuleManifest {
+            manifest,
+            path,
+            source: ModuleManifestSource::LegacyMeshToml,
+            diagnostics: vec![ModuleManifestDiagnostic::warning(
+                mesh_toml,
+                module_id,
+                None,
+                "mesh.toml is a legacy MESH module manifest path",
+                "replace mesh.toml with module.json",
+            )],
+        });
+    }
+
+    Err(ModuleManifestError::Validation(format!(
+        "no module.json, package.json, or mesh.toml found in {}",
         module_dir.display()
     )))
+}
+
+fn is_canonical_module_json(content: &str) -> Result<bool, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_str(content)?;
+    Ok(value.get("name").is_some() && value.get("mesh").is_some())
 }

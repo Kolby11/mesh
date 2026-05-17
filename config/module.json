@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "modulesDir": "../modules",
+  "modules": {
+    "@mesh/navigation-bar": {
+      "kind": "frontend",
+      "path": "frontend/navigation-bar",
+      "enabled": true
+    },
+    "@mesh/audio-popover": {
+      "kind": "frontend",
+      "path": "frontend/audio-popover",
+      "enabled": true
+    },
+    "@mesh/text-selection-proof": {
+      "kind": "frontend",
+      "path": "frontend/text-selection-proof",
+      "enabled": false
+    },
+    "@mesh/pipewire-audio": {
+      "kind": "backend",
+      "path": "backend/pipewire-audio",
+      "enabled": true
+    },
+    "@mesh/pulseaudio-audio": {
+      "kind": "backend",
+      "path": "backend/pulseaudio-audio",
+      "enabled": true
+    }
+  },
+  "providers": {
+    "mesh.audio": "@mesh/pipewire-audio"
+  },
+  "layout": {
+    "entrypoint": "@mesh/navigation-bar:main"
+  }
+}

@@ -310,7 +310,7 @@ fn keybind_declaration_without_default_trigger_is_valid() {
 }
 
 #[test]
-fn package_json_keybinds_round_trip_to_runtime_manifest() {
+fn canonical_module_json_keybinds_round_trip_to_runtime_manifest() {
     let input = r#"{
   "name": "@mesh/panel",
   "version": "0.1.0",
@@ -319,17 +319,21 @@ fn package_json_keybinds_round_trip_to_runtime_manifest() {
     "kind": "frontend",
     "keybinds": {
       "mute": {
-        "trigger": { "kind": "shortcut", "key": "m" }
+        "trigger": { "kind": "shortcut", "key": "m" },
+        "localizedTriggers": {
+          "sk": { "kind": "shortcut", "key": "s" }
+        }
       }
     }
   }
 }"#;
 
-    let parsed = crate::package::ModulePackageManifest::from_json_str(input).unwrap();
+    let parsed = crate::package::ModuleManifest::from_json_str(input).unwrap();
     let manifest = parsed.into_runtime_manifest();
     let action = &manifest.keybinds.actions["mute"];
 
     assert_eq!(action.trigger.key.as_deref(), Some("m"));
+    assert_eq!(action.localized_triggers["sk"].key.as_deref(), Some("s"));
 }
 
 #[test]
@@ -348,18 +352,18 @@ fn invalid_keybind_declaration_is_rejected() {
   }
 }"#;
 
-    let err = crate::package::ModulePackageManifest::from_json_str(input).unwrap_err();
+    let err = crate::package::ModuleManifest::from_json_str(input).unwrap_err();
 
     assert!(err.to_string().contains("trigger.key cannot be empty"));
 }
 
 #[test]
-fn parses_package_json_module_manifest() {
-    let dir = std::env::temp_dir().join(format!("mesh-package-json-module-{}", std::process::id()));
+fn parses_canonical_module_json_module_manifest() {
+    let dir = std::env::temp_dir().join(format!("mesh-canonical-module-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("package.json"),
+        dir.join("module.json"),
         r#"{
   "name": "@mesh/pipewire-audio",
   "version": "0.1.0",
@@ -373,7 +377,7 @@ fn parses_package_json_module_manifest() {
       "binaries": [{ "name": "wpctl", "reason": "PipeWire control" }]
     },
     "entrypoints": { "main": "src/main.luau" },
-    "provides": [
+    "implements": [
       {
         "interface": "mesh.audio",
         "version": "1.0",
@@ -389,7 +393,8 @@ fn parses_package_json_module_manifest() {
     .unwrap();
 
     let loaded = load_manifest(&dir).unwrap();
-    assert_eq!(loaded.path, dir.join("package.json"));
+    assert_eq!(loaded.path, dir.join("module.json"));
+    assert_eq!(loaded.source, ManifestSource::CanonicalModuleJson);
     assert_eq!(loaded.manifest.package.id, "@mesh/pipewire-audio");
     assert_eq!(loaded.manifest.package.module_type, ModuleType::Backend);
     assert_eq!(
@@ -527,7 +532,7 @@ fn manifest_with_dependencies(
     slot_contributions: &[&str],
 ) -> Manifest {
     Manifest {
-        package: PackageSection {
+        package: ModuleSection {
             id: id.to_string(),
             name: None,
             version: "0.1.0".into(),

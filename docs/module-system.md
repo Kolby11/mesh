@@ -56,31 +56,25 @@ files. They are not the authority for MESH behavior. MESH reads the
 `mesh` section, validates capabilities and native requirements, resolves
 interface providers, and decides which modules are enabled.
 
-The root installed-module graph follows the same rule. `config/package.json`
-uses normal package metadata at the top level and stores the active MESH module
-graph under `mesh`:
+The root installed-module graph follows the same rule. `config/module.json`
+uses the root graph shape directly because it is not an installable module:
 
 ```json
 {
-  "name": "@mesh/local-config",
-  "version": "0.1.0",
-  "private": true,
-  "mesh": {
-    "schemaVersion": 1,
-    "modulesDir": "../modules",
-    "modules": {
-      "@mesh/panel": {
-        "kind": "frontend",
-        "path": "frontend/panel",
-        "enabled": true
-      }
-    },
-    "providers": {
-      "mesh.audio": "@mesh/pipewire-audio"
-    },
-    "layout": {
-      "entrypoint": "@mesh/panel:main"
+  "schemaVersion": 1,
+  "modulesDir": "../modules",
+  "modules": {
+    "@mesh/panel": {
+      "kind": "frontend",
+      "path": "frontend/panel",
+      "enabled": true
     }
+  },
+  "providers": {
+    "mesh.audio": "@mesh/pipewire-audio"
+  },
+  "layout": {
+    "entrypoint": "@mesh/panel:main"
   }
 }
 ```
@@ -595,12 +589,12 @@ model.
 
 ## Migration Recommendations
 
-1. Treat `package.json` plus `mesh` as the target manifest.
-2. Keep loading `package.json`, `package.json`, and `mesh.toml` for compatibility
-   but mark them legacy in docs.
-3. Rename docs from "module" toward "module" where they describe the package
-   model. Keep "frontend module" and "backend module" only as legacy wording
-   or when discussing old manifests.
+1. Treat `module.json` plus `mesh` as the target manifest.
+2. Treat `package.json`, legacy `module.json` with `id/type/api_version`, and
+   `mesh.toml` as internal migration inputs only.
+3. Replace old public names with the canonical vocabulary in diagnostics, docs,
+   tests, and examples. Do not describe old manifest names as interchangeable
+   with `module.json`.
 4. Add a library resolver to both backend and frontend Luau runtimes.
 5. Move common backend helpers out of individual providers into
    `@mesh/backend-kit`.

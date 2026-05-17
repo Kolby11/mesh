@@ -16,7 +16,7 @@ pub enum ManifestError {
     #[error("failed to parse mesh.toml manifest: {0}")]
     Toml(#[from] toml::de::Error),
 
-    #[error("failed to parse package.json manifest: {0}")]
+    #[error("failed to parse JSON manifest: {0}")]
     Json(#[from] serde_json::Error),
 
     #[error("no manifest found in module directory {0}")]
@@ -24,14 +24,14 @@ pub enum ManifestError {
 }
 
 pub fn load_manifest(module_dir: &Path) -> Result<LoadedManifest, ManifestError> {
-    let package_json_path = module_dir.join("package.json");
-    if package_json_path.exists() {
-        return load_package_json(&package_json_path);
-    }
-
     let module_json_path = module_dir.join("module.json");
     if module_json_path.exists() {
         return load_module_json(&module_json_path);
+    }
+
+    let package_json_path = module_dir.join("package.json");
+    if package_json_path.exists() {
+        return load_package_json(&package_json_path);
     }
 
     let mesh_toml_path = module_dir.join("mesh.toml");
@@ -44,23 +44,32 @@ pub fn load_manifest(module_dir: &Path) -> Result<LoadedManifest, ManifestError>
 
 fn load_package_json(path: &Path) -> Result<LoadedManifest, ManifestError> {
     let content = std::fs::read_to_string(path)?;
-    let parsed: crate::package::ModulePackageManifest = serde_json::from_str(&content)?;
+    let parsed: crate::package::ModuleManifest = serde_json::from_str(&content)?;
 
     Ok(LoadedManifest {
         manifest: parsed.into_runtime_manifest(),
         path: path.to_path_buf(),
-        source: ManifestSource::PackageJson,
+        source: ManifestSource::LegacyPackageJson,
     })
 }
 
 fn load_module_json(path: &Path) -> Result<LoadedManifest, ManifestError> {
     let content = std::fs::read_to_string(path)?;
+    if is_canonical_module_json(&content)? {
+        let parsed: crate::package::ModuleManifest = serde_json::from_str(&content)?;
+        return Ok(LoadedManifest {
+            manifest: parsed.into_runtime_manifest(),
+            path: path.to_path_buf(),
+            source: ManifestSource::CanonicalModuleJson,
+        });
+    }
+
     let parsed: JsonManifest = serde_json::from_str(&content)?;
 
     Ok(LoadedManifest {
         manifest: parsed.into_manifest(),
         path: path.to_path_buf(),
-        source: ManifestSource::ModuleJson,
+        source: ManifestSource::LegacyModuleJson,
     })
 }
 
@@ -71,6 +80,11 @@ fn load_mesh_toml(path: &Path) -> Result<LoadedManifest, ManifestError> {
     Ok(LoadedManifest {
         manifest: parsed.into_manifest(),
         path: path.to_path_buf(),
-        source: ManifestSource::MeshToml,
+        source: ManifestSource::LegacyMeshToml,
     })
+}
+
+fn is_canonical_module_json(content: &str) -> Result<bool, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_str(content)?;
+    Ok(value.get("name").is_some() && value.get("mesh").is_some())
 }

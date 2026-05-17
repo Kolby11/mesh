@@ -1,11 +1,11 @@
-use super::{PackageManifestError, validate_relative_path};
+use super::{ModuleManifestError, validate_relative_path};
 use crate::manifest::{self, CapabilitiesSection, DependencySpec, Manifest, ModuleType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ModulePackageManifest {
+pub struct ModuleManifest {
     pub name: String,
     pub version: String,
     #[serde(default)]
@@ -17,10 +17,10 @@ pub struct ModulePackageManifest {
     pub mesh: MeshModuleSection,
 }
 
-impl ModulePackageManifest {
-    pub fn from_json_str(input: &str) -> Result<Self, PackageManifestError> {
+impl ModuleManifest {
+    pub fn from_json_str(input: &str) -> Result<Self, ModuleManifestError> {
         let parsed: Self =
-            serde_json::from_str(input).map_err(|source| PackageManifestError::Json {
+            serde_json::from_str(input).map_err(|source| ModuleManifestError::Json {
                 path: PathBuf::from("<inline>"),
                 source,
             })?;
@@ -28,13 +28,13 @@ impl ModulePackageManifest {
         Ok(parsed)
     }
 
-    pub fn from_path(path: &Path) -> Result<Self, PackageManifestError> {
-        let content = std::fs::read_to_string(path).map_err(|source| PackageManifestError::Io {
+    pub fn from_path(path: &Path) -> Result<Self, ModuleManifestError> {
+        let content = std::fs::read_to_string(path).map_err(|source| ModuleManifestError::Io {
             path: path.to_path_buf(),
             source,
         })?;
         let parsed: Self =
-            serde_json::from_str(&content).map_err(|source| PackageManifestError::Json {
+            serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
                 path: path.to_path_buf(),
                 source,
             })?;
@@ -42,14 +42,14 @@ impl ModulePackageManifest {
         Ok(parsed)
     }
 
-    pub fn validate(&self) -> Result<(), PackageManifestError> {
+    pub fn validate(&self) -> Result<(), ModuleManifestError> {
         if self.name.trim().is_empty() {
-            return Err(PackageManifestError::Validation(
+            return Err(ModuleManifestError::Validation(
                 "module name cannot be empty".into(),
             ));
         }
         if self.version.trim().is_empty() {
-            return Err(PackageManifestError::Validation(format!(
+            return Err(ModuleManifestError::Validation(format!(
                 "module {} version cannot be empty",
                 self.name
             )));
@@ -126,7 +126,7 @@ impl ModulePackageManifest {
         let manifest_theme = mesh.theme.clone().or(contributed_theme);
 
         Manifest {
-            package: manifest::PackageSection {
+            package: manifest::ModuleSection {
                 id: self.name,
                 name: None,
                 version: self.version,
@@ -144,7 +144,7 @@ impl ModulePackageManifest {
                 main: mesh.entrypoints.main,
                 settings_ui: mesh.entrypoints.settings_ui,
             },
-            accessibility: None,
+            accessibility: mesh.accessibility,
             settings,
             keybinds: mesh.keybinds,
             i18n,
@@ -159,9 +159,9 @@ impl ModulePackageManifest {
             assets,
             icons: mesh.icons,
             icon_pack: mesh.icon_pack,
-            icon_requirements: manifest::IconRequirementsSection::default(),
+            icon_requirements: mesh.icon_requirements,
             translations: HashMap::new(),
-            surface_layout: None,
+            surface_layout: mesh.surface_layout,
         }
     }
 
@@ -250,7 +250,10 @@ impl ModulePackageManifest {
         let dependencies = MeshDependencies::from_manifest_dependencies(manifest.dependencies);
         let icons = manifest.icons.clone();
         let icon_pack = manifest.icon_pack.clone();
+        let icon_requirements = manifest.icon_requirements.clone();
         let keybinds = manifest.keybinds.clone();
+        let accessibility = manifest.accessibility.clone();
+        let surface_layout = manifest.surface_layout.clone();
 
         Self {
             name: package.id,
@@ -289,6 +292,9 @@ impl ModulePackageManifest {
                 contributes,
                 icons,
                 icon_pack,
+                icon_requirements,
+                accessibility,
+                surface_layout,
                 experimental: serde_json::Value::Null,
             },
         }
@@ -324,20 +330,26 @@ pub struct MeshModuleSection {
     pub icons: Option<manifest::IconsSection>,
     #[serde(default)]
     pub icon_pack: Option<manifest::IconPackSection>,
+    #[serde(default, rename = "iconRequirements", alias = "icon_requirements")]
+    pub icon_requirements: manifest::IconRequirementsSection,
+    #[serde(default)]
+    pub accessibility: Option<manifest::AccessibilitySection>,
+    #[serde(default, rename = "surfaceLayout", alias = "surface_layout")]
+    pub surface_layout: Option<manifest::SurfaceLayoutSection>,
     #[serde(default)]
     pub experimental: serde_json::Value,
 }
 
 impl MeshModuleSection {
-    fn validate(&self) -> Result<(), PackageManifestError> {
+    fn validate(&self) -> Result<(), ModuleManifestError> {
         if self.api_version.trim().is_empty() {
-            return Err(PackageManifestError::Validation(
+            return Err(ModuleManifestError::Validation(
                 "mesh.apiVersion cannot be empty".into(),
             ));
         }
         self.i18n.validate()?;
         if self.kind == ModuleKind::Interface && self.interface.is_none() {
-            return Err(PackageManifestError::Validation(
+            return Err(ModuleManifestError::Validation(
                 "interface modules must declare mesh.interface".into(),
             ));
         }
@@ -345,12 +357,12 @@ impl MeshModuleSection {
             interface.validate()?;
             if self.kind == ModuleKind::Interface {
                 if interface.version.is_none() {
-                    return Err(PackageManifestError::Validation(
+                    return Err(ModuleManifestError::Validation(
                         "interface modules must declare mesh.interface.version".into(),
                     ));
                 }
                 if interface.file.is_none() {
-                    return Err(PackageManifestError::Validation(
+                    return Err(ModuleManifestError::Validation(
                         "interface modules must declare mesh.interface.file".into(),
                     ));
                 }
@@ -358,15 +370,15 @@ impl MeshModuleSection {
         }
         if let Some(theme) = &self.theme {
             if self.kind != ModuleKind::Frontend {
-                return Err(PackageManifestError::Validation(
+                return Err(ModuleManifestError::Validation(
                     "mesh.theme is only supported for frontend modules".into(),
                 ));
             }
-            theme.validate().map_err(PackageManifestError::Validation)?;
+            theme.validate().map_err(ModuleManifestError::Validation)?;
         }
         self.keybinds
             .validate()
-            .map_err(PackageManifestError::Validation)?;
+            .map_err(ModuleManifestError::Validation)?;
         for provided in self.implementations() {
             provided.validate()?;
         }
@@ -387,10 +399,10 @@ pub struct MeshI18nSupport {
 }
 
 impl MeshI18nSupport {
-    fn validate(&self) -> Result<(), PackageManifestError> {
+    fn validate(&self) -> Result<(), ModuleManifestError> {
         if let Some(default_locale) = &self.default_locale {
             if default_locale.trim().is_empty() {
-                return Err(PackageManifestError::Validation(
+                return Err(ModuleManifestError::Validation(
                     "mesh.i18n.defaultLocale cannot be empty".into(),
                 ));
             }
@@ -400,7 +412,7 @@ impl MeshI18nSupport {
                     .iter()
                     .any(|locale| locale == default_locale)
             {
-                return Err(PackageManifestError::Validation(format!(
+                return Err(ModuleManifestError::Validation(format!(
                     "mesh.i18n.defaultLocale {default_locale} must be listed in supportedLocales"
                 )));
             }
@@ -408,7 +420,7 @@ impl MeshI18nSupport {
 
         for locale in &self.supported_locales {
             if locale.trim().is_empty() {
-                return Err(PackageManifestError::Validation(
+                return Err(ModuleManifestError::Validation(
                     "mesh.i18n.supportedLocales cannot contain empty locales".into(),
                 ));
             }
@@ -465,9 +477,9 @@ pub struct ModuleRepository {
 }
 
 impl ModuleRepository {
-    fn validate(&self) -> Result<(), PackageManifestError> {
+    fn validate(&self) -> Result<(), ModuleManifestError> {
         if self.repository_type == "git" && self.url.trim().is_empty() {
-            return Err(PackageManifestError::Validation(
+            return Err(ModuleManifestError::Validation(
                 "repository.url cannot be empty when repository.type is git".into(),
             ));
         }
@@ -584,9 +596,9 @@ pub struct MeshProvidesDeclaration {
 }
 
 impl MeshProvidesDeclaration {
-    fn validate(&self) -> Result<(), PackageManifestError> {
+    fn validate(&self) -> Result<(), ModuleManifestError> {
         if self.interface.trim().is_empty() {
-            return Err(PackageManifestError::Validation(
+            return Err(ModuleManifestError::Validation(
                 "mesh.provides interface cannot be empty".into(),
             ));
         }
@@ -612,37 +624,37 @@ pub struct MeshInterfaceDeclaration {
 }
 
 impl MeshInterfaceDeclaration {
-    fn validate(&self) -> Result<(), PackageManifestError> {
+    fn validate(&self) -> Result<(), ModuleManifestError> {
         if self.name.trim().is_empty() {
-            return Err(PackageManifestError::Validation(
+            return Err(ModuleManifestError::Validation(
                 "mesh.interface.name cannot be empty".into(),
             ));
         }
         if let Some(version) = &self.version
             && version.trim().is_empty()
         {
-            return Err(PackageManifestError::Validation(
+            return Err(ModuleManifestError::Validation(
                 "mesh.interface.version cannot be empty".into(),
             ));
         }
         if let Some(file) = &self.file
             && file.trim().is_empty()
         {
-            return Err(PackageManifestError::Validation(
+            return Err(ModuleManifestError::Validation(
                 "mesh.interface.file cannot be empty".into(),
             ));
         }
         if let Some(domain) = &self.domain
             && domain.trim().is_empty()
         {
-            return Err(PackageManifestError::Validation(
+            return Err(ModuleManifestError::Validation(
                 "mesh.interface.domain cannot be empty".into(),
             ));
         }
         if let Some(extends) = &self.extends
             && extends.trim().is_empty()
         {
-            return Err(PackageManifestError::Validation(
+            return Err(ModuleManifestError::Validation(
                 "mesh.interface.extends cannot be empty".into(),
             ));
         }
@@ -702,7 +714,7 @@ pub struct MeshContributes {
 }
 
 impl MeshContributes {
-    fn validate(&self) -> Result<(), PackageManifestError> {
+    fn validate(&self) -> Result<(), ModuleManifestError> {
         for contribution in &self.layout {
             validate_relative_path("layout entrypoint", &contribution.entrypoint)?;
         }
@@ -775,9 +787,9 @@ pub struct LibraryContribution {
 }
 
 impl LibraryContribution {
-    pub(crate) fn validate(&self) -> Result<(), PackageManifestError> {
+    pub(crate) fn validate(&self) -> Result<(), ModuleManifestError> {
         if self.namespace.trim().is_empty() {
-            return Err(PackageManifestError::Validation(
+            return Err(ModuleManifestError::Validation(
                 "library namespace cannot be empty".into(),
             ));
         }

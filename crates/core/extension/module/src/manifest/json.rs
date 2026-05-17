@@ -2,8 +2,8 @@ use super::{
     AccessibilitySection, AssetsSection, BinaryDependency, CapabilitiesSection,
     CompatibilitySection, DependenciesSection, DependencySpec, EntrypointsSection, ExportsSection,
     ExtensionSection, FontDependency, I18nSection, IconPackSection, IconRequirementsSection,
-    IconsSection, InterfaceDependency, InterfaceSection, KeybindsSection, Manifest, ModuleType,
-    NativeDependency, OptionalDependencyGroup, PackageSection, ProvidedInterface, SettingsSection,
+    IconsSection, InterfaceDependency, InterfaceSection, KeybindsSection, Manifest, ModuleSection,
+    ModuleType, NativeDependency, OptionalDependencyGroup, ProvidedInterface, SettingsSection,
     SlotContribution, SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
 };
 use mesh_core_theme::TokenValue;
@@ -74,7 +74,7 @@ pub(super) struct JsonManifest {
 impl JsonManifest {
     pub(super) fn into_manifest(self) -> Manifest {
         Manifest {
-            package: PackageSection {
+            package: ModuleSection {
                 id: self.id,
                 name: self.name,
                 version: self.version,

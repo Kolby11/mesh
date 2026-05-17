@@ -1,4 +1,4 @@
-use super::PackageManifestError;
+use super::ModuleManifestError;
 use crate::manifest::DependencySpec;
 use std::path::{Component, Path};
 
@@ -14,25 +14,25 @@ pub(crate) fn default_enabled() -> bool {
     true
 }
 
-pub(crate) fn validate_modules_dir(value: &str) -> Result<(), PackageManifestError> {
+pub(crate) fn validate_modules_dir(value: &str) -> Result<(), ModuleManifestError> {
     let path = Path::new(value);
     if value.trim().is_empty() {
-        return Err(PackageManifestError::Validation(
+        return Err(ModuleManifestError::Validation(
             "modulesDir cannot be empty".into(),
         ));
     }
     if path.is_absolute() {
-        return Err(PackageManifestError::Validation(format!(
+        return Err(ModuleManifestError::Validation(format!(
             "modulesDir must be a relative path: {value}"
         )));
     }
     Ok(())
 }
 
-pub(crate) fn validate_relative_path(label: &str, value: &str) -> Result<(), PackageManifestError> {
+pub(crate) fn validate_relative_path(label: &str, value: &str) -> Result<(), ModuleManifestError> {
     let path = Path::new(value);
     if value.trim().is_empty() {
-        return Err(PackageManifestError::Validation(format!(
+        return Err(ModuleManifestError::Validation(format!(
             "{label} cannot be empty"
         )));
     }
@@ -41,7 +41,7 @@ pub(crate) fn validate_relative_path(label: &str, value: &str) -> Result<(), Pac
             .components()
             .any(|component| matches!(component, Component::ParentDir))
     {
-        return Err(PackageManifestError::Validation(format!(
+        return Err(ModuleManifestError::Validation(format!(
             "{label} must be a relative path without '..': {value}"
         )));
     }

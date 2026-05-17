@@ -13,7 +13,7 @@
 
 ### Manifest Contract
 
-- [ ] **MAN-01**: New modules can use a documented canonical `package.json` plus `mesh` schema for identity, dependencies, capabilities, entrypoints, contributions, interfaces, providers, settings, keybinds, assets, i18n, and compatibility metadata.
+- [ ] **MAN-01**: New modules can use a documented canonical `module.json` plus `mesh` schema for identity, dependencies, capabilities, entrypoints, contributions, interfaces, providers, settings, keybinds, assets, i18n, and compatibility metadata.
 - [ ] **MAN-02**: The runtime normalizes legacy manifest shapes into the canonical model without losing supported v1.1 backend provider behavior or v1.6 keybind declaration/resolution data.
 - [ ] **MAN-03**: Invalid, deprecated, duplicate, or ambiguous manifest fields produce actionable author-facing diagnostics with module id, field path, severity, and suggested migration.
 

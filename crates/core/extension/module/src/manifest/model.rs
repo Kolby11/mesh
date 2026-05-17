@@ -7,7 +7,7 @@ use std::collections::HashMap;
 /// The normalized contents of a module manifest, regardless of source format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
-    pub package: PackageSection,
+    pub package: ModuleSection,
     #[serde(default)]
     pub compatibility: CompatibilitySection,
     #[serde(default)]
@@ -164,7 +164,7 @@ fn validate_theme_value_references(value: &str) -> Result<(), String> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PackageSection {
+pub struct ModuleSection {
     pub id: String,
     #[serde(default)]
     pub name: Option<String>,
@@ -810,17 +810,19 @@ pub struct IconRequirementsSection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManifestSource {
-    PackageJson,
-    MeshToml,
-    ModuleJson,
+    CanonicalModuleJson,
+    LegacyPackageJson,
+    LegacyMeshToml,
+    LegacyModuleJson,
 }
 
 impl std::fmt::Display for ManifestSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::PackageJson => write!(f, "package.json"),
-            Self::MeshToml => write!(f, "mesh.toml"),
-            Self::ModuleJson => write!(f, "module.json"),
+            Self::CanonicalModuleJson => write!(f, "module.json"),
+            Self::LegacyPackageJson => write!(f, "package.json (legacy migration)"),
+            Self::LegacyMeshToml => write!(f, "mesh.toml (legacy migration)"),
+            Self::LegacyModuleJson => write!(f, "module.json (legacy migration)"),
         }
     }
 }

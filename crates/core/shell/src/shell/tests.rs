@@ -22,12 +22,12 @@ use mesh_core_interaction::measure_content_size;
 use mesh_core_module::ModuleInstance;
 use mesh_core_module::manifest::{
     CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
-    ExportsSection, Manifest, ManifestSource, ModuleType, PackageSection, ProvidedInterface,
+    ExportsSection, Manifest, ManifestSource, ModuleSection, ModuleType, ProvidedInterface,
     SettingsSection, SurfaceLayoutSection,
 };
 use mesh_core_module::package::{
-    InstalledModuleGraph, LoadedModuleManifest, ModuleManifestSource, ModulePackageManifest,
-    RootPackageManifest,
+    InstalledModuleGraph, LoadedModuleManifest, ModuleManifest, ModuleManifestSource,
+    RootModuleGraphManifest,
 };
 use mesh_core_scripting::{PublishedEvent, ScriptState};
 use mesh_core_service::{
@@ -84,7 +84,7 @@ fn node(tag: &str, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
 
 fn minimal_manifest(id: &str) -> Manifest {
     Manifest {
-        package: PackageSection {
+        package: ModuleSection {
             id: id.to_string(),
             name: None,
             version: "0.1.0".into(),
@@ -147,7 +147,7 @@ fn module_instance(id: &str, entrypoint: Option<&str>) -> (tempfile::TempDir, Mo
         manifest,
         dir.path().to_path_buf(),
         dir.path().join("package.json"),
-        ManifestSource::ModuleJson,
+        ManifestSource::LegacyModuleJson,
     );
     (dir, instance)
 }
@@ -161,15 +161,16 @@ fn test_config() -> ShellConfig {
 
 fn loaded_module(json: &str) -> LoadedModuleManifest {
     LoadedModuleManifest {
-        manifest: ModulePackageManifest::from_json_str(json).unwrap(),
+        manifest: ModuleManifest::from_json_str(json).unwrap(),
         path: PathBuf::from("<test>/package.json"),
-        source: ModuleManifestSource::PackageJson,
+        source: ModuleManifestSource::LegacyPackageJson,
+        diagnostics: Vec::new(),
     }
 }
 
 fn graph_from_json(root: &str, modules: Vec<&str>) -> InstalledModuleGraph {
     InstalledModuleGraph::from_parts(
-        RootPackageManifest::from_json_str(root).unwrap(),
+        RootModuleGraphManifest::from_json_str(root).unwrap(),
         modules.into_iter().map(loaded_module).collect(),
     )
     .unwrap()
@@ -4083,7 +4084,7 @@ fn non_widget_surfaces_keep_fallback_size() {
 fn installed_module_graph_exposes_shell_package_choices() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let graph = mesh_core_module::package::load_installed_module_graph(
-        &workspace_root.join("config/package.json"),
+        &workspace_root.join("config/module.json"),
     )
     .unwrap();
 
@@ -4127,7 +4128,7 @@ fn load_frontend_components_keeps_shell_shipped_debug_inspector_even_when_not_in
             .components
             .iter()
             .any(|runtime| runtime.surface_id == "@mesh/debug-inspector"),
-        "built-in debug inspector should load as a shell surface even when absent from config/package.json"
+        "built-in debug inspector should load as a shell surface even when absent from config/module.json"
     );
 }
 
@@ -4135,7 +4136,7 @@ fn load_frontend_components_keeps_shell_shipped_debug_inspector_even_when_not_in
 fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let graph = mesh_core_module::package::load_installed_module_graph(
-        &workspace_root.join("config/package.json"),
+        &workspace_root.join("config/module.json"),
     )
     .unwrap();
     let (_pipewire_dir, pipewire) = module_instance("@mesh/pipewire-audio", Some("src/main.luau"));

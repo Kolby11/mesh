@@ -47,8 +47,8 @@ fn temp_dir(name: &str) -> PathBuf {
 #[test]
 fn module_package_paths_default_to_dot_mesh() {
     let _guard = EnvGuard::set("MESH_HOME", None);
-    let path = root_package_manifest_path().unwrap();
-    assert!(path.ends_with(".mesh/package.json"));
+    let path = root_module_graph_manifest_path().unwrap();
+    assert!(path.ends_with(".mesh/module.json"));
 }
 
 #[test]
@@ -56,12 +56,12 @@ fn module_package_paths_reject_relative_mesh_home() {
     let _guard = EnvGuard::set("MESH_HOME", Some("relative/path"));
     assert!(matches!(
         mesh_home(),
-        Err(PackageManifestError::InvalidMeshHome(_))
+        Err(ModuleManifestError::InvalidMeshHome(_))
     ));
 }
 
 #[test]
-fn module_root_manifest_parses_minimal_package_json() {
+fn module_root_manifest_parses_minimal_module_json() {
     let content = r#"
 {
   "name": "@mesh/local-config",
@@ -77,7 +77,7 @@ fn module_root_manifest_parses_minimal_package_json() {
   }
 }
 "#;
-    let manifest = RootPackageManifest::from_json_str(content).unwrap();
+    let manifest = RootModuleGraphManifest::from_json_str(content).unwrap();
     assert_eq!(manifest.schema_version, 1);
     assert_eq!(manifest.modules_dir, "modules");
     assert_eq!(
@@ -97,7 +97,7 @@ fn module_root_manifest_accepts_legacy_top_level_shape() {
   "layout": { "entrypoint": "@mesh/panel:main" }
 }
 "#;
-    let manifest = RootPackageManifest::from_json_str(content).unwrap();
+    let manifest = RootModuleGraphManifest::from_json_str(content).unwrap();
     assert_eq!(manifest.schema_version, 1);
     assert_eq!(manifest.modules_dir, "modules");
     assert_eq!(
@@ -107,7 +107,7 @@ fn module_root_manifest_accepts_legacy_top_level_shape() {
 }
 
 #[test]
-fn module_package_manifest_parses_backend_package_json() {
+fn module_manifest_parses_backend_module_json() {
     let content = r#"
 {
   "name": "@mesh/pipewire-audio",
@@ -131,7 +131,7 @@ fn module_package_manifest_parses_backend_package_json() {
   }
 }
 "#;
-    let manifest = ModulePackageManifest::from_json_str(content).unwrap();
+    let manifest = ModuleManifest::from_json_str(content).unwrap();
     assert_eq!(manifest.name, "@mesh/pipewire-audio");
     assert_eq!(manifest.mesh.kind, ModuleKind::Backend);
     assert_eq!(
@@ -172,7 +172,7 @@ fn module_package_manifest_parses_interface_relationship_metadata() {
   }
 }
 "#;
-    let manifest = ModulePackageManifest::from_json_str(content).unwrap();
+    let manifest = ModuleManifest::from_json_str(content).unwrap();
     let interface = manifest.mesh.interface.unwrap();
     assert_eq!(interface.name, "alice.audio-streams");
     assert_eq!(interface.domain.as_deref(), Some("audio"));
@@ -193,7 +193,7 @@ fn module_package_manifest_rejects_empty_git_origin_url() {
   "mesh": { "apiVersion": "0.1", "kind": "backend" }
 }
 "#;
-    assert!(ModulePackageManifest::from_json_str(content).is_err());
+    assert!(ModuleManifest::from_json_str(content).is_err());
 }
 
 #[test]
@@ -223,7 +223,7 @@ fn module_package_manifest_parses_frontend_theme_contributions() {
   }
 }
 "##;
-    let manifest = ModulePackageManifest::from_json_str(content).unwrap();
+    let manifest = ModuleManifest::from_json_str(content).unwrap();
     let theme = manifest.mesh.theme.as_ref().expect("mesh.theme section");
     assert_eq!(
         theme
@@ -267,12 +267,12 @@ fn module_package_manifest_rejects_non_frontend_theme_contributions() {
   }
 }
 "##;
-    assert!(ModulePackageManifest::from_json_str(content).is_err());
+    assert!(ModuleManifest::from_json_str(content).is_err());
 }
 
 #[test]
-fn module_manifest_loader_prefers_package_json_over_module_json() {
-    let dir = temp_dir("module-precedence");
+fn module_manifest_loader_rejects_ambiguous_module_and_package_json() {
+    let dir = temp_dir("module-ambiguity");
     fs::write(
         dir.join("package.json"),
         r#"{"name":"@mesh/package","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
@@ -283,9 +283,47 @@ fn module_manifest_loader_prefers_package_json_over_module_json() {
         r#"{"id":"@mesh/module","version":"0.1.0","type":"surface","api_version":"0.1"}"#,
     )
     .unwrap();
+    let err = load_module_manifest(&dir).unwrap_err();
+    assert!(err.to_string().contains("ambiguous module manifest"));
+}
+
+#[test]
+fn module_manifest_loader_accepts_canonical_module_json() {
+    let dir = temp_dir("canonical-module");
+    fs::write(
+        dir.join("module.json"),
+        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
+    )
+    .unwrap();
     let loaded = load_module_manifest(&dir).unwrap();
-    assert_eq!(loaded.source, ModuleManifestSource::PackageJson);
+    assert_eq!(loaded.source, ModuleManifestSource::CanonicalModuleJson);
+    assert_eq!(loaded.manifest.name, "@mesh/module");
+    assert!(loaded.diagnostics.is_empty());
+}
+
+#[test]
+fn module_manifest_loader_accepts_legacy_package_json_with_replacement_warning() {
+    let dir = temp_dir("legacy-package");
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"@mesh/package","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
+    )
+    .unwrap();
+    let loaded = load_module_manifest(&dir).unwrap();
+    assert_eq!(loaded.source, ModuleManifestSource::LegacyPackageJson);
     assert_eq!(loaded.manifest.name, "@mesh/package");
+    assert_eq!(
+        loaded.diagnostics[0].suggested_action,
+        "replace package.json with module.json"
+    );
+}
+
+#[test]
+fn module_manifest_loader_rejects_plugin_json() {
+    let dir = temp_dir("plugin-json");
+    fs::write(dir.join("plugin.json"), r#"{}"#).unwrap();
+    let err = load_module_manifest(&dir).unwrap_err();
+    assert!(err.to_string().contains("remove plugin.json"));
 }
 
 #[test]
@@ -299,25 +337,30 @@ fn module_manifest_loader_accepts_legacy_module_json() {
     let loaded = load_module_manifest(&dir).unwrap();
     assert_eq!(loaded.source, ModuleManifestSource::LegacyModuleJson);
     assert_eq!(loaded.manifest.name, "@mesh/module");
+    assert_eq!(
+        loaded.diagnostics[0].suggested_action,
+        "replace legacy module.json fields with name/version/mesh"
+    );
 }
 
 #[test]
-fn module_manifest_loader_preserves_legacy_navigation_bar_entrypoint() {
+fn module_manifest_loader_preserves_navigation_bar_entrypoint() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../modules/frontend/navigation-bar");
     let loaded = load_module_manifest(&dir).unwrap();
-    assert_eq!(loaded.source, ModuleManifestSource::LegacyModuleJson);
+    assert_eq!(loaded.source, ModuleManifestSource::CanonicalModuleJson);
     assert_eq!(loaded.manifest.name, "@mesh/navigation-bar");
     assert_eq!(
         loaded.manifest.mesh.entrypoints.main.as_deref(),
         Some("src/main.mesh")
     );
+    assert_eq!(loaded.manifest.mesh.contributes.layout[0].id, "main");
 }
 
 #[test]
-fn installed_module_graph_loads_repo_package_fixture() {
+fn installed_module_graph_loads_repo_module_fixture() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
-    let graph = load_installed_module_graph(&workspace_root.join("config/package.json")).unwrap();
+    let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
 
     assert_eq!(graph.frontend_modules().len(), 2);
     assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
@@ -338,7 +381,7 @@ fn loaded_module(
     contributes: MeshContributes,
 ) -> LoadedModuleManifest {
     LoadedModuleManifest {
-        manifest: ModulePackageManifest {
+        manifest: ModuleManifest {
             name: name.into(),
             version: "0.1.0".into(),
             description: None,
@@ -358,12 +401,16 @@ fn loaded_module(
                 contributes,
                 icons: None,
                 icon_pack: None,
+                icon_requirements: crate::manifest::IconRequirementsSection::default(),
+                accessibility: None,
+                surface_layout: None,
                 theme: None,
                 experimental: serde_json::Value::Null,
             },
         },
         path: PathBuf::from(format!("{name}/package.json")),
-        source: ModuleManifestSource::PackageJson,
+        source: ModuleManifestSource::LegacyPackageJson,
+        diagnostics: Vec::new(),
     }
 }
 
@@ -371,8 +418,8 @@ fn root_with_modules(
     modules: &[(&str, ModuleKind)],
     providers: &[(&str, &str)],
     layout: Option<&str>,
-) -> RootPackageManifest {
-    RootPackageManifest {
+) -> RootModuleGraphManifest {
+    RootModuleGraphManifest {
         schema_version: 1,
         modules_dir: "modules".into(),
         modules: modules

@@ -1,5 +1,5 @@
 use super::{
-    PackageManifestError, default_enabled, default_modules_dir, default_schema_version,
+    ModuleManifestError, default_enabled, default_modules_dir, default_schema_version,
     parse_module_entrypoint, validate_modules_dir, validate_relative_path,
 };
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RootPackageManifest {
+pub struct RootModuleGraphManifest {
     pub schema_version: u32,
     #[serde(default = "default_modules_dir")]
     pub modules_dir: String,
@@ -22,10 +22,10 @@ pub struct RootPackageManifest {
     pub theme: Option<RootThemeSelection>,
 }
 
-impl RootPackageManifest {
-    pub fn from_json_str(input: &str) -> Result<Self, PackageManifestError> {
-        let parsed: RootPackageJson =
-            serde_json::from_str(input).map_err(|source| PackageManifestError::Json {
+impl RootModuleGraphManifest {
+    pub fn from_json_str(input: &str) -> Result<Self, ModuleManifestError> {
+        let parsed: RootModuleGraphJson =
+            serde_json::from_str(input).map_err(|source| ModuleManifestError::Json {
                 path: PathBuf::from("<inline>"),
                 source,
             })?;
@@ -34,13 +34,13 @@ impl RootPackageManifest {
         Ok(manifest)
     }
 
-    pub fn from_path(path: &Path) -> Result<Self, PackageManifestError> {
-        let content = std::fs::read_to_string(path).map_err(|source| PackageManifestError::Io {
+    pub fn from_path(path: &Path) -> Result<Self, ModuleManifestError> {
+        let content = std::fs::read_to_string(path).map_err(|source| ModuleManifestError::Io {
             path: path.to_path_buf(),
             source,
         })?;
-        let parsed: RootPackageJson =
-            serde_json::from_str(&content).map_err(|source| PackageManifestError::Json {
+        let parsed: RootModuleGraphJson =
+            serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
                 path: path.to_path_buf(),
                 source,
             })?;
@@ -49,9 +49,9 @@ impl RootPackageManifest {
         Ok(manifest)
     }
 
-    pub fn validate(&self) -> Result<(), PackageManifestError> {
+    pub fn validate(&self) -> Result<(), ModuleManifestError> {
         if self.schema_version != 1 {
-            return Err(PackageManifestError::Validation(format!(
+            return Err(ModuleManifestError::Validation(format!(
                 "unsupported schemaVersion {}; supported version is 1",
                 self.schema_version
             )));
@@ -59,7 +59,7 @@ impl RootPackageManifest {
         validate_modules_dir(&self.modules_dir)?;
         for (module_id, entry) in &self.modules {
             if module_id.trim().is_empty() {
-                return Err(PackageManifestError::Validation(
+                return Err(ModuleManifestError::Validation(
                     "module id cannot be empty".into(),
                 ));
             }
@@ -77,7 +77,7 @@ impl RootPackageManifest {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct RootPackageJson {
+struct RootModuleGraphJson {
     #[serde(default)]
     schema_version: Option<u32>,
     #[serde(default)]
@@ -94,10 +94,10 @@ struct RootPackageJson {
     mesh: Option<RootMeshSection>,
 }
 
-impl RootPackageJson {
-    fn into_manifest(self) -> RootPackageManifest {
+impl RootModuleGraphJson {
+    fn into_manifest(self) -> RootModuleGraphManifest {
         if let Some(mesh) = self.mesh {
-            return RootPackageManifest {
+            return RootModuleGraphManifest {
                 schema_version: mesh.schema_version,
                 modules_dir: mesh.modules_dir,
                 modules: mesh.modules,
@@ -107,7 +107,7 @@ impl RootPackageJson {
             };
         }
 
-        RootPackageManifest {
+        RootModuleGraphManifest {
             schema_version: self.schema_version.unwrap_or(1),
             modules_dir: self.modules_dir.unwrap_or_else(default_modules_dir),
             modules: self.modules,
@@ -144,9 +144,9 @@ pub struct InstalledModuleEntry {
 }
 
 impl InstalledModuleEntry {
-    fn validate(&self, module_id: &str) -> Result<(), PackageManifestError> {
+    fn validate(&self, module_id: &str) -> Result<(), ModuleManifestError> {
         if self.path.trim().is_empty() {
-            return Err(PackageManifestError::Validation(format!(
+            return Err(ModuleManifestError::Validation(format!(
                 "module {module_id} path cannot be empty"
             )));
         }
@@ -160,9 +160,9 @@ pub struct RootLayoutSelection {
 }
 
 impl RootLayoutSelection {
-    fn validate(&self) -> Result<(), PackageManifestError> {
+    fn validate(&self) -> Result<(), ModuleManifestError> {
         if parse_module_entrypoint(&self.entrypoint).is_none() {
-            return Err(PackageManifestError::Validation(format!(
+            return Err(ModuleManifestError::Validation(format!(
                 "layout entrypoint must use <module-id>:<entrypoint-id>: {}",
                 self.entrypoint
             )));
@@ -179,9 +179,9 @@ pub struct RootThemeSelection {
 }
 
 impl RootThemeSelection {
-    fn validate(&self) -> Result<(), PackageManifestError> {
+    fn validate(&self) -> Result<(), ModuleManifestError> {
         if self.active.trim().is_empty() {
-            return Err(PackageManifestError::Validation(
+            return Err(ModuleManifestError::Validation(
                 "theme.active cannot be empty".into(),
             ));
         }

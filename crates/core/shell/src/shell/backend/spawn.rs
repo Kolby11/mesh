@@ -11,7 +11,7 @@ impl Shell {
         tx: mpsc::UnboundedSender<ShellMessage>,
     ) {
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let graph_path = workspace_root.join("config/package.json");
+        let graph_path = workspace_root.join("config/module.json");
         match load_installed_module_graph(&graph_path) {
             Ok(graph) => {
                 let (candidates, statuses) = backend_launch_candidates_from_graph(

@@ -1,55 +1,56 @@
 {
-  "id": "@mesh/pulseaudio-audio",
-  "name": "MESH PulseAudio",
+  "name": "@mesh/pulseaudio-audio",
   "version": "0.1.0",
-  "type": "backend",
-  "api_version": "0.1",
   "description": "Audio backend using PulseAudio",
-  "authors": ["MESH Project"],
-  "capabilities": {
-    "required": [
-      "exec.pactl"
-    ],
-    "optional": [
-      "exec.aplay"
-    ]
-  },
-  "dependencies": {
-    "modules": {
-      "@mesh/audio-interface": ">=1.0.0, <2.0.0"
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "capabilities": {
+      "required": [
+        "exec.pactl"
+      ],
+      "optional": [
+        "exec.aplay"
+      ]
     },
-    "binaries": [
-      {
-        "name": "pactl",
-        "reason": "PulseAudio volume and mute control.",
-        "packages": {
-          "debian": "pulseaudio-utils",
-          "arch": "libpulse",
-          "fedora": "pulseaudio-utils"
-        }
+    "dependencies": {
+      "modules": {
+        "@mesh/audio-interface": ">=1.0.0, <2.0.0"
       },
-      {
-        "name": "aplay",
-        "reason": "Playback for shell sound effects.",
-        "optional": true,
-        "packages": {
-          "debian": "alsa-utils",
-          "arch": "alsa-utils",
-          "fedora": "alsa-utils"
+      "binaries": [
+        {
+          "name": "pactl",
+          "reason": "PulseAudio volume and mute control.",
+          "packages": {
+            "debian": "pulseaudio-utils",
+            "arch": "libpulse",
+            "fedora": "pulseaudio-utils"
+          }
+        },
+        {
+          "name": "aplay",
+          "reason": "Playback for shell sound effects.",
+          "optional": true,
+          "packages": {
+            "debian": "alsa-utils",
+            "arch": "alsa-utils",
+            "fedora": "alsa-utils"
+          }
         }
+      ]
+    },
+    "entrypoints": {
+      "main": "src/main.luau"
+    },
+    "implements": [
+      {
+        "interface": "mesh.audio",
+        "version": "1.0",
+        "baseModule": "@mesh/audio-interface",
+        "provider": "pulseaudio",
+        "label": "PulseAudio",
+        "priority": 50
       }
     ]
-  },
-  "entrypoints": {
-    "main": "src/main.luau"
-  },
-  "provides": [
-    {
-      "interface": "mesh.audio",
-      "version": "1.0",
-      "base_module": "@mesh/audio-interface",
-      "backend_name": "PulseAudio",
-      "priority": 50
-    }
-  ]
+  }
 }

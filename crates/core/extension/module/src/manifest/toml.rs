@@ -2,7 +2,7 @@ use super::{
     AccessibilitySection, AssetsSection, CapabilitiesSection, CompatibilitySection,
     DependenciesSection, DependencySpec, EntrypointsSection, ExportsSection, ExtensionSection,
     I18nSection, IconPackSection, IconRequirementsSection, IconsSection, InterfaceSection,
-    KeybindsSection, Manifest, PackageSection, ProvidedInterface, ServiceSection, SettingsSection,
+    KeybindsSection, Manifest, ModuleSection, ProvidedInterface, ServiceSection, SettingsSection,
     SlotContribution, SlotDefinition, SurfaceLayoutSection, ThemeDefaultsSection, ThemeSection,
 };
 use mesh_core_theme::TokenValue;
@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct TomlManifest {
-    package: PackageSection,
+    package: ModuleSection,
     #[serde(default)]
     compatibility: CompatibilitySection,
     #[serde(default)]

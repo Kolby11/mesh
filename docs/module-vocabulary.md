@@ -92,11 +92,11 @@ they are reference modules that use the same model third-party authors use.
 
 | Location | Current term | Target term | Disposition | Follow-up phase | Behavior to preserve |
 | -------- | ------------ | ----------- | ----------- | --------------- | -------------------- |
-| `crates/core/extension/module/src/package/module_manifest.rs` | `ModulePackageManifest` | `ModuleManifest` | replace | Phase 38 | Parse and validate module manifests without losing v1.1 provider or v1.6 keybind data. |
-| `crates/core/extension/module/src/package/module_manifest.rs` | `RootPackageManifest` | `RootModuleManifest` or installed module graph manifest | replace | Phase 38 | Keep root enabled-module graph, active providers, and layout entrypoint selection. |
-| `crates/core/extension/module/src/manifest/model.rs` | `PackageSection` | `ModuleSection` | replace | Phase 38 | Preserve normalized identity, version, module kind, API version, and metadata. |
-| `crates/core/extension/module/src/package/*.rs` | `PackageManifestError` | `ModuleManifestError` | replace | Phase 38 | Keep actionable validation, JSON, and IO diagnostics with module id and field path where available. |
-| author docs and shipped manifests | `package.json` | `module.json` | internal-only migration | Phase 38 | Load old shipped artifacts only as an internal migration path until they are migrated. |
+| `crates/core/extension/module/src/package/module_manifest.rs` | `ModulePackageManifest` | `ModuleManifest` | replaced | Phase 38 | Parse and validate module manifests without losing v1.1 provider or v1.6 keybind data. |
+| `crates/core/extension/module/src/package/module_manifest.rs` | `RootPackageManifest` | `RootModuleGraphManifest` | replaced | Phase 38 | Keep root enabled-module graph, active providers, and layout entrypoint selection. |
+| `crates/core/extension/module/src/manifest/model.rs` | `PackageSection` | `ModuleSection` | replaced | Phase 38 | Preserve normalized identity, version, module kind, API version, and metadata. |
+| `crates/core/extension/module/src/package/*.rs` | `PackageManifestError` | `ModuleManifestError` | replaced | Phase 38 | Keep actionable validation, JSON, and IO diagnostics with module id and field path where available. |
+| author docs and shipped manifests | `package.json` | `module.json` | internal-only migration | Phase 38 | Load old artifacts only as an internal migration path until they are migrated. |
 | author docs and future manifests | `module.json` | `module.json` | already canonical | Phase 38 | Make this the author-facing manifest name for new examples and diagnostics. |
 | historical manifest risk | `plugin.json` | none | remove | Phase 40 | Do not present plugin naming as supported vocabulary. |
 | legacy provider declarations | `provides` | `implements` or `contributes.providers` | internal-only migration | Phase 38 and Phase 39 | Preserve backend provider declarations while diagnostics guide authors to canonical fields. |

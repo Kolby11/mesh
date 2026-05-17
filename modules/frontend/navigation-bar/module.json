@@ -1,146 +1,145 @@
 {
-  "id": "@mesh/navigation-bar",
-  "name": "Navigation Bar",
+  "name": "@mesh/navigation-bar",
   "version": "0.1.0",
-  "type": "surface",
-  "api_version": "0.1",
   "description": "Top-edge navigation bar surface with declarative keybind metadata for localized shortcut labels.",
-  "authors": [
-    "MESH Project"
-  ],
-  "compatibility": {
-    "mesh": ">=0.1.0",
-    "compositors": [
-      "wlr-layer-shell-v1"
-    ]
-  },
-  "capabilities": {
-    "required": [
-      "shell.surface",
-      "service.audio.read",
-      "service.audio.control",
-      "theme.read",
-      "locale.read"
-    ]
-  },
-  "dependencies": {
-    "modules": {
-      "@mesh/audio-popover": ">=0.1.0"
-    },
-    "icon_packs": {
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "capabilities": {
       "required": [
-        "system"
+        "shell.surface",
+        "service.audio.read",
+        "service.audio.control",
+        "theme.read",
+        "locale.read"
       ]
-    }
-  },
-  "icon_requirements": {
-    "required": [
-      "settings",
-      "weather-clear-night",
-      "weather-clear",
-      "audio-volume-muted",
-      "audio-volume-low",
-      "audio-volume-medium",
-      "audio-volume-high"
-    ]
-  },
-  "entrypoints": {
-    "main": "src/main.mesh"
-  },
-  "keybinds": {
-    "mute": {
-      "label": "keybind.mute.label",
-      "description": "keybind.mute.description",
-      "category": "keybind.category.audio",
-      "trigger": {
-        "kind": "shortcut",
-        "key": "m"
-      }
-    }
-  },
-  "settings": {
-    "namespace": "@mesh/navigation-bar",
-    "schema": {
-      "surface": {
-        "type": "object",
-        "description": "Placement and sizing for the navigation bar surface.",
-        "properties": {
-          "anchor": {
-            "type": "enum",
-            "values": [
-              "top",
-              "bottom",
-              "left",
-              "right"
-            ],
-            "default": "top",
-            "description": "Screen edge this surface anchors to."
-          },
-          "layer": {
-            "type": "enum",
-            "values": [
-              "background",
-              "bottom",
-              "top",
-              "overlay"
-            ],
-            "default": "top",
-            "description": "Layer-shell stacking layer."
-          },
-          "width": {
-            "type": "integer",
-            "default": 0,
-            "min": 0,
-            "max": 7680,
-            "description": "Surface width in pixels. Use 0 to span the full output width."
-          },
-          "height": {
-            "type": "integer",
-            "default": 56,
-            "min": 32,
-            "max": 160,
-            "description": "Surface height in pixels."
-          },
-          "exclusive_zone": {
-            "type": "integer",
-            "default": 56,
-            "min": 0,
-            "max": 256,
-            "description": "Reserved compositor space in pixels."
-          },
-          "keyboard_mode": {
-            "type": "enum",
-            "values": [
-              "none",
-              "exclusive",
-              "on_demand"
-            ],
-            "default": "none",
-            "description": "Keyboard interactivity policy for the surface."
-          },
-          "visible_on_start": {
-            "type": "boolean",
-            "default": true,
-            "description": "Whether this surface starts visible when Mesh boots."
-          }
-        }
+    },
+    "dependencies": {
+      "modules": {
+        "@mesh/audio-popover": ">=0.1.0"
       },
-      "keyboard": {
-        "type": "object",
-        "description": "Focused-surface keyboard defaults for the navigation bar. The manifest keybinds section declares keybind ids and default triggers; frontend components subscribe handlers to those ids.",
-        "properties": {
-          "shortcuts": {
+      "icons": {
+        "@mesh/icons-default": "*"
+      }
+    },
+    "iconRequirements": {
+      "required": [
+        "settings",
+        "weather-clear-night",
+        "weather-clear",
+        "audio-volume-muted",
+        "audio-volume-low",
+        "audio-volume-medium",
+        "audio-volume-high"
+      ]
+    },
+    "entrypoints": {
+      "main": "src/main.mesh"
+    },
+    "keybinds": {
+      "mute": {
+        "label": "keybind.mute.label",
+        "description": "keybind.mute.description",
+        "category": "keybind.category.audio",
+        "trigger": {
+          "kind": "shortcut",
+          "key": "m"
+        }
+      }
+    },
+    "contributes": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Navigation Bar"
+        }
+      ],
+      "settings": {
+        "namespace": "@mesh/navigation-bar",
+        "schema": {
+          "surface": {
             "type": "object",
-            "description": "Shortcut definitions keyed by keybind id. Shell settings may remap the effective key per surface."
+            "description": "Placement and sizing for the navigation bar surface.",
+            "properties": {
+              "anchor": {
+                "type": "enum",
+                "values": [
+                  "top",
+                  "bottom",
+                  "left",
+                  "right"
+                ],
+                "default": "top",
+                "description": "Screen edge this surface anchors to."
+              },
+              "layer": {
+                "type": "enum",
+                "values": [
+                  "background",
+                  "bottom",
+                  "top",
+                  "overlay"
+                ],
+                "default": "top",
+                "description": "Layer-shell stacking layer."
+              },
+              "width": {
+                "type": "integer",
+                "default": 0,
+                "min": 0,
+                "max": 7680,
+                "description": "Surface width in pixels. Use 0 to span the full output width."
+              },
+              "height": {
+                "type": "integer",
+                "default": 56,
+                "min": 32,
+                "max": 160,
+                "description": "Surface height in pixels."
+              },
+              "exclusive_zone": {
+                "type": "integer",
+                "default": 56,
+                "min": 0,
+                "max": 256,
+                "description": "Reserved compositor space in pixels."
+              },
+              "keyboard_mode": {
+                "type": "enum",
+                "values": [
+                  "none",
+                  "exclusive",
+                  "on_demand"
+                ],
+                "default": "none",
+                "description": "Keyboard interactivity policy for the surface."
+              },
+              "visible_on_start": {
+                "type": "boolean",
+                "default": true,
+                "description": "Whether this surface starts visible when Mesh boots."
+              }
+            }
+          },
+          "keyboard": {
+            "type": "object",
+            "description": "Focused-surface keyboard defaults for the navigation bar. The manifest keybinds section declares keybind ids and default triggers; frontend components subscribe handlers to those ids.",
+            "properties": {
+              "shortcuts": {
+                "type": "object",
+                "description": "Shortcut definitions keyed by keybind id. Shell settings may remap the effective key per surface."
+              }
+            }
           }
         }
       }
+    },
+    "surfaceLayout": {
+      "size_policy": "fixed"
+    },
+    "accessibility": {
+      "role": "toolbar"
     }
-  },
-  "surface_layout": {
-    "size_policy": "fixed"
-  },
-  "accessibility": {
-    "role": "toolbar"
   }
 }

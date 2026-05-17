@@ -10,7 +10,7 @@ use mesh_core_frontend::CompiledFrontendModule;
 use mesh_core_module::manifest::{
     CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
 };
-use mesh_core_module::{ExportsSection, Manifest, ModuleType, PackageSection};
+use mesh_core_module::{ExportsSection, Manifest, ModuleSection, ModuleType};
 use mesh_core_scripting::ScriptContext;
 use mesh_core_service::{
     ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract, InterfaceMethod,
@@ -240,7 +240,7 @@ pub(super) fn assert_no_legacy_service_callbacks(source_name: &str, source: &str
 
 pub(super) fn minimal_test_manifest(id: &str) -> Manifest {
     Manifest {
-        package: PackageSection {
+        package: ModuleSection {
             id: id.to_string(),
             name: None,
             version: "0.1.0".into(),
