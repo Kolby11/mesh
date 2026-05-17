@@ -48,3 +48,41 @@ that the old and new names are interchangeable.
 | service category | Earlier backend/service grouping language | interface domain or module kind | replace | Use interface domain when grouping contracts; use module kind when describing installable roles. |
 | provides | Legacy provider declaration field and examples | implements or contributes.providers | internal-only migration | Phase 38/39 should normalize to provider/interface contributions with diagnostics. |
 | compatibility alias | Stale planning language | replacement or internal-only migration | remove | Do not document old names as synonyms; diagnostics should say replace with the canonical term. |
+
+## Prior Decision Reconciliation
+
+### v1.1 Provider Selection
+
+The v1.1 backend provider behavior remains part of the canonical model.
+frontend modules depend on interface contracts, backend modules contribute providers, and user configuration selects the active provider for each
+interface. Provider selection is configuration over modules that implement an
+interface, not a frontend dependency on a backend module.
+
+When the selected provider is missing, disabled, or unhealthy, diagnostics
+should name the interface, active provider module id, and field path that
+selected it. They should not imply that a frontend can fix the problem by
+depending on a provider module directly.
+
+### v1.6 Keybind Declarations
+
+The paused v1.6 keybind model remains valid as a module contribution model:
+keybind actions are contributions, localized triggers are contribution metadata, and user overrides are settings/configuration.
+
+Keybind identity comes from the declaring module and action id. Locale-specific
+trigger defaults help the shell choose a default binding, but they do not
+change the contribution identity or turn keybinds into provider behavior.
+
+## Innovation Rules
+
+MESH should support new module ideas without adding service-specific Rust
+branches. Authors may add new interfaces, providers, libraries, resource
+packs, and typed contributions when those concepts are declared through the
+module model.
+
+Interface relationships may be `base`, `extension`, or `independent`.
+Independent interfaces are allowed, but docs and diagnostics should guide
+authors toward extending a base interface when interoperability benefits.
+
+Consistency comes from typed registries, strict field names, validation,
+diagnostics, and author docs. Defaults have no privileged conceptual status;
+they are reference modules that use the same model third-party authors use.
