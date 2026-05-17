@@ -68,6 +68,11 @@ The v1.5 milestone closed the visible interaction regressions found during live 
 
 The v1.6 keybind milestone established semantic keybind declarations and locale-aware trigger resolution through phases 32 and 33. It was paused before script dispatch, conflict diagnostics, and accessibility proof so v1.7 can consolidate the broader module and extension model those features depend on.
 
+Phase 37 of v1.7 is complete. MESH now has a canonical module vocabulary, a
+hard replacement rule for old public names, author docs aligned to
+`module.json`, and a runtime/future-phase inventory for manifest
+normalization, contribution indexing, migration diagnostics, and shipped proof.
+
 ## Current Milestone: v1.7 Rethink Modularity and Extensibility Concepts
 
 **Goal:** Rework MESH's modularity model so frontend modules, backend providers, manifests, service contracts, capabilities, and extension points form a coherent author-facing architecture instead of a set of separate milestone-grown mechanisms.
@@ -88,10 +93,11 @@ The v1.6 keybind milestone established semantic keybind declarations and locale-
 - `v1.3`: Canonical benchmark scenarios, profiling snapshots, debug inspector views, and retained widget-tree identity/dirty summaries are available for measuring real responsiveness work.
 - `v1.4`: The renderer has typed invalidation, retained render objects, retained display data, damage tracking, text caching, selector indexing, and batching metrics on the software path.
 - `v1.5`: The CPU renderer has profiling attribution, visibility pruning, incremental retained paint-command updates, damage-indexed paint execution, raster cache hardening, and shipped-surface smoothness proof.
+- `v1.7 Phase 37`: The canonical module vocabulary is locked: old public names are replacement debt, temporary old loaders are internal migration details, and v1.1 provider plus v1.6 keybind decisions are reconciled into the module/interface/provider/contribution model.
 
 ### Active
 
-- Module authors can rely on one coherent package and manifest model for frontend, backend, interface, library, theme, icon, font, and language modules.
+- Module authors can rely on one coherent module and manifest model for frontend, backend, interface, library, theme, icon, font, and language modules.
 - Interface contracts, provider implementations, dependency declarations, capabilities, settings, keybinds, assets, and UI contributions use consistent vocabulary and validation paths.
 - Third-party modules can extend MESH by adding interfaces, providers, libraries, resources, and UI entrypoints without service-specific Rust branches.
 - Existing v1.1 backend package graph behavior and v1.6 keybind declaration/resolution behavior remain compatible or receive explicit migration diagnostics.
@@ -176,4 +182,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-15 after starting milestone v1.7*
+*Last updated: 2026-05-17 after completing Phase 37*
