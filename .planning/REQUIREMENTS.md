@@ -19,10 +19,10 @@
 
 ### Extensibility Contracts
 
-- [ ] **EXT-01**: Interface modules can declare base, extension, and independent relationships that tools and diagnostics can use for discoverability without blocking independent interfaces.
-- [ ] **EXT-02**: Backend provider declarations, interface dependencies, and capability requests remain separate concepts with validation that prevents host powers from being inferred by provider identity.
-- [ ] **EXT-03**: Frontend entrypoints, slots, libraries, settings, keybinds, theme/icon/font/language resources, and provider/interface declarations are indexed as typed contributions in the installed module graph.
-- [ ] **EXT-04**: A new or refactored module path can add interface/provider/library/resource behavior without adding service-specific Rust branches.
+- [x] **EXT-01**: Interface modules can declare base, extension, and independent relationships that tools and diagnostics can use for discoverability without blocking independent interfaces.
+- [x] **EXT-02**: Backend provider declarations, interface dependencies, and capability requests remain separate concepts with validation that prevents host powers from being inferred by provider identity.
+- [x] **EXT-03**: Frontend entrypoints, slots, libraries, settings, keybinds, theme/icon/font/language resources, and provider/interface declarations are indexed as typed contributions in the installed module graph.
+- [x] **EXT-04**: A new or refactored module path can add interface/provider/library/resource behavior without adding service-specific Rust branches.
 
 ### Migration and Proof
 
@@ -68,10 +68,10 @@
 | MAN-01 | Phase 38 | Complete |
 | MAN-02 | Phase 38 | Complete |
 | MAN-03 | Phase 38 | Complete |
-| EXT-01 | Phase 39 | Pending |
-| EXT-02 | Phase 39 | Pending |
-| EXT-03 | Phase 39 | Pending |
-| EXT-04 | Phase 39 | Pending |
+| EXT-01 | Phase 39 | Complete |
+| EXT-02 | Phase 39 | Complete |
+| EXT-03 | Phase 39 | Complete |
+| EXT-04 | Phase 39 | Complete |
 | MIGR-01 | Phase 40 | Pending |
 | MIGR-02 | Phase 40 | Pending |
 | PROOF-01 | Phase 41 | Pending |
