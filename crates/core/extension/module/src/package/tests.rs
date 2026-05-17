@@ -1263,6 +1263,98 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
 }
 
 #[test]
+fn contribution_index_reports_resource_and_settings_compatibility_diagnostics() {
+    let mut deps = MeshDependencies::default();
+    deps.icons.insert("@mesh/missing-icons".into(), "*".into());
+    deps.fonts.insert("@mesh/missing-fonts".into(), "*".into());
+    deps.i18n.insert("@mesh/missing-lang".into(), "*".into());
+    deps.themes.insert("@mesh/missing-theme".into(), "*".into());
+
+    let settings = SettingsContribution {
+        namespace: "shared.settings".into(),
+        schema: serde_json::json!({ "type": "object" }),
+    };
+    let mut frontend = loaded_module(
+        "@mesh/example-widget",
+        ModuleKind::Frontend,
+        deps,
+        vec![],
+        MeshContributes {
+            settings: Some(settings.clone()),
+            ..MeshContributes::default()
+        },
+    );
+    frontend.manifest.mesh.icon_requirements.required = vec!["missing-semantic-icon".into()];
+    let other_settings = loaded_module(
+        "@mesh/other-widget",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes {
+            settings: Some(settings),
+            ..MeshContributes::default()
+        },
+    );
+    let mut icon_pack = loaded_module(
+        "@mesh/icons-material",
+        ModuleKind::IconPack,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    icon_pack.manifest.mesh.icon_pack = Some(crate::manifest::IconPackSection {
+        id: "material".into(),
+        mappings: HashMap::from([(
+            "available-semantic-icon".into(),
+            "material-symbols/check".into(),
+        )]),
+        ..crate::manifest::IconPackSection::default()
+    });
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-widget", ModuleKind::Frontend),
+            ("@mesh/other-widget", ModuleKind::Frontend),
+            ("@mesh/icons-material", ModuleKind::IconPack),
+        ],
+        &[],
+        None,
+    );
+
+    let graph =
+        InstalledModuleGraph::from_parts(root, vec![frontend, other_settings, icon_pack]).unwrap();
+
+    let statuses = graph
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| diagnostic.status.as_str())
+        .collect::<Vec<_>>();
+    assert!(statuses.contains(&"missing_icon_pack_requirement"));
+    assert!(statuses.contains(&"missing_font_pack_requirement"));
+    assert!(statuses.contains(&"missing_i18n_pack_requirement"));
+    assert!(statuses.contains(&"missing_theme_requirement"));
+    assert!(statuses.contains(&"missing_required_icon"));
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == "duplicate_settings_namespace")
+            .count(),
+        2
+    );
+    let icon_diagnostic = graph
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.status == "missing_required_icon")
+        .unwrap();
+    assert_eq!(icon_diagnostic.module_id, "@mesh/example-widget");
+    assert!(
+        icon_diagnostic
+            .contribution_id
+            .as_deref()
+            .is_some_and(|id| id.contains("required:missing-semantic-icon"))
+    );
+}
+
+#[test]
 fn disabled_modules_remain_catalog_nodes_but_not_runtime_contributions() {
     let mut deps = MeshDependencies::default();
     deps.backend.insert("mesh.example".into(), ">=1.0.0".into());

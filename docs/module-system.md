@@ -568,6 +568,12 @@ The graph should:
 - surface missing or failed providers through health diagnostics,
 - preserve contract-level settings across provider swaps.
 
+The installed graph also exposes non-fatal compatibility diagnostics for
+resource and settings contribution mismatches. Missing icon/font/language/theme
+packs, required semantic icons that no enabled icon pack maps, and duplicate
+settings namespaces should be visible to tools and settings UI without blocking
+unrelated modules from loading.
+
 ## Extending Existing Interfaces
 
 Creating a new interface is always allowed. The ecosystem should still make

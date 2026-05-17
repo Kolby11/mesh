@@ -31,6 +31,7 @@ pub struct InstalledModuleGraph {
     frontend_requirements: HashMap<String, FrontendRequirementSet>,
     interface_declarations: HashMap<String, InterfaceDeclarationNode>,
     interface_guidance: Vec<InterfaceGuidanceRecord>,
+    diagnostics: Vec<ModuleGraphDiagnostic>,
     contributions: ModuleContributionIndex,
     layout_entrypoint: Option<ResolvedLayoutEntrypoint>,
 }
@@ -218,6 +219,8 @@ impl InstalledModuleGraph {
             None => None,
         };
         let interface_guidance = build_interface_guidance(&interface_declarations);
+        let diagnostics =
+            build_graph_diagnostics(&graph_modules, &frontend_requirements, &contributions);
 
         Ok(Self {
             modules: graph_modules,
@@ -226,6 +229,7 @@ impl InstalledModuleGraph {
             frontend_requirements,
             interface_declarations,
             interface_guidance,
+            diagnostics,
             contributions,
             layout_entrypoint,
         })
@@ -291,6 +295,10 @@ impl InstalledModuleGraph {
 
     pub fn interface_guidance(&self) -> &[InterfaceGuidanceRecord] {
         &self.interface_guidance
+    }
+
+    pub fn diagnostics(&self) -> &[ModuleGraphDiagnostic] {
+        &self.diagnostics
     }
 
     pub fn backend_providers_for_interface(&self, interface: &str) -> &[BackendProviderNode] {
@@ -473,6 +481,14 @@ pub struct InterfaceGuidanceRecord {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleGraphDiagnostic {
+    pub module_id: String,
+    pub contribution_id: Option<String>,
+    pub status: String,
+    pub message: String,
+}
+
 fn build_interface_guidance(
     declarations: &HashMap<String, InterfaceDeclarationNode>,
 ) -> Vec<InterfaceGuidanceRecord> {
@@ -527,6 +543,202 @@ fn build_interface_guidance(
             .then_with(|| a.module_id.cmp(&b.module_id))
     });
     guidance
+}
+
+fn build_graph_diagnostics(
+    modules: &HashMap<String, InstalledModuleNode>,
+    frontend_requirements: &HashMap<String, FrontendRequirementSet>,
+    contributions: &ModuleContributionIndex,
+) -> Vec<ModuleGraphDiagnostic> {
+    let mut diagnostics = Vec::new();
+
+    for requirements in frontend_requirements.values() {
+        for icon_pack in requirements.icons.keys() {
+            if !resource_module_or_contribution_exists(
+                modules,
+                ModuleKind::IconPack,
+                &contributions.icon_packs,
+                icon_pack,
+            ) {
+                diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: requirements.module_id.clone(),
+                    contribution_id: None,
+                    status: "missing_icon_pack_requirement".into(),
+                    message: format!(
+                        "frontend module {} requires icon pack {icon_pack}, but no enabled icon-pack contribution is installed",
+                        requirements.module_id
+                    ),
+                });
+            }
+        }
+        for font_pack in requirements.fonts.keys() {
+            if !resource_module_or_path_contribution_exists(
+                modules,
+                ModuleKind::FontPack,
+                &contributions.fonts,
+                font_pack,
+            ) {
+                diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: requirements.module_id.clone(),
+                    contribution_id: None,
+                    status: "missing_font_pack_requirement".into(),
+                    message: format!(
+                        "frontend module {} requires font pack {font_pack}, but no enabled font contribution is installed",
+                        requirements.module_id
+                    ),
+                });
+            }
+        }
+        for language_pack in requirements.i18n.keys() {
+            if !resource_module_or_i18n_contribution_exists(
+                modules,
+                ModuleKind::LanguagePack,
+                &contributions.i18n,
+                language_pack,
+            ) {
+                diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: requirements.module_id.clone(),
+                    contribution_id: None,
+                    status: "missing_i18n_pack_requirement".into(),
+                    message: format!(
+                        "frontend module {} requires language pack {language_pack}, but no enabled i18n contribution is installed",
+                        requirements.module_id
+                    ),
+                });
+            }
+        }
+        for theme in requirements.themes.keys() {
+            if !resource_module_or_theme_contribution_exists(
+                modules,
+                ModuleKind::Theme,
+                &contributions.themes,
+                theme,
+            ) {
+                diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: requirements.module_id.clone(),
+                    contribution_id: None,
+                    status: "missing_theme_requirement".into(),
+                    message: format!(
+                        "frontend module {} requires theme {theme}, but no enabled theme contribution is installed",
+                        requirements.module_id
+                    ),
+                });
+            }
+        }
+    }
+
+    if !contributions.icon_packs.is_empty() {
+        for requirement in contributions
+            .icon_requirements
+            .iter()
+            .filter(|requirement| requirement.required)
+        {
+            if !contributions
+                .icon_packs
+                .iter()
+                .any(|pack| pack.mappings.contains_key(&requirement.name))
+            {
+                diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: requirement.module_id.clone(),
+                    contribution_id: Some(requirement.source.scoped_id.clone()),
+                    status: "missing_required_icon".into(),
+                    message: format!(
+                        "module {} requires semantic icon {}, but no enabled icon pack maps it",
+                        requirement.module_id, requirement.name
+                    ),
+                });
+            }
+        }
+    }
+
+    let mut settings_by_namespace: HashMap<&str, Vec<&ContributedSettingsSchema>> = HashMap::new();
+    for settings in &contributions.settings {
+        settings_by_namespace
+            .entry(settings.namespace.as_str())
+            .or_default()
+            .push(settings);
+    }
+    for (namespace, schemas) in settings_by_namespace {
+        if schemas.len() <= 1 {
+            continue;
+        }
+        for schema in schemas {
+            diagnostics.push(ModuleGraphDiagnostic {
+                module_id: schema.module_id.clone(),
+                contribution_id: Some(schema.source.scoped_id.clone()),
+                status: "duplicate_settings_namespace".into(),
+                message: format!(
+                    "settings namespace {namespace} is contributed by multiple enabled modules"
+                ),
+            });
+        }
+    }
+
+    diagnostics.sort_by(|a, b| {
+        a.status
+            .cmp(&b.status)
+            .then_with(|| a.module_id.cmp(&b.module_id))
+            .then_with(|| a.contribution_id.cmp(&b.contribution_id))
+    });
+    diagnostics
+}
+
+fn enabled_module_exists(
+    modules: &HashMap<String, InstalledModuleNode>,
+    kind: ModuleKind,
+    id: &str,
+) -> bool {
+    modules
+        .get(id)
+        .is_some_and(|module| module.enabled && module.kind == kind)
+}
+
+fn resource_module_or_contribution_exists(
+    modules: &HashMap<String, InstalledModuleNode>,
+    kind: ModuleKind,
+    contributions: &[ContributedIconPack],
+    id: &str,
+) -> bool {
+    enabled_module_exists(modules, kind, id)
+        || contributions
+            .iter()
+            .any(|contribution| contribution.module_id == id || contribution.id == id)
+}
+
+fn resource_module_or_path_contribution_exists(
+    modules: &HashMap<String, InstalledModuleNode>,
+    kind: ModuleKind,
+    contributions: &[ContributedPathResource],
+    id: &str,
+) -> bool {
+    enabled_module_exists(modules, kind, id)
+        || contributions
+            .iter()
+            .any(|contribution| contribution.module_id == id || contribution.id == id)
+}
+
+fn resource_module_or_i18n_contribution_exists(
+    modules: &HashMap<String, InstalledModuleNode>,
+    kind: ModuleKind,
+    contributions: &[ContributedI18n],
+    id: &str,
+) -> bool {
+    enabled_module_exists(modules, kind, id)
+        || contributions.iter().any(|contribution| {
+            contribution.module_id == id || contribution.id == id || contribution.locale == id
+        })
+}
+
+fn resource_module_or_theme_contribution_exists(
+    modules: &HashMap<String, InstalledModuleNode>,
+    kind: ModuleKind,
+    contributions: &[ContributedTheme],
+    id: &str,
+) -> bool {
+    enabled_module_exists(modules, kind, id)
+        || contributions
+            .iter()
+            .any(|contribution| contribution.module_id == id || contribution.id == id)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
