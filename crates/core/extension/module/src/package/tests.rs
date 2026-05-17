@@ -774,6 +774,62 @@ fn installed_module_graph_keeps_provider_interface_and_frontend_requirements_sep
 }
 
 #[test]
+fn provider_capability_metadata_comes_only_from_backend_manifest() {
+    let mut deps = MeshDependencies::default();
+    deps.backend.insert("mesh.example".into(), ">=1.0.0".into());
+
+    let frontend = loaded_module(
+        "@mesh/example-widget",
+        ModuleKind::Frontend,
+        deps,
+        vec![],
+        MeshContributes::default(),
+    );
+    let mut backend = loaded_module(
+        "@mesh/example-backend",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.2.0".into()),
+            base_module: Some("@mesh/example-interface".into()),
+            provider: Some("example".into()),
+            label: Some("Example".into()),
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+    backend.manifest.mesh.capabilities.required = vec!["service.example.read".into()];
+    backend.manifest.mesh.capabilities.optional = vec!["service.example.control".into()];
+
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-widget", ModuleKind::Frontend),
+            ("@mesh/example-backend", ModuleKind::Backend),
+        ],
+        &[("mesh.example", "@mesh/example-backend")],
+        None,
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend, backend]).unwrap();
+    let provider = graph.active_provider("mesh.example").unwrap();
+    assert_eq!(provider.version.as_deref(), Some("1.2.0"));
+    assert_eq!(
+        provider.base_module.as_deref(),
+        Some("@mesh/example-interface")
+    );
+    assert_eq!(provider.provider.as_deref(), Some("example"));
+    assert_eq!(
+        provider.required_capabilities,
+        vec!["service.example.read".to_string()]
+    );
+    assert_eq!(
+        provider.optional_capabilities,
+        vec!["service.example.control".to_string()]
+    );
+}
+
+#[test]
 fn installed_module_graph_keeps_multiple_audio_providers() {
     let root = root_with_modules(
         &[

@@ -112,9 +112,13 @@ impl InstalledModuleGraph {
                         let provider = BackendProviderNode {
                             module_id: module_id.clone(),
                             interface: provided.interface.clone(),
+                            version: provided.version.clone(),
+                            base_module: provided.base_module.clone(),
                             provider: provided.provider.clone(),
                             label: provided.label.clone(),
                             priority: provided.priority,
+                            required_capabilities: node.manifest.mesh.capabilities.required.clone(),
+                            optional_capabilities: node.manifest.mesh.capabilities.optional.clone(),
                         };
                         backend_providers
                             .entry(provided.interface.clone())
@@ -361,9 +365,13 @@ pub struct InstalledModuleNode {
 pub struct BackendProviderNode {
     pub module_id: String,
     pub interface: String,
+    pub version: Option<String>,
+    pub base_module: Option<String>,
     pub provider: Option<String>,
     pub label: Option<String>,
     pub priority: u32,
+    pub required_capabilities: Vec<String>,
+    pub optional_capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
