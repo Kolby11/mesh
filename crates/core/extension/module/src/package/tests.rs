@@ -1444,6 +1444,175 @@ fn disabled_modules_remain_catalog_nodes_but_not_runtime_contributions() {
 }
 
 #[test]
+fn manifest_driven_extension_graph_indexes_provider_library_resource_and_frontend_requirement() {
+    let mut deps = MeshDependencies::default();
+    deps.backend.insert("mesh.example".into(), ">=1.0.0".into());
+    deps.icons.insert("material".into(), "*".into());
+    deps.fonts.insert("inter".into(), "*".into());
+    deps.i18n.insert("en".into(), "*".into());
+    deps.themes.insert("mesh-default".into(), "*".into());
+    let mut frontend = loaded_module(
+        "@mesh/example-widget",
+        ModuleKind::Frontend,
+        deps,
+        vec![],
+        MeshContributes::default(),
+    );
+    frontend.manifest.mesh.entrypoints.main = Some("src/main.mesh".into());
+    frontend.manifest.mesh.icon_requirements.required = vec!["example-action".into()];
+
+    let interface = interface_module(
+        "@mesh/example-interface",
+        "mesh.example",
+        "example",
+        InterfaceRelationship::Base,
+        None,
+    );
+    let backend = loaded_module(
+        "@mesh/example-backend",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.0".into()),
+            base_module: Some("@mesh/example-interface".into()),
+            provider: Some("example".into()),
+            label: Some("Example".into()),
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+    let library = loaded_module(
+        "@mesh/example-lib",
+        ModuleKind::Library,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes {
+            libraries: vec![LibraryContribution {
+                namespace: "@mesh/example-lib".into(),
+                path: "lib".into(),
+            }],
+            ..MeshContributes::default()
+        },
+    );
+    let mut icon_pack = loaded_module(
+        "@mesh/example-icons",
+        ModuleKind::IconPack,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    icon_pack.manifest.mesh.icon_pack = Some(crate::manifest::IconPackSection {
+        id: "material".into(),
+        mappings: HashMap::from([("example-action".into(), "material-symbols/check".into())]),
+        ..crate::manifest::IconPackSection::default()
+    });
+    let font_pack = loaded_module(
+        "@mesh/example-fonts",
+        ModuleKind::FontPack,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes {
+            fonts: vec![PathContribution {
+                id: "inter".into(),
+                path: "fonts".into(),
+                label: Some("Inter".into()),
+            }],
+            ..MeshContributes::default()
+        },
+    );
+    let language_pack = loaded_module(
+        "@mesh/example-lang",
+        ModuleKind::LanguagePack,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes {
+            i18n: vec![I18nContribution {
+                id: "en".into(),
+                locale: "en".into(),
+                path: "i18n/en.json".into(),
+            }],
+            ..MeshContributes::default()
+        },
+    );
+    let mut theme_modes = HashMap::new();
+    theme_modes.insert("dark".into(), "themes/dark.json".into());
+    let theme = loaded_module(
+        "@mesh/example-theme",
+        ModuleKind::Theme,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes {
+            themes: vec![ThemeContribution {
+                id: "mesh-default".into(),
+                label: "Default".into(),
+                modes: theme_modes,
+                default_mode: Some("dark".into()),
+            }],
+            ..MeshContributes::default()
+        },
+    );
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-widget", ModuleKind::Frontend),
+            ("@mesh/example-interface", ModuleKind::Interface),
+            ("@mesh/example-backend", ModuleKind::Backend),
+            ("@mesh/example-lib", ModuleKind::Library),
+            ("@mesh/example-icons", ModuleKind::IconPack),
+            ("@mesh/example-fonts", ModuleKind::FontPack),
+            ("@mesh/example-lang", ModuleKind::LanguagePack),
+            ("@mesh/example-theme", ModuleKind::Theme),
+        ],
+        &[("mesh.example", "@mesh/example-backend")],
+        None,
+    );
+
+    let graph = InstalledModuleGraph::from_parts(
+        root,
+        vec![
+            frontend,
+            interface,
+            backend,
+            library,
+            icon_pack,
+            font_pack,
+            language_pack,
+            theme,
+        ],
+    )
+    .unwrap();
+
+    assert!(graph.diagnostics().is_empty());
+    assert_eq!(
+        graph
+            .requirements_for_frontend("@mesh/example-widget")
+            .unwrap()
+            .backend
+            .get("mesh.example")
+            .map(String::as_str),
+        Some(">=1.0.0")
+    );
+    assert_eq!(
+        graph.declared_interface("mesh.example").unwrap().module_id,
+        "@mesh/example-interface"
+    );
+    assert_eq!(
+        graph.active_provider("mesh.example").unwrap().module_id,
+        "@mesh/example-backend"
+    );
+    assert_eq!(
+        graph.contributed_libraries()[0].namespace,
+        "@mesh/example-lib"
+    );
+    assert_eq!(graph.icon_requirements()[0].name, "example-action");
+    assert_eq!(graph.icon_pack_contributions()[0].id, "material");
+    assert_eq!(graph.contributed_fonts()[0].id, "inter");
+    assert_eq!(graph.contributed_i18n()[0].locale, "en");
+    assert_eq!(graph.contributed_themes()[0].id, "mesh-default");
+    assert_eq!(graph.frontend_entrypoints()[0].path, "src/main.mesh");
+}
+
+#[test]
 fn installed_module_graph_indexes_library_contributions() {
     let contributes = MeshContributes {
         libraries: vec![LibraryContribution {
