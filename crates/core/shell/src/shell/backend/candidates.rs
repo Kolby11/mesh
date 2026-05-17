@@ -13,16 +13,9 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph(
 ) {
     let mut statuses = backend_requirement_statuses(graph);
     let mut interface_names: Vec<String> = graph
-        .backend_modules()
+        .backend_provider_contributions()
         .into_iter()
-        .flat_map(|module| {
-            module
-                .manifest
-                .mesh
-                .implementations()
-                .map(|provided| provided.interface.clone())
-                .collect::<Vec<_>>()
-        })
+        .map(|provider| provider.interface.clone())
         .collect();
     interface_names.sort();
     interface_names.dedup();
@@ -65,19 +58,14 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph(
             continue;
         }
 
-        if !module
-            .manifest
-            .mesh
-            .implementations()
-            .any(|provided| provided.interface == interface)
-        {
+        if active_provider.interface != interface {
             statuses.push(BackendLifecycleStatusRecord {
                 interface: interface.clone(),
                 provider_id: Some(active_provider.module_id.clone()),
                 status: "invalid_manifest",
                 message: format!(
-                    "active provider {} does not declare interface {interface}",
-                    active_provider.module_id
+                    "active provider {} was indexed for {}, not {interface}",
+                    active_provider.module_id, active_provider.interface
                 ),
             });
             continue;
