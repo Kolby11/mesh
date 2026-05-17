@@ -53,10 +53,11 @@ that the old and new names are interchangeable.
 
 ### v1.1 Provider Selection
 
-The v1.1 backend provider behavior remains part of the canonical model.
-frontend modules depend on interface contracts, backend modules contribute providers, and user configuration selects the active provider for each
-interface. Provider selection is configuration over modules that implement an
-interface, not a frontend dependency on a backend module.
+The v1.1 backend provider behavior remains part of the canonical model. The
+rule is: frontend modules depend on interface contracts, backend modules
+contribute providers, and user configuration selects the active provider for
+each interface. Provider selection is configuration over modules that implement
+an interface, not a frontend dependency on a backend module.
 
 When the selected provider is missing, disabled, or unhealthy, diagnostics
 should name the interface, active provider module id, and field path that
@@ -86,3 +87,23 @@ authors toward extending a base interface when interoperability benefits.
 Consistency comes from typed registries, strict field names, validation,
 diagnostics, and author docs. Defaults have no privileged conceptual status;
 they are reference modules that use the same model third-party authors use.
+
+## Runtime Inventory
+
+| Location | Current term | Target term | Disposition | Follow-up phase | Behavior to preserve |
+| -------- | ------------ | ----------- | ----------- | --------------- | -------------------- |
+| `crates/core/extension/module/src/package/module_manifest.rs` | `ModulePackageManifest` | `ModuleManifest` | replace | Phase 38 | Parse and validate module manifests without losing v1.1 provider or v1.6 keybind data. |
+| `crates/core/extension/module/src/package/module_manifest.rs` | `RootPackageManifest` | `RootModuleManifest` or installed module graph manifest | replace | Phase 38 | Keep root enabled-module graph, active providers, and layout entrypoint selection. |
+| `crates/core/extension/module/src/manifest/model.rs` | `PackageSection` | `ModuleSection` | replace | Phase 38 | Preserve normalized identity, version, module kind, API version, and metadata. |
+| `crates/core/extension/module/src/package/*.rs` | `PackageManifestError` | `ModuleManifestError` | replace | Phase 38 | Keep actionable validation, JSON, and IO diagnostics with module id and field path where available. |
+| author docs and shipped manifests | `package.json` | `module.json` | internal-only migration | Phase 38 | Load old shipped artifacts only as an internal migration path until they are migrated. |
+| author docs and future manifests | `module.json` | `module.json` | already canonical | Phase 38 | Make this the author-facing manifest name for new examples and diagnostics. |
+| historical manifest risk | `plugin.json` | none | remove | Phase 40 | Do not present plugin naming as supported vocabulary. |
+| legacy provider declarations | `provides` | `implements` or `contributes.providers` | internal-only migration | Phase 38 and Phase 39 | Preserve backend provider declarations while diagnostics guide authors to canonical fields. |
+| module manifests | `implements` | `implements` | already canonical | Phase 38 and Phase 39 | Keep backend provider declarations tied to named interface contracts. |
+| `crates/core/extension/service/src/interface.rs` | `InterfaceRegistry` | `InterfaceRegistry` | already canonical | Phase 39 | Keep generic interface/provider registration and resolution without service-specific Rust branches. |
+| `crates/core/extension/module/src/package/installed_graph.rs` | `BackendProviderNode` | `ProviderContributionNode` or `InterfaceProviderNode` | replace | Phase 39 | Preserve active-provider validation and provider ordering by interface. |
+| `crates/core/extension/module/src/package/installed_graph.rs` | `ModuleContributionIndex` | `ModuleContributionIndex` | already canonical | Phase 39 | Preserve typed indexing for layout, themes, icons, fonts, i18n, libraries, settings, interfaces, and providers. |
+| v1.6 keybind manifest data | `localized_triggers` | keybind contribution metadata | already canonical | Phase 40 | Preserve locale-specific default trigger resolution and user override precedence. |
+| v1.6 compatibility settings | `settings.keyboard.shortcuts` | keybind contributions plus settings overrides | internal-only migration | Phase 40 | Preserve existing shortcuts as migration input to the contribution model. |
+| `config/package.json` | root package manifest file | root module graph manifest | internal-only migration | Phase 38 | Preserve active module graph, active providers, enabled flags, paths, and layout entrypoint. |
