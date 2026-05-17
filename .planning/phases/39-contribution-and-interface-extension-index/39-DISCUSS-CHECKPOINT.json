@@ -1,0 +1,70 @@
+{
+  "phase": "39",
+  "phase_name": "Contribution and Interface Extension Index",
+  "timestamp": "2026-05-17T21:16:59+02:00",
+  "areas_completed": ["Contribution Index Shape"],
+  "areas_remaining": [
+    "Interface Relationships",
+    "Provider/Dependency/Capability Split",
+    "Resource And Settings Resolution"
+  ],
+  "decisions": {
+    "Contribution Index Shape": [
+      {
+        "question": "How should phase 39 shape the installed contribution index?",
+        "answer": "Strict typed registries",
+        "options_presented": [
+          "Strict typed registries",
+          "Unified contribution list",
+          "Hybrid",
+          "Other"
+        ]
+      },
+      {
+        "question": "For typed registries, what should each contribution record carry as its common metadata?",
+        "answer": "Source-rich records",
+        "options_presented": [
+          "Source-rich records",
+          "Minimal runtime records",
+          "Split runtime + diagnostic metadata",
+          "Other"
+        ]
+      },
+      {
+        "question": "How should typed contribution ids work inside the installed graph?",
+        "answer": "Scoped ids",
+        "options_presented": [
+          "Scoped ids",
+          "Globally unique manifest ids",
+          "Kind-specific ids",
+          "Other"
+        ]
+      },
+      {
+        "question": "Should phase 39 index only enabled modules, or also disabled installed modules?",
+        "answer": "Enabled only for runtime, disabled in catalog metadata",
+        "options_presented": [
+          "Enabled only for runtime, disabled in catalog metadata",
+          "Index enabled and disabled together",
+          "Enabled only",
+          "Other"
+        ]
+      }
+    ]
+  },
+  "deferred_ideas": [],
+  "canonical_refs": [
+    ".planning/PROJECT.md",
+    ".planning/REQUIREMENTS.md",
+    ".planning/ROADMAP.md",
+    ".planning/STATE.md",
+    ".planning/phases/37-concept-inventory-and-vocabulary-lock/37-CONTEXT.md",
+    ".planning/phases/38-canonical-manifest-normalization/38-CONTEXT.md",
+    ".planning/todos/pending/2026-05-15-define-module-install-requirement-resolution.md",
+    "docs/module-vocabulary.md",
+    "docs/module-system.md",
+    "crates/core/extension/module/src/package/installed_graph.rs",
+    "crates/core/extension/module/src/package/module_manifest.rs",
+    "crates/core/extension/service/src/interface.rs"
+  ]
+}
