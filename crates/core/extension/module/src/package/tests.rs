@@ -183,6 +183,77 @@ fn module_package_manifest_parses_interface_relationship_metadata() {
     );
 }
 
+fn interface_relationship_manifest(relationship: Option<&str>, extends: Option<&str>) -> String {
+    let relationship_json = relationship
+        .map(|relationship| format!(r#","relationship":"{relationship}""#))
+        .unwrap_or_default();
+    let extends_json = extends
+        .map(|extends| format!(r#","extends":"{extends}""#))
+        .unwrap_or_default();
+    format!(
+        r#"{{
+  "name": "@alice/example-interface",
+  "version": "1.0.0",
+  "mesh": {{
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {{
+      "name": "alice.example",
+      "version": "1.0",
+      "file": "interface.toml",
+      "domain": "example"{extends_json}{relationship_json}
+    }}
+  }}
+}}"#
+    )
+}
+
+#[test]
+fn interface_relationship_extension_requires_extends() {
+    let err =
+        ModuleManifest::from_json_str(&interface_relationship_manifest(Some("extension"), None))
+            .unwrap_err();
+    let message = err.to_string();
+    assert!(message.contains("mesh.interface.relationship"));
+    assert!(message.contains("mesh.interface.extends"));
+}
+
+#[test]
+fn interface_relationship_base_rejects_extends() {
+    let err = ModuleManifest::from_json_str(&interface_relationship_manifest(
+        Some("base"),
+        Some("mesh.example"),
+    ))
+    .unwrap_err();
+    let message = err.to_string();
+    assert!(message.contains("mesh.interface.relationship"));
+    assert!(message.contains("mesh.interface.extends"));
+}
+
+#[test]
+fn interface_relationship_independent_rejects_extends() {
+    let err = ModuleManifest::from_json_str(&interface_relationship_manifest(
+        Some("independent"),
+        Some("mesh.example"),
+    ))
+    .unwrap_err();
+    let message = err.to_string();
+    assert!(message.contains("mesh.interface.relationship"));
+    assert!(message.contains("mesh.interface.extends"));
+}
+
+#[test]
+fn interface_relationship_infers_extension_from_extends() {
+    let manifest =
+        ModuleManifest::from_json_str(&interface_relationship_manifest(None, Some("mesh.example")))
+            .unwrap();
+    let interface = manifest.mesh.interface.unwrap();
+    assert_eq!(
+        interface.effective_relationship(),
+        InterfaceRelationship::Extension
+    );
+}
+
 #[test]
 fn module_package_manifest_rejects_empty_git_origin_url() {
     let content = r#"

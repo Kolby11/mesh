@@ -658,6 +658,25 @@ impl MeshInterfaceDeclaration {
                 "mesh.interface.extends cannot be empty".into(),
             ));
         }
+        match (self.relationship, self.extends.as_ref()) {
+            (Some(InterfaceRelationship::Extension), None) => {
+                return Err(ModuleManifestError::Validation(
+                    "mesh.interface.relationship extension requires mesh.interface.extends".into(),
+                ));
+            }
+            (Some(InterfaceRelationship::Base), Some(_)) => {
+                return Err(ModuleManifestError::Validation(
+                    "mesh.interface.relationship base cannot set mesh.interface.extends".into(),
+                ));
+            }
+            (Some(InterfaceRelationship::Independent), Some(_)) => {
+                return Err(ModuleManifestError::Validation(
+                    "mesh.interface.relationship independent cannot set mesh.interface.extends"
+                        .into(),
+                ));
+            }
+            _ => {}
+        }
         Ok(())
     }
 
