@@ -107,18 +107,20 @@ impl InstalledModuleGraph {
                     interface_declarations.insert(declaration.name.clone(), declaration);
                 }
 
-                for provided in node.manifest.mesh.implementations() {
-                    let provider = BackendProviderNode {
-                        module_id: module_id.clone(),
-                        interface: provided.interface.clone(),
-                        provider: provided.provider.clone(),
-                        label: provided.label.clone(),
-                        priority: provided.priority,
-                    };
-                    backend_providers
-                        .entry(provided.interface.clone())
-                        .or_default()
-                        .push(provider);
+                if entry.kind == ModuleKind::Backend {
+                    for provided in node.manifest.mesh.implementations() {
+                        let provider = BackendProviderNode {
+                            module_id: module_id.clone(),
+                            interface: provided.interface.clone(),
+                            provider: provided.provider.clone(),
+                            label: provided.label.clone(),
+                            priority: provided.priority,
+                        };
+                        backend_providers
+                            .entry(provided.interface.clone())
+                            .or_default()
+                            .push(provider);
+                    }
                 }
 
                 contributions.index_module(module_id, &node.manifest)?;

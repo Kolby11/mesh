@@ -693,6 +693,87 @@ fn installed_module_graph_exposes_frontend_backend_requirements() {
 }
 
 #[test]
+fn installed_module_graph_keeps_provider_interface_and_frontend_requirements_separate() {
+    let mut deps = MeshDependencies::default();
+    deps.backend.insert("mesh.example".into(), ">=1.0.0".into());
+
+    let mut interface = interface_module(
+        "@mesh/example-interface",
+        "mesh.example",
+        "example",
+        InterfaceRelationship::Base,
+        None,
+    );
+    interface
+        .manifest
+        .mesh
+        .provides
+        .push(MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: None,
+            base_module: None,
+            provider: Some("interface-owned-provider".into()),
+            label: None,
+            priority: 200,
+        });
+
+    let modules = vec![
+        loaded_module(
+            "@mesh/example-widget",
+            ModuleKind::Frontend,
+            deps,
+            vec![],
+            MeshContributes::default(),
+        ),
+        loaded_module(
+            "@mesh/example-backend",
+            ModuleKind::Backend,
+            MeshDependencies::default(),
+            vec![MeshProvidesDeclaration {
+                interface: "mesh.example".into(),
+                version: None,
+                base_module: Some("@mesh/example-interface".into()),
+                provider: Some("example".into()),
+                label: Some("Example".into()),
+                priority: 100,
+            }],
+            MeshContributes::default(),
+        ),
+        interface,
+    ];
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-widget", ModuleKind::Frontend),
+            ("@mesh/example-backend", ModuleKind::Backend),
+            ("@mesh/example-interface", ModuleKind::Interface),
+        ],
+        &[("mesh.example", "@mesh/example-backend")],
+        None,
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, modules).unwrap();
+    assert!(graph.declared_interface("mesh.example").is_some());
+
+    let providers = graph.backend_providers_for_interface("mesh.example");
+    assert_eq!(providers.len(), 1);
+    assert_eq!(providers[0].module_id, "@mesh/example-backend");
+    assert_eq!(providers[0].provider.as_deref(), Some("example"));
+
+    let requirements = graph
+        .requirements_for_frontend("@mesh/example-widget")
+        .unwrap();
+    assert_eq!(
+        requirements.backend.get("mesh.example").map(String::as_str),
+        Some(">=1.0.0")
+    );
+    assert!(
+        graph
+            .requirements_for_frontend("@mesh/example-backend")
+            .is_none()
+    );
+}
+
+#[test]
 fn installed_module_graph_keeps_multiple_audio_providers() {
     let root = root_with_modules(
         &[
