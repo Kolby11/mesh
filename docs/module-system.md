@@ -3,19 +3,23 @@
 MESH modules should feel easy to author without letting the ecosystem turn
 into one-off backend/frontend pairs. The core rule is:
 
-> A module is a package. An interface is the contract. A provider implements
-> the contract. A frontend consumes the contract. Shared Luau libraries hold
-> reusable implementation patterns.
+> A module is the installable MESH unit. An interface is the contract. A
+> provider implements the contract. A frontend consumes the contract. Shared
+> Luau libraries hold reusable implementation patterns.
 
 This gives users one workflow whether they are building UI, a backend service,
 a theme, an icon pack, or a shared library.
 
+Canonical vocabulary lives in [MESH Module Vocabulary](module-vocabulary.md).
+`module.json` is the canonical author-facing manifest name. `package.json` is
+an old term listed in the vocabulary inventory, and any temporary loader for it
+is an internal-only migration path rather than public author vocabulary.
+
 ## Principles
 
-1. **One package model.** Every installable thing is a module with
-   `package.json` and a `mesh` section. Legacy `package.json`, `package.json`,
-   and `mesh.toml` can remain loaders during migration, but new docs and
-   examples should use `package.json`.
+1. **One module model.** Every installable thing is a module with
+   `module.json`. Temporary loaders for old manifest names are internal-only
+   migration paths, but new docs and examples use `module.json`.
 2. **Interfaces are data, not code.** Service APIs live in interface modules
    such as `@mesh/audio-interface`. The Rust core validates and routes calls;
    it does not know audio, network, power, or media behavior.
@@ -31,14 +35,14 @@ a theme, an icon pack, or a shared library.
    themselves. The module using a library must still request the capabilities
    needed by its calls.
 
-## Package Shape
+## Module Manifest Shape
 
-Use `package.json` for every new module:
+Use `module.json` for every new module:
 
-`package.json` is intentionally npm-compatible. Top-level fields should remain
-normal package fields such as `name`, `version`, `description`, `private`,
-`license`, and `repository`. All MESH-specific fields must live under `mesh`.
-This avoids editor warnings from the standard npm schema:
+`module.json` is the author-facing manifest. Top-level fields should identify
+the module and its release metadata, such as `name`, `version`, `description`,
+`private`, `license`, and `repository`. All MESH-specific fields live under
+`mesh`.
 
 - Do not use top-level `type` for module kind; use `mesh.kind`.
 - Do not use top-level `id`; use npm's top-level `name`.
@@ -47,8 +51,8 @@ This avoids editor warnings from the standard npm schema:
 - Do not put capabilities, providers, entrypoints, settings, themes, or binary
   requirements at the top level.
 
-npm, pnpm, Yarn, or Bun can be used as development/distribution tooling around
-these files. They are not the authority for MESH behavior. MESH reads the
+Package managers can be used as development/distribution tooling around these
+files. They are not the authority for MESH behavior. MESH reads the
 `mesh` section, validates capabilities and native requirements, resolves
 interface providers, and decides which modules are enabled.
 
@@ -162,14 +166,14 @@ Recommended layout:
 
 ```text
 @mesh/audio-interface/
-  package.json
+  module.json
   interface.toml
   settings.schema.json
   lib/
     audio_types.luau
 ```
 
-Recommended `package.json`:
+Recommended `module.json`:
 
 ```json
 {

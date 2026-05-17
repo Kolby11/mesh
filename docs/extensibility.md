@@ -3,18 +3,15 @@
 MESH's first priority is **full extensibility**. The shell ships with default
 backends and frontends so it works out of the box, but nothing in the default
 set is privileged: any user, distribution, or third-party author can replace
-*or extend* it — including defining entirely new service categories.
+*or extend* it, including defining entirely new interface domains.
 
 This document describes the dynamic interface registration model that makes
 that possible. It supersedes the static, compile-time trait list implied by
 earlier drafts of `spec/pluggable-backend.md`.
 
-> **Terminology note.** Earlier docs and the `mesh-core-service` crate used the
-> word *trait* for what this document calls an **interface**. Interfaces are
-> data (a contract package declares them); the `mesh-core-service` crate is being
-> repositioned to host the registry, proc-macro, and runtime plumbing rather
-> than a fixed list of compiled traits. Both terms may still appear in the
-> code — treat them as synonyms during the transition.
+Canonical vocabulary lives in [MESH Module Vocabulary](module-vocabulary.md).
+Old `trait` wording is removed from public vocabulary; interface is the only canonical term. Runtime or crate names that still contain the old word are
+replacement debt, not author-facing synonyms.
 
 The shell core starts with an empty service registry. Default interfaces and
 providers are discovered from modules on disk under the `modules/` tree, so
@@ -69,9 +66,9 @@ interface (e.g. `shell.toggle-quick-settings`, `theme.changed`) are unowned:
 any module with the right capability can publish. Both are the same
 primitive; ownership is the only thing that differs.
 
-Interfaces live in **contract packages** — distributable units with
-`type = "interface"` that contain only the declaration file. Both the backend
-and the frontend declare a dependency on the contract.
+Interfaces live in **interface modules**: distributable modules with
+`kind = "interface"` that contain the declaration file. Both the backend and
+the frontend declare a dependency on the interface module.
 
 > **On the schema grammar.** The TOML snippets below are illustrative
 > pseudo-schema. The authoritative grammar for interface declarations is
