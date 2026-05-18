@@ -355,7 +355,19 @@ fn module_manifest_loader_rejects_ambiguous_module_and_package_json() {
     )
     .unwrap();
     let err = load_module_manifest(&dir).unwrap_err();
-    assert!(err.to_string().contains("ambiguous module manifest"));
+    let ModuleManifestError::Diagnostic { diagnostic } = err else {
+        panic!("expected diagnostic error for ambiguous manifest files");
+    };
+    assert_eq!(diagnostic.severity, ModuleManifestDiagnosticSeverity::Error);
+    assert!(
+        diagnostic
+            .message
+            .contains("ambiguous module manifest files found")
+    );
+    assert_eq!(
+        diagnostic.suggested_action,
+        "keep canonical module.json and remove the old manifest file"
+    );
 }
 
 #[test]
@@ -384,6 +396,10 @@ fn module_manifest_loader_accepts_legacy_package_json_with_replacement_warning()
     assert_eq!(loaded.source, ModuleManifestSource::LegacyPackageJson);
     assert_eq!(loaded.manifest.name, "@mesh/package");
     assert_eq!(
+        loaded.diagnostics[0].severity,
+        ModuleManifestDiagnosticSeverity::Warning
+    );
+    assert_eq!(
         loaded.diagnostics[0].suggested_action,
         "replace package.json with module.json"
     );
@@ -394,7 +410,18 @@ fn module_manifest_loader_rejects_plugin_json() {
     let dir = temp_dir("plugin-json");
     fs::write(dir.join("plugin.json"), r#"{}"#).unwrap();
     let err = load_module_manifest(&dir).unwrap_err();
-    assert!(err.to_string().contains("remove plugin.json"));
+    let ModuleManifestError::Diagnostic { diagnostic } = err else {
+        panic!("expected diagnostic error for plugin.json");
+    };
+    assert_eq!(diagnostic.severity, ModuleManifestDiagnosticSeverity::Error);
+    assert_eq!(
+        diagnostic.message,
+        "plugin.json is not a supported MESH module manifest"
+    );
+    assert_eq!(
+        diagnostic.suggested_action,
+        "remove plugin.json or replace it with module.json"
+    );
 }
 
 #[test]
@@ -409,8 +436,39 @@ fn module_manifest_loader_accepts_legacy_module_json() {
     assert_eq!(loaded.source, ModuleManifestSource::LegacyModuleJson);
     assert_eq!(loaded.manifest.name, "@mesh/module");
     assert_eq!(
+        loaded.diagnostics[0].severity,
+        ModuleManifestDiagnosticSeverity::Warning
+    );
+    assert_eq!(
         loaded.diagnostics[0].suggested_action,
         "replace legacy module.json fields with name/version/mesh"
+    );
+}
+
+#[test]
+fn module_manifest_loader_accepts_legacy_mesh_toml_with_replacement_warning() {
+    let dir = temp_dir("legacy-mesh-toml");
+    fs::write(
+        dir.join("mesh.toml"),
+        r#"
+[package]
+id = "@mesh/toml-module"
+version = "0.1.0"
+type = "surface"
+api_version = "0.1"
+"#,
+    )
+    .unwrap();
+    let loaded = load_module_manifest(&dir).unwrap();
+    assert_eq!(loaded.source, ModuleManifestSource::LegacyMeshToml);
+    assert_eq!(loaded.manifest.name, "@mesh/toml-module");
+    assert_eq!(
+        loaded.diagnostics[0].severity,
+        ModuleManifestDiagnosticSeverity::Warning
+    );
+    assert_eq!(
+        loaded.diagnostics[0].suggested_action,
+        "replace mesh.toml with module.json"
     );
 }
 
