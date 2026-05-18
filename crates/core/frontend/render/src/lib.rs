@@ -1,4 +1,5 @@
 pub mod display_list;
+pub mod proof;
 pub mod render_object;
 pub mod surface;
 
@@ -6,6 +7,11 @@ pub use display_list::{
     DamageRect, DisplayBatchBarrierCounts, DisplayListClip, DisplayListMetrics,
     DisplayListRepaintPolicy, DisplayPaintCommand, DisplayPaintCommandKind, RetainedDisplayList,
     SelectedDisplayListPaint,
+};
+pub use proof::{
+    FocusedAccessKitUpdate, FocusedAccessibilityEvidence, FocusedDirtyEvidence,
+    FocusedProofDiagnostic, FocusedProofNode, FocusedProofSnapshot, build_accesskit_update,
+    build_focused_proof_snapshot,
 };
 pub use render_object::{RenderObjectDirtySummary, RenderObjectTree};
 pub use surface::{
