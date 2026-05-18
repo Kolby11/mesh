@@ -5,9 +5,24 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+renderer-taffy = ["dep:taffy"]
+renderer-parley = ["dep:parley"]
+renderer-accesskit = ["dep:accesskit"]
+renderer-anyrender = ["dep:anyrender"]
+renderer-vello-encoding = ["dep:vello_encoding"]
+renderer-libraries = ["renderer-taffy", "renderer-parley", "renderer-accesskit", "renderer-anyrender", "renderer-vello-encoding"]
+
 [dependencies]
 mesh-core-icon = { workspace = true }
 mesh-core-elements = { workspace = true }
+
+taffy = { workspace = true, optional = true }
+parley = { workspace = true, optional = true }
+accesskit = { workspace = true, optional = true }
+anyrender = { workspace = true, optional = true }
+vello_encoding = { workspace = true, optional = true }
 
 cosmic-text = "0.18"
 fontdb = "0.23"
