@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Rendering Engine Architecture
 status: ready_to_plan
-stopped_at: Phase 45 ready to plan
-last_updated: "2026-05-18T16:08:00+02:00"
-last_activity: 2026-05-18 -- Phase 44 execution complete
+stopped_at: Phase 45 context gathered; ready to plan
+last_updated: "2026-05-18T16:28:38+02:00"
+last_activity: 2026-05-18 -- Phase 45 discussion complete
 progress:
   total_phases: 4
   completed_phases: 3
@@ -28,7 +28,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-18)
 Phase: 45
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-05-18 -- Phase 44 execution complete
+Last activity: 2026-05-18 -- Phase 45 discussion complete
 
 ## Decisions
 
@@ -114,6 +114,10 @@ Last activity: 2026-05-18 -- Phase 44 execution complete
 - [v1.7]: Modularity consolidation should preserve existing backend provider and keybind declaration behavior while aligning manifests, contributions, capabilities, diagnostics, and author docs around one canonical model.
 - [Phase 38]: Canonical `module.json` is the runtime manifest target for both checked-in modules and the root module graph at `config/module.json`.
 - [Phase 38]: Old manifest files and public package names are replacement debt only; runtime handling is limited to explicit internal migration diagnostics, not compatibility aliases.
+- [v1.8 Phase 42]: Direct Blitz adoption remains blocked by Wayland shell model fit, browser-engine-level overhead concerns, and later high-level crate compile evidence; MESH-owned focused-crate adoption is the selected path.
+- [v1.8 Phase 43]: MESH-owned focused-crate proof evidence advanced to production proof because it preserves retained node identity across layout, text, paint, interaction, and accessibility.
+- [v1.8 Phase 44]: Focused proof integration is adapter-owned behind existing renderer and shell ownership; MESH retained identity, typed invalidation, damage/profiling, diagnostics, selection, and AccessKit-compatible boundaries remain authoritative.
+- [v1.8 Phase 45]: Renderer migration should proceed through phased reversible adapter expansion with explicit author-contract, ownership-classification, build/CI/release, and rollback gates before broad adoption.
 
 ## Performance Metrics
 
@@ -156,9 +160,9 @@ Last activity: 2026-05-18 -- Phase 44 execution complete
 
 ## Session
 
-Last session: 2026-05-18T13:51:50.142Z
-Stopped At: Phase 44 planned
-Resume File: .planning/phases/44-selected-renderer-proof-integration/44-01-PLAN.md
+Last session: 2026-05-18T16:28:38+02:00
+Stopped At: Phase 45 context gathered; ready to plan
+Resume File: .planning/phases/45-renderer-migration-plan-and-author-contract/45-CONTEXT.md
 
 ## Accumulated Context
 
