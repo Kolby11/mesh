@@ -103,24 +103,25 @@ Use the shipped audio/navigation path as the authoring model:
 2. Make the UI a frontend module. `@mesh/navigation-bar` declares
    `mesh.kind: "frontend"`, contributes its `main` layout entrypoint, and
    declares `mesh.keybinds.mute` plus icon requirements.
-3. Depend on an interface contract, not a backend module ID. The navigation
+3. For frontend modules, renderer migration expectations live in [the .mesh renderer contract](frontend/renderer-contract.md); module authors should not depend on proof snapshots, candidate renderer crates, or browser DOM behavior.
+4. Depend on an interface contract, not a backend module ID. The navigation
    volume control imports `mesh.audio@>=1.0`; it does not import
    `@mesh/pipewire-audio` or `@mesh/pulseaudio-audio`.
-4. Define the contract in an interface module. `@mesh/audio-interface`
+5. Define the contract in an interface module. `@mesh/audio-interface`
    declares `mesh.audio`, its contract file, domain metadata, shared settings,
    and any reusable contract libraries.
-5. Implement the contract with backend providers. `@mesh/pipewire-audio` and
+6. Implement the contract with backend providers. `@mesh/pipewire-audio` and
    `@mesh/pulseaudio-audio` declare `mesh.kind: "backend"` and
    `mesh.implements` records for `mesh.audio`, each with provider metadata and
    native binary requirements.
-6. Select active providers in the root graph. `config/module.json` enables the
+7. Select active providers in the root graph. `config/module.json` enables the
    shipped modules, keeps both audio providers available, and selects
    `@mesh/pipewire-audio` as the active `mesh.audio` provider.
-7. Put layout, settings, keybinds, icons, and resources in contributions or
+8. Put layout, settings, keybinds, icons, and resources in contributions or
    requirements. The installed graph preserves those records so the shell can
    apply user overrides and validate module gaps without re-reading arbitrary
    source files.
-8. Treat diagnostics as part of the workflow. Missing providers, missing icon
+9. Treat diagnostics as part of the workflow. Missing providers, missing icon
    requirements, unresolved resources, settings schema gaps, and ambiguous
    legacy manifests should be reported as diagnostics with a concrete author
    action.

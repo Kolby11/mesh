@@ -6,6 +6,10 @@ The syntax described here is the current MESH UI authoring model. Historical
 HTML compatibility tags have been removed in favor of shell-specific
 primitives.
 
+## Renderer Contract
+
+Renderer migration rules for plugin-authored UI live in [the .mesh renderer contract](renderer-contract.md).
+
 ## File structure
 
 ```xml

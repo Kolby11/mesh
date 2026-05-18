@@ -30,6 +30,21 @@ The current ownership map is in `docs/renderer-ownership.md`. Public author beha
 
 ## Not Promised
 
+- `.mesh is not HTML/CSS in a browser engine.`
+- `Blitz is not the production authoring model.`
+- `Winit is not replacing Wayland shell ownership.`
+- `Arbitrary DOM/web platform behavior is not promised.`
+- `Renderer proof snapshots are migration evidence, not an author API.`
+
 ## Diagnostics And Verification
 
+- `NodeId retained identity remains a shell/runtime concern.`
+- `typed invalidation remains visible through migration gates.`
+- `damage, profiling, diagnostics, and debug payloads remain promotion gates.`
+- `AccessKit-compatible retained-node updates are the accessibility migration direction.`
+
 ## Deferred Work
+
+- `Audio Popover Transition Delay Polish remains deferred and is not part of renderer migration planning.`
+- `Define Module Install Requirement Resolution remains a separate module-system task.`
+- `Blitz crate dependency research is already captured by Phase 42 and Phase 43.`
