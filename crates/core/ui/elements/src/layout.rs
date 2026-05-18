@@ -3,13 +3,16 @@
 /// Computes `LayoutRect` for every node in a widget tree. Supports row/column
 /// direction, flex-grow/shrink, gap, padding, and margin.
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 
 use crate::style::{
     AlignItems, AlignSelf, Dimension, Display, Edges, FlexDirection, JustifyContent, Overflow,
     Position, TextDirection,
 };
 use crate::tree::{NodeId, WidgetNode};
+use taffy::TaffyTree;
+use taffy::geometry::{Point as TaffyPoint, Rect as TaffyRect, Size as TaffySize};
+use taffy::prelude::{AvailableSpace as TaffyAvailableSpace, NodeId as TaffyNodeId};
+use taffy::style as taffy_style;
 
 /// Trait for measuring text dimensions. Implemented outside `mesh-core-elements` (in the
 /// shell render stack) and injected so the layout engine can shrink-wrap text
@@ -74,180 +77,7 @@ fn record_taffy_diagnostic(
 }
 
 #[derive(Debug, Default)]
-pub struct IntrinsicLayoutCache {
-    generation: u64,
-    entries: HashMap<IntrinsicLayoutKey, IntrinsicLayoutEntry>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct IntrinsicLayoutKey {
-    node_id: NodeId,
-    subtree_signature: u64,
-    available_width_bits: u32,
-    available_height_bits: u32,
-    text_measurement_enabled: bool,
-    override_root_width_auto: bool,
-    override_root_height_auto: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct IntrinsicLayoutEntry {
-    layout: LayoutRect,
-    last_used_generation: u64,
-}
-
-impl IntrinsicLayoutCache {
-    fn begin_pass(&mut self) -> u64 {
-        self.generation = self.generation.saturating_add(1).max(1);
-        self.generation
-    }
-
-    fn get(&mut self, key: IntrinsicLayoutKey, generation: u64) -> Option<LayoutRect> {
-        let entry = self.entries.get_mut(&key)?;
-        entry.last_used_generation = generation;
-        Some(entry.layout)
-    }
-
-    fn insert(&mut self, key: IntrinsicLayoutKey, layout: LayoutRect, generation: u64) {
-        self.entries.insert(
-            key,
-            IntrinsicLayoutEntry {
-                layout,
-                last_used_generation: generation,
-            },
-        );
-    }
-
-    fn finish_pass(&mut self, generation: u64) {
-        self.entries
-            .retain(|_, entry| entry.last_used_generation == generation);
-    }
-}
-
-struct LayoutContext<'a> {
-    measurer: Option<&'a dyn TextMeasurer>,
-    intrinsic_cache: Option<&'a mut IntrinsicLayoutCache>,
-    cache_generation: u64,
-    signature_cache: HashMap<NodeId, u64>,
-}
-
-impl<'a> LayoutContext<'a> {
-    fn new(
-        measurer: Option<&'a dyn TextMeasurer>,
-        intrinsic_cache: Option<&'a mut IntrinsicLayoutCache>,
-    ) -> Self {
-        let mut intrinsic_cache = intrinsic_cache;
-        let cache_generation = intrinsic_cache
-            .as_mut()
-            .map(|cache| cache.begin_pass())
-            .unwrap_or_default();
-        Self {
-            measurer,
-            intrinsic_cache,
-            cache_generation,
-            signature_cache: HashMap::new(),
-        }
-    }
-
-    fn finish_pass(&mut self) {
-        if let Some(cache) = self.intrinsic_cache.as_mut() {
-            cache.finish_pass(self.cache_generation);
-        }
-    }
-
-    fn measure_intrinsic_layout(
-        &mut self,
-        node: &WidgetNode,
-        available_w: f32,
-        available_h: f32,
-        override_root_width_auto: bool,
-        override_root_height_auto: bool,
-    ) -> LayoutRect {
-        let key = if self.intrinsic_cache.is_some() {
-            Some(IntrinsicLayoutKey {
-                node_id: node.id,
-                subtree_signature: self.intrinsic_signature(node),
-                available_width_bits: available_w.to_bits(),
-                available_height_bits: available_h.to_bits(),
-                text_measurement_enabled: self.measurer.is_some(),
-                override_root_width_auto,
-                override_root_height_auto,
-            })
-        } else {
-            None
-        };
-        if let Some(key) = key
-            && let Some(layout) = self
-                .intrinsic_cache
-                .as_mut()
-                .and_then(|cache| cache.get(key, self.cache_generation))
-        {
-            return layout;
-        }
-
-        let mut probe = node.clone();
-        if override_root_width_auto {
-            probe.computed_style.width = Dimension::Auto;
-        }
-        if override_root_height_auto {
-            probe.computed_style.height = Dimension::Auto;
-        }
-        layout_node(&mut probe, 0.0, 0.0, available_w, available_h, self);
-        let layout = probe.layout;
-        if let Some(key) = key
-            && let Some(cache) = self.intrinsic_cache.as_mut()
-        {
-            cache.insert(key, layout, self.cache_generation);
-        }
-        layout
-    }
-
-    fn intrinsic_signature(&mut self, node: &WidgetNode) -> u64 {
-        if let Some(signature) = self.signature_cache.get(&node.id) {
-            return *signature;
-        }
-
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        node.tag.hash(&mut hasher);
-        node.attributes.get("content").hash(&mut hasher);
-        hash_dimension(node.computed_style.width, &mut hasher);
-        hash_dimension(node.computed_style.height, &mut hasher);
-        hash_dimension(node.computed_style.flex_basis, &mut hasher);
-        hash_option_f32(node.computed_style.min_width, &mut hasher);
-        hash_option_f32(node.computed_style.max_width, &mut hasher);
-        hash_option_f32(node.computed_style.min_height, &mut hasher);
-        hash_option_f32(node.computed_style.max_height, &mut hasher);
-        hash_edges(node.computed_style.padding, &mut hasher);
-        hash_edges(node.computed_style.margin, &mut hasher);
-        hash_enum(node.computed_style.display, &mut hasher);
-        hash_enum(node.computed_style.direction, &mut hasher);
-        hash_enum(node.computed_style.justify_content, &mut hasher);
-        hash_enum(node.computed_style.align_items, &mut hasher);
-        hash_enum(node.computed_style.align_self, &mut hasher);
-        hash_enum(node.computed_style.position, &mut hasher);
-        hash_enum(node.computed_style.overflow_x, &mut hasher);
-        hash_enum(node.computed_style.overflow_y, &mut hasher);
-        hash_enum(node.computed_style.text_direction, &mut hasher);
-        node.computed_style.gap.to_bits().hash(&mut hasher);
-        node.computed_style.flex_grow.to_bits().hash(&mut hasher);
-        node.computed_style.flex_shrink.to_bits().hash(&mut hasher);
-        node.computed_style.font_family.hash(&mut hasher);
-        node.computed_style.font_size.to_bits().hash(&mut hasher);
-        node.computed_style.font_weight.hash(&mut hasher);
-        node.computed_style.line_height.to_bits().hash(&mut hasher);
-        hash_option_f32(node.computed_style.inset_top, &mut hasher);
-        hash_option_f32(node.computed_style.inset_right, &mut hasher);
-        hash_option_f32(node.computed_style.inset_bottom, &mut hasher);
-        hash_option_f32(node.computed_style.inset_left, &mut hasher);
-        for child in &node.children {
-            child.id.hash(&mut hasher);
-            self.intrinsic_signature(child).hash(&mut hasher);
-        }
-        let signature = hasher.finish();
-        self.signature_cache.insert(node.id, signature);
-        signature
-    }
-}
+pub struct IntrinsicLayoutCache;
 
 /// The layout engine. Stateless — call `compute` on a widget tree.
 pub struct LayoutEngine;
@@ -290,523 +120,381 @@ impl LayoutEngine {
         intrinsic_cache: &mut IntrinsicLayoutCache,
         measurer: Option<&dyn TextMeasurer>,
     ) {
-        let mut context = LayoutContext::new(measurer, Some(intrinsic_cache));
-        layout_node(
-            root,
-            0.0,
-            0.0,
-            available_width,
-            available_height,
-            &mut context,
-        );
-        context.finish_pass();
+        let _ = intrinsic_cache;
+        Self::compute_taffy_layout(root, available_width, available_height, measurer);
+    }
+
+    /// Compute layout through Taffy and write the resulting rectangles back onto
+    /// the stable MESH `WidgetNode` tree.
+    pub fn compute_taffy_layout(
+        root: &mut WidgetNode,
+        available_width: f32,
+        available_height: f32,
+        measurer: Option<&dyn TextMeasurer>,
+    ) {
+        let mut report = TaffyLayoutReport::default();
+        let mut tree = TaffyTree::<NodeId>::new();
+        let mut node_map = HashMap::new();
+        let mut text_nodes = HashMap::new();
+
+        match build_taffy_tree(root, &mut tree, &mut node_map, &mut text_nodes, &mut report) {
+            Ok(root_id) => {
+                let available_space = TaffySize {
+                    width: TaffyAvailableSpace::Definite(available_width),
+                    height: TaffyAvailableSpace::Definite(available_height),
+                };
+
+                if let Err(error) = tree.compute_layout_with_measure(
+                    root_id,
+                    available_space,
+                    |known_dimensions, available_space, _node_id, context, _style| {
+                        measure_taffy_node(
+                            known_dimensions,
+                            available_space,
+                            context.map(|node_id| *node_id),
+                            &text_nodes,
+                            measurer,
+                        )
+                    },
+                ) {
+                    tracing::warn!(
+                        target: "mesh::layout",
+                        error = %error,
+                        "taffy layout computation failed"
+                    );
+                    zero_layout_subtree(root);
+                } else {
+                    write_taffy_layout(root, &tree, &node_map);
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    target: "mesh::layout",
+                    error = %error,
+                    "taffy layout tree construction failed"
+                );
+                zero_layout_subtree(root);
+            }
+        }
+
+        for diagnostic in &report.diagnostics {
+            tracing::warn!(
+                target: "mesh::layout",
+                node_id = diagnostic.node_id,
+                tag = %diagnostic.tag,
+                reason = %diagnostic.reason,
+                "taffy layout diagnostic"
+            );
+        }
     }
 }
 
-fn layout_node(
-    node: &mut WidgetNode,
-    x: f32,
-    y: f32,
-    available_w: f32,
-    available_h: f32,
-    context: &mut LayoutContext<'_>,
-) {
-    if node.computed_style.display == Display::None {
-        node.layout = LayoutRect::default();
-        return;
-    }
+#[derive(Clone)]
+struct TextMeasureData {
+    content: String,
+    font_family: String,
+    font_size: f32,
+    font_weight: u16,
+    line_height: f32,
+}
 
+fn taffy_dimension(dimension: Dimension) -> taffy_style::Dimension {
+    match dimension {
+        Dimension::Auto => taffy_style::Dimension::auto(),
+        Dimension::Px(value) => taffy_style::Dimension::length(value),
+        Dimension::Percent(value) => taffy_style::Dimension::percent(value / 100.0),
+        Dimension::Content => taffy_style::Dimension::auto(),
+    }
+}
+
+fn taffy_length_percentage(value: Option<f32>) -> taffy_style::LengthPercentageAuto {
+    value
+        .map(taffy_style::LengthPercentageAuto::length)
+        .unwrap_or_else(taffy_style::LengthPercentageAuto::auto)
+}
+
+fn taffy_length(value: f32) -> taffy_style::LengthPercentage {
+    taffy_style::LengthPercentage::length(value)
+}
+
+fn taffy_style_for_node(node: &WidgetNode, report: &mut TaffyLayoutReport) -> taffy_style::Style {
     let style = &node.computed_style;
 
-    let padding = style.padding;
-    let margin = style.margin;
+    if matches!(style.width, Dimension::Content) || matches!(style.height, Dimension::Content) {
+        record_taffy_diagnostic(
+            report,
+            node,
+            "content dimension mapped through Taffy measurement",
+        );
+    }
 
-    // For text leaf nodes, measure intrinsic size if a measurer is available.
-    let text_dims: Option<(f32, f32)> = if let (true, Some(m)) = (
-        node.tag == "text" && node.children.is_empty(),
-        context.measurer,
-    ) {
-        let text = node
-            .attributes
-            .get("content")
-            .map(|s| s.as_str())
-            .unwrap_or("");
-        let avail_w = (available_w - margin.horizontal()).max(0.0);
-        let mw = match style.width {
-            Dimension::Content => None,
-            _ => Some(avail_w),
+    let mut taffy = taffy_style::Style {
+        display: match style.display {
+            Display::Flex => taffy_style::Display::Flex,
+            Display::None => taffy_style::Display::None,
+        },
+        direction: match style.text_direction {
+            TextDirection::Ltr => taffy_style::Direction::Ltr,
+            TextDirection::Rtl => taffy_style::Direction::Rtl,
+        },
+        overflow: TaffyPoint {
+            x: match style.overflow_x {
+                Overflow::Visible => taffy_style::Overflow::Visible,
+                Overflow::Hidden | Overflow::Auto => taffy_style::Overflow::Hidden,
+                Overflow::Scroll => taffy_style::Overflow::Scroll,
+            },
+            y: match style.overflow_y {
+                Overflow::Visible => taffy_style::Overflow::Visible,
+                Overflow::Hidden | Overflow::Auto => taffy_style::Overflow::Hidden,
+                Overflow::Scroll => taffy_style::Overflow::Scroll,
+            },
+        },
+        position: match style.position {
+            Position::Static | Position::Relative => taffy_style::Position::Relative,
+            Position::Absolute => taffy_style::Position::Absolute,
+        },
+        inset: TaffyRect {
+            left: taffy_length_percentage(style.inset_left),
+            right: taffy_length_percentage(style.inset_right),
+            top: taffy_length_percentage(style.inset_top),
+            bottom: taffy_length_percentage(style.inset_bottom),
+        },
+        size: TaffySize {
+            width: taffy_dimension(style.width),
+            height: taffy_dimension(style.height),
+        },
+        min_size: TaffySize {
+            width: style
+                .min_width
+                .map(taffy_style::Dimension::length)
+                .unwrap_or_else(taffy_style::Dimension::auto),
+            height: style
+                .min_height
+                .map(taffy_style::Dimension::length)
+                .unwrap_or_else(taffy_style::Dimension::auto),
+        },
+        max_size: TaffySize {
+            width: style
+                .max_width
+                .map(taffy_style::Dimension::length)
+                .unwrap_or_else(taffy_style::Dimension::auto),
+            height: style
+                .max_height
+                .map(taffy_style::Dimension::length)
+                .unwrap_or_else(taffy_style::Dimension::auto),
+        },
+        margin: TaffyRect {
+            left: taffy_style::LengthPercentageAuto::length(style.margin.left),
+            right: taffy_style::LengthPercentageAuto::length(style.margin.right),
+            top: taffy_style::LengthPercentageAuto::length(style.margin.top),
+            bottom: taffy_style::LengthPercentageAuto::length(style.margin.bottom),
+        },
+        padding: TaffyRect {
+            left: taffy_length(style.padding.left),
+            right: taffy_length(style.padding.right),
+            top: taffy_length(style.padding.top),
+            bottom: taffy_length(style.padding.bottom),
+        },
+        border: TaffyRect {
+            left: taffy_length(style.border_width.left),
+            right: taffy_length(style.border_width.right),
+            top: taffy_length(style.border_width.top),
+            bottom: taffy_length(style.border_width.bottom),
+        },
+        align_items: Some(match style.align_items {
+            AlignItems::Start => taffy_style::AlignItems::FlexStart,
+            AlignItems::End => taffy_style::AlignItems::FlexEnd,
+            AlignItems::Center => taffy_style::AlignItems::Center,
+            AlignItems::Stretch => taffy_style::AlignItems::Stretch,
+        }),
+        align_self: match style.align_self {
+            AlignSelf::Auto => None,
+            AlignSelf::Start => Some(taffy_style::AlignSelf::FlexStart),
+            AlignSelf::End => Some(taffy_style::AlignSelf::FlexEnd),
+            AlignSelf::Center => Some(taffy_style::AlignSelf::Center),
+            AlignSelf::Stretch => Some(taffy_style::AlignSelf::Stretch),
+            AlignSelf::Baseline => Some(taffy_style::AlignSelf::Baseline),
+        },
+        justify_content: Some(match style.justify_content {
+            JustifyContent::Start => taffy_style::JustifyContent::FlexStart,
+            JustifyContent::End => taffy_style::JustifyContent::FlexEnd,
+            JustifyContent::Center => taffy_style::JustifyContent::Center,
+            JustifyContent::SpaceBetween => taffy_style::JustifyContent::SpaceBetween,
+            JustifyContent::SpaceAround => taffy_style::JustifyContent::SpaceAround,
+        }),
+        gap: TaffySize {
+            width: taffy_length(style.gap),
+            height: taffy_length(style.gap),
+        },
+        flex_direction: match style.direction {
+            FlexDirection::Row => taffy_style::FlexDirection::Row,
+            FlexDirection::Column => taffy_style::FlexDirection::Column,
+        },
+        flex_basis: taffy_dimension(style.flex_basis),
+        flex_grow: style.flex_grow.max(0.0),
+        flex_shrink: style.flex_shrink.max(0.0),
+        ..Default::default()
+    };
+
+    taffy.flex_wrap = match style.flex_wrap {
+        crate::style::FlexWrap::NoWrap => taffy_style::FlexWrap::NoWrap,
+        crate::style::FlexWrap::Wrap => taffy_style::FlexWrap::Wrap,
+        crate::style::FlexWrap::WrapReverse => taffy_style::FlexWrap::WrapReverse,
+    };
+    taffy
+}
+
+fn build_taffy_tree(
+    node: &WidgetNode,
+    tree: &mut TaffyTree<NodeId>,
+    node_map: &mut HashMap<NodeId, TaffyNodeId>,
+    text_nodes: &mut HashMap<NodeId, TextMeasureData>,
+    report: &mut TaffyLayoutReport,
+) -> Result<TaffyNodeId, taffy::TaffyError> {
+    let style = taffy_style_for_node(node, report);
+    let children = node
+        .children
+        .iter()
+        .map(|child| build_taffy_tree(child, tree, node_map, text_nodes, report))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let taffy_node = if children.is_empty() {
+        if node.tag == "text" {
+            text_nodes.insert(
+                node.id,
+                TextMeasureData {
+                    content: node
+                        .attributes
+                        .get("content")
+                        .cloned()
+                        .unwrap_or_else(String::new),
+                    font_family: node.computed_style.font_family.clone(),
+                    font_size: node.computed_style.font_size,
+                    font_weight: node.computed_style.font_weight,
+                    line_height: node.computed_style.line_height,
+                },
+            );
+        }
+        tree.new_leaf_with_context(style, node.id)?
+    } else {
+        tree.new_with_children(style, &children)?
+    };
+
+    node_map.insert(node.id, taffy_node);
+    Ok(taffy_node)
+}
+
+fn measure_taffy_node(
+    known_dimensions: TaffySize<Option<f32>>,
+    available_space: TaffySize<TaffyAvailableSpace>,
+    node_id: Option<NodeId>,
+    text_nodes: &HashMap<NodeId, TextMeasureData>,
+    measurer: Option<&dyn TextMeasurer>,
+) -> TaffySize<f32> {
+    let Some(node_id) = node_id else {
+        return TaffySize::ZERO;
+    };
+    let Some(text) = text_nodes.get(&node_id) else {
+        return TaffySize::ZERO;
+    };
+    let Some(measurer) = measurer else {
+        return TaffySize {
+            width: known_dimensions.width.unwrap_or(0.0),
+            height: known_dimensions.height.unwrap_or(0.0),
         };
-        Some(m.measure_text(
-            text,
-            &style.font_family,
-            style.font_size,
-            style.font_weight,
-            style.line_height,
-            mw,
-        ))
-    } else {
-        None
     };
 
-    // Resolve own size, then apply min/max constraints.
-    let width = if let Some((tw, _)) = text_dims {
-        match style.width {
-            Dimension::Px(px) => px,
-            Dimension::Percent(pct) => available_w * pct / 100.0,
-            Dimension::Auto | Dimension::Content => tw,
-        }
-    } else {
-        match style.width {
-            Dimension::Px(px) => px,
-            Dimension::Percent(pct) => available_w * pct / 100.0,
-            Dimension::Auto => (available_w - margin.horizontal()).max(0.0),
-            Dimension::Content => {
-                // Container with Content: dry-run to measure children naturally.
-                // Override Content → Auto on the probe so we don't recurse infinitely.
-                if !node.children.is_empty() {
-                    context
-                        .measure_intrinsic_layout(node, 32_000.0, available_h, true, false)
-                        .width
-                } else {
-                    (available_w - margin.horizontal()).max(0.0)
-                }
-            }
-        }
-    };
-    let width = clamp_dimension(width, style.min_width, style.max_width);
+    let max_width = known_dimensions
+        .width
+        .or_else(|| available_space_to_option(available_space.width));
+    let (measured_width, measured_height) = measurer.measure_text(
+        &text.content,
+        &text.font_family,
+        text.font_size,
+        text.font_weight,
+        text.line_height,
+        max_width,
+    );
 
-    let height = if let Some((_, th)) = text_dims {
-        match style.height {
-            Dimension::Px(px) => px,
-            Dimension::Percent(pct) => available_h * pct / 100.0,
-            Dimension::Auto | Dimension::Content => th,
-        }
-    } else {
-        match style.height {
-            Dimension::Px(px) => px,
-            Dimension::Percent(pct) => available_h * pct / 100.0,
-            Dimension::Auto | Dimension::Content => (available_h - margin.vertical()).max(0.0),
-        }
-    };
-    let height = clamp_dimension(height, style.min_height, style.max_height);
+    TaffySize {
+        width: known_dimensions.width.unwrap_or(measured_width),
+        height: known_dimensions.height.unwrap_or(measured_height),
+    }
+}
 
-    node.layout = LayoutRect {
-        x: x + margin.left,
-        y: y + margin.top,
-        width,
-        height,
-    };
+fn available_space_to_option(value: TaffyAvailableSpace) -> Option<f32> {
+    match value {
+        TaffyAvailableSpace::Definite(value) => Some(value),
+        TaffyAvailableSpace::MinContent | TaffyAvailableSpace::MaxContent => None,
+    }
+}
 
-    if node.children.is_empty() {
+fn write_taffy_layout(
+    node: &mut WidgetNode,
+    tree: &TaffyTree<NodeId>,
+    node_map: &HashMap<NodeId, TaffyNodeId>,
+) {
+    write_taffy_layout_with_parent(node, tree, node_map, None);
+}
+
+fn write_taffy_layout_with_parent(
+    node: &mut WidgetNode,
+    tree: &TaffyTree<NodeId>,
+    node_map: &HashMap<NodeId, TaffyNodeId>,
+    parent_padding: Option<Edges>,
+) {
+    if node.computed_style.display == Display::None {
+        zero_layout_subtree(node);
         return;
     }
 
-    // Layout children along the flex axis.
-    let inner_w = (width - padding.horizontal()).max(0.0);
-    let inner_h = (height - padding.vertical()).max(0.0);
-    let inner_x = node.layout.x + padding.left;
-    let inner_y = node.layout.y + padding.top;
-
-    // Absolutely-positioned children are out of flow and handled in a separate pass below.
-    let visible_children: Vec<usize> = node
-        .children
-        .iter()
-        .enumerate()
-        .filter(|(_, c)| {
-            c.computed_style.display != Display::None
-                && c.computed_style.position != Position::Absolute
-        })
-        .map(|(i, _)| i)
-        .collect();
-
-    let child_count = visible_children.len();
-
-    // Even with no flow children there may be absolute children — fall through to that pass.
-    if child_count > 0 {
-        let total_gap = style.gap * (child_count as f32 - 1.0).max(0.0);
-        let is_column = style.direction == FlexDirection::Column;
-
-        // For overflow containers, children can use their natural main-axis size.
-        let overflow_clips_main = if is_column {
-            style.overflow_y != Overflow::Visible
-        } else {
-            style.overflow_x != Overflow::Visible
+    if let Some(taffy_node) = node_map.get(&node.id)
+        && let Ok(layout) = tree.layout(*taffy_node)
+    {
+        node.layout = LayoutRect {
+            x: layout.location.x,
+            y: layout.location.y,
+            width: layout.size.width,
+            height: layout.size.height,
         };
 
-        let main_available = if is_column {
-            inner_h - total_gap
-        } else {
-            inner_w - total_gap
-        };
-
-        // First pass: size fixed children; intrinsic-measure auto children with no flex-grow;
-        // accumulate flex-grow total for the rest.
-        let mut total_flex_grow = 0.0f32;
-        let mut fixed_main = 0.0f32;
-        // NAN is the sentinel for "not yet sized" — avoids a separate Vec<bool> and
-        // correctly handles children whose intrinsic size is legitimately 0.
-        let mut child_sizes: Vec<f32> = vec![f32::NAN; node.children.len()];
-
-        for &idx in &visible_children {
-            let child_style = &node.children[idx].computed_style;
-            // flex-basis overrides the main-axis dimension if it is not Auto.
-            let main_dim = if is_column {
-                match child_style.flex_basis {
-                    Dimension::Auto => child_style.height,
-                    other => other,
-                }
-            } else {
-                match child_style.flex_basis {
-                    Dimension::Auto => child_style.width,
-                    other => other,
-                }
-            };
-
-            match main_dim {
-                Dimension::Px(px) => {
-                    child_sizes[idx] = px;
-                    fixed_main += px;
-                }
-                Dimension::Percent(pct) => {
-                    let s = main_available * pct / 100.0;
-                    child_sizes[idx] = s;
-                    fixed_main += s;
-                }
-                // Content is resolved to Px at the start of layout_node for that child,
-                // so treat it like Auto here (intrinsic measurement via dry-run below).
-                Dimension::Auto | Dimension::Content => {
-                    let grow = child_style.flex_grow.max(0.0);
-                    if grow > 0.0 {
-                        total_flex_grow += grow;
-                    } else {
-                        // Measure intrinsic main-axis size via dry-run layout.
-                        let large = 32_000.0_f32;
-                        let (mw, mh) = if is_column {
-                            (inner_w, large)
-                        } else {
-                            (large, inner_h)
-                        };
-                        let size = if is_column {
-                            context
-                                .measure_intrinsic_layout(&node.children[idx], mw, mh, false, false)
-                                .height
-                        } else {
-                            context
-                                .measure_intrinsic_layout(&node.children[idx], mw, mh, false, false)
-                                .width
-                        };
-                        child_sizes[idx] = size;
-                        fixed_main += size;
-                    }
-                }
+        if node.computed_style.position == Position::Absolute
+            && let Some(padding) = parent_padding
+        {
+            if node.computed_style.inset_left.is_some() {
+                node.layout.x += padding.left;
+            }
+            if node.computed_style.inset_top.is_some() {
+                node.layout.y += padding.top;
+            }
+            if node.computed_style.inset_left.is_some() && node.computed_style.inset_right.is_some()
+            {
+                node.layout.width = (node.layout.width - padding.horizontal()).max(0.0);
+            }
+            if node.computed_style.inset_top.is_some() && node.computed_style.inset_bottom.is_some()
+            {
+                node.layout.height = (node.layout.height - padding.vertical()).max(0.0);
             }
         }
+    }
 
-        // Second pass: distribute remaining space to flex-grow children.
-        let remaining = (main_available - fixed_main).max(0.0);
-        for &idx in &visible_children {
-            if !child_sizes[idx].is_nan() {
-                continue;
-            }
-            let grow = node.children[idx].computed_style.flex_grow.max(0.0);
-            if total_flex_grow > 0.0 && grow > 0.0 {
-                child_sizes[idx] = remaining * (grow / total_flex_grow);
-            } else if overflow_clips_main {
-                // Overflow container: measure natural size so content can scroll.
-                let large = 32_000.0_f32;
-                let (mw, mh) = if is_column {
-                    (inner_w, large)
-                } else {
-                    (large, inner_h)
-                };
-                child_sizes[idx] = if is_column {
-                    context
-                        .measure_intrinsic_layout(&node.children[idx], mw, mh, false, false)
-                        .height
-                } else {
-                    context
-                        .measure_intrinsic_layout(&node.children[idx], mw, mh, false, false)
-                        .width
-                };
-            } else {
-                child_sizes[idx] = 0.0;
-            }
-        }
-
-        // Third pass: apply justify-content initial offset and inter-item spacing.
-        let justify = style.justify_content;
-        let total_child_main: f32 = visible_children.iter().map(|&i| child_sizes[i]).sum();
-        let leftover = (main_available - total_gap - total_child_main).max(0.0);
-
-        let (mut cursor, extra_gap) = match justify {
-            JustifyContent::End => (leftover, 0.0),
-            JustifyContent::Center => (leftover / 2.0, 0.0),
-            JustifyContent::SpaceBetween => (
-                0.0,
-                if child_count > 1 {
-                    leftover / (child_count as f32 - 1.0)
-                } else {
-                    0.0
-                },
-            ),
-            JustifyContent::SpaceAround => {
-                let per = leftover / child_count as f32;
-                (per / 2.0, per)
-            }
-            JustifyContent::Start => (0.0, 0.0),
-        };
-
-        let container_align = style.align_items;
-        let mut content_main = 0.0f32;
-        for &idx in &visible_children {
-            let child_main_size = child_sizes[idx];
-            let child_style = &node.children[idx].computed_style;
-            let effective_align = resolve_align(child_style.align_self, container_align);
-
-            let (cx, cy, cw, ch) = if is_column {
-                let (child_cw, cx_off) =
-                    cross_axis_layout(effective_align, inner_w, child_style.width);
-                (
-                    inner_x + cx_off,
-                    inner_y + cursor,
-                    child_cw,
-                    child_main_size,
-                )
-            } else {
-                let (child_ch, cy_off) =
-                    cross_axis_layout(effective_align, inner_h, child_style.height);
-                (
-                    inner_x + cursor,
-                    inner_y + cy_off,
-                    child_main_size,
-                    child_ch,
-                )
-            };
-
-            layout_node(&mut node.children[idx], cx, cy, cw, ch, context);
-            content_main += child_main_size;
-            cursor += child_main_size + style.gap + extra_gap;
-        }
-        // Add gaps between children (not after the last one).
-        let content_main = content_main + total_gap;
-
-        // RTL mirror: for row containers with direction:rtl, flip all flow children's
-        // x positions so the start edge is on the right instead of the left.
-        if !is_column && node.computed_style.text_direction == TextDirection::Rtl {
-            let right_edge = inner_x + inner_w;
-            for &idx in &visible_children {
-                let child = &mut node.children[idx];
-                let child_right = child.layout.x + child.layout.width;
-                child.layout.x = right_edge - child_right + inner_x;
-            }
-        }
-
-        // Shrink auto/content dimensions to fit children (bottom-up sizing).
-        let style = &node.computed_style;
-        if matches!(style.height, Dimension::Auto | Dimension::Content) && is_column {
-            let content_h = (content_main + padding.vertical()).max(0.0);
-            node.layout.height = clamp_dimension(content_h, style.min_height, style.max_height);
-        }
-        if matches!(style.width, Dimension::Auto | Dimension::Content) && !is_column {
-            let content_w = (content_main + padding.horizontal()).max(0.0);
-            node.layout.width = clamp_dimension(content_w, style.min_width, style.max_width);
-        }
-        // Row containers: shrink height to max child height when height is Auto/Content.
-        if matches!(style.height, Dimension::Auto | Dimension::Content) && !is_column {
-            let max_h = node
-                .children
-                .iter()
-                .filter(|c| c.computed_style.display != Display::None)
-                .map(|c| c.layout.height + c.computed_style.margin.vertical())
-                .fold(0.0f32, f32::max);
-            let content_h = (max_h + padding.vertical()).max(0.0);
-            node.layout.height = clamp_dimension(content_h, style.min_height, style.max_height);
-        }
-        // Column containers: shrink width to max child width when width is Auto/Content.
-        if matches!(style.width, Dimension::Auto | Dimension::Content) && is_column {
-            let max_w = node
-                .children
-                .iter()
-                .filter(|c| c.computed_style.display != Display::None)
-                .map(|c| c.layout.width + c.computed_style.margin.horizontal())
-                .fold(0.0f32, f32::max);
-            let content_w = (max_w + padding.horizontal()).max(0.0);
-            node.layout.width = clamp_dimension(content_w, style.min_width, style.max_width);
-        }
-    } // end if child_count > 0
-
-    // Second pass: lay out absolutely-positioned children against this node's inner rect.
-    let absolute_indices: Vec<usize> = (0..node.children.len())
-        .filter(|&i| {
-            node.children[i].computed_style.display != Display::None
-                && node.children[i].computed_style.position == Position::Absolute
-        })
-        .collect();
-
-    for i in absolute_indices {
-        // Borrow immutably to compute the target rect, then drop before the mutable call.
-        let (ax, ay, aw, ah) = {
-            let child = &node.children[i];
-            absolute_child_rect(child, node.layout, node.computed_style.padding)
-        };
-        layout_node(&mut node.children[i], ax, ay, aw, ah, context);
-        // Restore the computed absolute position — layout_node adds margin to x/y,
-        // and absolute_child_rect already subtracts it so the result is correct.
+    let padding = node.computed_style.padding;
+    for child in &mut node.children {
+        write_taffy_layout_with_parent(child, tree, node_map, Some(padding));
     }
 }
 
-fn hash_dimension(dimension: Dimension, hasher: &mut impl Hasher) {
-    match dimension {
-        Dimension::Auto => 0u8.hash(hasher),
-        Dimension::Px(value) => {
-            1u8.hash(hasher);
-            value.to_bits().hash(hasher);
-        }
-        Dimension::Percent(value) => {
-            2u8.hash(hasher);
-            value.to_bits().hash(hasher);
-        }
-        Dimension::Content => 3u8.hash(hasher),
-    }
-}
-
-fn hash_option_f32(value: Option<f32>, hasher: &mut impl Hasher) {
-    match value {
-        Some(value) => {
-            true.hash(hasher);
-            value.to_bits().hash(hasher);
-        }
-        None => false.hash(hasher),
-    }
-}
-
-fn hash_edges(edges: Edges, hasher: &mut impl Hasher) {
-    edges.top.to_bits().hash(hasher);
-    edges.right.to_bits().hash(hasher);
-    edges.bottom.to_bits().hash(hasher);
-    edges.left.to_bits().hash(hasher);
-}
-
-fn hash_enum<T>(value: T, hasher: &mut impl Hasher) {
-    std::mem::discriminant(&value).hash(hasher);
-}
-
-/// Compute `(x, y, available_w, available_h)` for an absolutely-positioned child.
-///
-/// `x` and `y` are pre-adjusted so that when `layout_node` adds the child's
-/// margin back the final `layout.x / layout.y` lands at the intended position.
-fn absolute_child_rect(
-    child: &WidgetNode,
-    container: LayoutRect,
-    container_padding: Edges,
-) -> (f32, f32, f32, f32) {
-    let cs = &child.computed_style;
-    let cb_x = container.x + container_padding.left;
-    let cb_y = container.y + container_padding.top;
-    let cb_w = (container.width - container_padding.horizontal()).max(0.0);
-    let cb_h = (container.height - container_padding.vertical()).max(0.0);
-
-    // Available width: stretch between left+right insets when width is auto; otherwise
-    // use explicit width or fall back to the full containing-block width.
-    let aw = match (cs.inset_left, cs.inset_right) {
-        (Some(l), Some(r)) if matches!(cs.width, Dimension::Auto | Dimension::Content) => {
-            (cb_w - l - r).max(0.0)
-        }
-        _ => match cs.width {
-            Dimension::Px(px) => px,
-            Dimension::Percent(pct) => cb_w * pct / 100.0,
-            _ => cb_w,
-        },
-    };
-    let aw = clamp_dimension(aw, cs.min_width, cs.max_width);
-
-    let ah = match (cs.inset_top, cs.inset_bottom) {
-        (Some(t), Some(b)) if matches!(cs.height, Dimension::Auto | Dimension::Content) => {
-            (cb_h - t - b).max(0.0)
-        }
-        _ => match cs.height {
-            Dimension::Px(px) => px,
-            Dimension::Percent(pct) => cb_h * pct / 100.0,
-            _ => cb_h,
-        },
-    };
-    let ah = clamp_dimension(ah, cs.min_height, cs.max_height);
-
-    // Subtract the child's own margin so that layout_node (which adds it back) ends
-    // up placing the node at exactly the inset-specified position.
-    let x = if let Some(left) = cs.inset_left {
-        cb_x + left - cs.margin.left
-    } else if let Some(right) = cs.inset_right {
-        cb_x + cb_w - aw - right - cs.margin.left
-    } else {
-        cb_x - cs.margin.left
-    };
-
-    let y = if let Some(top) = cs.inset_top {
-        cb_y + top - cs.margin.top
-    } else if let Some(bottom) = cs.inset_bottom {
-        cb_y + cb_h - ah - bottom - cs.margin.top
-    } else {
-        cb_y - cs.margin.top
-    };
-
-    (x, y, aw, ah)
-}
-
-fn clamp_dimension(value: f32, min: Option<f32>, max: Option<f32>) -> f32 {
-    let v = if let Some(mn) = min {
-        value.max(mn)
-    } else {
-        value
-    };
-    if let Some(mx) = max { v.min(mx) } else { v }
-}
-
-/// Resolve a child's effective cross-axis alignment.
-fn resolve_align(child_self: AlignSelf, container: AlignItems) -> AlignItems {
-    match child_self {
-        AlignSelf::Auto => container,
-        AlignSelf::Start | AlignSelf::Baseline => AlignItems::Start,
-        AlignSelf::End => AlignItems::End,
-        AlignSelf::Center => AlignItems::Center,
-        AlignSelf::Stretch => AlignItems::Stretch,
-    }
-}
-
-/// Compute the cross-axis size and offset for a child given its alignment.
-fn cross_axis_layout(align: AlignItems, inner_size: f32, child_dim: Dimension) -> (f32, f32) {
-    match align {
-        AlignItems::Stretch => (inner_size, 0.0),
-        AlignItems::Start => {
-            let size = explicit_size(child_dim, inner_size);
-            (size, 0.0)
-        }
-        AlignItems::Center => {
-            let size = explicit_size(child_dim, inner_size);
-            let offset = ((inner_size - size) / 2.0).max(0.0);
-            (size, offset)
-        }
-        AlignItems::End => {
-            let size = explicit_size(child_dim, inner_size);
-            let offset = (inner_size - size).max(0.0);
-            (size, offset)
-        }
-    }
-}
-
-/// Return the explicit pixel size of a dimension, falling back to inner_size for Auto.
-fn explicit_size(dim: Dimension, inner_size: f32) -> f32 {
-    match dim {
-        Dimension::Px(px) => px,
-        Dimension::Percent(pct) => inner_size * pct / 100.0,
-        Dimension::Auto | Dimension::Content => inner_size,
+fn zero_layout_subtree(node: &mut WidgetNode) {
+    node.layout = LayoutRect::default();
+    for child in &mut node.children {
+        zero_layout_subtree(child);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::style::{Display, Edges, FlexDirection, Overflow, Position};
+    use crate::style::{Display, Edges, FlexDirection, Position};
     use std::cell::Cell;
 
     fn make_node(tag: &str, width: Dimension, height: Dimension) -> WidgetNode {
@@ -978,7 +666,7 @@ mod tests {
     }
 
     #[test]
-    fn flex_triple_basis_affects_main_axis_size() {
+    fn taffy_layout_flex_basis_participates_in_growth() {
         let mut root = make_node("row", Dimension::Px(200.0), Dimension::Px(40.0));
         root.computed_style.direction = FlexDirection::Row;
 
@@ -991,8 +679,8 @@ mod tests {
         root.children = vec![basis_child, fixed_child];
         LayoutEngine::compute(&mut root, 200.0, 40.0);
 
-        assert_eq!(root.children[0].layout.width, 80.0);
-        assert_eq!(root.children[1].layout.x, 80.0);
+        assert_eq!(root.children[0].layout.width, 160.0);
+        assert_eq!(root.children[1].layout.x, 160.0);
         assert_eq!(root.children[1].layout.width, 40.0);
     }
 
@@ -1017,20 +705,20 @@ mod tests {
     }
 
     #[test]
-    fn overflow_container_preserves_natural_main_axis_size() {
-        let mut root = make_node("scroller", Dimension::Px(100.0), Dimension::Px(40.0));
+    fn taffy_layout_text_leaf_uses_measurer() {
+        let mut root = make_node("row", Dimension::Px(100.0), Dimension::Px(40.0));
         root.computed_style.direction = FlexDirection::Row;
-        root.computed_style.overflow_x = Overflow::Hidden;
-
-        let child = make_node("content", Dimension::Auto, Dimension::Px(20.0));
+        root.computed_style.align_items = AlignItems::Start;
+        let mut child = make_node("text", Dimension::Content, Dimension::Content);
+        child.attributes.insert("content".into(), "hello".into());
         root.children = vec![child];
-        LayoutEngine::compute(&mut root, 100.0, 40.0);
 
-        assert_eq!(root.layout.width, 100.0);
-        assert!(
-            root.children[0].layout.width > root.layout.width,
-            "child width should preserve natural overflow width"
-        );
+        let measurer = CountingMeasurer::default();
+        LayoutEngine::compute_with_measurer(&mut root, 100.0, 40.0, Some(&measurer));
+
+        assert!(measurer.calls.get() > 0);
+        assert_eq!(root.children[0].layout.width, 40.0);
+        assert_eq!(root.children[0].layout.height, 16.0);
     }
 
     #[test]
@@ -1079,11 +767,12 @@ mod tests {
     }
 
     #[test]
-    fn intrinsic_cache_reuses_probe_layouts_across_passes() {
+    fn taffy_layout_text_content_changes_measurement_without_node_id_churn() {
         let mut root = make_node("row", Dimension::Content, Dimension::Auto);
         root.computed_style.direction = FlexDirection::Row;
         let mut child = make_node("text", Dimension::Auto, Dimension::Auto);
         child.attributes.insert("content".into(), "hello".into());
+        let child_id = child.id;
         root.children.push(child);
 
         let measurer = CountingMeasurer::default();
@@ -1096,19 +785,7 @@ mod tests {
             &mut cache,
             Some(&measurer),
         );
-        let first_pass_calls = measurer.calls.get();
-        assert!(first_pass_calls > 0);
-
-        LayoutEngine::compute_with_intrinsic_cache_and_measurer(
-            &mut root,
-            300.0,
-            40.0,
-            &mut cache,
-            Some(&measurer),
-        );
-        let second_pass_calls = measurer.calls.get();
-        let cached_delta = second_pass_calls - first_pass_calls;
-        assert!(cached_delta > 0);
+        let first_width = root.children[0].layout.width;
 
         root.children[0]
             .attributes
@@ -1120,12 +797,10 @@ mod tests {
             &mut cache,
             Some(&measurer),
         );
-        let third_pass_calls = measurer.calls.get();
-        let invalidated_delta = third_pass_calls - second_pass_calls;
-        assert!(
-            cached_delta < invalidated_delta,
-            "warm cache should avoid probe measurements until the text changes"
-        );
+
+        assert_eq!(root.children[0].id, child_id);
+        assert!(measurer.calls.get() >= 2);
+        assert!(root.children[0].layout.width > first_width);
     }
 
     #[test]
@@ -1133,11 +808,7 @@ mod tests {
         let node = make_node("diagnostic-target", Dimension::Auto, Dimension::Auto);
         let mut report = TaffyLayoutReport::default();
 
-        record_taffy_diagnostic(
-            &mut report,
-            &node,
-            "unsupported layout mapping: test-only",
-        );
+        record_taffy_diagnostic(&mut report, &node, "unsupported layout mapping: test-only");
 
         assert!(!report.is_clean());
         assert_eq!(report.diagnostics.len(), 1);
