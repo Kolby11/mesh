@@ -1,0 +1,671 @@
+{
+  "path": "mesh-owned-focused-crate",
+  "generated_by": "src/bin/focused_crate.rs",
+  "fixture": ".planning/prototypes/phase43/fixtures/phase43-scenarios.json",
+  "scenarios": [
+    {
+      "scenario_id": "nav-baseline",
+      "surface": "navigation-bar",
+      "visual_layout": "mesh-owned-focused-crate retained layout evidence for nav-baseline",
+      "interaction_shape": "mesh-owned-focused-crate retained event evidence for nav-baseline",
+      "notes": [
+        "taffy_layout::nav-baseline::x=0,y=0,width=intrinsic,height=intrinsic",
+        "parley_text::nav-baseline::shape=line_break_bidi_align",
+        "AnyRender boundary recorded as display-list-like PaintCommandEvidence.",
+        "AccessKit boundary recorded as stable retained node to accesskit_node_id mapping."
+      ]
+    },
+    {
+      "scenario_id": "nav-audio-trigger-hover",
+      "surface": "navigation-bar",
+      "visual_layout": "mesh-owned-focused-crate retained layout evidence for nav-audio-trigger-hover",
+      "interaction_shape": "mesh-owned-focused-crate retained event evidence for nav-audio-trigger-hover",
+      "notes": [
+        "taffy_layout::nav-audio-trigger-hover::x=0,y=0,width=intrinsic,height=intrinsic",
+        "parley_text::nav-audio-trigger-hover::shape=line_break_bidi_align",
+        "AnyRender boundary recorded as display-list-like PaintCommandEvidence.",
+        "AccessKit boundary recorded as stable retained node to accesskit_node_id mapping."
+      ]
+    },
+    {
+      "scenario_id": "audio-popover-visible",
+      "surface": "audio-popover",
+      "visual_layout": "mesh-owned-focused-crate retained layout evidence for audio-popover-visible",
+      "interaction_shape": "mesh-owned-focused-crate retained event evidence for audio-popover-visible",
+      "notes": [
+        "taffy_layout::audio-popover-visible::x=0,y=0,width=intrinsic,height=intrinsic",
+        "parley_text::audio-popover-visible::shape=line_break_bidi_align",
+        "AnyRender boundary recorded as display-list-like PaintCommandEvidence.",
+        "AccessKit boundary recorded as stable retained node to accesskit_node_id mapping."
+      ]
+    },
+    {
+      "scenario_id": "audio-slider-change-release",
+      "surface": "audio-popover",
+      "visual_layout": "mesh-owned-focused-crate retained layout evidence for audio-slider-change-release",
+      "interaction_shape": "mesh-owned-focused-crate retained event evidence for audio-slider-change-release",
+      "notes": [
+        "taffy_layout::audio-slider-change-release::x=0,y=0,width=intrinsic,height=intrinsic",
+        "parley_text::audio-slider-change-release::shape=line_break_bidi_align",
+        "AnyRender boundary recorded as display-list-like PaintCommandEvidence.",
+        "AccessKit boundary recorded as stable retained node to accesskit_node_id mapping."
+      ]
+    },
+    {
+      "scenario_id": "audio-popover-close",
+      "surface": "audio-popover",
+      "visual_layout": "mesh-owned-focused-crate retained layout evidence for audio-popover-close",
+      "interaction_shape": "mesh-owned-focused-crate retained event evidence for audio-popover-close",
+      "notes": [
+        "taffy_layout::audio-popover-close::x=0,y=0,width=intrinsic,height=intrinsic",
+        "parley_text::audio-popover-close::shape=line_break_bidi_align",
+        "AnyRender boundary recorded as display-list-like PaintCommandEvidence.",
+        "AccessKit boundary recorded as stable retained node to accesskit_node_id mapping."
+      ]
+    }
+  ],
+  "retained_nodes": [
+    {
+      "stable_node_id": "nav.root",
+      "surface": "navigation-bar",
+      "role": "window",
+      "label": "Navigation bar root",
+      "taffy_layout": "taffy_layout::nav.root::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Navigation bar root::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "surface": "navigation-bar",
+      "role": "text",
+      "label": "Shell surface active",
+      "taffy_layout": "taffy_layout::nav.status.primary::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Shell surface active::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "surface": "navigation-bar",
+      "role": "text",
+      "label": "Audio service offline",
+      "taffy_layout": "taffy_layout::nav.status.secondary::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Audio service offline::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "surface": "navigation-bar",
+      "role": "button",
+      "label": "Volume",
+      "taffy_layout": "taffy_layout::nav.controls.volume::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Volume::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "surface": "navigation-bar",
+      "role": "button",
+      "label": "Theme",
+      "taffy_layout": "taffy_layout::nav.controls.theme::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Theme::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "surface": "navigation-bar",
+      "role": "button",
+      "label": "Settings",
+      "taffy_layout": "taffy_layout::nav.controls.settings::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Settings::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "surface": "audio-popover",
+      "role": "dialog",
+      "label": "Audio popover",
+      "taffy_layout": "taffy_layout::audio.root::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Audio popover::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "surface": "audio-popover",
+      "role": "text",
+      "label": "Audio output",
+      "taffy_layout": "taffy_layout::audio.title::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Audio output::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "surface": "audio-popover",
+      "role": "text",
+      "label": "Volume 42%",
+      "taffy_layout": "taffy_layout::audio.status::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Volume 42%::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "surface": "audio-popover",
+      "role": "text",
+      "label": "42%",
+      "taffy_layout": "taffy_layout::audio.percent::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::42%::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "surface": "audio-popover",
+      "role": "slider",
+      "label": "Volume slider",
+      "taffy_layout": "taffy_layout::audio.slider::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Volume slider::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "surface": "audio-popover",
+      "role": "button",
+      "label": "Mute audio",
+      "taffy_layout": "taffy_layout::audio.actions.mute::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Mute audio::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "surface": "audio-popover",
+      "role": "button",
+      "label": "Lower volume",
+      "taffy_layout": "taffy_layout::audio.actions.down::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Lower volume::shape=line_break_bidi_align"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "surface": "audio-popover",
+      "role": "button",
+      "label": "Raise volume",
+      "taffy_layout": "taffy_layout::audio.actions.up::x=0,y=0,width=intrinsic,height=intrinsic",
+      "parley_text": "parley_text::Raise volume::shape=line_break_bidi_align"
+    }
+  ],
+  "paint_commands": [
+    {
+      "stable_node_id": "nav.root",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::nav.root"
+    },
+    {
+      "stable_node_id": "nav.root",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::nav.root"
+    },
+    {
+      "stable_node_id": "nav.root",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::nav.root"
+    },
+    {
+      "stable_node_id": "nav.root",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::nav.root"
+    },
+    {
+      "stable_node_id": "nav.root",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::nav.root"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::nav.status.primary"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::nav.status.primary"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::nav.status.primary"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::nav.status.primary"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::nav.status.primary"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::nav.status.secondary"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::nav.status.secondary"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::nav.status.secondary"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::nav.status.secondary"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::nav.status.secondary"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::nav.controls.volume"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::nav.controls.volume"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::nav.controls.volume"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::nav.controls.volume"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::nav.controls.volume"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::nav.controls.theme"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::nav.controls.theme"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::nav.controls.theme"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::nav.controls.theme"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::nav.controls.theme"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::nav.controls.settings"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::nav.controls.settings"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::nav.controls.settings"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::nav.controls.settings"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::nav.controls.settings"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::audio.root"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::audio.root"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::audio.root"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::audio.root"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::audio.root"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::audio.title"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::audio.title"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::audio.title"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::audio.title"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::audio.title"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::audio.status"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::audio.status"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::audio.status"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::audio.status"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::audio.status"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::audio.percent"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::audio.percent"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::audio.percent"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::audio.percent"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::audio.percent"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::audio.slider"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::audio.slider"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::audio.slider"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::audio.slider"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::audio.slider"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::audio.actions.mute"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::audio.actions.mute"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::audio.actions.mute"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::audio.actions.mute"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::audio.actions.mute"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::audio.actions.down"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::audio.actions.down"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::audio.actions.down"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::audio.actions.down"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::audio.actions.down"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "display_slot": "Background",
+      "command": "anyrender_paint::Background::audio.actions.up"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "display_slot": "Border",
+      "command": "anyrender_paint::Border::audio.actions.up"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "display_slot": "Text",
+      "command": "anyrender_paint::Text::audio.actions.up"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "display_slot": "Icon",
+      "command": "anyrender_paint::Icon::audio.actions.up"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "display_slot": "Generic",
+      "command": "anyrender_paint::Generic::audio.actions.up"
+    }
+  ],
+  "interactions": [
+    {
+      "interaction_id": "hover-volume-trigger",
+      "scenario_id": "nav-audio-trigger-hover",
+      "target": "nav.controls.volume",
+      "event": "hover",
+      "result": "mesh-owned-focused-crate: hover on nav.controls.volume"
+    },
+    {
+      "interaction_id": "click-volume-trigger",
+      "scenario_id": "nav-audio-trigger-hover",
+      "target": "nav.controls.volume",
+      "event": "click",
+      "result": "mesh-owned-focused-crate: click on nav.controls.volume"
+    },
+    {
+      "interaction_id": "change-audio-slider-0.42-to-0.73",
+      "scenario_id": "audio-slider-change-release",
+      "target": "audio.slider",
+      "event": "change",
+      "result": "mesh-owned-focused-crate: change on audio.slider"
+    },
+    {
+      "interaction_id": "release-audio-slider-0.73",
+      "scenario_id": "audio-slider-change-release",
+      "target": "audio.slider",
+      "event": "release",
+      "result": "mesh-owned-focused-crate: release on audio.slider"
+    },
+    {
+      "interaction_id": "close-audio-popover",
+      "scenario_id": "audio-popover-close",
+      "target": "audio.root",
+      "event": "close",
+      "result": "mesh-owned-focused-crate: close on audio.root"
+    }
+  ],
+  "accessibility": [
+    {
+      "stable_node_id": "nav.root",
+      "accesskit_node_id": "accesskit_node_id::1",
+      "role": "window",
+      "label": "Navigation bar root"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "accesskit_node_id": "accesskit_node_id::2",
+      "role": "text",
+      "label": "Shell surface active"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "accesskit_node_id": "accesskit_node_id::3",
+      "role": "text",
+      "label": "Audio service offline"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "accesskit_node_id": "accesskit_node_id::4",
+      "role": "button",
+      "label": "Volume"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "accesskit_node_id": "accesskit_node_id::5",
+      "role": "button",
+      "label": "Theme"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "accesskit_node_id": "accesskit_node_id::6",
+      "role": "button",
+      "label": "Settings"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "accesskit_node_id": "accesskit_node_id::7",
+      "role": "dialog",
+      "label": "Audio popover"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "accesskit_node_id": "accesskit_node_id::8",
+      "role": "text",
+      "label": "Audio output"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "accesskit_node_id": "accesskit_node_id::9",
+      "role": "text",
+      "label": "Volume 42%"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "accesskit_node_id": "accesskit_node_id::10",
+      "role": "text",
+      "label": "42%"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "accesskit_node_id": "accesskit_node_id::11",
+      "role": "slider",
+      "label": "Volume slider"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "accesskit_node_id": "accesskit_node_id::12",
+      "role": "button",
+      "label": "Mute audio"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "accesskit_node_id": "accesskit_node_id::13",
+      "role": "button",
+      "label": "Lower volume"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "accesskit_node_id": "accesskit_node_id::14",
+      "role": "button",
+      "label": "Raise volume"
+    }
+  ],
+  "comparison_headings": [
+    "visual/layout fidelity",
+    "interaction shape",
+    "retained identity fit",
+    "accessibility boundary",
+    "build/dependency cost",
+    "blocker evidence",
+    "Phase 44 integration readiness"
+  ],
+  "notes": [
+    "taffy_layout: retained nodes keep MESH stable_node_id as authority while layout evidence records CSS-like box geometry.",
+    "parley_text: text evidence records status/title/percent labels without requiring system font discovery.",
+    "display_slot: AnyRender-style paint boundary records Background, Border, Text, Icon, and Generic commands.",
+    "accesskit_node_id: accessibility boundary maps each retained node to a stable AccessKit-compatible ID."
+  ]
+}
