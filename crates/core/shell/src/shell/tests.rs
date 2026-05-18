@@ -3132,6 +3132,11 @@ fn pointer_click_claims_keyboard_owner_without_forcing_exclusive_mode() {
         .get_mut("@mesh/navigation-bar")
         .unwrap()
         .keyboard_mode = mesh_core_wayland::KeyboardMode::OnDemand;
+    shell
+        .surfaces
+        .get_mut("@mesh/audio-popover")
+        .unwrap()
+        .keyboard_mode = mesh_core_wayland::KeyboardMode::Exclusive;
 
     shell.claim_keyboard_focus_for_surface("@mesh/navigation-bar");
 
@@ -3207,6 +3212,11 @@ fn pointer_click_after_transfer_clears_transfer_forced_exclusive_override() {
         popover_state.clone(),
     )));
     shell.keyboard_focus_surface = Some("@mesh/navigation-bar".into());
+    shell
+        .surfaces
+        .get_mut("@mesh/audio-popover")
+        .unwrap()
+        .keyboard_mode = mesh_core_wayland::KeyboardMode::OnDemand;
     let mut emitted = shell
         .apply_request(CoreRequest::TransferTabFocus {
             from_surface: "@mesh/navigation-bar".into(),

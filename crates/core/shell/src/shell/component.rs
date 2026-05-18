@@ -109,6 +109,7 @@ impl ComponentDirtyFlags {
 
     pub(super) const INTERACTION_RESTYLE: Self = Self::STATE
         .union(Self::STYLE)
+        .union(Self::LAYOUT)
         .union(Self::PAINT)
         .union(Self::ACCESSIBILITY)
         .union(Self::METRICS);

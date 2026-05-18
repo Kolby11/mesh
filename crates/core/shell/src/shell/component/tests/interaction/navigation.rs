@@ -1503,3 +1503,44 @@ fn navigation_bar_compact_width_hides_secondary_status_before_controls() {
         "compact nav bar must keep the primary controls available"
     );
 }
+
+#[test]
+fn phase44_navigation_behavior_survives_focused_proof_path() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    component.visible = true;
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(960, 80);
+    component.paint(&theme, 960, 80, &mut buffer).unwrap();
+    assert!(
+        component.last_focused_proof_snapshot().is_some(),
+        "initial navigation paint should store focused proof evidence"
+    );
+
+    component
+        .handle_input(
+            &theme,
+            960,
+            80,
+            ComponentInput::KeyPressed {
+                key: "Tab".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    component.paint(&theme, 960, 80, &mut buffer).unwrap();
+
+    assert!(
+        component.last_focused_proof_snapshot().is_some(),
+        "keyboard navigation repaint should keep focused proof evidence"
+    );
+    assert!(
+        component.focused_key.is_some(),
+        "Tab navigation should focus a shipped navigation control"
+    );
+    assert_eq!(
+        component.focused_key, component.focus_visible_key,
+        "keyboard focus should remain visibly tracked after focused proof paint"
+    );
+}

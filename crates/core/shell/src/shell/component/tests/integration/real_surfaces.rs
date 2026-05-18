@@ -1,5 +1,56 @@
 use super::*;
 
+fn assert_phase44_focused_proof_snapshot(component: &FrontendSurfaceComponent, label: &str) {
+    let snapshot = component
+        .last_focused_proof_snapshot()
+        .unwrap_or_else(|| panic!("{label} should store a focused proof snapshot"));
+    assert!(
+        !snapshot.nodes.is_empty(),
+        "{label} should retain node proof evidence"
+    );
+    assert!(
+        snapshot
+            .paint
+            .iter()
+            .any(|paint| matches!(paint.display_slot, "Text" | "Icon")),
+        "{label} should include text or icon paint proof evidence"
+    );
+    assert!(
+        !snapshot.accessibility.is_empty(),
+        "{label} should retain accessibility proof evidence"
+    );
+}
+
+#[test]
+fn phase44_navigation_audio_surface_emits_focused_proof_snapshot() {
+    let theme = default_theme();
+
+    let mut navigation =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    navigation.visible = true;
+    let mut navigation_buffer = PixelBuffer::new(960, 80);
+    navigation
+        .paint(&theme, 960, 80, &mut navigation_buffer)
+        .unwrap();
+    assert_phase44_focused_proof_snapshot(&navigation, "navigation bar");
+
+    let mut audio = real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    audio
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    let mut audio_buffer = PixelBuffer::new(320, 220);
+    audio.paint(&theme, 320, 220, &mut audio_buffer).unwrap();
+    assert_phase44_focused_proof_snapshot(&audio, "audio popover");
+}
+
 #[test]
 fn navigation_volume_button_second_click_hides_audio_surface_via_parent_handler() {
     let button_component = parse_component(
