@@ -1,7 +1,7 @@
 ---
 phase: 46
 slug: renderer-library-dependency-and-adapter-foundation
-status: draft
+status: verified
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-05-18
@@ -38,12 +38,12 @@ created: 2026-05-18
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 46-01-01 | 01 | 1 | LIBS-01 | T-46-01-01 | Default build remains current renderer | cargo check | `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo check -p mesh-core-render` | ✅ | ⬜ pending |
-| 46-01-02 | 01 | 1 | LIBS-01 | T-46-01-02 | Enabled feature path compiles selected optional deps | cargo check | `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo check -p mesh-core-render --features renderer-libraries` | ✅ | ⬜ pending |
-| 46-02-01 | 02 | 2 | LIBS-02 | T-46-02-01 | Adapter status exposes enabled/disabled state without changing behavior | unit | `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render renderer_library` | ✅ | ⬜ pending |
-| 46-02-02 | 02 | 2 | LIBS-02 | T-46-02-02 | Existing proof and shipped-surface behavior survives default path | regression | `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render proof` | ✅ | ⬜ pending |
-| 46-03-01 | 03 | 3 | LIBS-03 | T-46-03-01 | Dependency/Nix/rollback risk record exists | docs | `rg -n "renderer-taffy|renderer-parley|renderer-accesskit|renderer-anyrender|renderer-vello-encoding|Rust 1.88|rollback path" docs/renderer-migration.md docs/renderer-ownership.md crates/core/frontend/render/Cargo.toml Cargo.toml` | ✅ | ⬜ pending |
-| 46-03-02 | 03 | 3 | LIBS-03 | T-46-03-02 | Shipped Phase 44 regressions remain green | regression | `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell phase44` | ✅ | ⬜ pending |
+| 46-01-01 | 01 | 1 | LIBS-01 | T-46-01-01 | Default build remains current renderer | cargo check | `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo check -p mesh-core-render` | ✅ | ✅ green |
+| 46-01-02 | 01 | 1 | LIBS-01 | T-46-01-02 | Enabled feature path compiles selected optional deps | cargo check | `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo check -p mesh-core-render --features renderer-libraries` | ✅ | ✅ green |
+| 46-02-01 | 02 | 2 | LIBS-02 | T-46-02-01 | Adapter status exposes enabled/disabled state without changing behavior | unit | `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render renderer_library` | ✅ | ✅ green |
+| 46-02-02 | 02 | 2 | LIBS-02 | T-46-02-02 | Existing proof and shipped-surface behavior survives default path | regression | `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render proof` | ✅ | ✅ green |
+| 46-03-01 | 03 | 3 | LIBS-03 | T-46-03-01 | Dependency/Nix/rollback risk record exists | docs | `rg -n "renderer-taffy|renderer-parley|renderer-accesskit|renderer-anyrender|renderer-vello-encoding|Rust 1.88|rollback path" docs/renderer-migration.md docs/renderer-ownership.md crates/core/frontend/render/Cargo.toml Cargo.toml` | ✅ | ✅ green |
+| 46-03-02 | 03 | 3 | LIBS-03 | T-46-03-02 | Shipped Phase 44 regressions remain green | regression | `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell phase44` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -63,6 +63,18 @@ Existing Rust and Nix test infrastructure covers all phase requirements. No Wave
 
 ---
 
+## Validation Audit 2026-05-18
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+
+Focused validation rerun confirmed all mapped automated commands are green. No generated test files were needed.
+
+---
+
 ## Validation Sign-Off
 
 - [x] All tasks have `<automated>` verify or existing infrastructure dependencies.
@@ -72,4 +84,4 @@ Existing Rust and Nix test infrastructure covers all phase requirements. No Wave
 - [x] Feedback latency target recorded.
 - [x] `nyquist_compliant: true` set in frontmatter.
 
-**Approval:** pending
+**Approval:** verified 2026-05-18
