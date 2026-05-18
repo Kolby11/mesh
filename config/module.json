@@ -12,6 +12,16 @@
       "path": "frontend/audio-popover",
       "enabled": true
     },
+    "@mesh/audio-interface": {
+      "kind": "interface",
+      "path": "interfaces/audio",
+      "enabled": true
+    },
+    "@mesh/icons-default": {
+      "kind": "icon-pack",
+      "path": "icon-packs/default",
+      "enabled": true
+    },
     "@mesh/text-selection-proof": {
       "kind": "frontend",
       "path": "frontend/text-selection-proof",

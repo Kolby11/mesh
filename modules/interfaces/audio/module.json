@@ -1,0 +1,16 @@
+{
+  "name": "@mesh/audio-interface",
+  "version": "1.0.0",
+  "description": "Base audio interface contract for frontend modules and backend providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.audio",
+      "version": "1.0",
+      "file": "interface.toml",
+      "domain": "audio",
+      "relationship": "base"
+    }
+  }
+}

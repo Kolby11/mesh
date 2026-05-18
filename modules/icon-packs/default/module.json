@@ -1,39 +1,34 @@
 {
-  "id": "@mesh/icons-default",
-  "name": "Default Icon Pack",
+  "name": "@mesh/icons-default",
   "version": "0.1.0",
-  "type": "icon-pack",
-  "api_version": "0.1",
   "description": "Default MESH icon binding. Maps shell logical names to freedesktop hicolor icon names. Acts as a sane baseline that works on any Linux system with a hicolor-compatible icon theme installed.",
-  "authors": [
-    "MESH Project"
-  ],
-  "compatibility": {
-    "mesh": ">=0.1.0"
-  },
-  "icon_pack": {
-    "id": "default",
-    "axes": {
-      "fill": false,
-      "weight": false,
-      "grade": false,
-      "optical_size": false
-    },
-    "mappings": {
-      "settings": "hicolor/preferences-system",
-      "weather-clear": "hicolor/weather-clear",
-      "weather-clear-night": "hicolor/weather-clear-night",
-      "audio-volume-muted": "hicolor/audio-volume-muted",
-      "audio-volume-low": "hicolor/audio-volume-low",
-      "audio-volume-medium": "hicolor/audio-volume-medium",
-      "audio-volume-high": "hicolor/audio-volume-high",
-      "battery-empty": "hicolor/battery-empty",
-      "battery-low": "hicolor/battery-low",
-      "battery-good": "hicolor/battery-good",
-      "battery-full": "hicolor/battery-full",
-      "wifi": "hicolor/network-wireless",
-      "bluetooth": "hicolor/bluetooth",
-      "close": "hicolor/window-close"
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "icon-pack",
+    "icon_pack": {
+      "id": "default",
+      "axes": {
+        "fill": false,
+        "weight": false,
+        "grade": false,
+        "optical_size": false
+      },
+      "mappings": {
+        "settings": "hicolor/preferences-system",
+        "weather-clear": "hicolor/weather-clear",
+        "weather-clear-night": "hicolor/weather-clear-night",
+        "audio-volume-muted": "hicolor/audio-volume-muted",
+        "audio-volume-low": "hicolor/audio-volume-low",
+        "audio-volume-medium": "hicolor/audio-volume-medium",
+        "audio-volume-high": "hicolor/audio-volume-high",
+        "battery-empty": "hicolor/battery-empty",
+        "battery-low": "hicolor/battery-low",
+        "battery-good": "hicolor/battery-good",
+        "battery-full": "hicolor/battery-full",
+        "wifi": "hicolor/network-wireless",
+        "bluetooth": "hicolor/bluetooth",
+        "close": "hicolor/window-close"
+      }
     }
   }
 }
