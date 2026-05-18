@@ -42,6 +42,42 @@ Current source boundaries also matter:
 
 ## Promotion Gates
 
+### Broad Adoption Checklist
+
+- [ ] Feature flag or equivalent local bypass documented
+- [ ] Rollback path documented
+- [ ] Linux/Nix impact documented
+- [ ] Root workspace dependencies documented
+- [ ] Native libraries documented
+- [ ] Binary/build risk documented
+- [ ] CI gates documented
+- [ ] Workspace tests documented
+- [ ] Focused renderer proof tests documented
+- [ ] Shipped navigation/audio surface regressions documented
+- [ ] Selection proof documented
+- [ ] Invalidation/damage/profiling evidence documented
+- [ ] AccessKit-compatible update evidence documented
+
+MIGR-03: build, CI, feature flags, Linux/Nix dependency implications, and binary-size risk are documented before broad adoption.
+
+### Required Commands
+
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render proof`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell phase44`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell phase44_navigation`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test --workspace`
+
+### Dependency Record Template
+
+| Field | Required content |
+|-------|------------------|
+| Linux/Nix impact | New Nix dev-shell packages, Linux runtime assumptions, Wayland/session effects, and environment variable changes. |
+| Root workspace dependencies | New Cargo workspace dependencies, feature flags, and crate ownership changes. |
+| Native libraries | Native libraries, pkg-config requirements, dynamic linking concerns, and runtime library paths. |
+| Binary/build risk | Build-time increase, binary-size risk, dependency fan-out, cache effects, and mitigation. |
+| CI gates | Exact commands, jobs, or manual equivalents required before promotion. |
+| Rollback path | How to disable, bypass, or revert the new path without breaking shipped surfaces. |
+
 ### Observability Promotion Gate
 
 A renderer path cannot become authoritative until it preserves or replaces:
