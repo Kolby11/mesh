@@ -557,6 +557,45 @@ fn shipped_module_graph_loads_repo_module_fixture() {
     );
 }
 
+#[test]
+fn shipped_module_diagnostics_report_missing_navigation_icon() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let mut navigation = load_module_manifest(
+        &workspace_root.join("modules/frontend/navigation-bar"),
+    )
+    .unwrap();
+    navigation
+        .manifest
+        .mesh
+        .icon_requirements
+        .required
+        .push("missing-shipped-proof-icon".into());
+    let icons = load_module_manifest(&workspace_root.join("modules/icon-packs/default")).unwrap();
+    let root = root_with_modules(
+        &[
+            ("@mesh/navigation-bar", ModuleKind::Frontend),
+            ("@mesh/icons-default", ModuleKind::IconPack),
+        ],
+        &[],
+        None,
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![navigation, icons]).unwrap();
+    let diagnostic = graph
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.status == "missing_required_icon")
+        .unwrap();
+
+    assert_eq!(diagnostic.module_id, "@mesh/navigation-bar");
+    assert!(
+        diagnostic
+            .contribution_id
+            .as_deref()
+            .is_some_and(|id| id.contains("required:missing-shipped-proof-icon"))
+    );
+}
+
 fn loaded_module(
     name: &str,
     kind: ModuleKind,
