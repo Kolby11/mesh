@@ -1,4 +1,5 @@
 pub mod display_list;
+pub mod library_adapters;
 pub mod proof;
 pub mod render_object;
 pub mod surface;
@@ -7,6 +8,10 @@ pub use display_list::{
     DamageRect, DisplayBatchBarrierCounts, DisplayListClip, DisplayListMetrics,
     DisplayListRepaintPolicy, DisplayPaintCommand, DisplayPaintCommandKind, RetainedDisplayList,
     SelectedDisplayListPaint,
+};
+pub use library_adapters::{
+    CURRENT_RENDERER_AUTHORITY, RendererLibraryStatus, renderer_library_rollback_authority,
+    renderer_library_statuses,
 };
 pub use proof::{
     FocusedAccessKitUpdate, FocusedAccessibilityEvidence, FocusedDirtyEvidence,
