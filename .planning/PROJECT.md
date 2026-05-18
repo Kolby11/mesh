@@ -102,9 +102,15 @@ The project now also has a consolidated module and extensibility model with:
 - Graph-driven provider registration, active backend selection, frontend filtering, and navigation proof without service-specific production branches
 - Author docs that teach the shipped navigation/audio path as the canonical workflow for extending or adding a MESH module
 
-## Current Milestone
+## Current Milestone: v1.8 Rendering Engine Architecture
 
-No active milestone is defined. The next candidate is a rendering engine improvement milestone that evaluates Blitz renderer as inspiration or a base, then decides whether MESH should reuse Blitz pieces or build its own renderer around libraries such as Skia, Stylo, Taffy, Parley, AnyRender, Winit, AccessKit, Muda, html5ever, and xml5ever.
+**Goal:** Decide and prove the next rendering architecture for MESH by evaluating Blitz as inspiration or a base, then implementing the minimum integration slice that improves rendering capability without losing shell-specific determinism, observability, and shipped-surface responsiveness.
+
+**Target features:**
+- Adopt-vs-build decision for Blitz renderer, including whether MESH should reuse Blitz directly, fork/adapt parts, or keep a MESH-owned pipeline.
+- Library evaluation for Skia, Stylo, Taffy, Parley, AnyRender, Winit, AccessKit, Muda, html5ever, and xml5ever against MESH's retained rendering, Wayland shell, accessibility, and plugin-surface needs.
+- Prototype rendering architecture that preserves MESH's existing invalidation, profiling, diagnostics, module rendering, and shipped navigation/audio surfaces.
+- Concrete migration plan for replacing or extending current render/layout/text/style/windowing pieces in phases rather than as a high-risk rewrite.
 
 ## Requirements
 
@@ -123,7 +129,8 @@ No active milestone is defined. The next candidate is a rendering engine improve
 
 ### Active
 
-- Define the next rendering engine milestone, including whether Blitz renderer should be reused directly, used as design inspiration, or rejected in favor of a MESH-owned renderer assembled from focused crates.
+- Decide whether Blitz renderer should be reused directly, used as design inspiration, or rejected in favor of a MESH-owned renderer assembled from focused crates.
+- Prove the chosen rendering direction with a small shipped-surface integration slice before broad migration.
 
 ### Out of Scope
 
@@ -209,4 +216,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-18 after archiving v1.7 milestone*
+*Last updated: 2026-05-18 after starting v1.8 milestone*
