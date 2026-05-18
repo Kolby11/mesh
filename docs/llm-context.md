@@ -111,38 +111,44 @@ mesh-tools-cli
 
 ```
 modules/
-  frontend/core/        ← built-in surface and widget modules
-    panel/              ← top panel (surface)
-    launcher/           ← app launcher popover (surface, content_measured)
-    quick-settings/     ← quick settings drawer (surface)
-    notification-center/← notification history (surface)
-    volume-slider/      ← audio volume popover (surface)
-    navigation-bar/     ← nav bar widget used inside panel
-    base-surface/       ← dev sandbox surface (surface)
-    base-launcher-widget/
-    base-sidebar-widget/
-    notification-feed/
-    notification-sidebar/
+  frontend/             ← built-in frontend modules
+    navigation-bar/     ← shipped top-edge navigation frontend module
+    audio-popover/      ← audio popover frontend module
+    text-selection-proof/ ← disabled proof frontend module
 
-  backend/core/         ← service modules (scripted backends, declared by module.json)
+  backend/              ← scripted backend provider modules declared by module.json
     pipewire-audio/     ← audio via PipeWire
     pulseaudio-audio/   ← audio via PulseAudio
-    mpris-media/        ← media via MPRIS
     networkmanager-network/ ← network via NetworkManager
-    upower-power/       ← power via UPower
-    mock-notifications/ ← fake notifications for dev
 
-    audio-interface/    ← interface contract for audio
-    network-interface/  ← interface contract for network
-    power-interface/    ← interface contract for power
-    media-interface/    ← interface contract for media
-    notifications-interface/ ← interface contract for notifications
-    brightness-interface/
+  interfaces/
+    audio/              ← @mesh/audio-interface contract for mesh.audio
+    audio.toml          ← legacy source copy kept during migration
+```
+
+### Canonical module workflow
+
+New modules use `module.json`. Frontend modules depend on interface contracts
+such as `mesh.audio`, never backend provider IDs. Backend providers implement
+interfaces with `mesh.implements`; the shipped graph keeps both
+`@mesh/pipewire-audio` and `@mesh/pulseaudio-audio` enabled while
+`config/module.json` selects `@mesh/pipewire-audio` as the active
+`mesh.audio` provider. Contributions cover layout, settings, keybinds, icon
+requirements, resource packs, and libraries. Service-specific behavior belongs
+in Luau provider modules, not service-specific Rust APIs; Rust routes generic
+interface/provider records.
+
+```
+@mesh/navigation-bar
+  -> require("mesh.audio@>=1.0")
+  -> mesh.audio interface contract from @mesh/audio-interface
+  -> active provider selected by config/module.json
+  -> provider script in modules/backend/<provider>/src/main.luau
 ```
 
 ### Frontend module anatomy (`module.json`)
 
-Every frontend module is a complete feature package. It declares in its
+Every frontend module is a complete feature module. It declares in its
 canonical author-facing manifest, `module.json`:
 - `mesh.kind`: `"frontend"` for frontend modules
 - `mesh.entrypoints.main`: path to the `.mesh` single-file component
@@ -163,7 +169,7 @@ Surface layout defaults live in `module.json`, **not** in Rust. `mesh-core-shell
 
 Components are reusable authoring units. They should be made from MESH core
 elements (`button`, `icon`, `input`, etc.) or other components. Do not call a
-full frontend module a component; the module is the package that owns settings,
+full frontend module a component; the module owns settings,
 capabilities, manifests, and one or more components.
 
 **CRITICAL CODE STYLE**: Component files should be small and focused. Always extract layout sections, list items, and logically distinct UI blocks into their own separate components (e.g., in a `components/` subdirectory). Custom PascalCase component tags must be imported explicitly in the script block, such as `import ItemRow from "./components/item-row.mesh"`. This is especially important for items inside `{#for ...}` loops so they can encapsulate their own event state (like capturing list item IDs) instead of relying on DOM dataset attributes (which are not supported in event handlers).
@@ -211,7 +217,7 @@ backend module (`module.json` with `mesh.implements`)
   → registered in InterfaceRegistry
   → emits events on EventBus
   → Shell sets __mesh_svc_audio Lua table and calls on_change handlers via ScriptContext
-  → frontend modules use require("mesh.audio") proxy to read state and call commands
+  → frontend modules use require("mesh.audio@>=1.0") proxy to read state and call commands
 ```
 
 ---
@@ -221,9 +227,9 @@ backend module (`module.json` with `mesh.implements`)
 | Task                           | Where to start                                                                                                                   |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
 | Add a CSS property             | `crates/core/ui/component/src/style.rs` / parser modules (parse), `crates/core/ui/elements/src/style.rs` (computed style), `crates/core/frontend/render/src/surface/painter.rs` (paint) |
-| Add a new surface module       | Create `packages/modules/frontend/core/<name>/`, `module.json` with `mesh.kind = "frontend"`, `src/main.mesh`                    |
+| Add a new frontend module      | Create `modules/frontend/<name>/`, `module.json` with `mesh.kind = "frontend"`, `src/main.mesh`                                  |
 | Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core-shell/src/shell.rs`; manifest's `mesh.surfaceLayout` section                      |
-| Add a service (backend module) | `packages/modules/backend/core/<name>/`, `module.json` + `src/main.luau`, implement the interface contract in the module script |
+| Add a backend provider module  | Create `modules/backend/<name>/`, `module.json` with `mesh.kind = "backend"` and `mesh.implements`, plus `src/main.luau`         |
 | Add a new CoreRequest action   | `CoreRequest` enum in `crates/core/shell/src/shell/types.rs` plus request handling under `crates/core/shell/src/shell/runtime/request.rs` |
 | Add a theme token              | `mesh-core-theme/src/lib.rs`, default theme JSON, then reference with `token(group.name)` in `.mesh`                             |
 | Debug rendering                | `ToggleDebugOverlay` / `CoreRequest::CycleDebugTab`; see `crates/core/foundation/debug/src/lib.rs` and `crates/core/frontend/render/src/surface/debug_overlay.rs` |
