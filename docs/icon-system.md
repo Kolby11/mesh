@@ -12,10 +12,12 @@ This document is the design contract; implementation follows it.
 
 ## Goals
 
-- Single semantic API in templates: `<icon name="volume-high"/>`
+- Single semantic API in templates: `<icon name="audio-volume-high"/>`
 - A clean three-layer model: system asset → MESH binding (icon-pack) → frontend
 - Frontends are portable: swap the icon-pack and the look changes, no
   template edits
+- Shell-owned expected-name vocabularies so icon-pack authors know which
+  names to map
 - Pack-qualified escape hatch when the author or user wants a specific
   source for one icon
 - Per-frontend user overrides without rebuilding the icon-pack
@@ -41,8 +43,9 @@ System asset            MESH icon-pack module        Frontend module
 (installed by user)     (mapping only, no assets)    (uses logical names)
 
 material-symbols.ttf  → @mesh/icons-material-r1   → @mesh/navigation-bar
-~/.local/share/icons    pack: maps "home" →           <icon name="home"/>
-  /Adwaita/...           material-symbols/home_round
+~/.local/share/icons    pack: maps                    <icon name="audio-volume-high"/>
+  /Adwaita/...           "audio-volume-high" →
+                         material-symbols/volume_up
 ```
 
 ### Layer 1 — System asset
@@ -58,15 +61,42 @@ Assets are installed **outside MESH** — `apt`, `pacman`, AUR helpers, a
 bash setup script, manual download into XDG paths. MESH discovers what
 is already installed; it never installs.
 
-### Layer 2 — Icon-pack module
+### Layer 2 — Icon vocabulary and icon-pack modules
 
-A MESH module of kind `icon-pack`. Contains **only** a mapping table
-plus metadata about the system assets it expects to find. Ships **no**
-icons.
+MESH keeps a local **icon vocabulary index** built from the shell,
+interface modules, and installed frontend modules. The index is the
+source of expected semantic names. It is not a downloadable registry or
+central service; it is data discovered from the installed module graph.
+
+Base shell and interface vocabularies define shared names such as:
+
+```text
+audio-volume-high
+audio-volume-muted
+network-wireless
+settings
+```
+
+Icon-pack authors target those names. A Material Symbols pack, for
+example, maps the MESH semantic names to Material glyph names:
+
+```json
+{
+  "audio-volume-high": "material-symbols/volume_up",
+  "audio-volume-muted": "material-symbols/volume_off"
+}
+```
+
+The same vocabulary can be mapped by a Lucide pack, an XDG theme pack,
+or a custom SVG pack without changing frontend templates.
+
+An icon-pack is a MESH module of kind `icon-pack`. It contains
+**only** a mapping table plus metadata about the system assets it
+expects to find. It ships **no** icons.
 
 The job of the icon-pack is to translate between two name vocabularies:
-the logical names a frontend wants (`home`, `volume-high`) and the
-asset-specific names the system has (`home_rounded`, `audio-volume-high`,
+the logical names a frontend wants (`home`, `audio-volume-high`) and the
+asset-specific names the system has (`home_rounded`, `volume_up`,
 codepoint ``, etc.).
 
 Multiple icon-pack modules can wrap the same underlying assets with
@@ -76,10 +106,14 @@ expose different sets of logical names or pick different glyph variants.
 
 ### Layer 3 — Frontend module
 
-Declares which icon-pack(s) it depends on. Writes `<icon name="..."/>`
-with logical names only. Optionally declares per-icon overrides for
-cases where the author wants to deviate from the active icon-pack's
-chosen glyph for one specific icon.
+Declares which semantic icon names it uses. Writes `<icon name="..."/>`
+with logical names only. It should not choose the user's visual style by
+default; the active shell icon-pack chain resolves those names.
+
+If a frontend needs module-specific icons that do not belong in a base
+interface vocabulary, it declares those names in its own module
+vocabulary. Users can then resolve or override those names the same way
+they handle shared shell names.
 
 ---
 
@@ -88,8 +122,8 @@ chosen glyph for one specific icon.
 All template usage is by **kebab-case logical name**:
 
 ```xml
-<icon name="volume-high"/>
-<icon name="wifi-off"/>
+<icon name="audio-volume-high"/>
+<icon name="network-wireless-off"/>
 ```
 
 Logical names are never raw codepoints, file paths, or pack-specific
@@ -97,29 +131,85 @@ identifiers in the common case.
 
 The canonical vocabulary for a given service is owned by the
 **interface module** for that service. The audio interface declares
-names like `volume-high`, `volume-mute`, `volume-medium`; any frontend
-consuming the audio interface inherits that vocabulary. This
-co-locates the icon contract with the service contract.
+names like `audio-volume-high`, `audio-volume-muted`, and
+`audio-volume-medium`; any frontend consuming the audio interface
+inherits that vocabulary. This co-locates the icon contract with the
+service contract.
 
 Modules are free to use additional names beyond the interface
 vocabulary, but should prefer interface-declared names where they
 exist.
 
+### Where expected names live
+
+Expected names come from three places:
+
+1. **Shell vocabulary** — core shell actions and primitives such as
+   `settings`, `close`, `search`, `warning`, and `missing-icon`.
+2. **Interface vocabularies** — domain names owned by interface modules,
+   such as `audio-volume-high` from `@mesh/audio-interface`.
+3. **Module vocabularies** — names declared by a frontend for concepts
+   specific to that module, such as a weather module declaring
+   `weather-rain-heavy`.
+
+The shell composes these declarations into the local icon vocabulary
+index. Tooling uses that index to tell pack authors what names are
+expected and to tell users which requested names are unresolved.
+
+### Module-specific icon names
+
+Frontend authors may declare special icon names when no base shell or
+interface name fits. These names are still semantic and should be
+documented in the module manifest; they are not raw asset names.
+
+```json
+{
+  "name": "@community/weather",
+  "mesh": {
+    "kind": "frontend",
+    "contributes": {
+      "icon_vocabulary": {
+        "names": [
+          "weather-clear",
+          "weather-rain-heavy"
+        ]
+      }
+    },
+    "uses": {
+      "icons": {
+        "required": [
+          "weather-clear"
+        ],
+        "optional": [
+          "weather-rain-heavy"
+        ]
+      }
+    }
+  }
+}
+```
+
+Diagnostics qualify module-owned names with the module id when needed,
+for example `@community/weather:weather-rain-heavy`, so they do not
+pollute the shared shell vocabulary or collide with another module's
+local concept.
+
 ### Pack-qualified escape hatch
 
 For the cases where you, the author, want to pin one specific glyph
 from a specific pack regardless of the active mapping, use the
-`<pack-id>/<logical-name>` form:
+`<pack-id>/<logical-name>` form. For scoped module IDs such as
+`@mesh/icons-material-rounded`, use the pack's short `icon_pack.id`
+alias (`material-rounded`) in this syntax.
 
 ```xml
 <icon name="lucide/home"/>
 <icon name="material-rounded/settings"/>
 ```
 
-The slash separates the icon-pack module id (or its short alias) from
-the logical name resolved through that pack. This bypasses the active
-default and the dependency chain — it always resolves through the
-named pack.
+The slash separates the icon-pack alias from the logical name resolved
+through that pack. This bypasses the active default and the dependency
+chain — it always resolves through the named pack.
 
 Use sparingly. The whole point of the binding system is that
 templates don't bake in pack choices. Pack-qualified names are an
@@ -130,7 +220,7 @@ matter (e.g. a brand mark, a custom logo).
 
 ## Icon-pack module shape
 
-Pack manifest (`package.json` with `mesh.kind = "icon-pack"`):
+Pack manifest (`module.json` with `mesh.kind = "icon-pack"`):
 
 ```json
 {
@@ -142,6 +232,10 @@ Pack manifest (`package.json` with `mesh.kind = "icon-pack"`):
   },
   "icon_pack": {
     "id": "material-rounded",
+    "covers": {
+      "@mesh/audio-interface": ">=1.0.0, <2.0.0",
+      "mesh.shell": ">=1.0.0, <2.0.0"
+    },
     "requires": {
       "fonts": [
         { "family": "Material Symbols Rounded", "version": ">=4.0" }
@@ -154,10 +248,10 @@ Pack manifest (`package.json` with `mesh.kind = "icon-pack"`):
       "optical_size": true
     },
     "mappings": {
-      "home":         "material-symbols/home_rounded",
-      "settings":     "material-symbols/settings_rounded",
-      "volume-high":  "material-symbols/volume_up",
-      "volume-mute":  "material-symbols/volume_off"
+      "home":                 "material-symbols/home_rounded",
+      "settings":             "material-symbols/settings_rounded",
+      "audio-volume-high":    "material-symbols/volume_up",
+      "audio-volume-muted":   "material-symbols/volume_off"
     }
   }
 }
@@ -177,6 +271,11 @@ Pack manifest (`package.json` with `mesh.kind = "icon-pack"`):
 - **`axes`** — variable-font axes the underlying asset supports. Used
   by the painter to gate CSS `--icon-*` custom properties; unsupported
   axes silently no-op. Ignored entirely for non-font assets.
+- **`covers`** — advisory declaration of vocabularies this pack intends
+  to cover. Values are semver ranges for the vocabulary owner. If a pack
+  claims coverage for an interface vocabulary but omits one of its
+  required names, validation emits a warning. Missing mappings never
+  block shell startup by themselves.
 - **`mappings`** — flat 1:1 map from logical name → asset reference.
   The right-hand side is `<asset-pack>/<asset-name>` where
   `asset-pack` is an XDG theme name, a font-family alias, or a free
@@ -187,6 +286,23 @@ Pack manifest (`package.json` with `mesh.kind = "icon-pack"`):
 
 A single icon-pack can wrap multiple system assets — `mappings`
 entries can target different `<asset-pack>` prefixes freely.
+
+For module-owned vocabularies, a pack may include a namespaced mapping
+section so the same local name can exist in more than one module without
+collision:
+
+```json
+{
+  "icon_pack": {
+    "vocabularies": {
+      "@community/weather": {
+        "weather-clear": "material-symbols/sunny",
+        "weather-rain-heavy": "material-symbols/rainy_heavy"
+      }
+    }
+  }
+}
+```
 
 ---
 
@@ -204,11 +320,23 @@ Frontend manifest:
         "@mesh/icons-material-rounded",
         "@mesh/icons-lucide"
       ]
-    }
-  },
-  "icons": {
-    "overrides": {
-      "settings": "@mesh/icons-lucide/settings"
+    },
+    "uses": {
+      "icons": {
+        "required": [
+          "settings",
+          "audio-volume-high",
+          "audio-volume-muted"
+        ],
+        "optional": [
+          "audio-device-headphones"
+        ]
+      }
+    },
+    "icons": {
+      "overrides": {
+        "settings": "lucide/settings"
+      }
     }
   }
 }
@@ -222,6 +350,12 @@ Frontend manifest:
   user-side overrides (those live in shell `settings.json`); think of
   this as the frontend author saying "I always want this specific
   glyph for this name regardless of which pack is otherwise active."
+- **`uses.icons.required`** — semantic names that must resolve for the
+  module to render its intended UI. Missing names render the built-in
+  missing glyph and produce diagnostics.
+- **`uses.icons.optional`** — semantic names the module can use when
+  available. The module should provide a graceful fallback when these
+  do not resolve.
 
 ### Implicit shell-default pack
 
@@ -244,13 +378,12 @@ User-side configuration in shell `settings.json`:
   "icons": {
     "default_pack": "@mesh/icons-material-rounded"
   },
-  "modules": {
-    "navigation-bar": {
-      "icons": {
-        "use_packs": ["@mesh/icons-lucide"],
-        "overrides": {
-          "home": "custom/my-home.svg"
-        }
+  "@mesh/navigation-bar": {
+    "icons": {
+      "use_packs": ["@mesh/icons-lucide"],
+      "overrides": {
+        "audio-volume-high": "material-rounded/audio-volume-high",
+        "settings": "~/icons/settings.svg"
       }
     }
   }
@@ -259,14 +392,19 @@ User-side configuration in shell `settings.json`:
 
 - **`icons.default_pack`** — the shell-wide preferred icon-pack,
   implicitly prepended to every frontend's dependencies (see above).
-- **`modules.<id>.icons.use_packs`** — replaces the frontend's
+- **`<module-id>.icons.use_packs`** — replaces the frontend's
   declared `dependencies.icon_packs` list for *this module only*.
   Useful when the user wants a different visual style for one panel
   without forking the module.
-- **`modules.<id>.icons.overrides`** — per-icon override chain
+- **`<module-id>.icons.overrides`** — per-icon override chain
   prepended in front of every other resolution path for matching
   logical names. The strongest user-side knob; use it to swap one
   icon in one place.
+
+The same settings are surfaced by the generated shell settings UI:
+users can choose the global preferred icon pack, choose a different
+pack chain for a specific frontend module, or override one semantic
+name with a pack-qualified target or local file.
 
 ---
 
@@ -274,7 +412,7 @@ User-side configuration in shell `settings.json`:
 
 For any `<icon name="X"/>` rendered inside frontend `<id>`:
 
-1. **User override chain** — `modules.<id>.icons.overrides.X`, if
+1. **User override chain** — `<module-id>.icons.overrides.X`, if
    present.
 2. **Frontend author override chain** — frontend manifest's
    `icons.overrides.X`, if present.
@@ -282,7 +420,7 @@ For any `<icon name="X"/>` rendered inside frontend `<id>`:
    directly through `pack` and skip the dependency chain.
 4. **Effective dependency chain** — the user's shell-default pack
    (unless suppressed) followed by the frontend's
-   `dependencies.icon_packs` (or `modules.<id>.icons.use_packs` if
+   `dependencies.icon_packs` (or `<module-id>.icons.use_packs` if
    overridden), tried in order. First pack whose `mappings` defines
    `X` and whose target resolves to a real asset wins.
 5. **System hicolor fallback** — bare-name lookup in the installed
@@ -313,6 +451,10 @@ Where `pack-id` may refer to:
   for a single-file reference (`override: "/abs/path/to/icon.svg"`).
 - Another icon-pack module (in user-overrides only) — `asset-name`
   is a logical name within that pack.
+
+For icon-pack modules, `pack-id` is the pack's short `icon_pack.id`
+alias. This keeps scoped module ids such as `@mesh/icons-material-rounded`
+from conflicting with the slash separator.
 
 The renderer dispatches on what the target type turns out to be:
 file targets go through the SVG/PNG raster path; font glyph targets
@@ -359,17 +501,56 @@ their target as `multicolor: true` if the pack knows in advance.
 
 At shell startup MESH discovers:
 
-1. **Installed icon-pack modules** — found via the standard module
+1. **Icon vocabulary declarations** — shell-owned names, interface
+   module names, and module-owned names from installed frontends. These
+   form the local expected-name index.
+2. **Installed icon-pack modules** — found via the standard module
    discovery paths (workspace, `~/.local/share/mesh/modules/`, etc.).
    Each pack's `requires` block is matched against installed system
    assets; mismatches log soft warnings.
-2. **System icon themes** — XDG directories scanned to know what
+3. **System icon themes** — XDG directories scanned to know what
    theme names are available for `hicolor:foo` style targets.
-3. **System fonts** — fontconfig query for families referenced in any
+4. **System fonts** — fontconfig query for families referenced in any
    loaded icon-pack's `requires.fonts`.
 
 There is no "MESH icon registry" or central server. Discovery is
 purely local.
+
+Validation compares the local expected-name index against the active
+pack chain. Missing required names produce diagnostics with the module
+id, semantic name, attempted pack chain, and final fallback. Missing
+optional names are reported at lower severity.
+
+---
+
+## Tooling
+
+The shell exposes the local vocabulary index and pack coverage so icon-pack
+authors can build against the names users and frontend modules expect:
+
+```text
+mesh icons vocabulary list
+mesh icons vocabulary show mesh.shell
+mesh icons vocabulary show @mesh/audio-interface
+mesh icons vocabulary show @community/weather
+mesh icons validate-pack @mesh/icons-material-rounded
+mesh icons missing @mesh/navigation-bar
+mesh icons resolve audio-volume-high --module @mesh/navigation-bar
+```
+
+- **`vocabulary list`** shows every vocabulary owner in the installed module
+  graph.
+- **`vocabulary show`** prints required and optional semantic names for one
+  owner.
+- **`validate-pack`** compares an icon-pack's `covers` and `mappings` against
+  the vocabularies it claims to support.
+- **`missing`** reports required and optional names used by a frontend that do
+  not resolve through its effective pack chain.
+- **`resolve`** prints the resolution chain for a specific semantic name.
+
+The diagnostics panel surfaces the same information so users can see whether a
+missing icon is caused by the frontend, the selected pack, a missing system
+asset, or a user override.
 
 ---
 
@@ -404,7 +585,7 @@ own `package.json`. That layer is **deprecated** and being removed:
 
 User-side shell `settings.json` `modules.<id>.icons.{pack,overrides}`
 from the earlier design becomes
-`modules.<id>.icons.{use_packs,overrides}` (note: `use_packs` is now
+`<module-id>.icons.{use_packs,overrides}` (note: `use_packs` is now
 a list — the user can declare a full pack chain, not just a single
 preferred pack).
 
@@ -417,6 +598,7 @@ for implementation:
 
 - `mesh-core-icon`
   - Pack manifest parsing (`icon_pack` section)
+  - Vocabulary index from shell, interface, and frontend declarations
   - Pack chain resolution (user override → author override →
     pack-qualified → dependency chain → hicolor → missing)
   - Resolution cache, glyph cache invalidation hooks
@@ -431,9 +613,10 @@ for implementation:
   - Future: animatable axis values through the StyleAnimation engine
 - `mesh-core-module/src/manifest/`
   - `icon-pack` kind handling, `icon_pack` section parsing
-  - Frontend `dependencies.icon_packs` and `icons.overrides`
+  - Frontend `dependencies.icon_packs`, `uses.icons`,
+    `contributes.icon_vocabulary`, and `icons.overrides`
 - `mesh-core-config`
-  - `icons.default_pack`, `modules.<id>.icons.{use_packs,overrides}`
+  - `icons.default_pack`, `<module-id>.icons.{use_packs,overrides}`
 - `mesh-core-shell`
   - Discover icon-pack modules; register their mappings + axis
     metadata in the shared registry

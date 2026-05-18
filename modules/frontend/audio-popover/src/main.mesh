@@ -263,6 +263,11 @@ end
     border-radius: token(radius.md);
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
+    transform: scale(1);
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate),
+                transform token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
 }
 
 .audio-action-compact {
@@ -273,11 +278,21 @@ end
 .audio-action:focus-visible {
     background: token(color.primary-container);
     color: token(color.on-primary-container);
+    border-radius: token(radius.md);
 }
 
 .audio-action:hover {
     background: token(color.primary-container);
     color: token(color.on-primary-container);
+    border-radius: token(radius.md);
+    transform: scale(1.03);
+}
+
+.audio-action:active {
+    background: token(color.primary);
+    color: token(color.on-primary);
+    border-radius: token(radius.full);
+    transform: scale(0.96);
 }
 
 .audio-action-text {

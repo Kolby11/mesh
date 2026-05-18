@@ -4,7 +4,7 @@
   "defaults": {
     "components": {
       "base": {
-        "transition": "color token(animation.duration.short) token(animation.curves.bezier.standard), background-color token(animation.duration.short) token(animation.curves.bezier.standard), border-color token(animation.duration.short) token(animation.curves.bezier.standard), opacity token(animation.duration.short) token(animation.curves.bezier.standard), border-radius token(animation.duration.medium) token(animation.curves.bezier.standard), border-width token(animation.duration.short) token(animation.curves.bezier.standard), width token(animation.duration.medium) token(animation.curves.bezier.standard), height token(animation.duration.medium) token(animation.curves.bezier.standard), padding token(animation.duration.medium) token(animation.curves.bezier.standard), margin token(animation.duration.medium) token(animation.curves.bezier.standard), transform token(animation.duration.medium) token(animation.curves.bezier.standard)"
+        "transition": "background-color token(animation.duration.short) token(animation.curves.bezier.standard), color token(animation.duration.short) token(animation.curves.bezier.standard), border-color token(animation.duration.short) token(animation.curves.bezier.standard), opacity token(animation.duration.medium) token(animation.curves.bezier.standard), border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate), border-width token(animation.duration.medium) token(animation.curves.bezier.standard), width token(animation.duration.medium) token(animation.curves.bezier.standard), height token(animation.duration.medium) token(animation.curves.bezier.standard), padding token(animation.duration.medium) token(animation.curves.bezier.standard), margin token(animation.duration.medium) token(animation.curves.bezier.standard), transform token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate)"
       }
     }
   },
@@ -188,7 +188,8 @@
     "animation.curves.bezier.standard-decelerate": "cubic-bezier(0.0, 0.0, 0, 1.0)",
     "animation.curves.bezier.standard-accelerate": "cubic-bezier(0.3, 0.0, 1, 1.0)",
     "animation.curves.bezier.emphasized": "cubic-bezier(0.2, 0.0, 0, 1.0)",
-    "animation.default.border-radius": "border-radius token(animation.duration.fast) token(animation.curves.bezier.standard)",
+    "animation.curves.bezier.emphasized-decelerate": "cubic-bezier(0.05, 0.7, 0.1, 1.0)",
+    "animation.default.border-radius": "border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate)",
     "animation.default.opacity": "opacity token(animation.duration.short) token(animation.curves.bezier.standard)",
     "animation.scale.hover": 1.02,
     "animation.scale.press": 0.98,

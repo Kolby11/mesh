@@ -111,6 +111,18 @@ The project now also has a rendering engine architecture direction with:
 - A production-adjacent focused proof adapter preserving retained identity, typed invalidation, damage/profiling, diagnostics, selection, and AccessKit-compatible boundaries.
 - A phased, reversible renderer migration roadmap with explicit ownership classification, build/CI/Linux/Nix/binary-risk gates, rollback expectations, and an author-facing `.mesh` renderer contract.
 
+## Current Milestone: v1.9 Renderer Library Integration
+
+**Goal:** Move the selected renderer libraries from prototype/proof evidence into production renderer paths behind reversible adapter boundaries, while preserving retained MESH identity, diagnostics, profiling, accessibility, and shipped navigation/audio behavior.
+
+**Target features:**
+- Add production Cargo dependencies and adapter ownership for Taffy layout, Parley text, AnyRender/Vello-style paint boundaries, and AccessKit runtime updates.
+- Replace proof-only `taffy_layout`, `parley_text`, and `accesskit_node_id` evidence with real library-backed adapters where each library is ready.
+- Keep the current MESH software renderer, retained tree, render-object tree, display list, and Wayland presentation as rollback authorities until each replacement path passes gates.
+- Verify shipped navigation/audio surfaces, selection behavior, damage/profiling payloads, diagnostics, binary/build impact, and Linux/Nix implications before any broad defaulting.
+
+**Next milestone direction:** v1.10 should focus on animations and motion fidelity after renderer library integration gives animation code a clearer layout/text/paint substrate.
+
 ## Last Shipped Milestone: v1.8 Rendering Engine Architecture
 
 **Goal:** Decide and prove the next rendering architecture for MESH by evaluating Blitz as inspiration or a base, then implementing the minimum integration slice that improves rendering capability without losing shell-specific determinism, observability, and shipped-surface responsiveness.
@@ -150,7 +162,8 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 
 ### Active
 
-- No active requirements remain after v1.8. The next milestone should define fresh requirements.
+- Productionize the selected renderer libraries from v1.8: Taffy, Parley, AnyRender/Vello-style paint boundaries, and AccessKit runtime updates.
+- Keep animation and motion-fidelity polish scoped to the following milestone unless a minimal regression fix is required to preserve existing behavior.
 
 ### Out of Scope
 
@@ -160,6 +173,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - Replacing keyboard focus traversal, text-input behavior, or shipped widget activation semantics.
 - Skia-backed rendering investigation — still a future rendering backlog candidate, but not the active v1.7 scope.
 - Finishing all paused v1.6 keybind runtime behavior; this milestone only preserves and migrates the declaration/resolution model where it intersects modularity.
+- Animation system redesign, transition polish, and richer keyframe behavior — planned for the milestone after renderer library integration.
 
 ## Key Decisions
 
@@ -240,4 +254,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-18 after shipping v1.8 milestone*
+*Last updated: 2026-05-18 after starting v1.9 milestone*

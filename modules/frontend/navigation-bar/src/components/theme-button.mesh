@@ -77,7 +77,7 @@ end
     justify-content: center;
     align-items: center;
     padding: token(spacing.xs);
-    border-radius: token(radius.lg);
+    border-radius: token(radius.md);
     transform: translateY(0px) scale(1);
     background: token(color.surface-container);
     color: token(color.on-surface);
@@ -87,14 +87,15 @@ end
     text-wrap: none;
     transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
                 color token(animation.duration.short) token(animation.curves.bezier.standard),
-                border-radius token(animation.duration.fast) token(animation.curves.bezier.standard),
-                transform token(animation.duration.fast) token(animation.curves.bezier.standard);
+                border-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate),
+                transform token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
 }
 
 .nav-button:hover {
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
-    border-radius: token(radius.full);
+    border-radius: token(radius.md);
     transform: translateY(-1px) scale(1.04);
 }
 
@@ -102,13 +103,16 @@ end
 .nav-button:focus-visible {
     background: token(color.tertiary-container);
     color: token(color.on-tertiary-container);
-    border-radius: token(radius.full);
+    border-radius: token(radius.md);
     transform: translateY(-1px) scale(1.03);
 }
 
 .nav-button:active {
+    background: token(color.primary);
+    color: token(color.on-primary);
+    border-color: token(color.primary);
     border-radius: token(radius.full);
-    transform: translateY(0px) scale(0.96);
+    transform: translateY(0px) scale(0.94);
 }
 
 .nav-button-glyph {

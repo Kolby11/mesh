@@ -1015,7 +1015,7 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
             <= 1.0,
         "navigation button should be vertically centered in the shell"
     );
-    assert_eq!(button.computed_style.border_radius.top_left, 16.0);
+    assert_eq!(button.computed_style.border_radius.top_left, 8.0);
     assert_eq!(button.computed_style.transform.scale_x, 1.0);
     assert_eq!(button.computed_style.transform.scale_y, 1.0);
     let visible_pixels = nontransparent_pixels(&buffer);
@@ -1059,7 +1059,7 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
         .expect("hovered navigation tree");
     let hovered_button = node_by_mesh_key(hovered_tree, &button_key);
 
-    assert_eq!(hovered_button.computed_style.border_radius.top_left, 9999.0);
+    assert_eq!(hovered_button.computed_style.border_radius.top_left, 8.0);
     assert_eq!(hovered_button.computed_style.transform.translate_y, -1.0);
     assert!((hovered_button.computed_style.transform.scale_x - 1.04).abs() < 0.001);
     assert!((hovered_button.computed_style.transform.scale_y - 1.04).abs() < 0.001);
@@ -1073,6 +1073,46 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
         center_alpha > 0,
         "hovered navigation button center should remain visible after transition repaint"
     );
+
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x: hover_x,
+                y: hover_y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        component.pointer_down_key.as_deref(),
+        Some(button_key.as_str())
+    );
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let active_tree = component
+        .last_tree
+        .as_ref()
+        .expect("active navigation tree");
+    let active_button = node_by_mesh_key(active_tree, &button_key);
+
+    assert!(active_button.state.active);
+    assert!(
+        component.style_animations.contains_key(&button_key),
+        "active press should start the visible squircle-to-circle transition"
+    );
+    std::thread::sleep(Duration::from_millis(260));
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let settled_tree = component
+        .last_tree
+        .as_ref()
+        .expect("settled active navigation tree");
+    let settled_button = node_by_mesh_key(settled_tree, &button_key);
+
+    assert_eq!(settled_button.computed_style.border_radius.top_left, 9999.0);
+    assert!((settled_button.computed_style.transform.scale_x - 0.94).abs() < 0.001);
+    assert!((settled_button.computed_style.transform.scale_y - 0.94).abs() < 0.001);
 }
 
 fn nontransparent_pixels(buffer: &PixelBuffer) -> usize {
