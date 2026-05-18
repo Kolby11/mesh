@@ -92,6 +92,12 @@ MIGR-03: build, CI, feature flags, Linux/Nix dependency implications, and binary
 
 Latest `parley 0.9.0`, `parley 0.8.0`, `vello 0.9.0`, and `vello_encoding 0.9.0` require Rust 1.88 and are not selected for the Rust 1.85 workspace.
 
+## Phase 47 Taffy Layout Replacement Record
+
+Phase 47 promotes Taffy for in-scope layout computation. `mesh-core-elements` owns the Taffy dependency because it owns `LayoutEngine`, retained `WidgetNode` geometry storage, and the text measurement injection point used before rendering.
+
+For Phase 47, unsupported cases produce diagnostics or blocker records rather than silent old-engine fallback. This intentionally narrows the Phase 46 rollback posture for layout only: non-layout renderer-library candidates remain gated, but in-scope MESH layout semantics move to Taffy-backed computation while MESH retains `NodeId`, runtime keys, dirty categories, render-object synchronization, diagnostics, profiling, damage, and presentation ownership.
+
 ### Observability Promotion Gate
 
 A renderer path cannot become authoritative until it preserves or replaces:

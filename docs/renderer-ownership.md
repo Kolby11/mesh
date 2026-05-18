@@ -35,7 +35,7 @@ MIGR-02: existing renderer modules are classified as authoritative, adapter-owne
 
 | Candidate | Status | Candidate use | Current limitation |
 |-----------|--------|---------------|--------------------|
-| Taffy | replacement candidate | Future layout implementation behind retained MESH nodes. | Not currently authoritative for shipped layout behavior. |
+| Taffy | replacement candidate | Phase 47 promotes Taffy toward authoritative layout for rows, columns, stacks, fixed sizes, gaps, padding, absolute positioning, and container-width cases behind retained MESH nodes. | MESH `NodeId`, runtime keys, dirty categories, render-object sync, diagnostics, profiling, damage, and presentation remain authoritative MESH boundaries. |
 | Parley | replacement candidate | Future text layout/shaping path behind theme-owned selection and retained text evidence. | Not currently authoritative for all text behavior or editing semantics. |
 | AnyRender/Vello-style rendering | replacement candidate | Future paint backend abstraction under retained display-list ownership. | Not currently authoritative for production paint execution. |
 | AccessKit runtime expansion | replacement candidate | Future accessibility runtime beyond retained-node update evidence. | Phase 44 proves an update boundary, not a complete cross-platform runtime. |

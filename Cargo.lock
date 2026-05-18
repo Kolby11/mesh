@@ -1447,6 +1447,7 @@ dependencies = [
  "mesh-core-theme",
  "serde",
  "serde_json",
+ "taffy",
  "thiserror 2.0.18",
  "tracing",
 ]

@@ -43,6 +43,36 @@ impl LayoutRect {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaffyLayoutDiagnostic {
+    pub node_id: NodeId,
+    pub tag: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Default)]
+pub struct TaffyLayoutReport {
+    pub diagnostics: Vec<TaffyLayoutDiagnostic>,
+}
+
+impl TaffyLayoutReport {
+    pub fn is_clean(&self) -> bool {
+        self.diagnostics.is_empty()
+    }
+}
+
+fn record_taffy_diagnostic(
+    report: &mut TaffyLayoutReport,
+    node: &WidgetNode,
+    reason: impl Into<String>,
+) {
+    report.diagnostics.push(TaffyLayoutDiagnostic {
+        node_id: node.id,
+        tag: node.tag.clone(),
+        reason: reason.into(),
+    });
+}
+
 #[derive(Debug, Default)]
 pub struct IntrinsicLayoutCache {
     generation: u64,
@@ -1095,6 +1125,27 @@ mod tests {
         assert!(
             cached_delta < invalidated_delta,
             "warm cache should avoid probe measurements until the text changes"
+        );
+    }
+
+    #[test]
+    fn taffy_diagnostic_records_node_identity_and_reason() {
+        let node = make_node("diagnostic-target", Dimension::Auto, Dimension::Auto);
+        let mut report = TaffyLayoutReport::default();
+
+        record_taffy_diagnostic(
+            &mut report,
+            &node,
+            "unsupported layout mapping: test-only",
+        );
+
+        assert!(!report.is_clean());
+        assert_eq!(report.diagnostics.len(), 1);
+        assert_eq!(report.diagnostics[0].node_id, node.id);
+        assert_eq!(report.diagnostics[0].tag, "diagnostic-target");
+        assert_eq!(
+            report.diagnostics[0].reason,
+            "unsupported layout mapping: test-only"
         );
     }
 }
