@@ -6,28 +6,28 @@ status: planning
 last_updated: "2026-05-18T12:15:49.055Z"
 last_activity: 2026-05-18
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
   percent: 0
 ---
 
-# State: MESH v1.7
+# State: MESH v1.8
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-05-18)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Planning next milestone after v1.7 archive
+**Current focus:** Phase 42 — renderer-architecture-decision-matrix
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 42
 Plan: —
-Status: Defining requirements
-Last activity: 2026-05-18 — Milestone v1.8 started
+Status: Roadmap defined; ready for discussion/planning
+Last activity: 2026-05-18 — Milestone v1.8 roadmap created
 
 ## Decisions
 
