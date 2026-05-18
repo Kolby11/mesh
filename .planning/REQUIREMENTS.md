@@ -26,7 +26,7 @@
 
 ### Migration and Proof
 
-- [ ] **MIGR-01**: Existing bundled modules and docs that still use legacy vocabulary or manifest shapes receive a clear migration path toward the canonical model.
+- [x] **MIGR-01**: Existing bundled modules and docs that still use legacy vocabulary or manifest shapes receive a clear migration path toward the canonical model.
 - [ ] **MIGR-02**: Paused v1.6 keybind declaration/resolution work is preserved as part of the manifest/contribution model so later keybind dispatch phases can resume without rework.
 - [ ] **PROOF-01**: At least one real bundled module/provider path proves the canonical model through code, docs, diagnostics, and tests.
 
@@ -72,7 +72,7 @@
 | EXT-02 | Phase 39 | Complete |
 | EXT-03 | Phase 39 | Complete |
 | EXT-04 | Phase 39 | Complete |
-| MIGR-01 | Phase 40 | Pending |
+| MIGR-01 | Phase 40 | Complete |
 | MIGR-02 | Phase 40 | Pending |
 | PROOF-01 | Phase 41 | Pending |
 
