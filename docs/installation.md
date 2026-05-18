@@ -4,13 +4,13 @@ Installation is the process of taking a module package, resolving everything
 it depends on, and landing it on disk in a state where the shell can load it.
 The core manages the whole flow — users never hand-wire dependencies.
 
-This document covers the manifest format (`package.json`), the dependency
+This document covers the manifest format (`module.json`), the dependency
 kinds, the resolution algorithm, and how the installer handles the conflicts
 that come up in a multi-backend ecosystem.
 
-## `package.json`
+## `module.json`
 
-Every module has a single `package.json` at its package root. It is the
+Every module has a single `module.json` at its module root. It is the
 authoritative manifest: identity, dependencies, capabilities, entrypoints,
 settings schema, and defaults all live here.
 
@@ -19,87 +19,70 @@ ordinary modules on disk. The shell core does not seed service APIs at
 startup; it discovers interface and backend modules the same way it discovers
 frontends.
 
-> **Migration note.** `package.json` replaces the earlier `mesh.toml`.
-> Existing module source in `modules/` still uses the TOML form during
-> transition; the installer accepts both but `package.json` is the target
-> format.
+`module.json` uses top-level `name` and `version` for package identity. MESH
+runtime metadata lives under `mesh`, including `mesh.apiVersion`, `mesh.kind`,
+`mesh.implements`, and `mesh.interface` where applicable.
+
+> **Migration note.** `package.json`, legacy `module.json` fields, and
+> `mesh.toml` are internal migration inputs. They warn when accepted and should
+> be replaced with canonical `module.json`.
 
 ### Shape
 
 ```json
 {
-  "id":          "@mesh/panel",
-  "version":     "0.1.0",
-  "type":        "surface",
-  "api_version": "0.1",
+  "name": "@mesh/panel",
+  "version": "0.1.0",
   "description": "Top panel shell surface.",
-  "authors":     ["MESH Project"],
-  "license":     "MIT",
-
-  "compatibility": {
-    "mesh":        ">=0.1.0",
-    "compositors": ["wlr-layer-shell-v1"]
-  },
-
-  "capabilities": {
-    "required": ["shell.surface", "theme.read", "locale.read"],
-    "optional": []
-  },
-
-  "dependencies": {
-    "modules": {
-      "@mesh/audio-contract":   ">=1.0.0, <2.0.0",
-      "@mesh/power-contract":   ">=1.0.0"
+  "license": "MIT",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "capabilities": {
+      "required": ["shell.surface", "theme.read", "locale.read"]
     },
-    "interfaces": [
-      { "name": "mesh.audio",   "version": ">=1.0", "required": false },
-      { "name": "mesh.power",   "version": ">=1.0", "required": false },
-      { "name": "mesh.network", "version": ">=1.0", "required": false }
-    ],
-    "icon_packs":     { "required": ["@mesh/symbols"], "optional": [] },
-    "language_packs": { "optional": ["@mesh/core-translations"] },
-    "themes":         { "optional": ["@mesh/default-theme"] },
-    "native_libs":    [],
-    "binaries":       [],
-    "fonts":          []
-  },
-
-  "entrypoints": {
-    "main":         "src/main.mesh",
-    "settings_ui":  null
-  },
-
-  "exports": {
-    "component": { "tag": "PanelWidget" }
-  },
-
-  "provides_slots": {
-    "left":   { "accepts": "widget", "layout": "row", "max": 4 },
-    "center": { "accepts": "widget", "layout": "row", "max": 1 },
-    "right":  { "accepts": "widget", "layout": "row", "max": 8 }
-  },
-
-  "slot_contributions": {},
-
-  "settings": {
-    "namespace": "@mesh/panel",
-    "schema": {
-      "clock_format": {
-        "type": "enum", "values": ["12h", "24h"], "default": "24h",
-        "description": "Clock display format."
+    "dependencies": {
+      "modules": {
+        "@mesh/audio-interface": ">=1.0.0, <2.0.0"
       },
-      "show_seconds":        { "type": "boolean", "default": false },
-      "show_battery_percent":{ "type": "boolean", "default": true }
+      "icons": {
+        "@mesh/icons-default": "*"
+      }
+    },
+    "entrypoints": {
+      "main": "src/main.mesh"
+    },
+    "contributes": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Panel"
+        }
+      ],
+      "settings": {
+        "namespace": "@mesh/panel",
+        "schema": {
+          "clock_format": {
+            "type": "enum",
+            "values": ["12h", "24h"],
+            "default": "24h",
+            "description": "Clock display format."
+          },
+          "show_seconds": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "i18n": {
+        "defaultLocale": "en",
+        "path": "config/i18n/"
+      }
+    },
+    "surfaceLayout": {
+      "size_policy": "fixed"
     }
-  },
-
-  "i18n": {
-    "default_locale": "en",
-    "bundled":        "config/i18n/"
-  },
-
-  "assets": {
-    "icons": "assets/icons/"
   }
 }
 ```
@@ -108,11 +91,10 @@ frontends.
 
 Frontend modules can embed other frontend modules in two complementary ways:
 
-- `dependencies.modules` declares the frontend modules you want to consume
-- the consumed module exports a tag through `exports.component.tag`, so markup
-  like `<ClockWidget/>` resolves through that declared dependency
-- `provides_slots` exposes named insertion points and `slot_contributions`
-  lets other widget modules attach themselves to those slots
+- `mesh.dependencies.modules` declares the frontend modules you want to consume
+- `mesh.entrypoints` declares loadable `.mesh` surfaces or widgets
+- `mesh.contributes.layout` exposes named layout entries that the installed
+  graph can index
 
 This lets a surface act as a host shell while keeping individual widgets
 packaged, versioned, and replaceable on their own.
@@ -126,6 +108,7 @@ Backends add an `implements` block (and typically declare system dependencies):
   "name": "@mesh/pipewire-audio",
   "version": "0.1.0",
   "mesh": {
+    "apiVersion": "0.1",
     "kind": "backend",
     "capabilities": {
       "required": ["exec.wpctl"]
@@ -158,30 +141,40 @@ Backends add an `implements` block (and typically declare system dependencies):
 }
 ```
 
-### Variant: contract package
+### Variant: interface module
 
-Contracts carry the interface declaration and the shared settings schema:
+Interface modules carry the interface declaration and the shared settings
+schema:
 
 ```json
 {
-  "id":      "@mesh/audio-contract",
+  "name": "@mesh/audio-interface",
   "version": "1.0.0",
-  "type":    "interface",
-
-  "interface": {
-    "name":    "mesh.audio",
-    "version": "1.0",
-    "file":    "interface.toml"
-  },
-
-  "settings": {
-    "namespace": "mesh.audio",
-    "schema": {
-      "default_output_priority": {
-        "type": "enum", "values": ["speakers","headphones","hdmi"],
-        "default": "speakers"
-      },
-      "auto_resume_on_device_change": { "type": "boolean", "default": true }
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.audio",
+      "version": "1.0",
+      "file": "interface.toml",
+      "domain": "audio",
+      "relationship": "base"
+    },
+    "contributes": {
+      "settings": {
+        "namespace": "mesh.audio",
+        "schema": {
+          "default_output_priority": {
+            "type": "enum",
+            "values": ["speakers", "headphones", "hdmi"],
+            "default": "speakers"
+          },
+          "auto_resume_on_device_change": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
     }
   }
 }
@@ -215,13 +208,12 @@ not install system software.
 
 Given a target module ID + version:
 
-1. **Fetch target.** Read `package.json`. Verify signature against the trust
+1. **Fetch target.** Read `module.json`. Verify signature against the trust
    tier (core / verified / community / local — see
    [`spec/pluggable-backend.md`](../spec/pluggable-backend.md#trust-tiers)).
-2. **Expand the dependency graph.** Walk `dependencies.modules`,
-   `icon_packs.required`, `language_packs.required`, and any
-   `interfaces[*].required == true` entries recursively. Treat `optional:
-   true` deps as *offered*, not required — they are added to the graph only
+2. **Expand the dependency graph.** Walk `mesh.dependencies.modules`,
+   resource requirements, and interface dependencies recursively. Treat
+   optional deps as *offered*, not required — they are added to the graph only
    if the user accepts.
 3. **Reconcile versions.** For each unique module ID in the graph, compute
    the intersection of all declared version ranges. Pick the highest
@@ -277,7 +269,7 @@ transaction:
 ```
 
 The lockfile makes `mesh-shell install` reproducible across machines — the same
-`package.json` + `modules.lock.json` produces the same on-disk layout.
+`module.json` + `modules.lock.json` produces the same on-disk layout.
 
 ## Sources
 
@@ -407,7 +399,7 @@ user module with the same ID.
 
 ## Summary
 
-- `package.json` is the single source of truth (manifest + schema +
+- `module.json` is the single source of truth (manifest + schema +
   defaults inline).
 - Dependencies are kinded: MESH modules (installed), interfaces
   (must have a provider), and system artefacts (detected, never
