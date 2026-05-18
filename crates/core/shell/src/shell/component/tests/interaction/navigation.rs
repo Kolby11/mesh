@@ -407,6 +407,45 @@ end
 }
 
 #[test]
+fn keyboard_shortcuts_manifest_declaration_wins_over_legacy_settings_same_id() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+    component.settings_json = serde_json::json!({
+        "keyboard": {
+            "shortcuts": {
+                "mute": {
+                    "key": "z"
+                }
+            }
+        }
+    });
+
+    let resolved =
+        component.resolved_surface_shortcuts(&mesh_core_config::KeyboardSettings::default());
+
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].keybind_id, "mute");
+    assert_eq!(resolved[0].key, "m");
+    assert_eq!(resolved[0].source, KeybindResolutionSource::ModuleDefault);
+}
+
+#[test]
 fn manifest_descriptor_exposes_keybind_i18n_keys_to_lua_and_markup() {
     let mut manifest = minimal_test_manifest("@test/keybind-descriptor");
     manifest.keybinds.actions.insert(
