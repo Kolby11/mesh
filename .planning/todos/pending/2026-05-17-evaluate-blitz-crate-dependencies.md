@@ -2,6 +2,7 @@
 created: 2026-05-17T22:14:41.564Z
 title: Evaluate Blitz crate dependencies
 area: planning
+resolves_phase: 42
 files: []
 ---
 
@@ -43,4 +44,3 @@ focused architecture evaluation:
   engine shape if it would undermine MESH's retained shell-specific model.
 - Capture findings in a future roadmap/spike before committing to broad
   rewrites.
-
