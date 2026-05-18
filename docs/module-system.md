@@ -502,7 +502,7 @@ Recommended layout:
 
 ```text
 @mesh/backend-kit/
-  package.json
+  module.json
   lib/
     result.luau
     poll.luau

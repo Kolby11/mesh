@@ -25,7 +25,7 @@ organization, not a special discovery boundary.
 - `@mesh/focus-timer` exports `<FocusTimer/>`
 - `@mesh/status-rail` exports `<StatusRail/>`
 
-These are imported by `@mesh/workspace-hub` through `dependencies.modules`.
+These are imported by `@mesh/workspace-hub` through `mesh.dependencies.modules`.
 The loader validates that each referenced tag resolves to exactly one required
 widget dependency before runtime.
 
@@ -33,7 +33,7 @@ widget dependency before runtime.
 
 - `@mesh/weather-brief`
   - Contributes into `@mesh/workspace-hub:main-extra`
-  - Demonstrates slot props in `package.json`
+  - Demonstrates layout contribution metadata in `module.json`
 - `@mesh/habit-streaks`
   - Contributes into `@mesh/workspace-hub:footer`
   - Demonstrates footer-style chip contributions
@@ -44,8 +44,17 @@ widget dependency before runtime.
 
 ```json
 {
-  "exports": {
-    "component": { "tag": "CalendarCard" }
+  "mesh": {
+    "kind": "frontend",
+    "contributes": {
+      "layout": [
+        {
+          "id": "calendar-card",
+          "entrypoint": "src/main.mesh",
+          "label": "Calendar Card"
+        }
+      ]
+    }
   }
 }
 ```
@@ -54,9 +63,11 @@ widget dependency before runtime.
 
 ```json
 {
-  "dependencies": {
-    "modules": {
-      "@mesh/calendar-card": ">=0.1.0"
+  "mesh": {
+    "dependencies": {
+      "modules": {
+        "@mesh/calendar-card": ">=0.1.0"
+      }
     }
   }
 }
@@ -73,8 +84,16 @@ editing it:
 
 ```json
 {
-  "provides_slots": {
-    "sidebar-extra": { "accepts": "widget", "layout": "column", "max": 3 }
+  "mesh": {
+    "contributes": {
+      "layout": [
+        {
+          "id": "sidebar-extra",
+          "entrypoint": "src/sidebar-extra.mesh",
+          "label": "Sidebar Extra"
+        }
+      ]
+    }
   }
 }
 ```

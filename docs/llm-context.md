@@ -21,7 +21,7 @@ hierarchy clear:
   Luau state and handlers, styles, schema, translations, and metadata. A
   component is an authoring abstraction, not a built-in core primitive.
 - **Frontend module**: a complete frontend implementation for a specific shell
-  feature or capability. It has a `package.json`, entrypoint `.mesh`,
+  feature or capability. It has a `module.json`, entrypoint `.mesh`,
   capabilities, settings, optional exports, and can contain multiple
   components. For example, an audio controls frontend module may include
   components for the volume mixer, mute toggle, output selector, and device
@@ -70,7 +70,7 @@ mesh-tools-cli
        ├─ mesh-core-backend   ← Luau backend module polling and command runtime
        │    └─ mesh-core-scripting     ← Luau host APIs and script state bridge
        ├─ mesh-core-service   ← interface/service registry (InterfaceRegistry)
-       ├─ mesh-core-module    ← manifest parsing (Manifest, package.json / mesh.toml)
+       ├─ mesh-core-module    ← manifest parsing (canonical module.json plus migration diagnostics for old inputs)
        ├─ mesh-core-theme     ← token-based theming (ThemeEngine, Theme)
        ├─ mesh-core-locale    ← localization (LocaleEngine)
        ├─ mesh-core-events    ← typed event bus for inter-module communication
@@ -124,7 +124,7 @@ modules/
     notification-feed/
     notification-sidebar/
 
-  backend/core/         ← service modules (scripted backends, declared by package.json)
+  backend/core/         ← service modules (scripted backends, declared by module.json)
     pipewire-audio/     ← audio via PipeWire
     pulseaudio-audio/   ← audio via PulseAudio
     mpris-media/        ← media via MPRIS
@@ -140,18 +140,18 @@ modules/
     brightness-interface/
 ```
 
-### Frontend module anatomy (`package.json`)
+### Frontend module anatomy (`module.json`)
 
 Every frontend module is a complete feature package. It declares in its
-`package.json`:
-- `type`: `"surface"` | `"widget"` | `"backend"` | `"interface"`
-- `entrypoints.main`: path to the `.mesh` single-file component
-- `settings.schema.surface.properties`: layout defaults (anchor, layer, width, height, etc.) — **user-editable**
-- `surface_layout`: non-user renderer hints (`size_policy`, `prefers_content_children_sizing`, clamp bounds)
-- `capabilities.required`: permission gates (`shell.surface`, `theme.read`, etc.)
-- `dependencies.modules`: module IDs this module depends on
+canonical author-facing manifest, `module.json`:
+- `mesh.kind`: `"frontend"` for frontend modules
+- `mesh.entrypoints.main`: path to the `.mesh` single-file component
+- `mesh.contributes.settings.schema.surface.properties`: layout defaults (anchor, layer, width, height, etc.) — **user-editable**
+- `mesh.surfaceLayout`: non-user renderer hints (`size_policy`, `prefers_content_children_sizing`, clamp bounds)
+- `mesh.capabilities.required`: permission gates (`shell.surface`, `theme.read`, etc.)
+- `mesh.dependencies.modules`: module IDs this module depends on
 
-Surface layout defaults live in `package.json`, **not** in Rust. `mesh-core-shell` reads them via `surface_layout_from_manifest()` in `shell.rs`.
+Surface layout defaults live in `module.json`, **not** in Rust. `mesh-core-shell` reads them via `surface_layout_from_manifest()` in `shell.rs`.
 
 ### `.mesh` single-file component structure
 
@@ -178,7 +178,7 @@ capabilities, manifests, and one or more components.
 2. Shell discovers modules via `module_search_paths()` (workspace, `/usr/share/mesh`, `~/.local/share/mesh`)
 3. Each module dir is loaded from manifest metadata; frontend modules are compiled via `mesh-core-frontend`, backend modules are hosted by `mesh-core-backend`
 4. `FrontendSurfaceComponent::new()` is created per surface module:
-   - reads `package.json` manifest → `surface_layout_from_manifest()` for layout defaults
+   - reads `module.json` manifest → `surface_layout_from_manifest()` for layout defaults
    - reads `config/settings.json` → user overrides applied on top of manifest defaults
 5. Shell enters the main event loop (Tokio runtime)
 
@@ -193,7 +193,7 @@ capabilities, manifests, and one or more components.
 ### Settings flow
 
 ```
-package.json settings.schema.surface.properties[field].default
+module.json mesh.contributes.settings.schema.surface.properties[field].default
   ↓  (baseline)
 surface_layout_from_manifest()
   ↓  + user overrides
@@ -207,7 +207,7 @@ ScriptContext state["settings"]  ←  Luau reads {settings.surface.anchor}
 ### Service/interface flow
 
 ```
-backend module (mesh.toml, provides = "mesh.audio")
+backend module (`module.json` with `mesh.implements`)
   → registered in InterfaceRegistry
   → emits events on EventBus
   → Shell sets __mesh_svc_audio Lua table and calls on_change handlers via ScriptContext
@@ -221,9 +221,9 @@ backend module (mesh.toml, provides = "mesh.audio")
 | Task                           | Where to start                                                                                                                   |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
 | Add a CSS property             | `crates/core/ui/component/src/style.rs` / parser modules (parse), `crates/core/ui/elements/src/style.rs` (computed style), `crates/core/frontend/render/src/surface/painter.rs` (paint) |
-| Add a new surface module       | Create `packages/modules/frontend/core/<name>/`, `package.json` with `"type": "surface"`, `src/main.mesh`                        |
-| Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core-shell/src/shell.rs`; manifest's `surface_layout` section                          |
-| Add a service (backend module) | `packages/modules/backend/core/<name>/`, `package.json` + `src/main.luau`, implement the interface contract in the module script |
+| Add a new surface module       | Create `packages/modules/frontend/core/<name>/`, `module.json` with `mesh.kind = "frontend"`, `src/main.mesh`                    |
+| Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core-shell/src/shell.rs`; manifest's `mesh.surfaceLayout` section                      |
+| Add a service (backend module) | `packages/modules/backend/core/<name>/`, `module.json` + `src/main.luau`, implement the interface contract in the module script |
 | Add a new CoreRequest action   | `CoreRequest` enum in `crates/core/shell/src/shell/types.rs` plus request handling under `crates/core/shell/src/shell/runtime/request.rs` |
 | Add a theme token              | `mesh-core-theme/src/lib.rs`, default theme JSON, then reference with `token(group.name)` in `.mesh`                             |
 | Debug rendering                | `ToggleDebugOverlay` / `CoreRequest::CycleDebugTab`; see `crates/core/foundation/debug/src/lib.rs` and `crates/core/frontend/render/src/surface/debug_overlay.rs` |
@@ -501,10 +501,10 @@ LSP completions for `audio.` derive state fields and commands by analyzing the b
 
 ---
 
-- **Everything is a module.** The shell core must not hardcode module IDs or behavior. Layout defaults, size policies, and content sizing are declared in `package.json`, not in Rust match arms.
+- **Everything is a module.** The shell core must not hardcode module IDs or behavior. Layout defaults, size policies, and content sizing are declared in `module.json`, not in Rust match arms.
 - **`mesh-core-shell/src/shell.rs` is large** (~4000 lines). When reading it, use `Grep` to find specific functions rather than reading the whole file.
 - **Frontend modules are compiled at startup**, not interpreted at runtime. Hot-reload is supported via file watching (`reload_module_settings`, `source_path()` watching).
 - **Globals are reactive state.** Any global assigned in `<script>` is synced to `ScriptState` after each call. Templates bind to `{variable_name}`. `local` variables are private.
 - **Surface layout is user-configurable.** Any surface can have its anchor, layer, size, keyboard mode overridden via `config/settings.json` inside the module directory.
-- **`SurfaceSizePolicy::ContentMeasured`** means the surface resizes itself to fit its content. Declared in `package.json` as `surface_layout.size_policy = "content_measured"`. Only the launcher uses this currently.
+- **`SurfaceSizePolicy::ContentMeasured`** means the surface resizes itself to fit its content. Declared in `module.json` as `mesh.surfaceLayout.size_policy = "content_measured"`. Only the launcher uses this currently.
 - **Test location:** unit tests live in `#[cfg(test)]` modules at the bottom of each source file.

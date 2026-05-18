@@ -320,16 +320,25 @@ Still needed:
 The UI XML vocabulary should be open for composition.
 
 If a module defines a reusable component, it should be able to export a custom
-tag through `package.json.exports.component.tag`, and dependent modules should be
-able to use that tag directly in template markup.
+tag through canonical `module.json` contribution metadata, and dependent
+modules should be able to use that tag directly in template markup. Legacy
+`exports.component.tag` examples are migration-era wording; new docs should
+prefer `mesh.contributes` in `module.json`.
 
 Example:
 
 ```json
 {
-  "exports": {
-    "component": {
-      "tag": "BatteryWidget"
+  "mesh": {
+    "kind": "frontend",
+    "contributes": {
+      "layout": [
+        {
+          "id": "battery-widget",
+          "entrypoint": "src/main.mesh",
+          "label": "Battery Widget"
+        }
+      ]
     }
   }
 }

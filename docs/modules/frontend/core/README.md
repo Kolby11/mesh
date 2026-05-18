@@ -1,8 +1,8 @@
 # Frontend Core Modules
 
 Frontend modules render the shell UI. They are declared with
-`"type": "surface"` (or `"widget"`) in `package.json` and provide a single-file
-`.mesh` component as their entrypoint.
+`mesh.kind = "frontend"` in `module.json` and provide a single-file `.mesh`
+component as their entrypoint.
 
 Frontends look up services **by interface name only** — never by backend module
 ID. If no implementation is registered, `pcall(require, ...)` returns false and
@@ -185,9 +185,9 @@ always go through `mesh.events.publish`.
 Frontend composition happens in two ways:
 
 - Dependency-backed component imports: add a frontend module to
-  `dependencies.modules`, then import the module ID in the `<script>` block
-  and use the imported PascalCase alias in `<template>` markup.
-- Slot hosting via `provides_slots` and `slot_contributions`.
+  `mesh.dependencies.modules`, then import the module ID in the `<script>`
+  block and use the imported PascalCase alias in `<template>` markup.
+- Layout hosting via `mesh.contributes.layout`.
 
 Built-in template primitives are lowercase (`<row>`, `<button>`, `<text>`).
 Custom component tags are PascalCase (`<AudioSection />`) so component
@@ -201,8 +201,9 @@ import CalendarCard from "@mesh/calendar-card"
 ```
 
 If you create a reusable frontend component, export its custom tag explicitly in
-`package.json.exports.component.tag` so other modules can consume it as a normal
-template tag.
+`module.json` contribution metadata so other modules can consume it as a normal
+template tag. Legacy `exports.component.tag` wording is migration-era guidance;
+new author docs should prefer canonical `module.json` contribution fields.
 
 ## The `.mesh` component format
 
