@@ -31,6 +31,11 @@ The shared fixture is `.planning/prototypes/phase43/fixtures/phase43-scenarios.j
 - `.planning/prototypes/phase43/evidence/blitz-reference.md`
 - `.planning/prototypes/phase43/evidence/focused-crate.md`
 
+## Final Artifacts
+
+- `.planning/phases/43-comparable-renderer-prototype-proofs/43-PROTOTYPE-COMPARISON.md`
+- `.planning/phases/43-comparable-renderer-prototype-proofs/43-PHASE44-HANDOFF.md`
+
 ## Non-Goals
 
 - No production renderer replacement.
@@ -38,4 +43,3 @@ The shared fixture is `.planning/prototypes/phase43/fixtures/phase43-scenarios.j
 - No general `.mesh` to Blitz translator.
 - No real backend audio runtime.
 - No broad migration plan.
-
