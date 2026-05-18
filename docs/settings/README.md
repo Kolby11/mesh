@@ -123,11 +123,12 @@ Shell-owned keyboard defaults live under the top-level `keyboard` object.
 - `button_activation_keys` controls which keys activate focused buttons.
 - `toggle_activation_keys` controls focused switch and checkbox activation.
 - `slider_decrement_keys` and `slider_increment_keys` define focused slider step keys.
-- `surface_shortcuts` lets the shell remap module-declared shortcut ids on a
-  per-surface basis without editing the module itself.
+- `surface_shortcuts` lets the shell remap manifest-declared `mesh.keybinds`
+  action ids for a frontend module without editing the module itself.
 
 `keyboard.surface_shortcuts` is user override data for action ids declared in
-module manifests. Legacy settings-derived shortcut declarations are fallback input only when a manifest action id is absent.
+module manifests. Legacy settings-derived shortcut declarations are fallback
+input only when a manifest action id is absent.
 
 Example override:
 
@@ -143,8 +144,8 @@ Example override:
 }
 ```
 
-In that example, the navigation bar still declares the `mute` shortcut, but
-the shell changes its effective key from the module default to `u`.
+In that example, `@mesh/navigation-bar` still declares `mesh.keybinds.mute`,
+but the shell changes its effective key from the module default to `u`.
 
 ## Keys, namespaces, and validation
 
