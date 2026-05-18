@@ -126,6 +126,9 @@ Shell-owned keyboard defaults live under the top-level `keyboard` object.
 - `surface_shortcuts` lets the shell remap module-declared shortcut ids on a
   per-surface basis without editing the module itself.
 
+`keyboard.surface_shortcuts` is user override data for action ids declared in
+module manifests. Legacy settings-derived shortcut declarations are fallback input only when a manifest action id is absent.
+
 Example override:
 
 ```json

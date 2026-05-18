@@ -166,6 +166,15 @@ included in `supportedLocales`. Bundled translation files are still listed
 under `mesh.contributes.i18n`; supported locales are install metadata, while
 contributions are concrete files available in this package.
 
+### Keybind Contributions
+
+Modules declare keybind actions in `mesh.keybinds`. Each action can include
+`label`, `description`, `category`, a default `trigger`, and
+`localizedTriggers` for locale-specific defaults. Installed graph keybind
+contributions preserve the action id, default trigger, and localized triggers
+so later dispatch, conflict, and accessibility phases can inspect the complete
+declaration without re-reading manifests.
+
 ## Interface Modules
 
 Interface modules are the stabilizing layer. A contract should define the
