@@ -1,0 +1,104 @@
+{
+  "surfaces": [
+    {
+      "id": "navigation-bar",
+      "source": "modules/frontend/navigation-bar/src/main.mesh",
+      "size": { "width": 1280, "height": 56 },
+      "required_text": ["Shell surface active", "Audio service offline"],
+      "required_controls": ["VolumeButton", "ThemeButton", "SettingsButton"]
+    },
+    {
+      "id": "audio-popover",
+      "source": "modules/frontend/audio-popover/src/main.mesh",
+      "size": { "width": 320, "height": 188 },
+      "required_text": ["Audio output", "Volume 42%", "42%"],
+      "required_controls": ["audio-slider", "mute", "volume-down", "volume-up"]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "nav-baseline",
+      "surface": "navigation-bar",
+      "state": {
+        "primary_status": "Shell surface active",
+        "secondary_status": "Audio service offline",
+        "audio_surface_hidden": true
+      },
+      "expected_nodes": ["nav.root", "nav.status.primary", "nav.status.secondary", "nav.controls.volume", "nav.controls.theme", "nav.controls.settings"]
+    },
+    {
+      "id": "nav-audio-trigger-hover",
+      "surface": "navigation-bar",
+      "state": {
+        "hovered_node": "nav.controls.volume",
+        "audio_surface_hidden": true
+      },
+      "expected_nodes": ["nav.root", "nav.controls.volume"]
+    },
+    {
+      "id": "audio-popover-visible",
+      "surface": "audio-popover",
+      "state": {
+        "audio_title": "Audio output",
+        "audio_status": "Volume 42%",
+        "audio_percent_label": "42%",
+        "slider_value": 0.42,
+        "muted": false
+      },
+      "expected_nodes": ["audio.root", "audio.title", "audio.status", "audio.percent", "audio.slider", "audio.actions.mute", "audio.actions.down", "audio.actions.up"]
+    },
+    {
+      "id": "audio-slider-change-release",
+      "surface": "audio-popover",
+      "state": {
+        "slider_before": 0.42,
+        "slider_after": 0.73,
+        "release_value": 0.73
+      },
+      "expected_nodes": ["audio.root", "audio.slider", "audio.percent"]
+    },
+    {
+      "id": "audio-popover-close",
+      "surface": "audio-popover",
+      "state": {
+        "audio_surface_hidden": true,
+        "exiting_class": "mesh-surface-exiting",
+        "opacity": 0
+      },
+      "expected_nodes": ["audio.root"]
+    }
+  ],
+  "retained_nodes": [
+    { "id": "nav.root", "surface": "navigation-bar", "role": "window", "label": "Navigation bar root" },
+    { "id": "nav.status.primary", "surface": "navigation-bar", "role": "text", "label": "Shell surface active" },
+    { "id": "nav.status.secondary", "surface": "navigation-bar", "role": "text", "label": "Audio service offline" },
+    { "id": "nav.controls.volume", "surface": "navigation-bar", "role": "button", "label": "Volume" },
+    { "id": "nav.controls.theme", "surface": "navigation-bar", "role": "button", "label": "Theme" },
+    { "id": "nav.controls.settings", "surface": "navigation-bar", "role": "button", "label": "Settings" },
+    { "id": "audio.root", "surface": "audio-popover", "role": "dialog", "label": "Audio popover" },
+    { "id": "audio.title", "surface": "audio-popover", "role": "text", "label": "Audio output" },
+    { "id": "audio.status", "surface": "audio-popover", "role": "text", "label": "Volume 42%" },
+    { "id": "audio.percent", "surface": "audio-popover", "role": "text", "label": "42%" },
+    { "id": "audio.slider", "surface": "audio-popover", "role": "slider", "label": "Volume slider" },
+    { "id": "audio.actions.mute", "surface": "audio-popover", "role": "button", "label": "Mute audio" },
+    { "id": "audio.actions.down", "surface": "audio-popover", "role": "button", "label": "Lower volume" },
+    { "id": "audio.actions.up", "surface": "audio-popover", "role": "button", "label": "Raise volume" }
+  ],
+  "interactions": [
+    { "id": "hover-volume-trigger", "scenario": "nav-audio-trigger-hover", "target": "nav.controls.volume", "event": "hover" },
+    { "id": "click-volume-trigger", "scenario": "nav-audio-trigger-hover", "target": "nav.controls.volume", "event": "click" },
+    { "id": "change-audio-slider-0.42-to-0.73", "scenario": "audio-slider-change-release", "target": "audio.slider", "event": "change", "from": 0.42, "to": 0.73 },
+    { "id": "release-audio-slider-0.73", "scenario": "audio-slider-change-release", "target": "audio.slider", "event": "release", "value": 0.73 },
+    { "id": "close-audio-popover", "scenario": "audio-popover-close", "target": "audio.root", "event": "close" }
+  ],
+  "comparison_headings": [
+    "visual/layout fidelity",
+    "interaction shape",
+    "retained identity fit",
+    "accessibility boundary",
+    "build/dependency cost",
+    "blocker evidence",
+    "Phase 44 integration readiness"
+  ]
+}
+
