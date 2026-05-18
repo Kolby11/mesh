@@ -53,3 +53,54 @@ pub fn renderer_library_statuses() -> [RendererLibraryStatus; RENDERER_LIBRARY_S
 pub fn renderer_library_rollback_authority() -> &'static str {
     CURRENT_RENDERER_AUTHORITY
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status_for(id: &str) -> RendererLibraryStatus {
+        renderer_library_statuses()
+            .into_iter()
+            .find(|status| status.id == id)
+            .unwrap_or_else(|| panic!("missing renderer library status for {id}"))
+    }
+
+    #[test]
+    fn renderer_library_statuses_track_feature_flags() {
+        let statuses = renderer_library_statuses();
+
+        assert_eq!(statuses.len(), RENDERER_LIBRARY_STATUS_COUNT);
+        assert_eq!(
+            status_for("taffy").enabled,
+            cfg!(feature = "renderer-taffy")
+        );
+        assert_eq!(
+            status_for("parley").enabled,
+            cfg!(feature = "renderer-parley")
+        );
+        assert_eq!(
+            status_for("accesskit").enabled,
+            cfg!(feature = "renderer-accesskit")
+        );
+        assert_eq!(
+            status_for("anyrender").enabled,
+            cfg!(feature = "renderer-anyrender")
+        );
+        assert_eq!(
+            status_for("vello_encoding").enabled,
+            cfg!(feature = "renderer-vello-encoding")
+        );
+    }
+
+    #[test]
+    fn renderer_library_rollback_authority_stays_mesh_software_renderer() {
+        assert_eq!(
+            renderer_library_rollback_authority(),
+            "mesh-software-renderer"
+        );
+
+        for status in renderer_library_statuses() {
+            assert_eq!(status.default_authority, "mesh-software-renderer");
+        }
+    }
+}
