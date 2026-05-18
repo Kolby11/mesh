@@ -85,6 +85,13 @@ registration, non-fatal resource/settings diagnostics, and manifest-driven
 tests that prove new interface/provider/library/resource behavior without
 service-specific Rust branches.
 
+Phase 40 of v1.7 is complete. Legacy manifest names now produce explicit
+author-facing migration diagnostics and documentation guidance, canonical
+`module.json` examples are reinforced across docs, and paused v1.6 keybind
+declaration/resolution data is preserved through typed contribution records,
+manifest-first shortcut resolution, modifier validation, and settings override
+boundaries.
+
 ## Current Milestone: v1.7 Rethink Modularity and Extensibility Concepts
 
 **Goal:** Rework MESH's modularity model so frontend modules, backend providers, manifests, service contracts, capabilities, and extension points form a coherent author-facing architecture instead of a set of separate milestone-grown mechanisms.
@@ -108,13 +115,13 @@ service-specific Rust branches.
 - `v1.7 Phase 37`: The canonical module vocabulary is locked: old public names are replacement debt, temporary old loaders are internal migration details, and v1.1 provider plus v1.6 keybind decisions are reconciled into the module/interface/provider/contribution model.
 - `v1.7 Phase 38`: Canonical `module.json` normalization is implemented in Rust, old manifest forms produce explicit migration diagnostics, checked-in root/module fixtures use canonical paths, and v1.1 provider plus v1.6 keybind data survive normalization.
 - `v1.7 Phase 39`: Interface relationships, backend provider declarations, frontend requirements, host capabilities, and typed contributions are indexed as separate graph concepts with source metadata and manifest-driven extension proof.
+- `v1.7 Phase 40`: Migration diagnostics and author docs now point legacy manifest shapes toward canonical `module.json`, and v1.6 keybind declarations remain available through manifest, installed-graph, shell resolution, and settings override paths.
 
 ### Active
 
 - Module authors can rely on one coherent module and manifest model for frontend, backend, interface, library, theme, icon, font, and language modules.
 - Interface contracts, provider implementations, dependency declarations, capabilities, settings, keybinds, assets, and UI contributions use consistent vocabulary and graph inspection paths.
-- Existing v1.1 backend provider behavior and v1.6 keybind declaration/resolution behavior remain preserved through explicit migration diagnostics.
-- Remaining v1.7 work is author-facing migration diagnostics, docs, and shipped-module proof on top of the canonical graph model.
+- Remaining v1.7 work is shipped-module proof on top of the canonical graph model.
 
 ### Out of Scope
 
@@ -152,6 +159,8 @@ service-specific Rust branches.
 | v1.7 prioritizes conceptual coherence over new feature breadth | MESH now has manifests, providers, interfaces, capabilities, resources, keybinds, docs, and diagnostics grown across multiple milestones; consolidating those contracts reduces future extension friction | Active for v1.7 |
 | Interface/provider/resource extensibility routes through the installed graph | Typed graph records make extension points inspectable and prevent frontend requirements, backend provider identity, and host capabilities from collapsing into one concept | Shipped in v1.7 Phase 39 |
 | Resource and settings compatibility gaps are diagnostics, not graph-load failures | Missing packs, unmapped semantic icons, and duplicate settings namespaces should be visible to tools/settings UI without blocking unrelated modules | Shipped in v1.7 Phase 39 |
+| Legacy manifest names are migration inputs, not public aliases | Authors need concrete replacement/removal guidance without reopening old terminology as supported vocabulary | Shipped in v1.7 Phase 40 |
+| Module keybind declarations remain canonical while settings only override effective shortcuts | Future dispatch/conflict/accessibility work needs manifest-owned keybind data and user settings must not become a declaration source again | Shipped in v1.7 Phase 40 |
 
 <details>
 <summary>Archived milestone framing</summary>
@@ -198,4 +207,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-17 after completing Phase 39*
+*Last updated: 2026-05-18 after completing Phase 40*
