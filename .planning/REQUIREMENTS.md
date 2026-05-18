@@ -13,9 +13,9 @@
 
 ### Prototype Proofs
 
-- [ ] **PROTO-01**: A Blitz-based prototype renders a MESH-equivalent shipped surface or clearly documents why direct Blitz adoption is blocked.
-- [ ] **PROTO-02**: A MESH-owned focused-crate prototype renders the same surface slice using retained MESH data with candidate layout/text/paint crates.
-- [ ] **PROTO-03**: Prototype comparison records behavior and cost using the same surface, inputs, benchmark expectations, and diagnostic criteria.
+- [x] **PROTO-01**: A Blitz-based prototype renders a MESH-equivalent shipped surface or clearly documents why direct Blitz adoption is blocked.
+- [x] **PROTO-02**: A MESH-owned focused-crate prototype renders the same surface slice using retained MESH data with candidate layout/text/paint crates.
+- [x] **PROTO-03**: Prototype comparison records behavior and cost using the same surface, inputs, benchmark expectations, and diagnostic criteria.
 
 ### Renderer Integration
 
@@ -60,9 +60,9 @@
 | REND-01 | Phase 42 | Complete |
 | REND-02 | Phase 42 | Complete |
 | REND-03 | Phase 42 | Complete |
-| PROTO-01 | Phase 43 | Pending |
-| PROTO-02 | Phase 43 | Pending |
-| PROTO-03 | Phase 43 | Pending |
+| PROTO-01 | Phase 43 | Complete |
+| PROTO-02 | Phase 43 | Complete |
+| PROTO-03 | Phase 43 | Complete |
 | INTG-01 | Phase 44 | Pending |
 | INTG-02 | Phase 44 | Pending |
 | INTG-03 | Phase 44 | Pending |

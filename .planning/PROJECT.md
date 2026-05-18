@@ -108,6 +108,8 @@ The project now also has a consolidated module and extensibility model with:
 
 Phase 42 of v1.8 is complete. MESH now has a source-backed renderer architecture decision matrix that defers direct Blitz production adoption behind Wayland shell fit and browser-engine-level overhead blockers, keeps Blitz as the reference path, and advances a MESH-owned focused-crate prototype path with Taffy, Parley, AnyRender, and AccessKit as preferred standalone candidates.
 
+Phase 43 of v1.8 is complete. MESH now has comparable renderer prototype evidence against the shared navigation/audio shipped-surface slice: Blitz produced a concrete reproducible blocker through the high-level crate, while the MESH-owned focused-crate path produced retained layout, text, paint, interaction, and AccessKit-boundary evidence. Phase 44 should advance the focused-crate path behind a constrained production proof boundary.
+
 **Target features:**
 - Adopt-vs-build decision for Blitz renderer, including whether MESH should reuse Blitz directly, fork/adapt parts, or keep a MESH-owned pipeline.
 - Library evaluation for Skia, Stylo, Taffy, Parley, AnyRender, Winit, AccessKit, Muda, html5ever, and xml5ever against MESH's retained rendering, Wayland shell, accessibility, and plugin-surface needs.
@@ -129,6 +131,7 @@ Phase 42 of v1.8 is complete. MESH now has a source-backed renderer architecture
 - `v1.7 Phase 40`: Migration diagnostics and author docs now point legacy manifest shapes toward canonical `module.json`, and v1.6 keybind declarations remain available through manifest, installed-graph, shell resolution, and settings override paths.
 - `v1.7 Phase 41`: The shipped navigation/audio module path proves canonical manifests, typed installed-graph records, provider registration, frontend filtering, and author documentation on a real bundled module/provider workflow.
 - `v1.8 Phase 42`: The renderer architecture decision matrix compares Blitz direct adoption, Blitz-inspired borrowing, and a MESH-owned focused-crate path with source-backed candidate outcomes and a Phase 43 dual-prototype handoff.
+- `v1.8 Phase 43`: Comparable renderer prototype evidence proves the shared navigation/audio slice, records a concrete Blitz blocker, and selects the MESH-owned focused-crate path for Phase 44.
 
 ### Active
 
@@ -218,4 +221,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-18 after completing v1.8 Phase 42*
+*Last updated: 2026-05-18 after completing v1.8 Phase 43*
