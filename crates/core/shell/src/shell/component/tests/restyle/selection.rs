@@ -160,3 +160,43 @@ fn selection_fixture_module_is_disabled_in_local_graph() {
     assert_eq!(module["path"], "frontend/text-selection-proof");
     assert_eq!(module["enabled"], false);
 }
+
+#[test]
+fn phase44_selection_restyle_keeps_focused_text_payload() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <text selectable="true">Selectable text</text>
+</template>
+"#,
+    );
+    component.selection = Some(TextSelectionState {
+        anchor: TextSelectionPoint {
+            node_key: "root/0".into(),
+            x: 0.0,
+            y: 0.0,
+        },
+        focus: TextSelectionPoint {
+            node_key: "root/0".into(),
+            x: 180.0,
+            y: 20.0,
+        },
+        dragging: false,
+    });
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 160);
+    component.paint(&theme, 240, 160, &mut buffer).unwrap();
+
+    let proof = component
+        .last_focused_proof_snapshot()
+        .expect("selection paint should store focused proof snapshot");
+    assert!(
+        proof.nodes.iter().any(|node| {
+            node.parley_text.as_ref().is_some_and(|text| {
+                text.selection_background.is_some() && text.selection_foreground.is_some()
+            })
+        }),
+        "focused proof should preserve shell-annotated selection colors"
+    );
+}

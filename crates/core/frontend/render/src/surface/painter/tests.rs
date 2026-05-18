@@ -1,5 +1,6 @@
 use super::*;
 use crate::display_list::{DamageRect, DisplayListRepaintPolicy, RetainedDisplayList};
+use crate::{RenderObjectDirtySummary, build_focused_proof_snapshot};
 use mesh_core_elements::layout::LayoutRect;
 use mesh_core_elements::style::{Dimension, Edges};
 use mesh_core_frontend::compile_frontend_module;
@@ -302,6 +303,97 @@ fn selection_paint_uses_selection_colors() {
 
     assert!(saw_selection_background);
     assert!(saw_selection_foreground);
+}
+
+#[test]
+fn phase44_selection_paint_and_proof_use_theme_colors() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 160.0,
+            height: 60.0,
+        },
+        Color::TRANSPARENT,
+    );
+    let mut text = text_node(
+        "selection proof text",
+        0.0,
+        0.0,
+        160.0,
+        60.0,
+        Color::from_hex("#111111").unwrap(),
+    );
+    text.attributes
+        .insert("_mesh_selection_background".into(), "#00ff00".into());
+    text.attributes
+        .insert("_mesh_selection_foreground".into(), "#ff00ff".into());
+    text.attributes
+        .insert("_mesh_selection_anchor_x".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_anchor_y".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_focus_x".into(), "1000.00".into());
+    text.attributes
+        .insert("_mesh_selection_focus_y".into(), "1000.00".into());
+    text.attributes
+        .insert("_mesh_selection_text_x".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_text_y".into(), "0.00".into());
+    root.children = vec![text];
+
+    let mut list = RetainedDisplayList::default();
+    let metrics = list.update(&root, 180, 80, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 180,
+            height: 80,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+
+    let mut buffer = PixelBuffer::new(180, 80);
+    FrontendRenderEngine::new().render_display_list_for_module(
+        selected.commands(),
+        &mut buffer,
+        1.0,
+        None,
+        None,
+        None,
+    );
+
+    let mut saw_selection_background = false;
+    let mut saw_selection_foreground = false;
+    for y in 0..buffer.height {
+        for x in 0..buffer.width {
+            let color = pixel(&buffer, x, y);
+            if color == Color::from_hex("#00ff00").unwrap() {
+                saw_selection_background = true;
+            }
+            if color == Color::from_hex("#ff00ff").unwrap() {
+                saw_selection_foreground = true;
+            }
+        }
+    }
+    assert!(saw_selection_background);
+    assert!(saw_selection_foreground);
+
+    let proof = build_focused_proof_snapshot(
+        &root,
+        RenderObjectDirtySummary::default(),
+        metrics,
+        &selected,
+    );
+    let text = proof
+        .nodes
+        .iter()
+        .find_map(|node| node.parley_text.as_ref())
+        .expect("text proof evidence");
+    assert_eq!(text.selection_background.as_deref(), Some("#00ff00"));
+    assert_eq!(text.selection_foreground.as_deref(), Some("#ff00ff"));
 }
 
 #[test]
