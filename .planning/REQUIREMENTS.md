@@ -16,9 +16,9 @@ Move the selected renderer libraries from v1.8 prototype/proof evidence into pro
 
 ### Layout
 
-- [ ] **LAYT-01**: A Taffy-backed layout adapter can compute MESH retained node geometry for the shipped navigation and audio surfaces while preserving stable node identity and runtime keys.
+- [x] **LAYT-01**: A Taffy-backed layout adapter can compute MESH retained node geometry for the shipped navigation and audio surfaces while preserving stable node identity and runtime keys.
 - [ ] **LAYT-02**: Layout parity tests compare current MESH layout output against Taffy-backed output for rows, columns, stacks, fixed sizes, gaps, padding, absolute positioning, and container-width cases.
-- [ ] **LAYT-03**: Layout fallback keeps the current MESH layout engine authoritative when Taffy cannot represent a supported MESH layout case.
+- [x] **LAYT-03**: Layout fallback keeps the current MESH layout engine authoritative when Taffy cannot represent a supported MESH layout case.
 
 ### Text
 
