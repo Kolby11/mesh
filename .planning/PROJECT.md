@@ -108,7 +108,9 @@ The project now also has a consolidated module and extensibility model with:
 
 Phase 42 of v1.8 is complete. MESH now has a source-backed renderer architecture decision matrix that defers direct Blitz production adoption behind Wayland shell fit and browser-engine-level overhead blockers, keeps Blitz as the reference path, and advances a MESH-owned focused-crate prototype path with Taffy, Parley, AnyRender, and AccessKit as preferred standalone candidates.
 
-Phase 43 of v1.8 is complete. MESH now has comparable renderer prototype evidence against the shared navigation/audio shipped-surface slice: Blitz produced a concrete reproducible blocker through the high-level crate, while the MESH-owned focused-crate path produced retained layout, text, paint, interaction, and AccessKit-boundary evidence. Phase 44 should advance the focused-crate path behind a constrained production proof boundary.
+Phase 43 of v1.8 is complete. MESH now has comparable renderer prototype evidence against the shared navigation/audio shipped-surface slice: Blitz produced a concrete reproducible blocker through the high-level crate, while the MESH-owned focused-crate path produced retained layout, text, paint, interaction, and AccessKit-boundary evidence.
+
+Phase 44 of v1.8 is complete. The selected MESH-owned focused proof path now has a production-adjacent render adapter and shell integration that preserves retained node identity, typed dirty categories, selected paint evidence, damage/profiling payloads, non-fatal diagnostics, text selection proof, and an AccessKit-compatible update boundary while navigation/audio shipped-surface regression tests continue to pass.
 
 **Target features:**
 - Adopt-vs-build decision for Blitz renderer, including whether MESH should reuse Blitz directly, fork/adapt parts, or keep a MESH-owned pipeline.
@@ -132,10 +134,11 @@ Phase 43 of v1.8 is complete. MESH now has comparable renderer prototype evidenc
 - `v1.7 Phase 41`: The shipped navigation/audio module path proves canonical manifests, typed installed-graph records, provider registration, frontend filtering, and author documentation on a real bundled module/provider workflow.
 - `v1.8 Phase 42`: The renderer architecture decision matrix compares Blitz direct adoption, Blitz-inspired borrowing, and a MESH-owned focused-crate path with source-backed candidate outcomes and a Phase 43 dual-prototype handoff.
 - `v1.8 Phase 43`: Comparable renderer prototype evidence proves the shared navigation/audio slice, records a concrete Blitz blocker, and selects the MESH-owned focused-crate path for Phase 44.
+- `v1.8 Phase 44`: The selected MESH-owned focused proof path is integrated behind current renderer/shell ownership with retained identity, invalidation, damage/profiling, diagnostics, text selection, AccessKit-compatible boundary, and navigation/audio shipped-surface evidence.
 
 ### Active
 
-- Prove the chosen rendering direction with a small shipped-surface integration slice before broad migration.
+- Convert the completed focused proof integration into a phased renderer migration plan and author contract before broad adoption.
 
 ### Out of Scope
 
@@ -221,4 +224,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-18 after completing v1.8 Phase 43*
+*Last updated: 2026-05-18 after completing v1.8 Phase 44*

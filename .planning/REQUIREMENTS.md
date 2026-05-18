@@ -19,10 +19,10 @@
 
 ### Renderer Integration
 
-- [ ] **INTG-01**: The selected proof path preserves MESH retained node identity, typed invalidation categories, damage/profiling payloads, and non-fatal diagnostics.
-- [ ] **INTG-02**: The selected proof path preserves current shipped navigation/audio surface behavior under automated tests.
-- [ ] **INTG-03**: Text layout, selection geometry, and theme-owned selection colors remain testable through the selected path.
-- [ ] **INTG-04**: Accessibility metadata remains derivable from retained nodes and has a clear AccessKit-compatible update boundary.
+- [x] **INTG-01**: The selected proof path preserves MESH retained node identity, typed invalidation categories, damage/profiling payloads, and non-fatal diagnostics.
+- [x] **INTG-02**: The selected proof path preserves current shipped navigation/audio surface behavior under automated tests.
+- [x] **INTG-03**: Text layout, selection geometry, and theme-owned selection colors remain testable through the selected path.
+- [x] **INTG-04**: Accessibility metadata remains derivable from retained nodes and has a clear AccessKit-compatible update boundary.
 
 ### Migration Plan
 
@@ -63,10 +63,10 @@
 | PROTO-01 | Phase 43 | Complete |
 | PROTO-02 | Phase 43 | Complete |
 | PROTO-03 | Phase 43 | Complete |
-| INTG-01 | Phase 44 | Pending |
-| INTG-02 | Phase 44 | Pending |
-| INTG-03 | Phase 44 | Pending |
-| INTG-04 | Phase 44 | Pending |
+| INTG-01 | Phase 44 | Complete |
+| INTG-02 | Phase 44 | Complete |
+| INTG-03 | Phase 44 | Complete |
+| INTG-04 | Phase 44 | Complete |
 | MIGR-01 | Phase 45 | Pending |
 | MIGR-02 | Phase 45 | Pending |
 | MIGR-03 | Phase 45 | Pending |
