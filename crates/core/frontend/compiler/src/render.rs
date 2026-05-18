@@ -572,7 +572,7 @@ mod tests {
 
     fn test_manifest() -> Manifest {
         Manifest {
-            package: mesh_core_module::PackageSection {
+            package: mesh_core_module::ModuleSection {
                 id: "test".into(),
                 version: "0.1.0".into(),
                 module_type: mesh_core_module::ModuleType::Widget,

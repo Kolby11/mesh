@@ -345,7 +345,7 @@ mod tests {
 "#;
         let module = mesh_core_component::parse_component(source).unwrap();
         let manifest = mesh_core_module::Manifest {
-            package: mesh_core_module::PackageSection {
+            package: mesh_core_module::ModuleSection {
                 id: "test".into(),
                 version: "0.1.0".into(),
                 module_type: mesh_core_module::ModuleType::Widget,
@@ -439,7 +439,7 @@ mod tests {
     fn make_test_module(source: &str) -> CompiledFrontendModule {
         let component = mesh_core_component::parse_component(source).unwrap();
         let manifest = mesh_core_module::Manifest {
-            package: mesh_core_module::PackageSection {
+            package: mesh_core_module::ModuleSection {
                 id: "test".into(),
                 version: "0.1.0".into(),
                 module_type: mesh_core_module::ModuleType::Widget,
