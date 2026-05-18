@@ -266,15 +266,16 @@ impl FrontendSurfaceComponent {
     pub(in crate::shell::component) fn annotate_surface_shortcuts(&self, tree: &mut WidgetNode) {
         let keyboard_settings = self.current_keyboard_settings();
         for shortcut in self.resolved_surface_shortcuts(&keyboard_settings) {
+            let accessibility_shortcut = format_shortcut_for_accessibility(&shortcut);
             for node in find_nodes_by_keybind_mut(tree, &shortcut.keybind_id) {
                 match node.accessibility.keyboard_shortcut.as_deref() {
-                    Some(existing) if existing == shortcut.key => {}
+                    Some(existing) if existing == accessibility_shortcut => {}
                     Some(existing) => {
                         node.accessibility.keyboard_shortcut =
-                            Some(format!("{existing}, {}", shortcut.key));
+                            Some(format!("{existing}, {accessibility_shortcut}"));
                     }
                     None => {
-                        node.accessibility.keyboard_shortcut = Some(shortcut.key.clone());
+                        node.accessibility.keyboard_shortcut = Some(accessibility_shortcut.clone());
                     }
                 }
             }
@@ -392,7 +393,7 @@ fn shortcut_modifiers_match(required: &[String], active: KeyModifiers) -> bool {
     let mut required_alt = false;
 
     for modifier in required {
-        match normalize_key_name(modifier).as_str() {
+        match normalize_key_name(modifier.trim()).as_str() {
             "ctrl" | "control" => required_ctrl = true,
             "shift" => required_shift = true,
             "alt" | "option" => required_alt = true,
@@ -401,6 +402,20 @@ fn shortcut_modifiers_match(required: &[String], active: KeyModifiers) -> bool {
     }
 
     active.ctrl == required_ctrl && active.shift == required_shift && active.alt == required_alt
+}
+
+fn format_shortcut_for_accessibility(shortcut: &ResolvedSurfaceShortcut) -> String {
+    let mut parts = Vec::new();
+    for modifier in &shortcut.modifiers {
+        match normalize_key_name(modifier.trim()).as_str() {
+            "ctrl" | "control" => parts.push("Control".to_string()),
+            "shift" => parts.push("Shift".to_string()),
+            "alt" | "option" => parts.push("Alt".to_string()),
+            _ => {}
+        }
+    }
+    parts.push(shortcut.key.clone());
+    parts.join("+")
 }
 
 fn keybind_locale_candidates(locale: &str) -> Vec<String> {

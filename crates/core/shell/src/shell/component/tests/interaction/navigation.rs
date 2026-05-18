@@ -476,6 +476,39 @@ end
     let resolved =
         component.resolved_surface_shortcuts(&mesh_core_config::KeyboardSettings::default());
     assert_eq!(resolved[0].modifiers, vec!["ctrl".to_string()]);
+
+    let mut tree = root_with(vec![event_node_with_attrs(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        40.0,
+        24.0,
+        &[("keybind", "mute")],
+        &[("keybind", "onMuteShortcut")],
+    )]);
+    annotate_runtime_tree(
+        &mut tree,
+        "root".to_string(),
+        &None,
+        &None,
+        &[],
+        &None,
+        &None,
+        &HashMap::new(),
+        &mut HashMap::new(),
+        &mut HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+    component.annotate_surface_shortcuts(&mut tree);
+    assert_eq!(
+        node_by_mesh_key(&tree, "root/0")
+            .accessibility
+            .keyboard_shortcut
+            .as_deref(),
+        Some("Control+m")
+    );
 }
 
 #[test]

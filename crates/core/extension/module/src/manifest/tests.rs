@@ -271,6 +271,66 @@ fn localized_keybind_trigger_empty_locale_is_rejected() {
 }
 
 #[test]
+fn keybind_trigger_unsupported_modifier_is_rejected() {
+    let content = r#"
+{
+  "id": "@mesh/panel",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "keybinds": {
+    "accept": {
+      "trigger": {
+        "kind": "shortcut",
+        "key": "a",
+        "modifiers": ["meta"]
+      }
+    }
+  }
+}
+"#;
+
+    let parsed: JsonManifest = serde_json::from_str(content).unwrap();
+    let manifest = parsed.into_manifest();
+    let err = manifest.validate_keybinds().unwrap_err();
+
+    assert!(err.contains("unsupported modifier 'meta'"));
+}
+
+#[test]
+fn localized_keybind_trigger_unsupported_modifier_is_rejected() {
+    let content = r#"
+{
+  "id": "@mesh/panel",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "keybinds": {
+    "accept": {
+      "trigger": {
+        "kind": "shortcut",
+        "key": "a"
+      },
+      "localized_triggers": {
+        "sk": {
+          "kind": "shortcut",
+          "key": "p",
+          "modifiers": ["super"]
+        }
+      }
+    }
+  }
+}
+"#;
+
+    let parsed: JsonManifest = serde_json::from_str(content).unwrap();
+    let manifest = parsed.into_manifest();
+    let err = manifest.validate_keybinds().unwrap_err();
+
+    assert!(err.contains("unsupported modifier 'super'"));
+}
+
+#[test]
 fn module_json_without_keybinds_has_empty_keybinds() {
     let content = r#"
 {

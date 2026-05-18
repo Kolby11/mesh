@@ -437,12 +437,13 @@ impl KeybindAction {
         validate_optional_keybind_text_key(action_id, "description", self.description.as_deref())?;
         validate_optional_keybind_text_key(action_id, "category", self.category.as_deref())?;
         self.trigger.validate(action_id)?;
-        for locale in self.localized_triggers.keys() {
+        for (locale, trigger) in &self.localized_triggers {
             if locale.trim().is_empty() {
                 return Err(format!(
                     "mesh.keybinds.{action_id}.localized_triggers cannot contain empty locale ids"
                 ));
             }
+            trigger.validate_modifiers(action_id)?;
         }
         Ok(())
     }
@@ -494,11 +495,23 @@ impl KeybindTrigger {
             }
         }
 
+        self.validate_modifiers(action_id)
+    }
+
+    fn validate_modifiers(&self, action_id: &str) -> Result<(), String> {
         for modifier in &self.modifiers {
             if modifier.trim().is_empty() {
                 return Err(format!(
                     "mesh.keybinds.{action_id}.trigger.modifiers cannot contain empty values"
                 ));
+            }
+            match modifier.trim().to_ascii_lowercase().as_str() {
+                "ctrl" | "control" | "shift" | "alt" | "option" => {}
+                other => {
+                    return Err(format!(
+                        "mesh.keybinds.{action_id}.trigger.modifiers contains unsupported modifier '{other}'"
+                    ));
+                }
             }
         }
 
