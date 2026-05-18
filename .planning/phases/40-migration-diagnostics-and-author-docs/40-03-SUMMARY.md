@@ -8,7 +8,7 @@ requires:
     provides: Contribution index and installed graph records for module resources
 provides:
   - Typed installed-graph keybind contribution records with default and localized triggers
-  - Manifest-first shell shortcut resolution coverage with legacy settings fallback preserved
+  - Manifest-first shell shortcut resolution with declared modifiers enforced
   - Author documentation for keybind migration and keyboard override boundaries
 affects: [module-system, shell-keyboard, settings, author-docs]
 tech-stack:
@@ -18,8 +18,10 @@ key-files:
   created: []
   modified:
     - crates/core/extension/module/src/manifest/model.rs
+    - crates/core/extension/module/src/manifest/tests.rs
     - crates/core/extension/module/src/package/installed_graph.rs
     - crates/core/extension/module/src/package/tests.rs
+    - crates/core/shell/src/shell/component/input/keyboard.rs
     - crates/core/shell/src/shell/component/tests/interaction/navigation.rs
     - docs/module-system.md
     - docs/settings/README.md
@@ -36,20 +38,21 @@ completed: 2026-05-18
 
 # Phase 40: Keybind Migration Continuity Summary
 
-**Manifest keybind declarations now flow into installed graph records with default and localized trigger data, while shell shortcut tests preserve manifest-first resolution and settings-only user overrides.**
+**Manifest keybind declarations now flow into installed graph records with default and localized trigger data, while shell shortcut dispatch enforces declared modifiers and preserves settings-only user overrides.**
 
 ## Performance
 
 - **Duration:** 1h 51min
 - **Started:** 2026-05-18T08:52:01Z
-- **Completed:** 2026-05-18T10:43:01Z
+- **Completed:** 2026-05-18T11:05:00Z
 - **Tasks:** 3
-- **Files modified:** 6
+- **Files modified:** 8
 
 ## Accomplishments
 
 - Extended `ContributedKeybindAction` to carry `trigger` and `localized_triggers` cloned from canonical manifest keybind actions.
 - Added package and shell navigation tests covering trigger preservation, manifest-over-legacy precedence, user overrides, localized triggers, and legacy fallback behavior.
+- Enforced declared keybind modifiers during dispatch, exposed modifiers in accessibility shortcut annotations, and rejected unsupported manifest modifier strings.
 - Documented `mesh.keybinds`, installed graph keybind contributions, and the boundary between manifest declarations and `keyboard.surface_shortcuts` user overrides.
 
 ## Task Commits
@@ -60,21 +63,23 @@ Each task was committed atomically:
 2. **Task 2: Protect manifest-first shortcut resolution behavior** - `ac20660` (test)
 3. **Task 3: Document keybind migration and override boundaries** - `a172d22` (docs)
 
-**Plan metadata:** `e3709fe` (docs: align verification wording)
+**Plan metadata and review fixes:** `e3709fe` (docs), `ba975ab` (fix), `ed192b2` (fix)
 
 ## Files Created/Modified
 
 - `crates/core/extension/module/src/manifest/model.rs` - Derived `PartialEq` and `Eq` for `KeybindTrigger` so typed contribution records can compare trigger data in tests.
+- `crates/core/extension/module/src/manifest/tests.rs` - Added validation coverage for unsupported default and localized trigger modifiers.
 - `crates/core/extension/module/src/package/installed_graph.rs` - Added default and localized trigger data to `ContributedKeybindAction`.
 - `crates/core/extension/module/src/package/tests.rs` - Asserted installed graph keybind records preserve default `m` and localized `sk` trigger `s`.
-- `crates/core/shell/src/shell/component/tests/interaction/navigation.rs` - Added shortcut resolution coverage proving manifest-first behavior and legacy fallback preservation.
+- `crates/core/shell/src/shell/component/input/keyboard.rs` - Preserved modifiers in resolved shortcuts, required exact modifier matches during dispatch, and formatted modifiers in accessibility shortcut metadata.
+- `crates/core/shell/src/shell/component/tests/interaction/navigation.rs` - Added shortcut resolution coverage proving manifest-first behavior, legacy fallback preservation, modifier dispatch, and modifier accessibility metadata.
 - `docs/module-system.md` - Added `### Keybind Contributions` author guidance for `mesh.keybinds` and installed graph preservation.
 - `docs/settings/README.md` - Clarified `keyboard.surface_shortcuts` as user override data and legacy settings declarations as fallback input only.
 
 ## Decisions Made
 
-- Kept production shell shortcut resolution unchanged because existing behavior already used manifest declarations before legacy settings fallback.
 - Treated `KeybindTrigger` equality derives as support for typed graph testing, not a behavior change.
+- Enforced exact modifier matching for manifest keybind dispatch because accepted modifier declarations are part of the runtime shortcut contract.
 - Preserved the existing `surface_shortcuts` JSON example while clarifying its role as override data.
 
 ## Deviations from Plan
@@ -89,10 +94,26 @@ Each task was committed atomically:
 - **Verification:** `rg -n "Keybind Contributions|mesh.keybinds|localizedTriggers|installed graph keybind contributions|surface_shortcuts|Legacy settings-derived shortcut declarations are fallback input only when a manifest action id is absent" docs/module-system.md docs/settings/README.md`
 - **Committed in:** `e3709fe`
 
+**2. [Rule 2 - Missing Critical] Enforced manifest keybind modifiers during dispatch**
+- **Found during:** Code review after Task 2
+- **Issue:** Manifest keybind triggers accepted modifiers, but shell dispatch matched only the key, so `Ctrl+M` could fire on bare `M`.
+- **Fix:** Carried modifiers through `ResolvedSurfaceShortcut`, required exact modifier matches during dispatch, and added a regression test.
+- **Files modified:** `crates/core/shell/src/shell/component/input/keyboard.rs`, `crates/core/shell/src/shell/component/tests/interaction/navigation.rs`
+- **Verification:** `nix develop -c cargo test -p mesh-core-shell shell::component::tests::interaction::navigation`
+- **Committed in:** `ba975ab`
+
+**3. [Rule 2 - Missing Critical] Closed modifier validation and accessibility gaps**
+- **Found during:** Code review after Task 2
+- **Issue:** Accessibility annotations displayed only the key for modified shortcuts, and manifest validation accepted unsupported modifier strings that dispatch would never match.
+- **Fix:** Formatted accessibility shortcuts with modifiers and rejected unsupported modifier values for default and localized triggers.
+- **Files modified:** `crates/core/extension/module/src/manifest/model.rs`, `crates/core/extension/module/src/manifest/tests.rs`, `crates/core/shell/src/shell/component/input/keyboard.rs`, `crates/core/shell/src/shell/component/tests/interaction/navigation.rs`
+- **Verification:** `nix develop -c cargo test -p mesh-core-module unsupported_modifier_is_rejected`; `nix develop -c cargo test -p mesh-core-shell shell::component::tests::interaction::navigation`
+- **Committed in:** `ed192b2`
+
 ---
 
-**Total deviations:** 1 auto-fixed (1 blocking verification issue)
-**Impact on plan:** Verification wording became deterministic. No scope creep or behavior change.
+**Total deviations:** 3 auto-fixed (1 blocking verification issue, 2 missing critical shortcut-contract issues)
+**Impact on plan:** The fixes make the canonical keybind contract executable and inspectable. No scope creep beyond closing review-identified defects in the planned keybind surface.
 
 ## Issues Encountered
 
@@ -102,8 +123,10 @@ Each task was committed atomically:
 ## Verification
 
 - `cargo test -p mesh-core-module contribution_index_exposes_frontend_keybind_resource_interface_and_provider_records` - passed.
-- `nix develop -c cargo test -p mesh-core-shell shell::component::tests::interaction::navigation` - passed, 22 tests.
+- `nix develop -c cargo test -p mesh-core-module unsupported_modifier_is_rejected` - passed, 2 tests.
+- `nix develop -c cargo test -p mesh-core-shell shell::component::tests::interaction::navigation` - passed, 23 tests.
 - `rg -n "Keybind Contributions|mesh.keybinds|localizedTriggers|installed graph keybind contributions|surface_shortcuts|Legacy settings-derived shortcut declarations are fallback input only when a manifest action id is absent" docs/module-system.md docs/settings/README.md` - passed.
+- Code review: `.planning/phases/40-migration-diagnostics-and-author-docs/40-REVIEW.md` status `clean`.
 
 ## User Setup Required
 
@@ -117,7 +140,7 @@ The canonical manifest keybind model is now represented in installed graph recor
 
 - Required key files exist and contain the planned keybind contribution fields and documentation phrases.
 - Plan commits exist for `40-03`.
-- Verification commands passed after using the valid Cargo filter and Nix shell for native dependencies.
+- Verification commands and clean code review passed after using the valid Cargo filters and Nix shell for native dependencies.
 
 ---
 *Phase: 40-migration-diagnostics-and-author-docs*
