@@ -29,6 +29,7 @@ MIGR-02: existing renderer modules are classified as authoritative, adapter-owne
 | Focused accessibility updates | adapter-owned | `FocusedAccessKitUpdate` and Phase 44 AccessKit-compatible update evidence | Can promote only after retained-node update behavior is proven across shipped surfaces and platform runtime needs. |
 | Focused text/layout/paint evidence | adapter-owned | `taffy_layout`, `parley_text`, selected paint slots, and `phase44_navigation_audio_surface_emits_focused_proof_snapshot` | Can promote only after candidate layout/text/paint paths preserve shipped behavior, selection geometry, and profiling evidence. |
 | Crate-facing conversion modules | adapter-owned | Non-fatal diagnostics with prefix `focused renderer proof:` and future conversion modules | Can promote only when replacement candidates satisfy all observability and rollback gates. |
+| Renderer library feature scaffold | adapter-owned | `crates/core/frontend/render/Cargo.toml` and `crates/core/frontend/render/src/library_adapters.rs` | May promote only when later phases preserve NodeId identity, invalidation, damage/profiling, diagnostics, theme-owned selection, AccessKit-compatible update evidence, and rollback gates. |
 
 ## Replacement Candidates
 

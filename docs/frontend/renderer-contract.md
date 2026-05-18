@@ -26,6 +26,8 @@ The renderer migration is internal unless a future migration step explicitly upd
 
 Renderer migration is phased and reversible, and author-facing behavior changes require the migration gates in docs/renderer-migration.md.
 
+Phase 46 adds disabled-by-default renderer-library features and an internal status seam only; `.mesh` syntax, layout semantics, service proxies, shell surface lifecycle, and author APIs do not change.
+
 The current ownership map is in `docs/renderer-ownership.md`. Public author behavior should change only after a migration step updates this document and verifies shipped surface behavior, diagnostics, profiling, selection, and accessibility gates.
 
 ## Not Promised
