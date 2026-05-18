@@ -380,6 +380,16 @@ impl ShellComponent for FrontendSurfaceComponent {
         let selected_paint = self
             .retained_display_list
             .select_paint_commands(paint_damage, effective_damage.policy);
+        let focused_proof_snapshot = mesh_core_render::build_focused_proof_snapshot(
+            &tree,
+            render_object_dirty,
+            display_list_metrics,
+            &selected_paint,
+        );
+        for diagnostic in &focused_proof_snapshot.diagnostics {
+            self.record_focused_proof_diagnostic(diagnostic);
+        }
+        self.focused_proof_snapshot = Some(focused_proof_snapshot);
         self.invalidation_snapshot = Some(mesh_core_debug::ProfilingInvalidationSnapshot {
             full_rebuild: requires_tree_rebuild,
             retained_path: use_retained_style_path,
@@ -513,6 +523,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.retained_tree = RetainedWidgetTree::default();
         self.retained_render_objects = RenderObjectTree::default();
         self.retained_display_list = RetainedDisplayList::default();
+        self.focused_proof_snapshot = None;
         // A theme swap is a global palette replacement, not a local CSS
         // transition. Drop transition state so stale light/dark colors cannot
         // paint over the newly active theme.
@@ -536,6 +547,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.retained_tree = RetainedWidgetTree::default();
         self.retained_render_objects = RenderObjectTree::default();
         self.retained_display_list = RetainedDisplayList::default();
+        self.focused_proof_snapshot = None;
         self.render_hooks_pending = true;
         self.surface_pixels_invalid = true;
         self.invalidate_script_state();
@@ -623,6 +635,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.invalidate_script_state();
         // Style rules may have changed in the recompiled module.
         self.cached_restyle_rules = None;
+        self.focused_proof_snapshot = None;
         Ok(true)
     }
 
@@ -730,6 +743,15 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn set_keyboard_mode_override(&mut self, mode: Option<KeyboardMode>) {
         self.keyboard_mode_override = mode;
         self.invalidate_surface_config();
+    }
+}
+
+impl FrontendSurfaceComponent {
+    #[cfg(test)]
+    pub(super) fn last_focused_proof_snapshot(
+        &self,
+    ) -> Option<&mesh_core_render::FocusedProofSnapshot> {
+        self.focused_proof_snapshot.as_ref()
     }
 }
 

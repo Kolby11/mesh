@@ -337,6 +337,7 @@ pub(super) struct FrontendSurfaceComponent {
     profiling_enabled: bool,
     profiling_records: Vec<ComponentProfilingRecord>,
     invalidation_snapshot: Option<mesh_core_debug::ProfilingInvalidationSnapshot>,
+    focused_proof_snapshot: Option<mesh_core_render::FocusedProofSnapshot>,
     last_present_damage: Option<DamageRect>,
     /// Cached aggregate of restyle rules collected from `compiled.component`
     /// and every entry in `compiled.local_components`. Populated lazily on the
@@ -421,6 +422,7 @@ impl FrontendSurfaceComponent {
             profiling_enabled: false,
             profiling_records: Vec::new(),
             invalidation_snapshot: None,
+            focused_proof_snapshot: None,
             last_present_damage: None,
             cached_restyle_rules: None,
         }

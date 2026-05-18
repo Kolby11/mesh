@@ -70,6 +70,31 @@ fn log_phase31_proof(
 }
 
 #[test]
+fn phase44_focused_proof_preserves_invalidation_and_damage_payloads() {
+    let theme = default_theme();
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    component.set_profiling_enabled(true);
+    let mut buffer = PixelBuffer::new(960, 80);
+
+    component.paint(&theme, 960, 80, &mut buffer).unwrap();
+
+    {
+        let proof = component
+            .last_focused_proof_snapshot()
+            .expect("paint should store focused proof snapshot");
+        assert!(!proof.nodes.is_empty());
+        assert!(!proof.accessibility.is_empty());
+        let _geometry = proof.dirty.geometry;
+        let _material = proof.dirty.material;
+        let _text = proof.dirty.text;
+        let _accessibility = proof.dirty.accessibility;
+    }
+    assert!(component.take_invalidation_snapshot().is_some());
+    assert!(component.take_present_damage().is_some());
+}
+
+#[test]
 fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
     let theme = default_theme();
 
