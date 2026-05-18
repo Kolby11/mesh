@@ -59,9 +59,9 @@ interface providers, and decides which modules are enabled.
 ## Migration Diagnostics
 
 Old manifest file names are replacement or removal targets, not public
-author-facing aliases. When an old name is still accepted, it is an internal
-migration input that emits a warning and should be replaced before publishing a
-module.
+author-facing aliases. When an old name is still accepted, it is an
+internal migration input that emits a warning and should be replaced before
+publishing a module.
 
 | Input | Severity | Author action | Runtime behavior |
 | ----- | -------- | ------------- | ---------------- |
