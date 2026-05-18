@@ -112,6 +112,8 @@ Phase 43 of v1.8 is complete. MESH now has comparable renderer prototype evidenc
 
 Phase 44 of v1.8 is complete. The selected MESH-owned focused proof path now has a production-adjacent render adapter and shell integration that preserves retained node identity, typed dirty categories, selected paint evidence, damage/profiling payloads, non-fatal diagnostics, text selection proof, and an AccessKit-compatible update boundary while navigation/audio shipped-surface regression tests continue to pass.
 
+Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad renderer migration roadmap, source-backed renderer ownership classification, explicit build/CI/Linux/Nix/binary-risk adoption gates, and an author-facing `.mesh` renderer contract that keeps browser-engine, Blitz, Winit, DOM, and proof-snapshot behavior out of the public authoring promise.
+
 **Target features:**
 - Adopt-vs-build decision for Blitz renderer, including whether MESH should reuse Blitz directly, fork/adapt parts, or keep a MESH-owned pipeline.
 - Library evaluation for Skia, Stylo, Taffy, Parley, AnyRender, Winit, AccessKit, Muda, html5ever, and xml5ever against MESH's retained rendering, Wayland shell, accessibility, and plugin-surface needs.
@@ -135,10 +137,11 @@ Phase 44 of v1.8 is complete. The selected MESH-owned focused proof path now has
 - `v1.8 Phase 42`: The renderer architecture decision matrix compares Blitz direct adoption, Blitz-inspired borrowing, and a MESH-owned focused-crate path with source-backed candidate outcomes and a Phase 43 dual-prototype handoff.
 - `v1.8 Phase 43`: Comparable renderer prototype evidence proves the shared navigation/audio slice, records a concrete Blitz blocker, and selects the MESH-owned focused-crate path for Phase 44.
 - `v1.8 Phase 44`: The selected MESH-owned focused proof path is integrated behind current renderer/shell ownership with retained identity, invalidation, damage/profiling, diagnostics, text selection, AccessKit-compatible boundary, and navigation/audio shipped-surface evidence.
+- `v1.8 Phase 45`: Broad renderer migration is documented as phased and reversible, existing renderer boundaries are classified as authoritative, adapter-owned, or replacement candidates, and author-facing `.mesh` behavior is bounded by a renderer contract with explicit adoption gates.
 
 ### Active
 
-- Convert the completed focused proof integration into a phased renderer migration plan and author contract before broad adoption.
+- No active v1.8 requirements remain after Phase 45. The milestone is ready for completion review.
 
 ### Out of Scope
 
@@ -224,4 +227,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-18 after completing v1.8 Phase 44*
+*Last updated: 2026-05-18 after completing v1.8 Phase 45*
