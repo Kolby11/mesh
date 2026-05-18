@@ -2,8 +2,10 @@
 
 Audio backend implemented against **PipeWire**.
 
-- **Type:** `backend`
-- **Implements:** interface `mesh.audio` (contract `@mesh/audio-contract`)
+- **Type:** `backend provider`
+- **Manifest:** `module.json`
+- **Implements:** interface `mesh.audio` from `@mesh/audio-interface` through
+  `mesh.implements`
 - **Backend name:** `PipeWire`
 - **Priority:** `100` (default choice on modern Linux systems)
 - **Entrypoint:** `src/main.luau`
@@ -26,11 +28,12 @@ Implements the methods declared by `mesh.audio`:
   `mesh.audio/*` channels so subscribers (panel, quick-settings) can redraw
 
 The shell host only routes `mesh.audio` calls to this provider and enforces
-capabilities. All PipeWire-specific behavior stays in `src/main.luau` and is
-performed through `wpctl`.
+capabilities through generic interface/provider records. All PipeWire-specific
+behavior stays in `src/main.luau` and is performed through `wpctl`.
 
 ## Selection
 
-Picked by auto-detection when PipeWire is running. If PipeWire is missing, the
-core falls back to [`@mesh/pulseaudio-audio`](../pulseaudio-audio/README.md)
-(priority 50).
+`config/module.json` selects `@mesh/pipewire-audio` as the active
+`mesh.audio` provider in the shipped graph while keeping
+[`@mesh/pulseaudio-audio`](../pulseaudio-audio/README.md) available as an
+alternate provider record.
