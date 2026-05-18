@@ -46,11 +46,11 @@ safe: they target modules individually.
 ## Module-bundled translations
 
 The simplest case: a module declares the locales it supports in
-`package.json` and ships its own locale files next to the manifest.
+`module.json` and ships its own locale files next to the manifest.
 
 ```
 @mesh/launcher/
-  package.json
+  module.json
   config/
     i18n/
       en.json
@@ -92,29 +92,45 @@ At load, the core indexes these under `@mesh/launcher`.
 ## Language packs
 
 A language pack is a module that provides translations for other modules.
+Declare it with `mesh.kind = "language-pack"` in `module.json`.
 
 ```
 @community/cs-language-pack/
-  mesh.toml
+  module.json
   translations/
     @mesh/launcher/cs.json
     @mesh/panel/cs.json
     @mesh/quick-settings/cs.json
 ```
 
-```toml
-[package]
-id   = "@community/cs-language-pack"
-type = "language-pack"
-
-[service]
-provides = "mesh.locale.source"
-priority = 60
-
-[translations]
-"@mesh/launcher"        = { cs = "translations/@mesh/launcher/cs.json" }
-"@mesh/panel"           = { cs = "translations/@mesh/panel/cs.json" }
-"@mesh/quick-settings"  = { cs = "translations/@mesh/quick-settings/cs.json" }
+```json
+{
+  "name": "@community/cs-language-pack",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "language-pack",
+    "contributes": {
+      "i18n": [
+        {
+          "id": "launcher-cs",
+          "locale": "cs",
+          "path": "translations/@mesh/launcher/cs.json"
+        },
+        {
+          "id": "panel-cs",
+          "locale": "cs",
+          "path": "translations/@mesh/panel/cs.json"
+        },
+        {
+          "id": "quick-settings-cs",
+          "locale": "cs",
+          "path": "translations/@mesh/quick-settings/cs.json"
+        }
+      ]
+    }
+  }
+}
 ```
 
 Packs implement `mesh.locale.source` — a narrower contract than
@@ -201,11 +217,29 @@ satisfy `sk-SK` unless the chain says so.
 
 A community translator can ship a pack translating modules they don't own:
 
-```toml
-# @polyglot/slovak-extras / mesh.toml
-[translations]
-"@community/weather-widget" = { sk = "weather/sk.json" }
-"@community/cpu-graph"      = { sk = "cpu-graph/sk.json" }
+```json
+{
+  "name": "@polyglot/slovak-extras",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "language-pack",
+    "contributes": {
+      "i18n": [
+        {
+          "id": "weather-sk",
+          "locale": "sk",
+          "path": "weather/sk.json"
+        },
+        {
+          "id": "cpu-graph-sk",
+          "locale": "sk",
+          "path": "cpu-graph/sk.json"
+        }
+      ]
+    }
+  }
+}
 ```
 
 As long as the target module's keys are stable, the pack works. When a

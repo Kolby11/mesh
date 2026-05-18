@@ -16,7 +16,7 @@ in the core assumes which themes exist.
    (`color.primary`, `spacing.md`); the active theme supplies the values.
 2. **One theme active at a time.** Unlike icon packs, themes are
    winner-takes-all — mixed token sets would produce incoherent UI.
-3. **Themes are modules.** `mesh.kind = "theme"` in `package.json`, with
+3. **Themes are modules.** `mesh.kind = "theme"` in `module.json`, with
    selectable token modes contributed through `mesh.contributes.themes`.
 4. **Component defaults inherit from `base`.** Every rendered element starts
    from `ComputedStyle::default()`, then inherits `defaults.components.base`,
@@ -64,7 +64,7 @@ MESH keeps three distinct theme sources:
    Frontend modules may declare `mesh.theme`, and Mesh writes those
    contributions into the authored active theme file under their module ID.
 
-Theme modules still exist as packages with `mesh.kind = "theme"`, but the
+Theme modules still exist as modules with `mesh.kind = "theme"`, but the
 runtime contract is the authored active theme JSON that the shell loads and
 mutates.
 

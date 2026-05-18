@@ -118,7 +118,7 @@ etc.).
 
 ## Font-pack module shape
 
-Pack manifest (`package.json` with `mesh.kind = "font-pack"`):
+Pack manifest (module.json with `mesh.kind = "font-pack"`):
 
 ```json
 {
@@ -126,24 +126,21 @@ Pack manifest (`package.json` with `mesh.kind = "font-pack"`):
   "version": "1.0.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "font-pack"
-  },
-  "font_pack": {
-    "id": "default",
-    "requires": {
+    "kind": "font-pack",
+    "dependencies": {
       "fonts": [
-        { "family": "Inter",          "version": ">=4.0" },
+        { "family": "Inter", "version": ">=4.0" },
         { "family": "JetBrains Mono", "version": ">=2.0" }
       ]
     },
-    "mappings": {
-      "display":  "Inter",
-      "headline": "Inter",
-      "title":    "Inter",
-      "body":     "Inter",
-      "label":    "Inter",
-      "caption":  "Inter",
-      "mono":     "JetBrains Mono"
+    "contributes": {
+      "fonts": [
+        {
+          "id": "default",
+          "path": "fonts/default.json",
+          "label": "Default font roles"
+        }
+      ]
     }
   }
 }
@@ -153,14 +150,15 @@ Pack manifest (`package.json` with `mesh.kind = "font-pack"`):
 
 - **`id`** — short alias used in pack-qualified `font-family`
   syntax (`default/body`). Should be globally unique.
-- **`requires.fonts`** — declares system font families the pack
+- **`mesh.dependencies.fonts`** — declares system font families the pack
   expects, matched via fontconfig. Versions are **soft**: missing or
   older fonts log a warning, never block loading. Resolution time
   presence is the source of truth.
-- **`mappings`** — flat 1:1 map from logical role → installed font
-  family name (the right-hand side is the exact fontconfig family
-  name). No fallback chains inside a single pack — cross-pack
-  fallback is handled by depending on multiple font-packs.
+- **`mesh.contributes.fonts`** — points to the pack's mapping data. The mapping
+  file is a flat 1:1 map from logical role → installed font family name (the
+  right-hand side is the exact fontconfig family name). No fallback chains
+  inside a single pack — cross-pack fallback is handled by depending on
+  multiple font-packs.
 
 A single font-pack can wrap multiple system fonts freely; mapping
 entries can target different families.

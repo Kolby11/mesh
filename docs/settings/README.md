@@ -9,9 +9,11 @@ MESH's settings system has two goals:
    `mesh.audio` should survive swapping PipeWire for PulseAudio. Shared
    contracts carry a shared schema; backends add their own on top.
 
-All settings are **JSON**. TOML is used for manifests and schemas; the runtime
-settings themselves — defaults and user overrides — are JSON so they can be
-read and written by the generated UI and inspected with standard tooling.
+All settings are **JSON**. `module.json` declares module-owned schemas through
+`mesh.contributes.settings`; sibling `settings.schema.json` files can hold
+larger schemas. Runtime settings themselves — defaults and user overrides —
+are JSON so they can be read and written by the generated UI and inspected
+with standard tooling.
 
 ## Layers
 
@@ -162,13 +164,13 @@ immutable view and subscribe to change events.
 
 ## Reusable schemas (shared contract settings)
 
-Contract packages export a canonical settings schema that all
+Interface modules export a canonical settings schema that all
 implementations inherit. The point: when the user swaps backends, keys
 under the contract namespace survive.
 
 ```
-@mesh/audio-contract/
-  mesh.toml
+@mesh/audio-interface/
+  module.json
   interface.toml
   settings.schema.json
 ```
@@ -235,7 +237,7 @@ Schemas are JSON. The keys supported today:
 
 ## Frontend module schemas
 
-Frontend modules declare their settings in `package.json` under
+Frontend modules declare their settings in `module.json` under
 `mesh.contributes.settings` or in a sibling `settings.schema.json` next to the
 manifest. The JSON file wins if both exist.
 
@@ -265,7 +267,7 @@ automatically. The page writes to the per-module file, not the system file,
 so changes are scoped and reversible.
 
 Modules that need a custom layout may ship a `settings_ui` entrypoint
-(declared in `package.json`) that renders a `.mesh` component instead of the
+(declared in `module.json`) that renders a `.mesh` component instead of the
 generated form. The schema still governs validation.
 
 ## Reading settings from a module
@@ -304,7 +306,7 @@ actually supplied the effective value.
 
 ## Summary
 
-- JSON everywhere for runtime settings; TOML for manifests/declarations.
+- JSON everywhere for runtime settings and module settings schemas.
 - Six layers, composed in strict order; later wins.
 - Shell-level keys live at the root; module keys are scoped by module ID.
 - Interface contracts export shared schemas so settings survive backend swaps.
