@@ -4278,10 +4278,26 @@ fn installed_module_graph_exposes_shell_package_choices() {
     .unwrap();
 
     assert_eq!(
+        graph.declared_interface("mesh.audio").unwrap().module_id,
+        "@mesh/audio-interface"
+    );
+    assert_eq!(
         graph.active_provider("mesh.audio").unwrap().module_id,
         "@mesh/pipewire-audio"
     );
     assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
+    assert!(
+        graph
+            .backend_providers_for_interface("mesh.audio")
+            .iter()
+            .any(|provider| provider.module_id == "@mesh/pulseaudio-audio")
+    );
+    assert!(
+        graph
+            .icon_pack_contributions()
+            .iter()
+            .any(|icon_pack| icon_pack.module_id == "@mesh/icons-default")
+    );
     assert!(graph.active_provider("mesh.network").is_none());
     assert!(graph.active_provider("mesh.power").is_none());
     assert_eq!(
@@ -4289,6 +4305,12 @@ fn installed_module_graph_exposes_shell_package_choices() {
         0
     );
     assert_eq!(graph.backend_providers_for_interface("mesh.power").len(), 0);
+    assert!(
+        graph
+            .frontend_modules()
+            .iter()
+            .any(|module| module.id == "@mesh/navigation-bar")
+    );
     assert!(
         graph
             .frontend_modules()
@@ -4303,6 +4325,29 @@ fn installed_module_graph_exposes_shell_package_choices() {
     let layout = graph.layout_entrypoint().unwrap();
     assert_eq!(layout.module_id, "@mesh/navigation-bar");
     assert_eq!(layout.entrypoint_id, "main");
+
+    let mut shell = Shell::new();
+    shell.register_interfaces_from_graph(&graph);
+    let contracts = shell.interfaces.contracts_for("mesh.audio");
+    assert!(contracts.iter().any(|contract| {
+        contract.interface == "mesh.audio"
+            && contract
+                .state_fields
+                .iter()
+                .any(|field| field.name == "available")
+    }));
+    let providers = shell.interfaces.providers_for("mesh.audio");
+    assert_eq!(providers.len(), 2);
+    assert!(providers.iter().any(|provider| {
+        provider.provider_module == "@mesh/pipewire-audio"
+            && provider.backend_name == "pipewire"
+            && provider.base_module.as_deref() == Some("@mesh/audio-interface")
+    }));
+    assert!(providers.iter().any(|provider| {
+        provider.provider_module == "@mesh/pulseaudio-audio"
+            && provider.backend_name == "pulseaudio"
+            && provider.base_module.as_deref() == Some("@mesh/audio-interface")
+    }));
 }
 
 #[test]

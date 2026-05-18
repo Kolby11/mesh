@@ -113,7 +113,7 @@ Phase 41 should validate three evidence layers:
 1. Package graph proof with real shipped manifests:
    `nix develop -c cargo test -p mesh-core-module shipped`.
 2. Shell runtime proof with graph-derived provider/frontend selection:
-   `nix develop -c cargo test -p mesh-core-shell shell::tests installed_module_graph`.
+   `nix develop -c cargo test -p mesh-core-shell installed_module_graph`.
 3. Documentation proof with grep gates over canonical workflow strings:
    `rg -n "extend or add a MESH module|@mesh/navigation-bar|@mesh/audio-interface|@mesh/pipewire-audio|module.json|mesh.kind|mesh.implements|mesh.keybinds|diagnostics" docs/module-system.md docs/modules/frontend/core/navigation-bar/README.md docs/modules/backend/core/pipewire-audio/README.md docs/modules/backend/core/pulseaudio-audio/README.md docs/settings/README.md docs/llm-context.md`.
 
