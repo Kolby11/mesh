@@ -1,0 +1,660 @@
+{
+  "path": "blitz-reference",
+  "generated_by": "src/bin/blitz_reference.rs",
+  "fixture": ".planning/prototypes/phase43/fixtures/phase43-scenarios.json",
+  "scenarios": [
+    {
+      "scenario_id": "nav-baseline",
+      "surface": "navigation-bar",
+      "visual_layout": "blitz_reference structured HTML/CSS equivalent recorded for nav shell with status text and volume/theme/settings controls",
+      "interaction_shape": "blitz_reference fixture event mapping recorded for nav-baseline",
+      "notes": [
+        "Default harness stays compileable while optional blitz-reference feature records the dependency blocker.",
+        "Pixel rendering is blocked by blitz crate compile failure in this environment."
+      ]
+    },
+    {
+      "scenario_id": "nav-audio-trigger-hover",
+      "surface": "navigation-bar",
+      "visual_layout": "blitz_reference structured HTML/CSS equivalent recorded for nav shell with hovered volume trigger",
+      "interaction_shape": "blitz_reference fixture event mapping recorded for nav-audio-trigger-hover",
+      "notes": [
+        "Default harness stays compileable while optional blitz-reference feature records the dependency blocker.",
+        "Pixel rendering is blocked by blitz crate compile failure in this environment."
+      ]
+    },
+    {
+      "scenario_id": "audio-popover-visible",
+      "surface": "audio-popover",
+      "visual_layout": "blitz_reference structured HTML/CSS equivalent recorded for audio popover with title, status, percent, slider, and actions",
+      "interaction_shape": "blitz_reference fixture event mapping recorded for audio-popover-visible",
+      "notes": [
+        "Default harness stays compileable while optional blitz-reference feature records the dependency blocker.",
+        "Pixel rendering is blocked by blitz crate compile failure in this environment."
+      ]
+    },
+    {
+      "scenario_id": "audio-slider-change-release",
+      "surface": "audio-popover",
+      "visual_layout": "blitz_reference structured HTML/CSS equivalent recorded for audio popover slider changing from 0.42 to 0.73 and releasing",
+      "interaction_shape": "blitz_reference fixture event mapping recorded for audio-slider-change-release",
+      "notes": [
+        "Default harness stays compileable while optional blitz-reference feature records the dependency blocker.",
+        "Pixel rendering is blocked by blitz crate compile failure in this environment."
+      ]
+    },
+    {
+      "scenario_id": "audio-popover-close",
+      "surface": "audio-popover",
+      "visual_layout": "blitz_reference structured HTML/CSS equivalent recorded for audio popover exiting with mesh-surface-exiting opacity state",
+      "interaction_shape": "blitz_reference fixture event mapping recorded for audio-popover-close",
+      "notes": [
+        "Default harness stays compileable while optional blitz-reference feature records the dependency blocker.",
+        "Pixel rendering is blocked by blitz crate compile failure in this environment."
+      ]
+    }
+  ],
+  "retained_nodes": [
+    {
+      "stable_node_id": "nav.root",
+      "surface": "navigation-bar",
+      "role": "window",
+      "label": "Navigation bar root",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "surface": "navigation-bar",
+      "role": "text",
+      "label": "Shell surface active",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "surface": "navigation-bar",
+      "role": "text",
+      "label": "Audio service offline",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "surface": "navigation-bar",
+      "role": "button",
+      "label": "Volume",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "surface": "navigation-bar",
+      "role": "button",
+      "label": "Theme",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "surface": "navigation-bar",
+      "role": "button",
+      "label": "Settings",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "audio.root",
+      "surface": "audio-popover",
+      "role": "dialog",
+      "label": "Audio popover",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "audio.title",
+      "surface": "audio-popover",
+      "role": "text",
+      "label": "Audio output",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "audio.status",
+      "surface": "audio-popover",
+      "role": "text",
+      "label": "Volume 42%",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "surface": "audio-popover",
+      "role": "text",
+      "label": "42%",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "surface": "audio-popover",
+      "role": "slider",
+      "label": "Volume slider",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "surface": "audio-popover",
+      "role": "button",
+      "label": "Mute audio",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "surface": "audio-popover",
+      "role": "button",
+      "label": "Lower volume",
+      "taffy_layout": null,
+      "parley_text": null
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "surface": "audio-popover",
+      "role": "button",
+      "label": "Raise volume",
+      "taffy_layout": null,
+      "parley_text": null
+    }
+  ],
+  "paint_commands": [
+    {
+      "stable_node_id": "nav.root",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::nav.root"
+    },
+    {
+      "stable_node_id": "nav.root",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::nav.root"
+    },
+    {
+      "stable_node_id": "nav.root",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::nav.root"
+    },
+    {
+      "stable_node_id": "nav.root",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::nav.root"
+    },
+    {
+      "stable_node_id": "nav.root",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::nav.root"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::nav.status.primary"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::nav.status.primary"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::nav.status.primary"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::nav.status.primary"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::nav.status.primary"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::nav.status.secondary"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::nav.status.secondary"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::nav.status.secondary"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::nav.status.secondary"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::nav.status.secondary"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::nav.controls.volume"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::nav.controls.volume"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::nav.controls.volume"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::nav.controls.volume"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::nav.controls.volume"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::nav.controls.theme"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::nav.controls.theme"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::nav.controls.theme"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::nav.controls.theme"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::nav.controls.theme"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::nav.controls.settings"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::nav.controls.settings"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::nav.controls.settings"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::nav.controls.settings"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::nav.controls.settings"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::audio.root"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::audio.root"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::audio.root"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::audio.root"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::audio.root"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::audio.title"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::audio.title"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::audio.title"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::audio.title"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::audio.title"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::audio.status"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::audio.status"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::audio.status"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::audio.status"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::audio.status"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::audio.percent"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::audio.percent"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::audio.percent"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::audio.percent"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::audio.percent"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::audio.slider"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::audio.slider"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::audio.slider"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::audio.slider"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::audio.slider"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::audio.actions.mute"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::audio.actions.mute"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::audio.actions.mute"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::audio.actions.mute"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::audio.actions.mute"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::audio.actions.down"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::audio.actions.down"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::audio.actions.down"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::audio.actions.down"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::audio.actions.down"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "display_slot": "Background",
+      "command": "html-css-equivalent::Background::audio.actions.up"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "display_slot": "Border",
+      "command": "html-css-equivalent::Border::audio.actions.up"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "display_slot": "Text",
+      "command": "html-css-equivalent::Text::audio.actions.up"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "display_slot": "Icon",
+      "command": "html-css-equivalent::Icon::audio.actions.up"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "display_slot": "Generic",
+      "command": "html-css-equivalent::Generic::audio.actions.up"
+    }
+  ],
+  "interactions": [
+    {
+      "interaction_id": "hover-volume-trigger",
+      "scenario_id": "nav-audio-trigger-hover",
+      "target": "nav.controls.volume",
+      "event": "hover",
+      "result": "blitz-reference: hover on nav.controls.volume"
+    },
+    {
+      "interaction_id": "click-volume-trigger",
+      "scenario_id": "nav-audio-trigger-hover",
+      "target": "nav.controls.volume",
+      "event": "click",
+      "result": "blitz-reference: click on nav.controls.volume"
+    },
+    {
+      "interaction_id": "change-audio-slider-0.42-to-0.73",
+      "scenario_id": "audio-slider-change-release",
+      "target": "audio.slider",
+      "event": "change",
+      "result": "blitz-reference: change on audio.slider"
+    },
+    {
+      "interaction_id": "release-audio-slider-0.73",
+      "scenario_id": "audio-slider-change-release",
+      "target": "audio.slider",
+      "event": "release",
+      "result": "blitz-reference: release on audio.slider"
+    },
+    {
+      "interaction_id": "close-audio-popover",
+      "scenario_id": "audio-popover-close",
+      "target": "audio.root",
+      "event": "close",
+      "result": "blitz-reference: close on audio.root"
+    }
+  ],
+  "accessibility": [
+    {
+      "stable_node_id": "nav.root",
+      "accesskit_node_id": "blitz-accesskit-node-0",
+      "role": "window",
+      "label": "Navigation bar root"
+    },
+    {
+      "stable_node_id": "nav.status.primary",
+      "accesskit_node_id": "blitz-accesskit-node-1",
+      "role": "text",
+      "label": "Shell surface active"
+    },
+    {
+      "stable_node_id": "nav.status.secondary",
+      "accesskit_node_id": "blitz-accesskit-node-2",
+      "role": "text",
+      "label": "Audio service offline"
+    },
+    {
+      "stable_node_id": "nav.controls.volume",
+      "accesskit_node_id": "blitz-accesskit-node-3",
+      "role": "button",
+      "label": "Volume"
+    },
+    {
+      "stable_node_id": "nav.controls.theme",
+      "accesskit_node_id": "blitz-accesskit-node-4",
+      "role": "button",
+      "label": "Theme"
+    },
+    {
+      "stable_node_id": "nav.controls.settings",
+      "accesskit_node_id": "blitz-accesskit-node-5",
+      "role": "button",
+      "label": "Settings"
+    },
+    {
+      "stable_node_id": "audio.root",
+      "accesskit_node_id": "blitz-accesskit-node-6",
+      "role": "dialog",
+      "label": "Audio popover"
+    },
+    {
+      "stable_node_id": "audio.title",
+      "accesskit_node_id": "blitz-accesskit-node-7",
+      "role": "text",
+      "label": "Audio output"
+    },
+    {
+      "stable_node_id": "audio.status",
+      "accesskit_node_id": "blitz-accesskit-node-8",
+      "role": "text",
+      "label": "Volume 42%"
+    },
+    {
+      "stable_node_id": "audio.percent",
+      "accesskit_node_id": "blitz-accesskit-node-9",
+      "role": "text",
+      "label": "42%"
+    },
+    {
+      "stable_node_id": "audio.slider",
+      "accesskit_node_id": "blitz-accesskit-node-10",
+      "role": "slider",
+      "label": "Volume slider"
+    },
+    {
+      "stable_node_id": "audio.actions.mute",
+      "accesskit_node_id": "blitz-accesskit-node-11",
+      "role": "button",
+      "label": "Mute audio"
+    },
+    {
+      "stable_node_id": "audio.actions.down",
+      "accesskit_node_id": "blitz-accesskit-node-12",
+      "role": "button",
+      "label": "Lower volume"
+    },
+    {
+      "stable_node_id": "audio.actions.up",
+      "accesskit_node_id": "blitz-accesskit-node-13",
+      "role": "button",
+      "label": "Raise volume"
+    }
+  ],
+  "comparison_headings": [
+    "visual/layout fidelity",
+    "interaction shape",
+    "retained identity fit",
+    "accessibility boundary",
+    "build/dependency cost",
+    "blocker evidence",
+    "Phase 44 integration readiness"
+  ],
+  "notes": [
+    "Attempted command: cargo check --manifest-path .planning/prototypes/phase43/Cargo.toml --features blitz-reference",
+    "Crate/API boundary: optional blitz = 0.3.0-alpha.4 dependency with default features disabled.",
+    "Observed blocker: blitz crate compile error E0425, cannot find value event_loop in src/lib.rs."
+  ]
+}

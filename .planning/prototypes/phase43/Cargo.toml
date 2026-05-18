@@ -12,5 +12,9 @@ taffy = "0.10.1"
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
 anyrender = "0.8.0"
 accesskit = "0.24.0"
+blitz = { version = "0.3.0-alpha.4", default-features = false, optional = true }
+
+[features]
+blitz-reference = ["dep:blitz"]
 
 [workspace]
