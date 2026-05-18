@@ -1,5 +1,37 @@
 # MESH Milestones
 
+## v1.7 Rethink Modularity and Extensibility Concepts (Shipped: 2026-05-18)
+
+**Status:** shipped
+**Archived:** 2026-05-18
+**Phases completed:** 5 phases, 17 plans, 39 tasks
+
+**Key accomplishments:**
+
+- Canonical module vocabulary with old-name replacement inventory and reconciled provider/keybind model
+- Author-facing module, backend, health, and icon docs now teach the canonical module/interface/provider vocabulary
+- Runtime terminology inventory and Phase 38-41 handoff for module.json, typed contributions, diagnostics, and shipped proof
+- Interface relationship validation and graph-boundary separation for base, extension, independent, provider, and frontend requirement metadata
+- Provider metadata and backend diagnostics now keep interface requirements, provider identity, and host capabilities separate
+- Installed graph contribution records now carry source metadata and expose typed runtime registries for frontend, resource, keybind, interface, provider, settings, and library data
+- Shell startup and backend launch now consume typed installed graph records, with non-fatal resource/settings diagnostics and an end-to-end manifest-driven extension proof
+- Manifest migration diagnostics now have test coverage for warning/error severity and author docs with exact replacement/removal actions
+- Author-facing docs now teach canonical module.json manifests across installation, resources, settings, frontend examples, and LLM context
+- Manifest keybind declarations now flow into installed graph records with default and localized trigger data, while shell shortcut dispatch enforces declared modifiers and preserves settings-only user overrides.
+- Canonical audio interface and default icon modules now participate in the real installed graph proof for the shipped navigation/audio path.
+- Shell tests now prove the shipped installed graph drives provider registration, active backend selection, frontend filtering, and navigation behavior without service-specific production branches.
+- Author docs now teach the shipped navigation/audio proof path as the canonical workflow for extending or adding a MESH module.
+
+**Known deferred items at close:** 4 open artifacts acknowledged and deferred; see `.planning/STATE.md` Deferred Items.
+
+**Archive artifacts:**
+
+- `.planning/milestones/v1.7-ROADMAP.md`
+- `.planning/milestones/v1.7-REQUIREMENTS.md`
+- `.planning/milestones/v1.7-phases/`
+
+---
+
 ## v1.5 CPU Rendering Performance Improvement
 
 **Status:** shipped
@@ -27,31 +59,6 @@
 - `.planning/milestones/v1.5-ROADMAP.md`
 - `.planning/milestones/v1.5-REQUIREMENTS.md`
 - `.planning/milestones/v1.5-MILESTONE-AUDIT.md`
-
-## v1.7 Rethink Modularity and Extensibility Concepts
-
-**Status:** planning
-**Starts after:** v1.6 Localized Keybind Management pause
-
-**Goal:** Rework MESH's modularity model so frontend modules, backend providers, manifests, service contracts, capabilities, and extension points form a coherent author-facing architecture instead of a set of separate milestone-grown mechanisms.
-
-**Priority:** high. MESH now has useful extension pieces across manifests, backend providers, interfaces, capabilities, resources, keybinds, diagnostics, and docs; consolidating the model will reduce friction before more extension features are added.
-
-**Planned scope:**
-
-- Define canonical vocabulary for package/module identity, frontend surfaces, backend providers, interface contracts, libraries, resource packs, contributions, capabilities, and dependencies
-- Normalize `package.json.mesh` manifest schema and compatibility behavior for existing manifests
-- Index typed contributions for UI entrypoints, slots, libraries, settings, keybinds, resources, interfaces, and providers
-- Preserve v1.1 backend provider behavior and v1.6 keybind declaration/resolution behavior during migration
-- Prove the model with docs, diagnostics, tests, and at least one real bundled module/provider path
-
-**Out of scope:**
-
-- Remote marketplace, signing, trust policy, or installer UX
-- Compositor-global shortcuts
-- Completing all paused keybind dispatch/conflict/accessibility runtime work
-- Service-specific Rust APIs
-- Skia-backed rendering investigation
 
 ## v1.6 Localized Keybind Management
 

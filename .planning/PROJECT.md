@@ -92,16 +92,19 @@ declaration/resolution data is preserved through typed contribution records,
 manifest-first shortcut resolution, modifier validation, and settings override
 boundaries.
 
-## Current Milestone: v1.7 Rethink Modularity and Extensibility Concepts
+`v1.7` shipped on 2026-05-18.
 
-**Goal:** Rework MESH's modularity model so frontend modules, backend providers, manifests, service contracts, capabilities, and extension points form a coherent author-facing architecture instead of a set of separate milestone-grown mechanisms.
+The project now also has a consolidated module and extensibility model with:
 
-**Target features:**
-- Clarified vocabulary and boundaries for module, frontend surface, backend provider, interface contract, library, resource pack, and contribution.
-- A canonical `module.json` manifest schema that unifies module identity, dependencies, capabilities, entrypoints, contributions, interface declarations, provider declarations, keybinds, assets, settings, and migration metadata.
-- Extensibility contracts that let third-party modules add new interfaces, providers, UI entrypoints, resources, and libraries without service-specific Rust branches.
-- Compatibility and migration handling for existing package graph, legacy manifests, v1.1 backend provider declarations, and v1.6 keybind declarations.
-- Author-facing proof through docs, diagnostics, validation, and at least one real module/provider path.
+- Locked canonical vocabulary for modules, frontend surfaces, backend providers, interfaces, libraries, resource packs, contributions, capabilities, and dependencies
+- Canonical `module.json` normalization with explicit legacy manifest migration diagnostics
+- Typed installed-graph contribution records for frontend, resource, keybind, interface, provider, settings, and library data
+- Graph-driven provider registration, active backend selection, frontend filtering, and navigation proof without service-specific production branches
+- Author docs that teach the shipped navigation/audio path as the canonical workflow for extending or adding a MESH module
+
+## Current Milestone
+
+No active milestone is defined. The next candidate is a rendering engine improvement milestone that evaluates Blitz renderer as inspiration or a base, then decides whether MESH should reuse Blitz pieces or build its own renderer around libraries such as Skia, Stylo, Taffy, Parley, AnyRender, Winit, AccessKit, Muda, html5ever, and xml5ever.
 
 ## Requirements
 
@@ -116,12 +119,11 @@ boundaries.
 - `v1.7 Phase 38`: Canonical `module.json` normalization is implemented in Rust, old manifest forms produce explicit migration diagnostics, checked-in root/module fixtures use canonical paths, and v1.1 provider plus v1.6 keybind data survive normalization.
 - `v1.7 Phase 39`: Interface relationships, backend provider declarations, frontend requirements, host capabilities, and typed contributions are indexed as separate graph concepts with source metadata and manifest-driven extension proof.
 - `v1.7 Phase 40`: Migration diagnostics and author docs now point legacy manifest shapes toward canonical `module.json`, and v1.6 keybind declarations remain available through manifest, installed-graph, shell resolution, and settings override paths.
+- `v1.7 Phase 41`: The shipped navigation/audio module path proves canonical manifests, typed installed-graph records, provider registration, frontend filtering, and author documentation on a real bundled module/provider workflow.
 
 ### Active
 
-- Module authors can rely on one coherent module and manifest model for frontend, backend, interface, library, theme, icon, font, and language modules.
-- Interface contracts, provider implementations, dependency declarations, capabilities, settings, keybinds, assets, and UI contributions use consistent vocabulary and graph inspection paths.
-- Remaining v1.7 work is shipped-module proof on top of the canonical graph model.
+- Define the next rendering engine milestone, including whether Blitz renderer should be reused directly, used as design inspiration, or rejected in favor of a MESH-owned renderer assembled from focused crates.
 
 ### Out of Scope
 
@@ -156,7 +158,7 @@ boundaries.
 | Module keybind management takes priority for v1.6 | Plugin authors need declared, localizable keyboard actions before expanding to compositor-global shortcut plumbing or more rendering work | Active for v1.6 |
 | Skia-backed rendering is deferred beyond v1.6 | The next user-requested capability is frontend module keybind management; Skia remains a future rendering investigation candidate | Deferred |
 | v1.6 keybind work is paused after phases 32 and 33 | The next user request is to rethink modularity and extensibility concepts, and the remaining keybind phases depend on the broader module contract vocabulary | Paused |
-| v1.7 prioritizes conceptual coherence over new feature breadth | MESH now has manifests, providers, interfaces, capabilities, resources, keybinds, docs, and diagnostics grown across multiple milestones; consolidating those contracts reduces future extension friction | Active for v1.7 |
+| v1.7 prioritizes conceptual coherence over new feature breadth | MESH now has manifests, providers, interfaces, capabilities, resources, keybinds, docs, and diagnostics grown across multiple milestones; consolidating those contracts reduces future extension friction | Shipped in v1.7 |
 | Interface/provider/resource extensibility routes through the installed graph | Typed graph records make extension points inspectable and prevent frontend requirements, backend provider identity, and host capabilities from collapsing into one concept | Shipped in v1.7 Phase 39 |
 | Resource and settings compatibility gaps are diagnostics, not graph-load failures | Missing packs, unmapped semantic icons, and duplicate settings namespaces should be visible to tools/settings UI without blocking unrelated modules | Shipped in v1.7 Phase 39 |
 | Legacy manifest names are migration inputs, not public aliases | Authors need concrete replacement/removal guidance without reopening old terminology as supported vocabulary | Shipped in v1.7 Phase 40 |
@@ -207,4 +209,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-18 after completing Phase 40*
+*Last updated: 2026-05-18 after archiving v1.7 milestone*

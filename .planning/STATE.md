@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Rethink Modularity and Extensibility Concepts
-status: milestone_complete
+status: completed
 stopped_at: Phase 41 context gathered
-last_updated: "2026-05-18T11:34:10.950Z"
-last_activity: 2026-05-18 -- Phase 41 execution started
+last_updated: "2026-05-18T12:09:53.753Z"
+last_activity: 2026-05-18
 progress:
   total_phases: 5
   completed_phases: 5
   total_plans: 17
-  completed_plans: 14
+  completed_plans: 17
   percent: 100
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-18)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 41 — shipped-module-proof-and-documentation
+**Current focus:** Planning next milestone after v1.7 archive
 
 ## Current Position
 
-Phase: 41
-Plan: Not started
-Status: Milestone complete
+Phase: —
+Plan: —
+Status: Milestone archived; ready to define next milestone
 Last activity: 2026-05-18
 
 ## Decisions
@@ -172,6 +172,7 @@ Resume File: .planning/phases/41-shipped-module-proof-and-documentation/41-CONTE
 - v1.6 continues phase numbering after v1.5 and focuses on localized module keybind management.
 - v1.6 paused after phases 32 and 33 by user request to rethink modularity and extensibility concepts.
 - v1.7 continues phase numbering after the v1.6 planned roadmap and starts at Phase 37.
+- v1.7 archived on 2026-05-18 after phases 37-41 completed.
 
 ## Deferred Items
 
@@ -191,6 +192,15 @@ Items acknowledged and deferred at `v1.2` close on 2026-05-08:
 | uat | Phase 11 / 11-HUMAN-UAT.md | partial |
 | verification | Phase 11 / 11-VERIFICATION.md | human_needed |
 | planning | v1.2 requirements checkbox and traceability drift for KEY-01 through KEY-04 and ANIM-01 through ANIM-05 despite completed phases | deferred |
+
+Items acknowledged and deferred at `v1.7` close on 2026-05-18:
+
+| Category | Item | Status |
+|----------|------|--------|
+| debug | phase31-live-uat-diagnosis | updated |
+| todo | 2026-05-13-phase31-audio-popover-transition-delay.md | pending |
+| todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
+| todo | 2026-05-17-evaluate-blitz-crate-dependencies.md | pending |
 
 ## Blockers
 
