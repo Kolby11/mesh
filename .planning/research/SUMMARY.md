@@ -1,45 +1,43 @@
-# Research Summary: v1.7 Modularity and Extensibility
+# Research Summary: v1.8 Rendering Engine Architecture
 
 ## Recommendation
 
-Make v1.7 a consolidation milestone: define one module/package/contribution model, align runtime validation and diagnostics with that model, and prove that third-party extension paths stay generic.
+Make v1.8 an architecture decision and proof milestone. Do not commit to replacing MESH's renderer wholesale until Blitz and a MESH-owned focused-crate path have been compared on the same shipped-surface slice.
 
-## Stack Additions
+## Stack Additions to Evaluate
 
-- Canonical `mesh` manifest schema documentation and normalized Rust model updates.
-- Typed contribution indexing for UI entrypoints, libraries, resources, settings, keybinds, interface declarations, and provider declarations.
-- Compatibility diagnostics for legacy manifests and milestone-grown fields.
-- Contract/capability validation that keeps service behavior out of Rust core.
+- Blitz as the reference architecture and direct-adoption candidate.
+- Taffy for layout.
+- Parley for text layout, selection, and future editor needs.
+- Skia/rust-skia or AnyRender for paint/backend abstraction.
+- AccessKit for accessibility updates.
+- Stylo only through Blitz or a tightly scoped style proof.
+- Winit, Muda, html5ever, and xml5ever only if the milestone proves they solve a concrete MESH shell/rendering need.
 
 ## Feature Table Stakes
 
-- One vocabulary: package/module, interface, provider, frontend, library, resource pack, contribution, capability, dependency.
-- One manifest model under `package.json.mesh`.
-- Explicit dependency/capability/provider rules.
-- Migration support for current backend graph and keybind declarations.
-- Author docs and proof module path.
+- Adopt-vs-build decision for Blitz.
+- Prototype evidence for both Blitz and focused-crate paths.
+- Retained invalidation, damage, profiling, diagnostics, and accessibility remain visible.
+- One real shipped surface renders through the chosen proof path.
+- Build/CI/dependency cost is measured before broader migration.
 
 ## Watch Out For
 
-- Do not rename docs without updating diagnostics and structs.
-- Do not break existing manifests silently.
-- Do not let capabilities become identity or provider selection.
-- Do not let new extension points bypass the installed graph.
-- Do not add service-specific Rust APIs during the proof.
-
-## Useful External Lessons
-
-- VS Code keeps extension behavior in manifest fields such as `contributes`, `activationEvents`, and `capabilities`, while preserving standard package metadata.
-- WebExtensions separate manifest functionality from explicit permissions, including install-time and optional permission concepts.
-- GNOME Shell extensions show that simple packaging is useful, but direct shell-internal coupling makes compatibility fragile.
-- Kubernetes custom resources reinforce that extensibility contracts should extend the platform API, not store arbitrary private application state.
+- Full browser compatibility is out of scope.
+- Winit is not a renderer and may not fit Wayland shell surfaces.
+- Stylo and Skia add real power but also integration cost.
+- Text and accessibility must be first-class acceptance criteria, not follow-up cleanup.
 
 ## Sources
 
-- VS Code Extension Manifest: https://code.visualstudio.com/api/references/extension-manifest
-- VS Code Contribution Points: https://code.visualstudio.com/api/references/contribution-points
-- VS Code Activation Events: https://code.visualstudio.com/api/references/activation-events
-- MDN WebExtensions manifest: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json
-- MDN WebExtensions permissions: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/permissions
-- GNOME Shell extension anatomy: https://gjs.guide/extensions/overview/anatomy.html
-- Kubernetes custom resources: https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/
+- Blitz: https://github.com/DioxusLabs/blitz
+- Skia: https://skia.org/docs/
+- rust-skia: https://github.com/rust-skia/rust-skia
+- Taffy: https://taffylayout.com/docs
+- Parley: https://docs.rs/parley/latest/parley/
+- Stylo: https://github.com/servo/stylo
+- Winit: https://rust-windowing.github.io/winit/winit/
+- AccessKit: https://www.xskit.dev/
+- Muda: https://github.com/tauri-apps/muda
+- html5ever: https://github.com/servo/html5ever

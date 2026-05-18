@@ -1,37 +1,45 @@
-# Architecture Research: v1.7 Modularity and Extensibility
+# Architecture Research: v1.8 Rendering Engine Architecture
 
-## Current Integration Points
+## Existing Architecture Constraints
 
-- `crates/core/extension/module/src/package/module_manifest.rs` parses the target `package.json` shape and converts it into the runtime manifest model.
-- `crates/core/extension/module/src/manifest/model.rs` is the normalized runtime manifest model, but it still exposes several organically grown sections and legacy compatibility concepts.
-- `crates/core/extension/module/src/package/installed_graph.rs` builds the installed module graph, active providers, interface declarations, contribution index, and layout entrypoint.
-- `crates/core/extension/service/src/lib.rs` and its submodules own interface contracts, interface/provider resolution, and registry behavior.
-- `docs/module-system.md`, `docs/extensibility.md`, `docs/modules/README.md`, backend/frontend module docs, and codebase maps already describe most of the desired model, but the docs and structs are not yet fully aligned.
-- v1.6 added keybind declaration and locale-resolution concepts that need to fit the broader contribution/capability vocabulary before dispatch and accessibility proof continue.
+- MESH already has retained widget identity, typed invalidation, retained render objects, retained display data, damage tracking, text caching, selector indexing, profiling snapshots, and shipped-surface benchmarks.
+- The Rust core must remain generic; shell surfaces and services should not force renderer-specific special cases.
+- Plugin-authored `.mesh` UI, theme tokens, diagnostics, and profiling payloads are part of the product contract.
 
-## Suggested Build Order
+## Candidate Paths
 
-1. Inventory and freeze vocabulary before changing schemas.
-2. Normalize manifest/package models around a canonical `mesh` schema while keeping compatibility loaders.
-3. Unify typed contribution indexing and validation for declarations that already exist in separate sections.
-4. Add migration and compatibility diagnostics so older docs/examples keep loading visibly.
-5. Prove the model with real bundled module paths and author documentation.
+### Path A: Adopt Blitz as Base
 
-## New vs Modified Components
+Use Blitz as the renderer/DOM/layout/style foundation and adapt MESH surfaces into Blitz-compatible inputs.
 
-| Area | Work Type | Notes |
-|------|-----------|-------|
-| Manifest schema | Modified | Consolidate existing fields, add canonical docs/schema, preserve load compatibility. |
-| Installed graph | Modified | Ensure contribution index covers the normalized extension points and exposes useful diagnostics. |
-| Interface registry | Modified | Align interface/provider declarations with dependency/capability vocabulary. |
-| Diagnostics | Modified/New | Add author-facing migration and validation diagnostics. |
-| Docs/examples | Modified | Update module-system, extensibility, backend/frontend module docs, and examples to one model. |
-| LSP metadata | Optional/New | Generate or expose contract metadata only if bounded by the plan. |
+**Advantages:** fastest path to a modular Rust HTML/CSS renderer; reuses Stylo/Taffy/Parley integration; aligns with the user's requested inspiration.
 
-## Architectural Guardrails
+**Risks:** MESH may inherit Dioxus/native assumptions, browser-like DOM semantics, and renderer lifecycle constraints that conflict with shell surfaces, diagnostics, retained invalidation, and Wayland-specific behavior.
 
-- Rust core remains a generic validator, router, loader, and diagnostics layer.
-- Services remain interface contracts plus providers, not hardcoded Rust service APIs.
-- Module identity should be stable package identity. Localized labels, display names, and resources must not become identity.
-- Capabilities are host powers. Interface implementation and interface consumption are separate declarations.
-- Contributions should be inspectable from the installed graph so tools, diagnostics, and docs do not need separate discovery paths.
+### Path B: Borrow Blitz Architecture, Keep MESH Renderer Ownership
+
+Treat Blitz as the reference architecture. Evaluate its crate boundaries and adopt selected pieces such as Taffy, Parley, Skia/AnyRender, or specific style/layout ideas behind MESH-owned adapters.
+
+**Advantages:** keeps MESH's retained graph, profiling, diagnostics, and module model authoritative while reducing reinvention.
+
+**Risks:** slower than direct adoption; requires careful adapter design; easy to create duplicated layout/style abstractions if the boundary is vague.
+
+### Path C: MESH-Owned Renderer with Focused Crates
+
+Build a new MESH renderer stack around focused crates: Taffy for layout, Parley for text, Skia or AnyRender for paint/GPU, AccessKit for accessibility, and optional html5ever/xml5ever only for imported document formats.
+
+**Advantages:** maximum control over shell-specific behavior and migration sequencing.
+
+**Risks:** highest implementation cost; repeats integration work Blitz is already doing; requires strong test coverage to avoid regressions.
+
+## Recommended Build Order
+
+1. Architecture spike: map current MESH renderer stages to Blitz and focused-crate equivalents.
+2. Prototype Blitz rendering for one static shipped-surface equivalent.
+3. Prototype focused-crate rendering for the same surface using MESH retained data.
+4. Compare with a fixed scorecard: responsiveness, invalidation, diagnostics, accessibility, build complexity, and migration risk.
+5. Implement only the chosen proof slice in production paths.
+
+## Decision Bias
+
+Default to Path B unless prototype evidence shows direct Blitz adoption is clean. MESH's value is not generic HTML rendering; it is deterministic, observable shell UI authored by plugins.

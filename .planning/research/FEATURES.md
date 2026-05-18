@@ -1,35 +1,28 @@
-# Feature Research: v1.7 Modularity and Extensibility
+# Feature Research: v1.8 Rendering Engine Architecture
 
 ## Table Stakes
 
-- One canonical vocabulary for module authors and core maintainers.
-- One installable package shape with standard package metadata and MESH behavior under `mesh`.
-- Typed contributions for frontend surfaces/widgets, backend providers, interface contracts, libraries, settings, keybinds, theme/icon/font/language resources, and layout entrypoints.
-- Explicit capability and dependency vocabulary that distinguishes host permissions, package dependencies, interface provider requirements, native dependencies, and resource dependencies.
-- Compatibility with existing package graph behavior, legacy manifest files, backend provider declarations, and v1.6 keybind declarations.
-- Diagnostics that explain what is wrong in author language: invalid section, deprecated field, missing dependency, missing provider, incompatible interface version, capability mismatch, duplicate contribution, or migration warning.
-- Proof that a new or refactored module path can declare its contract, provider, resources, settings, keybinds, and docs without core service-specific branches.
+- A written adopt-vs-build decision for Blitz, backed by prototype evidence.
+- A renderer abstraction boundary that preserves MESH retained identity, invalidation categories, damage tracking, profiling, diagnostics, and shell request flow.
+- Layout proof on shipped surfaces using current behavior as the baseline.
+- Text proof covering current text rendering plus selection/cursor geometry risks.
+- Paint proof comparing current software path against Skia or AnyRender-backed output.
+- Accessibility proof that retained node identity can produce stable AccessKit-style updates.
+- Build and dependency proof covering Linux/Nix development, CI, binary size, and GPU/backend feature flags.
 
 ## Differentiators
 
-- Interface relationship metadata (`base`, `extension`, `independent`) to guide ecosystem reuse without blocking independent experimentation.
-- Contribution indexing as a first-class runtime concept, so shell surfaces, libraries, resources, keybinds, and provider choices can be inspected consistently.
-- Contract-derived Luau/LSP metadata so author tooling follows interface contracts rather than whichever backend happens to be installed.
-- Compatibility diagnostics that make old manifests safe to load while steering new authors toward the canonical schema.
-- Cross-module resource rules for theme tokens, icons, slots, and libraries that make reuse explicit rather than ambient.
+- Keep MESH's shell-specific `.mesh` rendering model while borrowing proven browser-engine crates only where they pay for themselves.
+- Preserve debug observability through the migration rather than treating the renderer as a black box.
+- Make renderer backend selection a measured, reversible boundary instead of a one-way rewrite.
 
 ## Anti-Features
 
-- Do not turn the manifest into a dumping ground for module-private state.
-- Do not add Rust APIs such as `mesh.audio.get_volume()` for service-specific behavior.
-- Do not privilege default modules over third-party modules in the model.
-- Do not make library modules confer capabilities implicitly.
-- Do not make the milestone a marketplace, signing, installer, or distribution milestone.
-- Do not finish all paused v1.6 keybind runtime phases here; only carry forward the declaration/resolution concepts needed for the module model.
+- Do not attempt full HTML/CSS/browser compatibility in this milestone.
+- Do not rewrite windowing/input around Winit unless it solves a specific MESH Wayland shell problem.
+- Do not adopt Stylo directly without proving that its browser-grade complexity fits MESH's constrained CSS model.
+- Do not remove existing shipped-surface behavior before a new path matches it under tests and benchmarks.
 
-## Open Questions for Plan-Phase
+## Candidate User-Visible Outcome
 
-- Whether `ModuleType::Surface` and `ModuleType::Widget` should become `frontend` kinds with contribution subtypes, or remain compatibility variants normalized to `frontend`.
-- Whether `mesh.dependencies.backend` should replace, alias, or coexist with current interface dependency structures.
-- Which diagnostics should be blocking load errors and which should be warnings during migration.
-- How much contract-derived Luau/LSP metadata can be generated in this milestone without becoming a separate tooling phase.
+By the end of v1.8, MESH should not merely have a research document. It should have a small proof path showing the chosen rendering direction can render a real shipped surface with retained invalidation, text/layout behavior, accessibility metadata, and profiling still visible.
