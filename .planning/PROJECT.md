@@ -102,7 +102,16 @@ The project now also has a consolidated module and extensibility model with:
 - Graph-driven provider registration, active backend selection, frontend filtering, and navigation proof without service-specific production branches
 - Author docs that teach the shipped navigation/audio path as the canonical workflow for extending or adding a MESH module
 
-## Current Milestone: v1.8 Rendering Engine Architecture
+`v1.8` shipped on 2026-05-18.
+
+The project now also has a rendering engine architecture direction with:
+
+- A source-backed adopt-vs-build decision that keeps direct Blitz adoption blocked and selects a MESH-owned focused-crate path.
+- Comparable prototype evidence across the shared navigation/audio shipped-surface slice.
+- A production-adjacent focused proof adapter preserving retained identity, typed invalidation, damage/profiling, diagnostics, selection, and AccessKit-compatible boundaries.
+- A phased, reversible renderer migration roadmap with explicit ownership classification, build/CI/Linux/Nix/binary-risk gates, rollback expectations, and an author-facing `.mesh` renderer contract.
+
+## Last Shipped Milestone: v1.8 Rendering Engine Architecture
 
 **Goal:** Decide and prove the next rendering architecture for MESH by evaluating Blitz as inspiration or a base, then implementing the minimum integration slice that improves rendering capability without losing shell-specific determinism, observability, and shipped-surface responsiveness.
 
@@ -141,7 +150,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 
 ### Active
 
-- No active v1.8 requirements remain after Phase 45. The milestone is ready for completion review.
+- No active requirements remain after v1.8. The next milestone should define fresh requirements.
 
 ### Out of Scope
 
@@ -181,6 +190,10 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Resource and settings compatibility gaps are diagnostics, not graph-load failures | Missing packs, unmapped semantic icons, and duplicate settings namespaces should be visible to tools/settings UI without blocking unrelated modules | Shipped in v1.7 Phase 39 |
 | Legacy manifest names are migration inputs, not public aliases | Authors need concrete replacement/removal guidance without reopening old terminology as supported vocabulary | Shipped in v1.7 Phase 40 |
 | Module keybind declarations remain canonical while settings only override effective shortcuts | Future dispatch/conflict/accessibility work needs manifest-owned keybind data and user settings must not become a declaration source again | Shipped in v1.7 Phase 40 |
+| Direct Blitz production adoption remains blocked | Wayland shell model fit, browser-engine-level overhead, and high-level crate compile evidence make direct adoption too risky for MESH's shell-owned renderer path | Shipped in v1.8 Phase 42 |
+| MESH-owned focused-crate path is the selected renderer direction | The focused path preserved retained MESH-shaped evidence across layout, text, paint, interaction, and accessibility without replacing the production renderer wholesale | Shipped in v1.8 Phase 43 |
+| Focused renderer proof is adapter-owned, not public API | Phase 44 proof snapshots validate migration boundaries while current renderer/shell ownership remains authoritative for production behavior | Shipped in v1.8 Phase 44 |
+| Broad renderer migration must be phased and reversible | Future adoption needs author-contract, ownership-classification, build/CI/release, and rollback gates before becoming broad production behavior | Shipped in v1.8 Phase 45 |
 
 <details>
 <summary>Archived milestone framing</summary>
@@ -227,4 +240,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-18 after completing v1.8 Phase 45*
+*Last updated: 2026-05-18 after shipping v1.8 milestone*

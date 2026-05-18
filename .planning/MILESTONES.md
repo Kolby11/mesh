@@ -1,5 +1,39 @@
 # MESH Milestones
 
+## v1.8 Rendering Engine Architecture (Shipped: 2026-05-18)
+
+**Status:** shipped
+**Archived:** 2026-05-18
+**Delivered:** A source-backed renderer architecture direction, comparable prototype evidence, production-adjacent focused proof integration, and a phased renderer migration contract for future broad adoption.
+
+**Phases completed:** 4 phases, 14 plans, 28 tasks
+
+**Key accomplishments:**
+
+- Source-backed renderer decision frame with local MESH contracts, external crate sources, hard blockers, and scorecard placeholders
+- Renderer crate outcomes and path scores selecting a dual Phase 43 prototype comparison
+- Dual renderer prototype handoff for Blitz reference and MESH-owned focused-crate paths across navigation bar and audio popover surfaces
+- Shared renderer prototype fixture and isolated Rust evidence schema for comparable Blitz and focused-crate proofs
+- Blitz reference path evidence with a reproducible high-level crate compile blocker and structured fixture fallback
+- Retained MESH-shaped focused-crate evidence with Taffy layout, Parley text, AnyRender paint, and AccessKit accessibility boundaries
+- Final renderer prototype comparison selecting the MESH-owned focused-crate path for Phase 44
+- Render-owned focused proof snapshots preserving MESH node identity, typed dirty evidence, damage evidence, selected paint evidence, and AccessKit-compatible node IDs
+- Shell paint now captures focused proof snapshots while preserving invalidation snapshots, present damage, profiling, and non-fatal diagnostics
+- Focused proof evidence now covers theme-owned selection payloads, selection paint behavior, and AccessKit-compatible updates derived from retained MESH node IDs
+- Navigation and audio shipped-surface tests now prove focused snapshots exist during normal paints, with final evidence covering INTG-01 through INTG-04
+- Phased renderer migration roadmap with reversible rollout gates, required Nix/Cargo validation commands, and broad-adoption dependency records
+- Renderer ownership matrix classifying current MESH boundaries as authoritative, Phase 44 proof outputs as adapter-owned, and future crate paths as replacement candidates
+- Author-facing renderer contract for `.mesh` UI with explicit browser non-goals and links from existing module/frontend authoring docs
+
+**Known deferred items at close:** 3 open artifacts acknowledged and deferred; see `.planning/STATE.md` Deferred Items.
+
+**Archive artifacts:**
+
+- `.planning/milestones/v1.8-ROADMAP.md`
+- `.planning/milestones/v1.8-REQUIREMENTS.md`
+
+---
+
 ## v1.7 Rethink Modularity and Extensibility Concepts (Shipped: 2026-05-18)
 
 **Status:** shipped

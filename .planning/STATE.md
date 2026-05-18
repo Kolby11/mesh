@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Rendering Engine Architecture
-status: milestone_complete
-stopped_at: Phase 45 context gathered; ready to plan
-last_updated: "2026-05-18T14:39:25.982Z"
-last_activity: 2026-05-18 -- Phase 45 execution started
+status: completed
+stopped_at: v1.8 archived; ready to start next milestone
+last_updated: "2026-05-18T15:00:12.159Z"
+last_activity: 2026-05-18
 progress:
   total_phases: 4
   completed_phases: 4
   total_plans: 14
-  completed_plans: 11
+  completed_plans: 14
   percent: 100
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-18)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 45 — renderer-migration-plan-and-author-contract
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 45
-Plan: Not started
-Status: Milestone complete
+Phase: none
+Plan: none
+Status: v1.8 milestone archived
 Last activity: 2026-05-18
 
 ## Decisions
@@ -177,6 +177,7 @@ Resume File: .planning/phases/45-renderer-migration-plan-and-author-contract/45-
 - v1.6 paused after phases 32 and 33 by user request to rethink modularity and extensibility concepts.
 - v1.7 continues phase numbering after the v1.6 planned roadmap and starts at Phase 37.
 - v1.7 archived on 2026-05-18 after phases 37-41 completed.
+- v1.8 continued after v1.7 Phase 41 and was archived on 2026-05-18 after phases 42-45 completed.
 
 ## Deferred Items
 
@@ -206,6 +207,14 @@ Items acknowledged and deferred at `v1.7` close on 2026-05-18:
 | todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
 | todo | 2026-05-17-evaluate-blitz-crate-dependencies.md | pending |
 
+Items acknowledged and deferred at `v1.8` close on 2026-05-18:
+
+| Category | Item | Status |
+|----------|------|--------|
+| debug | phase31-live-uat-diagnosis | updated |
+| todo | 2026-05-13-phase31-audio-popover-transition-delay.md | pending |
+| todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
+
 ## Blockers
 
 (None)
@@ -214,7 +223,6 @@ Items acknowledged and deferred at `v1.7` close on 2026-05-18:
 
 - Audio popover transition delay polish — captured 2026-05-13; accepted v1.5 polish debt.
 - Define module install requirement resolution — captured 2026-05-15; remaining v1.7 input for typed registries, interface/provider matching, contradictory backend handling, resource requirements, shell-settings module override format, and missing icon/font/sound diagnostics.
-- Evaluate Blitz crate dependencies — captured 2026-05-17; assess whether MESH should reuse Stylo, Taffy, Parley, AnyRender, html5ever/xml5ever, Winit, AccessKit, and Muda instead of reinventing future DOM/layout/rendering/shell layers.
 - Resume v1.6 keybind dispatch/conflict/accessibility work after v1.7 stabilizes the module model.
 
 ## Artifact Index
@@ -228,6 +236,8 @@ Items acknowledged and deferred at `v1.7` close on 2026-05-18:
 | v1.5 archived roadmap | `.planning/milestones/v1.5-ROADMAP.md` |
 | v1.5 audit | `.planning/milestones/v1.5-MILESTONE-AUDIT.md` |
 | v1.7 research summary | `.planning/research/SUMMARY.md` |
+| v1.8 archived requirements | `.planning/milestones/v1.8-REQUIREMENTS.md` |
+| v1.8 archived roadmap | `.planning/milestones/v1.8-ROADMAP.md` |
 | v1.7 research details | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
 | v1.4 research | `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md` |
 | Codebase map | `.planning/codebase/` |
