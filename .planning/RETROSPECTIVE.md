@@ -46,6 +46,51 @@
 
 ---
 
+## Milestone: v1.8 - Rendering Engine Architecture
+
+**Shipped:** 2026-05-18
+**Phases:** 4 | **Plans:** 14 | **Sessions:** multiple planning, research, implementation, and verification sessions
+
+### What Was Built
+
+- Source-backed Blitz adopt-vs-build decision matrix with explicit candidate crate outcomes.
+- Comparable renderer prototype evidence for Blitz reference and MESH-owned focused-crate paths.
+- Retained MESH-shaped focused evidence using Taffy, Parley, AnyRender-style paint, and AccessKit-compatible boundaries.
+- Production-adjacent focused proof integration behind current renderer and shell ownership.
+- Phased renderer migration roadmap, ownership classification, and author-facing `.mesh` renderer contract.
+
+### What Worked
+
+- Running decision, prototype, integration, and migration-contract phases in sequence kept the renderer choice grounded in evidence.
+- The shared navigation/audio slice made Blitz and focused-crate prototype results comparable instead of abstract.
+- Treating focused proof snapshots as adapter-owned evidence avoided accidentally exposing migration internals as author API.
+
+### What Was Inefficient
+
+- The milestone close still surfaced old Phase 31 debug/todo artifacts, so cross-milestone deferred work needs periodic cleanup.
+- The codebase drift gate hit a non-blocking SDK Node `EPERM`, which reduced confidence in that advisory signal.
+- The archive SDK created useful archive files but still needed manual ROADMAP, PROJECT, and milestone-entry cleanup.
+
+### Patterns Established
+
+- Renderer candidates must preserve or replace retained `NodeId`, typed invalidation, damage, profiling, diagnostics, theme-owned selection, and AccessKit-compatible evidence before promotion.
+- Broad renderer migration needs feature flags or local bypasses, rollback paths, Linux/Nix impact notes, binary/build risk notes, and exact CI gates.
+- `.mesh` remains a bounded shell UI authoring surface, not browser DOM/HTML/CSS compatibility.
+
+### Key Lessons
+
+1. Architecture choices should move from source-backed matrix to comparable prototype to constrained production proof before migration planning.
+2. A concrete blocker is acceptable prototype evidence when it is reproducible and compared under the same criteria.
+3. Migration contracts should name non-goals as explicitly as guarantees, especially when browser-engine crates are involved.
+
+### Cost Observations
+
+- Model mix: not tracked.
+- Sessions: multiple.
+- Notable: the broadest command cost was the full workspace regression at Phase 45 closeout; it stayed green after docs-only migration planning.
+
+---
+
 ## Milestone: v1.7 - Rethink Modularity and Extensibility Concepts
 
 **Shipped:** 2026-05-18
@@ -97,6 +142,7 @@
 
 | Milestone | Sessions | Phases | Key Change |
 |-----------|----------|--------|------------|
+| v1.8 | multiple | 4 | Renderer architecture acceptance moved through decision matrix, comparable prototypes, focused production proof, and migration contract. |
 | v1.7 | multiple | 5 | Module extensibility acceptance moved through vocabulary, manifest, graph, diagnostics, and shipped proof in one milestone. |
 | v1.5 | multiple | 6 | Performance acceptance moved from counters-only proof to benchmark plus live-UAT proof. |
 
@@ -104,6 +150,7 @@
 
 | Milestone | Tests | Coverage | Zero-Dep Additions |
 |-----------|-------|----------|-------------------|
+| v1.8 | Prototype cargo checks, focused renderer proof tests, shell navigation/audio regressions, workspace test, and docs grep verification | Requirements 13/13 | None identified |
 | v1.7 | Focused Rust manifest, graph, shell, diagnostic, and docs proof tests | Requirements 13/13 | None identified |
 | v1.5 | Focused Rust and `.mesh` regression tests plus live UAT | Requirements 17/17 | None identified |
 
@@ -112,3 +159,4 @@
 1. Keep service-specific behavior out of Rust core while still testing shipped proof surfaces end to end.
 2. Retained renderer work needs stable debug payloads so optimizations remain observable after each phase.
 3. Canonical vocabulary and manifest contracts should be locked before expanding plugin-facing runtime behavior.
+4. Renderer migration work should keep author contracts, rollback gates, and ownership boundaries explicit before broad adoption.
