@@ -407,6 +407,78 @@ end
 }
 
 #[test]
+fn keyboard_shortcuts_manifest_keybind_requires_declared_modifiers() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+mute_count = 0
+function onMuteShortcut()
+    mute_count = mute_count + 1
+end
+</script>
+"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: vec!["ctrl".into()],
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+    component.last_tree = Some(root_with(vec![event_node_with_attrs(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        40.0,
+        24.0,
+        &[("keybind", "mute")],
+        &[("keybind", "onMuteShortcut")],
+    )]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "m".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(runtime_number(&component, "mute_count"), 0.0);
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "m".into(),
+                modifiers: KeyModifiers {
+                    ctrl: true,
+                    shift: false,
+                    alt: false,
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(runtime_number(&component, "mute_count"), 1.0);
+
+    let resolved =
+        component.resolved_surface_shortcuts(&mesh_core_config::KeyboardSettings::default());
+    assert_eq!(resolved[0].modifiers, vec!["ctrl".to_string()]);
+}
+
+#[test]
 fn keyboard_shortcuts_manifest_declaration_wins_over_legacy_settings_same_id() {
     let mut component = test_frontend_component(
         r#"

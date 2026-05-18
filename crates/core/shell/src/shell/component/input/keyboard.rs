@@ -4,6 +4,7 @@ use super::super::*;
 pub(in crate::shell::component) struct ResolvedSurfaceShortcut {
     pub(in crate::shell::component) keybind_id: String,
     pub(in crate::shell::component) key: String,
+    pub(in crate::shell::component) modifiers: Vec<String>,
     pub(in crate::shell::component) trigger_kind: mesh_core_module::KeybindTriggerKind,
     pub(in crate::shell::component) source: KeybindResolutionSource,
 }
@@ -221,7 +222,10 @@ impl FrontendSurfaceComponent {
         let matched = self
             .resolved_surface_shortcuts(keyboard_settings)
             .into_iter()
-            .find(|shortcut| Self::key_matches_binding(key, &shortcut.key));
+            .find(|shortcut| {
+                Self::key_matches_binding(key, &shortcut.key)
+                    && shortcut_modifiers_match(&shortcut.modifiers, modifiers)
+            });
         let Some(shortcut) = matched else {
             return Ok(None);
         };
@@ -317,32 +321,34 @@ fn resolve_surface_shortcut_declaration(
 ) -> Option<ResolvedSurfaceShortcut> {
     if let Some(key) = override_key {
         let kind = declaration.generic_trigger.kind;
+        let modifiers = declaration.generic_trigger.modifiers.clone();
         return resolved_surface_shortcut(
             declaration,
             key,
+            modifiers,
             kind,
             KeybindResolutionSource::UserOverride,
         );
     }
 
     for locale in keybind_locale_candidates(active_locale) {
-        let Some((key, trigger_kind)) =
-            declaration
-                .localized_triggers
-                .get(&locale)
-                .and_then(|trigger| {
-                    let key = trigger.key.as_ref()?;
-                    if key.trim().is_empty() {
-                        return None;
-                    }
-                    Some((key.clone(), trigger.kind))
-                })
+        let Some((key, trigger_kind, modifiers)) = declaration
+            .localized_triggers
+            .get(&locale)
+            .and_then(|trigger| {
+                let key = trigger.key.as_ref()?;
+                if key.trim().is_empty() {
+                    return None;
+                }
+                Some((key.clone(), trigger.kind, trigger.modifiers.clone()))
+            })
         else {
             continue;
         };
         return resolved_surface_shortcut(
             declaration,
             key,
+            modifiers,
             trigger_kind,
             KeybindResolutionSource::LocaleDefault { locale },
         );
@@ -350,9 +356,11 @@ fn resolve_surface_shortcut_declaration(
 
     let kind = declaration.generic_trigger.kind;
     let key = declaration.generic_trigger.key.clone()?;
+    let modifiers = declaration.generic_trigger.modifiers.clone();
     resolved_surface_shortcut(
         declaration,
         key,
+        modifiers,
         kind,
         KeybindResolutionSource::ModuleDefault,
     )
@@ -361,6 +369,7 @@ fn resolve_surface_shortcut_declaration(
 fn resolved_surface_shortcut(
     declaration: SurfaceShortcutDeclaration,
     key: String,
+    modifiers: Vec<String>,
     trigger_kind: mesh_core_module::KeybindTriggerKind,
     source: KeybindResolutionSource,
 ) -> Option<ResolvedSurfaceShortcut> {
@@ -371,9 +380,27 @@ fn resolved_surface_shortcut(
     Some(ResolvedSurfaceShortcut {
         keybind_id: declaration.keybind_id,
         key,
+        modifiers,
         trigger_kind,
         source,
     })
+}
+
+fn shortcut_modifiers_match(required: &[String], active: KeyModifiers) -> bool {
+    let mut required_ctrl = false;
+    let mut required_shift = false;
+    let mut required_alt = false;
+
+    for modifier in required {
+        match normalize_key_name(modifier).as_str() {
+            "ctrl" | "control" => required_ctrl = true,
+            "shift" => required_shift = true,
+            "alt" | "option" => required_alt = true,
+            _ => return false,
+        }
+    }
+
+    active.ctrl == required_ctrl && active.shift == required_shift && active.alt == required_alt
 }
 
 fn keybind_locale_candidates(locale: &str) -> Vec<String> {
