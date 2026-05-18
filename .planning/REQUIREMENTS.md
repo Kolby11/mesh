@@ -7,9 +7,9 @@
 
 ### Architecture Decision
 
-- [ ] **REND-01**: The project has a source-backed adopt-vs-build decision for Blitz that compares direct adoption, architecture borrowing, and a MESH-owned renderer path.
-- [ ] **REND-02**: The decision scorecard covers determinism, retained invalidation, profiling, diagnostics, accessibility, Wayland shell fit, build cost, binary/dependency risk, and migration effort.
-- [ ] **REND-03**: Blitz, Skia/rust-skia, Stylo, Taffy, Parley, AnyRender, Winit, AccessKit, Muda, html5ever, and xml5ever each have an explicit accept/defer/reject outcome for v1.8.
+- [x] **REND-01**: The project has a source-backed adopt-vs-build decision for Blitz that compares direct adoption, architecture borrowing, and a MESH-owned renderer path.
+- [x] **REND-02**: The decision scorecard covers determinism, retained invalidation, profiling, diagnostics, accessibility, Wayland shell fit, build cost, binary/dependency risk, and migration effort.
+- [x] **REND-03**: Blitz, Skia/rust-skia, Stylo, Taffy, Parley, AnyRender, Winit, AccessKit, Muda, html5ever, and xml5ever each have an explicit accept/defer/reject outcome for v1.8.
 
 ### Prototype Proofs
 
@@ -57,9 +57,9 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| REND-01 | Phase 42 | Pending |
-| REND-02 | Phase 42 | Pending |
-| REND-03 | Phase 42 | Pending |
+| REND-01 | Phase 42 | Complete |
+| REND-02 | Phase 42 | Complete |
+| REND-03 | Phase 42 | Complete |
 | PROTO-01 | Phase 43 | Pending |
 | PROTO-02 | Phase 43 | Pending |
 | PROTO-03 | Phase 43 | Pending |
