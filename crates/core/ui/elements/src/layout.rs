@@ -804,6 +804,86 @@ mod tests {
     }
 
     #[test]
+    fn phase47_taffy_required_layout_parity_cases() {
+        let mut row = make_node("row", Dimension::Px(300.0), Dimension::Px(50.0));
+        row.computed_style.direction = FlexDirection::Row;
+        row.children = vec![
+            make_node("a", Dimension::Px(100.0), Dimension::Px(20.0)),
+            make_node("b", Dimension::Px(100.0), Dimension::Px(20.0)),
+        ];
+        LayoutEngine::compute(&mut row, 300.0, 50.0);
+        assert_eq!(row.children[0].layout.x, 0.0);
+        assert_eq!(row.children[1].layout.x, 100.0);
+
+        let mut column = make_node("column", Dimension::Px(200.0), Dimension::Px(300.0));
+        column.computed_style.direction = FlexDirection::Column;
+        column.computed_style.gap = 10.0;
+        column.children = vec![
+            make_node("first", Dimension::Px(100.0), Dimension::Px(50.0)),
+            make_node("second", Dimension::Px(100.0), Dimension::Px(50.0)),
+        ];
+        LayoutEngine::compute(&mut column, 200.0, 300.0);
+        assert_eq!(column.children[0].layout.y, 0.0);
+        assert_eq!(column.children[1].layout.y, 60.0);
+
+        let mut stack = make_node("stack", Dimension::Px(120.0), Dimension::Px(80.0));
+        let mut first = make_node("first", Dimension::Px(40.0), Dimension::Px(30.0));
+        first.computed_style.position = Position::Absolute;
+        first.computed_style.inset_left = Some(0.0);
+        first.computed_style.inset_top = Some(0.0);
+        let mut second = make_node("second", Dimension::Px(40.0), Dimension::Px(30.0));
+        second.computed_style.position = Position::Absolute;
+        second.computed_style.inset_left = Some(0.0);
+        second.computed_style.inset_top = Some(0.0);
+        stack.children = vec![first, second];
+        LayoutEngine::compute(&mut stack, 120.0, 80.0);
+        assert_eq!(stack.children[0].layout.x, 0.0);
+        assert_eq!(stack.children[1].layout.x, 0.0);
+        assert_eq!(stack.children[0].layout.y, 0.0);
+        assert_eq!(stack.children[1].layout.y, 0.0);
+
+        let mut fixed = make_node("fixed-root", Dimension::Px(200.0), Dimension::Px(100.0));
+        fixed.children = vec![make_node(
+            "fixed-child",
+            Dimension::Px(75.0),
+            Dimension::Px(25.0),
+        )];
+        LayoutEngine::compute(&mut fixed, 200.0, 100.0);
+        assert_eq!(fixed.children[0].layout.width, 75.0);
+        assert_eq!(fixed.children[0].layout.height, 25.0);
+
+        let mut padded = make_node("padded", Dimension::Px(200.0), Dimension::Px(100.0));
+        padded.computed_style.padding = Edges::all(10.0);
+        padded.children = vec![make_node(
+            "padded-child",
+            Dimension::Px(50.0),
+            Dimension::Px(20.0),
+        )];
+        LayoutEngine::compute(&mut padded, 200.0, 100.0);
+        assert_eq!(padded.children[0].layout.x, 10.0);
+        assert_eq!(padded.children[0].layout.y, 10.0);
+
+        let mut absolute = make_node("absolute-root", Dimension::Px(300.0), Dimension::Px(200.0));
+        let mut overlay = make_node("overlay", Dimension::Px(80.0), Dimension::Px(40.0));
+        overlay.computed_style.position = Position::Absolute;
+        overlay.computed_style.inset_right = Some(10.0);
+        overlay.computed_style.inset_bottom = Some(10.0);
+        absolute.children = vec![overlay];
+        LayoutEngine::compute(&mut absolute, 300.0, 200.0);
+        assert!((absolute.children[0].layout.x - 210.0).abs() <= 0.5);
+        assert!((absolute.children[0].layout.y - 150.0).abs() <= 0.5);
+
+        let mut percent = make_node("percent-root", Dimension::Px(300.0), Dimension::Px(60.0));
+        percent.children = vec![make_node(
+            "percent-child",
+            Dimension::Percent(50.0),
+            Dimension::Px(20.0),
+        )];
+        LayoutEngine::compute(&mut percent, 300.0, 60.0);
+        assert_eq!(percent.children[0].layout.width, 150.0);
+    }
+
+    #[test]
     fn taffy_diagnostic_records_node_identity_and_reason() {
         let node = make_node("diagnostic-target", Dimension::Auto, Dimension::Auto);
         let mut report = TaffyLayoutReport::default();

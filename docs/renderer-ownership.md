@@ -12,6 +12,7 @@
 |----------|--------|-------|-------------------|
 | Component source parsing | authoritative | `crates/core/ui/component/src/lib.rs` | Parses author-facing `.mesh` single-file components before renderer migration touches runtime output. |
 | Frontend compilation and imports | authoritative | `crates/core/frontend/compiler/src/compile.rs` | Resolves frontend manifests, local components, source tags, and widget-tree construction inputs. |
+| Taffy-backed layout | authoritative | `crates/core/ui/elements/src/layout.rs` | Computes in-scope row, column, stack, fixed size, gap, padding, absolute positioning, and container-width geometry after Phase 47 while writing results back to retained MESH `WidgetNode.layout`. |
 | Retained runtime tree identity | authoritative | `crates/core/shell/src/shell/component/runtime_tree.rs` | Owns stable runtime node identity and retained dirty-category tracking. |
 | Render object synchronization | authoritative | `crates/core/frontend/render/src/render_object.rs` | Owns retained render-object slots for geometry, material, text, and accessibility dirtiness. |
 | Retained display-list ownership | authoritative | `crates/core/frontend/render/src/display_list.rs` | Owns paint command identity, selection payloads, damage data, repaint policy, and batching evidence. |
@@ -27,7 +28,7 @@ MIGR-02: existing renderer modules are classified as authoritative, adapter-owne
 |----------|--------|-------------------|---------------------|
 | Focused proof snapshots | adapter-owned | `FocusedProofSnapshot` in `crates/core/frontend/render/src/proof.rs` | Can grow only while current retained tree, render object, display-list, and presentation authority remain stable. |
 | Focused accessibility updates | adapter-owned | `FocusedAccessKitUpdate` and Phase 44 AccessKit-compatible update evidence | Can promote only after retained-node update behavior is proven across shipped surfaces and platform runtime needs. |
-| Focused text/layout/paint evidence | adapter-owned | `taffy_layout`, `parley_text`, selected paint slots, and `phase44_navigation_audio_surface_emits_focused_proof_snapshot` | Can promote only after candidate layout/text/paint paths preserve shipped behavior, selection geometry, and profiling evidence. |
+| Focused text/paint evidence | adapter-owned | `parley_text`, selected paint slots, and `phase44_navigation_audio_surface_emits_focused_proof_snapshot` | Can promote only after candidate text/paint paths preserve shipped behavior, selection geometry, and profiling evidence. |
 | Crate-facing conversion modules | adapter-owned | Non-fatal diagnostics with prefix `focused renderer proof:` and future conversion modules | Can promote only when replacement candidates satisfy all observability and rollback gates. |
 | Renderer library feature scaffold | adapter-owned | `crates/core/frontend/render/Cargo.toml` and `crates/core/frontend/render/src/library_adapters.rs` | May promote only when later phases preserve NodeId identity, invalidation, damage/profiling, diagnostics, theme-owned selection, AccessKit-compatible update evidence, and rollback gates. |
 
@@ -35,7 +36,6 @@ MIGR-02: existing renderer modules are classified as authoritative, adapter-owne
 
 | Candidate | Status | Candidate use | Current limitation |
 |-----------|--------|---------------|--------------------|
-| Taffy | replacement candidate | Phase 47 promotes Taffy toward authoritative layout for rows, columns, stacks, fixed sizes, gaps, padding, absolute positioning, and container-width cases behind retained MESH nodes. | MESH `NodeId`, runtime keys, dirty categories, render-object sync, diagnostics, profiling, damage, and presentation remain authoritative MESH boundaries. |
 | Parley | replacement candidate | Future text layout/shaping path behind theme-owned selection and retained text evidence. | Not currently authoritative for all text behavior or editing semantics. |
 | AnyRender/Vello-style rendering | replacement candidate | Future paint backend abstraction under retained display-list ownership. | Not currently authoritative for production paint execution. |
 | AccessKit runtime expansion | replacement candidate | Future accessibility runtime beyond retained-node update evidence. | Phase 44 proves an update boundary, not a complete cross-platform runtime. |

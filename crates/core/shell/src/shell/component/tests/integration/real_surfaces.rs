@@ -21,6 +21,96 @@ fn assert_phase44_focused_proof_snapshot(component: &FrontendSurfaceComponent, l
     );
 }
 
+fn assert_layout_contains(parent: &WidgetNode, child: &WidgetNode, label: &str) {
+    assert!(
+        parent.layout.width > 0.0 && parent.layout.height > 0.0,
+        "{label} parent should have non-zero layout"
+    );
+    assert!(
+        child.layout.width > 0.0 && child.layout.height > 0.0,
+        "{label} child should have non-zero layout"
+    );
+    assert!(
+        child.layout.x >= parent.layout.x - 0.5
+            && child.layout.y >= parent.layout.y - 0.5
+            && child.layout.x + child.layout.width <= parent.layout.x + parent.layout.width + 0.5
+            && child.layout.y + child.layout.height <= parent.layout.y + parent.layout.height + 0.5,
+        "{label} child layout {:?} should stay inside parent layout {:?}",
+        child.layout,
+        parent.layout
+    );
+}
+
+#[test]
+fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
+    let theme = default_theme();
+
+    let mut navigation =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    navigation.set_profiling_enabled(true);
+    navigation.visible = true;
+    let mut navigation_buffer = PixelBuffer::new(960, 80);
+    navigation
+        .paint(&theme, 960, 80, &mut navigation_buffer)
+        .unwrap();
+    let navigation_tree = navigation
+        .last_tree
+        .as_ref()
+        .expect("@mesh/navigation-bar rendered tree");
+    let nav_shell =
+        first_node_with_attr(navigation_tree, "class", "nav-shell").expect("navigation shell");
+    let volume_button = first_node_with_click_handler(
+        navigation_tree,
+        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+    )
+    .expect("volume button");
+    assert_layout_contains(
+        nav_shell,
+        volume_button,
+        "@mesh/navigation-bar volume button",
+    );
+    assert_phase44_focused_proof_snapshot(&navigation, "phase47 navigation bar");
+    assert!(
+        navigation.take_invalidation_snapshot().is_some(),
+        "phase47 navigation repaint should retain invalidation proof"
+    );
+    assert!(
+        navigation.take_present_damage().is_some(),
+        "phase47 navigation repaint should retain damage proof"
+    );
+
+    let mut audio = real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    audio.set_profiling_enabled(true);
+    audio
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    let mut audio_buffer = PixelBuffer::new(320, 220);
+    audio.paint(&theme, 320, 220, &mut audio_buffer).unwrap();
+    let audio_tree = audio
+        .last_tree
+        .as_ref()
+        .expect("@mesh/audio-popover rendered tree");
+    let slider = first_node_by_tag(audio_tree, "slider").expect("audio controls slider");
+    assert_layout_contains(audio_tree, slider, "@mesh/audio-popover controls");
+    assert_phase44_focused_proof_snapshot(&audio, "phase47 audio popover");
+    assert!(
+        audio.take_invalidation_snapshot().is_some(),
+        "phase47 audio repaint should retain invalidation proof"
+    );
+    assert!(
+        audio.take_present_damage().is_some(),
+        "phase47 audio repaint should retain damage proof"
+    );
+}
+
 #[test]
 fn phase44_navigation_audio_surface_emits_focused_proof_snapshot() {
     let theme = default_theme();

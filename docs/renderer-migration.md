@@ -34,7 +34,7 @@ Current source boundaries also matter:
 | Step | Objective | Boundary Changed | Feature flag | CI gates | Rollback path | Author-facing effect |
 |------|-----------|------------------|--------------|----------|---------------|----------------------|
 | Step 1: adapter seam hardening | Turn Phase 44 proof evidence into a stable internal adapter boundary. | `FocusedProofSnapshot`, focused text/layout/paint evidence, and focused accessibility update construction. | required before default shell use | focused renderer proof tests, phase44 shell tests, selection proof, workspace tests | disable focused adapter and keep current render object/display-list path authoritative | none; proof snapshots remain internal evidence |
-| Step 2: layout and text candidate integration | Evaluate production Taffy/Parley-shaped integration behind retained MESH nodes. | Layout and text shaping adapters beneath retained `WidgetNode`/`NodeId` authority. | required for all shipped surfaces | render proof tests, shipped navigation/audio regressions, text selection tests, profiling snapshots | fall back to existing MESH layout/text behavior | no syntax change; existing `.mesh` layout/control semantics remain stable |
+| Step 2: layout and text candidate integration | Evaluate production Taffy/Parley-shaped integration behind retained MESH nodes. | Taffy-backed layout beneath retained `WidgetNode`/`NodeId` authority; text shaping remains a future candidate path. | required for all shipped surfaces | render proof tests, shipped navigation/audio regressions, text selection tests, profiling snapshots | revert the Phase 47 layout replacement commit if an in-scope blocker is found; no silent runtime fallback is kept | no syntax change; existing `.mesh` layout/control semantics remain stable |
 | Step 3: paint backend abstraction | Introduce an AnyRender/Vello-style paint backend seam without replacing presentation ownership. | Paint command execution below retained display-list ownership. | required per backend | display-list tests, damage tests, profiling/debug payload checks, workspace tests | switch back to software painter | no public API change; visual differences require explicit regression acceptance |
 | Step 4: accessibility runtime expansion | Expand AccessKit-compatible retained-node updates toward a fuller runtime. | Accessibility update publication beneath retained node identity. | required per platform/runtime path | AccessKit-compatible update tests, navigation/focus regressions, shipped surface tests | retain current metadata-only accessibility boundary | author-facing accessibility attributes continue to map from `.mesh` metadata |
 | Step 5: optional style/parser expansion | Consider Stylo-style resolution or parser-profile expansion only when it preserves MESH's bounded UI profile. | CSS/profile validation and lowering, not arbitrary browser semantics. | required for experimental profile work | compiler diagnostics tests, `.mesh` syntax tests, style/restyle tests | keep current bounded CSS parser/resolver | only documented `.mesh` profile changes become public |
@@ -97,6 +97,17 @@ Latest `parley 0.9.0`, `parley 0.8.0`, `vello 0.9.0`, and `vello_encoding 0.9.0`
 Phase 47 promotes Taffy for in-scope layout computation. `mesh-core-elements` owns the Taffy dependency because it owns `LayoutEngine`, retained `WidgetNode` geometry storage, and the text measurement injection point used before rendering.
 
 For Phase 47, unsupported cases produce diagnostics or blocker records rather than silent old-engine fallback. This intentionally narrows the Phase 46 rollback posture for layout only: non-layout renderer-library candidates remain gated, but in-scope MESH layout semantics move to Taffy-backed computation while MESH retains `NodeId`, runtime keys, dirty categories, render-object synchronization, diagnostics, profiling, damage, and presentation ownership.
+
+Final Phase 47 gate commands:
+
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-elements phase47_taffy`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-elements layout`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell phase47`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell phase44_navigation`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render proof`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo check -p mesh-core-shell`
+
+The audio popover transition delay remains deferred to v1.10 and is not part of the Phase 47 Taffy layout replacement scope.
 
 ### Observability Promotion Gate
 
