@@ -26,9 +26,9 @@
 
 ### Migration Plan
 
-- [ ] **MIGR-01**: The roadmap for broad renderer migration is documented as phased, reversible steps instead of a whole-renderer rewrite.
-- [ ] **MIGR-02**: The migration plan identifies which existing renderer modules stay authoritative, which become adapters, and which are candidates for replacement.
-- [ ] **MIGR-03**: Build, CI, feature flags, and Linux/Nix dependency implications are documented before any broad adoption.
+- [x] **MIGR-01**: The roadmap for broad renderer migration is documented as phased, reversible steps instead of a whole-renderer rewrite.
+- [x] **MIGR-02**: The migration plan identifies which existing renderer modules stay authoritative, which become adapters, and which are candidates for replacement.
+- [x] **MIGR-03**: Build, CI, feature flags, and Linux/Nix dependency implications are documented before any broad adoption.
 
 ## Future Requirements
 
@@ -67,9 +67,9 @@
 | INTG-02 | Phase 44 | Complete |
 | INTG-03 | Phase 44 | Complete |
 | INTG-04 | Phase 44 | Complete |
-| MIGR-01 | Phase 45 | Pending |
-| MIGR-02 | Phase 45 | Pending |
-| MIGR-03 | Phase 45 | Pending |
+| MIGR-01 | Phase 45 | Complete |
+| MIGR-02 | Phase 45 | Complete |
+| MIGR-03 | Phase 45 | Complete |
 
 **Coverage:**
 - v1.8 requirements: 13 total
