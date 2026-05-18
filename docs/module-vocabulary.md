@@ -132,8 +132,10 @@ service-specific Rust branches.
 
 Phase 40 should migrate bundled docs, examples, and diagnostics away from old
 public names. Diagnostics should say `replace with` or `remove`, not `alias`.
-If old loaders or fields still exist internally for sequencing, they should be
-visible as migration warnings with removal targets and exact field paths.
+The replacement/removal diagnostics contract lives in the module-system author
+docs and should remain aligned with runtime loader diagnostics. If old loaders
+or fields still exist internally for sequencing, they should be visible as
+migration warnings with removal targets and exact field paths.
 Resource lookup aliases and operating-system package names remain separate
 mechanics, not vocabulary aliases.
 

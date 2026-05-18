@@ -56,6 +56,21 @@ files. They are not the authority for MESH behavior. MESH reads the
 `mesh` section, validates capabilities and native requirements, resolves
 interface providers, and decides which modules are enabled.
 
+## Migration Diagnostics
+
+Old manifest file names are replacement or removal targets, not public
+author-facing aliases. When an old name is still accepted, it is an internal
+migration input that emits a warning and should be replaced before publishing a
+module.
+
+| Input | Severity | Author action | Runtime behavior |
+| ----- | -------- | ------------- | ---------------- |
+| `package.json` | warning | replace package.json with module.json | Loads after normalizing the legacy package manifest shape. |
+| legacy `module.json` with `id/type/api_version` | warning | replace legacy module.json fields with name/version/mesh | Loads after normalizing the legacy module manifest shape. |
+| `mesh.toml` | warning | replace mesh.toml with module.json | Loads after normalizing the legacy TOML manifest shape. |
+| `plugin.json` | error | remove plugin.json or replace it with module.json | Fails manifest loading. |
+| multiple manifest files | error | keep canonical module.json and remove the old manifest file | Fails manifest loading until the ambiguous old file is removed. |
+
 The root installed-module graph follows the same rule. `config/module.json`
 uses the root graph shape directly because it is not an installable module:
 
