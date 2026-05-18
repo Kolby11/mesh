@@ -121,6 +121,10 @@ The project now also has a rendering engine architecture direction with:
 - Keep the current MESH software renderer, retained tree, render-object tree, display list, and Wayland presentation as rollback authorities until each replacement path passes gates.
 - Verify shipped navigation/audio surfaces, selection behavior, damage/profiling payloads, diagnostics, binary/build impact, and Linux/Nix implications before any broad defaulting.
 
+Phase 46 of v1.9 is complete. MESH now has production Cargo dependencies and disabled-by-default renderer-library feature gates for Taffy, Parley, AccessKit, AnyRender, and Vello encoding, plus documented build, rollback, Linux/Nix, binary-risk, and CI boundaries.
+
+Phase 47 of v1.9 is complete. Taffy-backed layout is now the authoritative in-scope layout path for retained MESH `WidgetNode` geometry, with stable `NodeId` writeback, text measurement injection, explicit diagnostics instead of legacy fallback, parity coverage, and shipped navigation/audio regression proof.
+
 **Next milestone direction:** v1.10 should focus on animations and motion fidelity after renderer library integration gives animation code a clearer layout/text/paint substrate.
 
 ## Last Shipped Milestone: v1.8 Rendering Engine Architecture
@@ -159,6 +163,8 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.8 Phase 43`: Comparable renderer prototype evidence proves the shared navigation/audio slice, records a concrete Blitz blocker, and selects the MESH-owned focused-crate path for Phase 44.
 - `v1.8 Phase 44`: The selected MESH-owned focused proof path is integrated behind current renderer/shell ownership with retained identity, invalidation, damage/profiling, diagnostics, text selection, AccessKit-compatible boundary, and navigation/audio shipped-surface evidence.
 - `v1.8 Phase 45`: Broad renderer migration is documented as phased and reversible, existing renderer boundaries are classified as authoritative, adapter-owned, or replacement candidates, and author-facing `.mesh` behavior is bounded by a renderer contract with explicit adoption gates.
+- `v1.9 Phase 46`: Production renderer-library dependencies and adapter feature gates are installed with documented rollback, build, CI, Linux/Nix, binary-risk, and ownership boundaries.
+- `v1.9 Phase 47`: Taffy-backed layout is authoritative for in-scope retained MESH geometry while shipped navigation/audio surfaces, layout parity cases, diagnostics, and proof/damage payloads remain verified.
 
 ### Active
 
@@ -254,4 +260,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-18 after starting v1.9 milestone*
+*Last updated: 2026-05-18 after completing Phase 47*
