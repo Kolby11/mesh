@@ -98,7 +98,7 @@ Move the selected renderer libraries from v1.8 prototype/proof evidence into pro
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 46. Renderer Library Dependency And Adapter Foundation | v1.9 | 0/? | Ready | — |
+| 46. Renderer Library Dependency And Adapter Foundation | v1.9 | 3/3 | Complete   | 2026-05-18 |
 | 47. Taffy Layout Adapter Integration | v1.9 | 0/? | Planned | — |
 | 48. Parley Text And Selection Integration | v1.9 | 0/? | Planned | — |
 | 49. AnyRender/Vello Paint Backend Adapter | v1.9 | 0/? | Planned | — |

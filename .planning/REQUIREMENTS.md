@@ -10,9 +10,9 @@ Move the selected renderer libraries from v1.8 prototype/proof evidence into pro
 
 ### Dependency And Rollout
 
-- [ ] **LIBS-01**: Production Cargo manifests include the selected renderer-library dependencies for Taffy layout, Parley text, AnyRender or Vello-backed paint experimentation, and AccessKit runtime updates, with feature choices documented.
-- [ ] **LIBS-02**: Each new renderer-library path has a feature flag, local bypass, or adapter switch that restores the current MESH renderer authority without breaking shipped surfaces.
-- [ ] **LIBS-03**: Binary size, compile-time, native dependency, Linux/Nix, and CI risk are measured and documented before any library-backed path becomes default.
+- [x] **LIBS-01**: Production Cargo manifests include the selected renderer-library dependencies for Taffy layout, Parley text, AnyRender or Vello-backed paint experimentation, and AccessKit runtime updates, with feature choices documented.
+- [x] **LIBS-02**: Each new renderer-library path has a feature flag, local bypass, or adapter switch that restores the current MESH renderer authority without breaking shipped surfaces.
+- [x] **LIBS-03**: Binary size, compile-time, native dependency, Linux/Nix, and CI risk are measured and documented before any library-backed path becomes default.
 
 ### Layout
 
