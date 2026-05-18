@@ -1,0 +1,64 @@
+# Renderer Migration Roadmap
+
+## Scope
+
+MIGR-01: broad renderer migration is phased and reversible; whole-renderer rewrite is not the first migration step.
+
+This roadmap translates the v1.8 renderer decision, prototype comparison, and focused production proof into future migration steps. It is a maintainer contract for adoption sequencing. It does not replace `mesh-core-render`, `mesh-core-presentation`, `.mesh` authoring syntax, shell surface lifecycle behavior, or the existing observability path by itself.
+
+## Source Evidence
+
+- Phase 42: direct Blitz adoption remains blocked by Wayland shell model fit, browser-engine-level overhead concerns, and later high-level crate compile evidence.
+- Phase 43: the MESH-owned focused-crate path advanced because retained identity was explicit across layout, text, paint, interaction, and accessibility evidence.
+- Phase 44: focused proof integration preserved NodeId identity, typed invalidation, damage, profiling, diagnostics, selection, and AccessKit-compatible update evidence behind existing ownership.
+
+Current source boundaries also matter:
+
+- `mesh-core-component` parses author-facing `.mesh` source.
+- `mesh-core-frontend` compiles and lowers frontend source into widget trees.
+- `mesh-core-elements` exposes retained widget, tree, style, and layout APIs.
+- `mesh-core-render` paints widget trees into `PixelBuffer`s.
+- `mesh-core-presentation` presents `PixelBuffer`s through dev-window or layer-shell backends.
+- `mesh-core-shell` connects runtime events, service state, frontend output, rendering, diagnostics, and presentation events.
+
+## Migration Principles
+
+- Reversibility: every renderer migration step must have a local bypass, rollback path, or feature flag before it can land as a production default.
+- Current authority first: current parser, frontend compiler, retained runtime tree, render object tree, retained display list, software painter, diagnostics, profiling, damage, and Wayland presentation remain authoritative until a later step explicitly replaces them.
+- Adapter before replacement: the Phase 44 focused proof boundary should harden into adapter seams before any module-by-module replacement begins.
+- Observability parity: NodeId identity, typed invalidation, damage, profiling, diagnostics, debug payloads, theme-owned selection, and AccessKit-compatible update evidence are promotion gates, not optional debug extras.
+- Author contract stability: `.mesh` authors should keep writing MESH UI primitives and service-driven components while renderer internals migrate behind the public authoring surface.
+
+## Phased Roadmap
+
+| Step | Objective | Boundary Changed | Feature flag | CI gates | Rollback path | Author-facing effect |
+|------|-----------|------------------|--------------|----------|---------------|----------------------|
+| Step 1: adapter seam hardening | Turn Phase 44 proof evidence into a stable internal adapter boundary. | `FocusedProofSnapshot`, focused text/layout/paint evidence, and focused accessibility update construction. | required before default shell use | focused renderer proof tests, phase44 shell tests, selection proof, workspace tests | disable focused adapter and keep current render object/display-list path authoritative | none; proof snapshots remain internal evidence |
+| Step 2: layout and text candidate integration | Evaluate production Taffy/Parley-shaped integration behind retained MESH nodes. | Layout and text shaping adapters beneath retained `WidgetNode`/`NodeId` authority. | required for all shipped surfaces | render proof tests, shipped navigation/audio regressions, text selection tests, profiling snapshots | fall back to existing MESH layout/text behavior | no syntax change; existing `.mesh` layout/control semantics remain stable |
+| Step 3: paint backend abstraction | Introduce an AnyRender/Vello-style paint backend seam without replacing presentation ownership. | Paint command execution below retained display-list ownership. | required per backend | display-list tests, damage tests, profiling/debug payload checks, workspace tests | switch back to software painter | no public API change; visual differences require explicit regression acceptance |
+| Step 4: accessibility runtime expansion | Expand AccessKit-compatible retained-node updates toward a fuller runtime. | Accessibility update publication beneath retained node identity. | required per platform/runtime path | AccessKit-compatible update tests, navigation/focus regressions, shipped surface tests | retain current metadata-only accessibility boundary | author-facing accessibility attributes continue to map from `.mesh` metadata |
+| Step 5: optional style/parser expansion | Consider Stylo-style resolution or parser-profile expansion only when it preserves MESH's bounded UI profile. | CSS/profile validation and lowering, not arbitrary browser semantics. | required for experimental profile work | compiler diagnostics tests, `.mesh` syntax tests, style/restyle tests | keep current bounded CSS parser/resolver | only documented `.mesh` profile changes become public |
+| Step 6: blocked Blitz reconsideration | Revisit direct Blitz only if current blockers are cleared and the shell ownership model fits MESH. | Potentially broad renderer architecture, still behind explicit gates. | not allowed until Blitz compile and shell ownership blockers are cleared | new proof harness, dependency/binary-size report, Wayland ownership proof, full workspace tests | reject direct adoption and continue MESH-owned adapter path | none until a later public contract revision |
+
+## Promotion Gates
+
+### Observability Promotion Gate
+
+A renderer path cannot become authoritative until it preserves or replaces:
+
+- `NodeId` retained identity,
+- typed invalidation categories,
+- damage evidence,
+- profiling records,
+- non-fatal diagnostics,
+- debug payloads,
+- theme-owned selection behavior,
+- AccessKit-compatible retained-node update evidence.
+
+## Deferred And Blocked Paths
+
+- Direct Blitz adoption remains blocked by compile/API evidence and unresolved shell ownership fit.
+- A whole-renderer rewrite is not part of the first migration step.
+- Full browser compatibility remains out of scope.
+- Winit shell ownership is not a production replacement for current Wayland shell ownership.
+- Skia remains fallback evidence unless a future paint backend step proves it is needed.
