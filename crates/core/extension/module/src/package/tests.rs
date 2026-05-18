@@ -487,19 +487,74 @@ fn module_manifest_loader_preserves_navigation_bar_entrypoint() {
 }
 
 #[test]
-fn installed_module_graph_loads_repo_module_fixture() {
+fn shipped_module_graph_loads_repo_module_fixture() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
 
     assert_eq!(graph.frontend_modules().len(), 2);
+    assert_eq!(
+        graph.module("@mesh/navigation-bar").unwrap().manifest_source,
+        ModuleManifestSource::CanonicalModuleJson
+    );
+    assert_eq!(
+        graph.module("@mesh/audio-interface").unwrap().manifest_source,
+        ModuleManifestSource::CanonicalModuleJson
+    );
+    assert_eq!(
+        graph.module("@mesh/icons-default").unwrap().manifest_source,
+        ModuleManifestSource::CanonicalModuleJson
+    );
+    assert_eq!(
+        graph.declared_interface("mesh.audio").unwrap().module_id,
+        "@mesh/audio-interface"
+    );
     assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
     assert_eq!(
         graph.active_provider("mesh.audio").unwrap().module_id,
         "@mesh/pipewire-audio"
     );
+    assert!(
+        graph
+            .backend_providers_for_interface("mesh.audio")
+            .iter()
+            .any(|provider| provider.module_id == "@mesh/pulseaudio-audio")
+    );
     let layout = graph.layout_entrypoint().unwrap();
     assert_eq!(layout.module_id, "@mesh/navigation-bar");
     assert_eq!(layout.entrypoint_id, "main");
+    assert!(graph.frontend_entrypoints().iter().any(|entrypoint| {
+        entrypoint.module_id == "@mesh/navigation-bar"
+            && entrypoint.source.local_id == "main"
+            && entrypoint.path == "src/main.mesh"
+    }));
+    assert!(
+        graph
+            .settings_schemas()
+            .iter()
+            .any(|settings| settings.namespace == "@mesh/navigation-bar")
+    );
+    assert!(
+        graph
+            .keybind_actions()
+            .iter()
+            .any(|keybind| keybind.module_id == "@mesh/navigation-bar"
+                && keybind.action_id == "mute")
+    );
+    assert!(
+        graph
+            .icon_requirements()
+            .iter()
+            .any(|icon| icon.module_id == "@mesh/navigation-bar"
+                && icon.name == "audio-volume-high"
+                && icon.required)
+    );
+    assert!(
+        graph
+            .icon_pack_contributions()
+            .iter()
+            .any(|icon_pack| icon_pack.module_id == "@mesh/icons-default"
+                && icon_pack.id == "default")
+    );
 }
 
 fn loaded_module(

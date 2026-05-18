@@ -17,7 +17,7 @@ created: 2026-05-18
 |----------|-------|
 | **Framework** | Rust cargo tests plus grep documentation checks |
 | **Config file** | `Cargo.toml` |
-| **Quick run command** | `nix develop -c cargo test -p mesh-core-module package::tests shipped` |
+| **Quick run command** | `nix develop -c cargo test -p mesh-core-module shipped` |
 | **Full suite command** | `nix develop -c cargo test -p mesh-core-module package::tests && nix develop -c cargo test -p mesh-core-shell shell::tests` |
 | **Estimated runtime** | ~120 seconds focused; workspace suite longer |
 
@@ -33,9 +33,9 @@ created: 2026-05-18
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 41-01-01 | 01 | 1 | PROOF-01 | T-41-01-01 | Shipped root graph includes canonical interface and icon-pack modules | unit | `nix develop -c cargo test -p mesh-core-module package::tests shipped_module` | yes | pending |
-| 41-01-02 | 01 | 1 | PROOF-01 | T-41-01-02 | Shipped root graph proves canonical manifests and selected provider without fake parsing | unit | `nix develop -c cargo test -p mesh-core-module package::tests shipped_module` | yes | pending |
-| 41-01-03 | 01 | 1 | PROOF-01 | T-41-01-03 | Missing/incompatible proof-path resources remain visible as diagnostics | unit | `nix develop -c cargo test -p mesh-core-module package::tests shipped_module_diagnostics` | yes | pending |
+| 41-01-01 | 01 | 1 | PROOF-01 | T-41-01-01 | Shipped root graph includes canonical interface and icon-pack modules | unit | `nix develop -c cargo test -p mesh-core-module shipped_module` | yes | pending |
+| 41-01-02 | 01 | 1 | PROOF-01 | T-41-01-02 | Shipped root graph proves canonical manifests and selected provider without fake parsing | unit | `nix develop -c cargo test -p mesh-core-module shipped_module` | yes | pending |
+| 41-01-03 | 01 | 1 | PROOF-01 | T-41-01-03 | Missing/incompatible proof-path resources remain visible as diagnostics | unit | `nix develop -c cargo test -p mesh-core-module shipped_module_diagnostics` | yes | pending |
 | 41-02-01 | 02 | 2 | PROOF-01 | T-41-02-01 | Shell runtime consumes graph provider records and does not infer service powers from provider identity | unit | `nix develop -c cargo test -p mesh-core-shell shell::tests installed_module_graph` | yes | pending |
 | 41-02-02 | 02 | 2 | PROOF-01 | T-41-02-02 | Shipped navigation behavior remains manifest/interface driven | unit | `nix develop -c cargo test -p mesh-core-shell shell::component::tests::interaction::navigation` | yes | pending |
 | 41-03-01 | 03 | 3 | PROOF-01 | T-41-03-01 | Author docs teach canonical workflow and strict vocabulary | grep | `rg -n "extend or add a MESH module|@mesh/navigation-bar|@mesh/audio-interface|@mesh/pipewire-audio|module.json|mesh.kind|mesh.implements|mesh.keybinds|diagnostics" docs/module-system.md docs/modules/frontend/core/navigation-bar/README.md docs/modules/backend/core/pipewire-audio/README.md docs/modules/backend/core/pulseaudio-audio/README.md docs/settings/README.md docs/llm-context.md` | yes | pending |

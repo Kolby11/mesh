@@ -111,7 +111,7 @@
 Phase 41 should validate three evidence layers:
 
 1. Package graph proof with real shipped manifests:
-   `nix develop -c cargo test -p mesh-core-module package::tests shipped`.
+   `nix develop -c cargo test -p mesh-core-module shipped`.
 2. Shell runtime proof with graph-derived provider/frontend selection:
    `nix develop -c cargo test -p mesh-core-shell shell::tests installed_module_graph`.
 3. Documentation proof with grep gates over canonical workflow strings:
