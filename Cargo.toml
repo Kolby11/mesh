@@ -71,3 +71,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["full"] }
 bitflags = "2.11.1"
 slotmap = "1.1.1"
+taffy = { version = "0.10.1", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout", "calc", "content_size"] }
+parley = { version = "0.7.0", default-features = false, features = ["std"] }
+accesskit = { version = "0.24.0", default-features = false }
+anyrender = { version = "0.10.0", default-features = false }
+vello_encoding = { version = "0.5.1", default-features = false }
