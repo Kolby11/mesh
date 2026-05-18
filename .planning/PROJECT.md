@@ -106,6 +106,8 @@ The project now also has a consolidated module and extensibility model with:
 
 **Goal:** Decide and prove the next rendering architecture for MESH by evaluating Blitz as inspiration or a base, then implementing the minimum integration slice that improves rendering capability without losing shell-specific determinism, observability, and shipped-surface responsiveness.
 
+Phase 42 of v1.8 is complete. MESH now has a source-backed renderer architecture decision matrix that defers direct Blitz production adoption behind Wayland shell fit and browser-engine-level overhead blockers, keeps Blitz as the reference path, and advances a MESH-owned focused-crate prototype path with Taffy, Parley, AnyRender, and AccessKit as preferred standalone candidates.
+
 **Target features:**
 - Adopt-vs-build decision for Blitz renderer, including whether MESH should reuse Blitz directly, fork/adapt parts, or keep a MESH-owned pipeline.
 - Library evaluation for Skia, Stylo, Taffy, Parley, AnyRender, Winit, AccessKit, Muda, html5ever, and xml5ever against MESH's retained rendering, Wayland shell, accessibility, and plugin-surface needs.
@@ -126,10 +128,10 @@ The project now also has a consolidated module and extensibility model with:
 - `v1.7 Phase 39`: Interface relationships, backend provider declarations, frontend requirements, host capabilities, and typed contributions are indexed as separate graph concepts with source metadata and manifest-driven extension proof.
 - `v1.7 Phase 40`: Migration diagnostics and author docs now point legacy manifest shapes toward canonical `module.json`, and v1.6 keybind declarations remain available through manifest, installed-graph, shell resolution, and settings override paths.
 - `v1.7 Phase 41`: The shipped navigation/audio module path proves canonical manifests, typed installed-graph records, provider registration, frontend filtering, and author documentation on a real bundled module/provider workflow.
+- `v1.8 Phase 42`: The renderer architecture decision matrix compares Blitz direct adoption, Blitz-inspired borrowing, and a MESH-owned focused-crate path with source-backed candidate outcomes and a Phase 43 dual-prototype handoff.
 
 ### Active
 
-- Decide whether Blitz renderer should be reused directly, used as design inspiration, or rejected in favor of a MESH-owned renderer assembled from focused crates.
 - Prove the chosen rendering direction with a small shipped-surface integration slice before broad migration.
 
 ### Out of Scope
@@ -216,4 +218,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-18 after starting v1.8 milestone*
+*Last updated: 2026-05-18 after completing v1.8 Phase 42*
