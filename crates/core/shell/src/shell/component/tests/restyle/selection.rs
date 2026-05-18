@@ -155,7 +155,7 @@ fn selection_fixture_module_is_disabled_in_local_graph() {
         .unwrap();
     let package = fs::read_to_string(root.join("config/module.json")).unwrap();
     let json: serde_json::Value = serde_json::from_str(&package).unwrap();
-    let module = &json["mesh"]["modules"]["@mesh/text-selection-proof"];
+    let module = &json["modules"]["@mesh/text-selection-proof"];
     assert_eq!(module["kind"], "frontend");
     assert_eq!(module["path"], "frontend/text-selection-proof");
     assert_eq!(module["enabled"], false);

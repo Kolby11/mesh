@@ -259,7 +259,7 @@ fn pcall_service_lookup_diagnostic_reaches_component_diagnostics() {
 <template><box /></template>
 <script lang="luau">
 function onRender()
-    pcall(require, "@mesh/missing@>=1.0")
+    pcall(require, "mesh.missing@>=1.0")
 end
 </script>
 "#,
@@ -349,8 +349,8 @@ fn icon_reliability_core_surfaces_proof() {
                 .dependencies
                 .icon_packs
                 .required
-                .contains(&"system".to_string()),
-            "{} must declare the system icon pack",
+                .contains(&"@mesh/icons-default".to_string()),
+            "{} must declare the default icon pack",
             loaded.manifest.package.id
         );
         for semantic_name in &loaded.manifest.icon_requirements.required {
