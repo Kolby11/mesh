@@ -1233,10 +1233,23 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
     frontend.manifest.mesh.entrypoints.main = Some("src/main.mesh".into());
     frontend.manifest.mesh.entrypoints.settings_ui = Some("src/settings.mesh".into());
     frontend.manifest.mesh.keybinds.actions.insert(
-        "toggle".into(),
+        "mute".into(),
         crate::manifest::KeybindAction {
-            label: Some("Toggle".into()),
+            label: Some("Mute".into()),
             scope: crate::manifest::KeybindScope::Surface,
+            trigger: crate::manifest::KeybindTrigger {
+                kind: crate::manifest::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            localized_triggers: HashMap::from([(
+                "sk".into(),
+                crate::manifest::KeybindTrigger {
+                    kind: crate::manifest::KeybindTriggerKind::Shortcut,
+                    key: Some("s".into()),
+                    modifiers: Vec::new(),
+                },
+            )]),
             ..crate::manifest::KeybindAction::default()
         },
     );
@@ -1302,7 +1315,16 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
         graph.settings_schemas()[0].namespace,
         "@mesh/example-widget"
     );
-    assert_eq!(graph.keybind_actions()[0].action_id, "toggle");
+    let keybind = &graph.keybind_actions()[0];
+    assert_eq!(keybind.action_id, "mute");
+    assert_eq!(keybind.trigger.key.as_deref(), Some("m"));
+    assert_eq!(
+        keybind
+            .localized_triggers
+            .get("sk")
+            .and_then(|trigger| trigger.key.as_deref()),
+        Some("s")
+    );
     assert_eq!(graph.icon_requirements()[0].name, "audio-volume-high");
     assert!(graph.icon_requirements()[0].required);
     assert_eq!(graph.icon_pack_contributions()[0].id, "material");

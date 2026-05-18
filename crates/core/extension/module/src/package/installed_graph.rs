@@ -883,6 +883,8 @@ impl ModuleContributionIndex {
                 label: action.label.clone(),
                 description: action.description.clone(),
                 category: action.category.clone(),
+                trigger: action.trigger.clone(),
+                localized_triggers: action.localized_triggers.clone(),
             });
         }
         for icon in &manifest.mesh.icon_requirements.required {
@@ -1018,6 +1020,8 @@ pub struct ContributedKeybindAction {
     pub label: Option<String>,
     pub description: Option<String>,
     pub category: Option<String>,
+    pub trigger: manifest::KeybindTrigger,
+    pub localized_triggers: HashMap<String, manifest::KeybindTrigger>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
