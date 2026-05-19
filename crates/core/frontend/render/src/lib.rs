@@ -1,5 +1,9 @@
 pub mod display_list;
 pub mod library_adapters;
+
+#[cfg(feature = "renderer-parley")]
+mod parley_adapter;
+
 pub mod proof;
 pub mod render_object;
 pub mod surface;
