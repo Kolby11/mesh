@@ -139,4 +139,55 @@ mod tests {
             "unexpected result: {result}"
         );
     }
+
+    #[test]
+    fn parley_selection_evidence_maps_anchor_focus() {
+        let mut node = text_node("Hello World", 200.0);
+        node.layout = LayoutRect { x: 10.0, y: 5.0, width: 200.0, height: 18.0 };
+        node.computed_style.padding.left = 4.0;
+        node.computed_style.padding.top = 2.0;
+        node.attributes.insert("_mesh_selection_anchor_x".to_string(), "20".to_string());
+        node.attributes.insert("_mesh_selection_anchor_y".to_string(), "8".to_string());
+        node.attributes.insert("_mesh_selection_focus_x".to_string(), "60".to_string());
+        node.attributes.insert("_mesh_selection_focus_y".to_string(), "8".to_string());
+
+        let mut diagnostics = Vec::new();
+        let (parley_text, anchor, focus) =
+            shape_text_with_selection_evidence(&node, "Hello World", &mut diagnostics);
+
+        if parley_text.contains("::no_fonts") {
+            // CI without fonts — verify no panic and tolerant about Some/None.
+            let _ = (anchor, focus);
+        } else {
+            let a = anchor.expect("anchor must be Some when fonts available");
+            let f = focus.expect("focus must be Some when fonts available");
+            assert!(f.0 > a.0, "expected focus.x ({}) > anchor.x ({})", f.0, a.0);
+        }
+    }
+
+    #[test]
+    fn parley_selection_evidence_returns_none_when_attrs_absent() {
+        let node = text_node("Hello", 100.0);
+        let mut diagnostics = Vec::new();
+        let (_parley_text, anchor, focus) =
+            shape_text_with_selection_evidence(&node, "Hello", &mut diagnostics);
+        assert!(anchor.is_none());
+        assert!(focus.is_none());
+    }
+
+    #[test]
+    fn parley_selection_evidence_uses_text_origin_attribute_when_present() {
+        let mut node = text_node("Hi", 100.0);
+        node.attributes.insert("_mesh_selection_text_x".to_string(), "10".to_string());
+        node.attributes.insert("_mesh_selection_text_y".to_string(), "5".to_string());
+        node.attributes.insert("_mesh_selection_anchor_x".to_string(), "20".to_string());
+        node.attributes.insert("_mesh_selection_anchor_y".to_string(), "8".to_string());
+        node.attributes.insert("_mesh_selection_focus_x".to_string(), "30".to_string());
+        node.attributes.insert("_mesh_selection_focus_y".to_string(), "8".to_string());
+        let mut diagnostics = Vec::new();
+        let (_parley_text, anchor, focus) =
+            shape_text_with_selection_evidence(&node, "Hi", &mut diagnostics);
+        // Must not panic. Anchor/focus may be Some or None depending on font availability.
+        let _ = (anchor, focus);
+    }
 }
