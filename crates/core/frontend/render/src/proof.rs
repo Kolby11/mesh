@@ -432,10 +432,24 @@ mod tests {
             .as_ref()
             .expect("text evidence");
 
+        // Theme-owned colors always pass through unmodified.
         assert_eq!(proof_text.selection_background.as_deref(), Some("#112233"));
         assert_eq!(proof_text.selection_foreground.as_deref(), Some("#ddeeff"));
-        assert_eq!(proof_text.selection_anchor, Some((2.0, 3.0)));
-        assert_eq!(proof_text.selection_focus, Some((8.0, 9.0)));
+
+        // Default build: raw attribute passthrough (byte-identical to pre-Phase-48).
+        // Feature-on build: coords are Parley-derived (may differ from raw values).
+        #[cfg(not(feature = "renderer-parley"))]
+        {
+            assert_eq!(proof_text.selection_anchor, Some((2.0, 3.0)));
+            assert_eq!(proof_text.selection_focus, Some((8.0, 9.0)));
+        }
+        #[cfg(feature = "renderer-parley")]
+        {
+            // With Parley, selection coords are cursor-geometry derived.
+            // Just assert they are present (Some) — exact values depend on font metrics.
+            assert!(proof_text.selection_anchor.is_some());
+            assert!(proof_text.selection_focus.is_some());
+        }
     }
 
     #[test]
