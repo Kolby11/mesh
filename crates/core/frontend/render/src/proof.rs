@@ -161,7 +161,7 @@ fn collect_focused_nodes(node: &WidgetNode, snapshot: &mut FocusedProofSnapshot)
             width: node.layout.width,
             height: node.layout.height,
         },
-        parley_text: focused_text_evidence(node),
+        parley_text: focused_text_evidence(node, &mut snapshot.diagnostics),
     });
 
     snapshot.accessibility.push(FocusedAccessibilityEvidence {
@@ -192,10 +192,24 @@ fn collect_focused_nodes(node: &WidgetNode, snapshot: &mut FocusedProofSnapshot)
     }
 }
 
-fn focused_text_evidence(node: &WidgetNode) -> Option<FocusedTextEvidence> {
+fn focused_text_evidence(
+    node: &WidgetNode,
+    diagnostics: &mut Vec<FocusedProofDiagnostic>,
+) -> Option<FocusedTextEvidence> {
     let content = node.attributes.get("content")?.clone();
+
+    #[cfg(feature = "renderer-parley")]
+    let parley_text =
+        crate::parley_adapter::shape_text_evidence(node, content.as_str(), diagnostics);
+
+    #[cfg(not(feature = "renderer-parley"))]
+    let parley_text = {
+        let _ = &diagnostics; // unused without feature; suppress warning
+        format!("parley_text::{content}::shape=line_break_bidi_align")
+    };
+
     Some(FocusedTextEvidence {
-        parley_text: format!("parley_text::{content}::shape=line_break_bidi_align"),
+        parley_text,
         content,
         selection_background: node.attributes.get("_mesh_selection_background").cloned(),
         selection_foreground: node.attributes.get("_mesh_selection_foreground").cloned(),
@@ -451,5 +465,45 @@ mod tests {
             assert_eq!(node.stable_node_id, node.node_id.to_string());
             assert!(!node.accesskit_node_id.is_empty());
         }
+    }
+
+    #[test]
+    #[cfg(not(feature = "renderer-parley"))]
+    fn focused_text_evidence_default_build_preserves_placeholder() {
+        let mut node = WidgetNode::new("text");
+        node.attributes
+            .insert("content".to_string(), "World".to_string());
+        node.layout = LayoutRect { x: 0.0, y: 0.0, width: 100.0, height: 18.0 };
+        let mut diagnostics: Vec<FocusedProofDiagnostic> = Vec::new();
+        let evidence = focused_text_evidence(&node, &mut diagnostics).expect("evidence");
+        assert_eq!(
+            evidence.parley_text,
+            "parley_text::World::shape=line_break_bidi_align"
+        );
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    #[cfg(feature = "renderer-parley")]
+    fn focused_text_evidence_with_parley_feature_returns_shaped_summary() {
+        let mut node = WidgetNode::new("text");
+        node.attributes
+            .insert("content".to_string(), "World".to_string());
+        node.layout = LayoutRect { x: 0.0, y: 0.0, width: 100.0, height: 18.0 };
+        node.computed_style.font_size = 14.0;
+        node.computed_style.font_weight = 400;
+        let mut diagnostics: Vec<FocusedProofDiagnostic> = Vec::new();
+        let evidence = focused_text_evidence(&node, &mut diagnostics).expect("evidence");
+        assert_ne!(
+            evidence.parley_text,
+            "parley_text::World::shape=line_break_bidi_align",
+            "feature-on path must not return the legacy placeholder"
+        );
+        assert!(
+            evidence.parley_text.starts_with("parley::lines=")
+                || evidence.parley_text.contains("::no_fonts"),
+            "unexpected parley_text: {}",
+            evidence.parley_text
+        );
     }
 }
