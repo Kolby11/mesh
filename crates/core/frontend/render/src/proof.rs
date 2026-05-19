@@ -199,13 +199,32 @@ fn focused_text_evidence(
     let content = node.attributes.get("content")?.clone();
 
     #[cfg(feature = "renderer-parley")]
-    let parley_text =
-        crate::parley_adapter::shape_text_evidence(node, content.as_str(), diagnostics);
+    let (parley_text, selection_anchor, selection_focus) = {
+        let (shaped, anchor, focus) = crate::parley_adapter::shape_text_with_selection_evidence(
+            node,
+            content.as_str(),
+            diagnostics,
+        );
+        // Parley-derived anchor/focus take precedence when the feature is on;
+        // fall back to the raw attribute values only when Parley returned None
+        // (e.g. attrs absent — semantics identical to default build).
+        let anchor = anchor.or_else(|| {
+            selection_point(node, "_mesh_selection_anchor_x", "_mesh_selection_anchor_y")
+        });
+        let focus = focus.or_else(|| {
+            selection_point(node, "_mesh_selection_focus_x", "_mesh_selection_focus_y")
+        });
+        (shaped, anchor, focus)
+    };
 
     #[cfg(not(feature = "renderer-parley"))]
-    let parley_text = {
-        let _ = &diagnostics; // unused without feature; suppress warning
-        format!("parley_text::{content}::shape=line_break_bidi_align")
+    let (parley_text, selection_anchor, selection_focus) = {
+        let _ = &diagnostics; // unused without feature
+        (
+            format!("parley_text::{content}::shape=line_break_bidi_align"),
+            selection_point(node, "_mesh_selection_anchor_x", "_mesh_selection_anchor_y"),
+            selection_point(node, "_mesh_selection_focus_x", "_mesh_selection_focus_y"),
+        )
     };
 
     Some(FocusedTextEvidence {
@@ -213,16 +232,8 @@ fn focused_text_evidence(
         content,
         selection_background: node.attributes.get("_mesh_selection_background").cloned(),
         selection_foreground: node.attributes.get("_mesh_selection_foreground").cloned(),
-        selection_anchor: selection_point(
-            node,
-            "_mesh_selection_anchor_x",
-            "_mesh_selection_anchor_y",
-        ),
-        selection_focus: selection_point(
-            node,
-            "_mesh_selection_focus_x",
-            "_mesh_selection_focus_y",
-        ),
+        selection_anchor,
+        selection_focus,
     })
 }
 
