@@ -199,13 +199,32 @@ fn focused_text_evidence(
     let content = node.attributes.get("content")?.clone();
 
     #[cfg(feature = "renderer-parley")]
-    let parley_text =
-        crate::parley_adapter::shape_text_evidence(node, content.as_str(), diagnostics);
+    let (parley_text, selection_anchor, selection_focus) = {
+        let (shaped, anchor, focus) = crate::parley_adapter::shape_text_with_selection_evidence(
+            node,
+            content.as_str(),
+            diagnostics,
+        );
+        // Parley-derived anchor/focus take precedence when the feature is on;
+        // fall back to the raw attribute values only when Parley returned None
+        // (e.g. attrs absent — semantics identical to default build).
+        let anchor = anchor.or_else(|| {
+            selection_point(node, "_mesh_selection_anchor_x", "_mesh_selection_anchor_y")
+        });
+        let focus = focus.or_else(|| {
+            selection_point(node, "_mesh_selection_focus_x", "_mesh_selection_focus_y")
+        });
+        (shaped, anchor, focus)
+    };
 
     #[cfg(not(feature = "renderer-parley"))]
-    let parley_text = {
-        let _ = &diagnostics; // unused without feature; suppress warning
-        format!("parley_text::{content}::shape=line_break_bidi_align")
+    let (parley_text, selection_anchor, selection_focus) = {
+        let _ = &diagnostics; // unused without feature
+        (
+            format!("parley_text::{content}::shape=line_break_bidi_align"),
+            selection_point(node, "_mesh_selection_anchor_x", "_mesh_selection_anchor_y"),
+            selection_point(node, "_mesh_selection_focus_x", "_mesh_selection_focus_y"),
+        )
     };
 
     Some(FocusedTextEvidence {
@@ -213,16 +232,8 @@ fn focused_text_evidence(
         content,
         selection_background: node.attributes.get("_mesh_selection_background").cloned(),
         selection_foreground: node.attributes.get("_mesh_selection_foreground").cloned(),
-        selection_anchor: selection_point(
-            node,
-            "_mesh_selection_anchor_x",
-            "_mesh_selection_anchor_y",
-        ),
-        selection_focus: selection_point(
-            node,
-            "_mesh_selection_focus_x",
-            "_mesh_selection_focus_y",
-        ),
+        selection_anchor,
+        selection_focus,
     })
 }
 
@@ -421,10 +432,24 @@ mod tests {
             .as_ref()
             .expect("text evidence");
 
+        // Theme-owned colors always pass through unmodified.
         assert_eq!(proof_text.selection_background.as_deref(), Some("#112233"));
         assert_eq!(proof_text.selection_foreground.as_deref(), Some("#ddeeff"));
-        assert_eq!(proof_text.selection_anchor, Some((2.0, 3.0)));
-        assert_eq!(proof_text.selection_focus, Some((8.0, 9.0)));
+
+        // Default build: raw attribute passthrough (byte-identical to pre-Phase-48).
+        // Feature-on build: coords are Parley-derived (may differ from raw values).
+        #[cfg(not(feature = "renderer-parley"))]
+        {
+            assert_eq!(proof_text.selection_anchor, Some((2.0, 3.0)));
+            assert_eq!(proof_text.selection_focus, Some((8.0, 9.0)));
+        }
+        #[cfg(feature = "renderer-parley")]
+        {
+            // With Parley, selection coords are cursor-geometry derived.
+            // Just assert they are present (Some) — exact values depend on font metrics.
+            assert!(proof_text.selection_anchor.is_some());
+            assert!(proof_text.selection_focus.is_some());
+        }
     }
 
     #[test]
@@ -505,5 +530,72 @@ mod tests {
             "unexpected parley_text: {}",
             evidence.parley_text
         );
+    }
+
+    #[test]
+    #[cfg(not(feature = "renderer-parley"))]
+    fn focused_text_evidence_default_build_selection_is_raw_attribute() {
+        let mut node = WidgetNode::new("text");
+        node.attributes.insert("content".to_string(), "Hi".to_string());
+        node.attributes.insert("_mesh_selection_anchor_x".to_string(), "12.5".to_string());
+        node.attributes.insert("_mesh_selection_anchor_y".to_string(), "3.0".to_string());
+        node.layout = LayoutRect { x: 0.0, y: 0.0, width: 100.0, height: 18.0 };
+        let mut diagnostics: Vec<FocusedProofDiagnostic> = Vec::new();
+        let evidence = focused_text_evidence(&node, &mut diagnostics).expect("evidence");
+        assert_eq!(evidence.selection_anchor, Some((12.5, 3.0)));
+    }
+
+    #[test]
+    #[cfg(feature = "renderer-parley")]
+    fn focused_text_evidence_with_parley_feature_uses_cursor_geometry() {
+        let mut node = WidgetNode::new("text");
+        node.attributes.insert("content".to_string(), "Hello World".to_string());
+        node.attributes.insert("_mesh_selection_anchor_x".to_string(), "20".to_string());
+        node.attributes.insert("_mesh_selection_anchor_y".to_string(), "8".to_string());
+        node.attributes.insert("_mesh_selection_focus_x".to_string(), "60".to_string());
+        node.attributes.insert("_mesh_selection_focus_y".to_string(), "8".to_string());
+        node.layout = LayoutRect { x: 10.0, y: 5.0, width: 200.0, height: 18.0 };
+        node.computed_style.font_size = 14.0;
+        node.computed_style.font_weight = 400;
+        node.computed_style.padding.left = 4.0;
+        node.computed_style.padding.top = 2.0;
+        let mut diagnostics: Vec<FocusedProofDiagnostic> = Vec::new();
+        let evidence = focused_text_evidence(&node, &mut diagnostics).expect("evidence");
+
+        if evidence.parley_text.contains("::no_fonts") {
+            // CI fallback path — Parley returned None for selection coords; selection_point
+            // fallback returns raw attribute values. Verify no panic and Some values.
+            assert!(evidence.selection_anchor.is_some());
+            assert!(evidence.selection_focus.is_some());
+        } else {
+            let a = evidence.selection_anchor.expect("anchor");
+            assert!(
+                a != (20.0, 8.0),
+                "Parley should have transformed (20,8) into text-local cursor coords, got {a:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "renderer-parley")]
+    fn focused_text_evidence_selection_colors_preserved() {
+        let mut node = WidgetNode::new("text");
+        node.attributes.insert("content".to_string(), "Hi".to_string());
+        node.attributes.insert(
+            "_mesh_selection_background".to_string(),
+            "rgba(0,0,255,0.5)".to_string(),
+        );
+        node.attributes.insert(
+            "_mesh_selection_foreground".to_string(),
+            "white".to_string(),
+        );
+        node.layout = LayoutRect { x: 0.0, y: 0.0, width: 100.0, height: 18.0 };
+        let mut diagnostics: Vec<FocusedProofDiagnostic> = Vec::new();
+        let evidence = focused_text_evidence(&node, &mut diagnostics).expect("evidence");
+        assert_eq!(
+            evidence.selection_background.as_deref(),
+            Some("rgba(0,0,255,0.5)")
+        );
+        assert_eq!(evidence.selection_foreground.as_deref(), Some("white"));
     }
 }
