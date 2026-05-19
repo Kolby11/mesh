@@ -47,6 +47,12 @@ Move the selected renderer libraries from v1.8 prototype/proof evidence into pro
 3. Selection geometry preserves theme-owned selection colors, UTF-8 boundaries, anchor/focus evidence, and copy behavior.
 4. Unsupported text cases fall back to the current text path and surface adapter diagnostics.
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 48-01-PLAN.md — Parley shaping adapter + diagnostics threading (TEXT-01, TEXT-03)
+- [ ] 48-02-PLAN.md — Parley cursor-derived selection evidence (TEXT-02)
+
 ### Phase 49: AnyRender/Vello Paint Backend Adapter
 
 **Goal:** Introduce a library-backed paint adapter behind the retained display-list boundary while preserving software painter rollback.
@@ -100,7 +106,7 @@ Move the selected renderer libraries from v1.8 prototype/proof evidence into pro
 |-------|-----------|----------------|--------|-----------|
 | 46. Renderer Library Dependency And Adapter Foundation | v1.9 | 3/3 | Complete   | 2026-05-18 |
 | 47. Taffy Layout Adapter Integration | v1.9 | 3/3 | Complete    | 2026-05-18 |
-| 48. Parley Text And Selection Integration | v1.9 | 0/? | Planned | — |
+| 48. Parley Text And Selection Integration | v1.9 | 0/2 | Planned | — |
 | 49. AnyRender/Vello Paint Backend Adapter | v1.9 | 0/? | Planned | — |
 | 50. AccessKit Runtime And Broad Adoption Gates | v1.9 | 0/? | Planned | — |
 
