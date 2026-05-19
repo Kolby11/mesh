@@ -50,7 +50,10 @@ Move the selected renderer libraries from v1.8 prototype/proof evidence into pro
 **Plans:** 2 plans
 
 Plans:
+**Wave 1**
 - [ ] 48-01-PLAN.md — Parley shaping adapter + diagnostics threading (TEXT-01, TEXT-03)
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 48-02-PLAN.md — Parley cursor-derived selection evidence (TEXT-02)
 
 ### Phase 49: AnyRender/Vello Paint Backend Adapter
