@@ -111,21 +111,30 @@ The project now also has a rendering engine architecture direction with:
 - A production-adjacent focused proof adapter preserving retained identity, typed invalidation, damage/profiling, diagnostics, selection, and AccessKit-compatible boundaries.
 - A phased, reversible renderer migration roadmap with explicit ownership classification, build/CI/Linux/Nix/binary-risk gates, rollback expectations, and an author-facing `.mesh` renderer contract.
 
-## Current Milestone: v1.9 Renderer Library Integration
+## Current Milestone: v1.10 Skia-Centric Painter API
 
-**Goal:** Move the selected renderer libraries from prototype/proof evidence into production renderer paths behind reversible adapter boundaries, while preserving retained MESH identity, diagnostics, profiling, accessibility, and shipped navigation/audio behavior.
+**Goal:** Refactor MESH's paint boundary into an extensible WebEngine/Qt-style painter API where MESH keeps render-engine ownership and Skia owns low-level raster, effects, layers, and paint primitives, with a backend contract that can later support Vello.
 
 **Target features:**
-- Add production Cargo dependencies and adapter ownership for Taffy layout, Parley text, AnyRender/Vello-style paint boundaries, and AccessKit runtime updates.
-- Replace proof-only `taffy_layout`, `parley_text`, and `accesskit_node_id` evidence with real library-backed adapters where each library is ready.
-- Keep the current MESH software renderer, retained tree, render-object tree, display list, and Wayland presentation as rollback authorities until each replacement path passes gates.
-- Verify shipped navigation/audio surfaces, selection behavior, damage/profiling payloads, diagnostics, binary/build impact, and Linux/Nix implications before any broad defaulting.
+- Define a high-level painter command API below the retained display list: push clip, push layer, draw rect/rounded rect/path/text/image/shadow, apply filter, pop layer, and pop clip.
+- Make Skia the authoritative implementation for rasterization, antialiasing, paths, rounded rects, strokes, shadows, blurs, image filters, blend modes, clipping, layers/saveLayer, gradients/images, and eligible text primitives.
+- Remove remaining ad hoc painter behavior from MESH where Skia already has a primitive, while preserving MESH ownership of tree traversal, style/layout, animation state, display-list ordering, damage, z-order, module boundaries, input state, and presentation.
+- Keep the painter contract backend-neutral enough for a future Vello backend, with explicit parity tests and shipped-surface proof before any additional backend can be promoted.
 
 Phase 46 of v1.9 is complete. MESH now has production Cargo dependencies and disabled-by-default renderer-library feature gates for Taffy, Parley, AccessKit, AnyRender, and Vello encoding, plus documented build, rollback, Linux/Nix, binary-risk, and CI boundaries.
 
 Phase 47 of v1.9 is complete. Taffy-backed layout is now the authoritative in-scope layout path for retained MESH `WidgetNode` geometry, with stable `NodeId` writeback, text measurement injection, explicit diagnostics instead of legacy fallback, parity coverage, and shipped navigation/audio regression proof.
 
-**Next milestone direction:** v1.10 should focus on animations and motion fidelity after renderer library integration gives animation code a clearer layout/text/paint substrate.
+`v1.9` shipped on 2026-05-21.
+
+The project now also has production renderer-library integration with:
+
+- Rust 1.85-compatible renderer-library dependencies and feature-gated adapter boundaries
+- Taffy as the authoritative in-scope retained layout source
+- Parley text/selection proof evidence behind the renderer-library scaffold
+- AnyRender/Vello-style paint proof evidence and Vello encoding scaffolding
+- AccessKit retained-node runtime update construction behind the `renderer-accesskit` feature
+- Renderer migration docs that classify current retained display-list ownership and Skia paint-backend direction
 
 ## Last Shipped Milestone: v1.8 Rendering Engine Architecture
 
@@ -168,8 +177,10 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 
 ### Active
 
-- Productionize the selected renderer libraries from v1.8: Taffy, Parley, AnyRender/Vello-style paint boundaries, and AccessKit runtime updates.
-- Keep animation and motion-fidelity polish scoped to the following milestone unless a minimal regression fix is required to preserve existing behavior.
+- Implement the full extensible painter API below the retained display list.
+- Move low-level painter behavior to Skia primitives instead of MESH-owned raster helpers.
+- Preserve MESH render-engine ownership around style/layout/animation/display-list/damage/presentation while making the paint backend swappable.
+- Prove the Skia-backed painter contract through retained display-list, shipped-surface, effects, damage, and profiling tests.
 
 ### Out of Scope
 
@@ -177,9 +188,10 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - Broad shell UI redesign, marketplace/distribution service work, remote package signing, or installer UX.
 - Compositor-global shortcuts via XDG desktop portals or compositor-specific APIs.
 - Replacing keyboard focus traversal, text-input behavior, or shipped widget activation semantics.
-- Skia-backed rendering investigation — still a future rendering backlog candidate, but not the active v1.7 scope.
+- Replacing the MESH render engine wholesale with Skia, Vello, Blitz, WebEngine, or Qt.
 - Finishing all paused v1.6 keybind runtime behavior; this milestone only preserves and migrates the declaration/resolution model where it intersects modularity.
-- Animation system redesign, transition polish, and richer keyframe behavior — planned for the milestone after renderer library integration.
+- Full GPU compositor implementation, arbitrary browser compatibility, and complete CSS/Web platform behavior.
+- Full Vello backend implementation beyond API shape, fixtures, and compatibility notes for a future milestone.
 
 ## Key Decisions
 
@@ -214,6 +226,8 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | MESH-owned focused-crate path is the selected renderer direction | The focused path preserved retained MESH-shaped evidence across layout, text, paint, interaction, and accessibility without replacing the production renderer wholesale | Shipped in v1.8 Phase 43 |
 | Focused renderer proof is adapter-owned, not public API | Phase 44 proof snapshots validate migration boundaries while current renderer/shell ownership remains authoritative for production behavior | Shipped in v1.8 Phase 44 |
 | Broad renderer migration must be phased and reversible | Future adoption needs author-contract, ownership-classification, build/CI/release, and rollback gates before becoming broad production behavior | Shipped in v1.8 Phase 45 |
+| Skia is the paint backend, not the render engine | MESH still owns widget traversal, style/layout, animation, retained display lists, damage, module boundaries, input state, and presentation; Skia owns the low-level painter/raster primitives below that boundary | Active for v1.10 |
+| Painter API must stay backend-neutral enough for Vello | The display-list-to-painter contract should describe high-level paint commands, not Skia-only helper calls, so a future Vello backend can implement the same behavior with parity proof | Active for v1.10 |
 
 <details>
 <summary>Archived milestone framing</summary>
@@ -260,4 +274,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-18 after completing Phase 47*
+*Last updated: 2026-05-21 after starting milestone v1.10*

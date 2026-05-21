@@ -1,34 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.9
-milestone_name: Renderer Library Integration
-status: milestone_archived
-stopped_at: v1.9 archived and phase directories cleaned up
-last_updated: "2026-05-21T19:57:35.028Z"
-last_activity: 2026-05-21 -- v1.9 archived to .planning/milestones/
+milestone: v1.10
+milestone_name: Skia-Centric Painter API
+status: planning
+last_updated: "2026-05-21T20:58:18.016Z"
+last_activity: 2026-05-21
 progress:
   total_phases: 5
-  completed_phases: 5
-  total_plans: 10
-  completed_plans: 10
-  percent: 100
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: MESH v1.9
+# State: MESH v1.10
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-18)
+See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Planning the next milestone
+**Current focus:** Skia-Centric Painter API
 
 ## Current Position
 
-Phase: v1.9 — ARCHIVED
-Plan: 10 of 10
-Status: Archived
-Last activity: 2026-05-21 -- v1.9 milestone completed, audited, and archived
+Phase: 51 — Painter Contract And Backend Boundary
+Plan: —
+Status: Roadmap ready
+Last activity: 2026-05-21 — Milestone v1.10 planned
 
 ## Decisions
 
@@ -118,6 +117,8 @@ Last activity: 2026-05-21 -- v1.9 milestone completed, audited, and archived
 - [v1.8 Phase 43]: MESH-owned focused-crate proof evidence advanced to production proof because it preserves retained node identity across layout, text, paint, interaction, and accessibility.
 - [v1.8 Phase 44]: Focused proof integration is adapter-owned behind existing renderer and shell ownership; MESH retained identity, typed invalidation, damage/profiling, diagnostics, selection, and AccessKit-compatible boundaries remain authoritative.
 - [v1.8 Phase 45]: Renderer migration should proceed through phased reversible adapter expansion with explicit author-contract, ownership-classification, build/CI/release, and rollback gates before broad adoption.
+- [v1.10]: Skia is the authoritative paint/raster backend, not the render engine; MESH retains widget traversal, style/layout, animation, retained display-list, damage, z-order, module, input, and presentation ownership.
+- [v1.10]: The painter API should use backend-neutral high-level commands so a future Vello backend can implement the same contract after Skia parity is proven.
 
 ## Performance Metrics
 
