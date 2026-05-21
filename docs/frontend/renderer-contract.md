@@ -32,6 +32,8 @@ After Phase 47, in-scope `.mesh` layout semantics are computed by Taffy-backed l
 
 The current ownership map is in `docs/renderer-ownership.md`. Public author behavior should change only after a migration step updates this document and verifies shipped surface behavior, diagnostics, profiling, selection, and accessibility gates.
 
+After Phase 50, `renderer-accesskit` builds real retained-node AccessKit `TreeUpdate` values internally from existing `.mesh` accessibility metadata. Authors still use the same roles, labels, focusable controls, and documented accessibility attributes; platform publication is not part of the public contract yet.
+
 ## Not Promised
 
 - `.mesh is not HTML/CSS in a browser engine.`
@@ -46,6 +48,7 @@ The current ownership map is in `docs/renderer-ownership.md`. Public author beha
 - `typed invalidation remains visible through migration gates.`
 - `damage, profiling, diagnostics, and debug payloads remain promotion gates.`
 - `AccessKit-compatible retained-node updates are the accessibility migration direction.`
+- `renderer-accesskit` proves retained-node AccessKit update construction; screen-reader/platform publication remains deferred.
 
 ## Deferred Work
 

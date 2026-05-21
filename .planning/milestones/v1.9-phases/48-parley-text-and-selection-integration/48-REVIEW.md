@@ -8,11 +8,11 @@ files_reviewed_list:
   - crates/core/frontend/render/src/lib.rs
   - crates/core/frontend/render/src/proof.rs
 findings:
-  critical: 1
-  warning: 3
+  critical: 0
+  warning: 0
   info: 1
-  total: 5
-status: issues_found
+  total: 1
+status: fixed
 ---
 
 # Phase 48: Code Review Report
@@ -20,7 +20,18 @@ status: issues_found
 **Reviewed:** 2026-05-19T00:00:00Z
 **Depth:** standard
 **Files Reviewed:** 3
-**Status:** issues_found
+**Status:** fixed
+
+## Fix Status
+
+The CR-01 no-font selection fallback bug and related warning-level follow-ups were fixed on 2026-05-21:
+
+- `shape_text_with_selection_evidence` now returns `None` for cursor evidence when `layout.len() == 0`, allowing `focused_text_evidence` to fall back to raw selection attributes.
+- `shape_text_evidence` visibility is now `pub(crate)`.
+- `FocusedTextEvidence` selection fields document the feature-dependent coordinate contract.
+- The misleading no-font fallback test comment was corrected and assertions now verify the fallback values.
+
+Verification: `cargo test -p mesh-core-render --features renderer-parley parley` passed.
 
 ## Summary
 

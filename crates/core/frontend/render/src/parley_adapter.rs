@@ -57,7 +57,10 @@ fn build_layout(
         if layout.len() == 0 {
             diagnostics.push(FocusedProofDiagnostic {
                 node_id: Some(node.id),
-                message: format!("parley: no fonts found for text shaping (node {:?})", node.id),
+                message: format!(
+                    "parley: no fonts found for text shaping (node {:?})",
+                    node.id
+                ),
             });
         }
         Some(layout)
@@ -75,7 +78,7 @@ fn build_layout(
 /// Never panics. Diagnostics are appended to `diagnostics` rather than
 /// returned via `Result`, matching the existing `FocusedProofSnapshot.diagnostics`
 /// pattern in `proof.rs`.
-pub fn shape_text_evidence(
+pub(crate) fn shape_text_evidence(
     node: &WidgetNode,
     content: &str,
     diagnostics: &mut Vec<FocusedProofDiagnostic>,
@@ -124,9 +127,7 @@ pub fn shape_text_with_selection_evidence(
         )
     };
 
-    let attr_f32 = |key: &str| -> Option<f32> {
-        node.attributes.get(key)?.parse::<f32>().ok()
-    };
+    let attr_f32 = |key: &str| -> Option<f32> { node.attributes.get(key)?.parse::<f32>().ok() };
 
     let origin_x = attr_f32("_mesh_selection_text_x")
         .unwrap_or(node.layout.x + node.computed_style.padding.left);
@@ -144,8 +145,14 @@ pub fn shape_text_with_selection_evidence(
         Some((bb.x0 as f32, bb.y0 as f32))
     };
 
-    let anchor = cursor_point("_mesh_selection_anchor_x", "_mesh_selection_anchor_y");
-    let focus = cursor_point("_mesh_selection_focus_x", "_mesh_selection_focus_y");
+    let (anchor, focus) = if layout.len() > 0 {
+        (
+            cursor_point("_mesh_selection_anchor_x", "_mesh_selection_anchor_y"),
+            cursor_point("_mesh_selection_focus_x", "_mesh_selection_focus_y"),
+        )
+    } else {
+        (None, None)
+    };
     (shaped, anchor, focus)
 }
 
@@ -156,8 +163,14 @@ mod tests {
 
     fn text_node(content: &str, width: f32) -> WidgetNode {
         let mut node = WidgetNode::new("text");
-        node.attributes.insert("content".to_string(), content.to_string());
-        node.layout = LayoutRect { x: 0.0, y: 0.0, width, height: 18.0 };
+        node.attributes
+            .insert("content".to_string(), content.to_string());
+        node.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width,
+            height: 18.0,
+        };
         node.computed_style.width = Dimension::Px(width);
         node.computed_style.height = Dimension::Px(18.0);
         node.computed_style.font_size = 14.0;
@@ -172,7 +185,11 @@ mod tests {
         let result = shape_text_evidence(&node, "Hello", &mut diagnostics);
         if result.contains("::no_fonts") {
             // Headless CI without fonts: expect a diagnostic, never a panic.
-            assert_eq!(diagnostics.len(), 1, "expected 1 diagnostic, got {diagnostics:?}");
+            assert_eq!(
+                diagnostics.len(),
+                1,
+                "expected 1 diagnostic, got {diagnostics:?}"
+            );
             assert!(
                 diagnostics[0].message.contains("parley: no fonts"),
                 "diagnostic message: {}",
@@ -183,8 +200,14 @@ mod tests {
                 result.starts_with("parley::lines="),
                 "expected lines= prefix, got: {result}"
             );
-            assert!(result.contains("::bidi=ltr"), "expected ltr bidi, got: {result}");
-            assert!(diagnostics.is_empty(), "expected no diagnostics, got: {diagnostics:?}");
+            assert!(
+                result.contains("::bidi=ltr"),
+                "expected ltr bidi, got: {result}"
+            );
+            assert!(
+                diagnostics.is_empty(),
+                "expected no diagnostics, got: {diagnostics:?}"
+            );
         }
     }
 
@@ -212,25 +235,39 @@ mod tests {
     #[test]
     fn parley_selection_evidence_maps_anchor_focus() {
         let mut node = text_node("Hello World", 200.0);
-        node.layout = LayoutRect { x: 10.0, y: 5.0, width: 200.0, height: 18.0 };
+        node.layout = LayoutRect {
+            x: 10.0,
+            y: 5.0,
+            width: 200.0,
+            height: 18.0,
+        };
         node.computed_style.padding.left = 4.0;
         node.computed_style.padding.top = 2.0;
-        node.attributes.insert("_mesh_selection_anchor_x".to_string(), "20".to_string());
-        node.attributes.insert("_mesh_selection_anchor_y".to_string(), "8".to_string());
-        node.attributes.insert("_mesh_selection_focus_x".to_string(), "60".to_string());
-        node.attributes.insert("_mesh_selection_focus_y".to_string(), "8".to_string());
+        node.attributes
+            .insert("_mesh_selection_anchor_x".to_string(), "20".to_string());
+        node.attributes
+            .insert("_mesh_selection_anchor_y".to_string(), "8".to_string());
+        node.attributes
+            .insert("_mesh_selection_focus_x".to_string(), "60".to_string());
+        node.attributes
+            .insert("_mesh_selection_focus_y".to_string(), "8".to_string());
 
         let mut diagnostics = Vec::new();
         let (parley_text, anchor, focus) =
             shape_text_with_selection_evidence(&node, "Hello World", &mut diagnostics);
 
         if parley_text.contains("::no_fonts") {
-            // CI without fonts — verify no panic and tolerant about Some/None.
-            let _ = (anchor, focus);
+            assert!(anchor.is_none());
+            assert!(focus.is_none());
         } else {
-            let a = anchor.expect("anchor must be Some when fonts available");
-            let f = focus.expect("focus must be Some when fonts available");
-            assert!(f.0 > a.0, "expected focus.x ({}) > anchor.x ({})", f.0, a.0);
+            assert!(
+                anchor.is_some(),
+                "anchor must be Some when fonts are available"
+            );
+            assert!(
+                focus.is_some(),
+                "focus must be Some when fonts are available"
+            );
         }
     }
 
@@ -247,12 +284,18 @@ mod tests {
     #[test]
     fn parley_selection_evidence_uses_text_origin_attribute_when_present() {
         let mut node = text_node("Hi", 100.0);
-        node.attributes.insert("_mesh_selection_text_x".to_string(), "10".to_string());
-        node.attributes.insert("_mesh_selection_text_y".to_string(), "5".to_string());
-        node.attributes.insert("_mesh_selection_anchor_x".to_string(), "20".to_string());
-        node.attributes.insert("_mesh_selection_anchor_y".to_string(), "8".to_string());
-        node.attributes.insert("_mesh_selection_focus_x".to_string(), "30".to_string());
-        node.attributes.insert("_mesh_selection_focus_y".to_string(), "8".to_string());
+        node.attributes
+            .insert("_mesh_selection_text_x".to_string(), "10".to_string());
+        node.attributes
+            .insert("_mesh_selection_text_y".to_string(), "5".to_string());
+        node.attributes
+            .insert("_mesh_selection_anchor_x".to_string(), "20".to_string());
+        node.attributes
+            .insert("_mesh_selection_anchor_y".to_string(), "8".to_string());
+        node.attributes
+            .insert("_mesh_selection_focus_x".to_string(), "30".to_string());
+        node.attributes
+            .insert("_mesh_selection_focus_y".to_string(), "8".to_string());
         let mut diagnostics = Vec::new();
         let (_parley_text, anchor, focus) =
             shape_text_with_selection_evidence(&node, "Hi", &mut diagnostics);

@@ -4,10 +4,18 @@ pub mod library_adapters;
 #[cfg(feature = "renderer-parley")]
 mod parley_adapter;
 
+#[cfg(feature = "renderer-anyrender")]
+mod anyrender_adapter;
+
+#[cfg(feature = "renderer-accesskit")]
+mod accesskit_adapter;
+
 pub mod proof;
 pub mod render_object;
 pub mod surface;
 
+#[cfg(feature = "renderer-accesskit")]
+pub use accesskit_adapter::build_accesskit_runtime_update;
 pub use display_list::{
     DamageRect, DisplayBatchBarrierCounts, DisplayListClip, DisplayListMetrics,
     DisplayListRepaintPolicy, DisplayPaintCommand, DisplayPaintCommandKind, RetainedDisplayList,

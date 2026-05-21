@@ -1,5 +1,24 @@
 # MESH Milestones
 
+## v1.9 Renderer Library Integration (Shipped: 2026-05-21)
+
+**Phases completed:** 5 phases, 10 plans, 18 tasks
+
+**Key accomplishments:**
+
+- Rust 1.85-compatible renderer-library candidates are now production manifest entries behind disabled-by-default mesh-core-render features.
+- Internal renderer-library feature status records now expose enabled adapter paths while keeping the software renderer as fixed rollback authority.
+- Phase 46 renderer-library dependency risk, adapter ownership, author-contract boundaries, and final adoption gates are documented against the disabled-by-default scaffold.
+- Taffy layout ownership moved to `mesh-core-elements` with NodeId-keyed diagnostics and Phase 47 replacement docs.
+- `LayoutEngine` now uses Taffy as the production geometry source.
+- Phase 47 now has explicit parity, shipped-surface, and documentation gates for the Taffy layout replacement.
+- Parley proof evidence now covers text shaping and selection geometry while preserving theme-owned selection payloads and default text fallback.
+- AnyRender proof evidence now encodes retained display-list background, border, and icon commands behind `renderer-anyrender` while the software painter remains authoritative.
+- AccessKit retained-node runtime updates now build real `accesskit::TreeUpdate` values behind `renderer-accesskit`.
+- Renderer migration, ownership, and author-contract docs now classify Taffy, Parley, AnyRender, Vello encoding, and AccessKit adoption status.
+
+---
+
 ## v1.8 Rendering Engine Architecture (Shipped: 2026-05-18)
 
 **Status:** shipped

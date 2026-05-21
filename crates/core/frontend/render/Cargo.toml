@@ -10,7 +10,7 @@ default = []
 renderer-taffy = ["dep:taffy"]
 renderer-parley = ["dep:parley"]
 renderer-accesskit = ["dep:accesskit"]
-renderer-anyrender = ["dep:anyrender"]
+renderer-anyrender = ["dep:anyrender", "dep:color", "dep:peniko"]
 renderer-vello-encoding = ["dep:vello_encoding"]
 renderer-libraries = ["renderer-taffy", "renderer-parley", "renderer-accesskit", "renderer-anyrender", "renderer-vello-encoding"]
 
@@ -22,6 +22,8 @@ taffy = { workspace = true, optional = true }
 parley = { workspace = true, optional = true }
 accesskit = { workspace = true, optional = true }
 anyrender = { workspace = true, optional = true }
+color = { version = "0.3", optional = true }
+peniko = { version = "0.6", optional = true }
 vello_encoding = { workspace = true, optional = true }
 
 cosmic-text = "0.18"

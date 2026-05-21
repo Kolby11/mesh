@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Renderer Library Integration
-status: executing
-stopped_at: Phase 49 context gathered
-last_updated: "2026-05-20T00:00:00.000Z"
-last_activity: 2026-05-20 -- Phase 49 context gathered
+status: milestone_archived
+stopped_at: v1.9 archived and phase directories cleaned up
+last_updated: "2026-05-21T19:57:35.028Z"
+last_activity: 2026-05-21 -- v1.9 archived to .planning/milestones/
 progress:
   total_phases: 5
-  completed_phases: 2
-  total_plans: 8
-  completed_plans: 6
-  percent: 75
+  completed_phases: 5
+  total_plans: 10
+  completed_plans: 10
+  percent: 100
 ---
 
 # State: MESH v1.9
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-18)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 48 — parley-text-and-selection-integration
+**Current focus:** Planning the next milestone
 
 ## Current Position
 
-Phase: 48 (parley-text-and-selection-integration) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 48
-Last activity: 2026-05-19 -- Phase 48 execution started
+Phase: v1.9 — ARCHIVED
+Plan: 10 of 10
+Status: Archived
+Last activity: 2026-05-21 -- v1.9 milestone completed, audited, and archived
 
 ## Decisions
 
@@ -238,14 +238,18 @@ Items acknowledged and deferred at `v1.8` close on 2026-05-18:
 | v1.7 research summary | `.planning/research/SUMMARY.md` |
 | v1.8 archived requirements | `.planning/milestones/v1.8-REQUIREMENTS.md` |
 | v1.8 archived roadmap | `.planning/milestones/v1.8-ROADMAP.md` |
+| v1.9 archived requirements | `.planning/milestones/v1.9-REQUIREMENTS.md` |
+| v1.9 archived roadmap | `.planning/milestones/v1.9-ROADMAP.md` |
+| v1.9 audit | `.planning/milestones/v1.9-MILESTONE-AUDIT.md` |
+| v1.9 phase archive | `.planning/milestones/v1.9-phases/` |
 | v1.7 research details | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
 | v1.4 research | `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-15 after milestone v1.7 initialization*
+*State updated: 2026-05-21 after milestone v1.9 archive*
 
 ## Operator Next Steps
 
-- Plan Phase 37 with `$gsd-plan-phase 37`.
+- Start the next milestone with `$gsd-new-milestone`.
 - Review deferred polish when planning future transition/smoothness work: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`

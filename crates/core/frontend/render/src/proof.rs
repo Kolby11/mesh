@@ -38,7 +38,11 @@ pub struct FocusedTextEvidence {
     pub parley_text: String,
     pub selection_background: Option<String>,
     pub selection_foreground: Option<String>,
+    /// Selection anchor evidence. Default builds preserve raw surface-space
+    /// attributes; `renderer-parley` builds prefer Parley cursor geometry and
+    /// fall back to raw attributes only when Parley cannot produce a cursor.
     pub selection_anchor: Option<(f32, f32)>,
+    /// Selection focus evidence. Coordinate space matches `selection_anchor`.
     pub selection_focus: Option<(f32, f32)>,
 }
 
@@ -47,6 +51,10 @@ pub struct FocusedPaintEvidence {
     pub node_id: NodeId,
     pub stable_node_id: String,
     pub display_slot: &'static str,
+    /// True when `renderer-anyrender` encoded at least one scene op for this
+    /// command. Always false without the feature; software paint stays
+    /// authoritative for output.
+    pub anyrender_encoded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,7 +143,7 @@ pub fn build_focused_proof_snapshot(
     snapshot.paint = selected_paint
         .commands()
         .iter()
-        .map(focused_paint_evidence)
+        .map(|cmd| focused_paint_evidence(cmd, &mut snapshot.diagnostics))
         .collect();
     snapshot
 }
@@ -243,11 +251,24 @@ fn selection_point(node: &WidgetNode, x_key: &str, y_key: &str) -> Option<(f32, 
     Some((x, y))
 }
 
-fn focused_paint_evidence(command: &DisplayPaintCommand) -> FocusedPaintEvidence {
+fn focused_paint_evidence(
+    command: &DisplayPaintCommand,
+    diagnostics: &mut Vec<FocusedProofDiagnostic>,
+) -> FocusedPaintEvidence {
+    #[cfg(feature = "renderer-anyrender")]
+    let anyrender_encoded =
+        crate::anyrender_adapter::encode_command_to_scene(command, diagnostics) > 0;
+    #[cfg(not(feature = "renderer-anyrender"))]
+    let anyrender_encoded = {
+        let _ = diagnostics;
+        false
+    };
+
     FocusedPaintEvidence {
         node_id: command.node.id,
         stable_node_id: command.node.id.to_string(),
         display_slot: display_slot_for_command(command),
+        anyrender_encoded,
     }
 }
 
@@ -333,6 +354,66 @@ mod tests {
         assert_eq!(snapshot.nodes[0].taffy_layout.width, 30.0);
         assert_eq!(snapshot.nodes[0].taffy_layout.height, 40.0);
         assert_eq!(snapshot.paint[0].stable_node_id, "42");
+    }
+
+    #[test]
+    #[cfg(not(feature = "renderer-anyrender"))]
+    fn proof_snapshot_anyrender_encoded_false_without_feature() {
+        let mut root = node(
+            "box",
+            42,
+            LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 30.0,
+                height: 40.0,
+            },
+        );
+        root.computed_style.background_color = Color::WHITE;
+        let (metrics, selected) = selected_paint(&root);
+
+        let snapshot = build_focused_proof_snapshot(
+            &root,
+            RenderObjectDirtySummary::default(),
+            metrics,
+            &selected,
+        );
+
+        assert!(!snapshot.paint.is_empty());
+        assert!(
+            snapshot.paint.iter().all(|paint| !paint.anyrender_encoded),
+            "anyrender_encoded must be false on the default build"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "renderer-anyrender")]
+    fn proof_snapshot_anyrender_encoded_true_for_background_command() {
+        let mut root = node(
+            "box",
+            42,
+            LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 30.0,
+                height: 40.0,
+            },
+        );
+        root.computed_style.background_color = Color::WHITE;
+        let (metrics, selected) = selected_paint(&root);
+
+        let snapshot = build_focused_proof_snapshot(
+            &root,
+            RenderObjectDirtySummary::default(),
+            metrics,
+            &selected,
+        );
+
+        assert!(!snapshot.paint.is_empty());
+        assert!(
+            snapshot.paint.iter().any(|paint| paint.anyrender_encoded),
+            "at least one background command must be encoded"
+        );
     }
 
     #[test]
@@ -498,7 +579,12 @@ mod tests {
         let mut node = WidgetNode::new("text");
         node.attributes
             .insert("content".to_string(), "World".to_string());
-        node.layout = LayoutRect { x: 0.0, y: 0.0, width: 100.0, height: 18.0 };
+        node.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 18.0,
+        };
         let mut diagnostics: Vec<FocusedProofDiagnostic> = Vec::new();
         let evidence = focused_text_evidence(&node, &mut diagnostics).expect("evidence");
         assert_eq!(
@@ -514,14 +600,18 @@ mod tests {
         let mut node = WidgetNode::new("text");
         node.attributes
             .insert("content".to_string(), "World".to_string());
-        node.layout = LayoutRect { x: 0.0, y: 0.0, width: 100.0, height: 18.0 };
+        node.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 18.0,
+        };
         node.computed_style.font_size = 14.0;
         node.computed_style.font_weight = 400;
         let mut diagnostics: Vec<FocusedProofDiagnostic> = Vec::new();
         let evidence = focused_text_evidence(&node, &mut diagnostics).expect("evidence");
         assert_ne!(
-            evidence.parley_text,
-            "parley_text::World::shape=line_break_bidi_align",
+            evidence.parley_text, "parley_text::World::shape=line_break_bidi_align",
             "feature-on path must not return the legacy placeholder"
         );
         assert!(
@@ -536,10 +626,18 @@ mod tests {
     #[cfg(not(feature = "renderer-parley"))]
     fn focused_text_evidence_default_build_selection_is_raw_attribute() {
         let mut node = WidgetNode::new("text");
-        node.attributes.insert("content".to_string(), "Hi".to_string());
-        node.attributes.insert("_mesh_selection_anchor_x".to_string(), "12.5".to_string());
-        node.attributes.insert("_mesh_selection_anchor_y".to_string(), "3.0".to_string());
-        node.layout = LayoutRect { x: 0.0, y: 0.0, width: 100.0, height: 18.0 };
+        node.attributes
+            .insert("content".to_string(), "Hi".to_string());
+        node.attributes
+            .insert("_mesh_selection_anchor_x".to_string(), "12.5".to_string());
+        node.attributes
+            .insert("_mesh_selection_anchor_y".to_string(), "3.0".to_string());
+        node.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 18.0,
+        };
         let mut diagnostics: Vec<FocusedProofDiagnostic> = Vec::new();
         let evidence = focused_text_evidence(&node, &mut diagnostics).expect("evidence");
         assert_eq!(evidence.selection_anchor, Some((12.5, 3.0)));
@@ -549,12 +647,22 @@ mod tests {
     #[cfg(feature = "renderer-parley")]
     fn focused_text_evidence_with_parley_feature_uses_cursor_geometry() {
         let mut node = WidgetNode::new("text");
-        node.attributes.insert("content".to_string(), "Hello World".to_string());
-        node.attributes.insert("_mesh_selection_anchor_x".to_string(), "20".to_string());
-        node.attributes.insert("_mesh_selection_anchor_y".to_string(), "8".to_string());
-        node.attributes.insert("_mesh_selection_focus_x".to_string(), "60".to_string());
-        node.attributes.insert("_mesh_selection_focus_y".to_string(), "8".to_string());
-        node.layout = LayoutRect { x: 10.0, y: 5.0, width: 200.0, height: 18.0 };
+        node.attributes
+            .insert("content".to_string(), "Hello World".to_string());
+        node.attributes
+            .insert("_mesh_selection_anchor_x".to_string(), "20".to_string());
+        node.attributes
+            .insert("_mesh_selection_anchor_y".to_string(), "8".to_string());
+        node.attributes
+            .insert("_mesh_selection_focus_x".to_string(), "60".to_string());
+        node.attributes
+            .insert("_mesh_selection_focus_y".to_string(), "8".to_string());
+        node.layout = LayoutRect {
+            x: 10.0,
+            y: 5.0,
+            width: 200.0,
+            height: 18.0,
+        };
         node.computed_style.font_size = 14.0;
         node.computed_style.font_weight = 400;
         node.computed_style.padding.left = 4.0;
@@ -563,10 +671,10 @@ mod tests {
         let evidence = focused_text_evidence(&node, &mut diagnostics).expect("evidence");
 
         if evidence.parley_text.contains("::no_fonts") {
-            // CI fallback path — Parley returned None for selection coords; selection_point
-            // fallback returns raw attribute values. Verify no panic and Some values.
-            assert!(evidence.selection_anchor.is_some());
-            assert!(evidence.selection_focus.is_some());
+            // CI without fonts: empty Parley layouts return None for cursor
+            // evidence, so focused_text_evidence falls back to raw attributes.
+            assert_eq!(evidence.selection_anchor, Some((20.0, 8.0)));
+            assert_eq!(evidence.selection_focus, Some((60.0, 8.0)));
         } else {
             let a = evidence.selection_anchor.expect("anchor");
             assert!(
@@ -580,7 +688,8 @@ mod tests {
     #[cfg(feature = "renderer-parley")]
     fn focused_text_evidence_selection_colors_preserved() {
         let mut node = WidgetNode::new("text");
-        node.attributes.insert("content".to_string(), "Hi".to_string());
+        node.attributes
+            .insert("content".to_string(), "Hi".to_string());
         node.attributes.insert(
             "_mesh_selection_background".to_string(),
             "rgba(0,0,255,0.5)".to_string(),
@@ -589,7 +698,12 @@ mod tests {
             "_mesh_selection_foreground".to_string(),
             "white".to_string(),
         );
-        node.layout = LayoutRect { x: 0.0, y: 0.0, width: 100.0, height: 18.0 };
+        node.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 18.0,
+        };
         let mut diagnostics: Vec<FocusedProofDiagnostic> = Vec::new();
         let evidence = focused_text_evidence(&node, &mut diagnostics).expect("evidence");
         assert_eq!(

@@ -47,16 +47,16 @@ Current source boundaries also matter:
 - [ ] Feature flag or equivalent local bypass documented
 - [ ] Rollback path documented
 - [ ] Linux/Nix impact documented
-- [ ] Root workspace dependencies documented
-- [ ] Native libraries documented
-- [ ] Binary/build risk documented
-- [ ] CI gates documented
-- [ ] Workspace tests documented
-- [ ] Focused renderer proof tests documented
-- [ ] Shipped navigation/audio surface regressions documented
-- [ ] Selection proof documented
-- [ ] Invalidation/damage/profiling evidence documented
-- [ ] AccessKit-compatible update evidence documented
+- [x] Root workspace dependencies documented
+- [x] Native libraries documented
+- [x] Binary/build risk documented
+- [x] CI gates documented
+- [x] Workspace tests documented
+- [x] Focused renderer proof tests documented
+- [x] Shipped navigation/audio surface regressions documented
+- [x] Selection proof documented
+- [x] Invalidation/damage/profiling evidence documented
+- [x] AccessKit-compatible update evidence documented
 
 MIGR-03: build, CI, feature flags, Linux/Nix dependency implications, and binary-size risk are documented before broad adoption.
 
@@ -108,6 +108,27 @@ Final Phase 47 gate commands:
 - `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo check -p mesh-core-shell`
 
 The audio popover transition delay remains deferred to v1.10 and is not part of the Phase 47 Taffy layout replacement scope.
+
+## Phase 50 AccessKit Retained-Node Runtime Record
+
+Phase 50 adds a feature-gated AccessKit runtime update adapter in `mesh-core-render`. With `renderer-accesskit` enabled, retained `WidgetNode` trees convert into real `accesskit::TreeUpdate` values using MESH `NodeId` values as AccessKit node ids. The update includes roles, labels, descriptions, values, bounds, child relationships, focus, and control actions/state where available.
+
+Adoption status:
+
+| Library path | Status after v1.9 | Notes |
+|--------------|-------------------|-------|
+| Taffy layout | production | Authoritative for in-scope MESH layout computation after Phase 47. |
+| Parley text | experimental adapter | Proof/evidence path only; production text measurement and rasterization remain current MESH/cosmic-text paths. |
+| AnyRender paint | experimental adapter | Encodes background/border/icon proof subset; software painter remains authoritative. |
+| Vello encoding | deferred | Dependency scaffold only; no runtime adapter in v1.9. |
+| AccessKit updates | production adapter boundary | Real retained-node `TreeUpdate` construction exists; platform publication remains deferred. |
+
+Final v1.9 adoption gates:
+
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo check -p mesh-core-render`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render --features renderer-accesskit accesskit`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render --features renderer-libraries renderer_library`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell phase44_navigation`
 
 ### Observability Promotion Gate
 
