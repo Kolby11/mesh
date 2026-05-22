@@ -137,6 +137,66 @@ mod tests {
     }
 
     #[test]
+    fn style_profile_matrix_classifies_supported_visual_properties() {
+        for (property, expected_status) in [
+            ("background-color", StyleProfileStatus::Implemented),
+            ("width", StyleProfileStatus::Implemented),
+            ("padding", StyleProfileStatus::Implemented),
+            ("border-width", StyleProfileStatus::Implemented),
+            ("border-radius", StyleProfileStatus::Implemented),
+            ("opacity", StyleProfileStatus::Implemented),
+            ("transform", StyleProfileStatus::Implemented),
+            ("box-shadow", StyleProfileStatus::Implemented),
+            ("filter", StyleProfileStatus::Implemented),
+            ("display", StyleProfileStatus::Implemented),
+            ("font-size", StyleProfileStatus::Implemented),
+            ("animation-duration", StyleProfileStatus::Implemented),
+            ("transition-property", StyleProfileStatus::Implemented),
+        ] {
+            assert_eq!(
+                style_profile_status(property),
+                Some(expected_status),
+                "{property}"
+            );
+        }
+    }
+
+    #[test]
+    fn style_profile_matrix_matches_supported_css_properties() {
+        for property in supported_css_properties() {
+            if property.starts_with("--") {
+                continue;
+            }
+
+            assert!(
+                style_profile_status(property).is_some(),
+                "missing style profile row for {property}"
+            );
+        }
+    }
+
+    #[test]
+    fn style_profile_marks_browser_css_out_of_scope() {
+        for property in [
+            "grid-template-columns",
+            "float",
+            "white-space",
+            "container-type",
+            "text-wrap",
+        ] {
+            assert_eq!(
+                style_profile_status(property),
+                Some(StyleProfileStatus::OutOfScope),
+                "{property}"
+            );
+            assert!(
+                !is_supported_css_property(property),
+                "{property} must not be accepted as implemented shell CSS"
+            );
+        }
+    }
+
+    #[test]
     fn keyframe_property_helper_accepts_transition_safe_properties() {
         for property in [
             "opacity",
