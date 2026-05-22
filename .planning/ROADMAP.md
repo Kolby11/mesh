@@ -77,6 +77,14 @@ the source of truth for the painter engine's supported visual subset.
 
 **Requirements:** STYLE-01, STYLE-02, STYLE-03
 
+**Plans:** 4 plans
+
+Plans:
+- [ ] 52-01-PLAN.md — Author-facing style profile and executable support matrix for STYLE-01.
+- [ ] 52-02-PLAN.md — Token/custom-property and shipped navigation/audio style compatibility fixtures for STYLE-02.
+- [ ] 52-03-PLAN.md — Unsupported and ambiguous web-like property diagnostics for STYLE-03.
+- [ ] 52-04-PLAN.md — Component parser keyframe expectation cleanup and final Phase 52 validation gate.
+
 **Autonomous task seed:**
 1. Inventory supported style properties across `mesh-core-component`,
    `mesh-core-elements`, theme tokens, and shipped module styles.
@@ -290,7 +298,7 @@ architecture docs for future LLM-run milestones.
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 51. Painter Contract And Backend Boundary | v1.10 | 3/3 | Complete | 2026-05-22 |
-| 52. Style Profile And Lowering Compatibility | v1.10 | 0/? | Pending | — |
+| 52. Style Profile And Lowering Compatibility | v1.10 | 0/4 | Pending | — |
 | 53. Element And Display-List Primitive Coverage | v1.10 | 0/? | Pending | — |
 | 54. Skia Shape, Path, Text Highlight, And Border Migration | v1.10 | 0/? | Pending | — |
 | 55. Effects, Layers, Shadows, Blur, Images, And Gradients | v1.10 | 0/? | Pending | — |
