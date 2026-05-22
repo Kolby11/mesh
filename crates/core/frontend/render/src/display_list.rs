@@ -2096,6 +2096,71 @@ mod tests {
     }
 
     #[test]
+    fn display_list_effect_visual_clip_includes_shadow_and_filter_overflow() {
+        let mut root = node(1, "box", 20.0, 20.0, 20.0, 20.0);
+        root.computed_style.filter = VisualFilter { blur_radius: 4.0 };
+        root.computed_style.box_shadow = BoxShadow {
+            offset_x: 10.0,
+            offset_y: 0.0,
+            blur_radius: 4.0,
+            spread_radius: 0.0,
+            color: Color::from_hex("#00000080").unwrap(),
+            inset: false,
+        };
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 90, 90, false, true);
+        let selected = list.select_paint_commands(
+            Some(DamageRect {
+                x: 50,
+                y: 24,
+                width: 2,
+                height: 2,
+            }),
+            DisplayListRepaintPolicy::MinimalDamage,
+        );
+
+        assert!(
+            selected
+                .commands()
+                .iter()
+                .any(|command| command.node.id == 1)
+        );
+    }
+
+    #[test]
+    fn display_list_effect_visual_clip_includes_image_bounds() {
+        let mut root = node(1, "box", 20.0, 20.0, 20.0, 20.0);
+        root.computed_style.background_paint = BackgroundPaint::Image(StyleImageSource {
+            path: "assets/panel.png".to_string(),
+        });
+        let paint_node = build_paint_node(&root, 0.0, 0.0);
+        let visual = visual_clip_for(&paint_node);
+
+        assert_eq!(visual.x, 20);
+        assert_eq!(visual.y, 20);
+        assert_eq!(visual.width, 20);
+        assert_eq!(visual.height, 20);
+    }
+
+    #[test]
+    fn display_list_effect_visual_clip_includes_gradient_bounds() {
+        let mut root = node(1, "box", 20.0, 20.0, 20.0, 20.0);
+        root.computed_style.background_paint =
+            BackgroundPaint::LinearGradient(StyleLinearGradient {
+                from: Color::from_hex("#112233").unwrap(),
+                to: Color::from_hex("#445566").unwrap(),
+            });
+        let paint_node = build_paint_node(&root, 0.0, 0.0);
+        let visual = visual_clip_for(&paint_node);
+
+        assert_eq!(visual.x, 20);
+        assert_eq!(visual.y, 20);
+        assert_eq!(visual.width, 20);
+        assert_eq!(visual.height, 20);
+    }
+
+    #[test]
     fn display_list_selects_box_shadow_outside_layout_bounds() {
         let mut root = node(1, "box", 20.0, 20.0, 20.0, 20.0);
         root.computed_style.box_shadow = BoxShadow {

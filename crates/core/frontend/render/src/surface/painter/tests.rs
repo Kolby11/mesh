@@ -1414,6 +1414,77 @@ fn skia_effect_image_gradient_suite_runs_supported_cases() {
 }
 
 #[test]
+fn painter_effect_clipped_shadow_stays_inside_clip() {
+    let mut buffer = PixelBuffer::new(32, 32);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawShadow {
+            rect: ClipRect {
+                x: 8,
+                y: 8,
+                width: 10,
+                height: 10,
+            },
+            radius: 0.0,
+            shadow: BoxShadow {
+                offset_x: 1.0,
+                offset_y: 1.0,
+                blur_radius: 0.0,
+                spread_radius: 0.0,
+                color: Color::from_hex("#000000ff").unwrap(),
+                inset: false,
+            },
+            clip: ClipRect {
+                x: 10,
+                y: 10,
+                width: 4,
+                height: 4,
+            },
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(pixel(&buffer, 9, 9), Color::TRANSPARENT);
+    assert_eq!(
+        pixel(&buffer, 10, 10),
+        Color::from_hex("#000000ff").unwrap()
+    );
+    assert_eq!(pixel(&buffer, 14, 14), Color::TRANSPARENT);
+}
+
+#[test]
+fn painter_effect_gradient_respects_rounded_clip() {
+    let mut buffer = PixelBuffer::new(24, 24);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawLinearGradient {
+            gradient: PainterLinearGradient {
+                from: Color::from_hex("#ff0000").unwrap(),
+                to: Color::from_hex("#0000ff").unwrap(),
+            },
+            rect: ClipRect {
+                x: 4,
+                y: 4,
+                width: 16,
+                height: 16,
+            },
+            radius: 8.0,
+            clip: full_clip(24, 24),
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(pixel(&buffer, 4, 4), Color::TRANSPARENT);
+    assert!(pixel(&buffer, 12, 12).a > 0);
+}
+
+#[test]
 fn skia_shape_push_clip_intersects_command_clip() {
     let mut buffer = PixelBuffer::new(16, 16);
     let mut diagnostics = Vec::new();

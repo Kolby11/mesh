@@ -53,6 +53,24 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
     navigation
         .paint(&theme, 960, 80, &mut navigation_buffer)
         .unwrap();
+    let navigation_health = format!(
+        "{:?}",
+        navigation
+            .diagnostics
+            .as_ref()
+            .expect("navigation diagnostics")
+            .health()
+    );
+    for unexpected in [
+        "missing image asset",
+        "unsupported background-image",
+        "excessive blur",
+    ] {
+        assert!(
+            !navigation_health.contains(unexpected),
+            "navigation diagnostics should not contain {unexpected}: {navigation_health}"
+        );
+    }
     let navigation_tree = navigation
         .last_tree
         .as_ref()
@@ -333,6 +351,24 @@ fn shipped_navigation_volume_button_publishes_immediate_audio_popover_show() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 80);
     component.paint(&theme, 320, 80, &mut buffer).unwrap();
+    let health = format!(
+        "{:?}",
+        component
+            .diagnostics
+            .as_ref()
+            .expect("navigation diagnostics")
+            .health()
+    );
+    for unexpected in [
+        "missing image asset",
+        "unsupported background-image",
+        "excessive blur",
+    ] {
+        assert!(
+            !health.contains(unexpected),
+            "navigation diagnostics should not contain {unexpected}: {health}"
+        );
+    }
     let handler = "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface";
     let tree = component
         .last_tree
