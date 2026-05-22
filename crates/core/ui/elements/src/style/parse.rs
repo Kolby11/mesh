@@ -246,6 +246,9 @@ pub(super) fn parse_transition_properties(value: &str) -> TransitionProperties {
             "padding" => properties.padding = true,
             "margin" => properties.margin = true,
             "transform" => properties.transform = true,
+            "box-shadow" => properties.box_shadow = true,
+            "filter" => properties.filter = true,
+            "backdrop-filter" => properties.backdrop_filter = true,
             "min-width" => properties.min_width = true,
             "max-width" => properties.max_width = true,
             "min-height" => properties.min_height = true,
@@ -401,6 +404,9 @@ pub(super) fn parse_transition_shorthand(
                 "padding" => properties.padding = true,
                 "margin" => properties.margin = true,
                 "transform" => properties.transform = true,
+                "box-shadow" => properties.box_shadow = true,
+                "filter" => properties.filter = true,
+                "backdrop-filter" => properties.backdrop_filter = true,
                 "min-width" => properties.min_width = true,
                 "max-width" => properties.max_width = true,
                 "min-height" => properties.min_height = true,
@@ -542,6 +548,60 @@ pub(super) fn parse_time_ms(value: &str) -> u32 {
 pub(super) fn parse_px(s: &str) -> f32 {
     let s = s.trim().trim_end_matches("px");
     s.parse().unwrap_or(0.0)
+}
+
+pub(super) fn parse_filter(value: &str) -> VisualFilter {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "none" {
+        return VisualFilter::NONE;
+    }
+    let Some(inner) = trimmed
+        .strip_prefix("blur(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    else {
+        return VisualFilter::NONE;
+    };
+    VisualFilter {
+        blur_radius: parse_px(inner).max(0.0),
+    }
+}
+
+pub(super) fn parse_box_shadow(value: &str) -> BoxShadow {
+    let trimmed = first_comma_item(value).trim();
+    if trimmed.is_empty() || trimmed == "none" {
+        return BoxShadow::NONE;
+    }
+
+    let mut inset = false;
+    let mut color = Color {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 128,
+    };
+    let mut lengths = Vec::new();
+    for token in trimmed.split_whitespace() {
+        if token == "inset" {
+            inset = true;
+        } else if let Some(parsed) = Color::from_hex(token) {
+            color = parsed;
+        } else {
+            lengths.push(parse_px(token));
+        }
+    }
+
+    if lengths.len() < 2 {
+        return BoxShadow::NONE;
+    }
+
+    BoxShadow {
+        offset_x: lengths[0],
+        offset_y: lengths[1],
+        blur_radius: lengths.get(2).copied().unwrap_or(0.0).max(0.0),
+        spread_radius: lengths.get(3).copied().unwrap_or(0.0),
+        color,
+        inset,
+    }
 }
 
 pub(super) fn parse_dimension(s: &str) -> Dimension {

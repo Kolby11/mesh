@@ -234,7 +234,7 @@ impl FrontendRenderEngine {
             return;
         }
 
-        self.render_node_self(node, buffer, scale, bounds, node_clip, module_id);
+        self.render_node_self(node, buffer, scale, bounds, clip, module_id);
 
         let scroll_x = node_attr_f32(node, "_mesh_scroll_x");
         let scroll_y = node_attr_f32(node, "_mesh_scroll_y");
@@ -311,16 +311,49 @@ impl FrontendRenderEngine {
         let border_color = opacity_color(style.border_color, style.opacity);
         let content_color = opacity_color(style.color, style.opacity);
 
+        self.draw_box_shadow(
+            buffer,
+            bounds,
+            style.border_radius.top_left * scale,
+            style.box_shadow,
+            clip,
+        );
+        self.apply_backdrop_filter(
+            buffer,
+            bounds,
+            style.border_radius.top_left * scale,
+            style.backdrop_filter,
+            node_clip,
+        );
+
         if background_color.a > 0 {
             let radius = style.border_radius.top_left * scale;
-            if radius > 0.5 {
-                fill_rounded_rect_clipped(buffer, bounds, radius, background_color, node_clip);
+            let paint_clip = if style.filter.is_none() {
+                node_clip
             } else {
-                fill_rect_clipped(buffer, bounds, background_color, node_clip);
+                clip
+            };
+            if radius > 0.5 {
+                self.fill_rounded_rect_clipped_with_filter(
+                    buffer,
+                    bounds,
+                    radius,
+                    background_color,
+                    paint_clip,
+                    style.filter,
+                );
+            } else {
+                self.fill_rect_clipped_with_filter(
+                    buffer,
+                    bounds,
+                    background_color,
+                    paint_clip,
+                    style.filter,
+                );
             }
         }
 
-        draw_border_clipped(
+        self.draw_border_clipped(
             buffer,
             bounds,
             &style.border_width,
@@ -359,22 +392,49 @@ impl FrontendRenderEngine {
         let w = bounds.width;
         let h = bounds.height;
 
+        self.draw_box_shadow(
+            buffer,
+            bounds,
+            style.border_radius * scale,
+            style.box_shadow,
+            clip,
+        );
+        self.apply_backdrop_filter(
+            buffer,
+            bounds,
+            style.border_radius * scale,
+            style.backdrop_filter,
+            node_clip,
+        );
+
         if style.background_color.a > 0 {
             let radius = style.border_radius * scale;
+            let paint_clip = if style.filter.is_none() {
+                node_clip
+            } else {
+                clip
+            };
             if radius > 0.5 {
-                fill_rounded_rect_clipped(
+                self.fill_rounded_rect_clipped_with_filter(
                     buffer,
                     bounds,
                     radius,
                     style.background_color,
-                    node_clip,
+                    paint_clip,
+                    style.filter,
                 );
             } else {
-                fill_rect_clipped(buffer, bounds, style.background_color, node_clip);
+                self.fill_rect_clipped_with_filter(
+                    buffer,
+                    bounds,
+                    style.background_color,
+                    paint_clip,
+                    style.filter,
+                );
             }
         }
 
-        draw_border_clipped(
+        self.draw_border_clipped(
             buffer,
             bounds,
             &style.border_width,
@@ -400,6 +460,74 @@ impl FrontendRenderEngine {
             DisplayPaintContent::None => {}
         }
     }
+    fn draw_border_clipped(
+        &self,
+        buffer: &mut PixelBuffer,
+        bounds: ClipRect,
+        border_widths: &Edges,
+        radius: f32,
+        color: Color,
+        scale: f32,
+        clip: ClipRect,
+    ) {
+        if border_widths.top <= 0.0 || color.a == 0 {
+            return;
+        }
+
+        let border_width = (border_widths.top * scale).max(1.0) as i32;
+        if self.stroke_rounded_rect_clipped(buffer, bounds, radius, border_width, color, clip) {
+            return;
+        }
+
+        let x = bounds.x;
+        let y = bounds.y;
+        let w = bounds.width;
+        let h = bounds.height;
+        self.fill_rect_clipped(
+            buffer,
+            ClipRect {
+                x,
+                y,
+                width: w,
+                height: border_width,
+            },
+            color,
+            clip,
+        );
+        self.fill_rect_clipped(
+            buffer,
+            ClipRect {
+                x,
+                y: y + h.saturating_sub(border_width),
+                width: w,
+                height: border_width,
+            },
+            color,
+            clip,
+        );
+        self.fill_rect_clipped(
+            buffer,
+            ClipRect {
+                x,
+                y,
+                width: border_width,
+                height: h,
+            },
+            color,
+            clip,
+        );
+        self.fill_rect_clipped(
+            buffer,
+            ClipRect {
+                x: x + w.saturating_sub(border_width),
+                y,
+                width: border_width,
+                height: h,
+            },
+            color,
+            clip,
+        );
+    }
 }
 
 fn scaled_display_node_bounds(node: &DisplayPaintNode, scale: f32) -> ClipRect {
@@ -418,72 +546,4 @@ fn scaled_display_clip(clip: DisplayListClip, scale: f32) -> ClipRect {
         width: (clip.width as f32 * scale).round().max(0.0) as i32,
         height: (clip.height as f32 * scale).round().max(0.0) as i32,
     }
-}
-
-fn draw_border_clipped(
-    buffer: &mut PixelBuffer,
-    bounds: ClipRect,
-    border_widths: &Edges,
-    radius: f32,
-    color: Color,
-    scale: f32,
-    clip: ClipRect,
-) {
-    if border_widths.top <= 0.0 || color.a == 0 {
-        return;
-    }
-
-    let border_width = (border_widths.top * scale).max(1.0) as i32;
-    if stroke_rounded_rect_clipped(buffer, bounds, radius, border_width, color, clip) {
-        return;
-    }
-
-    let x = bounds.x;
-    let y = bounds.y;
-    let w = bounds.width;
-    let h = bounds.height;
-    fill_rect_clipped(
-        buffer,
-        ClipRect {
-            x,
-            y,
-            width: w,
-            height: border_width,
-        },
-        color,
-        clip,
-    );
-    fill_rect_clipped(
-        buffer,
-        ClipRect {
-            x,
-            y: y + h.saturating_sub(border_width),
-            width: w,
-            height: border_width,
-        },
-        color,
-        clip,
-    );
-    fill_rect_clipped(
-        buffer,
-        ClipRect {
-            x,
-            y,
-            width: border_width,
-            height: h,
-        },
-        color,
-        clip,
-    );
-    fill_rect_clipped(
-        buffer,
-        ClipRect {
-            x: x + w.saturating_sub(border_width),
-            y,
-            width: border_width,
-            height: h,
-        },
-        color,
-        clip,
-    );
 }

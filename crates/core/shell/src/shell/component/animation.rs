@@ -12,8 +12,8 @@ use mesh_core_animation::{
 };
 use mesh_core_component::style as component_style;
 use mesh_core_elements::{
-    Corners, Dimension, Edges, StyleResolver, Transform2D, TransitionEasing, TransitionStyle,
-    WidgetNode,
+    BoxShadow, Corners, Dimension, Edges, StyleResolver, Transform2D, TransitionEasing,
+    TransitionStyle, VisualFilter, WidgetNode,
     style::{AnimationPlayState, Color},
 };
 
@@ -36,6 +36,9 @@ pub(super) struct AnimatedVisualStyle {
     padding: Edges,
     margin: Edges,
     transform: Transform2D,
+    box_shadow: BoxShadow,
+    filter: VisualFilter,
+    backdrop_filter: VisualFilter,
     font_size: f32,
     letter_spacing: f32,
     line_height: f32,
@@ -65,6 +68,9 @@ impl AnimatedVisualStyle {
             padding: s.padding,
             margin: s.margin,
             transform: s.transform,
+            box_shadow: s.box_shadow,
+            filter: s.filter,
+            backdrop_filter: s.backdrop_filter,
             font_size: s.font_size,
             letter_spacing: s.letter_spacing,
             line_height: s.line_height,
@@ -93,6 +99,9 @@ impl AnimatedVisualStyle {
         s.padding = self.padding;
         s.margin = self.margin;
         s.transform = self.transform;
+        s.box_shadow = self.box_shadow;
+        s.filter = self.filter;
+        s.backdrop_filter = self.backdrop_filter;
         s.font_size = self.font_size;
         s.letter_spacing = self.letter_spacing;
         s.line_height = self.line_height;
@@ -125,6 +134,13 @@ impl AnimatedVisualStyle {
             padding: self.padding.lerp(target.padding, progress),
             margin: self.margin.lerp(target.margin, progress),
             transform: self.transform.lerp(target.transform, progress),
+            box_shadow: lerp_box_shadow(self.box_shadow, target.box_shadow, progress),
+            filter: lerp_visual_filter(self.filter, target.filter, progress),
+            backdrop_filter: lerp_visual_filter(
+                self.backdrop_filter,
+                target.backdrop_filter,
+                progress,
+            ),
             font_size: self.font_size.lerp(target.font_size, progress),
             letter_spacing: self.letter_spacing.lerp(target.letter_spacing, progress),
             line_height: self.line_height.lerp(target.line_height, progress),
@@ -196,6 +212,17 @@ impl AnimatedVisualStyle {
                 props.animates_transform(),
                 previous.transform,
                 desired.transform,
+            ),
+            box_shadow: pick(
+                props.animates_box_shadow(),
+                previous.box_shadow,
+                desired.box_shadow,
+            ),
+            filter: pick(props.animates_filter(), previous.filter, desired.filter),
+            backdrop_filter: pick(
+                props.animates_backdrop_filter(),
+                previous.backdrop_filter,
+                desired.backdrop_filter,
             ),
             font_size: pick(
                 props.animates_font_size(),
@@ -645,5 +672,22 @@ fn lerp_option_f32(from: Option<f32>, to: Option<f32>, progress: f32) -> Option<
     match (from, to) {
         (Some(a), Some(b)) => Some(a.lerp(b, progress)),
         _ => to,
+    }
+}
+
+fn lerp_box_shadow(from: BoxShadow, to: BoxShadow, progress: f32) -> BoxShadow {
+    BoxShadow {
+        offset_x: from.offset_x.lerp(to.offset_x, progress),
+        offset_y: from.offset_y.lerp(to.offset_y, progress),
+        blur_radius: from.blur_radius.lerp(to.blur_radius, progress),
+        spread_radius: from.spread_radius.lerp(to.spread_radius, progress),
+        color: from.color.lerp(to.color, progress),
+        inset: if progress < 0.5 { from.inset } else { to.inset },
+    }
+}
+
+fn lerp_visual_filter(from: VisualFilter, to: VisualFilter, progress: f32) -> VisualFilter {
+    VisualFilter {
+        blur_radius: from.blur_radius.lerp(to.blur_radius, progress),
     }
 }

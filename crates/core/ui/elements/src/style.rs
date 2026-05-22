@@ -116,6 +116,9 @@ mod tests {
             "transition-duration",
             "transition-delay",
             "transition-timing-function",
+            "box-shadow",
+            "filter",
+            "backdrop-filter",
             "animation",
             "animation-name",
             "animation-duration",
@@ -142,6 +145,9 @@ mod tests {
             "padding",
             "font-size",
             "inset",
+            "box-shadow",
+            "filter",
+            "backdrop-filter",
         ] {
             assert!(is_transition_safe_keyframe_property(property), "{property}");
         }
@@ -149,7 +155,7 @@ mod tests {
 
     #[test]
     fn keyframe_property_helper_rejects_unsupported_properties() {
-        for property in ["filter", "box-shadow", "grid-template-columns", "display"] {
+        for property in ["grid-template-columns", "display"] {
             assert!(
                 !is_transition_safe_keyframe_property(property),
                 "{property}"
@@ -284,6 +290,51 @@ mod tests {
                 a: 255
             }
         );
+    }
+
+    #[test]
+    fn resolve_paint_effects_from_rules() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![
+                mesh_core_component::style::Declaration {
+                    property: "box-shadow".to_string(),
+                    value: StyleValue::Literal("2px 4px 8px 1px #00000080".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "filter".to_string(),
+                    value: StyleValue::Literal("blur(3px)".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "backdrop-filter".to_string(),
+                    value: StyleValue::Literal("blur(5px)".to_string()),
+                },
+            ],
+            container_query: None,
+        }];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.box_shadow.offset_x, 2.0);
+        assert_eq!(style.box_shadow.offset_y, 4.0);
+        assert_eq!(style.box_shadow.blur_radius, 8.0);
+        assert_eq!(style.box_shadow.spread_radius, 1.0);
+        assert_eq!(
+            style.box_shadow.color,
+            Color::from_hex("#00000080").unwrap()
+        );
+        assert_eq!(style.filter.blur_radius, 3.0);
+        assert_eq!(style.backdrop_filter.blur_radius, 5.0);
     }
 
     #[test]

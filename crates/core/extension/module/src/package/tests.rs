@@ -493,11 +493,17 @@ fn shipped_module_graph_loads_repo_module_fixture() {
 
     assert_eq!(graph.frontend_modules().len(), 2);
     assert_eq!(
-        graph.module("@mesh/navigation-bar").unwrap().manifest_source,
+        graph
+            .module("@mesh/navigation-bar")
+            .unwrap()
+            .manifest_source,
         ModuleManifestSource::CanonicalModuleJson
     );
     assert_eq!(
-        graph.module("@mesh/audio-interface").unwrap().manifest_source,
+        graph
+            .module("@mesh/audio-interface")
+            .unwrap()
+            .manifest_source,
         ModuleManifestSource::CanonicalModuleJson
     );
     assert_eq!(
@@ -560,10 +566,8 @@ fn shipped_module_graph_loads_repo_module_fixture() {
 #[test]
 fn shipped_module_diagnostics_report_missing_navigation_icon() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
-    let mut navigation = load_module_manifest(
-        &workspace_root.join("modules/frontend/navigation-bar"),
-    )
-    .unwrap();
+    let mut navigation =
+        load_module_manifest(&workspace_root.join("modules/frontend/navigation-bar")).unwrap();
     navigation
         .manifest
         .mesh

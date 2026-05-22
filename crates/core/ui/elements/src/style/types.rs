@@ -101,6 +101,9 @@ const SUPPORTED_CSS_PROPERTIES: &[&str] = &[
     "animation-play-state",
     "transform",
     "transform-origin",
+    "box-shadow",
+    "filter",
+    "backdrop-filter",
 ];
 
 pub fn supported_css_properties() -> &'static [&'static str] {
@@ -132,6 +135,9 @@ pub struct ComputedStyle {
     pub border_radius: Corners,
     pub opacity: f32,
     pub transform: Transform2D,
+    pub box_shadow: BoxShadow,
+    pub filter: VisualFilter,
+    pub backdrop_filter: VisualFilter,
     pub transition: TransitionStyle,
     pub animation: AnimationStyle,
     pub overflow_x: Overflow,
@@ -193,6 +199,9 @@ impl Default for ComputedStyle {
             border_radius: Corners::zero(),
             opacity: 1.0,
             transform: Transform2D::IDENTITY,
+            box_shadow: BoxShadow::NONE,
+            filter: VisualFilter::NONE,
+            backdrop_filter: VisualFilter::NONE,
             transition: TransitionStyle::default(),
             animation: AnimationStyle::default(),
             overflow_x: Overflow::Visible,
@@ -351,6 +360,9 @@ pub struct TransitionProperties {
     pub padding: bool,
     pub margin: bool,
     pub transform: bool,
+    pub box_shadow: bool,
+    pub filter: bool,
+    pub backdrop_filter: bool,
     pub font_size: bool,
     pub letter_spacing: bool,
     pub line_height: bool,
@@ -384,6 +396,9 @@ impl TransitionProperties {
             padding: true,
             margin: true,
             transform: true,
+            box_shadow: true,
+            filter: true,
+            backdrop_filter: true,
             font_size: true,
             letter_spacing: true,
             line_height: true,
@@ -437,6 +452,18 @@ impl TransitionProperties {
 
     pub fn animates_transform(self) -> bool {
         self.all || self.transform
+    }
+
+    pub fn animates_box_shadow(self) -> bool {
+        self.all || self.box_shadow
+    }
+
+    pub fn animates_filter(self) -> bool {
+        self.all || self.filter
+    }
+
+    pub fn animates_backdrop_filter(self) -> bool {
+        self.all || self.backdrop_filter
     }
 
     pub fn animates_min_width(self) -> bool {
@@ -516,6 +543,60 @@ pub struct Transform2D {
     pub scale_x: f32,
     pub scale_y: f32,
     pub rotation: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BoxShadow {
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub blur_radius: f32,
+    pub spread_radius: f32,
+    pub color: Color,
+    pub inset: bool,
+}
+
+impl BoxShadow {
+    pub const NONE: Self = Self {
+        offset_x: 0.0,
+        offset_y: 0.0,
+        blur_radius: 0.0,
+        spread_radius: 0.0,
+        color: Color::TRANSPARENT,
+        inset: false,
+    };
+
+    pub fn is_none(self) -> bool {
+        self.color.a == 0
+            || (self.offset_x == 0.0
+                && self.offset_y == 0.0
+                && self.blur_radius == 0.0
+                && self.spread_radius == 0.0)
+    }
+}
+
+impl Default for BoxShadow {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VisualFilter {
+    pub blur_radius: f32,
+}
+
+impl VisualFilter {
+    pub const NONE: Self = Self { blur_radius: 0.0 };
+
+    pub fn is_none(self) -> bool {
+        self.blur_radius <= 0.0
+    }
+}
+
+impl Default for VisualFilter {
+    fn default() -> Self {
+        Self::NONE
+    }
 }
 
 impl Transform2D {

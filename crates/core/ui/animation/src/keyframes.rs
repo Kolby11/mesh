@@ -236,7 +236,7 @@ impl ActiveKeyframeAnimation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mesh_core_elements::{Corners, Edges, Transform2D, style::Color};
+    use mesh_core_elements::{BoxShadow, Corners, Edges, Transform2D, VisualFilter, style::Color};
 
     fn style(opacity: f32, translate_x: f32) -> AnimatableStyle {
         AnimatableStyle {
@@ -258,6 +258,9 @@ mod tests {
                 translate_x,
                 ..Transform2D::IDENTITY
             },
+            box_shadow: BoxShadow::NONE,
+            filter: VisualFilter::NONE,
+            backdrop_filter: VisualFilter::NONE,
             font_size: 14.0,
             letter_spacing: 0.0,
             line_height: 1.4,

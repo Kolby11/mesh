@@ -147,10 +147,10 @@ mod tests {
         DisplayIconPaint, DisplayInputPaint, DisplayListClip, DisplayPaintNode, DisplayPaintStyle,
         DisplayScrollbars, DisplaySliderPaint,
     };
-    use mesh_core_elements::LayoutRect;
     use mesh_core_elements::style::{
         Color, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
     };
+    use mesh_core_elements::{BoxShadow, LayoutRect, VisualFilter};
 
     fn base_style() -> DisplayPaintStyle {
         DisplayPaintStyle {
@@ -170,6 +170,9 @@ mod tests {
             text_overflow: TextOverflow::Clip,
             text_direction: TextDirection::Ltr,
             opacity: 1.0,
+            box_shadow: BoxShadow::NONE,
+            filter: VisualFilter::NONE,
+            backdrop_filter: VisualFilter::NONE,
             icon_fill: None,
             icon_weight: None,
             icon_grade: None,

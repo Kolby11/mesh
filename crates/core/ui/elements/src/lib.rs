@@ -29,10 +29,10 @@ pub use element::{
 pub use events::{EventDispatcher, InputState, Modifiers, RawInputEvent, UiEvent};
 pub use layout::{IntrinsicLayoutCache, LayoutEngine, LayoutRect, TextMeasurer};
 pub use style::{
-    AlignContent, AlignItems, AlignSelf, Color, ComputedStyle, Corners, Dimension, Display, Edges,
-    FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow, Position, StyleContext,
-    StyleResolver, TextAlign, TextDirection, TextOverflow, Transform2D, TransitionEasing,
-    TransitionProperties, TransitionStyle,
+    AlignContent, AlignItems, AlignSelf, BoxShadow, Color, ComputedStyle, Corners, Dimension,
+    Display, Edges, FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow, Position,
+    StyleContext, StyleResolver, TextAlign, TextDirection, TextOverflow, Transform2D,
+    TransitionEasing, TransitionProperties, TransitionStyle, VisualFilter,
 };
 pub use tree::{ElementState, NodeId, WidgetNode};
 

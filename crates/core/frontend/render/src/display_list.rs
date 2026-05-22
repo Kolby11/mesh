@@ -5,6 +5,7 @@ use std::path::Path;
 use mesh_core_elements::style::{
     Color, Display, Edges, Overflow, TextAlign, TextDirection, TextOverflow, Visibility,
 };
+use mesh_core_elements::{BoxShadow, VisualFilter};
 use mesh_core_elements::{LayoutRect, NodeId, WidgetNode};
 
 use crate::RenderObjectDirtySummary;
@@ -211,6 +212,9 @@ pub struct DisplayPaintStyle {
     pub text_overflow: TextOverflow,
     pub text_direction: TextDirection,
     pub opacity: f32,
+    pub box_shadow: BoxShadow,
+    pub filter: VisualFilter,
+    pub backdrop_filter: VisualFilter,
     pub icon_fill: Option<f32>,
     pub icon_weight: Option<f32>,
     pub icon_grade: Option<f32>,
@@ -890,7 +894,8 @@ fn collect_paint_commands(
     let paint_node = build_paint_node(node, offset_x, offset_y);
 
     let bounds = node_clip_for(&paint_node);
-    let node_clip = intersect_display_clip(clip, bounds);
+    let visual_bounds = visual_clip_for(&paint_node);
+    let node_clip = intersect_display_clip(clip, visual_bounds);
     if node_clip.width <= 0 || node_clip.height <= 0 {
         pruning.record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, false), true);
         return;
@@ -917,7 +922,7 @@ fn collect_paint_commands(
     let child_clip = if node.computed_style.overflow_x.clips_contents()
         || node.computed_style.overflow_y.clips_contents()
     {
-        node_clip
+        intersect_display_clip(clip, bounds)
     } else {
         clip
     };
@@ -1046,7 +1051,8 @@ fn build_paint_subtree(
     let offset_y = offset_y + transform.translate_y;
     let paint_node = build_paint_node(node, offset_x, offset_y);
     let bounds = node_clip_for(&paint_node);
-    let node_clip = intersect_display_clip(clip, bounds);
+    let visual_bounds = visual_clip_for(&paint_node);
+    let node_clip = intersect_display_clip(clip, visual_bounds);
     if node_clip.width <= 0 || node_clip.height <= 0 {
         let mut subtree = RetainedPaintSubtree::default();
         subtree
@@ -1079,7 +1085,7 @@ fn build_paint_subtree(
     let child_clip = if node.computed_style.overflow_x.clips_contents()
         || node.computed_style.overflow_y.clips_contents()
     {
-        node_clip
+        intersect_display_clip(clip, bounds)
     } else {
         clip
     };
@@ -1250,8 +1256,43 @@ fn node_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
     }
 }
 
+fn visual_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
+    let mut left = node.layout.x;
+    let mut top = node.layout.y;
+    let mut right = node.layout.x + node.layout.width;
+    let mut bottom = node.layout.y + node.layout.height;
+    let shadow = node.style.box_shadow;
+    if !shadow.is_none() && !shadow.inset {
+        let spread = shadow.spread_radius;
+        let blur_pad = shadow.blur_radius * 3.0;
+        left = left.min(node.layout.x + shadow.offset_x - spread - blur_pad);
+        top = top.min(node.layout.y + shadow.offset_y - spread - blur_pad);
+        right = right.max(node.layout.x + node.layout.width + shadow.offset_x + spread + blur_pad);
+        bottom =
+            bottom.max(node.layout.y + node.layout.height + shadow.offset_y + spread + blur_pad);
+    }
+    let filter_pad = node
+        .style
+        .filter
+        .blur_radius
+        .max(node.style.backdrop_filter.blur_radius)
+        * 3.0;
+    if filter_pad > 0.0 {
+        left -= filter_pad;
+        top -= filter_pad;
+        right += filter_pad;
+        bottom += filter_pad;
+    }
+    DisplayListClip {
+        x: left.floor() as i32,
+        y: top.floor() as i32,
+        width: (right - left).ceil().max(0.0) as i32,
+        height: (bottom - top).ceil().max(0.0) as i32,
+    }
+}
+
 fn command_bounds(command: &DisplayPaintCommand) -> DamageRect {
-    let bounds = node_clip_for(&command.node);
+    let bounds = visual_clip_for(&command.node);
     let clip = intersect_display_clip(bounds, command.clip);
     DamageRect {
         x: clip.x.max(0) as u32,
@@ -1380,6 +1421,9 @@ fn build_paint_node(node: &WidgetNode, offset_x: f32, offset_y: f32) -> DisplayP
             text_overflow: node.computed_style.text_overflow,
             text_direction: node.computed_style.text_direction,
             opacity,
+            box_shadow: node.computed_style.box_shadow,
+            filter: node.computed_style.filter,
+            backdrop_filter: node.computed_style.backdrop_filter,
             icon_fill: node.computed_style.icon_fill,
             icon_weight: node.computed_style.icon_weight,
             icon_grade: node.computed_style.icon_grade,
@@ -1610,10 +1654,35 @@ fn damage_rect_for_node_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> O
     let layout = transformed_layout_at(node, offset_x, offset_y);
     let left = layout.x;
     let top = layout.y;
+    let mut left = left;
+    let mut top = top;
+    let mut right = left + layout.width;
+    let mut bottom = top + layout.height;
+    let shadow = node.computed_style.box_shadow;
+    if !shadow.is_none() && !shadow.inset {
+        let spread = shadow.spread_radius;
+        let blur_pad = shadow.blur_radius * 3.0;
+        left = left.min(layout.x + shadow.offset_x - spread - blur_pad);
+        top = top.min(layout.y + shadow.offset_y - spread - blur_pad);
+        right = right.max(layout.x + layout.width + shadow.offset_x + spread + blur_pad);
+        bottom = bottom.max(layout.y + layout.height + shadow.offset_y + spread + blur_pad);
+    }
+    let filter_pad = node
+        .computed_style
+        .filter
+        .blur_radius
+        .max(node.computed_style.backdrop_filter.blur_radius)
+        * 3.0;
+    if filter_pad > 0.0 {
+        left -= filter_pad;
+        top -= filter_pad;
+        right += filter_pad;
+        bottom += filter_pad;
+    }
     let x = left.floor().max(0.0) as u32;
     let y = top.floor().max(0.0) as u32;
-    let right = (left + layout.width).ceil().max(0.0) as u32;
-    let bottom = (top + layout.height).ceil().max(0.0) as u32;
+    let right = right.ceil().max(0.0) as u32;
+    let bottom = bottom.ceil().max(0.0) as u32;
     Some(DamageRect {
         x,
         y,
@@ -1702,6 +1771,17 @@ fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
         .hash(&mut hasher);
     node.computed_style.padding.left.to_bits().hash(&mut hasher);
     node.computed_style.opacity.to_bits().hash(&mut hasher);
+    hash_box_shadow(node.computed_style.box_shadow, &mut hasher);
+    node.computed_style
+        .filter
+        .blur_radius
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style
+        .backdrop_filter
+        .blur_radius
+        .to_bits()
+        .hash(&mut hasher);
     node.computed_style.font_family.hash(&mut hasher);
     node.computed_style.font_size.to_bits().hash(&mut hasher);
     node.computed_style.font_weight.hash(&mut hasher);
@@ -1752,7 +1832,30 @@ fn batch_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
     node.computed_style.color.a.hash(&mut hasher);
     node.computed_style.font_family.hash(&mut hasher);
     node.computed_style.font_size.to_bits().hash(&mut hasher);
+    hash_box_shadow(node.computed_style.box_shadow, &mut hasher);
+    node.computed_style
+        .filter
+        .blur_radius
+        .to_bits()
+        .hash(&mut hasher);
+    node.computed_style
+        .backdrop_filter
+        .blur_radius
+        .to_bits()
+        .hash(&mut hasher);
     hasher.finish()
+}
+
+fn hash_box_shadow(shadow: BoxShadow, hasher: &mut std::collections::hash_map::DefaultHasher) {
+    shadow.offset_x.to_bits().hash(hasher);
+    shadow.offset_y.to_bits().hash(hasher);
+    shadow.blur_radius.to_bits().hash(hasher);
+    shadow.spread_radius.to_bits().hash(hasher);
+    shadow.color.r.hash(hasher);
+    shadow.color.g.hash(hasher);
+    shadow.color.b.hash(hasher);
+    shadow.color.a.hash(hasher);
+    shadow.inset.hash(hasher);
 }
 
 fn hash_attribute(
@@ -1774,6 +1877,12 @@ fn batch_barrier(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> Option<Displa
     }
     if node.computed_style.opacity < 1.0 {
         return Some(DisplayBatchBarrier::Opacity);
+    }
+    if !node.computed_style.box_shadow.is_none()
+        || !node.computed_style.filter.is_none()
+        || !node.computed_style.backdrop_filter.is_none()
+    {
+        return Some(DisplayBatchBarrier::Translucency);
     }
     if node.computed_style.overflow_x.clips_contents()
         || node.computed_style.overflow_y.clips_contents()
@@ -1904,6 +2013,65 @@ mod tests {
         assert_eq!(metrics.entries_rebuilt, 1);
         assert_eq!(metrics.damage_area, 1_000);
         assert_eq!(metrics.skipped_paint_pixels, 9_000);
+    }
+
+    #[test]
+    fn display_list_selects_blurred_background_outside_layout_bounds() {
+        let mut root = node(1, "box", 20.0, 20.0, 20.0, 20.0);
+        root.computed_style.filter = VisualFilter { blur_radius: 4.0 };
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 80, 80, false, true);
+        let selected = list.select_paint_commands(
+            Some(DamageRect {
+                x: 10,
+                y: 24,
+                width: 2,
+                height: 2,
+            }),
+            DisplayListRepaintPolicy::MinimalDamage,
+        );
+
+        assert!(
+            selected
+                .commands()
+                .iter()
+                .any(|command| command.node.id == 1),
+            "blurred visual bounds should participate in sparse repaint selection"
+        );
+    }
+
+    #[test]
+    fn display_list_selects_box_shadow_outside_layout_bounds() {
+        let mut root = node(1, "box", 20.0, 20.0, 20.0, 20.0);
+        root.computed_style.box_shadow = BoxShadow {
+            offset_x: 10.0,
+            offset_y: 0.0,
+            blur_radius: 0.0,
+            spread_radius: 0.0,
+            color: Color::from_hex("#00000080").unwrap(),
+            inset: false,
+        };
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 80, 80, false, true);
+        let selected = list.select_paint_commands(
+            Some(DamageRect {
+                x: 44,
+                y: 24,
+                width: 2,
+                height: 2,
+            }),
+            DisplayListRepaintPolicy::MinimalDamage,
+        );
+
+        assert!(
+            selected
+                .commands()
+                .iter()
+                .any(|command| command.node.id == 1),
+            "box-shadow visual bounds should participate in sparse repaint selection"
+        );
     }
 
     #[test]

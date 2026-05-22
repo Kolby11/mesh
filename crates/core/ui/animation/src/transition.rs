@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use mesh_core_elements::{Corners, Dimension, Edges, TransitionStyle, WidgetNode, style::Color};
+use mesh_core_elements::{
+    BoxShadow, Corners, Dimension, Edges, TransitionStyle, VisualFilter, WidgetNode, style::Color,
+};
 
 use super::easing::{Easing, apply_easing};
 use super::interpolate::Interpolate;
@@ -26,6 +28,9 @@ pub struct AnimatableStyle {
     pub padding: Edges,
     pub margin: Edges,
     pub transform: mesh_core_elements::Transform2D,
+    pub box_shadow: BoxShadow,
+    pub filter: VisualFilter,
+    pub backdrop_filter: VisualFilter,
     pub font_size: f32,
     pub letter_spacing: f32,
     pub line_height: f32,
@@ -55,6 +60,9 @@ impl AnimatableStyle {
             padding: s.padding,
             margin: s.margin,
             transform: s.transform,
+            box_shadow: s.box_shadow,
+            filter: s.filter,
+            backdrop_filter: s.backdrop_filter,
             font_size: s.font_size,
             letter_spacing: s.letter_spacing,
             line_height: s.line_height,
@@ -83,6 +91,9 @@ impl AnimatableStyle {
         s.padding = self.padding;
         s.margin = self.margin;
         s.transform = self.transform;
+        s.box_shadow = self.box_shadow;
+        s.filter = self.filter;
+        s.backdrop_filter = self.backdrop_filter;
         s.font_size = self.font_size;
         s.letter_spacing = self.letter_spacing;
         s.line_height = self.line_height;
@@ -112,6 +123,13 @@ impl Interpolate for AnimatableStyle {
             padding: self.padding.lerp(other.padding, progress),
             margin: self.margin.lerp(other.margin, progress),
             transform: self.transform.lerp(other.transform, progress),
+            box_shadow: lerp_box_shadow(self.box_shadow, other.box_shadow, progress),
+            filter: lerp_visual_filter(self.filter, other.filter, progress),
+            backdrop_filter: lerp_visual_filter(
+                self.backdrop_filter,
+                other.backdrop_filter,
+                progress,
+            ),
             font_size: self.font_size.lerp(other.font_size, progress),
             letter_spacing: self.letter_spacing.lerp(other.letter_spacing, progress),
             line_height: self.line_height.lerp(other.line_height, progress),
@@ -192,6 +210,23 @@ fn lerp_option_f32(from: Option<f32>, to: Option<f32>, progress: f32) -> Option<
     }
 }
 
+fn lerp_box_shadow(from: BoxShadow, to: BoxShadow, progress: f32) -> BoxShadow {
+    BoxShadow {
+        offset_x: from.offset_x.lerp(to.offset_x, progress),
+        offset_y: from.offset_y.lerp(to.offset_y, progress),
+        blur_radius: from.blur_radius.lerp(to.blur_radius, progress),
+        spread_radius: from.spread_radius.lerp(to.spread_radius, progress),
+        color: from.color.lerp(to.color, progress),
+        inset: if progress < 0.5 { from.inset } else { to.inset },
+    }
+}
+
+fn lerp_visual_filter(from: VisualFilter, to: VisualFilter, progress: f32) -> VisualFilter {
+    VisualFilter {
+        blur_radius: from.blur_radius.lerp(to.blur_radius, progress),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,6 +274,9 @@ mod tests {
             padding: Edges::zero(),
             margin: Edges::zero(),
             transform: Transform2D::IDENTITY,
+            box_shadow: BoxShadow::NONE,
+            filter: VisualFilter::NONE,
+            backdrop_filter: VisualFilter::NONE,
             font_size: 10.0,
             letter_spacing: 0.0,
             line_height: 1.0,

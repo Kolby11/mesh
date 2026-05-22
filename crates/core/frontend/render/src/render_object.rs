@@ -286,6 +286,18 @@ fn material_hash(style: &ComputedStyle) -> u64 {
     style.border_radius.bottom_left.to_bits().hash(&mut hasher);
     format!("{:?}", style.display).hash(&mut hasher);
     style.z_index.hash(&mut hasher);
+    style.box_shadow.offset_x.to_bits().hash(&mut hasher);
+    style.box_shadow.offset_y.to_bits().hash(&mut hasher);
+    style.box_shadow.blur_radius.to_bits().hash(&mut hasher);
+    style.box_shadow.spread_radius.to_bits().hash(&mut hasher);
+    color_slot(style.box_shadow.color).hash(&mut hasher);
+    style.box_shadow.inset.hash(&mut hasher);
+    style.filter.blur_radius.to_bits().hash(&mut hasher);
+    style
+        .backdrop_filter
+        .blur_radius
+        .to_bits()
+        .hash(&mut hasher);
     hasher.finish()
 }
 

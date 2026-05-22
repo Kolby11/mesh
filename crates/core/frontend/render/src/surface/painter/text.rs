@@ -72,6 +72,7 @@ impl FrontendRenderEngine {
             scale,
         ) {
             render_selection_highlights(
+                self,
                 &self.text_renderer,
                 buffer,
                 tx as i32,
@@ -165,6 +166,7 @@ impl FrontendRenderEngine {
             scale,
         ) {
             render_display_selection_highlights(
+                self,
                 &self.text_renderer,
                 buffer,
                 tx as i32,
@@ -234,7 +236,7 @@ impl FrontendRenderEngine {
         let text_color = Color::from_hex("#e2d9f0").unwrap_or(Color::WHITE);
         let radius = (6.0 * scale).max(3.0);
 
-        fill_rounded_rect_clipped(
+        self.fill_rounded_rect_clipped(
             buffer,
             ClipRect {
                 x: tx - 1,
@@ -246,7 +248,7 @@ impl FrontendRenderEngine {
             border,
             full_clip,
         );
-        fill_rounded_rect_clipped(
+        self.fill_rounded_rect_clipped(
             buffer,
             ClipRect {
                 x: tx,
@@ -429,6 +431,7 @@ fn selection_geometry_for_display(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_selection_highlights(
+    paint_engine: &FrontendRenderEngine,
     renderer: &TextRenderer,
     buffer: &mut PixelBuffer,
     tx: i32,
@@ -466,7 +469,7 @@ pub(super) fn render_selection_highlights(
             height: highlight.height.ceil() as i32,
         };
         let highlight_clip = intersect_clip(clip, rect);
-        fill_rect_clipped(buffer, rect, selection_background, highlight_clip);
+        paint_engine.fill_rect_clipped(buffer, rect, selection_background, highlight_clip);
         renderer.render_clipped(
             display_text,
             &style.font_family,
@@ -486,6 +489,7 @@ pub(super) fn render_selection_highlights(
 
 #[allow(clippy::too_many_arguments)]
 fn render_display_selection_highlights(
+    paint_engine: &FrontendRenderEngine,
     renderer: &TextRenderer,
     buffer: &mut PixelBuffer,
     tx: i32,
@@ -524,7 +528,7 @@ fn render_display_selection_highlights(
             height: highlight.height.ceil() as i32,
         };
         let highlight_clip = intersect_clip(clip, rect);
-        fill_rect_clipped(buffer, rect, selection_background, highlight_clip);
+        paint_engine.fill_rect_clipped(buffer, rect, selection_background, highlight_clip);
         renderer.render_clipped(
             display_text,
             &style.font_family,

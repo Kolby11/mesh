@@ -88,7 +88,7 @@ impl FrontendRenderEngine {
                 None,
             );
             let caret_x = tx + text_width.round() as u32;
-            fill_rect_clipped(
+            self.fill_rect_clipped(
                 buffer,
                 ClipRect {
                     x: caret_x as i32,
@@ -170,7 +170,7 @@ impl FrontendRenderEngine {
                 None,
             );
             let caret_x = tx + text_width.round() as u32;
-            fill_rect_clipped(
+            self.fill_rect_clipped(
                 buffer,
                 ClipRect {
                     x: caret_x as i32,
@@ -233,7 +233,7 @@ impl FrontendRenderEngine {
             let track_y = y + track_margin;
             let track_h = (h - track_margin * 2).max(8);
 
-            fill_rect_clipped(
+            self.fill_rect_clipped(
                 buffer,
                 ClipRect {
                     x: track_x,
@@ -246,7 +246,7 @@ impl FrontendRenderEngine {
             );
 
             let active_h = ((track_h as f32) * (1.0 - pct)).round() as i32;
-            fill_rect_clipped(
+            self.fill_rect_clipped(
                 buffer,
                 ClipRect {
                     x: track_x,
@@ -260,7 +260,7 @@ impl FrontendRenderEngine {
 
             let thumb_y = track_y + active_h - thumb_radius;
             let thumb_x = x + w / 2 - thumb_radius;
-            fill_rounded_rect_clipped(
+            self.fill_rounded_rect_clipped(
                 buffer,
                 ClipRect {
                     x: thumb_x,
@@ -276,7 +276,7 @@ impl FrontendRenderEngine {
             let track_x = x + track_margin;
             let track_y = y + (h / 2) - (track_thickness / 2);
             let track_w = (w - track_margin * 2).max(8);
-            fill_rect_clipped(
+            self.fill_rect_clipped(
                 buffer,
                 ClipRect {
                     x: track_x,
@@ -289,7 +289,7 @@ impl FrontendRenderEngine {
             );
 
             let active_w = ((track_w as f32) * pct).round() as i32;
-            fill_rect_clipped(
+            self.fill_rect_clipped(
                 buffer,
                 ClipRect {
                     x: track_x,
@@ -303,7 +303,7 @@ impl FrontendRenderEngine {
 
             let thumb_x = track_x + active_w - thumb_radius;
             let thumb_y = y + h / 2 - thumb_radius;
-            fill_rounded_rect_clipped(
+            self.fill_rounded_rect_clipped(
                 buffer,
                 ClipRect {
                     x: thumb_x,
@@ -346,7 +346,7 @@ impl FrontendRenderEngine {
             let track_y = y + track_margin;
             let track_h = (h - track_margin * 2).max(8);
 
-            fill_rect_clipped(
+            self.fill_rect_clipped(
                 buffer,
                 ClipRect {
                     x: track_x,
@@ -359,7 +359,7 @@ impl FrontendRenderEngine {
             );
 
             let active_h = ((track_h as f32) * (1.0 - pct)).round() as i32;
-            fill_rect_clipped(
+            self.fill_rect_clipped(
                 buffer,
                 ClipRect {
                     x: track_x,
@@ -373,7 +373,7 @@ impl FrontendRenderEngine {
 
             let thumb_y = track_y + active_h - thumb_radius;
             let thumb_x = x + w / 2 - thumb_radius;
-            fill_rounded_rect_clipped(
+            self.fill_rounded_rect_clipped(
                 buffer,
                 ClipRect {
                     x: thumb_x,
@@ -389,7 +389,7 @@ impl FrontendRenderEngine {
             let track_x = x + track_margin;
             let track_y = y + (h / 2) - (track_thickness / 2);
             let track_w = (w - track_margin * 2).max(8);
-            fill_rect_clipped(
+            self.fill_rect_clipped(
                 buffer,
                 ClipRect {
                     x: track_x,
@@ -402,7 +402,7 @@ impl FrontendRenderEngine {
             );
 
             let active_w = ((track_w as f32) * pct).round() as i32;
-            fill_rect_clipped(
+            self.fill_rect_clipped(
                 buffer,
                 ClipRect {
                     x: track_x,
@@ -416,7 +416,7 @@ impl FrontendRenderEngine {
 
             let thumb_x = track_x + active_w - thumb_radius;
             let thumb_y = y + h / 2 - thumb_radius;
-            fill_rounded_rect_clipped(
+            self.fill_rounded_rect_clipped(
                 buffer,
                 ClipRect {
                     x: thumb_x,
@@ -565,7 +565,7 @@ impl FrontendRenderEngine {
                 width: thickness,
                 height: track_height,
             };
-            fill_rounded_rect_clipped(
+            self.fill_rounded_rect_clipped(
                 buffer,
                 track,
                 radius,
@@ -587,7 +587,7 @@ impl FrontendRenderEngine {
                 } else {
                     ((scroll_y / max_y.max(1.0)) * thumb_range).round() as i32
                 };
-            fill_rounded_rect_clipped(
+            self.fill_rounded_rect_clipped(
                 buffer,
                 ClipRect {
                     x: track.x,
@@ -612,7 +612,7 @@ impl FrontendRenderEngine {
                 width: track_width,
                 height: thickness,
             };
-            fill_rounded_rect_clipped(
+            self.fill_rounded_rect_clipped(
                 buffer,
                 track,
                 radius,
@@ -634,7 +634,7 @@ impl FrontendRenderEngine {
                 } else {
                     ((scroll_x / max_x.max(1.0)) * thumb_range).round() as i32
                 };
-            fill_rounded_rect_clipped(
+            self.fill_rounded_rect_clipped(
                 buffer,
                 ClipRect {
                     x: thumb_x,
@@ -690,7 +690,7 @@ impl FrontendRenderEngine {
                 width: thickness,
                 height: track_height,
             };
-            fill_rounded_rect_clipped(
+            self.fill_rounded_rect_clipped(
                 buffer,
                 track,
                 radius,
@@ -714,7 +714,7 @@ impl FrontendRenderEngine {
                     ((node.scrollbars.scroll_y / node.scrollbars.max_y.max(1.0)) * thumb_range)
                         .round() as i32
                 };
-            fill_rounded_rect_clipped(
+            self.fill_rounded_rect_clipped(
                 buffer,
                 ClipRect {
                     x: track.x,
@@ -739,7 +739,7 @@ impl FrontendRenderEngine {
                 width: track_width,
                 height: thickness,
             };
-            fill_rounded_rect_clipped(
+            self.fill_rounded_rect_clipped(
                 buffer,
                 track,
                 radius,
@@ -763,7 +763,7 @@ impl FrontendRenderEngine {
                     ((node.scrollbars.scroll_x / node.scrollbars.max_x.max(1.0)) * thumb_range)
                         .round() as i32
                 };
-            fill_rounded_rect_clipped(
+            self.fill_rounded_rect_clipped(
                 buffer,
                 ClipRect {
                     x: thumb_x,

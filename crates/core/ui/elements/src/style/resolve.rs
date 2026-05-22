@@ -815,6 +815,17 @@ fn apply_declaration(
             style.transform =
                 parse_transform(&resolver.resolve_value_with_variables(value, variables))
         }
+        "box-shadow" => {
+            style.box_shadow =
+                parse_box_shadow(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "filter" => {
+            style.filter = parse_filter(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "backdrop-filter" => {
+            style.backdrop_filter =
+                parse_filter(&resolver.resolve_value_with_variables(value, variables))
+        }
         "transition-duration" => {
             style.transition.duration_ms =
                 parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))

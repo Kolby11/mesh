@@ -256,6 +256,32 @@ fn surface_change_requires_fresh_configure(
         || previous.margin_left != next.margin_left
 }
 
+fn resolved_surface_size(entry: &SurfaceEntry, output_size: Option<(u32, u32)>) -> (u32, u32) {
+    resolved_surface_size_for_config(&entry.cfg, entry.width, entry.height, output_size)
+}
+
+fn resolved_surface_size_for_config(
+    cfg: &LayerSurfaceConfig,
+    configured_width: u32,
+    configured_height: u32,
+    output_size: Option<(u32, u32)>,
+) -> (u32, u32) {
+    let (output_width, output_height) = output_size.unwrap_or((0, 0));
+    let width = match cfg.edge {
+        Some(Edge::Top) | Some(Edge::Bottom) if cfg.width == 0 => {
+            configured_width.max(output_width).max(1)
+        }
+        _ => configured_width.max(1),
+    };
+    let height = match cfg.edge {
+        Some(Edge::Left) | Some(Edge::Right) if cfg.height == 0 => {
+            configured_height.max(output_height).max(1)
+        }
+        _ => configured_height.max(1),
+    };
+    (width, height)
+}
+
 fn create_surface_shm_buffer(
     pool: &mut SlotPool,
     width: u32,
@@ -620,7 +646,7 @@ impl LayerShellBackend {
             .surfaces
             .get(surface_id)
             .filter(|entry| entry.configured)
-            .map(|entry| (entry.width.max(1), entry.height.max(1)))
+            .map(|entry| resolved_surface_size(entry, self.output_logical_size()))
     }
 
     pub fn pump(&mut self) {
@@ -864,5 +890,33 @@ mod tests {
         assert!(surface_change_requires_fresh_configure(
             &previous, &next, false
         ));
+    }
+
+    #[test]
+    fn dynamic_top_surface_uses_output_width_when_configure_width_is_unspecified() {
+        let mut cfg = base_cfg();
+        cfg.edge = Some(Edge::Top);
+        cfg.width = 0;
+        cfg.height = 50;
+
+        assert_eq!(
+            resolved_surface_size_for_config(&cfg, 1, 50, Some((1920, 1080))),
+            (1920, 50),
+            "top bars with width=0 must paint across the output even when the compositor leaves configure width unspecified"
+        );
+    }
+
+    #[test]
+    fn dynamic_left_surface_uses_output_height_when_configure_height_is_unspecified() {
+        let mut cfg = base_cfg();
+        cfg.edge = Some(Edge::Left);
+        cfg.width = 56;
+        cfg.height = 0;
+
+        assert_eq!(
+            resolved_surface_size_for_config(&cfg, 56, 1, Some((1920, 1080))),
+            (56, 1080),
+            "left rails with height=0 must paint across the output height when the compositor leaves configure height unspecified"
+        );
     }
 }
