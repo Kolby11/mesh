@@ -411,6 +411,167 @@ fn display_list_primitive_direct_and_retained_box_emit_same_command_classes() {
 }
 
 #[test]
+fn painter_primitive_box_background_and_border_emit_rect_classes() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 1.0,
+            y: 1.0,
+            width: 18.0,
+            height: 16.0,
+        },
+        Color::from_hex("#114477").unwrap(),
+    );
+    root.computed_style.border_width = Edges::all(2.0);
+    root.computed_style.border_color = Color::from_hex("#eecc44").unwrap();
+
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let mut buffer = PixelBuffer::new(24, 24);
+    engine.render_tree(&root, &mut buffer, 1.0);
+
+    assert_eq!(
+        painter_command_classes(&recorded.recorded_commands()),
+        vec!["draw_rect", "draw_rounded_rect"]
+    );
+}
+
+#[test]
+fn painter_primitive_box_rounded_shadow_and_filters_emit_effect_classes() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 4.0,
+            y: 4.0,
+            width: 18.0,
+            height: 16.0,
+        },
+        Color::from_hex("#224466").unwrap(),
+    );
+    root.computed_style.border_radius.top_left = 6.0;
+    root.computed_style.box_shadow = BoxShadow {
+        offset_x: 2.0,
+        offset_y: 2.0,
+        blur_radius: 4.0,
+        spread_radius: 0.0,
+        color: Color::from_hex("#00000080").unwrap(),
+        inset: false,
+    };
+    root.computed_style.backdrop_filter = VisualFilter { blur_radius: 3.0 };
+    root.computed_style.filter = VisualFilter { blur_radius: 2.0 };
+
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let mut buffer = PixelBuffer::new(32, 32);
+    engine.render_tree(&root, &mut buffer, 1.0);
+
+    let classes = painter_command_classes(&recorded.recorded_commands());
+    assert_eq!(
+        classes,
+        vec!["draw_shadow", "apply_filter", "draw_rounded_rect"]
+    );
+    assert!(classes.contains(&"draw_shadow"));
+    assert!(classes.contains(&"apply_filter"));
+    assert!(classes.contains(&"draw_rounded_rect"));
+}
+
+#[test]
+fn painter_primitive_text_selection_highlight_uses_draw_rect_command() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 160.0,
+            height: 60.0,
+        },
+        Color::TRANSPARENT,
+    );
+    let mut text = text_node(
+        "selection proof text",
+        0.0,
+        0.0,
+        160.0,
+        60.0,
+        Color::from_hex("#111111").unwrap(),
+    );
+    text.attributes
+        .insert("_mesh_selection_background".into(), "#00ff00".into());
+    text.attributes
+        .insert("_mesh_selection_foreground".into(), "#ff00ff".into());
+    text.attributes
+        .insert("_mesh_selection_anchor_x".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_anchor_y".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_focus_x".into(), "1000.00".into());
+    text.attributes
+        .insert("_mesh_selection_focus_y".into(), "1000.00".into());
+    text.attributes
+        .insert("_mesh_selection_text_x".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_text_y".into(), "0.00".into());
+    root.children = vec![text];
+
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let mut buffer = PixelBuffer::new(180, 80);
+    engine.render_tree(&root, &mut buffer, 1.0);
+
+    assert!(
+        painter_command_classes(&recorded.recorded_commands()).contains(&"draw_rect"),
+        "selection highlight rectangles should route through the command backend"
+    );
+}
+
+#[test]
+fn painter_primitive_debug_overlay_bounds_use_draw_rect_commands() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 1.0,
+            y: 1.0,
+            width: 12.0,
+            height: 10.0,
+        },
+        Color::TRANSPARENT,
+    );
+    root.children = vec![node(
+        "box",
+        LayoutRect {
+            x: 2.0,
+            y: 2.0,
+            width: 6.0,
+            height: 4.0,
+        },
+        Color::TRANSPARENT,
+    )];
+
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let mut buffer = PixelBuffer::new(24, 24);
+    crate::surface::debug_overlay::DebugOverlay::new().paint_layout_bounds_with_engine(
+        &engine,
+        &root,
+        &mut buffer,
+        1.0,
+    );
+
+    let classes = painter_command_classes(&recorded.recorded_commands());
+    assert_eq!(
+        classes
+            .iter()
+            .filter(|class| **class == "draw_rect")
+            .count(),
+        8
+    );
+}
+
+#[test]
 fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose() {
     let backend = SkiaPaintBackend;
     let capabilities = backend.capabilities();

@@ -187,6 +187,9 @@ impl FrontendRenderEngine {
         shadow: BoxShadow,
         clip: ClipRect,
     ) {
+        if shadow.is_none() || shadow.inset {
+            return;
+        }
         self.execute_painter_commands(
             buffer,
             &[PainterCommand::DrawShadow {
@@ -206,6 +209,9 @@ impl FrontendRenderEngine {
         filter: VisualFilter,
         clip: ClipRect,
     ) {
+        if filter.is_none() {
+            return;
+        }
         self.execute_painter_commands(
             buffer,
             &[PainterCommand::ApplyFilter {
