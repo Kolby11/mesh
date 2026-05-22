@@ -10,7 +10,7 @@
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 51 | Painter Contract And Backend Boundary | 2/3 | In Progress|  |
+| 51 | Painter Contract And Backend Boundary | 3/3 | Complete   | 2026-05-22 |
 | 52 | Skia Shape Primitive Migration | Route core shape, stroke, rounded-rect, path, clipping, blend, and retained replay primitives through Skia-backed painter commands. | PAINT-03, SKIA-01, SKIA-04 | 5 |
 | 53 | Skia Effects, Layers, Gradients, And Images | Move shadows, blur/filter effects, saveLayer/layers, gradients, and image commands into Skia-owned primitives. | SKIA-02, SKIA-03, LAYER-01 | 5 |
 | 54 | Retained Damage, Stacking, And Backend Observability | Preserve retained ordering, visual-bounds damage, backend reversibility, diagnostics, and profiling through the new painter boundary. | LAYER-02, LAYER-03, BACKEND-03 | 5 |
