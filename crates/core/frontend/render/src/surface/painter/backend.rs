@@ -2,9 +2,7 @@ use super::*;
 use crate::surface::painter::geometry::rounded_rect_coverage;
 use mesh_core_elements::{BoxShadow, VisualFilter};
 use skia_safe::image_filters;
-use skia_safe::{
-    BlendMode, BlurStyle, MaskFilter, PaintStyle, RRect, Rect, TileMode, canvas::SaveLayerRec,
-};
+use skia_safe::{BlurStyle, MaskFilter, PaintStyle, RRect, Rect, TileMode, canvas::SaveLayerRec};
 
 #[allow(dead_code)]
 pub(crate) trait PaintBackend: Send + Sync {
@@ -775,33 +773,51 @@ impl SkiaPaintBackend {
         if clipped.width <= 0 || clipped.height <= 0 {
             return;
         }
-        buffer.with_skia_canvas(|canvas| {
-            let save_count = canvas.save();
-            canvas.clip_rect(
-                Rect::from_xywh(
-                    clipped.x as f32,
-                    clipped.y as f32,
-                    clipped.width as f32,
-                    clipped.height as f32,
-                ),
-                None,
-                false,
-            );
-            let mut paint = skia_paint(color, true);
-            paint.set_style(PaintStyle::Stroke);
-            paint.set_stroke_width(stroke_width as f32);
-            paint.set_blend_mode(BlendMode::SrcOver);
-            canvas.draw_rect(
-                Rect::from_xywh(
-                    rect.x as f32,
-                    rect.y as f32,
-                    rect.width as f32,
-                    rect.height as f32,
-                ),
-                &paint,
-            );
-            canvas.restore_to_count(save_count);
-        });
+        let stroke_width = stroke_width.min(rect.width.max(0)).min(rect.height.max(0));
+        self.fill_rect_impl(
+            buffer,
+            ClipRect {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: stroke_width,
+            },
+            color,
+            clip,
+        );
+        self.fill_rect_impl(
+            buffer,
+            ClipRect {
+                x: rect.x,
+                y: rect.y + rect.height.saturating_sub(stroke_width),
+                width: rect.width,
+                height: stroke_width,
+            },
+            color,
+            clip,
+        );
+        self.fill_rect_impl(
+            buffer,
+            ClipRect {
+                x: rect.x,
+                y: rect.y,
+                width: stroke_width,
+                height: rect.height,
+            },
+            color,
+            clip,
+        );
+        self.fill_rect_impl(
+            buffer,
+            ClipRect {
+                x: rect.x + rect.width.saturating_sub(stroke_width),
+                y: rect.y,
+                width: stroke_width,
+                height: rect.height,
+            },
+            color,
+            clip,
+        );
     }
 
     fn fill_shape(
