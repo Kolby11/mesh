@@ -1,103 +1,319 @@
-# Roadmap: MESH v1.10 Skia-Centric Painter API
+# Roadmap: MESH v1.10 Painter Engine
 
 ## Milestones
 
-- [ ] **v1.10 Skia-Centric Painter API** — Phases 51-55 planned
+- [ ] **v1.10 Painter Engine** — Phases 51-59 planned
 - [x] **v1.9 Renderer Library Integration** — Phases 46-50 shipped 2026-05-21
 - [x] **v1.8 Rendering Engine Architecture** — Phases 42-45 shipped 2026-05-18
+
+## Intent
+
+Build a bounded WebEngine/Qt-style painter engine for MESH: expressive enough
+for shell UI surfaces, CSS-like styling, animation, shadows, blur, layers,
+images, gradients, retained damage, and backend observability, but deliberately
+smaller than a browser engine. MESH keeps XML/.mesh parsing, CSS/token style
+resolution, layout, animation state, retained display-list ordering, damage,
+z-order, module boundaries, input, and presentation ownership. Skia owns
+low-level paint/raster behavior behind the painter backend boundary.
 
 ## Phase Summary
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 51 | Painter Contract And Backend Boundary | 3/3 | Complete    | 2026-05-22 |
-| 52 | Skia Shape Primitive Migration | Route core shape, stroke, rounded-rect, path, clipping, blend, and retained replay primitives through Skia-backed painter commands. | PAINT-03, SKIA-01, SKIA-04 | 5 |
-| 53 | Skia Effects, Layers, Gradients, And Images | Move shadows, blur/filter effects, saveLayer/layers, gradients, and image commands into Skia-owned primitives. | SKIA-02, SKIA-03, LAYER-01 | 5 |
-| 54 | Retained Damage, Stacking, And Backend Observability | Preserve retained ordering, visual-bounds damage, backend reversibility, diagnostics, and profiling through the new painter boundary. | LAYER-02, LAYER-03, BACKEND-03 | 5 |
-| 55 | Shipped-Surface Proof And Documentation | Prove the Skia-centric painter API on shipped surfaces and lock the WebEngine/Qt-style architecture docs. | VERIFY-01, VERIFY-02, VERIFY-03 | 5 |
+| 51 | Painter Contract And Backend Boundary | 3/3 | Complete | 2026-05-22 |
+| 52 | Style Profile And Lowering Compatibility | Lock the bounded XML/CSS/token style profile and lower supported style values into render-object/display-list intent without changing author-facing syntax. | STYLE-01, STYLE-02, STYLE-03 | 5 |
+| 53 | Element And Display-List Primitive Coverage | Ensure every supported element/control lowers into backend-neutral painter commands with retained identity and no helper-shaped bypasses. | ELEM-01, ELEM-02, PAINT-03 | 5 |
+| 54 | Skia Shape, Path, Text Highlight, And Border Migration | Route core geometry primitives through Skia-backed commands while preserving selection and current text handoff behavior. | SKIA-01, SKIA-04, TEXT-01 | 5 |
+| 55 | Effects, Layers, Shadows, Blur, Images, And Gradients | Implement the visual effects subset expected from a compact CSS renderer through explicit layer/effect/image/gradient commands. | EFFECT-01, EFFECT-02, EFFECT-03, LAYER-01 | 5 |
+| 56 | Animation And Transition Paint Integration | Preserve and extend supported CSS/token animation behavior through retained style, render-object, display-list, damage, and painter execution. | ANIM-01, ANIM-02, ANIM-03 | 5 |
+| 57 | Stacking, Clipping, Visual Bounds, And Damage | Make z-order, clipping, transformed/effect visual bounds, and retained repaint selection correct for the richer painter subset. | LAYER-02, LAYER-03, DAMAGE-01, DAMAGE-02 | 5 |
+| 58 | Backend Capabilities, Diagnostics, And Rollback | Make unsupported-feature behavior, backend choice, profiling, and rollback explicit enough for autonomous migration work. | BACKEND-03, OBS-01, OBS-02 | 5 |
+| 59 | Shipped-Surface Proof And Renderer Documentation | Prove the painter engine on shipped surfaces and update the author/internal architecture docs. | VERIFY-01, VERIFY-02, VERIFY-03 | 5 |
+
+## Autonomous Execution Rules
+
+These phases are intended to be planned and executed by LLM agents. Each
+generated phase plan should:
+
+- keep changes inside the files named by that phase context unless tests prove
+  a narrower adjacent edit is required;
+- include automated verification commands for every task;
+- preserve `.mesh` XML/CSS/token authoring compatibility unless the task
+  explicitly adds a diagnostic for unsupported syntax;
+- add diagnostics for unsupported combinations instead of silently dropping
+  visual behavior;
+- avoid moving layout, style resolution, animation scheduling, z-order, damage,
+  input, module, or presentation ownership into Skia;
+- keep Skia types out of retained display-list, render-object, and public style
+  data structures;
+- leave a rollback or compatibility path until shipped-surface proof accepts the
+  new behavior.
 
 ## Phases
 
 ### Phase 51: Painter Contract And Backend Boundary
 
-**Goal:** Define the extensible painter API that sits below the retained display list and above Skia/Vello-style backends.
+**Goal:** Define the extensible painter API that sits below the retained display
+list and above Skia/Vello-style backends.
 
 **Requirements:** PAINT-01, PAINT-02, BACKEND-01, BACKEND-02
 
+**Status:** Complete 2026-05-22.
+
 **Success criteria:**
-1. `mesh-core-render` has a documented painter command model covering push/pop clip, push/pop layer, rect, rounded rect, path, text, image, shadow, filter, and backend capability behavior.
-2. The painter API does not expose Skia-only types in retained display-list data or public render-object structures.
+1. `mesh-core-render` has a documented painter command model covering push/pop
+   clip, push/pop layer, rect, rounded rect, path, text, image, shadow, filter,
+   and backend capability behavior.
+2. The painter API does not expose Skia-only types in retained display-list data
+   or public render-object structures.
 3. Existing direct paint helper calls have a migration map to painter commands.
-4. Vello compatibility notes identify which commands can map cleanly, which need approximation, and which require future capability gates.
+4. Vello compatibility notes identify which commands can map cleanly, which need
+   approximation, and which require future capability gates.
 
-### Phase 52: Skia Shape Primitive Migration
+### Phase 52: Style Profile And Lowering Compatibility
 
-**Goal:** Make Skia own core raster primitives and remove MESH-owned software shape fallback behavior from authoritative painter paths.
+**Goal:** Make the current XML/.mesh, CSS-like parser, and token styling contract
+the source of truth for the painter engine's supported visual subset.
 
-**Requirements:** PAINT-03, SKIA-01, SKIA-04
+**Requirements:** STYLE-01, STYLE-02, STYLE-03
 
-**Success criteria:**
-1. Widget-tree painting and retained display-list replay both execute core shape primitives through the same painter backend boundary.
-2. Rect, rounded rect, path, stroke, antialiasing, clip, and blend behavior use Skia canvas/paint/path primitives instead of per-pixel MESH implementations.
-3. Border drawing uses backend stroke/fill commands and preserves current visual behavior on square and rounded borders.
-4. Legacy MESH raster helpers are removed from authoritative painter paths or clearly isolated as tests/compatibility utilities.
-5. Existing painter, display-list, and shipped-surface tests pass under the Nix graphics environment.
-
-### Phase 53: Skia Effects, Layers, Gradients, And Images
-
-**Goal:** Move visual effects and richer painter primitives into Skia-owned commands while preserving MESH style semantics.
-
-**Requirements:** SKIA-02, SKIA-03, LAYER-01
-
-**Success criteria:**
-1. Box shadows, filter blur, backdrop-filter blur, opacity, and blend effects lower into explicit painter effect/layer commands.
-2. Skia saveLayer/image-filter behavior owns supported layer effects rather than ad hoc MESH composition.
-3. Gradient and image commands are represented in the painter API and implemented through Skia where current style/data support exists.
-4. Unsupported effect combinations degrade through explicit diagnostics or capability records, not silent incorrect rendering.
-5. Effect tests cover visual pixels outside layout bounds and clipped/layered effect behavior.
-
-### Phase 54: Retained Damage, Stacking, And Backend Observability
-
-**Goal:** Keep retained rendering correctness and observability intact while the backend boundary changes.
-
-**Requirements:** LAYER-02, LAYER-03, BACKEND-03
+**Autonomous task seed:**
+1. Inventory supported style properties across `mesh-core-component`,
+   `mesh-core-elements`, theme tokens, and shipped module styles.
+2. Create a painter-style support matrix that classifies each property as
+   implemented, diagnostic-only, deferred, or out-of-scope.
+3. Ensure style resolution lowers painter-relevant values into retained
+   render-object/display-list data without Skia types.
+4. Add parser/resolver diagnostics for unsupported web-like properties instead
+   of accepting behavior MESH cannot render.
+5. Add regression fixtures proving existing XML/CSS/token styles still resolve.
 
 **Success criteria:**
-1. Damage and repaint selection include visual bounds from shadows, filters, layer effects, clips, and transformed descendants.
-2. MESH remains responsible for z-order, stacking order, node traversal, and display-list command ordering before backend execution.
-3. Backend selection and backend capability data are visible through renderer diagnostics or debug/profiling payloads.
-4. Partial repaint and full-surface fallback behavior remain deterministic and covered by tests.
-5. Rollback to the previous backend implementation remains possible during the milestone until Skia parity is accepted.
+1. A documented style profile defines the supported subset for color, size,
+   spacing, border, radius, opacity, transform, shadow, filter, image, gradient,
+   animation, and transition properties.
+2. Existing token references keep resolving through the current theme/token path.
+3. Unsupported or ambiguous browser CSS properties produce actionable diagnostics.
+4. Shipped navigation/audio styles compile without syntax or token regressions.
+5. Style data passed to render/display-list code remains backend-neutral.
 
-### Phase 55: Shipped-Surface Proof And Documentation
+### Phase 53: Element And Display-List Primitive Coverage
 
-**Goal:** Prove the Skia-centric painter API preserves shipped behavior and document the final architecture boundary.
+**Goal:** Ensure every supported MESH element/control emits retained painter
+intent through backend-neutral commands.
+
+**Requirements:** ELEM-01, ELEM-02, PAINT-03
+
+**Autonomous task seed:**
+1. Inventory element/control rendering paths in `mesh-core-elements`,
+   `mesh-core-render`, and shipped navigation/audio modules.
+2. Convert remaining helper-shaped widget/control paths into command-backed
+   lowering while preserving compatibility wrappers where needed.
+3. Add display-list command fixtures for box, text selection highlight, icon,
+   image-like primitives, slider/input/control fills, and debug overlay fills.
+4. Prove direct widget-tree painting and retained display-list replay produce the
+   same command classes for the same node/style inputs.
+5. Isolate or delete non-authoritative software helper code that duplicates Skia
+   primitives.
+
+**Success criteria:**
+1. Supported elements and controls lower into explicit painter commands.
+2. Retained `NodeId` identity, material hashes, and command ordering remain
+   MESH-owned.
+3. Helper-shaped paint calls no longer bypass the command backend on
+   authoritative paths.
+4. Widget/control tests cover both direct and retained replay paths.
+5. Existing shipped surfaces render through the command boundary.
+
+### Phase 54: Skia Shape, Path, Text Highlight, And Border Migration
+
+**Goal:** Make Skia authoritative for core shape rasterization while preserving
+MESH ownership of text layout/selection semantics.
+
+**Requirements:** SKIA-01, SKIA-04, TEXT-01
+
+**Autonomous task seed:**
+1. Implement Skia execution for rect, rounded rect, stroke, path, clip, blend,
+   and antialiasing commands.
+2. Migrate border drawing, focus rings, selection highlight rectangles, debug
+   fills, and basic control backgrounds to those commands.
+3. Preserve existing text measurement/drawing handoff; only route text-adjacent
+   highlight/background painting through Skia unless a task explicitly proves a
+   text primitive migration.
+4. Add pixel tests for square/rounded borders, clipped shapes, stroke widths,
+   path fills/strokes, and selection highlight fills.
+5. Remove or fence old software primitive fallbacks from production paths.
+
+**Success criteria:**
+1. Skia owns rasterization, antialiasing, paths, rounded rects, strokes, clipping,
+   and blend behavior for core primitives.
+2. Current selection and text behavior remains compatible with theme-owned
+   selection colors.
+3. Border and focus rendering retain current visual behavior.
+4. Shape/path tests pass under the Nix graphics environment.
+5. Legacy raster helpers are non-authoritative or test-only.
+
+### Phase 55: Effects, Layers, Shadows, Blur, Images, And Gradients
+
+**Goal:** Implement the compact CSS visual-effects subset expected from the MESH
+painter engine.
+
+**Requirements:** EFFECT-01, EFFECT-02, EFFECT-03, LAYER-01
+
+**Autonomous task seed:**
+1. Lower box shadows, text-adjacent backgrounds, opacity, filters,
+   backdrop-filter, blend mode, and clipping combinations into explicit
+   `PushLayer`/`PopLayer`, `DrawShadow`, `ApplyFilter`, image, and gradient
+   command sequences.
+2. Implement Skia saveLayer/image-filter behavior for supported effects.
+3. Add image and gradient source/lifetime rules that fit existing style/token
+   data and module asset boundaries.
+4. Emit diagnostics for unsupported effect combinations, excessive blur, missing
+   assets, or backend capability gaps.
+5. Add visual-bounds fixtures for pixels outside layout bounds.
+
+**Success criteria:**
+1. Shadows, blur, backdrop blur, opacity, blend, images, and gradients lower into
+   painter commands where supported.
+2. Skia owns supported layer/effect execution.
+3. Unsupported combinations are explicit through diagnostics or capability data.
+4. Visual bounds include shadow/filter/image/gradient output.
+5. Tests cover clipped, layered, and out-of-bounds effects.
+
+### Phase 56: Animation And Transition Paint Integration
+
+**Goal:** Make current CSS/token animation support drive retained painter updates
+without broad browser animation scope.
+
+**Requirements:** ANIM-01, ANIM-02, ANIM-03
+
+**Autonomous task seed:**
+1. Inventory supported animation/transition properties in
+   `mesh-core-ui-animation`, `mesh-core-elements`, and shell component runtime.
+2. Classify animatable properties into layout-affecting, paint-only,
+   layer/effect, and unsupported buckets.
+3. Route paint-only animation changes through retained render-object/display-list
+   invalidation without forcing unnecessary layout.
+4. Ensure animated shadows, opacity, transforms, colors, filters, and borders
+   update visual bounds and damage correctly.
+5. Add deterministic tests for interpolation, token keyframes, transition start
+   and cancellation, and repaint metrics.
+
+**Success criteria:**
+1. Existing theme/token animations remain compatible.
+2. Paint-only animations avoid full layout when geometry does not change.
+3. Animated visual bounds are included in damage.
+4. Unsupported animation properties produce diagnostics.
+5. Navigation/audio animation regressions stay within accepted behavior.
+
+### Phase 57: Stacking, Clipping, Visual Bounds, And Damage
+
+**Goal:** Preserve retained rendering correctness as the painter subset gains
+effects, layers, and animation.
+
+**Requirements:** LAYER-02, LAYER-03, DAMAGE-01, DAMAGE-02
+
+**Autonomous task seed:**
+1. Prove z-order and stacking order stay computed before backend execution.
+2. Expand visual bounds for shadows, filters, transforms, layers, images, and
+   animated effects.
+3. Update damage selection and partial-present logic to include effect overflow
+   and clipped descendants.
+4. Add diagnostics or fallback thresholds for pathological damage expansion.
+5. Add tests for overlapping elements, nested clips, animated effects, and
+   retained replay ordering.
+
+**Success criteria:**
+1. MESH retains z-order, stacking, node traversal, and command ordering.
+2. Damage includes pixels affected outside layout bounds.
+3. Partial repaint and full-surface fallback remain deterministic.
+4. Profiling counters distinguish changed layout, changed paint, effect overflow,
+   and fallback promotion.
+5. Retained display-list tests cover layered/effect ordering.
+
+### Phase 58: Backend Capabilities, Diagnostics, And Rollback
+
+**Goal:** Make painter-engine behavior inspectable enough for autonomous work and
+safe enough to continue migrating.
+
+**Requirements:** BACKEND-03, OBS-01, OBS-02
+
+**Autonomous task seed:**
+1. Publish backend id, capability records, unsupported features, and recent
+   painter diagnostics through existing debug/profiling payloads.
+2. Add feature flag or configuration wiring for backend selection/rollback where
+   the current architecture expects it.
+3. Ensure diagnostics include source node/style context where available without
+   polluting retained identity.
+4. Add proof tests for capability reporting, unsupported command diagnostics,
+   rollback path, and profiling payload shape.
+5. Document backend selection and rollback in renderer docs.
+
+**Success criteria:**
+1. Backend selection and capability data are visible in renderer diagnostics.
+2. Unsupported feature behavior is testable and non-fatal where possible.
+3. Rollback path remains documented until shipped-surface proof accepts Skia
+   parity.
+4. Debug/profiling payloads remain stable for existing inspector consumers.
+5. Capability tests gate future Vello compatibility.
+
+### Phase 59: Shipped-Surface Proof And Renderer Documentation
+
+**Goal:** Prove the painter engine against real MESH surfaces and lock the
+architecture docs for future LLM-run milestones.
 
 **Requirements:** VERIFY-01, VERIFY-02, VERIFY-03
 
+**Autonomous task seed:**
+1. Build an automated proof suite covering style profile, element lowering,
+   shapes, borders, shadows, blur, images, gradients, animations, damage, and
+   retained replay.
+2. Run shipped navigation bar and audio popover regressions with the painter
+   engine path enabled.
+3. Verify selection rendering, text handoff, profiling payloads, diagnostics,
+   and partial damage metrics.
+4. Update `crates/core/frontend/render/README.md`,
+   `docs/renderer-ownership.md`, and `docs/renderer-migration.md`.
+5. Finalize requirement traceability and mark deferred items for v1.11.
+
 **Success criteria:**
-1. Automated tests cover Skia-backed core shapes, rounded corners, strokes, paths, shadows, blur/filter effects, layer clipping, retained display-list replay, and supported image/gradient commands.
-2. Navigation bar and audio popover shipped-surface regressions pass with the new painter API.
-3. Selection rendering, text measurement/drawing handoff, profiling payloads, and damage metrics remain compatible with existing debug proof.
-4. Renderer ownership, renderer migration, and render crate docs describe the WebEngine/Qt-style split: MESH render engine, Skia painter backend, Vello future backend.
-5. Requirements traceability is complete and every v1.10 requirement is mapped to exactly one phase.
+1. Automated tests cover the supported painter-engine subset end to end.
+2. Shipped surfaces render without accepted regressions.
+3. Documentation distinguishes MESH render engine, style/layout/animation
+   ownership, Skia painter backend, presentation, and future Vello backend.
+4. Requirements traceability maps every v1.10 requirement to exactly one phase.
+5. Remaining web/CSS ambitions are captured as deferred bounded-profile work,
+   not implicit browser compatibility.
 
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 51. Painter Contract And Backend Boundary | v1.10 | 3/3 | Complete | 2026-05-22 |
-| 52. Skia Shape Primitive Migration | v1.10 | 0/? | Pending | — |
-| 53. Skia Effects, Layers, Gradients, And Images | v1.10 | 0/? | Pending | — |
-| 54. Retained Damage, Stacking, And Backend Observability | v1.10 | 0/? | Pending | — |
-| 55. Shipped-Surface Proof And Documentation | v1.10 | 0/? | Pending | — |
+| 52. Style Profile And Lowering Compatibility | v1.10 | 0/? | Pending | — |
+| 53. Element And Display-List Primitive Coverage | v1.10 | 0/? | Pending | — |
+| 54. Skia Shape, Path, Text Highlight, And Border Migration | v1.10 | 0/? | Pending | — |
+| 55. Effects, Layers, Shadows, Blur, Images, And Gradients | v1.10 | 0/? | Pending | — |
+| 56. Animation And Transition Paint Integration | v1.10 | 0/? | Pending | — |
+| 57. Stacking, Clipping, Visual Bounds, And Damage | v1.10 | 0/? | Pending | — |
+| 58. Backend Capabilities, Diagnostics, And Rollback | v1.10 | 0/? | Pending | — |
+| 59. Shipped-Surface Proof And Renderer Documentation | v1.10 | 0/? | Pending | — |
 
 ## Deferred Context
 
-- Full Vello backend production work is deferred until the painter API and Skia implementation prove the contract.
-- Animation and motion-fidelity polish remains separate unless required to preserve existing animation behavior through the painter boundary.
-- Audio popover transition delay polish remains accepted debt for a later animation milestone.
-- Module install requirement resolution remains separate from painter backend architecture.
-- Paused v1.6 keybind dispatch, conflict diagnostics, and accessibility proof remain separate from renderer paint backend work.
+- Full Vello backend production work is deferred until the Skia-backed painter
+  engine proves the contract and capability gates.
+- Full browser/Web platform compatibility remains out of scope. MESH supports a
+  bounded shell UI style/rendering profile, not arbitrary HTML/CSS/DOM behavior.
+- Text engine replacement is deferred unless a bounded task proves a backend
+  text primitive preserves current selection, shaping, font, and theme behavior.
+- GPU compositor replacement remains out of scope; presentation stays in
+  `mesh-core-presentation`.
+- Audio popover transition-delay polish remains accepted debt unless Phase 56
+  touches the same animation path and can fix it safely.
+- Module install requirement resolution remains separate from painter engine
+  architecture.
+- Paused v1.6 keybind dispatch, conflict diagnostics, and accessibility proof
+  remain separate from renderer paint backend work.
 
-Run `$gsd-discuss-phase 51` to start the first phase.
+Run `$gsd-plan-phase 52` to plan the next autonomous implementation phase.

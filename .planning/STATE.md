@@ -1,27 +1,27 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.10
-milestone_name: Skia-Centric Painter API
+milestone_name: Painter Engine
 status: ready_to_plan
 stopped_at: Phase 51 complete
-last_updated: "2026-05-22T04:44:13.216Z"
+last_updated: "2026-05-22T05:12:00.000Z"
 last_activity: 2026-05-22
 progress:
-  total_phases: 5
+  total_phases: 9
   completed_phases: 1
   total_plans: 3
   completed_plans: 3
-  percent: 20
+  percent: 11
 ---
 
 # State: MESH v1.10
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-21)
+See: `.planning/PROJECT.md` (updated 2026-05-22)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 52 — Skia Shape Primitive Migration
+**Current focus:** Phase 52 — Style Profile And Lowering Compatibility
 
 ## Current Position
 
@@ -118,8 +118,9 @@ Last activity: 2026-05-22
 - [v1.8 Phase 43]: MESH-owned focused-crate proof evidence advanced to production proof because it preserves retained node identity across layout, text, paint, interaction, and accessibility.
 - [v1.8 Phase 44]: Focused proof integration is adapter-owned behind existing renderer and shell ownership; MESH retained identity, typed invalidation, damage/profiling, diagnostics, selection, and AccessKit-compatible boundaries remain authoritative.
 - [v1.8 Phase 45]: Renderer migration should proceed through phased reversible adapter expansion with explicit author-contract, ownership-classification, build/CI/release, and rollback gates before broad adoption.
-- [v1.10]: Skia is the authoritative paint/raster backend, not the render engine; MESH retains widget traversal, style/layout, animation, retained display-list, damage, z-order, module, input, and presentation ownership.
+- [v1.10]: Skia is the authoritative paint/raster backend, not the render engine; MESH retains widget traversal, XML/.mesh parsing, CSS/token style resolution, layout, animation, retained display-list, damage, z-order, module, input, and presentation ownership.
 - [v1.10]: The painter API should use backend-neutral high-level commands so a future Vello backend can implement the same contract after Skia parity is proven.
+- [v1.10]: The painter engine should implement a bounded shell UI subset of web-style rendering rather than full HTML/CSS/browser compatibility. Unsupported browser-like syntax or visual combinations should produce diagnostics instead of silent missing behavior.
 
 ## Performance Metrics
 

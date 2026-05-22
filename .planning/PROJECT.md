@@ -111,9 +111,9 @@ The project now also has a rendering engine architecture direction with:
 - A production-adjacent focused proof adapter preserving retained identity, typed invalidation, damage/profiling, diagnostics, selection, and AccessKit-compatible boundaries.
 - A phased, reversible renderer migration roadmap with explicit ownership classification, build/CI/Linux/Nix/binary-risk gates, rollback expectations, and an author-facing `.mesh` renderer contract.
 
-## Current Milestone: v1.10 Skia-Centric Painter API
+## Current Milestone: v1.10 Painter Engine
 
-**Goal:** Refactor MESH's paint boundary into an extensible WebEngine/Qt-style painter API where MESH keeps render-engine ownership and Skia owns low-level raster, effects, layers, and paint primitives, with a backend contract that can later support Vello.
+**Goal:** Build a bounded WebEngine/Qt-style painter engine for MESH. The engine should support the current XML/.mesh, CSS-like parser, theme tokens, retained elements, animations, shadows, blur, layers, images, gradients, damage, and diagnostics without becoming a full browser engine. MESH keeps render-engine ownership while Skia owns low-level raster, effects, layers, and paint primitives behind a backend contract that can later support Vello.
 
 Phase 51 of v1.10 is complete. `mesh-core-render` now has a
 backend-neutral painter command contract, `PaintBackend` capability and
@@ -122,10 +122,12 @@ helper-to-command migration path, and Vello compatibility notes that keep Skia
 types behind the Skia backend boundary.
 
 **Target features:**
-- Define a high-level painter command API below the retained display list: push clip, push layer, draw rect/rounded rect/path/text/image/shadow, apply filter, pop layer, and pop clip.
-- Make Skia the authoritative implementation for rasterization, antialiasing, paths, rounded rects, strokes, shadows, blurs, image filters, blend modes, clipping, layers/saveLayer, gradients/images, and eligible text primitives.
-- Remove remaining ad hoc painter behavior from MESH where Skia already has a primitive, while preserving MESH ownership of tree traversal, style/layout, animation state, display-list ordering, damage, z-order, module boundaries, input state, and presentation.
-- Keep the painter contract backend-neutral enough for a future Vello backend, with explicit parity tests and shipped-surface proof before any additional backend can be promoted.
+- Define and use a high-level painter command API below the retained display list: push clip, push layer, draw rect/rounded rect/path/text/image/shadow, apply filter, pop layer, and pop clip.
+- Lock the bounded MESH style profile for XML/.mesh, CSS-like syntax, and theme tokens so unsupported browser CSS produces diagnostics instead of hidden missing behavior.
+- Lower supported elements and controls into retained painter commands while preserving NodeId identity, style/layout ownership, accessibility metadata, and shipped surface behavior.
+- Make Skia the authoritative implementation for rasterization, antialiasing, paths, rounded rects, strokes, shadows, blurs, image filters, blend modes, clipping, layers/saveLayer, gradients/images, and eligible text-adjacent primitives.
+- Preserve and route existing CSS/token animation behavior through retained style, render-object, display-list, visual-bounds, damage, and painter execution.
+- Keep the painter contract backend-neutral enough for a future Vello backend, with explicit capabilities, diagnostics, parity tests, rollback, and shipped-surface proof before any additional backend can be promoted.
 
 Phase 46 of v1.9 is complete. MESH now has production Cargo dependencies and disabled-by-default renderer-library feature gates for Taffy, Parley, AccessKit, AnyRender, and Vello encoding, plus documented build, rollback, Linux/Nix, binary-risk, and CI boundaries.
 
@@ -184,10 +186,10 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 
 ### Active
 
-- Implement the full extensible painter API below the retained display list.
+- Implement the bounded painter engine below XML/.mesh, CSS-like styling, token resolution, retained elements, layout, and animation state.
 - Move low-level painter behavior to Skia primitives instead of MESH-owned raster helpers.
 - Preserve MESH render-engine ownership around style/layout/animation/display-list/damage/presentation while making the paint backend swappable.
-- Prove the Skia-backed painter contract through retained display-list, shipped-surface, effects, damage, and profiling tests.
+- Prove the Skia-backed painter engine through retained display-list, shipped-surface, effects, animation, damage, diagnostics, and profiling tests.
 
 ### Out of Scope
 
