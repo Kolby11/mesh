@@ -37,8 +37,8 @@ responsive on real interaction paths.
 ### Effects, Layers, Images, And Gradients
 
 - [ ] **EFFECT-01**: Box shadows, blur, backdrop-filter blur, opacity, and blend behavior lower into explicit painter layer/effect commands.
-- [ ] **EFFECT-02**: Gradients and images are represented in backend-neutral painter data with source/lifetime rules compatible with current module assets and style/token data.
-- [ ] **EFFECT-03**: Unsupported effect combinations, excessive blur, missing assets, or backend capability gaps emit explicit diagnostics.
+- [x] **EFFECT-02**: Gradients and images are represented in backend-neutral painter data with source/lifetime rules compatible with current module assets and style/token data.
+- [x] **EFFECT-03**: Unsupported effect combinations, excessive blur, missing assets, or backend capability gaps emit explicit diagnostics.
 - [ ] **LAYER-01**: Node styles that require opacity, clipping, filters, backdrop filters, shadows, or blend behavior lower into explicit painter layer/effect commands.
 
 ### Animation And Transitions
@@ -110,8 +110,8 @@ responsive on real interaction paths.
 | SKIA-04 | Phase 54 | Complete |
 | TEXT-01 | Phase 54 | Complete |
 | EFFECT-01 | Phase 55 | Pending |
-| EFFECT-02 | Phase 55 | Pending |
-| EFFECT-03 | Phase 55 | Pending |
+| EFFECT-02 | Phase 55 | Complete |
+| EFFECT-03 | Phase 55 | Complete |
 | LAYER-01 | Phase 55 | Pending |
 | ANIM-01 | Phase 56 | Pending |
 | ANIM-02 | Phase 56 | Pending |
