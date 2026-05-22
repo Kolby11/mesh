@@ -314,6 +314,9 @@ box {
             "padding",
             "font-size",
             "inset",
+            "filter",
+            "backdrop-filter",
+            "box-shadow",
         ] {
             assert!(is_transition_safe_keyframe_property(property), "{property}");
         }
@@ -321,7 +324,7 @@ box {
 
     #[test]
     fn keyframe_property_helper_rejects_unsupported_properties() {
-        for property in ["filter", "box-shadow", "grid-template-columns", "display"] {
+        for property in ["grid-template-columns", "display", "container-type"] {
             assert!(
                 !is_transition_safe_keyframe_property(property),
                 "{property}"
@@ -385,18 +388,45 @@ box {
     }
 
     #[test]
-    fn reject_unsupported_keyframe_property() {
+    fn parse_filter_and_shadow_keyframes() {
         let source = r#"
 <style>
 @keyframes pulse {
     0% { filter: blur(4px); }
+    50% { box-shadow: 0 2px 8px #00000080; }
+    75% { backdrop-filter: blur(2px); }
+    100% { opacity: 1; }
+}
+</style>
+"#;
+        let file = parse_component(source).unwrap();
+        let style = file.style.unwrap();
+        let properties: Vec<_> = style.keyframes[0]
+            .stops
+            .iter()
+            .flat_map(|stop| stop.declarations.iter())
+            .map(|declaration| declaration.property.as_str())
+            .collect();
+
+        assert!(properties.contains(&"filter"));
+        assert!(properties.contains(&"box-shadow"));
+        assert!(properties.contains(&"backdrop-filter"));
+        assert!(properties.contains(&"opacity"));
+    }
+
+    #[test]
+    fn reject_unsupported_keyframe_property() {
+        let source = r#"
+<style>
+@keyframes pulse {
+    0% { grid-template-columns: 1fr 1fr; }
     100% { opacity: 1; }
 }
 </style>
 "#;
         let err = parse_component(source).unwrap_err().to_string();
         assert!(
-            err.contains("unsupported keyframe property 'filter'"),
+            err.contains("unsupported keyframe property 'grid-template-columns'"),
             "{err}"
         );
     }
