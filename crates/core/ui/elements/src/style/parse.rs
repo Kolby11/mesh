@@ -566,6 +566,73 @@ pub(super) fn parse_filter(value: &str) -> VisualFilter {
     }
 }
 
+pub(super) fn parse_background_image(value: &str) -> BackgroundPaint {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "none" {
+        return BackgroundPaint::None;
+    }
+
+    if let Some(path) = parse_background_url(trimmed) {
+        return BackgroundPaint::Image(StyleImageSource { path });
+    }
+
+    if let Some(gradient) = parse_linear_gradient(trimmed) {
+        return BackgroundPaint::LinearGradient(gradient);
+    }
+
+    BackgroundPaint::None
+}
+
+pub(super) fn is_supported_background_image(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.is_empty()
+        || trimmed == "none"
+        || parse_background_url(trimmed).is_some()
+        || parse_linear_gradient(trimmed).is_some()
+}
+
+fn parse_background_url(value: &str) -> Option<String> {
+    let inner = value
+        .strip_prefix("url(")
+        .and_then(|rest| rest.strip_suffix(')'))?
+        .trim();
+    let path = inner
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .or_else(|| inner.strip_prefix('\'').and_then(|rest| rest.strip_suffix('\'')))
+        .unwrap_or(inner)
+        .trim();
+
+    if path.is_empty()
+        || path.starts_with('/')
+        || path.contains("://")
+        || path.starts_with("data:")
+        || path.starts_with('#')
+    {
+        return None;
+    }
+
+    Some(path.to_string())
+}
+
+fn parse_linear_gradient(value: &str) -> Option<StyleLinearGradient> {
+    let inner = value
+        .strip_prefix("linear-gradient(")
+        .and_then(|rest| rest.strip_suffix(')'))?;
+    let mut parts = inner.split(',').map(str::trim).filter(|part| !part.is_empty());
+    let first = parts.next()?;
+    let from = if first == "to bottom" {
+        Color::from_hex(parts.next()?)?
+    } else {
+        Color::from_hex(first)?
+    };
+    let to = Color::from_hex(parts.next()?)?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(StyleLinearGradient { from, to })
+}
+
 pub(super) fn parse_box_shadow(value: &str) -> BoxShadow {
     let trimmed = first_comma_item(value).trim();
     if trimmed.is_empty() || trimmed == "none" {

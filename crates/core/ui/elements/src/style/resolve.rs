@@ -597,6 +597,17 @@ impl<'a> StyleResolver<'a> {
                 return;
             }
         }
+        if decl.property == "background-image" {
+            let resolved = self.resolve_value_with_variables(&decl.value, variables);
+            if !is_supported_background_image(&resolved) {
+                diagnostics.push(StyleDiagnostic {
+                    property: decl.property.clone(),
+                    selector,
+                    message: format!("unsupported background-image '{resolved}'"),
+                });
+                return;
+            }
+        }
         apply_declaration(style, &decl.property, &decl.value, self, variables);
     }
 }
@@ -869,6 +880,10 @@ fn apply_declaration(
         "box-shadow" => {
             style.box_shadow =
                 parse_box_shadow(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "background-image" => {
+            let resolved = resolver.resolve_value_with_variables(value, variables);
+            style.background_paint = parse_background_image(&resolved);
         }
         "filter" => {
             style.filter = parse_filter(&resolver.resolve_value_with_variables(value, variables))

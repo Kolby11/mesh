@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
-use mesh_core_elements::style::{Color, ComputedStyle, Edges, Transform2D};
+use mesh_core_elements::style::{BackgroundPaint, Color, ComputedStyle, Edges, Transform2D};
 use mesh_core_elements::{NodeId, WidgetNode};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -284,6 +284,18 @@ fn accessibility_slot(node: &WidgetNode) -> AccessibilitySlot {
 fn material_hash(style: &ComputedStyle) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     color_slot(style.background_color).hash(&mut hasher);
+    match &style.background_paint {
+        BackgroundPaint::None => 0_u8.hash(&mut hasher),
+        BackgroundPaint::Image(source) => {
+            1_u8.hash(&mut hasher);
+            source.path.hash(&mut hasher);
+        }
+        BackgroundPaint::LinearGradient(gradient) => {
+            2_u8.hash(&mut hasher);
+            color_slot(gradient.from).hash(&mut hasher);
+            color_slot(gradient.to).hash(&mut hasher);
+        }
+    }
     color_slot(style.border_color).hash(&mut hasher);
     hash_edges(style.border_width, &mut hasher);
     hash_edges(style.padding, &mut hasher);

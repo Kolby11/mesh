@@ -616,7 +616,7 @@ const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
     StyleProfileProperty {
         property: "background-image",
         category: "image",
-        status: StyleProfileStatus::Deferred,
+        status: StyleProfileStatus::Implemented,
     },
     StyleProfileProperty {
         property: "linear-gradient",
@@ -690,6 +690,7 @@ pub struct ComputedStyle {
     pub margin: Edges,
     pub border_width: Edges,
     pub background_color: Color,
+    pub background_paint: BackgroundPaint,
     pub border_color: Color,
     pub border_radius: Corners,
     pub opacity: f32,
@@ -754,6 +755,7 @@ impl Default for ComputedStyle {
             margin: Edges::zero(),
             border_width: Edges::zero(),
             background_color: Color::TRANSPARENT,
+            background_paint: BackgroundPaint::None,
             border_color: Color::TRANSPARENT,
             border_radius: Corners::zero(),
             opacity: 1.0,
@@ -1136,6 +1138,39 @@ impl BoxShadow {
 impl Default for BoxShadow {
     fn default() -> Self {
         Self::NONE
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BackgroundPaint {
+    None,
+    Image(StyleImageSource),
+    LinearGradient(StyleLinearGradient),
+}
+
+impl Default for BackgroundPaint {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StyleImageSource {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StyleLinearGradient {
+    pub from: Color,
+    pub to: Color,
+}
+
+impl Default for StyleLinearGradient {
+    fn default() -> Self {
+        Self {
+            from: Color::TRANSPARENT,
+            to: Color::TRANSPARENT,
+        }
     }
 }
 
