@@ -23,7 +23,7 @@ low-level paint/raster behavior behind the painter backend boundary.
 | 51 | Painter Contract And Backend Boundary | 3/3 | Complete | 2026-05-22 |
 | 52 | Style Profile And Lowering Compatibility | 4/4 | Complete    | 2026-05-22 |
 | 53 | Element And Display-List Primitive Coverage | 4/4 | Complete    | 2026-05-22 |
-| 54 | Skia Shape, Path, Text Highlight, And Border Migration | Route core geometry primitives through Skia-backed commands while preserving selection and current text handoff behavior. | SKIA-01, SKIA-04, TEXT-01 | 5 |
+| 54 | Skia Shape, Path, Text Highlight, And Border Migration | 5/5 | Complete    | 2026-05-22 |
 | 55 | Effects, Layers, Shadows, Blur, Images, And Gradients | Implement the visual effects subset expected from a compact CSS renderer through explicit layer/effect/image/gradient commands. | EFFECT-01, EFFECT-02, EFFECT-03, LAYER-01 | 5 |
 | 56 | Animation And Transition Paint Integration | Preserve and extend supported CSS/token animation behavior through retained style, render-object, display-list, damage, and painter execution. | ANIM-01, ANIM-02, ANIM-03 | 5 |
 | 57 | Stacking, Clipping, Visual Bounds, And Damage | Make z-order, clipping, transformed/effect visual bounds, and retained repaint selection correct for the richer painter subset. | LAYER-02, LAYER-03, DAMAGE-01, DAMAGE-02 | 5 |

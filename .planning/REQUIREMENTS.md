@@ -27,12 +27,12 @@ responsive on real interaction paths.
 
 ### Skia Backend
 
-- [ ] **SKIA-01**: Skia owns rasterization, antialiasing, paths, rounded rects, strokes, clipping, and blend modes for core shape primitives.
-- [ ] **SKIA-04**: Remaining MESH-owned software fallback code for painter primitives is removed or isolated behind non-authoritative compatibility tests.
+- [x] **SKIA-01**: Skia owns rasterization, antialiasing, paths, rounded rects, strokes, clipping, and blend modes for core shape primitives.
+- [x] **SKIA-04**: Remaining MESH-owned software fallback code for painter primitives is removed or isolated behind non-authoritative compatibility tests.
 
 ### Text Boundary
 
-- [ ] **TEXT-01**: The painter engine preserves current text measurement, drawing, and theme-owned selection behavior while allowing text-adjacent rectangles and future text primitives to route through the painter API.
+- [x] **TEXT-01**: The painter engine preserves current text measurement, drawing, and theme-owned selection behavior while allowing text-adjacent rectangles and future text primitives to route through the painter API.
 
 ### Effects, Layers, Images, And Gradients
 
@@ -106,9 +106,9 @@ responsive on real interaction paths.
 | STYLE-03 | Phase 52 | Complete |
 | ELEM-01 | Phase 53 | Complete |
 | ELEM-02 | Phase 53 | Complete |
-| SKIA-01 | Phase 54 | Pending |
-| SKIA-04 | Phase 54 | Pending |
-| TEXT-01 | Phase 54 | Pending |
+| SKIA-01 | Phase 54 | Complete |
+| SKIA-04 | Phase 54 | Complete |
+| TEXT-01 | Phase 54 | Complete |
 | EFFECT-01 | Phase 55 | Pending |
 | EFFECT-02 | Phase 55 | Pending |
 | EFFECT-03 | Phase 55 | Pending |
