@@ -19,7 +19,7 @@ use mesh_core_elements::style::{Color, Display, Overflow, TextAlign, TextDirecti
 use mesh_core_elements::tree::WidgetNode;
 use mesh_core_elements::{BoxShadow, VisualFilter};
 
-pub(crate) use geometry::{ClipRect, fill_rect_clipped};
+pub(crate) use geometry::ClipRect;
 use geometry::{
     clip_to_tuple, dim_color, intersect_clip, node_attr_f32, node_clips_children, opacity_color,
 };

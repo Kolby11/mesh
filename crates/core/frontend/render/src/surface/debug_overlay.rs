@@ -3,7 +3,7 @@
 /// Phase 16 moves the inspector panel into a shell-shipped `.mesh` surface.
 /// The native overlay now only owns optional layout-bounds painting.
 use super::buffer::PixelBuffer;
-use super::painter::{ClipRect, FrontendRenderEngine, fill_rect_clipped};
+use super::painter::{ClipRect, FrontendRenderEngine};
 use mesh_core_elements::style::Color;
 use mesh_core_elements::tree::WidgetNode;
 
@@ -68,15 +68,8 @@ impl DebugOverlay {
 
     /// Draw coloured bounding-box outlines for every node in the widget tree.
     pub fn paint_layout_bounds(&self, root: &WidgetNode, buffer: &mut PixelBuffer, scale: f32) {
-        let bw = buffer.width as i32;
-        let bh = buffer.height as i32;
-        let full = ClipRect {
-            x: 0,
-            y: 0,
-            width: bw,
-            height: bh,
-        };
-        paint_bounds_recursive(None, root, buffer, scale, full, 0);
+        let engine = FrontendRenderEngine::new();
+        self.paint_layout_bounds_with_engine(&engine, root, buffer, scale);
     }
 
     pub(crate) fn paint_layout_bounds_with_engine(
@@ -94,7 +87,7 @@ impl DebugOverlay {
             width: bw,
             height: bh,
         };
-        paint_bounds_recursive(Some(engine), root, buffer, scale, full, 0);
+        paint_bounds_recursive(engine, root, buffer, scale, full, 0);
     }
 }
 
@@ -105,7 +98,7 @@ impl Default for DebugOverlay {
 }
 
 fn paint_bounds_recursive(
-    engine: Option<&FrontendRenderEngine>,
+    engine: &FrontendRenderEngine,
     node: &WidgetNode,
     buffer: &mut PixelBuffer,
     scale: f32,
@@ -188,15 +181,11 @@ fn paint_bounds_recursive(
 }
 
 fn paint_bounds_rect(
-    engine: Option<&FrontendRenderEngine>,
+    engine: &FrontendRenderEngine,
     buffer: &mut PixelBuffer,
     rect: ClipRect,
     color: Color,
     clip: ClipRect,
 ) {
-    if let Some(engine) = engine {
-        engine.fill_rect_clipped(buffer, rect, color, clip);
-    } else {
-        fill_rect_clipped(buffer, rect, color, clip);
-    }
+    engine.fill_rect_clipped(buffer, rect, color, clip);
 }

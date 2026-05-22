@@ -899,10 +899,6 @@ fn display_list_primitive_helper_bypass_audit_documents_command_backed_compatibi
             "command-backed compatibility helper",
         ),
         (
-            "surface::painter::geometry::fill_rect_clipped",
-            "deferred compatibility helper for legacy public debug overlay painting",
-        ),
-        (
             "surface::icon::draw_named_icon_for_module",
             "deferred specialized icon rasterizer",
         ),
@@ -916,7 +912,7 @@ fn display_list_primitive_helper_bypass_audit_documents_command_backed_compatibi
     assert!(
         helper_bypass_audit
             .iter()
-            .any(|(helper, status)| helper.contains("geometry") && status.contains("deferred"))
+            .any(|(helper, status)| helper.contains("icon") && status.contains("deferred"))
     );
 }
 

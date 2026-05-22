@@ -15,7 +15,8 @@ requirements:
 
 - Added retained mixed-tree primitive coverage for box, text selection, input, slider, and icon nodes.
 - Added retained node-order assertions for MESH-owned display-list command ordering.
-- Added a helper bypass audit test documenting command-backed compatibility helpers and explicitly deferred specialized paths.
+- Added a helper bypass audit test documenting command-backed compatibility helpers and the explicitly deferred specialized icon rasterizer.
+- Removed the legacy geometry fill bypass from debug overlay painting so public layout bounds painting uses the command-backed engine path.
 - Marked `53-VALIDATION.md` complete and green after final verification.
 
 ## Verification

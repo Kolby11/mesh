@@ -31,23 +31,6 @@ pub(super) fn clip_to_tuple(clip: ClipRect) -> (u32, u32, u32, u32) {
     )
 }
 
-pub(crate) fn fill_rect_clipped(
-    buffer: &mut PixelBuffer,
-    rect: ClipRect,
-    color: Color,
-    clip: ClipRect,
-) {
-    let clipped = intersect_clip(rect, clip);
-    if clipped.width <= 0 || clipped.height <= 0 {
-        return;
-    }
-    let x = clipped.x.max(0) as u32;
-    let y = clipped.y.max(0) as u32;
-    let w = clipped.width as u32;
-    let h = clipped.height as u32;
-    buffer.clear_rect(x, y, w, h, color);
-}
-
 pub(super) fn rounded_rect_coverage(rect: ClipRect, radius: f32, px: f32, py: f32) -> f32 {
     let half_w = rect.width.max(0) as f32 * 0.5;
     let half_h = rect.height.max(0) as f32 * 0.5;
