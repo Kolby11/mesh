@@ -51,6 +51,7 @@ completed: 2026-05-22
 ## Task Commits
 
 1. **Task 1-3: Helper lowering, diagnostics, and tests** - `1fc327f`
+2. **Post-wave fix: Preserve square border command rendering** - `7e4b3e7`
 
 ## Files Created/Modified
 
@@ -65,11 +66,25 @@ completed: 2026-05-22
 
 ## Deviations from Plan
 
-None - plan executed exactly as written.
+### Auto-fixed Issues
+
+**1. [Rule 1 - Bug] Square border command path skipped expected inner edge pixels**
+
+- **Found during:** Phase-level `mesh-core-render` full suite
+- **Issue:** `stroke_rounded_rect_clipped` now returned success for square borders, bypassing the old fallback, but the Skia stroke path did not fill pixel `(1, 1)` as expected by existing square-border behavior.
+- **Fix:** Updated `stroke_rect_impl` to paint inside-edge border rectangles through backend-internal fill handling.
+- **Files modified:** `crates/core/frontend/render/src/surface/painter/backend.rs`
+- **Verification:** `painter_draws_border_from_computed_edges` and the full `mesh-core-render` suite pass.
+- **Committed in:** `7e4b3e7`
+
+---
+
+**Total deviations:** 1 auto-fixed bug.
+**Impact on plan:** Preserved existing square-border behavior while keeping helper calls on the command backend path.
 
 ## Issues Encountered
 
-None.
+- Post-wave full-suite validation caught the square-border regression above; fixed in `7e4b3e7`.
 
 ## Verification
 
@@ -77,6 +92,7 @@ None.
 - `cargo check -p mesh-core-render` passed with the existing `placement_top` dead-code warning.
 - `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render painter_helper_lowering -- --nocapture` passed.
 - `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render painter_backend_diagnostics -- --nocapture` passed.
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render` passed after the square-border fix.
 
 ## User Setup Required
 
