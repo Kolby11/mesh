@@ -755,6 +755,172 @@ fn painter_primitive_icon_direct_and_retained_preserve_image_like_boundary() {
 }
 
 #[test]
+fn display_list_primitive_mixed_tree_preserves_node_order_and_command_classes() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 220.0,
+            height: 120.0,
+        },
+        Color::from_hex("#20242a").unwrap(),
+    );
+    let mut text = text_node(
+        "selected primitive",
+        8.0,
+        8.0,
+        120.0,
+        28.0,
+        Color::from_hex("#f0f0f0").unwrap(),
+    );
+    text.attributes
+        .insert("_mesh_selection_background".into(), "#3366ff".into());
+    text.attributes
+        .insert("_mesh_selection_foreground".into(), "#ffffff".into());
+    text.attributes
+        .insert("_mesh_selection_anchor_x".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_anchor_y".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_focus_x".into(), "1000.00".into());
+    text.attributes
+        .insert("_mesh_selection_focus_y".into(), "1000.00".into());
+    text.attributes
+        .insert("_mesh_selection_text_x".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_text_y".into(), "0.00".into());
+
+    let mut input = node(
+        "input",
+        LayoutRect {
+            x: 8.0,
+            y: 42.0,
+            width: 110.0,
+            height: 26.0,
+        },
+        Color::from_hex("#101820").unwrap(),
+    );
+    input.attributes.insert("value".into(), "mesh".into());
+    input
+        .attributes
+        .insert("_mesh_focused".into(), "true".into());
+    input.computed_style.color = Color::from_hex("#f5f5f5").unwrap();
+    input.computed_style.padding = Edges::all(4.0);
+
+    let mut slider = node(
+        "slider",
+        LayoutRect {
+            x: 8.0,
+            y: 76.0,
+            width: 128.0,
+            height: 30.0,
+        },
+        Color::TRANSPARENT,
+    );
+    slider.attributes.insert("value".into(), "60".into());
+    slider.computed_style.color = Color::from_hex("#4a90e2").unwrap();
+
+    let mut icon = node(
+        "icon",
+        LayoutRect {
+            x: 150.0,
+            y: 12.0,
+            width: 24.0,
+            height: 24.0,
+        },
+        Color::TRANSPARENT,
+    );
+    icon.attributes.insert("name".into(), "mesh:search".into());
+    icon.attributes.insert("size".into(), "20".into());
+
+    let expected_node_order = vec![root.id, text.id, input.id, slider.id, icon.id];
+    root.children = vec![text, input, slider, icon];
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 240, 140, true, true);
+    let node_order: Vec<_> = list
+        .paint_commands()
+        .iter()
+        .filter(|command| command.kind == DisplayPaintCommandKind::Node)
+        .map(|command| command.node.id)
+        .collect();
+    assert_eq!(node_order, expected_node_order);
+
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let mut buffer = PixelBuffer::new(240, 140);
+    engine.render_display_list_for_module(
+        list.paint_commands(),
+        &mut buffer,
+        1.0,
+        None,
+        None,
+        Some("test-module"),
+    );
+
+    let classes = painter_command_classes(&recorded.recorded_commands());
+    assert_eq!(classes.first(), Some(&"draw_rect"));
+    assert_eq!(
+        classes
+            .iter()
+            .filter(|class| **class == "draw_rounded_rect")
+            .count(),
+        1
+    );
+    assert!(
+        classes
+            .iter()
+            .filter(|class| **class == "draw_rect")
+            .count()
+            >= 6,
+        "box, text selection, input, and slider primitives should emit draw_rect commands"
+    );
+}
+
+#[test]
+fn display_list_primitive_helper_bypass_audit_documents_command_backed_compatibility_helpers() {
+    let helper_bypass_audit = [
+        (
+            "FrontendRenderEngine::fill_rect_clipped",
+            "command-backed compatibility helper",
+        ),
+        (
+            "FrontendRenderEngine::fill_rounded_rect_clipped",
+            "command-backed compatibility helper",
+        ),
+        (
+            "FrontendRenderEngine::draw_box_shadow",
+            "command-backed compatibility helper",
+        ),
+        (
+            "FrontendRenderEngine::apply_backdrop_filter",
+            "command-backed compatibility helper",
+        ),
+        (
+            "surface::painter::geometry::fill_rect_clipped",
+            "deferred compatibility helper for legacy public debug overlay painting",
+        ),
+        (
+            "surface::icon::draw_named_icon_for_module",
+            "deferred specialized icon rasterizer",
+        ),
+    ];
+
+    assert!(
+        helper_bypass_audit
+            .iter()
+            .any(|(_, status)| status.contains("command-backed"))
+    );
+    assert!(
+        helper_bypass_audit
+            .iter()
+            .any(|(helper, status)| helper.contains("geometry") && status.contains("deferred"))
+    );
+}
+
+#[test]
 fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose() {
     let backend = SkiaPaintBackend;
     let capabilities = backend.capabilities();
