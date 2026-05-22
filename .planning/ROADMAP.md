@@ -21,7 +21,7 @@ low-level paint/raster behavior behind the painter backend boundary.
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
 | 51 | Painter Contract And Backend Boundary | 3/3 | Complete | 2026-05-22 |
-| 52 | Style Profile And Lowering Compatibility | 1/4 | In Progress|  |
+| 52 | Style Profile And Lowering Compatibility | 4/4 | Complete   | 2026-05-22 |
 | 53 | Element And Display-List Primitive Coverage | Ensure every supported element/control lowers into backend-neutral painter commands with retained identity and no helper-shaped bypasses. | ELEM-01, ELEM-02, PAINT-03 | 5 |
 | 54 | Skia Shape, Path, Text Highlight, And Border Migration | Route core geometry primitives through Skia-backed commands while preserving selection and current text handoff behavior. | SKIA-01, SKIA-04, TEXT-01 | 5 |
 | 55 | Effects, Layers, Shadows, Blur, Images, And Gradients | Implement the visual effects subset expected from a compact CSS renderer through explicit layer/effect/image/gradient commands. | EFFECT-01, EFFECT-02, EFFECT-03, LAYER-01 | 5 |
@@ -77,13 +77,13 @@ the source of truth for the painter engine's supported visual subset.
 
 **Requirements:** STYLE-01, STYLE-02, STYLE-03
 
-**Plans:** 1/4 plans executed
+**Plans:** 4/4 plans complete
 
 Plans:
 - [x] 52-01-PLAN.md — Author-facing style profile and executable support matrix for STYLE-01.
-- [ ] 52-02-PLAN.md — Token/custom-property and shipped navigation/audio style compatibility fixtures for STYLE-02.
-- [ ] 52-03-PLAN.md — Unsupported and ambiguous web-like property diagnostics for STYLE-03.
-- [ ] 52-04-PLAN.md — Component parser keyframe expectation cleanup and final Phase 52 validation gate.
+- [x] 52-02-PLAN.md — Token/custom-property and shipped navigation/audio style compatibility fixtures for STYLE-02.
+- [x] 52-03-PLAN.md — Unsupported and ambiguous web-like property diagnostics for STYLE-03.
+- [x] 52-04-PLAN.md — Component parser keyframe expectation cleanup and final Phase 52 validation gate. (completed 2026-05-22)
 
 **Autonomous task seed:**
 1. Inventory supported style properties across `mesh-core-component`,

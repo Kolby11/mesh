@@ -17,8 +17,8 @@ responsive on real interaction paths.
 ### XML/CSS/Token Style Profile
 
 - [x] **STYLE-01**: Maintainer has a documented bounded style profile for MESH's XML/.mesh, CSS-like syntax, and theme tokens, covering supported visual properties and explicitly excluding arbitrary browser CSS.
-- [ ] **STYLE-02**: Existing token references and shipped module styles continue to resolve through the current theme/token pipeline while painter-relevant values lower into backend-neutral render data.
-- [ ] **STYLE-03**: Unsupported or ambiguous web-style properties produce diagnostics instead of being silently accepted with missing visual behavior.
+- [x] **STYLE-02**: Existing token references and shipped module styles continue to resolve through the current theme/token pipeline while painter-relevant values lower into backend-neutral render data.
+- [x] **STYLE-03**: Unsupported or ambiguous web-style properties produce diagnostics instead of being silently accepted with missing visual behavior.
 
 ### Elements And Display-List Lowering
 
@@ -102,8 +102,8 @@ responsive on real interaction paths.
 | PAINT-02 | Phase 51 | Complete |
 | PAINT-03 | Phase 53 | Pending |
 | STYLE-01 | Phase 52 | Complete |
-| STYLE-02 | Phase 52 | Pending |
-| STYLE-03 | Phase 52 | Pending |
+| STYLE-02 | Phase 52 | Complete |
+| STYLE-03 | Phase 52 | Complete |
 | ELEM-01 | Phase 53 | Pending |
 | ELEM-02 | Phase 53 | Pending |
 | SKIA-01 | Phase 54 | Pending |
