@@ -143,6 +143,25 @@ impl RecordingPaintBackend {
     }
 }
 
+fn painter_command_classes(commands: &[PainterCommand]) -> Vec<&'static str> {
+    commands
+        .iter()
+        .map(|command| match command {
+            PainterCommand::PushClip(_) => "push_clip",
+            PainterCommand::PopClip => "pop_clip",
+            PainterCommand::PushLayer(_) => "push_layer",
+            PainterCommand::PopLayer => "pop_layer",
+            PainterCommand::DrawRect { .. } => "draw_rect",
+            PainterCommand::DrawRoundedRect { .. } => "draw_rounded_rect",
+            PainterCommand::DrawPath { .. } => "draw_path",
+            PainterCommand::DrawText { .. } => "draw_text",
+            PainterCommand::DrawImage { .. } => "draw_image",
+            PainterCommand::DrawShadow { .. } => "draw_shadow",
+            PainterCommand::ApplyFilter { .. } => "apply_filter",
+        })
+        .collect()
+}
+
 impl PaintBackend for RecordingPaintBackend {
     fn id(&self) -> &'static str {
         "recording"
@@ -254,6 +273,141 @@ fn painter_command_contract_constructs_required_command_set() {
     ];
 
     assert_eq!(commands.len(), 12);
+}
+
+#[test]
+fn painter_primitive_command_classes_record_helper_backed_rects() {
+    let clip = full_clip(16, 16);
+    let rect = ClipRect {
+        x: 1,
+        y: 2,
+        width: 8,
+        height: 9,
+    };
+    let paint = PainterPaint::fill(Color::WHITE);
+    let commands = vec![
+        PainterCommand::PushClip(PainterClip { rect, radius: 2.0 }),
+        PainterCommand::PopClip,
+        PainterCommand::PushLayer(PainterLayer {
+            bounds: clip,
+            opacity: 0.5,
+            blend_mode: PainterBlendMode::SrcOver,
+            filter: PainterFilter::None,
+        }),
+        PainterCommand::PopLayer,
+        PainterCommand::DrawRect { rect, paint, clip },
+        PainterCommand::DrawRoundedRect {
+            rect,
+            radius: 4.0,
+            paint,
+            clip,
+        },
+        PainterCommand::DrawPath {
+            path: PainterPath {
+                elements: vec![PainterPathElement::MoveTo(0.0, 0.0)],
+            },
+            paint,
+            clip,
+        },
+        PainterCommand::DrawText {
+            text: "hello".into(),
+            x: 2.0,
+            y: 12.0,
+            paint,
+            clip,
+        },
+        PainterCommand::DrawImage {
+            image: PainterImage { id: "img".into() },
+            rect,
+            paint,
+            clip,
+        },
+        PainterCommand::DrawShadow {
+            rect,
+            radius: 4.0,
+            shadow: BoxShadow::default(),
+            clip,
+        },
+        PainterCommand::ApplyFilter {
+            rect,
+            radius: 4.0,
+            filter: PainterFilter::Backdrop(VisualFilter { blur_radius: 2.0 }),
+            clip,
+        },
+    ];
+
+    assert_eq!(
+        painter_command_classes(&commands),
+        vec![
+            "push_clip",
+            "pop_clip",
+            "push_layer",
+            "pop_layer",
+            "draw_rect",
+            "draw_rounded_rect",
+            "draw_path",
+            "draw_text",
+            "draw_image",
+            "draw_shadow",
+            "apply_filter",
+        ]
+    );
+}
+
+#[test]
+fn display_list_primitive_direct_and_retained_box_emit_same_command_classes() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 2.0,
+            y: 3.0,
+            width: 20.0,
+            height: 18.0,
+        },
+        Color::from_hex("#336699").unwrap(),
+    );
+    root.computed_style.border_width = Edges::all(2.0);
+    root.computed_style.border_color = Color::from_hex("#ff00ff").unwrap();
+
+    let direct_backend = RecordingPaintBackend::default();
+    let direct_recorded = direct_backend.clone();
+    let direct_engine = FrontendRenderEngine::with_paint_backend(Box::new(direct_backend));
+    let mut direct_buffer = PixelBuffer::new(32, 32);
+    direct_engine.render_tree(&root, &mut direct_buffer, 1.0);
+    let direct_classes = painter_command_classes(&direct_recorded.recorded_commands());
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 32, 32, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 32,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+
+    let retained_backend = RecordingPaintBackend::default();
+    let retained_recorded = retained_backend.clone();
+    let retained_engine = FrontendRenderEngine::with_paint_backend(Box::new(retained_backend));
+    let mut retained_buffer = PixelBuffer::new(32, 32);
+    retained_engine.render_display_list_for_module(
+        selected.commands(),
+        &mut retained_buffer,
+        1.0,
+        None,
+        None,
+        None,
+    );
+    let retained_classes = painter_command_classes(&retained_recorded.recorded_commands());
+
+    assert_eq!(
+        direct_classes,
+        vec!["draw_rect", "draw_rounded_rect"],
+        "direct box primitive should emit background and border commands"
+    );
+    assert_eq!(retained_classes, direct_classes);
 }
 
 #[test]
