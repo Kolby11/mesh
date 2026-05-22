@@ -365,7 +365,7 @@ impl PaintBackend for SkiaPaintBackend {
     fn capabilities(&self) -> PainterBackendCapabilities {
         PainterBackendCapabilities {
             backend_id: self.id(),
-            clips: false,
+            clips: true,
             layers: false,
             rects: true,
             rounded_rects: true,
@@ -384,15 +384,14 @@ impl PaintBackend for SkiaPaintBackend {
         commands: &[PainterCommand],
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
+        let mut clip_stack: Vec<PainterClip> = Vec::new();
         for command in commands {
             match command {
-                PainterCommand::PushClip(_) | PainterCommand::PopClip => {
-                    diagnostics.push(PainterDiagnostic {
-                        backend_id: self.id(),
-                        feature: UnsupportedPainterFeature::ClipStack,
-                        message: "clip stack commands are defined but not wired to execution yet"
-                            .into(),
-                    });
+                PainterCommand::PushClip(clip) => {
+                    clip_stack.push(*clip);
+                }
+                PainterCommand::PopClip => {
+                    clip_stack.pop();
                 }
                 PainterCommand::PushLayer(layer) => {
                     if layer.blend_mode != PainterBlendMode::SrcOver || !layer.filter.is_none() {
@@ -408,7 +407,12 @@ impl PaintBackend for SkiaPaintBackend {
                 PainterCommand::PopLayer => {}
                 PainterCommand::DrawRect { rect, paint, clip } => {
                     self.diagnose_unsupported_paint(*paint, diagnostics);
-                    self.draw_rect_command(buffer, *rect, *paint, *clip);
+                    self.draw_rect_command(
+                        buffer,
+                        *rect,
+                        *paint,
+                        effective_clip(*clip, &clip_stack),
+                    );
                 }
                 PainterCommand::DrawRoundedRect {
                     rect,
@@ -417,11 +421,22 @@ impl PaintBackend for SkiaPaintBackend {
                     clip,
                 } => {
                     self.diagnose_unsupported_paint(*paint, diagnostics);
-                    self.draw_rounded_rect_command(buffer, *rect, *radius, *paint, *clip);
+                    self.draw_rounded_rect_command(
+                        buffer,
+                        *rect,
+                        *radius,
+                        *paint,
+                        effective_clip(*clip, &clip_stack),
+                    );
                 }
                 PainterCommand::DrawPath { path, paint, clip } => {
                     self.diagnose_unsupported_paint(*paint, diagnostics);
-                    self.draw_path_command(buffer, path, *paint, *clip);
+                    self.draw_path_command(
+                        buffer,
+                        path,
+                        *paint,
+                        effective_clip(*clip, &clip_stack),
+                    );
                 }
                 PainterCommand::DrawText { .. } => diagnostics.push(PainterDiagnostic {
                     backend_id: self.id(),
@@ -442,7 +457,13 @@ impl PaintBackend for SkiaPaintBackend {
                     radius,
                     shadow,
                     clip,
-                } => self.draw_box_shadow_impl(buffer, *rect, *radius, *shadow, *clip),
+                } => self.draw_box_shadow_impl(
+                    buffer,
+                    *rect,
+                    *radius,
+                    *shadow,
+                    effective_clip(*clip, &clip_stack),
+                ),
                 PainterCommand::ApplyFilter {
                     rect,
                     radius,
@@ -456,9 +477,13 @@ impl PaintBackend for SkiaPaintBackend {
                         message: "standalone blur filter commands are deferred to layer migration"
                             .into(),
                     }),
-                    PainterFilter::Backdrop(filter) => {
-                        self.apply_backdrop_filter_impl(buffer, *rect, *radius, *filter, *clip);
-                    }
+                    PainterFilter::Backdrop(filter) => self.apply_backdrop_filter_impl(
+                        buffer,
+                        *rect,
+                        *radius,
+                        *filter,
+                        effective_clip(*clip, &clip_stack),
+                    ),
                 },
             }
         }
@@ -936,6 +961,12 @@ impl SkiaPaintBackend {
             canvas.restore_to_count(save_count);
         });
     }
+}
+
+fn effective_clip(clip: ClipRect, clip_stack: &[PainterClip]) -> ClipRect {
+    clip_stack
+        .iter()
+        .fold(clip, |clip, pushed| intersect_clip(clip, pushed.rect))
 }
 
 fn skia_path(path: &PainterPath) -> Option<SkiaPath> {

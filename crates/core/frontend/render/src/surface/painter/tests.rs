@@ -925,7 +925,7 @@ fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose(
     assert!(capabilities.rounded_rects);
     assert!(capabilities.shadows);
     assert!(capabilities.filters);
-    assert!(!capabilities.clips);
+    assert!(capabilities.clips);
     assert!(!capabilities.layers);
     assert!(capabilities.paths);
 
@@ -1025,6 +1025,54 @@ fn skia_shape_rect_fill_respects_transparency() {
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(pixel(&buffer, 4, 4), color);
     assert_eq!(pixel(&buffer, 1, 1), Color::TRANSPARENT);
+}
+
+#[test]
+fn skia_shape_push_clip_intersects_command_clip() {
+    let mut buffer = PixelBuffer::new(16, 16);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[
+            PainterCommand::PushClip(PainterClip {
+                rect: ClipRect {
+                    x: 4,
+                    y: 4,
+                    width: 4,
+                    height: 4,
+                },
+                radius: 0.0,
+            }),
+            PainterCommand::DrawRect {
+                rect: ClipRect {
+                    x: 2,
+                    y: 2,
+                    width: 10,
+                    height: 10,
+                },
+                paint: PainterPaint::fill(Color::from_hex("#ff0000").unwrap()),
+                clip: full_clip(16, 16),
+            },
+            PainterCommand::PopClip,
+            PainterCommand::DrawRect {
+                rect: ClipRect {
+                    x: 0,
+                    y: 0,
+                    width: 2,
+                    height: 2,
+                },
+                paint: PainterPaint::fill(Color::from_hex("#0000ff").unwrap()),
+                clip: full_clip(16, 16),
+            },
+        ],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(pixel(&buffer, 3, 3), Color::TRANSPARENT);
+    assert_eq!(pixel(&buffer, 4, 4), Color::from_hex("#ff0000").unwrap());
+    assert_eq!(pixel(&buffer, 0, 0), Color::from_hex("#0000ff").unwrap());
 }
 
 #[test]
