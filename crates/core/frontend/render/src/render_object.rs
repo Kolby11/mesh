@@ -14,6 +14,7 @@ pub struct RenderObjectDirtySummary {
     pub opacity: usize,
     pub geometry: usize,
     pub material: usize,
+    pub primitive: usize,
     pub text: usize,
     pub accessibility: usize,
 }
@@ -28,6 +29,7 @@ impl RenderObjectDirtySummary {
             || self.opacity > 0
             || self.geometry > 0
             || self.material > 0
+            || self.primitive > 0
             || self.text > 0
             || self.accessibility > 0
     }
@@ -137,6 +139,9 @@ impl RenderObjectDirtySummary {
         if previous.material != next.material {
             self.material += 1;
         }
+        if previous.primitive != next.primitive {
+            self.primitive += 1;
+        }
         if previous.text != next.text {
             self.text += 1;
         }
@@ -155,6 +160,7 @@ struct RenderObjectPaintData {
     opacity: u32,
     geometry: GeometrySlot,
     material: u64,
+    primitive: u64,
     text: TextSlot,
     accessibility: AccessibilitySlot,
 }
@@ -216,6 +222,7 @@ fn render_object_paint_data(node: &WidgetNode, parent: Option<NodeId>) -> Render
         opacity: node.computed_style.opacity.to_bits(),
         geometry: geometry_slot(node),
         material: material_hash(&node.computed_style),
+        primitive: primitive_hash(node),
         text: text_slot(node),
         accessibility: accessibility_slot(node),
     }
@@ -301,6 +308,38 @@ fn material_hash(style: &ComputedStyle) -> u64 {
     hasher.finish()
 }
 
+fn primitive_hash(node: &WidgetNode) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    node.tag.hash(&mut hasher);
+    match node.tag.as_str() {
+        "input" => {
+            node.attributes.get("value").hash(&mut hasher);
+            node.attributes.get("placeholder").hash(&mut hasher);
+            node.attributes.get("type").hash(&mut hasher);
+            node.attributes.get("_mesh_focused").hash(&mut hasher);
+        }
+        "slider" => {
+            attr_f32_with_default(node, "min", 0.0)
+                .to_bits()
+                .hash(&mut hasher);
+            attr_f32_with_default(node, "max", 100.0)
+                .to_bits()
+                .hash(&mut hasher);
+            attr_f32_with_default(node, "value", 50.0)
+                .to_bits()
+                .hash(&mut hasher);
+            node.attributes.get("orient").hash(&mut hasher);
+        }
+        "icon" => {
+            node.attributes.get("src").hash(&mut hasher);
+            node.attributes.get("name").hash(&mut hasher);
+            node.attributes.get("size").hash(&mut hasher);
+        }
+        _ => {}
+    }
+    hasher.finish()
+}
+
 fn hash_edges(edges: Edges, hasher: &mut impl Hasher) {
     edges.top.to_bits().hash(hasher);
     edges.right.to_bits().hash(hasher);
@@ -317,6 +356,13 @@ fn attr_f32(node: &WidgetNode, key: &str) -> f32 {
         .get(key)
         .and_then(|value| value.parse::<f32>().ok())
         .unwrap_or(0.0)
+}
+
+fn attr_f32_with_default(node: &WidgetNode, key: &str, default: f32) -> f32 {
+    node.attributes
+        .get(key)
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(default)
 }
 
 #[cfg(test)]
@@ -434,6 +480,28 @@ mod tests {
             tree.dirty_node_ids(),
             &HashSet::from([1]),
             "scroll updates should dirty the scrolled render object so retained paint can rebuild its subtree locally"
+        );
+    }
+
+    #[test]
+    fn render_object_tree_marks_slider_value_updates_as_primitive_dirty() {
+        let mut root = WidgetNode::new("slider");
+        root.id = 1;
+        root.attributes.insert("min".into(), "0".into());
+        root.attributes.insert("max".into(), "1".into());
+        root.attributes.insert("value".into(), "0.25".into());
+
+        let mut tree = RenderObjectTree::default();
+        tree.update(&root);
+
+        root.attributes.insert("value".into(), "0.735".into());
+        let dirty = tree.update(&root);
+
+        assert_eq!(dirty.primitive, 1);
+        assert_eq!(
+            tree.dirty_node_ids(),
+            &HashSet::from([1]),
+            "slider value updates should dirty the render object so retained paint rebuilds the thumb immediately"
         );
     }
 }

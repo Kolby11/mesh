@@ -110,7 +110,7 @@ fn resolve_dimension_for_context(dimension: Dimension, available: f32) -> f32 {
     }
 }
 
-pub(crate) fn merge_missing_defaults(tag: &str, style: &mut ComputedStyle) {
+pub fn merge_missing_defaults(tag: &str, style: &mut ComputedStyle) {
     let defaults = default_leaf_style(tag);
 
     if tag == "icon" {

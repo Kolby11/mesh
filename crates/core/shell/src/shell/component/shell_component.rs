@@ -264,7 +264,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             && can_use_retained_path
             && self.last_tree.is_some()
             && !self.render_hooks_pending;
-        let previous_visual_styles = if use_retained_style_path {
+        let previous_visual_styles = if self.last_tree.is_some() {
             self.previous_visual_styles()
         } else {
             Default::default()

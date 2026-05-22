@@ -66,7 +66,7 @@ end
 
 local function sync_audio_copy(percent, muted)
     local safe_percent = clamp_percent(percent)
-    slider_value = clamp_unit(safe_percent / 100)
+    slider_value = clamp_unit(percent / 100)
     audio_percent_label = string.format("%d%%", safe_percent)
     audio_muted = muted and true or false
 

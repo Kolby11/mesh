@@ -16,6 +16,7 @@ use std::path::PathBuf;
 pub use accessibility::root_accessibility_role;
 pub use compile::{CompileFrontendError, compile_frontend_module, is_frontend_module};
 pub use render::build_widget_tree_from_component;
+pub use style::merge_missing_defaults;
 pub use tags::UiTag;
 
 /// A `VariableStore` overlay used during `{#for}` iteration.

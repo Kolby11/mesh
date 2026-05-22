@@ -58,6 +58,9 @@ pub struct TaffyLayoutReport {
     pub diagnostics: Vec<TaffyLayoutDiagnostic>,
 }
 
+const CONTENT_DIMENSION_TAFFY_DIAGNOSTIC: &str =
+    "content dimension mapped through Taffy measurement";
+
 impl TaffyLayoutReport {
     pub fn is_clean(&self) -> bool {
         self.diagnostics.is_empty()
@@ -178,13 +181,23 @@ impl LayoutEngine {
         }
 
         for diagnostic in &report.diagnostics {
-            tracing::warn!(
-                target: "mesh::layout",
-                node_id = diagnostic.node_id,
-                tag = %diagnostic.tag,
-                reason = %diagnostic.reason,
-                "taffy layout diagnostic"
-            );
+            if is_expected_taffy_measurement_diagnostic(&diagnostic.reason) {
+                tracing::debug!(
+                    target: "mesh::layout",
+                    node_id = diagnostic.node_id,
+                    tag = %diagnostic.tag,
+                    reason = %diagnostic.reason,
+                    "taffy layout diagnostic"
+                );
+            } else {
+                tracing::warn!(
+                    target: "mesh::layout",
+                    node_id = diagnostic.node_id,
+                    tag = %diagnostic.tag,
+                    reason = %diagnostic.reason,
+                    "taffy layout diagnostic"
+                );
+            }
         }
     }
 }
@@ -221,11 +234,7 @@ fn taffy_style_for_node(node: &WidgetNode, report: &mut TaffyLayoutReport) -> ta
     let style = &node.computed_style;
 
     if matches!(style.width, Dimension::Content) || matches!(style.height, Dimension::Content) {
-        record_taffy_diagnostic(
-            report,
-            node,
-            "content dimension mapped through Taffy measurement",
-        );
+        record_taffy_diagnostic(report, node, CONTENT_DIMENSION_TAFFY_DIAGNOSTIC);
     }
 
     let mut taffy = taffy_style::Style {
@@ -344,6 +353,10 @@ fn taffy_style_for_node(node: &WidgetNode, report: &mut TaffyLayoutReport) -> ta
     taffy
 }
 
+fn is_expected_taffy_measurement_diagnostic(reason: &str) -> bool {
+    reason == CONTENT_DIMENSION_TAFFY_DIAGNOSTIC
+}
+
 fn build_taffy_tree(
     node: &WidgetNode,
     tree: &mut TaffyTree<NodeId>,
@@ -434,7 +447,7 @@ fn write_taffy_layout(
     tree: &TaffyTree<NodeId>,
     node_map: &HashMap<NodeId, TaffyNodeId>,
 ) {
-    write_taffy_layout_with_parent(node, tree, node_map, None);
+    write_taffy_layout_with_parent(node, tree, node_map, None, 0.0, 0.0);
 }
 
 fn write_taffy_layout_with_parent(
@@ -442,6 +455,8 @@ fn write_taffy_layout_with_parent(
     tree: &TaffyTree<NodeId>,
     node_map: &HashMap<NodeId, TaffyNodeId>,
     parent_padding: Option<Edges>,
+    parent_x: f32,
+    parent_y: f32,
 ) {
     if node.computed_style.display == Display::None {
         zero_layout_subtree(node);
@@ -452,8 +467,8 @@ fn write_taffy_layout_with_parent(
         && let Ok(layout) = tree.layout(*taffy_node)
     {
         node.layout = LayoutRect {
-            x: layout.location.x,
-            y: layout.location.y,
+            x: parent_x + layout.location.x,
+            y: parent_y + layout.location.y,
             width: layout.size.width,
             height: layout.size.height,
         };
@@ -480,7 +495,14 @@ fn write_taffy_layout_with_parent(
 
     let padding = node.computed_style.padding;
     for child in &mut node.children {
-        write_taffy_layout_with_parent(child, tree, node_map, Some(padding));
+        write_taffy_layout_with_parent(
+            child,
+            tree,
+            node_map,
+            Some(padding),
+            node.layout.x,
+            node.layout.y,
+        );
     }
 }
 
@@ -815,6 +837,21 @@ mod tests {
         assert_eq!(row.children[0].layout.x, 0.0);
         assert_eq!(row.children[1].layout.x, 100.0);
 
+        let mut nested = make_node("nested-root", Dimension::Px(300.0), Dimension::Px(80.0));
+        nested.computed_style.direction = FlexDirection::Row;
+        let mut nested_parent =
+            make_node("nested-parent", Dimension::Px(120.0), Dimension::Px(40.0));
+        nested_parent.computed_style.margin.left = 30.0;
+        nested_parent.children = vec![make_node(
+            "nested-child",
+            Dimension::Px(20.0),
+            Dimension::Px(20.0),
+        )];
+        nested.children = vec![nested_parent];
+        LayoutEngine::compute(&mut nested, 300.0, 80.0);
+        assert_eq!(nested.children[0].layout.x, 30.0);
+        assert_eq!(nested.children[0].children[0].layout.x, 30.0);
+
         let mut column = make_node("column", Dimension::Px(200.0), Dimension::Px(300.0));
         column.computed_style.direction = FlexDirection::Column;
         column.computed_style.gap = 10.0;
@@ -898,5 +935,15 @@ mod tests {
             report.diagnostics[0].reason,
             "unsupported layout mapping: test-only"
         );
+    }
+
+    #[test]
+    fn content_dimension_taffy_diagnostic_is_expected_measurement_noise() {
+        assert!(is_expected_taffy_measurement_diagnostic(
+            CONTENT_DIMENSION_TAFFY_DIAGNOSTIC
+        ));
+        assert!(!is_expected_taffy_measurement_diagnostic(
+            "unsupported layout mapping: test-only"
+        ));
     }
 }

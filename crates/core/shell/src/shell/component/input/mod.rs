@@ -7,6 +7,10 @@ mod widgets;
 #[cfg(test)]
 pub(crate) use keyboard::KeybindResolutionSource;
 
+fn point_in_bounds(x: f32, y: f32, (left, top, right, bottom): (f32, f32, f32, f32)) -> bool {
+    x >= left && x <= right && y >= top && y <= bottom
+}
+
 impl FrontendSurfaceComponent {
     pub(in crate::shell::component) fn handle_component_input(
         &mut self,
@@ -36,6 +40,7 @@ impl FrontendSurfaceComponent {
                     if let Some(selection_key) = self.selectable_text_target_key(&tree, x, y) {
                         let requests = self.set_focus_target(&tree, None, false)?;
                         self.pointer_down_key = None;
+                        self.pointer_down_bounds = None;
                         self.active_slider_key = None;
                         self.begin_text_selection(selection_key, x, y);
                         self.invalidate_paint();
@@ -45,6 +50,8 @@ impl FrontendSurfaceComponent {
                     self.clear_selection();
                     if let Some(node_key) = self.pointer_event_target_key(&tree, x, y) {
                         self.pointer_down_key = Some(node_key.clone());
+                        self.pointer_down_bounds =
+                            find_node_bounds_by_key(&tree, &node_key, 0.0, 0.0);
                         let mut requests = if let Some(focused_key) = find_focusable_at(&tree, x, y)
                         {
                             let focus_visible =
@@ -88,6 +95,7 @@ impl FrontendSurfaceComponent {
                     } else {
                         let requests = self.set_focus_target(&tree, None, false)?;
                         self.pointer_down_key = None;
+                        self.pointer_down_bounds = None;
                         self.active_slider_key = None;
                         self.invalidate_interaction_restyle();
                         if !requests.is_empty() {
@@ -115,17 +123,25 @@ impl FrontendSurfaceComponent {
                         return Ok(requests);
                     }
 
-                    if let Some(node_key) = self.pointer_event_target_key(&tree, x, y) {
-                        if self.pointer_down_key.as_deref() == Some(node_key.as_str()) {
-                            if let Some(handler) = find_click_handler(&tree, &node_key) {
-                                let click_event = self.build_click_event(&tree, &node_key, x, y);
-                                requests.extend(
-                                    self.call_namespaced_handler(&handler, &[click_event])?,
-                                );
-                            }
+                    let release_key = self.pointer_event_target_key(&tree, x, y);
+                    let captured_click_key = self.pointer_down_key.as_ref().and_then(|down_key| {
+                        let released_on_same_key =
+                            release_key.as_deref() == Some(down_key.as_str());
+                        let released_inside_press_bounds = self
+                            .pointer_down_bounds
+                            .is_some_and(|bounds| point_in_bounds(x, y, bounds));
+                        (released_on_same_key || released_inside_press_bounds)
+                            .then_some(down_key.clone())
+                    });
+                    if let Some(node_key) = captured_click_key {
+                        if let Some(handler) = find_click_handler(&tree, &node_key) {
+                            let click_event = self.build_click_event(&tree, &node_key, x, y);
+                            requests
+                                .extend(self.call_namespaced_handler(&handler, &[click_event])?);
                         }
                     }
                     self.pointer_down_key = None;
+                    self.pointer_down_bounds = None;
                     self.active_slider_key = None;
                     self.invalidate_interaction_restyle();
                     if !requests.is_empty() {

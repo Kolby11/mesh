@@ -53,7 +53,11 @@ impl AnimatedVisualStyle {
     fn from_node(node: &WidgetNode) -> Self {
         let s = &node.computed_style;
         Self {
-            border_radius: s.border_radius,
+            border_radius: visual_border_radius(
+                s.border_radius,
+                node.layout.width,
+                node.layout.height,
+            ),
             border_width: s.border_width,
             opacity: s.opacity,
             background_color: s.background_color,
@@ -264,6 +268,20 @@ impl AnimatedVisualStyle {
     }
 }
 
+fn visual_border_radius(radius: Corners, width: f32, height: f32) -> Corners {
+    let cap = (width.min(height) * 0.5).max(0.0);
+    if cap <= 0.0 {
+        return radius;
+    }
+
+    Corners {
+        top_left: radius.top_left.min(cap),
+        top_right: radius.top_right.min(cap),
+        bottom_right: radius.bottom_right.min(cap),
+        bottom_left: radius.bottom_left.min(cap),
+    }
+}
+
 fn pick<T>(use_previous: bool, previous: T, desired: T) -> T {
     if use_previous { previous } else { desired }
 }
@@ -429,6 +447,9 @@ impl FrontendSurfaceComponent {
 
         let transition = node.computed_style.transition;
         let props = transition.properties;
+        if props.animates_border_radius() {
+            node.computed_style.border_radius = desired.border_radius;
+        }
         let should_animate = transition.duration_ms > 0
             && ((props.animates_border_radius()
                 && previous_displayed.border_radius != desired.border_radius)
@@ -689,5 +710,29 @@ fn lerp_box_shadow(from: BoxShadow, to: BoxShadow, progress: f32) -> BoxShadow {
 fn lerp_visual_filter(from: VisualFilter, to: VisualFilter, progress: f32) -> VisualFilter {
     VisualFilter {
         blur_radius: from.blur_radius.lerp(to.blur_radius, progress),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn visual_border_radius_clamps_full_radius_to_visible_node_radius() {
+        let radius = visual_border_radius(Corners::all(9999.0), 32.0, 28.0);
+
+        assert_eq!(radius, Corners::all(14.0));
+    }
+
+    #[test]
+    fn animated_visual_style_uses_visible_border_radius_for_full_radius() {
+        let mut node = WidgetNode::new("button");
+        node.layout.width = 32.0;
+        node.layout.height = 28.0;
+        node.computed_style.border_radius = Corners::all(9999.0);
+
+        let style = AnimatedVisualStyle::from_node(&node);
+
+        assert_eq!(style.border_radius, Corners::all(14.0));
     }
 }

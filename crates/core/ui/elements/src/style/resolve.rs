@@ -397,6 +397,19 @@ impl<'a> StyleResolver<'a> {
         self.restyle_subtree_with_index(node, &index, context, None);
     }
 
+    pub fn restyle_subtree_children(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        context: StyleContext,
+    ) {
+        let index = StyleRuleIndex::new(rules);
+        let parent_style = node.computed_style.clone();
+        for child in &mut node.children {
+            self.restyle_subtree_with_index(child, &index, context, Some(&parent_style));
+        }
+    }
+
     fn restyle_subtree_with_index(
         &self,
         node: &mut crate::tree::WidgetNode,

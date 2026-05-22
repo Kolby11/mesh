@@ -59,11 +59,32 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
         .expect("@mesh/navigation-bar rendered tree");
     let nav_shell =
         first_node_with_attr(navigation_tree, "class", "nav-shell").expect("navigation shell");
+    assert_eq!(
+        nav_shell.layout.width.round() as u32,
+        960,
+        "@mesh/navigation-bar shell background should span the resolved surface width"
+    );
+    let status_cluster =
+        first_node_with_attr(navigation_tree, "class", "status-cluster").expect("status cluster");
+    let control_cluster =
+        first_node_with_attr(navigation_tree, "ref", "control-cluster").expect("control cluster");
+    assert!(
+        control_cluster.layout.x > status_cluster.layout.x + status_cluster.layout.width,
+        "@mesh/navigation-bar controls should be positioned after status content, got controls {:?} and status {:?}",
+        control_cluster.layout,
+        status_cluster.layout
+    );
     let volume_button = first_node_with_click_handler(
         navigation_tree,
         "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
     )
     .expect("volume button");
+    assert!(
+        volume_button.layout.x >= control_cluster.layout.x,
+        "@mesh/navigation-bar button layout should include parent offsets, got button {:?} and controls {:?}",
+        volume_button.layout,
+        control_cluster.layout
+    );
     assert_layout_contains(
         nav_shell,
         volume_button,

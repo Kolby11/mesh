@@ -297,6 +297,56 @@ fn audio_popover_first_slider_grab_dispatches_change() {
 }
 
 #[test]
+fn audio_popover_drag_keeps_fractional_slider_value_visible() {
+    let mut component =
+        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    let theme = default_theme();
+    let width = 280;
+    let height = 180;
+    let mut buffer = PixelBuffer::new(width, height);
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 20,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
+        .expect("audio popover slider");
+    let drag_x = slider.layout.x + slider.layout.width * 0.735;
+    let drag_y = slider.layout.y + slider.layout.height * 0.5;
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x: drag_x,
+                y: drag_y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
+        .and_then(|slider| slider.attributes.get("value"))
+        .and_then(|value| value.parse::<f32>().ok())
+        .expect("painted slider value");
+    assert!(
+        (rendered_value - 0.735).abs() < 0.01,
+        "drag should keep the fractional slider position visible, got {rendered_value}"
+    );
+}
+
+#[test]
 fn audio_popover_button_volume_updates_slider_after_drag() {
     let mut component =
         real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());

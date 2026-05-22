@@ -273,6 +273,7 @@ pub(super) struct FrontendSurfaceComponent {
     focused_key: Option<String>,
     focus_visible_key: Option<String>,
     pointer_down_key: Option<String>,
+    pointer_down_bounds: Option<(f32, f32, f32, f32)>,
     active_slider_key: Option<String>,
     /// When a surface with keyboard interactivity transitions visible→true,
     /// this flag tells the next paint to seed focus on the first tabbable
@@ -381,6 +382,7 @@ impl FrontendSurfaceComponent {
             focused_key: None,
             focus_visible_key: None,
             pointer_down_key: None,
+            pointer_down_bounds: None,
             active_slider_key: None,
             pending_auto_focus: settings_state.layout.visible_on_start
                 && settings_state.layout.keyboard_mode != KeyboardMode::None,

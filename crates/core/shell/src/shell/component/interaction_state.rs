@@ -87,6 +87,7 @@ impl FrontendSurfaceComponent {
         if let Some(key) = &self.pointer_down_key {
             if !valid_keys.contains(key) {
                 self.pointer_down_key = None;
+                self.pointer_down_bounds = None;
             }
         }
 

@@ -52,6 +52,7 @@ impl FrontendSurfaceComponent {
                     rules.extend(style.rules.iter().cloned());
                 }
             }
+            rules.sort_by_key(|rule| selector_contains_state(&rule.selector));
 
             self.cached_restyle_rules = Some(rules);
         }
@@ -214,6 +215,7 @@ impl FrontendSurfaceComponent {
             && dirty_types.contains(ComponentDirtyFlags::STATE)
             && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
         let mut reused_retained_layout = false;
+        let preserve_surface_root = tree.tag == "surface";
         if targeted_interaction_restyle {
             // Pseudo-state selectors are not isolated to the stateful node:
             // `.parent:hover .child` and similar relationship selectors can
@@ -221,10 +223,20 @@ impl FrontendSurfaceComponent {
             // Restyle the retained tree globally, but keep interaction
             // invalidation layout-stable unless a caller explicitly requests
             // layout.
-            resolver.restyle_subtree(tree, restyle_rules, context);
+            if preserve_surface_root {
+                resolver.restyle_subtree_children(tree, restyle_rules, context);
+            } else {
+                resolver.restyle_subtree(tree, restyle_rules, context);
+            }
+            merge_runtime_primitive_defaults(tree);
             reused_retained_layout = !dirty_types.contains(ComponentDirtyFlags::LAYOUT);
         } else {
-            resolver.restyle_subtree(tree, restyle_rules, context);
+            if preserve_surface_root {
+                resolver.restyle_subtree_children(tree, restyle_rules, context);
+            } else {
+                resolver.restyle_subtree(tree, restyle_rules, context);
+            }
+            merge_runtime_primitive_defaults(tree);
         }
         let restyle_elapsed = restyle_started.elapsed();
         self.record_profiling_stage_with_elapsed(
@@ -343,6 +355,25 @@ impl FrontendSurfaceComponent {
         for child in &node.children {
             self.record_runtime_style_diagnostics_for_node(child, rules, resolver, context);
         }
+    }
+}
+
+fn merge_runtime_primitive_defaults(node: &mut WidgetNode) {
+    if node.tag != "surface" {
+        mesh_core_frontend::merge_missing_defaults(&node.tag, &mut node.computed_style);
+    }
+    for child in &mut node.children {
+        merge_runtime_primitive_defaults(child);
+    }
+}
+
+fn selector_contains_state(selector: &mesh_core_component::style::Selector) -> bool {
+    use mesh_core_component::style::Selector;
+
+    match selector {
+        Selector::State(_, _) => true,
+        Selector::Compound(parts) => parts.iter().any(selector_contains_state),
+        Selector::Tag(_) | Selector::Class(_) | Selector::Id(_) | Selector::Universal => false,
     }
 }
 

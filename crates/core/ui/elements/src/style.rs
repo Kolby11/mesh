@@ -1309,10 +1309,7 @@ mod tests {
         let (style, diagnostics) = resolve_class(&resolver, &rules, "panel");
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        assert_eq!(
-            style.background_color,
-            Color::from_hex("#211F26").unwrap()
-        );
+        assert_eq!(style.background_color, Color::from_hex("#211F26").unwrap());
     }
 
     #[test]
@@ -1332,7 +1329,11 @@ mod tests {
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].property, "transition-duration");
-        assert!(diagnostics[0].message.contains("animation.duration.not-real"));
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("animation.duration.not-real")
+        );
     }
 
     #[test]
@@ -1344,10 +1345,16 @@ mod tests {
             "../../../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
         ));
 
-        assert!(nav_rules.iter().any(|rule| selector_has_class(&rule.selector, "nav-shell")));
-        assert!(volume_rules
-            .iter()
-            .any(|rule| selector_has_class(&rule.selector, "nav-button")));
+        assert!(
+            nav_rules
+                .iter()
+                .any(|rule| selector_has_class(&rule.selector, "nav-shell"))
+        );
+        assert!(
+            volume_rules
+                .iter()
+                .any(|rule| selector_has_class(&rule.selector, "nav-button"))
+        );
     }
 
     #[test]
@@ -1362,8 +1369,7 @@ mod tests {
         )));
 
         let (nav_style, nav_diagnostics) = resolve_class(&resolver, &rules, "nav-shell");
-        let (status_style, status_diagnostics) =
-            resolve_class(&resolver, &rules, "status-primary");
+        let (status_style, status_diagnostics) = resolve_class(&resolver, &rules, "status-primary");
         let (button_style, button_diagnostics) = resolve_class(&resolver, &rules, "nav-button");
         let diagnostic_properties: std::collections::BTreeSet<_> = nav_diagnostics
             .iter()
@@ -1375,7 +1381,10 @@ mod tests {
         assert!(diagnostic_properties.contains("container-type"));
         assert!(diagnostic_properties.contains("text-wrap"));
         assert!(diagnostic_properties.contains("border-style"));
-        assert_eq!(nav_style.background_color, Color::from_hex("#1C1B1F").unwrap());
+        assert_eq!(
+            nav_style.background_color,
+            Color::from_hex("#1C1B1F").unwrap()
+        );
         assert_eq!(nav_style.padding.left, 16.0);
         assert_eq!(status_style.font_size, 12.0);
         assert_eq!(button_style.border_width, Edges::all(2.0));
@@ -1383,6 +1392,26 @@ mod tests {
             button_style.background_color,
             Color::from_hex("#211F26").unwrap()
         );
+
+        let (hovered_button_style, hovered_button_diagnostics) = resolver
+            .resolve_node_style_with_diagnostics(
+                &rules,
+                "button",
+                &["nav-button".to_string()],
+                None,
+                StyleContext::default(),
+                ElementState {
+                    hovered: true,
+                    ..ElementState::default()
+                },
+            );
+        assert!(
+            hovered_button_diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.property != "transform")
+        );
+        assert_eq!(hovered_button_style.transform.translate_y, -1.0);
+        assert!((hovered_button_style.transform.scale_x - 1.04).abs() < 0.001);
     }
 
     #[test]

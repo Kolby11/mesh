@@ -1059,10 +1059,12 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
         .expect("hovered navigation tree");
     let hovered_button = node_by_mesh_key(hovered_tree, &button_key);
 
+    assert!(hovered_button.state.hovered);
+    assert!(
+        component.style_animations.contains_key(&button_key),
+        "hover should start the visible navigation transition"
+    );
     assert_eq!(hovered_button.computed_style.border_radius.top_left, 8.0);
-    assert_eq!(hovered_button.computed_style.transform.translate_y, -1.0);
-    assert!((hovered_button.computed_style.transform.scale_x - 1.04).abs() < 0.001);
-    assert!((hovered_button.computed_style.transform.scale_y - 1.04).abs() < 0.001);
     let hovered_visible_pixels = nontransparent_pixels(&buffer);
     assert!(
         hovered_visible_pixels > 40_000,
@@ -1073,6 +1075,21 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
         center_alpha > 0,
         "hovered navigation button center should remain visible after transition repaint"
     );
+
+    std::thread::sleep(Duration::from_millis(220));
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let settled_hover_tree = component
+        .last_tree
+        .as_ref()
+        .expect("settled hovered navigation tree");
+    let settled_hover_button = node_by_mesh_key(settled_hover_tree, &button_key);
+
+    assert_eq!(
+        settled_hover_button.computed_style.transform.translate_y,
+        -1.0
+    );
+    assert!((settled_hover_button.computed_style.transform.scale_x - 1.04).abs() < 0.001);
+    assert!((settled_hover_button.computed_style.transform.scale_y - 1.04).abs() < 0.001);
 
     component
         .handle_input(
@@ -1102,7 +1119,7 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
         component.style_animations.contains_key(&button_key),
         "active press should start the visible squircle-to-circle transition"
     );
-    std::thread::sleep(Duration::from_millis(260));
+    std::thread::sleep(Duration::from_millis(220));
     component.paint(&theme, width, height, &mut buffer).unwrap();
     let settled_tree = component
         .last_tree
@@ -1110,7 +1127,15 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
         .expect("settled active navigation tree");
     let settled_button = node_by_mesh_key(settled_tree, &button_key);
 
-    assert_eq!(settled_button.computed_style.border_radius.top_left, 9999.0);
+    let max_visible_radius = settled_button
+        .layout
+        .width
+        .min(settled_button.layout.height)
+        * 0.5;
+    assert_eq!(
+        settled_button.computed_style.border_radius.top_left,
+        max_visible_radius
+    );
     assert!((settled_button.computed_style.transform.scale_x - 0.94).abs() < 0.001);
     assert!((settled_button.computed_style.transform.scale_y - 0.94).abs() < 0.001);
 }
@@ -1422,6 +1447,161 @@ fn navigation_bar_same_hover_volume_trigger_closes_popover_immediately() {
             CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/audio-popover"
         )),
         "second click at the same hovered coordinates should hide immediately: {close_requests:?}"
+    );
+}
+
+#[test]
+fn navigation_bar_volume_trigger_reopens_after_rapid_toggle_cycle() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    let volume_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+    )
+    .expect("rendered volume button");
+    let volume_key = volume_button
+        .attributes
+        .get("_mesh_key")
+        .expect("volume button mesh key")
+        .clone();
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, &volume_key, 0.0, 0.0).expect("volume bounds");
+    let x = (left + right) * 0.5;
+    let y = (top + bottom) * 0.5;
+
+    for expected_open in [true, false, true] {
+        component
+            .handle_input(
+                &theme,
+                width,
+                height,
+                ComponentInput::PointerButton {
+                    x,
+                    y,
+                    pressed: true,
+                },
+            )
+            .unwrap();
+        let requests = component
+            .handle_input(
+                &theme,
+                width,
+                height,
+                ComponentInput::PointerButton {
+                    x,
+                    y,
+                    pressed: false,
+                },
+            )
+            .unwrap();
+
+        if expected_open {
+            assert!(
+                requests.iter().any(|request| matches!(
+                    request,
+                    CoreRequest::ActivatePopover { surface_id, .. }
+                        if surface_id == "@mesh/audio-popover"
+                )),
+                "expected rapid click to open the audio popover: {requests:?}"
+            );
+            component
+                .handle_core_event(&CoreEvent::SurfaceVisibilityChanged {
+                    surface_id: "@mesh/audio-popover".into(),
+                    visible: true,
+                })
+                .unwrap();
+        } else {
+            assert!(
+                requests.iter().any(|request| matches!(
+                    request,
+                    CoreRequest::HideSurface { surface_id } if surface_id == "@mesh/audio-popover"
+                )),
+                "expected rapid click to hide the audio popover: {requests:?}"
+            );
+            component
+                .handle_core_event(&CoreEvent::SurfaceVisibilityChanged {
+                    surface_id: "@mesh/audio-popover".into(),
+                    visible: false,
+                })
+                .unwrap();
+        }
+
+        component.paint(&theme, width, height, &mut buffer).unwrap();
+    }
+}
+
+#[test]
+fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    let volume_button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+    )
+    .expect("rendered volume button");
+    let volume_key = volume_button
+        .attributes
+        .get("_mesh_key")
+        .expect("volume button mesh key")
+        .clone();
+    let (_left, top, right, bottom) =
+        find_node_bounds_by_key(tree, &volume_key, 0.0, 0.0).expect("volume bounds");
+    let x = right - 0.5;
+    let y = (top + bottom) * 0.5;
+
+    component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let requests = component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: false,
+            },
+        )
+        .unwrap();
+
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ActivatePopover { surface_id, .. }
+                if surface_id == "@mesh/audio-popover"
+        )),
+        "release at the original press point should still click while the active animation changes visual bounds: {requests:?}"
     );
 }
 
