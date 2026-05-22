@@ -493,13 +493,29 @@ impl SkiaPaintBackend {
         if clipped.width <= 0 || clipped.height <= 0 {
             return;
         }
-        buffer.clear_rect(
-            clipped.x.max(0) as u32,
-            clipped.y.max(0) as u32,
-            clipped.width as u32,
-            clipped.height as u32,
-            color,
-        );
+        buffer.with_skia_canvas(|canvas| {
+            let save_count = canvas.save();
+            canvas.clip_rect(
+                Rect::from_xywh(
+                    clipped.x as f32,
+                    clipped.y as f32,
+                    clipped.width as f32,
+                    clipped.height as f32,
+                ),
+                None,
+                false,
+            );
+            let rect = Rect::from_xywh(
+                rect.x as f32,
+                rect.y as f32,
+                rect.width as f32,
+                rect.height as f32,
+            );
+            let mut paint = skia_paint(color, false);
+            paint.set_style(PaintStyle::Fill);
+            canvas.draw_rect(rect, &paint);
+            canvas.restore_to_count(save_count);
+        });
     }
 
     fn fill_rounded_rect_impl(

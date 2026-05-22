@@ -963,6 +963,71 @@ fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose(
 }
 
 #[test]
+fn skia_shape_rect_fill_uses_command_clip() {
+    let mut buffer = PixelBuffer::new(16, 16);
+    let mut diagnostics = Vec::new();
+    let rect = ClipRect {
+        x: 2,
+        y: 2,
+        width: 10,
+        height: 10,
+    };
+    let clip = ClipRect {
+        x: 4,
+        y: 4,
+        width: 4,
+        height: 4,
+    };
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawRect {
+            rect,
+            paint: PainterPaint::fill(Color::from_hex("#ff0000").unwrap()),
+            clip,
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(pixel(&buffer, 3, 3), Color::TRANSPARENT);
+    assert_eq!(pixel(&buffer, 4, 4), Color::from_hex("#ff0000").unwrap());
+    assert_eq!(pixel(&buffer, 7, 7), Color::from_hex("#ff0000").unwrap());
+    assert_eq!(pixel(&buffer, 8, 8), Color::TRANSPARENT);
+}
+
+#[test]
+fn skia_shape_rect_fill_respects_transparency() {
+    let mut buffer = PixelBuffer::new(12, 12);
+    let mut diagnostics = Vec::new();
+    let color = Color {
+        r: 20,
+        g: 40,
+        b: 60,
+        a: 128,
+    };
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawRect {
+            rect: ClipRect {
+                x: 2,
+                y: 2,
+                width: 6,
+                height: 6,
+            },
+            paint: PainterPaint::fill(color),
+            clip: full_clip(12, 12),
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(pixel(&buffer, 4, 4), color);
+    assert_eq!(pixel(&buffer, 1, 1), Color::TRANSPARENT);
+}
+
+#[test]
 fn painter_command_contract_keeps_retained_structures_free_of_skia_types() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for relative in ["src/display_list.rs", "src/render_object.rs"] {
