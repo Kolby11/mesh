@@ -86,7 +86,7 @@
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 51. Painter Contract And Backend Boundary | v1.10 | 3/3 | Ready to execute | — |
+| 51. Painter Contract And Backend Boundary | v1.10 | 3/3 | Complete | 2026-05-22 |
 | 52. Skia Shape Primitive Migration | v1.10 | 0/? | Pending | — |
 | 53. Skia Effects, Layers, Gradients, And Images | v1.10 | 0/? | Pending | — |
 | 54. Retained Damage, Stacking, And Backend Observability | v1.10 | 0/? | Pending | — |
