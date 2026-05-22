@@ -52,6 +52,17 @@ fn pixel(buffer: &PixelBuffer, x: u32, y: u32) -> Color {
     }
 }
 
+fn write_effect_test_image(name: &str) -> String {
+    let dir = PathBuf::from("target/phase55-effects");
+    std::fs::create_dir_all(&dir).expect("create effect image fixture dir");
+    let path = dir.join(name);
+    let mut image = image::RgbaImage::new(2, 1);
+    image.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+    image.put_pixel(1, 0, image::Rgba([0, 255, 0, 255]));
+    image.save(&path).expect("write effect image fixture");
+    path.to_string_lossy().into_owned()
+}
+
 fn full_clip(width: i32, height: i32) -> ClipRect {
     ClipRect {
         x: 0,
@@ -1158,6 +1169,176 @@ fn skia_shape_rect_fill_respects_transparency() {
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(pixel(&buffer, 4, 4), color);
     assert_eq!(pixel(&buffer, 1, 1), Color::TRANSPARENT);
+}
+
+#[test]
+fn skia_effect_layer_opacity_isolates_child_pixels() {
+    let mut buffer = PixelBuffer::new(12, 12);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[
+            PainterCommand::PushLayer(PainterLayer {
+                bounds: full_clip(12, 12),
+                opacity: 0.5,
+                blend_mode: PainterBlendMode::SrcOver,
+                filter: PainterFilter::None,
+            }),
+            PainterCommand::DrawRect {
+                rect: ClipRect {
+                    x: 2,
+                    y: 2,
+                    width: 6,
+                    height: 6,
+                },
+                paint: PainterPaint::fill(Color::from_hex("#ff0000").unwrap()),
+                clip: full_clip(12, 12),
+            },
+            PainterCommand::PopLayer,
+        ],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let color = pixel(&buffer, 4, 4);
+    assert_eq!(color.r, 255);
+    assert!((120..=136).contains(&color.a), "{color:?}");
+}
+
+#[test]
+fn skia_effect_layer_blur_expands_painted_pixels() {
+    let mut buffer = PixelBuffer::new(24, 24);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[
+            PainterCommand::PushLayer(PainterLayer {
+                bounds: full_clip(24, 24),
+                opacity: 1.0,
+                blend_mode: PainterBlendMode::SrcOver,
+                filter: PainterFilter::Blur(VisualFilter { blur_radius: 3.0 }),
+            }),
+            PainterCommand::DrawRect {
+                rect: ClipRect {
+                    x: 8,
+                    y: 8,
+                    width: 8,
+                    height: 8,
+                },
+                paint: PainterPaint::fill(Color::from_hex("#00ff00").unwrap()),
+                clip: full_clip(24, 24),
+            },
+            PainterCommand::PopLayer,
+        ],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(pixel(&buffer, 6, 12).a > 0);
+    assert_eq!(pixel(&buffer, 0, 0), Color::TRANSPARENT);
+}
+
+#[test]
+fn skia_effect_linear_gradient_draws_top_and_bottom_colors() {
+    let mut buffer = PixelBuffer::new(8, 12);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawLinearGradient {
+            gradient: PainterLinearGradient {
+                from: Color::from_hex("#ff0000").unwrap(),
+                to: Color::from_hex("#0000ff").unwrap(),
+            },
+            rect: ClipRect {
+                x: 0,
+                y: 0,
+                width: 8,
+                height: 12,
+            },
+            radius: 0.0,
+            clip: full_clip(8, 12),
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let top = pixel(&buffer, 4, 1);
+    let bottom = pixel(&buffer, 4, 10);
+    assert!(top.r > top.b, "{top:?}");
+    assert!(bottom.b > bottom.r, "{bottom:?}");
+}
+
+#[test]
+fn skia_effect_image_draws_source_pixels() {
+    let path = write_effect_test_image("phase55-image-source.png");
+    let mut buffer = PixelBuffer::new(20, 10);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawImage {
+            image: PainterImage {
+                source: PainterImageSource::Path(path.clone()),
+            },
+            rect: ClipRect {
+                x: 0,
+                y: 0,
+                width: 20,
+                height: 10,
+            },
+            paint: PainterPaint::fill(Color::WHITE),
+            clip: full_clip(20, 10),
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(pixel(&buffer, 4, 5).r > pixel(&buffer, 4, 5).g);
+    assert!(pixel(&buffer, 15, 5).g > pixel(&buffer, 15, 5).r);
+}
+
+#[test]
+fn skia_effect_image_respects_command_clip() {
+    let path = write_effect_test_image("phase55-image-clip.png");
+    let mut buffer = PixelBuffer::new(20, 10);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawImage {
+            image: PainterImage {
+                source: PainterImageSource::Path(path),
+            },
+            rect: ClipRect {
+                x: 0,
+                y: 0,
+                width: 20,
+                height: 10,
+            },
+            paint: PainterPaint::fill(Color::WHITE),
+            clip: ClipRect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(pixel(&buffer, 4, 5).a > 0);
+    assert_eq!(pixel(&buffer, 15, 5), Color::TRANSPARENT);
+}
+
+#[test]
+fn skia_effect_image_gradient_suite_runs_supported_cases() {
+    skia_effect_linear_gradient_draws_top_and_bottom_colors();
+    skia_effect_image_draws_source_pixels();
+    skia_effect_image_respects_command_clip();
 }
 
 #[test]

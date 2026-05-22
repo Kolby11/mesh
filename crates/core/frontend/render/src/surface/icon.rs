@@ -111,6 +111,10 @@ fn get_or_load(path: &Path) -> Option<image::RgbaImage> {
     Some(img)
 }
 
+pub(crate) fn load_image_rgba(path: &Path) -> Option<image::RgbaImage> {
+    get_or_load(path)
+}
+
 fn encode_tint(color: Color) -> u32 {
     ((color.r as u32) << 24) | ((color.g as u32) << 16) | ((color.b as u32) << 8) | color.a as u32
 }

@@ -1,9 +1,10 @@
 use super::*;
+use crate::surface::icon;
 use crate::surface::painter::geometry::rounded_rect_coverage;
 use mesh_core_elements::{BoxShadow, VisualFilter};
-use skia_safe::image_filters;
 use skia_safe::{BlurStyle, MaskFilter, PaintStyle, RRect, Rect, TileMode, canvas::SaveLayerRec};
-use skia_safe::{Path as SkiaPath, PathBuilder};
+use skia_safe::{Data, Path as SkiaPath, PathBuilder, Point};
+use skia_safe::{Image, ImageInfo, SamplingOptions, gradient_shader, image_filters};
 
 #[allow(dead_code)]
 pub(crate) trait PaintBackend: Send + Sync {
@@ -384,12 +385,12 @@ impl PaintBackend for SkiaPaintBackend {
         PainterBackendCapabilities {
             backend_id: self.id(),
             clips: true,
-            layers: false,
+            layers: true,
             rects: true,
             rounded_rects: true,
             paths: true,
             text: false,
-            images: false,
+            images: true,
             shadows: true,
             filters: true,
             blend_modes: true,
@@ -403,6 +404,7 @@ impl PaintBackend for SkiaPaintBackend {
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
         let mut clip_stack: Vec<PainterClip> = Vec::new();
+        let mut layer_stack: Vec<PainterLayer> = Vec::new();
         for command in commands {
             match command {
                 PainterCommand::PushClip(clip) => {
@@ -412,23 +414,25 @@ impl PaintBackend for SkiaPaintBackend {
                     clip_stack.pop();
                 }
                 PainterCommand::PushLayer(layer) => {
-                    if layer.blend_mode != PainterBlendMode::SrcOver || !layer.filter.is_none() {
+                    if layer.blend_mode != PainterBlendMode::SrcOver {
                         diagnostics.push(PainterDiagnostic {
                             backend_id: self.id(),
-                            feature: UnsupportedPainterFeature::LayerStack,
-                            message:
-                                "layer stack commands are defined but not wired to execution yet"
-                                    .into(),
+                            feature: UnsupportedPainterFeature::BlendMode,
+                            message: "non-SrcOver layer blend modes are not supported".into(),
                         });
                     }
+                    layer_stack.push(*layer);
                 }
-                PainterCommand::PopLayer => {}
+                PainterCommand::PopLayer => {
+                    layer_stack.pop();
+                }
                 PainterCommand::DrawRect { rect, paint, clip } => {
-                    self.diagnose_unsupported_paint(*paint, diagnostics);
+                    let paint = layer_paint(*paint, &layer_stack);
+                    self.diagnose_unsupported_paint(paint, diagnostics);
                     self.draw_rect_command(
                         buffer,
                         *rect,
-                        *paint,
+                        paint,
                         effective_clip(*clip, &clip_stack),
                     );
                 }
@@ -438,23 +442,20 @@ impl PaintBackend for SkiaPaintBackend {
                     paint,
                     clip,
                 } => {
-                    self.diagnose_unsupported_paint(*paint, diagnostics);
+                    let paint = layer_paint(*paint, &layer_stack);
+                    self.diagnose_unsupported_paint(paint, diagnostics);
                     self.draw_rounded_rect_command(
                         buffer,
                         *rect,
                         *radius,
-                        *paint,
+                        paint,
                         effective_clip(*clip, &clip_stack),
                     );
                 }
                 PainterCommand::DrawPath { path, paint, clip } => {
-                    self.diagnose_unsupported_paint(*paint, diagnostics);
-                    self.draw_path_command(
-                        buffer,
-                        path,
-                        *paint,
-                        effective_clip(*clip, &clip_stack),
-                    );
+                    let paint = layer_paint(*paint, &layer_stack);
+                    self.diagnose_unsupported_paint(paint, diagnostics);
+                    self.draw_path_command(buffer, path, paint, effective_clip(*clip, &clip_stack));
                 }
                 PainterCommand::DrawText { .. } => diagnostics.push(PainterDiagnostic {
                     backend_id: self.id(),
@@ -463,19 +464,35 @@ impl PaintBackend for SkiaPaintBackend {
                         "text commands are part of the contract but still handled by TextRenderer"
                             .into(),
                 }),
-                PainterCommand::DrawImage { .. } => diagnostics.push(PainterDiagnostic {
-                    backend_id: self.id(),
-                    feature: UnsupportedPainterFeature::Image,
-                    message:
-                        "image commands are part of the contract but deferred to image migration"
-                            .into(),
-                }),
-                PainterCommand::DrawLinearGradient { .. } => {
-                    diagnostics.push(PainterDiagnostic {
-                        backend_id: self.id(),
-                        feature: UnsupportedPainterFeature::Gradient,
-                        message: "linear-gradient commands are part of the contract but deferred to gradient migration".into(),
-                    })
+                PainterCommand::DrawImage {
+                    image,
+                    rect,
+                    paint,
+                    clip,
+                } => {
+                    let paint = layer_paint(*paint, &layer_stack);
+                    self.draw_image_command(
+                        buffer,
+                        image,
+                        *rect,
+                        paint,
+                        effective_clip(*clip, &clip_stack),
+                        diagnostics,
+                    );
+                }
+                PainterCommand::DrawLinearGradient {
+                    gradient,
+                    rect,
+                    radius,
+                    clip,
+                } => {
+                    self.draw_linear_gradient_command(
+                        buffer,
+                        *gradient,
+                        *rect,
+                        *radius,
+                        effective_clip(*clip, &clip_stack),
+                    );
                 }
                 PainterCommand::DrawShadow {
                     rect,
@@ -881,6 +898,135 @@ impl SkiaPaintBackend {
         });
     }
 
+    fn draw_linear_gradient_command(
+        &self,
+        buffer: &mut PixelBuffer,
+        gradient: PainterLinearGradient,
+        rect: ClipRect,
+        radius: f32,
+        clip: ClipRect,
+    ) {
+        let clipped = intersect_clip(rect, clip);
+        if clipped.width <= 0 || clipped.height <= 0 {
+            return;
+        }
+        buffer.with_skia_canvas(|canvas| {
+            let save_count = canvas.save();
+            canvas.clip_rect(
+                Rect::from_xywh(
+                    clipped.x as f32,
+                    clipped.y as f32,
+                    clipped.width as f32,
+                    clipped.height as f32,
+                ),
+                None,
+                false,
+            );
+            let rect = Rect::from_xywh(
+                rect.x as f32,
+                rect.y as f32,
+                rect.width as f32,
+                rect.height as f32,
+            );
+            let colors = [
+                crate::surface::buffer::skia_color(gradient.from),
+                crate::surface::buffer::skia_color(gradient.to),
+            ];
+            let Some(shader) = gradient_shader::linear(
+                (
+                    Point::new(rect.left(), rect.top()),
+                    Point::new(rect.left(), rect.bottom()),
+                ),
+                colors.as_slice(),
+                None,
+                TileMode::Clamp,
+                None,
+                None,
+            ) else {
+                canvas.restore_to_count(save_count);
+                return;
+            };
+            let mut paint = skia_safe::Paint::default();
+            paint.set_anti_alias(true);
+            paint.set_shader(shader);
+            if radius > 0.5 {
+                canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+            } else {
+                canvas.draw_rect(rect, &paint);
+            }
+            canvas.restore_to_count(save_count);
+        });
+    }
+
+    fn draw_image_command(
+        &self,
+        buffer: &mut PixelBuffer,
+        image: &PainterImage,
+        rect: ClipRect,
+        paint: PainterPaint,
+        clip: ClipRect,
+        diagnostics: &mut Vec<PainterDiagnostic>,
+    ) {
+        let clipped = intersect_clip(rect, clip);
+        if clipped.width <= 0 || clipped.height <= 0 {
+            return;
+        }
+        let PainterImageSource::Path(path) = &image.source;
+        let Some(rgba) = icon::load_image_rgba(std::path::Path::new(path)) else {
+            diagnostics.push(PainterDiagnostic {
+                backend_id: self.id(),
+                feature: UnsupportedPainterFeature::Image,
+                message: format!("missing image source '{path}'"),
+            });
+            return;
+        };
+        let info = ImageInfo::new(
+            (rgba.width() as i32, rgba.height() as i32),
+            skia_safe::ColorType::RGBA8888,
+            skia_safe::AlphaType::Unpremul,
+            None,
+        );
+        let data = Data::new_copy(rgba.as_raw());
+        let Some(skia_image) = Image::from_raster_data(&info, data, (rgba.width() * 4) as usize)
+        else {
+            diagnostics.push(PainterDiagnostic {
+                backend_id: self.id(),
+                feature: UnsupportedPainterFeature::Image,
+                message: format!("could not decode image source '{path}'"),
+            });
+            return;
+        };
+        buffer.with_skia_canvas(|canvas| {
+            let save_count = canvas.save();
+            canvas.clip_rect(
+                Rect::from_xywh(
+                    clipped.x as f32,
+                    clipped.y as f32,
+                    clipped.width as f32,
+                    clipped.height as f32,
+                ),
+                None,
+                false,
+            );
+            let mut skia_paint = skia_paint(paint.color, true);
+            skia_paint.set_alpha(paint.color.a);
+            let dst = Rect::from_xywh(
+                rect.x as f32,
+                rect.y as f32,
+                rect.width as f32,
+                rect.height as f32,
+            );
+            canvas.draw_image_rect_with_sampling_options(
+                skia_image,
+                None,
+                dst,
+                SamplingOptions::default(),
+                &skia_paint,
+            );
+            canvas.restore_to_count(save_count);
+        });
+    }
+
     fn stroke_rect_impl(
         &self,
         buffer: &mut PixelBuffer,
@@ -992,6 +1138,21 @@ fn effective_clip(clip: ClipRect, clip_stack: &[PainterClip]) -> ClipRect {
     clip_stack
         .iter()
         .fold(clip, |clip, pushed| intersect_clip(clip, pushed.rect))
+}
+
+fn layer_paint(mut paint: PainterPaint, layer_stack: &[PainterLayer]) -> PainterPaint {
+    for layer in layer_stack {
+        let alpha = ((paint.color.a as f32) * layer.opacity.clamp(0.0, 1.0))
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        paint.color.a = alpha;
+        if let PainterFilter::Blur(filter) = layer.filter
+            && paint.filter.is_none()
+        {
+            paint.filter = filter;
+        }
+    }
+    paint
 }
 
 fn skia_path(path: &PainterPath) -> Option<SkiaPath> {
