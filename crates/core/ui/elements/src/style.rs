@@ -152,6 +152,7 @@ mod tests {
             "transition-duration",
             "transition-delay",
             "transition-timing-function",
+            "background-image",
             "box-shadow",
             "filter",
             "backdrop-filter",
@@ -182,6 +183,7 @@ mod tests {
             ("border-radius", StyleProfileStatus::Implemented),
             ("opacity", StyleProfileStatus::Implemented),
             ("transform", StyleProfileStatus::Implemented),
+            ("background-image", StyleProfileStatus::Implemented),
             ("box-shadow", StyleProfileStatus::Implemented),
             ("filter", StyleProfileStatus::Implemented),
             ("display", StyleProfileStatus::Implemented),
@@ -553,6 +555,100 @@ mod tests {
         );
         assert_eq!(style.filter.blur_radius, 3.0);
         assert_eq!(style.backdrop_filter.blur_radius, 5.0);
+    }
+
+    #[test]
+    fn style_background_image_url_resolves_backend_neutral_source() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "background-image".to_string(),
+                value: StyleValue::Literal("url(\"assets/panel.png\")".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let (style, diagnostics) = resolver.resolve_node_style_with_diagnostics(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            style.background_paint,
+            BackgroundPaint::Image(StyleImageSource {
+                path: "assets/panel.png".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn style_background_linear_gradient_resolves_two_colors() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "background-image".to_string(),
+                value: StyleValue::Literal(
+                    "linear-gradient(to bottom, #112233, #445566)".to_string(),
+                ),
+            }],
+            container_query: None,
+        }];
+
+        let (style, diagnostics) = resolver.resolve_node_style_with_diagnostics(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            style.background_paint,
+            BackgroundPaint::LinearGradient(StyleLinearGradient {
+                from: Color::from_hex("#112233").unwrap(),
+                to: Color::from_hex("#445566").unwrap(),
+            })
+        );
+    }
+
+    #[test]
+    fn style_background_image_unsupported_value_records_diagnostic() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "background-image".to_string(),
+                value: StyleValue::Literal("radial-gradient(#000, #fff)".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let (style, diagnostics) = resolver.resolve_node_style_with_diagnostics(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.background_paint, BackgroundPaint::None);
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.property == "background-image"
+                && diagnostic.message.contains("unsupported background-image")
+        }));
     }
 
     #[test]

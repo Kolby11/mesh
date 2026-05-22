@@ -37,6 +37,7 @@ pub struct StyleProfileProperty {
 const SUPPORTED_CSS_PROPERTIES: &[&str] = &[
     "background",
     "background-color",
+    "background-image",
     "color",
     "border",
     "border-color",

@@ -599,7 +599,11 @@ fn parse_background_url(value: &str) -> Option<String> {
     let path = inner
         .strip_prefix('"')
         .and_then(|rest| rest.strip_suffix('"'))
-        .or_else(|| inner.strip_prefix('\'').and_then(|rest| rest.strip_suffix('\'')))
+        .or_else(|| {
+            inner
+                .strip_prefix('\'')
+                .and_then(|rest| rest.strip_suffix('\''))
+        })
         .unwrap_or(inner)
         .trim();
 
@@ -619,7 +623,10 @@ fn parse_linear_gradient(value: &str) -> Option<StyleLinearGradient> {
     let inner = value
         .strip_prefix("linear-gradient(")
         .and_then(|rest| rest.strip_suffix(')'))?;
-    let mut parts = inner.split(',').map(str::trim).filter(|part| !part.is_empty());
+    let mut parts = inner
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty());
     let first = parts.next()?;
     let from = if first == "to bottom" {
         Color::from_hex(parts.next()?)?
