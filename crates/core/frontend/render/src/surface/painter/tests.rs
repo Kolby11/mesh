@@ -1,5 +1,8 @@
 use super::*;
-use crate::display_list::{DamageRect, DisplayListRepaintPolicy, RetainedDisplayList};
+use crate::display_list::{
+    DamageRect, DisplayIconPaint, DisplayListRepaintPolicy, DisplayPaintCommandKind,
+    DisplayPaintContent, RetainedDisplayList,
+};
 use crate::{RenderObjectDirtySummary, build_focused_proof_snapshot};
 use mesh_core_elements::layout::LayoutRect;
 use mesh_core_elements::style::{Dimension, Edges};
@@ -569,6 +572,186 @@ fn painter_primitive_debug_overlay_bounds_use_draw_rect_commands() {
             .count(),
         8
     );
+}
+
+#[test]
+fn painter_primitive_controls_input_direct_and_retained_emit_same_classes() {
+    let mut root = node(
+        "input",
+        LayoutRect {
+            x: 2.0,
+            y: 2.0,
+            width: 120.0,
+            height: 28.0,
+        },
+        Color::from_hex("#101820").unwrap(),
+    );
+    root.attributes.insert("value".into(), "mesh".into());
+    root.attributes
+        .insert("_mesh_focused".into(), "true".into());
+    root.computed_style.color = Color::from_hex("#f5f5f5").unwrap();
+    root.computed_style.padding = Edges::all(4.0);
+
+    let direct_backend = RecordingPaintBackend::default();
+    let direct_recorded = direct_backend.clone();
+    let direct_engine = FrontendRenderEngine::with_paint_backend(Box::new(direct_backend));
+    let mut direct_buffer = PixelBuffer::new(140, 48);
+    direct_engine.render_tree(&root, &mut direct_buffer, 1.0);
+    let direct_classes = painter_command_classes(&direct_recorded.recorded_commands());
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 140, 48, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 140,
+            height: 48,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+
+    let retained_backend = RecordingPaintBackend::default();
+    let retained_recorded = retained_backend.clone();
+    let retained_engine = FrontendRenderEngine::with_paint_backend(Box::new(retained_backend));
+    let mut retained_buffer = PixelBuffer::new(140, 48);
+    retained_engine.render_display_list_for_module(
+        selected.commands(),
+        &mut retained_buffer,
+        1.0,
+        None,
+        None,
+        None,
+    );
+    let retained_classes = painter_command_classes(&retained_recorded.recorded_commands());
+
+    assert_eq!(direct_classes, vec!["draw_rect", "draw_rect"]);
+    assert_eq!(retained_classes, direct_classes);
+}
+
+#[test]
+fn painter_primitive_controls_slider_direct_and_retained_emit_same_classes() {
+    let mut root = node(
+        "slider",
+        LayoutRect {
+            x: 2.0,
+            y: 2.0,
+            width: 128.0,
+            height: 32.0,
+        },
+        Color::TRANSPARENT,
+    );
+    root.attributes.insert("min".into(), "0".into());
+    root.attributes.insert("max".into(), "100".into());
+    root.attributes.insert("value".into(), "40".into());
+    root.computed_style.color = Color::from_hex("#4a90e2").unwrap();
+
+    let direct_backend = RecordingPaintBackend::default();
+    let direct_recorded = direct_backend.clone();
+    let direct_engine = FrontendRenderEngine::with_paint_backend(Box::new(direct_backend));
+    let mut direct_buffer = PixelBuffer::new(150, 48);
+    direct_engine.render_tree(&root, &mut direct_buffer, 1.0);
+    let direct_classes = painter_command_classes(&direct_recorded.recorded_commands());
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 150, 48, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 150,
+            height: 48,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+
+    let retained_backend = RecordingPaintBackend::default();
+    let retained_recorded = retained_backend.clone();
+    let retained_engine = FrontendRenderEngine::with_paint_backend(Box::new(retained_backend));
+    let mut retained_buffer = PixelBuffer::new(150, 48);
+    retained_engine.render_display_list_for_module(
+        selected.commands(),
+        &mut retained_buffer,
+        1.0,
+        None,
+        None,
+        None,
+    );
+    let retained_classes = painter_command_classes(&retained_recorded.recorded_commands());
+
+    assert_eq!(
+        direct_classes,
+        vec!["draw_rect", "draw_rect", "draw_rounded_rect"]
+    );
+    assert_eq!(retained_classes, direct_classes);
+}
+
+#[test]
+fn painter_primitive_icon_direct_and_retained_preserve_image_like_boundary() {
+    let mut root = node(
+        "icon",
+        LayoutRect {
+            x: 3.0,
+            y: 4.0,
+            width: 24.0,
+            height: 24.0,
+        },
+        Color::TRANSPARENT,
+    );
+    root.attributes.insert("name".into(), "mesh:search".into());
+    root.attributes.insert("size".into(), "20".into());
+    root.computed_style.color = Color::from_hex("#fafafa").unwrap();
+    root.computed_style.icon_fill = Some(1.0);
+    root.computed_style.icon_weight = Some(500.0);
+
+    let direct_backend = RecordingPaintBackend::default();
+    let direct_recorded = direct_backend.clone();
+    let direct_engine = FrontendRenderEngine::with_paint_backend(Box::new(direct_backend));
+    let mut direct_buffer = PixelBuffer::new(40, 40);
+    direct_engine.render_tree_at_for_module(
+        &root,
+        &mut direct_buffer,
+        1.0,
+        0.0,
+        0.0,
+        Some("test-module"),
+    );
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 40, 40, true, true);
+    let display_icon: &DisplayIconPaint = list
+        .paint_commands()
+        .iter()
+        .find_map(|command| {
+            (command.kind == DisplayPaintCommandKind::Node).then_some(&command.node.content)
+        })
+        .and_then(|content| match content {
+            DisplayPaintContent::Icon(icon) => Some(icon),
+            _ => None,
+        })
+        .expect("retained icon paint");
+    assert_eq!(display_icon.name.as_deref(), Some("mesh:search"));
+    assert_eq!(display_icon.size, Some(20));
+
+    let retained_backend = RecordingPaintBackend::default();
+    let retained_recorded = retained_backend.clone();
+    let retained_engine = FrontendRenderEngine::with_paint_backend(Box::new(retained_backend));
+    let mut retained_buffer = PixelBuffer::new(40, 40);
+    retained_engine.render_display_list_for_module(
+        list.paint_commands(),
+        &mut retained_buffer,
+        1.0,
+        None,
+        None,
+        Some("test-module"),
+    );
+
+    assert_eq!(
+        root.attributes.get("name").map(String::as_str),
+        Some("mesh:search")
+    );
+    assert!(painter_command_classes(&direct_recorded.recorded_commands()).is_empty());
+    assert!(painter_command_classes(&retained_recorded.recorded_commands()).is_empty());
 }
 
 #[test]
