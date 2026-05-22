@@ -8,6 +8,32 @@ pub struct StyleDiagnostic {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StyleProfileStatus {
+    Implemented,
+    DiagnosticOnly,
+    Deferred,
+    OutOfScope,
+}
+
+impl StyleProfileStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Implemented => "implemented",
+            Self::DiagnosticOnly => "diagnostic-only",
+            Self::Deferred => "deferred",
+            Self::OutOfScope => "out-of-scope",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StyleProfileProperty {
+    pub property: &'static str,
+    pub category: &'static str,
+    pub status: StyleProfileStatus,
+}
+
 const SUPPORTED_CSS_PROPERTIES: &[&str] = &[
     "background",
     "background-color",
@@ -106,12 +132,545 @@ const SUPPORTED_CSS_PROPERTIES: &[&str] = &[
     "backdrop-filter",
 ];
 
+const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
+    StyleProfileProperty {
+        property: "background",
+        category: "color",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "background-color",
+        category: "color",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "color",
+        category: "color",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border",
+        category: "border",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border-color",
+        category: "border",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border-width",
+        category: "border",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border-top-width",
+        category: "border",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border-right-width",
+        category: "border",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border-bottom-width",
+        category: "border",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border-left-width",
+        category: "border",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border-radius",
+        category: "radius",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border-top-left-radius",
+        category: "radius",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border-top-right-radius",
+        category: "radius",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border-bottom-right-radius",
+        category: "radius",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border-bottom-left-radius",
+        category: "radius",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "display",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "visibility",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "opacity",
+        category: "opacity",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "overflow",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "overflow-x",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "overflow-y",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "width",
+        category: "size",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "height",
+        category: "size",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "min-width",
+        category: "size",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "max-width",
+        category: "size",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "min-height",
+        category: "size",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "max-height",
+        category: "size",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "padding",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "padding-top",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "padding-right",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "padding-bottom",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "padding-left",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "padding-x",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "padding-y",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "padding-inline",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "padding-block",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "margin",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "margin-top",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "margin-right",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "margin-bottom",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "margin-left",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "margin-x",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "margin-y",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "margin-inline",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "margin-block",
+        category: "spacing",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "font",
+        category: "font",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "font-family",
+        category: "font",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "font-size",
+        category: "font",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "font-weight",
+        category: "font",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "font-style",
+        category: "font",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "line-height",
+        category: "font",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "letter-spacing",
+        category: "font",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "text-align",
+        category: "font",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "text-overflow",
+        category: "font",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "direction",
+        category: "font",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "flex",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "flex-direction",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "flex-wrap",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "flex-grow",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "flex-shrink",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "flex-basis",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "justify-content",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "align-items",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "align-self",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "align-content",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "gap",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "row-gap",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "column-gap",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "gap-x",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "position",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "z-index",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "inset",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "top",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "right",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "bottom",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "left",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "transition",
+        category: "transition",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "transition-property",
+        category: "transition",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "transition-duration",
+        category: "transition",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "transition-delay",
+        category: "transition",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "transition-timing-function",
+        category: "transition",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "animation",
+        category: "animation",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "animation-name",
+        category: "animation",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "animation-duration",
+        category: "animation",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "animation-delay",
+        category: "animation",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "animation-timing-function",
+        category: "animation",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "animation-iteration-count",
+        category: "animation",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "animation-direction",
+        category: "animation",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "animation-fill-mode",
+        category: "animation",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "animation-play-state",
+        category: "animation",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "transform",
+        category: "transform",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "transform-origin",
+        category: "transform",
+        status: StyleProfileStatus::Deferred,
+    },
+    StyleProfileProperty {
+        property: "box-shadow",
+        category: "shadow",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "filter",
+        category: "filter",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "backdrop-filter",
+        category: "filter",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "border-style",
+        category: "border",
+        status: StyleProfileStatus::DiagnosticOnly,
+    },
+    StyleProfileProperty {
+        property: "background-image",
+        category: "image",
+        status: StyleProfileStatus::Deferred,
+    },
+    StyleProfileProperty {
+        property: "linear-gradient",
+        category: "gradient",
+        status: StyleProfileStatus::Deferred,
+    },
+    StyleProfileProperty {
+        property: "grid-template-columns",
+        category: "layout",
+        status: StyleProfileStatus::OutOfScope,
+    },
+    StyleProfileProperty {
+        property: "float",
+        category: "layout",
+        status: StyleProfileStatus::OutOfScope,
+    },
+    StyleProfileProperty {
+        property: "white-space",
+        category: "font",
+        status: StyleProfileStatus::OutOfScope,
+    },
+    StyleProfileProperty {
+        property: "container-type",
+        category: "layout",
+        status: StyleProfileStatus::OutOfScope,
+    },
+    StyleProfileProperty {
+        property: "text-wrap",
+        category: "font",
+        status: StyleProfileStatus::OutOfScope,
+    },
+];
+
 pub fn supported_css_properties() -> &'static [&'static str] {
     SUPPORTED_CSS_PROPERTIES
 }
 
 pub fn is_supported_css_property(property: &str) -> bool {
     property.starts_with("--") || SUPPORTED_CSS_PROPERTIES.contains(&property)
+}
+
+pub fn style_profile_properties() -> &'static [StyleProfileProperty] {
+    STYLE_PROFILE_PROPERTIES
+}
+
+pub fn style_profile_status(property: &str) -> Option<StyleProfileStatus> {
+    if property.starts_with("--") {
+        return Some(StyleProfileStatus::Implemented);
+    }
+
+    STYLE_PROFILE_PROPERTIES
+        .iter()
+        .find(|entry| entry.property == property)
+        .map(|entry| entry.status)
 }
 
 pub fn is_transition_safe_keyframe_property(property: &str) -> bool {
