@@ -1128,6 +1128,107 @@ fn skia_path_stroke_line_paints_expected_pixels() {
 }
 
 #[test]
+fn skia_text_highlight_selection_background_uses_theme_color() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 160.0,
+            height: 60.0,
+        },
+        Color::TRANSPARENT,
+    );
+    let mut text = text_node(
+        "selection proof text",
+        0.0,
+        0.0,
+        160.0,
+        60.0,
+        Color::from_hex("#111111").unwrap(),
+    );
+    text.attributes
+        .insert("_mesh_selection_background".into(), "#00ff00".into());
+    text.attributes
+        .insert("_mesh_selection_foreground".into(), "#ff00ff".into());
+    text.attributes
+        .insert("_mesh_selection_anchor_x".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_anchor_y".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_focus_x".into(), "1000.00".into());
+    text.attributes
+        .insert("_mesh_selection_focus_y".into(), "1000.00".into());
+    text.attributes
+        .insert("_mesh_selection_text_x".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_text_y".into(), "0.00".into());
+    root.children = vec![text];
+
+    let mut buffer = PixelBuffer::new(180, 80);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    let saw_selection_background = buffer.data.chunks_exact(4).any(|px| {
+        Color {
+            b: px[0],
+            g: px[1],
+            r: px[2],
+            a: px[3],
+        } == Color::from_hex("#00ff00").unwrap()
+    });
+    assert!(saw_selection_background);
+}
+
+#[test]
+fn skia_text_highlight_does_not_change_glyph_handoff() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 160.0,
+            height: 60.0,
+        },
+        Color::TRANSPARENT,
+    );
+    let mut text = text_node(
+        "selection proof text",
+        0.0,
+        0.0,
+        160.0,
+        60.0,
+        Color::from_hex("#111111").unwrap(),
+    );
+    text.attributes
+        .insert("_mesh_selection_background".into(), "#00ff00".into());
+    text.attributes
+        .insert("_mesh_selection_foreground".into(), "#ff00ff".into());
+    text.attributes
+        .insert("_mesh_selection_anchor_x".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_anchor_y".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_focus_x".into(), "1000.00".into());
+    text.attributes
+        .insert("_mesh_selection_focus_y".into(), "1000.00".into());
+    text.attributes
+        .insert("_mesh_selection_text_x".into(), "0.00".into());
+    text.attributes
+        .insert("_mesh_selection_text_y".into(), "0.00".into());
+    root.children = vec![text];
+
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let mut buffer = PixelBuffer::new(180, 80);
+    engine.render_tree(&root, &mut buffer, 1.0);
+
+    let classes = painter_command_classes(&recorded.recorded_commands());
+    assert!(classes.contains(&"draw_rect"));
+    assert!(!classes.contains(&"draw_text"));
+}
+
+#[test]
 fn painter_command_contract_keeps_retained_structures_free_of_skia_types() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for relative in ["src/display_list.rs", "src/render_object.rs"] {
