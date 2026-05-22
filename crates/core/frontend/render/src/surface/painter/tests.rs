@@ -159,6 +159,7 @@ fn painter_command_classes(commands: &[PainterCommand]) -> Vec<&'static str> {
             PainterCommand::DrawPath { .. } => "draw_path",
             PainterCommand::DrawText { .. } => "draw_text",
             PainterCommand::DrawImage { .. } => "draw_image",
+            PainterCommand::DrawLinearGradient { .. } => "draw_linear_gradient",
             PainterCommand::DrawShadow { .. } => "draw_shadow",
             PainterCommand::ApplyFilter { .. } => "apply_filter",
         })
@@ -250,9 +251,20 @@ fn painter_command_contract_constructs_required_command_set() {
             clip,
         },
         PainterCommand::DrawImage {
-            image: PainterImage { id: "img".into() },
+            image: PainterImage {
+                source: PainterImageSource::Path("img".into()),
+            },
             rect,
             paint,
+            clip,
+        },
+        PainterCommand::DrawLinearGradient {
+            gradient: PainterLinearGradient {
+                from: Color::BLACK,
+                to: Color::WHITE,
+            },
+            rect,
+            radius: 4.0,
             clip,
         },
         PainterCommand::DrawShadow {
@@ -275,7 +287,7 @@ fn painter_command_contract_constructs_required_command_set() {
         },
     ];
 
-    assert_eq!(commands.len(), 12);
+    assert_eq!(commands.len(), 13);
 }
 
 #[test]
@@ -320,9 +332,20 @@ fn painter_primitive_command_classes_record_helper_backed_rects() {
             clip,
         },
         PainterCommand::DrawImage {
-            image: PainterImage { id: "img".into() },
+            image: PainterImage {
+                source: PainterImageSource::Path("img".into()),
+            },
             rect,
             paint,
+            clip,
+        },
+        PainterCommand::DrawLinearGradient {
+            gradient: PainterLinearGradient {
+                from: Color::BLACK,
+                to: Color::WHITE,
+            },
+            rect,
+            radius: 4.0,
             clip,
         },
         PainterCommand::DrawShadow {
@@ -351,6 +374,7 @@ fn painter_primitive_command_classes_record_helper_backed_rects() {
             "draw_path",
             "draw_text",
             "draw_image",
+            "draw_linear_gradient",
             "draw_shadow",
             "apply_filter",
         ]
@@ -1391,7 +1415,9 @@ fn painter_backend_diagnostics_are_observable_on_frontend_render_engine() {
     engine.execute_painter_commands(
         &mut buffer,
         &[PainterCommand::DrawImage {
-            image: PainterImage { id: "img".into() },
+            image: PainterImage {
+                source: PainterImageSource::Path("img".into()),
+            },
             rect: full_clip(8, 8),
             paint: PainterPaint::fill(Color::WHITE),
             clip: full_clip(16, 16),

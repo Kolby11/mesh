@@ -196,6 +196,12 @@ pub(crate) enum PainterCommand {
         paint: PainterPaint,
         clip: ClipRect,
     },
+    DrawLinearGradient {
+        gradient: PainterLinearGradient,
+        rect: ClipRect,
+        radius: f32,
+        clip: ClipRect,
+    },
     DrawShadow {
         rect: ClipRect,
         radius: f32,
@@ -286,7 +292,18 @@ pub(crate) enum PainterPathElement {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PainterImage {
-    pub id: String,
+    pub source: PainterImageSource,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PainterImageSource {
+    Path(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PainterLinearGradient {
+    pub from: Color,
+    pub to: Color,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -343,6 +360,7 @@ pub(crate) enum UnsupportedPainterFeature {
     Path,
     Text,
     Image,
+    Gradient,
     Filter,
     BlendMode,
 }
@@ -452,6 +470,13 @@ impl PaintBackend for SkiaPaintBackend {
                         "image commands are part of the contract but deferred to image migration"
                             .into(),
                 }),
+                PainterCommand::DrawLinearGradient { .. } => {
+                    diagnostics.push(PainterDiagnostic {
+                        backend_id: self.id(),
+                        feature: UnsupportedPainterFeature::Gradient,
+                        message: "linear-gradient commands are part of the contract but deferred to gradient migration".into(),
+                    })
+                }
                 PainterCommand::DrawShadow {
                     rect,
                     radius,
