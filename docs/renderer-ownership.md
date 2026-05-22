@@ -16,7 +16,8 @@
 | Retained runtime tree identity | authoritative | `crates/core/shell/src/shell/component/runtime_tree.rs` | Owns stable runtime node identity and retained dirty-category tracking. |
 | Render object synchronization | authoritative | `crates/core/frontend/render/src/render_object.rs` | Owns retained render-object slots for geometry, material, text, and accessibility dirtiness. |
 | Retained display-list ownership | authoritative | `crates/core/frontend/render/src/display_list.rs` | Owns paint command identity, selection payloads, damage data, repaint policy, and batching evidence. |
-| Software painter | authoritative | `crates/core/frontend/render/src/surface/painter.rs` | Paints current widget trees to software pixel buffers and remains the default paint execution path. |
+| Render engine and display list | authoritative | `crates/core/frontend/render/src/render_object.rs`, `crates/core/frontend/render/src/display_list.rs`, `crates/core/frontend/render/src/surface/painter.rs` | Owns retained render state, paint command ordering, damage/repaint selection, and translation from MESH widget/style/layout data into backend paint operations. |
+| Skia paint backend | authoritative | `crates/core/frontend/render/src/surface/painter/backend.rs` | Owns the low-level painter/raster work below MESH paint commands: antialiasing, paths, rounded rects, strokes, shadows, blur/image filters, blend modes, clipping, layers/saveLayer, and related Skia canvas behavior. |
 | Presentation boundary | authoritative | `crates/core/presentation/src/lib.rs` | Selects dev-window or layer-shell presentation and keeps `PixelBuffer` presentation ownership outside renderer experiments. |
 | Wayland surface backend | authoritative | `crates/core/presentation/src/wayland_surface/backend.rs` | Owns Wayland surface attach, copy, and damage behavior that broad migration must preserve or intentionally replace. |
 
@@ -37,11 +38,44 @@ MIGR-02: existing renderer modules are classified as authoritative, adapter-owne
 | Candidate | Status | Candidate use | Current limitation |
 |-----------|--------|---------------|--------------------|
 | Parley | replacement candidate | Future text layout/shaping path behind theme-owned selection and retained text evidence. | Not currently authoritative for all text behavior or editing semantics. |
-| AnyRender/Vello-style rendering | replacement candidate | Future paint backend abstraction under retained display-list ownership. | Not currently authoritative for production paint execution. |
+| Vello-style rendering | replacement candidate | Future paint backend implementation under retained display-list ownership. | Not currently authoritative for production paint execution; must implement the same high-level painter contract without taking ownership of MESH layout, style, damage, or presentation. |
 | AccessKit platform publication | replacement candidate | Future accessibility service/platform publication beyond retained-node `TreeUpdate` construction. | Phase 50 builds real AccessKit updates but does not publish them to a compositor or screen-reader runtime. |
 | Stylo-style resolution | replacement candidate | Future style/profile evaluation if MESH needs richer CSS capability. | Must preserve bounded `.mesh` UI semantics and avoid browser-platform overreach. |
-| Skia fallback | replacement candidate | Fallback paint backend if the preferred abstraction path cannot satisfy MESH needs. | Fallback evidence only; not selected as the primary v1.8 path. |
 | Blitz | replacement candidate | Reference architecture and possible future reconsideration. | Blitz remains reference/blocker evidence, not a production authoring model. |
+
+## Vello Compatibility Notes
+
+Vello compatibility is a contract-shaping constraint, not Phase 51 production
+scope. The painter API should stay backend-neutral while allowing Skia to use
+Skia-specific primitives internally.
+
+Clean mapping candidates:
+
+- `DrawRect`
+- `DrawRoundedRect`
+- `DrawPath`
+- basic `PushClip` / `PopClip`
+- basic `PushLayer` / `PopLayer`
+- simple gradients and images when source ownership is defined
+
+Approximation or capability-gated candidates:
+
+- `DrawShadow`
+- blur filters
+- `ApplyFilter` with backdrop behavior
+- blend modes beyond the common subset
+- saveLayer-style effects whose exact semantics differ from Skia
+
+Deferred or future-gated candidates:
+
+- `DrawText` if MESH keeps shaping/rasterization in `TextRenderer`
+- image decoding/source lifetime semantics
+- complex image-filter composition
+
+Skia-specific types stay inside `SkiaPaintBackend`. Retained display-list data,
+render-object data, and the painter command API must not expose `skia_safe`
+types such as `Canvas`, `Paint`, `Path`, `RRect`, `ImageFilter`, or
+`SaveLayerRec`.
 
 ## Promotion Rule
 
