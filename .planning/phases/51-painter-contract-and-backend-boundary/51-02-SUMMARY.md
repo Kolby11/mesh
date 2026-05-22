@@ -52,6 +52,7 @@ completed: 2026-05-22
 
 1. **Task 1-3: Helper lowering, diagnostics, and tests** - `1fc327f`
 2. **Post-wave fix: Preserve square border command rendering** - `7e4b3e7`
+3. **Code review fix: Align capabilities with diagnostics** - `1093f41`
 
 ## Files Created/Modified
 
@@ -77,14 +78,24 @@ completed: 2026-05-22
 - **Verification:** `painter_draws_border_from_computed_edges` and the full `mesh-core-render` suite pass.
 - **Committed in:** `7e4b3e7`
 
+**2. [Rule 1 - Bug] Capability flags overstated deferred clip/layer stack behavior**
+
+- **Found during:** Code review gate
+- **Issue:** Skia capabilities reported clip/layer stack support while `execute_commands` still diagnosed stack commands as deferred, and standalone blur-filter commands could silently no-op.
+- **Fix:** Marked clip/layer stack capabilities false for the current implementation, diagnosed standalone blur filters, and added capability diagnostic assertions.
+- **Files modified:** `crates/core/frontend/render/src/surface/painter/backend.rs`, `crates/core/frontend/render/src/surface/painter/tests.rs`
+- **Verification:** `painter_backend_capabilities` and the full `mesh-core-render` suite pass.
+- **Committed in:** `1093f41`
+
 ---
 
-**Total deviations:** 1 auto-fixed bug.
-**Impact on plan:** Preserved existing square-border behavior while keeping helper calls on the command backend path.
+**Total deviations:** 2 auto-fixed bugs.
+**Impact on plan:** Tightened backend capability truthfulness and unsupported-feature behavior without changing the command contract.
 
 ## Issues Encountered
 
 - Post-wave full-suite validation caught the square-border regression above; fixed in `7e4b3e7`.
+- Code review caught a capability/diagnostic mismatch; fixed in `1093f41`.
 
 ## Verification
 
