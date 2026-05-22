@@ -7,8 +7,8 @@
 
 ### Painter Contract
 
-- [ ] **PAINT-01**: Maintainer can express retained display-list output through a high-level painter API with commands for push clip, pop clip, push layer, pop layer, draw rect, draw rounded rect, draw path, draw text, draw image, draw shadow, and apply filter.
-- [ ] **PAINT-02**: Maintainer can add a future backend without changing MESH widget traversal, style resolution, layout, animation state, retained display-list ordering, damage selection, module boundaries, input handling, or presentation ownership.
+- [x] **PAINT-01**: Maintainer can express retained display-list output through a high-level painter API with commands for push clip, pop clip, push layer, pop layer, draw rect, draw rounded rect, draw path, draw text, draw image, draw shadow, and apply filter.
+- [x] **PAINT-02**: Maintainer can add a future backend without changing MESH widget traversal, style resolution, layout, animation state, retained display-list ordering, damage selection, module boundaries, input handling, or presentation ownership.
 - [ ] **PAINT-03**: Existing widget-tree and retained-display-list render paths both route paint execution through the same painter command/backend boundary.
 
 ### Skia Backend
@@ -26,8 +26,8 @@
 
 ### Backend Extensibility
 
-- [ ] **BACKEND-01**: Painter backend traits are documented with backend obligations, unsupported-feature behavior, and parity expectations.
-- [ ] **BACKEND-02**: A future Vello backend can be sketched against the painter API without introducing Skia-specific concepts into display-list data.
+- [x] **BACKEND-01**: Painter backend traits are documented with backend obligations, unsupported-feature behavior, and parity expectations.
+- [x] **BACKEND-02**: A future Vello backend can be sketched against the painter API without introducing Skia-specific concepts into display-list data.
 - [ ] **BACKEND-03**: Backend selection remains reversible and observable through renderer diagnostics or debug/profiling payloads.
 
 ### Verification And Shipped Proof
@@ -61,8 +61,8 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PAINT-01 | Phase 51 | Pending |
-| PAINT-02 | Phase 51 | Pending |
+| PAINT-01 | Phase 51 | Complete |
+| PAINT-02 | Phase 51 | Complete |
 | PAINT-03 | Phase 52 | Pending |
 | SKIA-01 | Phase 52 | Pending |
 | SKIA-02 | Phase 53 | Pending |
@@ -71,8 +71,8 @@
 | LAYER-01 | Phase 53 | Pending |
 | LAYER-02 | Phase 54 | Pending |
 | LAYER-03 | Phase 54 | Pending |
-| BACKEND-01 | Phase 51 | Pending |
-| BACKEND-02 | Phase 51 | Pending |
+| BACKEND-01 | Phase 51 | Complete |
+| BACKEND-02 | Phase 51 | Complete |
 | BACKEND-03 | Phase 54 | Pending |
 | VERIFY-01 | Phase 55 | Pending |
 | VERIFY-02 | Phase 55 | Pending |
