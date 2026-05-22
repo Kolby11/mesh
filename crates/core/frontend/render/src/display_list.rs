@@ -3,7 +3,8 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 
 use mesh_core_elements::style::{
-    Color, Display, Edges, Overflow, TextAlign, TextDirection, TextOverflow, Visibility,
+    BackgroundPaint, Color, Display, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
+    Visibility,
 };
 use mesh_core_elements::{BoxShadow, VisualFilter};
 use mesh_core_elements::{LayoutRect, NodeId, WidgetNode};
@@ -197,6 +198,7 @@ pub struct DisplayPaintNode {
 #[derive(Debug, Clone)]
 pub struct DisplayPaintStyle {
     pub background_color: Color,
+    pub background_paint: BackgroundPaint,
     pub border_color: Color,
     pub border_width: Edges,
     pub border_radius: f32,
@@ -1406,6 +1408,7 @@ fn build_paint_node(node: &WidgetNode, offset_x: f32, offset_y: f32) -> DisplayP
         layout: transformed_layout_at(node, offset_x, offset_y),
         style: DisplayPaintStyle {
             background_color: opacity_color(node.computed_style.background_color, opacity),
+            background_paint: node.computed_style.background_paint.clone(),
             border_color: opacity_color(node.computed_style.border_color, opacity),
             border_width: node.computed_style.border_width,
             border_radius: node.computed_style.border_radius.top_left,
@@ -1772,6 +1775,7 @@ fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
     node.computed_style.padding.left.to_bits().hash(&mut hasher);
     node.computed_style.opacity.to_bits().hash(&mut hasher);
     hash_box_shadow(node.computed_style.box_shadow, &mut hasher);
+    hash_background_paint(&node.computed_style.background_paint, &mut hasher);
     node.computed_style
         .filter
         .blur_radius
@@ -1833,6 +1837,7 @@ fn batch_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
     node.computed_style.font_family.hash(&mut hasher);
     node.computed_style.font_size.to_bits().hash(&mut hasher);
     hash_box_shadow(node.computed_style.box_shadow, &mut hasher);
+    hash_background_paint(&node.computed_style.background_paint, &mut hasher);
     node.computed_style
         .filter
         .blur_radius
@@ -1856,6 +1861,30 @@ fn hash_box_shadow(shadow: BoxShadow, hasher: &mut std::collections::hash_map::D
     shadow.color.b.hash(hasher);
     shadow.color.a.hash(hasher);
     shadow.inset.hash(hasher);
+}
+
+fn hash_background_paint(
+    paint: &BackgroundPaint,
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+) {
+    match paint {
+        BackgroundPaint::None => 0_u8.hash(hasher),
+        BackgroundPaint::Image(source) => {
+            1_u8.hash(hasher);
+            source.path.hash(hasher);
+        }
+        BackgroundPaint::LinearGradient(gradient) => {
+            2_u8.hash(hasher);
+            gradient.from.r.hash(hasher);
+            gradient.from.g.hash(hasher);
+            gradient.from.b.hash(hasher);
+            gradient.from.a.hash(hasher);
+            gradient.to.r.hash(hasher);
+            gradient.to.g.hash(hasher);
+            gradient.to.b.hash(hasher);
+            gradient.to.a.hash(hasher);
+        }
+    }
 }
 
 fn hash_attribute(
@@ -1957,7 +1986,9 @@ fn clip_rect(rect: DamageRect, surface: DamageRect) -> Option<DamageRect> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mesh_core_elements::style::{Color, Overflow, Visibility};
+    use mesh_core_elements::style::{
+        BackgroundPaint, Color, Overflow, StyleImageSource, StyleLinearGradient, Visibility,
+    };
 
     fn command_debugs(commands: &[DisplayPaintCommand], ids: &[NodeId]) -> Vec<String> {
         commands
@@ -1998,6 +2029,29 @@ mod tests {
         assert_eq!(second.entries_reused, 1);
         assert_eq!(second.damage_area, 0);
         assert_eq!(second.skipped_paint_pixels, 0);
+    }
+
+    #[test]
+    fn display_list_effect_rebuilds_when_background_paint_changes() {
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
+        let mut list = RetainedDisplayList::default();
+
+        list.update(&root, 100, 40, false, false);
+        root.computed_style.background_paint = BackgroundPaint::Image(StyleImageSource {
+            path: "assets/first.png".to_string(),
+        });
+        let image_metrics = list.update(&root, 100, 40, false, false);
+        assert_eq!(image_metrics.entries_rebuilt, 1);
+        assert_eq!(image_metrics.entries_reused, 0);
+
+        root.computed_style.background_paint =
+            BackgroundPaint::LinearGradient(StyleLinearGradient {
+                from: Color::from_hex("#112233").unwrap(),
+                to: Color::from_hex("#445566").unwrap(),
+            });
+        let gradient_metrics = list.update(&root, 100, 40, false, false);
+        assert_eq!(gradient_metrics.entries_rebuilt, 1);
+        assert_eq!(gradient_metrics.entries_reused, 0);
     }
 
     #[test]

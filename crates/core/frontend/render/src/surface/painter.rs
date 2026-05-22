@@ -16,7 +16,9 @@ pub(crate) use backend::{
     PainterLinearGradient, PainterPaint, PainterPaintStyle, PainterPath, PainterPathElement,
     PainterStroke, SkiaPaintBackend, UnsupportedPainterFeature,
 };
-use mesh_core_elements::style::{Color, Display, Overflow, TextAlign, TextDirection, TextOverflow};
+use mesh_core_elements::style::{
+    BackgroundPaint, Color, Display, Overflow, TextAlign, TextDirection, TextOverflow,
+};
 use mesh_core_elements::tree::WidgetNode;
 use mesh_core_elements::{BoxShadow, VisualFilter};
 
@@ -222,6 +224,37 @@ impl FrontendRenderEngine {
                 clip,
             }],
         );
+    }
+
+    pub(super) fn draw_background_paint(
+        &self,
+        buffer: &mut PixelBuffer,
+        paint: &BackgroundPaint,
+        rect: ClipRect,
+        radius: f32,
+        clip: ClipRect,
+    ) {
+        let command = match paint {
+            BackgroundPaint::None => return,
+            BackgroundPaint::Image(source) => PainterCommand::DrawImage {
+                image: PainterImage {
+                    source: PainterImageSource::Path(source.path.clone()),
+                },
+                rect,
+                paint: PainterPaint::fill(Color::WHITE),
+                clip,
+            },
+            BackgroundPaint::LinearGradient(gradient) => PainterCommand::DrawLinearGradient {
+                gradient: PainterLinearGradient {
+                    from: gradient.from,
+                    to: gradient.to,
+                },
+                rect,
+                radius,
+                clip,
+            },
+        };
+        self.execute_painter_commands(buffer, &[command]);
     }
 
     pub fn reset_text_cache_metrics(&self) {

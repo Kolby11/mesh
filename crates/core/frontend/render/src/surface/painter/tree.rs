@@ -352,6 +352,13 @@ impl FrontendRenderEngine {
                 );
             }
         }
+        self.draw_background_paint(
+            buffer,
+            &style.background_paint,
+            bounds,
+            style.border_radius.top_left * scale,
+            node_clip,
+        );
 
         self.draw_border_clipped(
             buffer,
@@ -433,6 +440,13 @@ impl FrontendRenderEngine {
                 );
             }
         }
+        self.draw_background_paint(
+            buffer,
+            &style.background_paint,
+            bounds,
+            style.border_radius * scale,
+            node_clip,
+        );
 
         self.draw_border_clipped(
             buffer,

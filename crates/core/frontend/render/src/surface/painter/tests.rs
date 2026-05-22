@@ -5,7 +5,9 @@ use crate::display_list::{
 };
 use crate::{RenderObjectDirtySummary, build_focused_proof_snapshot};
 use mesh_core_elements::layout::LayoutRect;
-use mesh_core_elements::style::{Dimension, Edges};
+use mesh_core_elements::style::{
+    BackgroundPaint, Dimension, Edges, StyleImageSource, StyleLinearGradient,
+};
 use mesh_core_frontend::compile_frontend_module;
 use mesh_core_theme::default_theme;
 use std::path::PathBuf;
@@ -707,6 +709,113 @@ fn painter_primitive_controls_slider_direct_and_retained_emit_same_classes() {
         direct_classes,
         vec!["draw_rect", "draw_rect", "draw_rounded_rect"]
     );
+    assert_eq!(retained_classes, direct_classes);
+}
+
+#[test]
+fn painter_effect_lowering_direct_and_retained_image_emit_same_command_classes() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 2.0,
+            y: 2.0,
+            width: 64.0,
+            height: 32.0,
+        },
+        Color::TRANSPARENT,
+    );
+    root.computed_style.background_paint = BackgroundPaint::Image(StyleImageSource {
+        path: "assets/panel.png".to_string(),
+    });
+
+    let direct_backend = RecordingPaintBackend::default();
+    let direct_recorded = direct_backend.clone();
+    let direct_engine = FrontendRenderEngine::with_paint_backend(Box::new(direct_backend));
+    let mut direct_buffer = PixelBuffer::new(80, 48);
+    direct_engine.render_tree(&root, &mut direct_buffer, 1.0);
+    let direct_classes = painter_command_classes(&direct_recorded.recorded_commands());
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 80, 48, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 48,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+
+    let retained_backend = RecordingPaintBackend::default();
+    let retained_recorded = retained_backend.clone();
+    let retained_engine = FrontendRenderEngine::with_paint_backend(Box::new(retained_backend));
+    let mut retained_buffer = PixelBuffer::new(80, 48);
+    retained_engine.render_display_list_for_module(
+        selected.commands(),
+        &mut retained_buffer,
+        1.0,
+        None,
+        None,
+        None,
+    );
+    let retained_classes = painter_command_classes(&retained_recorded.recorded_commands());
+
+    assert_eq!(direct_classes, vec!["draw_image"]);
+    assert_eq!(retained_classes, direct_classes);
+}
+
+#[test]
+fn painter_effect_lowering_direct_and_retained_gradient_emit_same_command_classes() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 2.0,
+            y: 2.0,
+            width: 64.0,
+            height: 32.0,
+        },
+        Color::TRANSPARENT,
+    );
+    root.computed_style.background_paint = BackgroundPaint::LinearGradient(StyleLinearGradient {
+        from: Color::from_hex("#112233").unwrap(),
+        to: Color::from_hex("#445566").unwrap(),
+    });
+
+    let direct_backend = RecordingPaintBackend::default();
+    let direct_recorded = direct_backend.clone();
+    let direct_engine = FrontendRenderEngine::with_paint_backend(Box::new(direct_backend));
+    let mut direct_buffer = PixelBuffer::new(80, 48);
+    direct_engine.render_tree(&root, &mut direct_buffer, 1.0);
+    let direct_classes = painter_command_classes(&direct_recorded.recorded_commands());
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 80, 48, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 48,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+
+    let retained_backend = RecordingPaintBackend::default();
+    let retained_recorded = retained_backend.clone();
+    let retained_engine = FrontendRenderEngine::with_paint_backend(Box::new(retained_backend));
+    let mut retained_buffer = PixelBuffer::new(80, 48);
+    retained_engine.render_display_list_for_module(
+        selected.commands(),
+        &mut retained_buffer,
+        1.0,
+        None,
+        None,
+        None,
+    );
+    let retained_classes = painter_command_classes(&retained_recorded.recorded_commands());
+
+    assert_eq!(direct_classes, vec!["draw_linear_gradient"]);
     assert_eq!(retained_classes, direct_classes);
 }
 
