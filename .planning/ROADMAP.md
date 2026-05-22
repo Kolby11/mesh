@@ -21,7 +21,7 @@ low-level paint/raster behavior behind the painter backend boundary.
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
 | 51 | Painter Contract And Backend Boundary | 3/3 | Complete | 2026-05-22 |
-| 52 | Style Profile And Lowering Compatibility | 4/4 | Complete   | 2026-05-22 |
+| 52 | Style Profile And Lowering Compatibility | 4/4 | Complete    | 2026-05-22 |
 | 53 | Element And Display-List Primitive Coverage | Ensure every supported element/control lowers into backend-neutral painter commands with retained identity and no helper-shaped bypasses. | ELEM-01, ELEM-02, PAINT-03 | 5 |
 | 54 | Skia Shape, Path, Text Highlight, And Border Migration | Route core geometry primitives through Skia-backed commands while preserving selection and current text handoff behavior. | SKIA-01, SKIA-04, TEXT-01 | 5 |
 | 55 | Effects, Layers, Shadows, Blur, Images, And Gradients | Implement the visual effects subset expected from a compact CSS renderer through explicit layer/effect/image/gradient commands. | EFFECT-01, EFFECT-02, EFFECT-03, LAYER-01 | 5 |
