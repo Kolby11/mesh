@@ -373,22 +373,31 @@ other => {
 
 All claims in this research were verified against project files, commands, or cited official docs. No `[ASSUMED]` claims are present.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Where should the author-facing style profile document live?**
+1. **RESOLVED: Where should the author-facing style profile document live?**
    - What we know: context allows docs, render docs, or `mesh-core-elements` tests if traceability is preserved. [VERIFIED: .planning/phases/52-skia-shape-primitive-migration/52-CONTEXT.md]
    - What's unclear: the repo does not currently show a dedicated `docs/rendering/style-profile.md` file. [VERIFIED: `rg --files docs .planning crates | rg style-profile` found no path]
    - Recommendation: create `docs/rendering/style-profile.md` if a docs tree exists; otherwise create a compact markdown profile under `crates/core/frontend/render/README.md` or a new `crates/core/ui/elements/STYLE_PROFILE.md` and reference it from tests. [VERIFIED: crates/core/frontend/render/README.md exists]
+   - Resolution: use the existing `docs/css-coverage.md` as the author-facing
+     style profile, because it already documents MESH's CSS coverage and Plan
+     52-01 rewrites it into the bounded painter style profile.
 
-2. **Should `container-type` be diagnostic-only or a supported no-op?**
+2. **RESOLVED: Should `container-type` be diagnostic-only or a supported no-op?**
    - What we know: shipped navigation uses `container-type: inline-size`, and parser already supports `@container` width/height conditions independently. [VERIFIED: modules/frontend/navigation-bar/src/main.mesh:121] [VERIFIED: crates/core/ui/component/src/parser/styles.rs:225]
    - What's unclear: there is no observed computed style field for `container-type`. [VERIFIED: crates/core/ui/elements/src/style/types.rs:121]
    - Recommendation: classify `container-type` as compatibility/diagnostic-only unless the planner adds explicit container-establishment semantics. [VERIFIED: current code inventory]
+   - Resolution: classify `container-type` as diagnostic-only for Phase 52. Do
+     not add no-op supported semantics or a computed style field in this phase.
 
-3. **Should descendant selectors be in-scope for diagnostics?**
+3. **RESOLVED: Should descendant selectors be in-scope for diagnostics?**
    - What we know: `parse_selector` ignores whitespace and produces compound selector parts, so `.nav-button:hover .nav-button-glyph` is not modeled as a descendant relationship. [VERIFIED: crates/core/ui/component/src/parser/styles.rs:497] [VERIFIED: modules/frontend/navigation-bar/src/components/volume-button.mesh:369]
    - What's unclear: Phase 52 scope mentions property inventory more than selector-profile inventory. [VERIFIED: .planning/phases/52-skia-shape-primitive-migration/52-CONTEXT.md]
    - Recommendation: document descendant selectors as out-of-scope browser CSS and add a diagnostic only if it can be done without breaking existing fixture parsing. [VERIFIED: current parser behavior]
+   - Resolution: document descendant selectors as out-of-scope browser CSS in
+     the style profile. Add parser diagnostics only if implementation can do so
+     without breaking existing fixture parsing; otherwise keep diagnostic work
+     focused on properties and values.
 
 ## Environment Availability
 
