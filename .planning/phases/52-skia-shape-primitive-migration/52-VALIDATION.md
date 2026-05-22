@@ -1,9 +1,9 @@
 ---
 phase: 52
 slug: skia-shape-primitive-migration
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: complete
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-05-22
 ---
 
@@ -38,10 +38,10 @@ created: 2026-05-22
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 52-01-01 | 01 | 1 | STYLE-01 | T-52-01 | Unsupported browser CSS remains outside the MESH profile | docs/unit | `cargo test -p mesh-core-elements style_profile -- --nocapture` | ❌ W0 | ⬜ pending |
-| 52-02-01 | 02 | 1 | STYLE-02 | T-52-02 | Token resolution remains through `mesh-core-theme` + `StyleResolver` | unit/fixture | `cargo test -p mesh-core-elements shipped_navigation_style -- --nocapture` | ❌ W0 | ⬜ pending |
-| 52-03-01 | 03 | 2 | STYLE-03 | T-52-03 | Unsupported and ambiguous web-style properties emit diagnostics | unit | `cargo test -p mesh-core-elements style_diagnostics -- --nocapture` | ✅ / ❌ W0 | ⬜ pending |
-| 52-04-01 | 04 | 2 | STYLE-01, STYLE-02, STYLE-03 | T-52-01 / T-52-02 / T-52-03 | Shipped `.mesh` styles parse/resolve without syntax or token regressions | integration/fixture | `cargo test -p mesh-core-component parser -- --nocapture` | ⚠️ partial | ⬜ pending |
+| 52-01-01 | 01 | 1 | STYLE-01 | T-52-01 | Unsupported browser CSS remains outside the MESH profile | docs/unit | `cargo test -p mesh-core-elements style_profile -- --nocapture` | ✅ | ✅ green |
+| 52-02-01 | 02 | 1 | STYLE-02 | T-52-02 | Token resolution remains through `mesh-core-theme` + `StyleResolver` | unit/fixture | `cargo test -p mesh-core-elements shipped_navigation_style -- --nocapture` | ✅ | ✅ green |
+| 52-03-01 | 03 | 2 | STYLE-03 | T-52-03 | Unsupported and ambiguous web-style properties emit diagnostics | unit | `cargo test -p mesh-core-elements style_diagnostics -- --nocapture` | ✅ | ✅ green |
+| 52-04-01 | 04 | 2 | STYLE-01, STYLE-02, STYLE-03 | T-52-01 / T-52-02 / T-52-03 | Shipped `.mesh` styles parse/resolve without syntax or token regressions | integration/fixture | `cargo test -p mesh-core-component parser -- --nocapture` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -49,11 +49,11 @@ created: 2026-05-22
 
 ## Wave 0 Requirements
 
-- [ ] Add or extend `mesh-core-elements` style-profile tests that assert the
+- [x] Add or extend `mesh-core-elements` style-profile tests that assert the
       support matrix and `supported_css_properties()` stay synchronized.
-- [ ] Add shipped navigation/audio style fixture tests for token resolution and
+- [x] Add shipped navigation/audio style fixture tests for token resolution and
       expected diagnostics.
-- [ ] Update stale `mesh-core-component` parser expectations around
+- [x] Update stale `mesh-core-component` parser expectations around
       filter/backdrop-filter keyframes if the Phase 52 matrix classifies them as
       accepted metadata/deferred render behavior.
 
@@ -69,11 +69,11 @@ created: 2026-05-22
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 60s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 60s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** automated gates passed on 2026-05-22
