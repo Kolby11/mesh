@@ -3,6 +3,7 @@ use crate::surface::painter::geometry::rounded_rect_coverage;
 use mesh_core_elements::{BoxShadow, VisualFilter};
 use skia_safe::image_filters;
 use skia_safe::{BlurStyle, MaskFilter, PaintStyle, RRect, Rect, TileMode, canvas::SaveLayerRec};
+use skia_safe::{Path as SkiaPath, PathBuilder};
 
 #[allow(dead_code)]
 pub(crate) trait PaintBackend: Send + Sync {
@@ -368,7 +369,7 @@ impl PaintBackend for SkiaPaintBackend {
             layers: false,
             rects: true,
             rounded_rects: true,
-            paths: false,
+            paths: true,
             text: false,
             images: false,
             shadows: true,
@@ -418,13 +419,10 @@ impl PaintBackend for SkiaPaintBackend {
                     self.diagnose_unsupported_paint(*paint, diagnostics);
                     self.draw_rounded_rect_command(buffer, *rect, *radius, *paint, *clip);
                 }
-                PainterCommand::DrawPath { .. } => diagnostics.push(PainterDiagnostic {
-                    backend_id: self.id(),
-                    feature: UnsupportedPainterFeature::Path,
-                    message:
-                        "path commands are part of the contract but deferred to shape migration"
-                            .into(),
-                }),
+                PainterCommand::DrawPath { path, paint, clip } => {
+                    self.diagnose_unsupported_paint(*paint, diagnostics);
+                    self.draw_path_command(buffer, path, *paint, *clip);
+                }
                 PainterCommand::DrawText { .. } => diagnostics.push(PainterDiagnostic {
                     backend_id: self.id(),
                     feature: UnsupportedPainterFeature::Text,
@@ -793,6 +791,46 @@ impl SkiaPaintBackend {
         }
     }
 
+    fn draw_path_command(
+        &self,
+        buffer: &mut PixelBuffer,
+        path: &PainterPath,
+        paint: PainterPaint,
+        clip: ClipRect,
+    ) {
+        let Some(path) = skia_path(path) else {
+            return;
+        };
+        if clip.width <= 0 || clip.height <= 0 {
+            return;
+        }
+        buffer.with_skia_canvas(|canvas| {
+            let save_count = canvas.save();
+            canvas.clip_rect(
+                Rect::from_xywh(
+                    clip.x as f32,
+                    clip.y as f32,
+                    clip.width as f32,
+                    clip.height as f32,
+                ),
+                None,
+                true,
+            );
+            let mut skia_paint = skia_paint(paint.color, true);
+            match paint.style {
+                PainterPaintStyle::Fill => {
+                    skia_paint.set_style(PaintStyle::Fill);
+                }
+                PainterPaintStyle::Stroke(stroke) => {
+                    skia_paint.set_style(PaintStyle::Stroke);
+                    skia_paint.set_stroke_width(stroke.width.max(0.0));
+                }
+            }
+            canvas.draw_path(&path, &skia_paint);
+            canvas.restore_to_count(save_count);
+        });
+    }
+
     fn stroke_rect_impl(
         &self,
         buffer: &mut PixelBuffer,
@@ -898,6 +936,30 @@ impl SkiaPaintBackend {
             canvas.restore_to_count(save_count);
         });
     }
+}
+
+fn skia_path(path: &PainterPath) -> Option<SkiaPath> {
+    let mut builder = PathBuilder::new();
+    for element in &path.elements {
+        match *element {
+            PainterPathElement::MoveTo(x, y) => {
+                builder.move_to((x, y));
+            }
+            PainterPathElement::LineTo(x, y) => {
+                builder.line_to((x, y));
+            }
+            PainterPathElement::QuadTo(x1, y1, x2, y2) => {
+                builder.quad_to((x1, y1), (x2, y2));
+            }
+            PainterPathElement::CubicTo(x1, y1, x2, y2, x3, y3) => {
+                builder.cubic_to((x1, y1), (x2, y2), (x3, y3));
+            }
+            PainterPathElement::Close => {
+                builder.close();
+            }
+        }
+    }
+    (!path.elements.is_empty()).then(|| builder.detach())
 }
 
 fn blur_radius_to_sigma(radius: f32) -> f32 {

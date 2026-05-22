@@ -927,16 +927,16 @@ fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose(
     assert!(capabilities.filters);
     assert!(!capabilities.clips);
     assert!(!capabilities.layers);
-    assert!(!capabilities.paths);
+    assert!(capabilities.paths);
 
     let mut buffer = PixelBuffer::new(16, 16);
     let mut diagnostics = Vec::new();
     backend.execute_commands(
         &mut buffer,
-        &[PainterCommand::DrawPath {
-            path: PainterPath {
-                elements: vec![PainterPathElement::MoveTo(0.0, 0.0)],
-            },
+        &[PainterCommand::DrawText {
+            text: "hello".into(),
+            x: 1.0,
+            y: 10.0,
             paint: PainterPaint::fill(Color::WHITE),
             clip: full_clip(16, 16),
         }],
@@ -945,7 +945,7 @@ fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose(
 
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].backend_id, "skia");
-    assert_eq!(diagnostics[0].feature, UnsupportedPainterFeature::Path);
+    assert_eq!(diagnostics[0].feature, UnsupportedPainterFeature::Text);
 
     diagnostics.clear();
     backend.execute_commands(
@@ -1076,6 +1076,58 @@ fn skia_border_rounded_border_keeps_corners_clear() {
 }
 
 #[test]
+fn skia_path_fill_triangle_paints_expected_pixels() {
+    let mut buffer = PixelBuffer::new(18, 14);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawPath {
+            path: PainterPath {
+                elements: vec![
+                    PainterPathElement::MoveTo(2.0, 11.0),
+                    PainterPathElement::LineTo(9.0, 2.0),
+                    PainterPathElement::LineTo(16.0, 11.0),
+                    PainterPathElement::Close,
+                ],
+            },
+            paint: PainterPaint::fill(Color::from_hex("#00ff00").unwrap()),
+            clip: full_clip(18, 14),
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(pixel(&buffer, 9, 7), Color::from_hex("#00ff00").unwrap());
+    assert_eq!(pixel(&buffer, 1, 1), Color::TRANSPARENT);
+}
+
+#[test]
+fn skia_path_stroke_line_paints_expected_pixels() {
+    let mut buffer = PixelBuffer::new(18, 8);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawPath {
+            path: PainterPath {
+                elements: vec![
+                    PainterPathElement::MoveTo(2.0, 4.0),
+                    PainterPathElement::LineTo(16.0, 4.0),
+                ],
+            },
+            paint: PainterPaint::stroke(Color::from_hex("#0000ff").unwrap(), 2.0),
+            clip: full_clip(18, 8),
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(pixel(&buffer, 9, 4).a > 0);
+    assert_eq!(pixel(&buffer, 9, 0), Color::TRANSPARENT);
+}
+
+#[test]
 fn painter_command_contract_keeps_retained_structures_free_of_skia_types() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for relative in ["src/display_list.rs", "src/render_object.rs"] {
@@ -1189,10 +1241,9 @@ fn painter_backend_diagnostics_are_observable_on_frontend_render_engine() {
     let mut buffer = PixelBuffer::new(16, 16);
     engine.execute_painter_commands(
         &mut buffer,
-        &[PainterCommand::DrawPath {
-            path: PainterPath {
-                elements: vec![PainterPathElement::MoveTo(0.0, 0.0)],
-            },
+        &[PainterCommand::DrawImage {
+            image: PainterImage { id: "img".into() },
+            rect: full_clip(8, 8),
             paint: PainterPaint::fill(Color::WHITE),
             clip: full_clip(16, 16),
         }],
@@ -1201,7 +1252,7 @@ fn painter_backend_diagnostics_are_observable_on_frontend_render_engine() {
     let diagnostics = engine.painter_diagnostics();
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].backend_id, "skia");
-    assert_eq!(diagnostics[0].feature, UnsupportedPainterFeature::Path);
+    assert_eq!(diagnostics[0].feature, UnsupportedPainterFeature::Image);
 
     engine.clear_painter_diagnostics();
     assert!(engine.painter_diagnostics().is_empty());
