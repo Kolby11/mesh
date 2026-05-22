@@ -12,9 +12,8 @@ use super::text::{TextCacheMetrics, TextRenderer, TextSelectionGeometry};
 #[allow(unused_imports)]
 pub(crate) use backend::{
     PaintBackend, PainterBackendCapabilities, PainterBlendMode, PainterClip, PainterCommand,
-    PainterDiagnostic, PainterFilter, PainterImage, PainterLayer, PainterPaint,
-    PainterPaintStyle, PainterPath, PainterPathElement, PainterStroke, SkiaPaintBackend,
-    UnsupportedPainterFeature,
+    PainterDiagnostic, PainterFilter, PainterImage, PainterLayer, PainterPaint, PainterPaintStyle,
+    PainterPath, PainterPathElement, PainterStroke, SkiaPaintBackend, UnsupportedPainterFeature,
 };
 use mesh_core_elements::style::{Color, Display, Overflow, TextAlign, TextDirection, TextOverflow};
 use mesh_core_elements::tree::WidgetNode;

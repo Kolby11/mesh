@@ -6,6 +6,7 @@ use mesh_core_elements::style::{Dimension, Edges};
 use mesh_core_frontend::compile_frontend_module;
 use mesh_core_theme::default_theme;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 fn node(tag: &str, layout: LayoutRect, color: Color) -> WidgetNode {
     let mut node = WidgetNode::new(tag);
@@ -128,6 +129,51 @@ impl PaintBackend for TestPaintBackend {
     }
 }
 
+#[derive(Clone, Default)]
+struct RecordingPaintBackend {
+    commands: Arc<Mutex<Vec<PainterCommand>>>,
+}
+
+impl RecordingPaintBackend {
+    fn recorded_commands(&self) -> Vec<PainterCommand> {
+        self.commands
+            .lock()
+            .map(|commands| commands.clone())
+            .unwrap_or_default()
+    }
+}
+
+impl PaintBackend for RecordingPaintBackend {
+    fn id(&self) -> &'static str {
+        "recording"
+    }
+
+    fn capabilities(&self) -> PainterBackendCapabilities {
+        PainterBackendCapabilities {
+            backend_id: self.id(),
+            clips: true,
+            layers: true,
+            rects: true,
+            rounded_rects: true,
+            paths: false,
+            text: false,
+            images: false,
+            shadows: true,
+            filters: true,
+            blend_modes: true,
+        }
+    }
+
+    fn execute_commands(
+        &self,
+        _buffer: &mut PixelBuffer,
+        commands: &[PainterCommand],
+        _diagnostics: &mut Vec<PainterDiagnostic>,
+    ) {
+        self.commands.lock().unwrap().extend_from_slice(commands);
+    }
+}
+
 #[test]
 fn frontend_renderer_can_be_constructed_with_pluggable_paint_backend() {
     let engine = FrontendRenderEngine::with_paint_backend(Box::<TestPaintBackend>::default());
@@ -243,16 +289,133 @@ fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose(
 #[test]
 fn painter_command_contract_keeps_retained_structures_free_of_skia_types() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for relative in [
-        "src/display_list.rs",
-        "src/render_object.rs",
-    ] {
+    for relative in ["src/display_list.rs", "src/render_object.rs"] {
         let contents = std::fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             !contents.contains("skia_safe"),
             "{relative} must stay backend-neutral"
         );
     }
+}
+
+#[test]
+fn painter_helper_lowering_routes_rect_helper_through_command_backend() {
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let mut buffer = PixelBuffer::new(16, 16);
+    let rect = ClipRect {
+        x: 1,
+        y: 2,
+        width: 8,
+        height: 9,
+    };
+
+    engine.fill_rect_clipped(&mut buffer, rect, Color::WHITE, full_clip(16, 16));
+
+    let commands = recorded.recorded_commands();
+    assert_eq!(commands.len(), 1);
+    assert!(matches!(
+        commands[0],
+        PainterCommand::DrawRect {
+            rect: recorded_rect,
+            paint: PainterPaint {
+                style: PainterPaintStyle::Fill,
+                ..
+            },
+            ..
+        } if recorded_rect == rect
+    ));
+}
+
+#[test]
+fn painter_helper_lowering_routes_effect_helpers_through_command_backend() {
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let mut buffer = PixelBuffer::new(32, 32);
+    let rect = ClipRect {
+        x: 4,
+        y: 4,
+        width: 12,
+        height: 12,
+    };
+    let clip = full_clip(32, 32);
+
+    engine.fill_rounded_rect_clipped_with_filter(
+        &mut buffer,
+        rect,
+        6.0,
+        Color::WHITE,
+        clip,
+        VisualFilter { blur_radius: 2.0 },
+    );
+    engine.draw_box_shadow(
+        &mut buffer,
+        rect,
+        6.0,
+        BoxShadow {
+            offset_x: 2.0,
+            offset_y: 2.0,
+            blur_radius: 4.0,
+            spread_radius: 1.0,
+            color: Color::BLACK,
+            inset: false,
+        },
+        clip,
+    );
+    engine.apply_backdrop_filter(
+        &mut buffer,
+        rect,
+        6.0,
+        VisualFilter { blur_radius: 3.0 },
+        clip,
+    );
+
+    let commands = recorded.recorded_commands();
+    assert_eq!(commands.len(), 3);
+    assert!(matches!(
+        commands[0],
+        PainterCommand::DrawRoundedRect {
+            paint: PainterPaint {
+                filter: VisualFilter { blur_radius: 2.0 },
+                ..
+            },
+            ..
+        }
+    ));
+    assert!(matches!(commands[1], PainterCommand::DrawShadow { .. }));
+    assert!(matches!(
+        commands[2],
+        PainterCommand::ApplyFilter {
+            filter: PainterFilter::Backdrop(VisualFilter { blur_radius: 3.0 }),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn painter_backend_diagnostics_are_observable_on_frontend_render_engine() {
+    let engine = FrontendRenderEngine::new();
+    let mut buffer = PixelBuffer::new(16, 16);
+    engine.execute_painter_commands(
+        &mut buffer,
+        &[PainterCommand::DrawPath {
+            path: PainterPath {
+                elements: vec![PainterPathElement::MoveTo(0.0, 0.0)],
+            },
+            paint: PainterPaint::fill(Color::WHITE),
+            clip: full_clip(16, 16),
+        }],
+    );
+
+    let diagnostics = engine.painter_diagnostics();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].backend_id, "skia");
+    assert_eq!(diagnostics[0].feature, UnsupportedPainterFeature::Path);
+
+    engine.clear_painter_diagnostics();
+    assert!(engine.painter_diagnostics().is_empty());
 }
 
 #[test]

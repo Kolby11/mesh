@@ -6,6 +6,7 @@ use skia_safe::{
     BlendMode, BlurStyle, MaskFilter, PaintStyle, RRect, Rect, TileMode, canvas::SaveLayerRec,
 };
 
+#[allow(dead_code)]
 pub(crate) trait PaintBackend: Send + Sync {
     fn id(&self) -> &'static str;
 
@@ -161,6 +162,7 @@ pub(crate) trait PaintBackend: Send + Sync {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub(crate) enum PainterCommand {
     PushClip(PainterClip),
     PopClip,
@@ -268,11 +270,13 @@ pub(crate) struct PainterStroke {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub(crate) struct PainterPath {
     pub elements: Vec<PainterPathElement>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub(crate) enum PainterPathElement {
     MoveTo(f32, f32),
     LineTo(f32, f32),
@@ -287,6 +291,7 @@ pub(crate) struct PainterImage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub(crate) enum PainterFilter {
     None,
     Blur(VisualFilter),
@@ -309,6 +314,7 @@ impl Default for PainterFilter {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum PainterBlendMode {
     SrcOver,
     Multiply,
@@ -331,6 +337,7 @@ pub(crate) struct PainterBackendCapabilities {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum UnsupportedPainterFeature {
     ClipStack,
     LayerStack,
@@ -393,8 +400,9 @@ impl PaintBackend for SkiaPaintBackend {
                         diagnostics.push(PainterDiagnostic {
                             backend_id: self.id(),
                             feature: UnsupportedPainterFeature::LayerStack,
-                            message: "layer stack commands are defined but not wired to execution yet"
-                                .into(),
+                            message:
+                                "layer stack commands are defined but not wired to execution yet"
+                                    .into(),
                         });
                     }
                 }
@@ -413,20 +421,23 @@ impl PaintBackend for SkiaPaintBackend {
                 PainterCommand::DrawPath { .. } => diagnostics.push(PainterDiagnostic {
                     backend_id: self.id(),
                     feature: UnsupportedPainterFeature::Path,
-                    message: "path commands are part of the contract but deferred to shape migration"
-                        .into(),
+                    message:
+                        "path commands are part of the contract but deferred to shape migration"
+                            .into(),
                 }),
                 PainterCommand::DrawText { .. } => diagnostics.push(PainterDiagnostic {
                     backend_id: self.id(),
                     feature: UnsupportedPainterFeature::Text,
-                    message: "text commands are part of the contract but still handled by TextRenderer"
-                        .into(),
+                    message:
+                        "text commands are part of the contract but still handled by TextRenderer"
+                            .into(),
                 }),
                 PainterCommand::DrawImage { .. } => diagnostics.push(PainterDiagnostic {
                     backend_id: self.id(),
                     feature: UnsupportedPainterFeature::Image,
-                    message: "image commands are part of the contract but deferred to image migration"
-                        .into(),
+                    message:
+                        "image commands are part of the contract but deferred to image migration"
+                            .into(),
                 }),
                 PainterCommand::DrawShadow {
                     rect,
@@ -454,7 +465,13 @@ impl PaintBackend for SkiaPaintBackend {
 }
 
 impl SkiaPaintBackend {
-    fn fill_rect_impl(&self, buffer: &mut PixelBuffer, rect: ClipRect, color: Color, clip: ClipRect) {
+    fn fill_rect_impl(
+        &self,
+        buffer: &mut PixelBuffer,
+        rect: ClipRect,
+        color: Color,
+        clip: ClipRect,
+    ) {
         let clipped = intersect_clip(rect, clip);
         if clipped.width <= 0 || clipped.height <= 0 {
             return;
