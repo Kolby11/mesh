@@ -1,9 +1,9 @@
 ---
 phase: 55
 slug: effects-layers-shadows-blur-images-and-gradients
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: complete
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-05-23
 ---
 
@@ -38,15 +38,15 @@ created: 2026-05-23
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 55-01-01 | 01 | 1 | EFFECT-02 | T-55-01 | Backend-neutral image/gradient style data | unit | `cargo test -p mesh-core-elements style_background -- --nocapture` | ✅ | ⬜ pending |
-| 55-01-02 | 01 | 1 | EFFECT-03 | T-55-02 | Unsupported image/gradient values diagnose | unit | `cargo test -p mesh-core-elements style_background -- --nocapture` | ✅ | ⬜ pending |
-| 55-02-01 | 02 | 2 | EFFECT-01, LAYER-01 | T-55-03 | Direct/retained effect classes match | unit | `cargo test -p mesh-core-render painter_effect_lowering -- --nocapture` | ✅ | ⬜ pending |
-| 55-02-02 | 02 | 2 | EFFECT-02 | T-55-04 | Image/gradient commands remain backend-neutral | unit | `cargo test -p mesh-core-render display_list_effect -- --nocapture` | ✅ | ⬜ pending |
-| 55-03-01 | 03 | 3 | EFFECT-01, LAYER-01 | T-55-05 | Skia executes supported layer/filter combinations | unit | `cargo test -p mesh-core-render skia_effect_layer -- --nocapture` | ✅ | ⬜ pending |
-| 55-03-02 | 03 | 3 | EFFECT-02 | T-55-06 | Skia executes image and gradient commands | unit | `cargo test -p mesh-core-render skia_effect_image_gradient -- --nocapture` | ✅ | ⬜ pending |
-| 55-04-01 | 04 | 4 | EFFECT-03 | T-55-07 | Unsupported features emit diagnostics | unit | `cargo test -p mesh-core-render painter_effect_diagnostic -- --nocapture` | ✅ | ⬜ pending |
-| 55-04-02 | 04 | 4 | EFFECT-01, LAYER-01 | T-55-08 | Visual bounds include effect overflow | unit | `cargo test -p mesh-core-render display_list_effect -- --nocapture` | ✅ | ⬜ pending |
-| 55-05-01 | 05 | 5 | EFFECT-01, EFFECT-02, EFFECT-03, LAYER-01 | — | Full phase proof and metadata update | integration | `cargo test -p mesh-core-render painter_effect -- --nocapture && cargo test -p mesh-core-render display_list_effect -- --nocapture && cargo test -p mesh-core-elements style_background -- --nocapture` | ✅ | ⬜ pending |
+| 55-01-01 | 01 | 1 | EFFECT-02 | T-55-01 | Backend-neutral image/gradient style data | unit | `cargo test -p mesh-core-elements style_background -- --nocapture` | ✅ | ✅ green |
+| 55-01-02 | 01 | 1 | EFFECT-03 | T-55-02 | Unsupported image/gradient values diagnose | unit | `cargo test -p mesh-core-elements style_background -- --nocapture` | ✅ | ✅ green |
+| 55-02-01 | 02 | 2 | EFFECT-01, LAYER-01 | T-55-03 | Direct/retained effect classes match | unit | `cargo test -p mesh-core-render painter_effect_lowering -- --nocapture` | ✅ | ✅ green |
+| 55-02-02 | 02 | 2 | EFFECT-02 | T-55-04 | Image/gradient commands remain backend-neutral | unit | `cargo test -p mesh-core-render display_list_effect -- --nocapture` | ✅ | ✅ green |
+| 55-03-01 | 03 | 3 | EFFECT-01, LAYER-01 | T-55-05 | Skia executes supported layer/filter combinations | unit | `cargo test -p mesh-core-render skia_effect_layer -- --nocapture` | ✅ | ✅ green |
+| 55-03-02 | 03 | 3 | EFFECT-02 | T-55-06 | Skia executes image and gradient commands | unit | `cargo test -p mesh-core-render skia_effect_image_gradient -- --nocapture` | ✅ | ✅ green |
+| 55-04-01 | 04 | 4 | EFFECT-03 | T-55-07 | Unsupported features emit diagnostics | unit | `cargo test -p mesh-core-render painter_effect_diagnostic -- --nocapture` | ✅ | ✅ green |
+| 55-04-02 | 04 | 4 | EFFECT-01, LAYER-01 | T-55-08 | Visual bounds include effect overflow | unit | `cargo test -p mesh-core-render display_list_effect -- --nocapture` | ✅ | ✅ green |
+| 55-05-01 | 05 | 5 | EFFECT-01, EFFECT-02, EFFECT-03, LAYER-01 | — | Full phase proof and metadata update | integration | `cargo test -p mesh-core-render painter_effect -- --nocapture && cargo test -p mesh-core-render display_list_effect -- --nocapture && cargo test -p mesh-core-elements style_background -- --nocapture` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -66,11 +66,11 @@ All Phase 55 behaviors have automated verification.
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
 - [x] Wave 0 covers all MISSING references
 - [x] No watch-mode flags
-- [ ] Feedback latency < 120s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] Feedback latency < 120s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** complete
