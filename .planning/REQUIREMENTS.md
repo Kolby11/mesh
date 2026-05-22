@@ -12,7 +12,7 @@ responsive on real interaction paths.
 
 - [x] **PAINT-01**: Maintainer can express retained display-list output through a high-level painter API with commands for push clip, pop clip, push layer, pop layer, draw rect, draw rounded rect, draw path, draw text, draw image, draw shadow, and apply filter.
 - [x] **PAINT-02**: Maintainer can add a future backend without changing MESH widget traversal, style resolution, layout, animation state, retained display-list ordering, damage selection, module boundaries, input handling, or presentation ownership.
-- [ ] **PAINT-03**: Existing widget-tree and retained-display-list render paths both route paint execution through the same painter command/backend boundary.
+- [x] **PAINT-03**: Existing widget-tree and retained-display-list render paths both route paint execution through the same painter command/backend boundary.
 
 ### XML/CSS/Token Style Profile
 
@@ -22,8 +22,8 @@ responsive on real interaction paths.
 
 ### Elements And Display-List Lowering
 
-- [ ] **ELEM-01**: Supported MESH elements and controls lower into backend-neutral painter commands without losing retained node identity, style state, layout data, or accessibility metadata.
-- [ ] **ELEM-02**: Direct widget-tree painting and retained display-list replay produce equivalent painter command classes for the same node/style inputs.
+- [x] **ELEM-01**: Supported MESH elements and controls lower into backend-neutral painter commands without losing retained node identity, style state, layout data, or accessibility metadata.
+- [x] **ELEM-02**: Direct widget-tree painting and retained display-list replay produce equivalent painter command classes for the same node/style inputs.
 
 ### Skia Backend
 
@@ -100,12 +100,12 @@ responsive on real interaction paths.
 |-------------|-------|--------|
 | PAINT-01 | Phase 51 | Complete |
 | PAINT-02 | Phase 51 | Complete |
-| PAINT-03 | Phase 53 | Pending |
+| PAINT-03 | Phase 53 | Complete |
 | STYLE-01 | Phase 52 | Complete |
 | STYLE-02 | Phase 52 | Complete |
 | STYLE-03 | Phase 52 | Complete |
-| ELEM-01 | Phase 53 | Pending |
-| ELEM-02 | Phase 53 | Pending |
+| ELEM-01 | Phase 53 | Complete |
+| ELEM-02 | Phase 53 | Complete |
 | SKIA-01 | Phase 54 | Pending |
 | SKIA-04 | Phase 54 | Pending |
 | TEXT-01 | Phase 54 | Pending |
