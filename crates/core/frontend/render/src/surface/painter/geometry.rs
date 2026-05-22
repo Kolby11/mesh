@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ClipRect {
     pub x: i32,
     pub y: i32,
@@ -48,96 +48,7 @@ pub(crate) fn fill_rect_clipped(
     buffer.clear_rect(x, y, w, h, color);
 }
 
-pub(crate) fn fill_rounded_rect_clipped(
-    buffer: &mut PixelBuffer,
-    rect: ClipRect,
-    radius: f32,
-    color: Color,
-    clip: ClipRect,
-) {
-    let clipped = intersect_clip(rect, clip);
-    if clipped.width <= 0 || clipped.height <= 0 {
-        return;
-    }
-
-    let half_w = (rect.width.max(0) as f32) * 0.5;
-    let half_h = (rect.height.max(0) as f32) * 0.5;
-    let radius = radius.max(0.0).min(half_w).min(half_h);
-
-    // Solid rectangles (or radius<0.5 px) skip the AA rounded path entirely.
-    if radius < 0.5 {
-        buffer.clear_rect(
-            clipped.x.max(0) as u32,
-            clipped.y.max(0) as u32,
-            clipped.width as u32,
-            clipped.height as u32,
-            color,
-        );
-        return;
-    }
-
-    if buffer.fill_rounded_rect_clipped(
-        rect.x,
-        rect.y,
-        rect.width,
-        rect.height,
-        radius,
-        color,
-        (clipped.x, clipped.y, clipped.width, clipped.height),
-    ) {
-        return;
-    }
-
-    // Fallback: original per-pixel coverage path. Hit only when tiny_skia rejects
-    // the geometry (e.g. degenerate sizes that survive earlier clipping).
-    for py in clipped.y..clipped.y + clipped.height {
-        for px in clipped.x..clipped.x + clipped.width {
-            let coverage = rounded_rect_coverage(rect, radius, px as f32 + 0.5, py as f32 + 0.5);
-            if coverage <= 0.0 {
-                continue;
-            }
-            buffer.blend_pixel_f32(px as u32, py as u32, color, coverage);
-        }
-    }
-}
-
-pub(crate) fn stroke_rounded_rect_clipped(
-    buffer: &mut PixelBuffer,
-    rect: ClipRect,
-    radius: f32,
-    stroke_width: i32,
-    color: Color,
-    clip: ClipRect,
-) -> bool {
-    if stroke_width <= 0 {
-        return false;
-    }
-
-    let clipped = intersect_clip(rect, clip);
-    if clipped.width <= 0 || clipped.height <= 0 {
-        return true;
-    }
-
-    let half_w = (rect.width.max(0) as f32) * 0.5;
-    let half_h = (rect.height.max(0) as f32) * 0.5;
-    let radius = radius.max(0.0).min(half_w).min(half_h);
-    if radius < 0.5 {
-        return false;
-    }
-
-    buffer.stroke_rounded_rect_clipped(
-        rect.x,
-        rect.y,
-        rect.width,
-        rect.height,
-        radius,
-        stroke_width as f32,
-        color,
-        (clipped.x, clipped.y, clipped.width, clipped.height),
-    )
-}
-
-fn rounded_rect_coverage(rect: ClipRect, radius: f32, px: f32, py: f32) -> f32 {
+pub(super) fn rounded_rect_coverage(rect: ClipRect, radius: f32, px: f32, py: f32) -> f32 {
     let half_w = rect.width.max(0) as f32 * 0.5;
     let half_h = rect.height.max(0) as f32 * 0.5;
     let radius = radius.min(half_w).min(half_h).max(0.0);

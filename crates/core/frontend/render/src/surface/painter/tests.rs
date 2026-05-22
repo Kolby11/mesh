@@ -46,6 +46,215 @@ fn pixel(buffer: &PixelBuffer, x: u32, y: u32) -> Color {
     }
 }
 
+fn full_clip(width: i32, height: i32) -> ClipRect {
+    ClipRect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    }
+}
+
+#[derive(Default)]
+struct TestPaintBackend;
+
+impl PaintBackend for TestPaintBackend {
+    fn id(&self) -> &'static str {
+        "test"
+    }
+
+    fn capabilities(&self) -> PainterBackendCapabilities {
+        let mut capabilities = SkiaPaintBackend.capabilities();
+        capabilities.backend_id = self.id();
+        capabilities
+    }
+
+    fn execute_commands(
+        &self,
+        buffer: &mut PixelBuffer,
+        commands: &[PainterCommand],
+        diagnostics: &mut Vec<PainterDiagnostic>,
+    ) {
+        SkiaPaintBackend.execute_commands(buffer, commands, diagnostics);
+    }
+
+    fn fill_rect(&self, buffer: &mut PixelBuffer, rect: ClipRect, color: Color, clip: ClipRect) {
+        SkiaPaintBackend.fill_rect(buffer, rect, color, clip);
+    }
+
+    fn fill_rounded_rect(
+        &self,
+        buffer: &mut PixelBuffer,
+        rect: ClipRect,
+        radius: f32,
+        color: Color,
+        clip: ClipRect,
+    ) {
+        SkiaPaintBackend.fill_rounded_rect(buffer, rect, radius, color, clip);
+    }
+
+    fn stroke_rounded_rect(
+        &self,
+        buffer: &mut PixelBuffer,
+        rect: ClipRect,
+        radius: f32,
+        stroke_width: i32,
+        color: Color,
+        clip: ClipRect,
+    ) -> bool {
+        SkiaPaintBackend.stroke_rounded_rect(buffer, rect, radius, stroke_width, color, clip)
+    }
+
+    fn draw_box_shadow(
+        &self,
+        buffer: &mut PixelBuffer,
+        rect: ClipRect,
+        radius: f32,
+        shadow: BoxShadow,
+        clip: ClipRect,
+    ) {
+        SkiaPaintBackend.draw_box_shadow(buffer, rect, radius, shadow, clip);
+    }
+
+    fn apply_backdrop_filter(
+        &self,
+        buffer: &mut PixelBuffer,
+        rect: ClipRect,
+        radius: f32,
+        filter: VisualFilter,
+        clip: ClipRect,
+    ) {
+        SkiaPaintBackend.apply_backdrop_filter(buffer, rect, radius, filter, clip);
+    }
+}
+
+#[test]
+fn frontend_renderer_can_be_constructed_with_pluggable_paint_backend() {
+    let engine = FrontendRenderEngine::with_paint_backend(Box::<TestPaintBackend>::default());
+    assert_eq!(engine.paint_backend_id(), "test");
+}
+
+#[test]
+fn painter_command_contract_constructs_required_command_set() {
+    let clip = full_clip(16, 16);
+    let rect = ClipRect {
+        x: 1,
+        y: 2,
+        width: 8,
+        height: 9,
+    };
+    let paint = PainterPaint::fill(Color::WHITE);
+    let commands = vec![
+        PainterCommand::PushClip(PainterClip { rect, radius: 2.0 }),
+        PainterCommand::PopClip,
+        PainterCommand::PushLayer(PainterLayer {
+            bounds: clip,
+            opacity: 0.5,
+            blend_mode: PainterBlendMode::SrcOver,
+            filter: PainterFilter::None,
+        }),
+        PainterCommand::PopLayer,
+        PainterCommand::DrawRect { rect, paint, clip },
+        PainterCommand::DrawRoundedRect {
+            rect,
+            radius: 4.0,
+            paint,
+            clip,
+        },
+        PainterCommand::DrawPath {
+            path: PainterPath {
+                elements: vec![
+                    PainterPathElement::MoveTo(0.0, 0.0),
+                    PainterPathElement::LineTo(4.0, 4.0),
+                    PainterPathElement::QuadTo(5.0, 5.0, 6.0, 6.0),
+                    PainterPathElement::CubicTo(1.0, 1.0, 2.0, 2.0, 3.0, 3.0),
+                    PainterPathElement::Close,
+                ],
+            },
+            paint,
+            clip,
+        },
+        PainterCommand::DrawText {
+            text: "hello".into(),
+            x: 2.0,
+            y: 12.0,
+            paint,
+            clip,
+        },
+        PainterCommand::DrawImage {
+            image: PainterImage { id: "img".into() },
+            rect,
+            paint,
+            clip,
+        },
+        PainterCommand::DrawShadow {
+            rect,
+            radius: 4.0,
+            shadow: BoxShadow::default(),
+            clip,
+        },
+        PainterCommand::ApplyFilter {
+            rect,
+            radius: 4.0,
+            filter: PainterFilter::Backdrop(VisualFilter { blur_radius: 2.0 }),
+            clip,
+        },
+        PainterCommand::ApplyFilter {
+            rect,
+            radius: 4.0,
+            filter: PainterFilter::Blur(VisualFilter { blur_radius: 2.0 }),
+            clip,
+        },
+    ];
+
+    assert_eq!(commands.len(), 12);
+}
+
+#[test]
+fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose() {
+    let backend = SkiaPaintBackend;
+    let capabilities = backend.capabilities();
+    assert_eq!(capabilities.backend_id, "skia");
+    assert!(capabilities.rects);
+    assert!(capabilities.rounded_rects);
+    assert!(capabilities.shadows);
+    assert!(capabilities.filters);
+    assert!(!capabilities.paths);
+
+    let mut buffer = PixelBuffer::new(16, 16);
+    let mut diagnostics = Vec::new();
+    backend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawPath {
+            path: PainterPath {
+                elements: vec![PainterPathElement::MoveTo(0.0, 0.0)],
+            },
+            paint: PainterPaint::fill(Color::WHITE),
+            clip: full_clip(16, 16),
+        }],
+        &mut diagnostics,
+    );
+
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].backend_id, "skia");
+    assert_eq!(diagnostics[0].feature, UnsupportedPainterFeature::Path);
+}
+
+#[test]
+fn painter_command_contract_keeps_retained_structures_free_of_skia_types() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for relative in [
+        "src/display_list.rs",
+        "src/render_object.rs",
+    ] {
+        let contents = std::fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !contents.contains("skia_safe"),
+            "{relative} must stay backend-neutral"
+        );
+    }
+}
+
 #[test]
 fn painter_draws_border_from_computed_edges() {
     let mut root = node(
@@ -121,6 +330,56 @@ fn painter_applies_opacity_to_skia_filled_background() {
             a: 128,
         }
     );
+}
+
+#[test]
+fn painter_draws_box_shadow_outside_node_bounds() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 8.0,
+            y: 8.0,
+            width: 16.0,
+            height: 16.0,
+        },
+        Color::from_hex("#ffffff").unwrap(),
+    );
+    root.computed_style.box_shadow = BoxShadow {
+        offset_x: 8.0,
+        offset_y: 0.0,
+        blur_radius: 0.0,
+        spread_radius: 0.0,
+        color: Color::from_hex("#000000ff").unwrap(),
+        inset: false,
+    };
+
+    let mut buffer = PixelBuffer::new(40, 32);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    assert_eq!(pixel(&buffer, 12, 12), Color::from_hex("#ffffff").unwrap());
+    assert_eq!(pixel(&buffer, 28, 12), Color::from_hex("#000000").unwrap());
+}
+
+#[test]
+fn painter_blurs_background_fill_beyond_node_bounds() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 12.0,
+            y: 12.0,
+            width: 16.0,
+            height: 16.0,
+        },
+        Color::from_hex("#000000ff").unwrap(),
+    );
+    root.computed_style.filter = VisualFilter { blur_radius: 4.0 };
+
+    let mut buffer = PixelBuffer::new(40, 40);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    assert!(pixel(&buffer, 10, 20).a > 0);
+    assert!(pixel(&buffer, 10, 20).a < 255);
+    assert_eq!(pixel(&buffer, 0, 0), Color::TRANSPARENT);
 }
 
 #[test]
