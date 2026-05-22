@@ -1,37 +1,49 @@
-# CSS Coverage in MESH
+# MESH Shell CSS Style Profile
 
-MESH supports practical shell CSS, not full browser CSS. The style parser accepts a focused subset, `mesh-core-elements` resolves tokens and local variables into `ComputedStyle`, layout consumes layout fields, and the renderer consumes visual fields.
+MESH shell CSS is the bounded CSS-like style profile for XML/.mesh surfaces. It is not arbitrary HTML/CSS/DOM/browser compatibility. The parser accepts a focused authoring subset, `StyleResolver` resolves values against `mesh-core-theme` and local custom properties, layout consumes layout fields, and render/display-list code consumes backend-neutral visual fields.
 
-Unsupported properties produce style diagnostics. Unsupported at-rules are rejected by the component parser instead of being silently ignored.
+Unsupported properties produce style diagnostics or parser errors instead of hidden browser-style fallback behavior. The executable source of truth for property support lives next to `supported_css_properties()` in `crates/core/ui/elements/src/style/types.rs`.
 
-## Supported Selectors
+## Status Vocabulary
 
-| Feature | Status | Notes |
-|---|---|---|
-| Universal, tag, class, ID | Supported | `*`, `button`, `.primary`, `#main` |
-| Compound selectors | Supported | Example: `button.primary` |
-| Selector lists | Supported | Lowered into separate rules |
-| State pseudo-classes | Supported subset | `:hover`, `:focus`, `:active`, `:disabled`, `:checked`, `:focus-visible` map to runtime element state; `:focus-visible` is a modality-aware visible-focus heuristic rather than a plain alias of `:focus` |
-| Container queries | Supported subset | `@container` size conditions with `and`; `or`, `not`, style, and scroll-state queries are rejected |
-
-Unsupported selector families include descendant/child/sibling combinators, attribute selectors, structural pseudo-classes such as `:nth-child`, and pseudo-elements.
-
-## Supported Properties
-
-| Area | Properties |
+| Status | Meaning |
 |---|---|
-| Box model and sizing | `width`, `height`, `min-width`, `max-width`, `min-height`, `max-height`, `padding`, `padding-*`, `padding-inline`, `padding-block`, `padding-x`, `padding-y`, `margin`, `margin-*`, `margin-inline`, `margin-block`, `margin-x`, `margin-y` |
-| Borders and radius | `border`, `border-color`, `border-width`, `border-*-width`, `border-radius`, `border-*-radius` |
-| Visuals | `background`, `background-color`, `color`, `opacity`, `visibility` |
-| Typography | `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `letter-spacing`, `text-align`, `text-overflow`, `direction` |
-| Flex layout | `display`, `flex`, `flex-direction`, `flex-wrap`, `flex-grow`, `flex-shrink`, `flex-basis`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `row-gap`, `column-gap`, `gap-x` |
-| Overflow | `overflow`, `overflow-x`, `overflow-y` |
-| Positioning | `position`, `top`, `right`, `bottom`, `left`, `inset`, `z-index` |
-| Transition metadata | `transition`, `transition-property`, `transition-duration`, `transition-delay`, `transition-timing-function` |
-| Transform metadata | `transform` |
-| Animation metadata | `animation`, `animation-name`, `animation-duration`, `animation-delay`, `animation-timing-function`, `animation-iteration-count`, `animation-direction`, `animation-fill-mode`, `animation-play-state` |
+| implemented | Parsed/resolved by the current MESH style path and represented in backend-neutral style/render data where applicable. |
+| diagnostic-only | Recognized as an author-facing compatibility case, but not accepted as supported shell CSS. Authors should get diagnostics or no support claim. |
+| deferred | In the bounded painter roadmap, but not promised by Phase 52. Later phases must add lowering, diagnostics, and proof before promoting it. |
+| out-of-scope | Browser/Web platform behavior that MESH does not intend to implement for shell CSS. |
 
-Shorthands are practical shell shorthands rather than complete browser-compatible shorthands. Examples that are expected to work:
+## Support Matrix
+
+| Category | Status | Profile |
+|---|---|---|
+| color | implemented | `background`, `background-color`, and `color` resolve from literals, local variables, and theme tokens into `ComputedStyle` colors. |
+| size | implemented | `width`, `height`, `min-width`, `max-width`, `min-height`, and `max-height` feed retained layout dimensions. |
+| spacing | implemented | `padding`, `padding-*`, `padding-x`, `padding-y`, `padding-inline`, `padding-block`, `margin`, `margin-*`, `margin-x`, `margin-y`, `margin-inline`, and `margin-block` resolve into edge values. |
+| border | implemented | `border`, `border-color`, `border-width`, and `border-*-width` resolve into backend-neutral border color and width fields. |
+| border | diagnostic-only | Browser-specific `border-style` is not part of the executable supported-property list; practical shell border shorthands accept solid-style syntax as a compatibility parse detail. |
+| radius | implemented | `border-radius` and corner-specific radius properties resolve into `Corners`. |
+| opacity | implemented | `opacity` resolves into a numeric style field and remains backend-neutral. |
+| transform | implemented | `transform` parses the supported MESH transform subset. Translation is the current reliable visual/hit-test path; broader transform painting remains bounded by later painter work. |
+| transform | deferred | `transform-origin` is tracked in the matrix because it is accepted by the current support list, but full origin-aware painting is not a Phase 52 promise. |
+| shadow | implemented | `box-shadow` parses and resolves into backend-neutral shadow data. Skia-backed shadow execution belongs to a later painter phase. |
+| filter | implemented | `filter` and `backdrop-filter` parse and resolve into backend-neutral filter data. Skia-backed layer/filter execution belongs to a later painter phase. |
+| image | deferred | CSS image sources such as `background-image` are future painter-profile work and are not accepted as current supported shell CSS. |
+| gradient | deferred | CSS gradient syntax such as `linear-gradient(...)` is future painter-profile work and is not accepted as current supported shell CSS. |
+| animation | implemented | `animation` and its longhands store constrained animation metadata. Keyframes are percentage-only and limited to transition-safe visual properties. |
+| transition | implemented | `transition` and its longhands store constrained transition metadata for supported visual properties. |
+| layout | implemented | `display`, `visibility`, flex properties, `gap`, `row-gap`, `column-gap`, `gap-x`, positioning, `inset`, and `z-index` feed retained layout/render state. |
+| layout | out-of-scope | CSS Grid, floats, multicolumn layout, browser box model modes, full media queries, and arbitrary layout algorithms are not MESH shell CSS. |
+| font | implemented | `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `letter-spacing`, `text-align`, `text-overflow`, and text `direction` resolve into text style fields. |
+| font | out-of-scope | Browser text-flow controls such as `white-space`, `text-wrap`, and `word-break` are not part of the bounded profile. |
+| selectors | implemented | Universal, tag, class, ID, compound selectors, selector lists, and the supported state pseudo-classes participate in style matching. |
+| selectors | out-of-scope | Descendant, child, sibling, attribute, structural pseudo-class, and pseudo-element selector behavior is outside MESH shell CSS. |
+| tokens | implemented | `token(...)` resolves through `mesh-core-theme` plus `StyleResolver` for supported declaration values. |
+| custom properties | implemented | CSS custom properties beginning with `--` are local variables resolved by `StyleResolver`; they are not theme tokens and do not create a full browser cascade model. |
+
+## Practical Syntax
+
+Shorthands are practical shell shorthands rather than full browser-compatible shorthands:
 
 ```css
 .card {
@@ -51,12 +63,9 @@ Shorthands are practical shell shorthands rather than complete browser-compatibl
 }
 ```
 
-## Transition And Interpolation
+`transition-timing-function` accepts `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, and `cubic-bezier(x1, y1, x2, y2)`.
 
-`transition-timing-function` accepts `linear`, `ease`, `ease-in`,
-`ease-out`, `ease-in-out`, and `cubic-bezier(x1, y1, x2, y2)`.
-
-The current shell animator interpolates these practical visual properties:
+The current shell animator interpolates this practical visual set:
 
 - `background` / `background-color`
 - `border-color`
@@ -70,64 +79,47 @@ The current shell animator interpolates these practical visual properties:
 - `margin`
 - `transform`
 
-`transform` currently parses `translate`, `scale`, and `rotate`. Only
-translation is painted and inverted for hit-testing today; scale and rotation
-flow through style resolution and transition state but still render as
-identity until the non-axis-aligned paint path lands.
+`@keyframes` supports numeric percentage stops over the same transition-safe visual set. `from` and `to` aliases are rejected. Unsupported keyframe properties reject the keyframes rule. Keyframe stop values do not support `token(...)` or `var(...)` in this release.
 
-## Keyframes
+## Tokens And Custom Properties
 
-`@keyframes` is supported as percentage-only keyframes over the same
-transition-safe visual property set listed above.
-
-- Stops must use numeric percentages such as `0%`, `50%`, and `100%`.
-- `from` and `to` aliases are rejected.
-- Unsupported keyframe properties reject the entire keyframes rule.
-- Keyframe stop values do not support `token(...)` or `var(...)` in this release.
-- Animation declarations may reference theme tokens such as
-  `token(animation.duration.fast)` and `token(animation.curves.bezier.standard)`.
-
-Example:
+Theme tokens are first-class MESH theme values:
 
 ```css
-.pulse {
-    animation: pulse 180ms token(animation.curves.bezier.standard) 0ms 2 alternate both;
-}
-
-@keyframes pulse {
-    0% { opacity: 0; }
-    50% { opacity: 0.5; }
-    100% { opacity: 1; }
+.surface {
+    background: token(color.surface);
+    padding: token(spacing.md);
 }
 ```
 
-## Tokens And Variables
+Theme token resolution belongs to `mesh-core-theme` and `StyleResolver`. Token values can be full declaration values or embedded in practical literals such as `border: 1px solid token(color.outline)`.
 
-`token(...)` is first-class and resolves against the active MESH theme. It works as a full declaration value and inside practical literals such as `border: 1px solid token(color.outline)`.
-
-Local custom properties are supported for supported declarations:
+CSS custom properties are local variables:
 
 ```css
 .surface {
     --surface: token(color.surface);
     background: var(--surface);
-    padding: token(spacing.md);
 }
 ```
 
-Variables are local to the rule resolution path used by Phase 8; they are not a full CSS cascade model.
+Custom properties are not theme tokens, are not exported to the theme registry, and are not a full browser cascade or inheritance model.
 
-## Focus Styling Guidance
+## Explicit Browser CSS Exclusions
 
-Use `:focus` for logical focus state that should always track the focused control, and use `:focus-visible` for the stronger keyboard-oriented ring or highlight. Pointer focus on text-entry controls still counts as `:focus-visible`; pointer focus on non-text controls does not automatically keep the stronger visible-focus styling.
+These examples are out-of-scope browser CSS and must not be documented or tested as implemented MESH shell CSS:
 
-## Explicitly Out Of Scope
+- `grid-template-columns`
+- `float`
+- `white-space`
+- `container-type`
+- `text-wrap`
+- arbitrary HTML elements, DOM APIs, generated content, full media queries, and browser layout compatibility modes
 
-MESH does not implement CSS Grid, floats, multicolumn layout, full media queries, arbitrary at-rules, browser box model modes, filters, `box-shadow`, gradients/images as CSS backgrounds, generated content, or full text layout controls such as `white-space` and `word-break`.
+Unsupported at-rules are rejected by the component parser where possible. Unsupported declaration names flow through style diagnostics.
 
-Full transform rendering is still out of scope for the current raster path.
-Only translation is visually applied today.
+## Phase 52 Boundary
 
-## Engine Boundary
+Phase 52 locks the profile contract and executable support matrix. It does not migrate widget/control painting, Skia primitive execution, effects/layers/images/gradients, animation invalidation, damage policy, or backend observability. Those remain later v1.10 painter phases.
 
-Parser and lowering live in `mesh-core-component`. Computed style and value resolution live in `mesh-core-elements`. Layout and paint consumption live in `mesh-core-elements` and `mesh-core-render` respectively. LSP completions mirror this contract and intentionally avoid unsupported browser CSS such as CSS Grid and filter-heavy effects.
+Style profile data must stay backend-neutral. Skia belongs behind the painter backend boundary, not in style/profile structs, retained display-list data, or public author-facing style APIs.
