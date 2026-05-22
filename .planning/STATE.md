@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Painter Engine
-status: ready_to_plan
-stopped_at: Phase 51 complete
-last_updated: "2026-05-22T05:12:00.000Z"
+status: executing
+stopped_at: Completed 52-01-PLAN.md
+last_updated: "2026-05-22T18:39:10.021Z"
 last_activity: 2026-05-22
 progress:
   total_phases: 9
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
-  percent: 11
+  total_plans: 7
+  completed_plans: 4
+  percent: 57
 ---
 
 # State: MESH v1.10
@@ -25,9 +25,9 @@ See: `.planning/PROJECT.md` (updated 2026-05-22)
 
 ## Current Position
 
-Phase: 52
-Plan: Not started
-Status: Ready to plan
+Phase: 52 (Style Profile And Lowering Compatibility) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
 Last activity: 2026-05-22
 
 ## Decisions
@@ -121,6 +121,9 @@ Last activity: 2026-05-22
 - [v1.10]: Skia is the authoritative paint/raster backend, not the render engine; MESH retains widget traversal, XML/.mesh parsing, CSS/token style resolution, layout, animation, retained display-list, damage, z-order, module, input, and presentation ownership.
 - [v1.10]: The painter API should use backend-neutral high-level commands so a future Vello backend can implement the same contract after Skia parity is proven.
 - [v1.10]: The painter engine should implement a bounded shell UI subset of web-style rendering rather than full HTML/CSS/browser compatibility. Unsupported browser-like syntax or visual combinations should produce diagnostics instead of silent missing behavior.
+- [Phase 52-01]: MESH shell CSS profile statuses are exactly implemented, diagnostic-only, deferred, and out-of-scope.
+- [Phase 52-01]: Style profile metadata remains backend-neutral and colocated with supported_css_properties.
+- [Phase 52-01]: CSS custom properties remain local StyleResolver variables and are distinct from mesh-core-theme tokens.
 
 ## Performance Metrics
 
@@ -160,11 +163,12 @@ Last activity: 2026-05-22
 | Phase 31 P01 | 48min | 5 tasks | 6 files |
 | Phase 40 P01 | 16 min | 3 tasks | 3 files |
 | Phase 40 P02 | 9 min | 3 tasks | 10 files |
+| Phase 52 P01 | 5min | 2 tasks | 3 files |
 
 ## Session
 
-Last session: 2026-05-22T04:44:13.206Z
-Stopped At: Completed 51-03-PLAN.md
+Last session: 2026-05-22T18:39:10.012Z
+Stopped At: Completed 52-01-PLAN.md
 Resume File: None
 
 ## Accumulated Context
