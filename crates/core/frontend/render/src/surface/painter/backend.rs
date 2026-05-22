@@ -4,6 +4,8 @@ use crate::surface::painter::geometry::rounded_rect_coverage;
 use mesh_core_elements::{BoxShadow, VisualFilter};
 use skia_safe::{BlurStyle, MaskFilter, PaintStyle, RRect, Rect, TileMode, canvas::SaveLayerRec};
 use skia_safe::{Data, Path as SkiaPath, PathBuilder, Point};
+
+pub(crate) const MAX_EFFECT_BLUR_RADIUS: f32 = 96.0;
 use skia_safe::{Image, ImageInfo, SamplingOptions, gradient_shader, image_filters};
 
 #[allow(dead_code)]
@@ -367,10 +369,17 @@ pub(crate) enum UnsupportedPainterFeature {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PainterDiagnosticSource {
+    pub node_id: Option<mesh_core_elements::NodeId>,
+    pub property: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PainterDiagnostic {
     pub backend_id: &'static str,
     pub feature: UnsupportedPainterFeature,
     pub message: String,
+    pub source: Option<PainterDiagnosticSource>,
 }
 
 #[derive(Debug, Default)]
@@ -419,7 +428,13 @@ impl PaintBackend for SkiaPaintBackend {
                             backend_id: self.id(),
                             feature: UnsupportedPainterFeature::BlendMode,
                             message: "non-SrcOver layer blend modes are not supported".into(),
+                            source: None,
                         });
+                    }
+                    if let PainterFilter::Blur(filter) = layer.filter
+                        && self.diagnose_excessive_blur(filter, diagnostics)
+                    {
+                        continue;
                     }
                     layer_stack.push(*layer);
                 }
@@ -463,6 +478,7 @@ impl PaintBackend for SkiaPaintBackend {
                     message:
                         "text commands are part of the contract but still handled by TextRenderer"
                             .into(),
+                    source: None,
                 }),
                 PainterCommand::DrawImage {
                     image,
@@ -499,13 +515,23 @@ impl PaintBackend for SkiaPaintBackend {
                     radius,
                     shadow,
                     clip,
-                } => self.draw_box_shadow_impl(
-                    buffer,
-                    *rect,
-                    *radius,
-                    *shadow,
-                    effective_clip(*clip, &clip_stack),
-                ),
+                } => {
+                    if self.diagnose_excessive_blur(
+                        VisualFilter {
+                            blur_radius: shadow.blur_radius,
+                        },
+                        diagnostics,
+                    ) {
+                        continue;
+                    }
+                    self.draw_box_shadow_impl(
+                        buffer,
+                        *rect,
+                        *radius,
+                        *shadow,
+                        effective_clip(*clip, &clip_stack),
+                    );
+                }
                 PainterCommand::ApplyFilter {
                     rect,
                     radius,
@@ -513,19 +539,30 @@ impl PaintBackend for SkiaPaintBackend {
                     clip,
                 } => match filter {
                     PainterFilter::None => {}
-                    PainterFilter::Blur(_) => diagnostics.push(PainterDiagnostic {
-                        backend_id: self.id(),
-                        feature: UnsupportedPainterFeature::Filter,
-                        message: "standalone blur filter commands are deferred to layer migration"
-                            .into(),
-                    }),
-                    PainterFilter::Backdrop(filter) => self.apply_backdrop_filter_impl(
-                        buffer,
-                        *rect,
-                        *radius,
-                        *filter,
-                        effective_clip(*clip, &clip_stack),
-                    ),
+                    PainterFilter::Blur(filter) => {
+                        if !self.diagnose_excessive_blur(*filter, diagnostics) {
+                            diagnostics.push(PainterDiagnostic {
+                                backend_id: self.id(),
+                                feature: UnsupportedPainterFeature::Filter,
+                                message:
+                                    "standalone blur filter commands are deferred to layer migration"
+                                        .into(),
+                                source: None,
+                            });
+                        }
+                    }
+                    PainterFilter::Backdrop(filter) => {
+                        if self.diagnose_excessive_blur(*filter, diagnostics) {
+                            continue;
+                        }
+                        self.apply_backdrop_filter_impl(
+                            buffer,
+                            *rect,
+                            *radius,
+                            *filter,
+                            effective_clip(*clip, &clip_stack),
+                        );
+                    }
                 },
             }
         }
@@ -543,8 +580,30 @@ impl SkiaPaintBackend {
                 backend_id: self.id(),
                 feature: UnsupportedPainterFeature::BlendMode,
                 message: "non-SrcOver blend modes are deferred to blend-mode migration".into(),
+                source: None,
             });
         }
+        self.diagnose_excessive_blur(paint.filter, diagnostics);
+    }
+
+    fn diagnose_excessive_blur(
+        &self,
+        filter: VisualFilter,
+        diagnostics: &mut Vec<PainterDiagnostic>,
+    ) -> bool {
+        if filter.blur_radius <= MAX_EFFECT_BLUR_RADIUS {
+            return false;
+        }
+        diagnostics.push(PainterDiagnostic {
+            backend_id: self.id(),
+            feature: UnsupportedPainterFeature::Filter,
+            message: format!(
+                "excessive blur radius {} exceeds max {}",
+                filter.blur_radius, MAX_EFFECT_BLUR_RADIUS
+            ),
+            source: None,
+        });
+        true
     }
 
     fn fill_rect_impl(
@@ -976,7 +1035,8 @@ impl SkiaPaintBackend {
             diagnostics.push(PainterDiagnostic {
                 backend_id: self.id(),
                 feature: UnsupportedPainterFeature::Image,
-                message: format!("missing image source '{path}'"),
+                message: format!("missing image asset '{path}'"),
+                source: None,
             });
             return;
         };
@@ -993,6 +1053,7 @@ impl SkiaPaintBackend {
                 backend_id: self.id(),
                 feature: UnsupportedPainterFeature::Image,
                 message: format!("could not decode image source '{path}'"),
+                source: None,
             });
             return;
         };

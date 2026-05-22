@@ -11,10 +11,11 @@ use super::icon;
 use super::text::{TextCacheMetrics, TextRenderer, TextSelectionGeometry};
 #[allow(unused_imports)]
 pub(crate) use backend::{
-    PaintBackend, PainterBackendCapabilities, PainterBlendMode, PainterClip, PainterCommand,
-    PainterDiagnostic, PainterFilter, PainterImage, PainterImageSource, PainterLayer,
-    PainterLinearGradient, PainterPaint, PainterPaintStyle, PainterPath, PainterPathElement,
-    PainterStroke, SkiaPaintBackend, UnsupportedPainterFeature,
+    MAX_EFFECT_BLUR_RADIUS, PaintBackend, PainterBackendCapabilities, PainterBlendMode,
+    PainterClip, PainterCommand, PainterDiagnostic, PainterDiagnosticSource, PainterFilter,
+    PainterImage, PainterImageSource, PainterLayer, PainterLinearGradient, PainterPaint,
+    PainterPaintStyle, PainterPath, PainterPathElement, PainterStroke, SkiaPaintBackend,
+    UnsupportedPainterFeature,
 };
 use mesh_core_elements::style::{
     BackgroundPaint, Color, Display, Overflow, TextAlign, TextDirection, TextOverflow,
