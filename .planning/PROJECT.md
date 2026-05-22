@@ -115,6 +115,12 @@ The project now also has a rendering engine architecture direction with:
 
 **Goal:** Refactor MESH's paint boundary into an extensible WebEngine/Qt-style painter API where MESH keeps render-engine ownership and Skia owns low-level raster, effects, layers, and paint primitives, with a backend contract that can later support Vello.
 
+Phase 51 of v1.10 is complete. `mesh-core-render` now has a
+backend-neutral painter command contract, `PaintBackend` capability and
+diagnostic reporting, command-backed compatibility helpers, docs for the
+helper-to-command migration path, and Vello compatibility notes that keep Skia
+types behind the Skia backend boundary.
+
 **Target features:**
 - Define a high-level painter command API below the retained display list: push clip, push layer, draw rect/rounded rect/path/text/image/shadow, apply filter, pop layer, and pop clip.
 - Make Skia the authoritative implementation for rasterization, antialiasing, paths, rounded rects, strokes, shadows, blurs, image filters, blend modes, clipping, layers/saveLayer, gradients/images, and eligible text primitives.
@@ -174,6 +180,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.8 Phase 45`: Broad renderer migration is documented as phased and reversible, existing renderer boundaries are classified as authoritative, adapter-owned, or replacement candidates, and author-facing `.mesh` behavior is bounded by a renderer contract with explicit adoption gates.
 - `v1.9 Phase 46`: Production renderer-library dependencies and adapter feature gates are installed with documented rollback, build, CI, Linux/Nix, binary-risk, and ownership boundaries.
 - `v1.9 Phase 47`: Taffy-backed layout is authoritative for in-scope retained MESH geometry while shipped navigation/audio surfaces, layout parity cases, diagnostics, and proof/damage payloads remain verified.
+- `v1.10 Phase 51`: The painter command API, backend capability contract, compatibility helper lowering, helper migration map, and Vello compatibility notes are in place below retained display-list ownership.
 
 ### Active
 
