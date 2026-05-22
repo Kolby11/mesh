@@ -10,7 +10,43 @@ mod tests {
     use super::parse::parse_transition_properties;
     use super::*;
     use crate::tree::ElementState;
-    use mesh_core_component::style::{Selector, StyleRule, StyleValue};
+    use mesh_core_component::{
+        parser::parse_component,
+        style::{Declaration, Selector, StyleRule, StyleValue},
+    };
+
+    fn parse_fixture_style(source: &str) -> Vec<StyleRule> {
+        parse_component(source)
+            .expect("fixture parses")
+            .style
+            .expect("fixture has style")
+            .rules
+    }
+
+    fn selector_has_class(selector: &Selector, class: &str) -> bool {
+        match selector {
+            Selector::Class(name) => name == class,
+            Selector::Compound(parts) => parts.iter().any(|part| selector_has_class(part, class)),
+            Selector::Tag(_) | Selector::Id(_) | Selector::State(_, _) | Selector::Universal => {
+                false
+            }
+        }
+    }
+
+    fn resolve_class(
+        resolver: &StyleResolver<'_>,
+        rules: &[StyleRule],
+        class: &str,
+    ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
+        resolver.resolve_node_style_with_diagnostics(
+            rules,
+            "box",
+            &[class.to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        )
+    }
 
     #[test]
     fn parse_hex_colors() {
@@ -253,6 +289,128 @@ mod tests {
                 .message
                 .contains("unsupported CSS property 'grid-template-columns'")
         );
+    }
+
+    #[test]
+    fn style_diagnostics_transform_origin_is_accepted_but_unlowered() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![Declaration {
+                property: "transform-origin".to_string(),
+                value: StyleValue::Literal("center".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let (_style, diagnostics) = resolve_class(&resolver, &rules, "panel");
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].property, "transform-origin");
+        assert!(diagnostics[0].message.contains("accepted by the parser"));
+        assert!(diagnostics[0].message.contains("not lowered"));
+    }
+
+    #[test]
+    fn style_diagnostics_browser_layout_properties_are_unsupported() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![
+                Declaration {
+                    property: "container-type".to_string(),
+                    value: StyleValue::Literal("inline-size".to_string()),
+                },
+                Declaration {
+                    property: "text-wrap".to_string(),
+                    value: StyleValue::Literal("nowrap".to_string()),
+                },
+            ],
+            container_query: None,
+        }];
+
+        let (_style, diagnostics) = resolve_class(&resolver, &rules, "panel");
+        let properties: std::collections::BTreeSet<_> = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.property.as_str())
+            .collect();
+
+        assert_eq!(properties.len(), 2);
+        assert!(properties.contains("container-type"));
+        assert!(properties.contains("text-wrap"));
+        for diagnostic in diagnostics {
+            assert!(diagnostic.message.contains("unsupported"));
+            assert!(diagnostic.message.contains(&diagnostic.property));
+        }
+    }
+
+    #[test]
+    fn style_diagnostics_border_style_is_diagnostic_only() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![Declaration {
+                property: "border-style".to_string(),
+                value: StyleValue::Literal("solid".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let (_style, diagnostics) = resolve_class(&resolver, &rules, "panel");
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].property, "border-style");
+        assert!(diagnostics[0].message.contains("diagnostic-only"));
+        assert!(diagnostics[0].message.contains("not lowered"));
+    }
+
+    #[test]
+    fn style_diagnostics_shipped_navigation_fixture_expected_properties_are_exact() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let mut rules = parse_fixture_style(include_str!(
+            "../../../../../modules/frontend/navigation-bar/src/main.mesh"
+        ));
+        rules.extend(parse_fixture_style(include_str!(
+            "../../../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
+        )));
+
+        let (_nav_style, nav_diagnostics) = resolve_class(&resolver, &rules, "nav-shell");
+        let (_status_style, status_diagnostics) =
+            resolve_class(&resolver, &rules, "status-primary");
+        let (_button_style, button_diagnostics) = resolve_class(&resolver, &rules, "nav-button");
+        let properties: std::collections::BTreeSet<_> = nav_diagnostics
+            .iter()
+            .chain(status_diagnostics.iter())
+            .chain(button_diagnostics.iter())
+            .map(|diagnostic| diagnostic.property.as_str())
+            .collect();
+
+        assert_eq!(
+            properties,
+            std::collections::BTreeSet::from(["border-style", "container-type", "text-wrap"])
+        );
+    }
+
+    #[test]
+    fn style_diagnostics_descendant_selector_out_of_scope_documented() {
+        let rules = parse_fixture_style(include_str!(
+            "../../../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
+        ));
+        let docs = include_str!("../../../../../docs/css-coverage.md");
+
+        assert!(
+            rules.iter().any(|rule| {
+                selector_has_class(&rule.selector, "nav-button")
+                    && selector_has_class(&rule.selector, "nav-button-glyph")
+            }),
+            "fixture should preserve current descendant-like selector lowering shape"
+        );
+        assert!(docs.contains("Descendant"));
+        assert!(docs.contains("out-of-scope"));
     }
 
     #[test]
@@ -1080,6 +1238,169 @@ mod tests {
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("--missing"));
+    }
+
+    #[test]
+    fn shipped_navigation_style_token_resolution_uses_theme_pipeline() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("nav-shell".to_string()),
+            declarations: vec![
+                Declaration {
+                    property: "background".to_string(),
+                    value: StyleValue::Token("color.surface".to_string()),
+                },
+                Declaration {
+                    property: "color".to_string(),
+                    value: StyleValue::Token("color.on-surface".to_string()),
+                },
+                Declaration {
+                    property: "padding-inline".to_string(),
+                    value: StyleValue::Token("spacing.lg".to_string()),
+                },
+                Declaration {
+                    property: "border-radius".to_string(),
+                    value: StyleValue::Token("radius.md".to_string()),
+                },
+                Declaration {
+                    property: "transition-duration".to_string(),
+                    value: StyleValue::Token("animation.duration.short".to_string()),
+                },
+                Declaration {
+                    property: "animation-duration".to_string(),
+                    value: StyleValue::Token("animation.duration.long".to_string()),
+                },
+            ],
+            container_query: None,
+        }];
+
+        let (style, diagnostics) = resolve_class(&resolver, &rules, "nav-shell");
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(style.background_color, Color::from_hex("#1C1B1F").unwrap());
+        assert_eq!(style.color, Color::from_hex("#E6E1E5").unwrap());
+        assert_eq!(style.padding.left, 24.0);
+        assert_eq!(style.padding.right, 24.0);
+        assert_eq!(style.border_radius, Corners::all(8.0));
+        assert_eq!(style.transition.duration_ms, 150);
+        assert_eq!(style.animation.duration_ms, 360);
+    }
+
+    #[test]
+    fn shipped_navigation_style_custom_properties_remain_local_variables() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![
+                Declaration {
+                    property: "--surface".to_string(),
+                    value: StyleValue::Token("color.surface-container".to_string()),
+                },
+                Declaration {
+                    property: "background".to_string(),
+                    value: StyleValue::Var("--surface".to_string()),
+                },
+            ],
+            container_query: None,
+        }];
+
+        let (style, diagnostics) = resolve_class(&resolver, &rules, "panel");
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            style.background_color,
+            Color::from_hex("#211F26").unwrap()
+        );
+    }
+
+    #[test]
+    fn shipped_navigation_style_animation_token_failures_are_actionable() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("nav-shell".to_string()),
+            declarations: vec![Declaration {
+                property: "transition-duration".to_string(),
+                value: StyleValue::Token("animation.duration.not-real".to_string()),
+            }],
+            container_query: None,
+        }];
+
+        let (_style, diagnostics) = resolve_class(&resolver, &rules, "nav-shell");
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].property, "transition-duration");
+        assert!(diagnostics[0].message.contains("animation.duration.not-real"));
+    }
+
+    #[test]
+    fn shipped_navigation_style_fixtures_parse_without_syntax_regression() {
+        let nav_rules = parse_fixture_style(include_str!(
+            "../../../../../modules/frontend/navigation-bar/src/main.mesh"
+        ));
+        let volume_rules = parse_fixture_style(include_str!(
+            "../../../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
+        ));
+
+        assert!(nav_rules.iter().any(|rule| selector_has_class(&rule.selector, "nav-shell")));
+        assert!(volume_rules
+            .iter()
+            .any(|rule| selector_has_class(&rule.selector, "nav-button")));
+    }
+
+    #[test]
+    fn shipped_navigation_style_expected_diagnostics_do_not_block_tokens() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let mut rules = parse_fixture_style(include_str!(
+            "../../../../../modules/frontend/navigation-bar/src/main.mesh"
+        ));
+        rules.extend(parse_fixture_style(include_str!(
+            "../../../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
+        )));
+
+        let (nav_style, nav_diagnostics) = resolve_class(&resolver, &rules, "nav-shell");
+        let (status_style, status_diagnostics) =
+            resolve_class(&resolver, &rules, "status-primary");
+        let (button_style, button_diagnostics) = resolve_class(&resolver, &rules, "nav-button");
+        let diagnostic_properties: std::collections::BTreeSet<_> = nav_diagnostics
+            .iter()
+            .chain(status_diagnostics.iter())
+            .chain(button_diagnostics.iter())
+            .map(|diagnostic| diagnostic.property.as_str())
+            .collect();
+
+        assert!(diagnostic_properties.contains("container-type"));
+        assert!(diagnostic_properties.contains("text-wrap"));
+        assert!(diagnostic_properties.contains("border-style"));
+        assert_eq!(nav_style.background_color, Color::from_hex("#1C1B1F").unwrap());
+        assert_eq!(nav_style.padding.left, 16.0);
+        assert_eq!(status_style.font_size, 12.0);
+        assert_eq!(button_style.border_width, Edges::all(2.0));
+        assert_eq!(
+            button_style.background_color,
+            Color::from_hex("#211F26").unwrap()
+        );
+    }
+
+    #[test]
+    fn shipped_audio_style_fixture_resolves_painter_relevant_values() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = parse_fixture_style(include_str!(
+            "../../../../../modules/frontend/audio-popover/src/main.mesh"
+        ));
+
+        let (style, diagnostics) = resolve_class(&resolver, &rules, "audio-popover");
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(style.background_color, Color::from_hex("#211F26").unwrap());
+        assert_eq!(style.color, Color::from_hex("#E6E1E5").unwrap());
+        assert_eq!(style.padding, Edges::all(16.0));
+        assert_eq!(style.border_radius, Corners::all(16.0));
+        assert_eq!(style.gap, 16.0);
     }
 
     #[test]

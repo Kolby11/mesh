@@ -514,6 +514,44 @@ impl<'a> StyleResolver<'a> {
             variables.insert(decl.property.clone(), decl.value.clone());
             return;
         }
+        if let Some(status) = style_profile_status(&decl.property) {
+            match status {
+                StyleProfileStatus::Implemented => {}
+                StyleProfileStatus::DiagnosticOnly => {
+                    diagnostics.push(StyleDiagnostic {
+                        property: decl.property.clone(),
+                        selector,
+                        message: format!(
+                            "diagnostic-only CSS property '{}' is accepted by the parser but not lowered into ComputedStyle",
+                            decl.property
+                        ),
+                    });
+                    return;
+                }
+                StyleProfileStatus::Deferred => {
+                    diagnostics.push(StyleDiagnostic {
+                        property: decl.property.clone(),
+                        selector,
+                        message: format!(
+                            "deferred CSS property '{}' is accepted by the parser but not lowered in the current painter profile",
+                            decl.property
+                        ),
+                    });
+                    return;
+                }
+                StyleProfileStatus::OutOfScope => {
+                    diagnostics.push(StyleDiagnostic {
+                        property: decl.property.clone(),
+                        selector,
+                        message: format!(
+                            "unsupported CSS property '{}' is out-of-scope for the MESH shell CSS profile",
+                            decl.property
+                        ),
+                    });
+                    return;
+                }
+            }
+        }
         if !is_supported_css_property(&decl.property) {
             diagnostics.push(StyleDiagnostic {
                 property: decl.property.clone(),
