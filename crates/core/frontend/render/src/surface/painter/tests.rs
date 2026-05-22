@@ -1028,6 +1028,54 @@ fn skia_shape_rect_fill_respects_transparency() {
 }
 
 #[test]
+fn skia_border_square_border_matches_existing_pixels() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 20.0,
+            height: 20.0,
+        },
+        Color::TRANSPARENT,
+    );
+    root.computed_style.border_width = Edges::all(2.0);
+    root.computed_style.border_color = Color::from_hex("#ff0000").unwrap();
+
+    let mut buffer = PixelBuffer::new(24, 24);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    assert_eq!(pixel(&buffer, 1, 1), Color::from_hex("#ff0000").unwrap());
+    assert_eq!(pixel(&buffer, 10, 10), Color::TRANSPARENT);
+}
+
+#[test]
+fn skia_border_rounded_border_keeps_corners_clear() {
+    let border = Color::from_hex("#ff0000").unwrap();
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 20.0,
+            height: 20.0,
+        },
+        Color::TRANSPARENT,
+    );
+    root.computed_style.border_width = Edges::all(2.0);
+    root.computed_style.border_color = border;
+    root.computed_style.border_radius.top_left = 8.0;
+
+    let mut buffer = PixelBuffer::new(24, 24);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    assert_eq!(pixel(&buffer, 0, 0), Color::TRANSPARENT);
+    assert!(pixel(&buffer, 10, 0).a > 0);
+    assert!(pixel(&buffer, 0, 10).a > 0);
+    assert_eq!(pixel(&buffer, 10, 10), Color::TRANSPARENT);
+}
+
+#[test]
 fn painter_command_contract_keeps_retained_structures_free_of_skia_types() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for relative in ["src/display_list.rs", "src/render_object.rs"] {

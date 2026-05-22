@@ -808,51 +808,32 @@ impl SkiaPaintBackend {
         if clipped.width <= 0 || clipped.height <= 0 {
             return;
         }
-        let stroke_width = stroke_width.min(rect.width.max(0)).min(rect.height.max(0));
-        self.fill_rect_impl(
-            buffer,
-            ClipRect {
-                x: rect.x,
-                y: rect.y,
-                width: rect.width,
-                height: stroke_width,
-            },
-            color,
-            clip,
-        );
-        self.fill_rect_impl(
-            buffer,
-            ClipRect {
-                x: rect.x,
-                y: rect.y + rect.height.saturating_sub(stroke_width),
-                width: rect.width,
-                height: stroke_width,
-            },
-            color,
-            clip,
-        );
-        self.fill_rect_impl(
-            buffer,
-            ClipRect {
-                x: rect.x,
-                y: rect.y,
-                width: stroke_width,
-                height: rect.height,
-            },
-            color,
-            clip,
-        );
-        self.fill_rect_impl(
-            buffer,
-            ClipRect {
-                x: rect.x + rect.width.saturating_sub(stroke_width),
-                y: rect.y,
-                width: stroke_width,
-                height: rect.height,
-            },
-            color,
-            clip,
-        );
+        let stroke_width = stroke_width.min(rect.width.max(0)).min(rect.height.max(0)) as f32;
+        let inset = stroke_width * 0.5;
+        buffer.with_skia_canvas(|canvas| {
+            let save_count = canvas.save();
+            canvas.clip_rect(
+                Rect::from_xywh(
+                    clipped.x as f32,
+                    clipped.y as f32,
+                    clipped.width as f32,
+                    clipped.height as f32,
+                ),
+                None,
+                false,
+            );
+            let rect = Rect::from_xywh(
+                rect.x as f32 + inset,
+                rect.y as f32 + inset,
+                (rect.width as f32 - stroke_width).max(0.0),
+                (rect.height as f32 - stroke_width).max(0.0),
+            );
+            let mut paint = skia_paint(color, false);
+            paint.set_style(PaintStyle::Stroke);
+            paint.set_stroke_width(stroke_width);
+            canvas.draw_rect(rect, &paint);
+            canvas.restore_to_count(save_count);
+        });
     }
 
     fn fill_shape(
