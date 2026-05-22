@@ -364,8 +364,8 @@ impl PaintBackend for SkiaPaintBackend {
     fn capabilities(&self) -> PainterBackendCapabilities {
         PainterBackendCapabilities {
             backend_id: self.id(),
-            clips: true,
-            layers: true,
+            clips: false,
+            layers: false,
             rects: true,
             rounded_rects: true,
             paths: false,
@@ -406,6 +406,7 @@ impl PaintBackend for SkiaPaintBackend {
                 }
                 PainterCommand::PopLayer => {}
                 PainterCommand::DrawRect { rect, paint, clip } => {
+                    self.diagnose_unsupported_paint(*paint, diagnostics);
                     self.draw_rect_command(buffer, *rect, *paint, *clip);
                 }
                 PainterCommand::DrawRoundedRect {
@@ -414,6 +415,7 @@ impl PaintBackend for SkiaPaintBackend {
                     paint,
                     clip,
                 } => {
+                    self.diagnose_unsupported_paint(*paint, diagnostics);
                     self.draw_rounded_rect_command(buffer, *rect, *radius, *paint, *clip);
                 }
                 PainterCommand::DrawPath { .. } => diagnostics.push(PainterDiagnostic {
@@ -450,9 +452,12 @@ impl PaintBackend for SkiaPaintBackend {
                     clip,
                 } => match filter {
                     PainterFilter::None => {}
-                    PainterFilter::Blur(filter) => {
-                        self.fill_shape(buffer, *rect, *radius, Color::TRANSPARENT, *clip, *filter);
-                    }
+                    PainterFilter::Blur(_) => diagnostics.push(PainterDiagnostic {
+                        backend_id: self.id(),
+                        feature: UnsupportedPainterFeature::Filter,
+                        message: "standalone blur filter commands are deferred to layer migration"
+                            .into(),
+                    }),
                     PainterFilter::Backdrop(filter) => {
                         self.apply_backdrop_filter_impl(buffer, *rect, *radius, *filter, *clip);
                     }
@@ -463,6 +468,20 @@ impl PaintBackend for SkiaPaintBackend {
 }
 
 impl SkiaPaintBackend {
+    fn diagnose_unsupported_paint(
+        &self,
+        paint: PainterPaint,
+        diagnostics: &mut Vec<PainterDiagnostic>,
+    ) {
+        if paint.blend_mode != PainterBlendMode::SrcOver {
+            diagnostics.push(PainterDiagnostic {
+                backend_id: self.id(),
+                feature: UnsupportedPainterFeature::BlendMode,
+                message: "non-SrcOver blend modes are deferred to blend-mode migration".into(),
+            });
+        }
+    }
+
     fn fill_rect_impl(
         &self,
         buffer: &mut PixelBuffer,

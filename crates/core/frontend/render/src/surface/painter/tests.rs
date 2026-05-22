@@ -265,6 +265,8 @@ fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose(
     assert!(capabilities.rounded_rects);
     assert!(capabilities.shadows);
     assert!(capabilities.filters);
+    assert!(!capabilities.clips);
+    assert!(!capabilities.layers);
     assert!(!capabilities.paths);
 
     let mut buffer = PixelBuffer::new(16, 16);
@@ -284,6 +286,20 @@ fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose(
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].backend_id, "skia");
     assert_eq!(diagnostics[0].feature, UnsupportedPainterFeature::Path);
+
+    diagnostics.clear();
+    backend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::ApplyFilter {
+            rect: full_clip(8, 8),
+            radius: 0.0,
+            filter: PainterFilter::Blur(VisualFilter { blur_radius: 2.0 }),
+            clip: full_clip(16, 16),
+        }],
+        &mut diagnostics,
+    );
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].feature, UnsupportedPainterFeature::Filter);
 }
 
 #[test]
