@@ -59,6 +59,13 @@ public render-object structures must stay backend-neutral: they may describe
 MESH visual intent, but Skia-specific types such as `Canvas`, `Paint`, `Path`,
 `RRect`, `ImageFilter`, and `SaveLayerRec` belong inside the Skia backend.
 
+Runtime and debug surfaces should inspect the active backend through
+`FrontendRenderEngine::paint_backend_snapshot()`. The snapshot publishes the
+backend id, a backend-neutral capability list, recent unsupported-feature
+diagnostics, and the current rollback authority. This keeps observability and
+rollback decisions out of Skia-specific types while still making unsupported
+painter behavior visible to shell diagnostics and future proof phases.
+
 Keep new render-specific code in this crate unless it is frontend compile/lower
 logic (`mesh-core-frontend`), source parsing (`mesh-core-component`), a
 runtime-inspectable element/style/layout contract (`mesh-core-elements`), or a

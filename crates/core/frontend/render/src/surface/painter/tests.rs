@@ -1862,8 +1862,32 @@ fn painter_backend_diagnostics_are_observable_on_frontend_render_engine() {
     assert_eq!(diagnostics[0].backend_id, "skia");
     assert_eq!(diagnostics[0].feature, UnsupportedPainterFeature::Image);
 
+    let snapshot = engine.paint_backend_snapshot();
+    assert_eq!(snapshot.backend_id, "skia");
+    assert_eq!(snapshot.rollback_authority, "mesh-software-renderer");
+    assert!(
+        snapshot
+            .capabilities
+            .iter()
+            .any(|capability| capability.feature == "images" && capability.supported)
+    );
+    assert!(
+        snapshot
+            .capabilities
+            .iter()
+            .any(|capability| capability.feature == "text" && !capability.supported)
+    );
+    assert_eq!(snapshot.recent_diagnostics.len(), 1);
+    assert_eq!(snapshot.recent_diagnostics[0].feature, "image");
+
     engine.clear_painter_diagnostics();
     assert!(engine.painter_diagnostics().is_empty());
+    assert!(
+        engine
+            .paint_backend_snapshot()
+            .recent_diagnostics
+            .is_empty()
+    );
 }
 
 #[test]

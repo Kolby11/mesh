@@ -16,7 +16,10 @@ use crate::display_list::DisplayPaintCommand;
 pub use buffer::PixelBuffer;
 pub use debug_overlay::DebugOverlay;
 pub use glyph::GlyphAxes;
-pub use painter::FrontendRenderEngine;
+pub use painter::{
+    FrontendRenderEngine, PainterBackendSnapshot, PainterCapabilitySnapshot,
+    PainterDiagnosticSnapshot,
+};
 pub use profiling::RasterMetrics;
 pub use text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer};
 

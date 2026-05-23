@@ -34,6 +34,12 @@ The current ownership map is in `docs/renderer-ownership.md`. Public author beha
 
 After Phase 50, `renderer-accesskit` builds real retained-node AccessKit `TreeUpdate` values internally from existing `.mesh` accessibility metadata. Authors still use the same roles, labels, focusable controls, and documented accessibility attributes; platform publication is not part of the public contract yet.
 
+After v1.10, the painter engine is a bounded internal rendering path. MESH still
+owns `.mesh` syntax, style/profile semantics, layout, animation state, retained
+display-list ordering, damage, diagnostics, profiling, module boundaries, input,
+and presentation. Skia is the current paint backend below that contract; authors
+do not depend on Skia or future Vello types.
+
 ## Not Promised
 
 - `.mesh is not HTML/CSS in a browser engine.`
@@ -41,6 +47,7 @@ After Phase 50, `renderer-accesskit` builds real retained-node AccessKit `TreeUp
 - `Winit is not replacing Wayland shell ownership.`
 - `Arbitrary DOM/web platform behavior is not promised.`
 - `Renderer proof snapshots are migration evidence, not an author API.`
+- `Skia and future Vello backend details are not author-facing APIs.`
 
 ## Diagnostics And Verification
 

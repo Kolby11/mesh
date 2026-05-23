@@ -1,5 +1,42 @@
 # MESH Milestones
 
+## v1.10 Painter Engine (Shipped: 2026-05-23)
+
+**Phases completed:** 9 phases, 29 plans, 36 tasks
+
+**Key accomplishments:**
+
+- Backend-neutral painter command contract with Skia capability reporting and diagnostic handling
+- Existing renderer paint helpers lowered through the new painter command backend boundary
+- Renderer documentation for the Skia-centric, backend-neutral painter boundary
+- Bounded MESH shell CSS profile with executable property metadata and browser CSS exclusions
+- StyleResolver token, custom-property, and shipped navigation/audio fixture coverage for the painter profile
+- Profile-status-driven diagnostics for unsupported browser-like CSS and accepted-yet-unlowered declarations
+- Component parser keyframe tests aligned with the Phase 52 profile plus final style/parser validation proof
+- Backend-neutral background image and linear-gradient style data with unsupported-value diagnostics
+- Background images and linear gradients lower into backend-neutral painter commands with retained parity
+- Skia executes supported layer, image, and linear-gradient painter commands with pixel proof
+- Unsupported effect cases diagnose, and retained visual bounds cover supported Phase 55 output
+- Phase 55 focused suites and backend-neutrality proof are green, with validation metadata complete
+- Explicit animation property buckets with shell-side transition classification proof
+- Paint-only animation ticks repaint visually while geometry-changing ticks still relayout
+- Paint-only keyframe rules repaint without layout while diagnostics and conservative fallbacks remain intact
+- Animated transform and effect damage now covers current and previous visual pixels
+- Shipped navigation/audio animation proof plus complete Phase 56 validation metadata
+- Retained preclip filtering now uses visual bounds, with debug counters for changed layout, changed paint, effect overflow, and fallback promotion
+- Painter backend snapshots now expose backend id, rollback authority, capabilities, and recent diagnostics
+- Renderer ownership, migration, and `.mesh` author-contract docs now record the shipped v1.10 painter-engine boundary
+
+**Known deferred items at close:** 2 open artifacts acknowledged and deferred; see `.planning/STATE.md` Deferred Items.
+
+**Archive artifacts:**
+
+- `.planning/milestones/v1.10-ROADMAP.md`
+- `.planning/milestones/v1.10-REQUIREMENTS.md`
+- `.planning/milestones/v1.10-MILESTONE-AUDIT.md`
+
+---
+
 ## v1.9 Renderer Library Integration (Shipped: 2026-05-21)
 
 **Phases completed:** 5 phases, 10 plans, 18 tasks

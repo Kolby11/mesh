@@ -100,6 +100,9 @@ MIGR-03: build, CI, feature flags, Linux/Nix dependency implications, and binary
 - `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render proof`
 - `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell phase44`
 - `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell phase44_navigation`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render display_list_`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-render painter_backend`
+- `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test -p mesh-core-shell real_surfaces`
 - `env XDG_CACHE_HOME=/tmp/codex-nix-cache nix develop -c cargo test --workspace`
 
 ### Dependency Record Template
@@ -185,3 +188,32 @@ A renderer path cannot become authoritative until it preserves or replaces:
 - Full browser compatibility remains out of scope.
 - Winit shell ownership is not a production replacement for current Wayland shell ownership.
 - Skia is the authoritative paint backend; future paint backend work should preserve the same retained display-list contract and prove parity before promotion.
+
+## v1.10 Painter Engine Record
+
+The v1.10 painter engine promotes a bounded MESH-owned render engine with a
+Skia paint backend. MESH owns the authoring, runtime, retained tree,
+render-object, display-list, z-order, damage, diagnostics, profiling, module,
+input, and presentation boundaries. Skia owns low-level raster behavior below
+backend-neutral painter commands.
+
+Adoption status:
+
+| Path | Status after v1.10 | Notes |
+|------|--------------------|-------|
+| Retained display list | production | Owns command ordering, visual bounds, sparse replay, damage, and repaint policy. |
+| Skia paint backend | production | Owns supported low-level shapes, paths, clipping, layers, shadows, filters, images, gradients, and blend behavior behind the painter command contract. |
+| Painter backend snapshots | production observability | Expose backend id, capabilities, unsupported-feature diagnostics, and rollback authority without leaking Skia types. |
+| Vello backend | deferred | Future backend candidate that must implement the same painter contract and pass parity gates before promotion. |
+
+Final v1.10 painter gates:
+
+- `nix develop -c cargo test -p mesh-core-render display_list_`
+- `nix develop -c cargo test -p mesh-core-render painter_backend`
+- `nix develop -c cargo test -p mesh-core-shell retained_paint`
+- `nix develop -c cargo test -p mesh-core-shell real_surfaces`
+
+Rollback remains explicit: keep the Skia-backed painter path behind the current
+MESH render-engine ownership boundary, and use
+`FrontendRenderEngine::paint_backend_snapshot().rollback_authority` to surface
+the current fallback authority to debug/proof code.

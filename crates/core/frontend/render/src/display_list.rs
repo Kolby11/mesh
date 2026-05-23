@@ -89,6 +89,10 @@ pub struct DisplayListMetrics {
     pub subtree_segments_reused: u64,
     pub subtree_segments_rebuilt: u64,
     pub subtree_commands_rebuilt: u64,
+    pub changed_layout_count: u64,
+    pub changed_paint_count: u64,
+    pub effect_overflow_count: u64,
+    pub fallback_promotion_count: u64,
     pub full_fallback_count: u64,
     pub broad_dirty_fallback_count: u64,
     pub damage_rect: DamageRect,
@@ -545,6 +549,7 @@ impl RetainedDisplayList {
         };
         let batch_metrics = compute_batch_metrics(&ordered_entries);
         let command_spans = build_command_spans(root, &paint_commands);
+        let effect_overflow_count = count_effect_overflow_commands(&paint_commands);
 
         if rebuilt > 0 || removed > 0 || force_full_damage {
             self.generation = self.generation.saturating_add(1);
@@ -572,6 +577,12 @@ impl RetainedDisplayList {
             subtree_segments_reused: local_metrics.reused_segments,
             subtree_segments_rebuilt: local_metrics.rebuilt_segments,
             subtree_commands_rebuilt: local_metrics.rebuilt_commands,
+            changed_layout_count: changed_layout_count(dirty_summary),
+            changed_paint_count: changed_paint_count(dirty_summary),
+            effect_overflow_count,
+            fallback_promotion_count: u64::from(full_surface_damage)
+                + full_fallback_count
+                + broad_dirty_fallback_count,
             full_fallback_count,
             broad_dirty_fallback_count,
             damage_rect,
@@ -617,6 +628,7 @@ impl RetainedDisplayList {
         } else {
             0
         };
+        let effect_overflow_count = count_effect_overflow_commands(&self.paint_commands);
         self.last_metrics = DisplayListMetrics {
             retained_generation: self.generation,
             entries_total: self.entries.len() as u64,
@@ -626,6 +638,10 @@ impl RetainedDisplayList {
             subtree_segments_reused: self.subtrees.len() as u64,
             subtree_segments_rebuilt: 0,
             subtree_commands_rebuilt: 0,
+            changed_layout_count: 0,
+            changed_paint_count: 0,
+            effect_overflow_count,
+            fallback_promotion_count: u64::from(force_full_damage),
             full_fallback_count: 0,
             broad_dirty_fallback_count: 0,
             damage_rect,
@@ -1182,7 +1198,7 @@ fn subtree_bounds_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Option<
     let transform = node.computed_style.transform;
     let offset_x = offset_x + transform.translate_x;
     let offset_y = offset_y + transform.translate_y;
-    let mut bounds = node_bounds_at(node, offset_x, offset_y);
+    let mut bounds = node_visual_bounds_at(node, offset_x, offset_y);
     let scroll_x = attr_f32(node, "_mesh_scroll_x");
     let scroll_y = attr_f32(node, "_mesh_scroll_y");
     let child_offset_x = offset_x - scroll_x;
@@ -1198,14 +1214,15 @@ fn subtree_bounds_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Option<
     bounds
 }
 
-fn node_bounds_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Option<FloatBounds> {
+fn node_visual_bounds_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Option<FloatBounds> {
     (node.layout.width > 0.0 && node.layout.height > 0.0).then(|| {
-        let layout = transformed_layout_at(node, offset_x, offset_y);
+        let paint_node = build_paint_node(node, offset_x, offset_y);
+        let visual = visual_clip_for(&paint_node);
         FloatBounds {
-            left: layout.x,
-            top: layout.y,
-            right: layout.x + layout.width,
-            bottom: layout.y + layout.height,
+            left: visual.x as f32,
+            top: visual.y as f32,
+            right: (visual.x + visual.width) as f32,
+            bottom: (visual.y + visual.height) as f32,
         }
     })
 }
@@ -1302,6 +1319,40 @@ fn command_bounds(command: &DisplayPaintCommand) -> DamageRect {
         width: clip.width.max(0) as u32,
         height: clip.height.max(0) as u32,
     }
+}
+
+fn count_effect_overflow_commands(commands: &[DisplayPaintCommand]) -> u64 {
+    commands
+        .iter()
+        .filter(|command| command.kind == DisplayPaintCommandKind::Node)
+        .filter(|command| visual_clip_for(&command.node) != node_clip_for(&command.node))
+        .count() as u64
+}
+
+fn changed_layout_count(dirty_summary: RenderObjectDirtySummary) -> u64 {
+    [
+        dirty_summary.inserted,
+        dirty_summary.removed,
+        dirty_summary.reordered,
+        dirty_summary.transform,
+        dirty_summary.clip,
+        dirty_summary.geometry,
+    ]
+    .into_iter()
+    .map(|count| count as u64)
+    .sum()
+}
+
+fn changed_paint_count(dirty_summary: RenderObjectDirtySummary) -> u64 {
+    [
+        dirty_summary.opacity,
+        dirty_summary.material,
+        dirty_summary.primitive,
+        dirty_summary.text,
+    ]
+    .into_iter()
+    .map(|count| count as u64)
+    .sum()
 }
 
 fn build_command_spans(
@@ -2191,6 +2242,105 @@ mod tests {
                 .any(|command| command.node.id == 1),
             "box-shadow visual bounds should participate in sparse repaint selection"
         );
+    }
+
+    #[test]
+    fn display_list_orders_commands_by_z_index_before_replay() {
+        let mut root = node(1, "stack", 0.0, 0.0, 100.0, 100.0);
+        let mut top = node(2, "box", 0.0, 0.0, 40.0, 40.0);
+        top.computed_style.z_index = 10;
+        let mut bottom = node(3, "box", 0.0, 0.0, 40.0, 40.0);
+        bottom.computed_style.z_index = -1;
+        root.children.push(top);
+        root.children.push(bottom);
+
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 100, false, false);
+        let node_order: Vec<_> = list
+            .paint_commands()
+            .iter()
+            .filter(|command| command.kind == DisplayPaintCommandKind::Node)
+            .map(|command| command.node.id)
+            .collect();
+
+        assert_eq!(node_order, vec![1, 3, 2]);
+    }
+
+    #[test]
+    fn display_list_preclip_uses_visual_bounds_for_effect_overflow() {
+        let mut root = node(1, "box", 0.0, 0.0, 40.0, 40.0);
+        root.computed_style.overflow_x = Overflow::Hidden;
+        root.computed_style.overflow_y = Overflow::Hidden;
+        let mut child = node(2, "box", 48.0, 0.0, 10.0, 10.0);
+        child.computed_style.box_shadow = BoxShadow {
+            offset_x: -15.0,
+            offset_y: 0.0,
+            blur_radius: 0.0,
+            spread_radius: 0.0,
+            color: Color::from_hex("#00000080").unwrap(),
+            inset: false,
+        };
+        root.children.push(child);
+
+        let mut list = RetainedDisplayList::default();
+        let metrics = list.update(&root, 100, 100, false, false);
+
+        assert!(
+            list.paint_commands().iter().any(
+                |command| command.node.id == 2 && command.kind == DisplayPaintCommandKind::Node
+            ),
+            "effect overflow intersecting a parent clip must not be preclipped by layout bounds"
+        );
+        assert_eq!(metrics.preclipped_descendants, 0);
+        assert_eq!(metrics.effect_overflow_count, 1);
+    }
+
+    #[test]
+    fn display_list_profiles_changed_paint_layout_effect_overflow_and_fallbacks() {
+        let mut root = node(1, "box", 20.0, 20.0, 20.0, 20.0);
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 100, 100, false, true);
+
+        root.computed_style.box_shadow = BoxShadow {
+            offset_x: 10.0,
+            offset_y: 0.0,
+            blur_radius: 2.0,
+            spread_radius: 0.0,
+            color: Color::from_hex("#00000080").unwrap(),
+            inset: false,
+        };
+        let metrics = list.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                material: 1,
+                geometry: 1,
+                ..Default::default()
+            },
+            &HashSet::from([1]),
+            100,
+            100,
+            false,
+            true,
+        );
+
+        assert_eq!(metrics.changed_paint_count, 1);
+        assert_eq!(metrics.changed_layout_count, 1);
+        assert_eq!(metrics.effect_overflow_count, 1);
+
+        let fallback_metrics = list.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                geometry: 1,
+                ..Default::default()
+            },
+            &HashSet::new(),
+            100,
+            100,
+            false,
+            true,
+        );
+        assert_eq!(fallback_metrics.full_fallback_count, 1);
+        assert_eq!(fallback_metrics.fallback_promotion_count, 1);
     }
 
     #[test]

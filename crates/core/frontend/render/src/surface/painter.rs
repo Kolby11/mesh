@@ -28,6 +28,29 @@ use geometry::{
     clip_to_tuple, dim_color, intersect_clip, node_attr_f32, node_clips_children, opacity_color,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PainterBackendSnapshot {
+    pub backend_id: &'static str,
+    pub rollback_authority: &'static str,
+    pub capabilities: Vec<PainterCapabilitySnapshot>,
+    pub recent_diagnostics: Vec<PainterDiagnosticSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PainterCapabilitySnapshot {
+    pub feature: &'static str,
+    pub supported: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PainterDiagnosticSnapshot {
+    pub backend_id: &'static str,
+    pub feature: &'static str,
+    pub message: String,
+    pub node_id: Option<mesh_core_elements::NodeId>,
+    pub property: Option<String>,
+}
+
 pub struct FrontendRenderEngine {
     paint_backend: Box<dyn PaintBackend>,
     painter_diagnostics: Mutex<Vec<PainterDiagnostic>>,
@@ -54,6 +77,22 @@ impl FrontendRenderEngine {
 
     pub fn paint_backend_id(&self) -> &'static str {
         self.paint_backend.id()
+    }
+
+    pub fn paint_backend_snapshot(&self) -> PainterBackendSnapshot {
+        PainterBackendSnapshot {
+            backend_id: self.paint_backend.id(),
+            rollback_authority: crate::renderer_library_rollback_authority(),
+            capabilities: painter_capability_snapshots(self.paint_backend.capabilities()),
+            recent_diagnostics: self.painter_diagnostic_snapshots(),
+        }
+    }
+
+    pub fn painter_diagnostic_snapshots(&self) -> Vec<PainterDiagnosticSnapshot> {
+        self.painter_diagnostics()
+            .into_iter()
+            .map(painter_diagnostic_snapshot)
+            .collect()
     }
 
     #[allow(dead_code)]
@@ -264,6 +303,79 @@ impl FrontendRenderEngine {
 
     pub fn text_cache_metrics(&self) -> TextCacheMetrics {
         self.text_renderer.cache_metrics()
+    }
+}
+
+fn painter_capability_snapshots(
+    capabilities: PainterBackendCapabilities,
+) -> Vec<PainterCapabilitySnapshot> {
+    vec![
+        PainterCapabilitySnapshot {
+            feature: "clips",
+            supported: capabilities.clips,
+        },
+        PainterCapabilitySnapshot {
+            feature: "layers",
+            supported: capabilities.layers,
+        },
+        PainterCapabilitySnapshot {
+            feature: "rects",
+            supported: capabilities.rects,
+        },
+        PainterCapabilitySnapshot {
+            feature: "rounded_rects",
+            supported: capabilities.rounded_rects,
+        },
+        PainterCapabilitySnapshot {
+            feature: "paths",
+            supported: capabilities.paths,
+        },
+        PainterCapabilitySnapshot {
+            feature: "text",
+            supported: capabilities.text,
+        },
+        PainterCapabilitySnapshot {
+            feature: "images",
+            supported: capabilities.images,
+        },
+        PainterCapabilitySnapshot {
+            feature: "shadows",
+            supported: capabilities.shadows,
+        },
+        PainterCapabilitySnapshot {
+            feature: "filters",
+            supported: capabilities.filters,
+        },
+        PainterCapabilitySnapshot {
+            feature: "blend_modes",
+            supported: capabilities.blend_modes,
+        },
+    ]
+}
+
+fn painter_diagnostic_snapshot(diagnostic: PainterDiagnostic) -> PainterDiagnosticSnapshot {
+    PainterDiagnosticSnapshot {
+        backend_id: diagnostic.backend_id,
+        feature: unsupported_painter_feature_label(diagnostic.feature),
+        message: diagnostic.message,
+        node_id: diagnostic.source.as_ref().and_then(|source| source.node_id),
+        property: diagnostic
+            .source
+            .as_ref()
+            .and_then(|source| source.property.clone()),
+    }
+}
+
+fn unsupported_painter_feature_label(feature: UnsupportedPainterFeature) -> &'static str {
+    match feature {
+        UnsupportedPainterFeature::ClipStack => "clip_stack",
+        UnsupportedPainterFeature::LayerStack => "layer_stack",
+        UnsupportedPainterFeature::Path => "path",
+        UnsupportedPainterFeature::Text => "text",
+        UnsupportedPainterFeature::Image => "image",
+        UnsupportedPainterFeature::Gradient => "gradient",
+        UnsupportedPainterFeature::Filter => "filter",
+        UnsupportedPainterFeature::BlendMode => "blend_mode",
     }
 }
 

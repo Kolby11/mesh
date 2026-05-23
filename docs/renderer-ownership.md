@@ -18,6 +18,7 @@
 | Retained display-list ownership | authoritative | `crates/core/frontend/render/src/display_list.rs` | Owns paint command identity, selection payloads, damage data, repaint policy, and batching evidence. |
 | Render engine and display list | authoritative | `crates/core/frontend/render/src/render_object.rs`, `crates/core/frontend/render/src/display_list.rs`, `crates/core/frontend/render/src/surface/painter.rs` | Owns retained render state, paint command ordering, damage/repaint selection, and translation from MESH widget/style/layout data into backend paint operations. |
 | Skia paint backend | authoritative | `crates/core/frontend/render/src/surface/painter/backend.rs` | Owns the low-level painter/raster work below MESH paint commands: antialiasing, paths, rounded rects, strokes, shadows, blur/image filters, blend modes, clipping, layers/saveLayer, and related Skia canvas behavior. |
+| Painter backend diagnostics and rollback visibility | authoritative | `FrontendRenderEngine::paint_backend_snapshot()` in `crates/core/frontend/render/src/surface/painter.rs` | Publishes backend id, backend-neutral capabilities, recent unsupported-feature diagnostics, and rollback authority without exposing Skia-specific types. |
 | Presentation boundary | authoritative | `crates/core/presentation/src/lib.rs` | Selects dev-window or layer-shell presentation and keeps `PixelBuffer` presentation ownership outside renderer experiments. |
 | Wayland surface backend | authoritative | `crates/core/presentation/src/wayland_surface/backend.rs` | Owns Wayland surface attach, copy, and damage behavior that broad migration must preserve or intentionally replace. |
 
@@ -82,3 +83,14 @@ types such as `Canvas`, `Paint`, `Path`, `RRect`, `ImageFilter`, or
 A replacement candidate cannot become authoritative until it preserves or replaces NodeId identity, typed invalidation, damage, profiling, diagnostics, theme-owned selection behavior, and AccessKit-compatible update evidence.
 
 Promotion also requires the dependency record and broad-adoption checklist in `docs/renderer-migration.md`.
+
+## v1.10 Painter Engine Proof
+
+The v1.10 painter engine keeps MESH authoritative for `.mesh` parsing, style
+resolution, layout, animation state, z-order traversal, retained display-list
+ordering, damage selection, diagnostics, profiling, module boundaries, input,
+and presentation. Skia is authoritative only below the painter backend boundary.
+
+The shipped proof slice is the navigation bar and audio popover. Required proof
+commands are recorded in `docs/renderer-migration.md` under the v1.10 painter
+engine record.
