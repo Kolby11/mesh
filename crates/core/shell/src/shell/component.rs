@@ -37,8 +37,8 @@ use runtime_tree::{
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::{
-    IntrinsicLayoutCache, LayoutEngine, StyleContext, StyleResolver, VariableStore, WidgetNode,
-    element_snapshot_json,
+    IntrinsicLayoutCache, LayoutEngine, NodeId, StyleContext, StyleResolver, VariableStore,
+    WidgetNode, element_snapshot_json,
 };
 use mesh_core_frontend::{
     CompiledFrontendModule, FrontendRenderMode, compile_frontend_module, root_accessibility_role,
@@ -341,6 +341,7 @@ pub(super) struct FrontendSurfaceComponent {
     invalidation_snapshot: Option<mesh_core_debug::ProfilingInvalidationSnapshot>,
     focused_proof_snapshot: Option<mesh_core_render::FocusedProofSnapshot>,
     last_present_damage: Option<DamageRect>,
+    last_visual_damage: HashMap<NodeId, DamageRect>,
     /// Cached aggregate of restyle rules collected from `compiled.component`
     /// and every entry in `compiled.local_components`. Populated lazily on the
     /// first restyle and invalidated whenever the compiled module is replaced
@@ -427,6 +428,7 @@ impl FrontendSurfaceComponent {
             invalidation_snapshot: None,
             focused_proof_snapshot: None,
             last_present_damage: None,
+            last_visual_damage: HashMap::new(),
             cached_restyle_rules: None,
         }
     }

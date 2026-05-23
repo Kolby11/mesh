@@ -356,20 +356,37 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.last_tooltip_damage,
             surface_damage,
         );
+        let dirty_node_visual_damage = damage_rect_for_node_ids(
+            &tree,
+            self.retained_render_objects.dirty_node_ids(),
+            &self.last_visual_damage,
+            surface_damage,
+        );
+        let animated_visual_damage = if render_object_dirty.transform > 0
+            || render_object_dirty.opacity > 0
+            || render_object_dirty.material > 0
+        {
+            dirty_node_visual_damage
+        } else {
+            None
+        };
         let reorder_damage = if render_object_dirty.reordered > 0 {
             damage_rect_for_node_ids(
                 &tree,
                 self.retained_render_objects.dirty_node_ids(),
+                &self.last_visual_damage,
                 surface_damage,
             )
         } else {
             None
         };
+        let visual_damage =
+            merge_optional_damage(reorder_damage, animated_visual_damage, surface_damage);
         let effective_damage = select_effective_damage(
             display_list_metrics,
             surface_damage,
             requires_tree_rebuild,
-            reorder_damage,
+            visual_damage,
             tooltip_damage,
         );
         let paint_damage = if effective_damage.full_surface {
@@ -467,6 +484,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         };
         self.last_present_damage =
             merge_optional_damage(self.last_present_damage, paint_damage, surface_damage);
+        self.last_visual_damage = collect_visual_damage_rects(&tree, surface_damage);
         let traversal_micros = paint_metrics
             .traversal_micros
             .saturating_sub(paint_metrics.text.shaping_micros)
@@ -524,6 +542,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.retained_render_objects = RenderObjectTree::default();
         self.retained_display_list = RetainedDisplayList::default();
         self.focused_proof_snapshot = None;
+        self.last_visual_damage.clear();
         // A theme swap is a global palette replacement, not a local CSS
         // transition. Drop transition state so stale light/dark colors cannot
         // paint over the newly active theme.
@@ -548,6 +567,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.retained_render_objects = RenderObjectTree::default();
         self.retained_display_list = RetainedDisplayList::default();
         self.focused_proof_snapshot = None;
+        self.last_visual_damage.clear();
         self.render_hooks_pending = true;
         self.surface_pixels_invalid = true;
         self.invalidate_script_state();
@@ -636,6 +656,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // Style rules may have changed in the recompiled module.
         self.cached_restyle_rules = None;
         self.focused_proof_snapshot = None;
+        self.last_visual_damage.clear();
         Ok(true)
     }
 
@@ -860,11 +881,20 @@ fn tooltip_damage_rect(
 fn damage_rect_for_node_ids(
     node: &WidgetNode,
     node_ids: &HashSet<mesh_core_elements::NodeId>,
+    last_visual_damage: &HashMap<mesh_core_elements::NodeId, DamageRect>,
     surface: DamageRect,
 ) -> Option<DamageRect> {
     let mut damage = None;
+    for node_id in node_ids {
+        if let Some(previous) = last_visual_damage.get(node_id).copied() {
+            damage = Some(match damage {
+                Some(current) => union_damage(current, previous),
+                None => previous,
+            });
+        }
+    }
     collect_damage_rect_for_node_ids(node, node_ids, surface, &mut damage);
-    damage
+    clip_damage(damage?, surface)
 }
 
 fn collect_damage_rect_for_node_ids(
@@ -888,13 +918,58 @@ fn collect_damage_rect_for_node_ids(
 }
 
 fn damage_rect_for_widget_node(node: &WidgetNode, surface: DamageRect) -> Option<DamageRect> {
+    visual_damage_rect_for_widget_node(node, surface)
+}
+
+fn visual_damage_rect_for_widget_node(
+    node: &WidgetNode,
+    surface: DamageRect,
+) -> Option<DamageRect> {
     if node.layout.width <= 0.0 || node.layout.height <= 0.0 {
         return None;
     }
-    let left = node.layout.x.floor().max(0.0) as u32;
-    let top = node.layout.y.floor().max(0.0) as u32;
-    let right = (node.layout.x + node.layout.width).ceil().max(0.0) as u32;
-    let bottom = (node.layout.y + node.layout.height).ceil().max(0.0) as u32;
+    let transform = node.computed_style.transform;
+    let scale_x = transform.scale_x.max(0.0);
+    let scale_y = transform.scale_y.max(0.0);
+    let width = node.layout.width * scale_x;
+    let height = node.layout.height * scale_y;
+    let mut left = node.layout.x + transform.translate_x;
+    let mut top = node.layout.y + transform.translate_y;
+    let mut right = left + width;
+    let mut bottom = top + height;
+
+    let shadow = node.computed_style.box_shadow;
+    if !shadow.is_none() && !shadow.inset {
+        let spread = shadow.spread_radius;
+        let blur_pad = shadow.blur_radius * 3.0;
+        left =
+            left.min(node.layout.x + transform.translate_x + shadow.offset_x - spread - blur_pad);
+        top = top.min(node.layout.y + transform.translate_y + shadow.offset_y - spread - blur_pad);
+        right = right.max(
+            node.layout.x + transform.translate_x + width + shadow.offset_x + spread + blur_pad,
+        );
+        bottom = bottom.max(
+            node.layout.y + transform.translate_y + height + shadow.offset_y + spread + blur_pad,
+        );
+    }
+
+    let filter_pad = node
+        .computed_style
+        .filter
+        .blur_radius
+        .max(node.computed_style.backdrop_filter.blur_radius)
+        * 3.0;
+    if filter_pad > 0.0 {
+        left -= filter_pad;
+        top -= filter_pad;
+        right += filter_pad;
+        bottom += filter_pad;
+    }
+
+    let left = left.floor().max(0.0) as u32;
+    let top = top.floor().max(0.0) as u32;
+    let right = right.ceil().max(0.0) as u32;
+    let bottom = bottom.ceil().max(0.0) as u32;
     clip_damage(
         DamageRect {
             x: left,
@@ -904,6 +979,28 @@ fn damage_rect_for_widget_node(node: &WidgetNode, surface: DamageRect) -> Option
         },
         surface,
     )
+}
+
+fn collect_visual_damage_rects(
+    node: &WidgetNode,
+    surface: DamageRect,
+) -> HashMap<mesh_core_elements::NodeId, DamageRect> {
+    let mut damage = HashMap::new();
+    collect_visual_damage_rects_into(node, surface, &mut damage);
+    damage
+}
+
+fn collect_visual_damage_rects_into(
+    node: &WidgetNode,
+    surface: DamageRect,
+    damage: &mut HashMap<mesh_core_elements::NodeId, DamageRect>,
+) {
+    if let Some(bounds) = visual_damage_rect_for_widget_node(node, surface) {
+        damage.insert(node.id, bounds);
+    }
+    for child in &node.children {
+        collect_visual_damage_rects_into(child, surface, damage);
+    }
 }
 
 fn merge_optional_damage(
@@ -970,11 +1067,143 @@ mod tests {
         }
     }
 
+    fn visual_node() -> WidgetNode {
+        let mut node = WidgetNode::new("box");
+        node.id = 1;
+        node.layout.x = 10.0;
+        node.layout.y = 10.0;
+        node.layout.width = 20.0;
+        node.layout.height = 10.0;
+        node
+    }
+
     fn metrics(surface_area: u64) -> DisplayListMetrics {
         DisplayListMetrics {
             surface_area,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn animation_damage_includes_transform_visual_bounds() {
+        let mut node = visual_node();
+        node.computed_style.transform.translate_x = 15.0;
+        node.computed_style.transform.translate_y = 5.0;
+        node.computed_style.transform.scale_x = 2.0;
+        node.computed_style.transform.scale_y = 2.0;
+
+        let damage = visual_damage_rect_for_widget_node(&node, surface(200, 100));
+
+        assert_eq!(
+            damage,
+            Some(DamageRect {
+                x: 25,
+                y: 15,
+                width: 40,
+                height: 20,
+            })
+        );
+    }
+
+    #[test]
+    fn animation_damage_includes_shadow_filter_visual_bounds() {
+        let mut node = visual_node();
+        node.computed_style.box_shadow = mesh_core_elements::BoxShadow {
+            offset_x: 4.0,
+            offset_y: 6.0,
+            blur_radius: 2.0,
+            spread_radius: 1.0,
+            color: mesh_core_elements::style::Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 128,
+            },
+            inset: false,
+        };
+        node.computed_style.filter = mesh_core_elements::VisualFilter { blur_radius: 3.0 };
+
+        let damage = visual_damage_rect_for_widget_node(&node, surface(200, 100));
+
+        assert_eq!(
+            damage,
+            Some(DamageRect {
+                x: 0,
+                y: 0,
+                width: 50,
+                height: 42,
+            })
+        );
+    }
+
+    #[test]
+    fn animation_damage_unions_previous_and_current_transform_bounds() {
+        let mut node = visual_node();
+        node.computed_style.transform.translate_x = 30.0;
+        let previous = HashMap::from([(
+            1,
+            DamageRect {
+                x: 10,
+                y: 10,
+                width: 20,
+                height: 10,
+            },
+        )]);
+
+        let damage =
+            damage_rect_for_node_ids(&node, &HashSet::from([1]), &previous, surface(200, 100));
+
+        assert_eq!(
+            damage,
+            Some(DamageRect {
+                x: 10,
+                y: 10,
+                width: 50,
+                height: 10,
+            })
+        );
+    }
+
+    #[test]
+    fn animation_damage_unions_previous_and_current_shadow_bounds() {
+        let mut node = visual_node();
+        node.layout.x = 20.0;
+        node.layout.y = 20.0;
+        node.computed_style.box_shadow = mesh_core_elements::BoxShadow {
+            offset_x: 4.0,
+            offset_y: 6.0,
+            blur_radius: 2.0,
+            spread_radius: 1.0,
+            color: mesh_core_elements::style::Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 128,
+            },
+            inset: false,
+        };
+        let previous = HashMap::from([(
+            1,
+            DamageRect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+        )]);
+
+        let damage =
+            damage_rect_for_node_ids(&node, &HashSet::from([1]), &previous, surface(200, 100));
+
+        assert_eq!(
+            damage,
+            Some(DamageRect {
+                x: 0,
+                y: 0,
+                width: 51,
+                height: 43,
+            })
+        );
     }
 
     #[test]
