@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.11
 milestone_name: Surface Keybind Completion
-status: executing
+status: ready_to_plan
 stopped_at: Phase 61 context gathered
-last_updated: "2026-05-23T10:05:21.946Z"
-last_activity: 2026-05-23 -- Phase 61 planning complete
+last_updated: "2026-05-23T10:08:03.759Z"
+last_activity: 2026-05-23
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 3
   total_plans: 2
-  completed_plans: 1
-  percent: 50
+  completed_plans: 2
+  percent: 60
 ---
 
 # State: MESH v1.11
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-23)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Phase 60 — surface-keybind-dispatch-runtime
+**Current focus:** Phase 61 — localized-resolution-and-override-safety
 
 ## Current Position
 
-Phase: 61
+Phase: 62
 Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-23 -- Phase 61 planning complete
+Status: Ready to plan
+Last activity: 2026-05-23
 
 ## Decisions
 
@@ -125,6 +125,7 @@ Last activity: 2026-05-23 -- Phase 61 planning complete
 - [Phase 52-01]: Style profile metadata remains backend-neutral and colocated with supported_css_properties.
 - [Phase 52-01]: CSS custom properties remain local StyleResolver variables and are distinct from mesh-core-theme tokens.
 - [Phase 60]: Bare printable keys remain owned by focused text inputs before surface keybind dispatch; matched shortcuts with no runtime subscribers fall through as unhandled. — Preserves shell/input precedence and prevents declared-but-unrendered keybinds from swallowing normal focused keyboard handling.
+- [Phase 61]: Localized keybind defaults apply only to access-key declarations, while user overrides apply only to existing action declarations and cannot create missing action ids. — This satisfies KRES-02 and KRES-03 while keeping manifest declarations canonical and settings override-only.
 
 ## Performance Metrics
 
@@ -166,6 +167,7 @@ Last activity: 2026-05-23 -- Phase 61 planning complete
 | Phase 40 P02 | 9 min | 3 tasks | 10 files |
 | Phase 52 P01 | 5min | 2 tasks | 3 files |
 | Phase 60 P01 | 25min | 3 tasks | 3 files |
+| Phase 61 P01 | 18min | 3 tasks | 2 files |
 
 ## Session
 

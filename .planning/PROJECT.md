@@ -181,11 +181,11 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.10 Phase 51`: The painter command API, backend capability contract, compatibility helper lowering, helper migration map, and Vello compatibility notes are in place below retained display-list ownership.
 - `v1.10 Phase 55`: Supported background images, linear gradients, layers, images, blur, shadows, effect diagnostics, visual bounds, and backend-neutral validation are proven through focused style/render/effect suites.
 - `v1.11 Phase 60`: Manifest-owned surface keybind actions dispatch through runtime subscribers while preserving shell-global precedence, focused text input ownership, selection copy, focus traversal, and default widget activation.
+- `v1.11 Phase 61`: Focused-surface keybind resolution now has deterministic override, exact locale, parent locale, generic, and no-binding precedence, with settings unable to create undeclared actions and localized defaults limited to access keys.
 
 ### Active
 
 - Add keybind diagnostics for conflicts, malformed declarations, unresolved targets, unsupported triggers, and unsafe user overrides.
-- Preserve localized trigger and user override precedence from v1.6/v1.7 while making it operational on focused surfaces.
 - Expose resolved keybind metadata through accessibility/debug surfaces and prove behavior on shipped navigation/audio surfaces.
 
 ### Out of Scope
@@ -232,6 +232,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Module keybind declarations remain canonical while settings only override effective shortcuts | Future dispatch/conflict/accessibility work needs manifest-owned keybind data and user settings must not become a declaration source again | Shipped in v1.7 Phase 40 |
 | v1.11 resumes keybind completion as surface-scoped runtime work | The module graph and renderer foundations are now stable enough to finish dispatch, diagnostics, overrides, accessibility metadata, and shipped-surface proof without taking on compositor-global shortcut scope | Active for v1.11 |
 | Bare printable keybinds do not preempt focused text input | Text entry remains shell/input-owned even when a surface declares a matching semantic keybind, and unresolved subscriber sets must not swallow focused keydown behavior | Shipped in v1.11 Phase 60 |
+| Localized keybind defaults are access-key scoped | Shortcut actions keep generic defaults unless user overrides exist, while settings overrides cannot create missing action ids | Shipped in v1.11 Phase 61 |
 | Direct Blitz production adoption remains blocked | Wayland shell model fit, browser-engine-level overhead, and high-level crate compile evidence make direct adoption too risky for MESH's shell-owned renderer path | Shipped in v1.8 Phase 42 |
 | MESH-owned focused-crate path is the selected renderer direction | The focused path preserved retained MESH-shaped evidence across layout, text, paint, interaction, and accessibility without replacing the production renderer wholesale | Shipped in v1.8 Phase 43 |
 | Focused renderer proof is adapter-owned, not public API | Phase 44 proof snapshots validate migration boundaries while current renderer/shell ownership remains authoritative for production behavior | Shipped in v1.8 Phase 44 |
@@ -285,4 +286,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-23 after completing Phase 60*
+*Last updated: 2026-05-23 after completing Phase 61*

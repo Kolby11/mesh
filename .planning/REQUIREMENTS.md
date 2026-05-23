@@ -14,10 +14,10 @@
 
 ### Resolution And Overrides
 
-- [ ] **KRES-01**: Effective focused-surface bindings resolve from user override, exact active locale, parent locale, generic manifest trigger, then no binding.
-- [ ] **KRES-02**: User overrides are keyed by surface id and stable action id, and cannot create canonical declarations.
-- [ ] **KRES-03**: Localized access-key defaults remain scoped to `access_key` actions while shortcut actions keep generic defaults unless a user override exists.
-- [ ] **KRES-04**: Legacy `settings.keyboard.shortcuts` remains a compatibility fallback only when canonical manifest contributions do not declare the action.
+- [x] **KRES-01**: Effective focused-surface bindings resolve from user override, exact active locale, parent locale, generic manifest trigger, then no binding.
+- [x] **KRES-02**: User overrides are keyed by surface id and stable action id, and cannot create canonical declarations.
+- [x] **KRES-03**: Localized access-key defaults remain scoped to `access_key` actions while shortcut actions keep generic defaults unless a user override exists.
+- [x] **KRES-04**: Legacy `settings.keyboard.shortcuts` remains a compatibility fallback only when canonical manifest contributions do not declare the action.
 
 ### Diagnostics And Safety
 
@@ -73,10 +73,10 @@
 | KDISP-02 | Phase 60 | Complete |
 | KDISP-03 | Phase 60 | Complete |
 | KDISP-04 | Phase 60 | Complete |
-| KRES-01 | Phase 61 | Pending |
-| KRES-02 | Phase 61 | Pending |
-| KRES-03 | Phase 61 | Pending |
-| KRES-04 | Phase 61 | Pending |
+| KRES-01 | Phase 61 | Complete |
+| KRES-02 | Phase 61 | Complete |
+| KRES-03 | Phase 61 | Complete |
+| KRES-04 | Phase 61 | Complete |
 | KDIAG-01 | Phase 62 | Pending |
 | KDIAG-02 | Phase 62 | Pending |
 | KDIAG-03 | Phase 62 | Pending |
