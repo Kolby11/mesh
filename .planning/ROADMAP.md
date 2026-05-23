@@ -34,6 +34,12 @@ The target authoring model is "Lua objects over typed runtime lanes": durable da
 
 ## Phases
 
+- [x] Phase 65: Module Instance Registry
+- [x] Phase 66: State And Export Read Model
+- [x] Phase 67: Method Call Result Lane
+- [x] Phase 68: Typed Event Subscription Lane
+- [x] Phase 69: Shipped Module Object Proof
+
 ### Phase 65: Module Instance Registry
 
 **Goal:** Register backend services and frontend modules as stable runtime object instances with inspectable metadata.
