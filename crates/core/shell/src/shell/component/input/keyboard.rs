@@ -336,27 +336,29 @@ fn resolve_surface_shortcut_declaration(
         );
     }
 
-    for locale in keybind_locale_candidates(active_locale) {
-        let Some((key, trigger_kind, modifiers)) = declaration
-            .localized_triggers
-            .get(&locale)
-            .and_then(|trigger| {
-                let key = trigger.key.as_ref()?;
-                if key.trim().is_empty() {
-                    return None;
-                }
-                Some((key.clone(), trigger.kind, trigger.modifiers.clone()))
-            })
-        else {
-            continue;
-        };
-        return resolved_surface_shortcut(
-            declaration,
-            key,
-            modifiers,
-            trigger_kind,
-            KeybindResolutionSource::LocaleDefault { locale },
-        );
+    if declaration.generic_trigger.kind == mesh_core_module::KeybindTriggerKind::AccessKey {
+        for locale in keybind_locale_candidates(active_locale) {
+            let Some((key, trigger_kind, modifiers)) = declaration
+                .localized_triggers
+                .get(&locale)
+                .and_then(|trigger| {
+                    let key = trigger.key.as_ref()?;
+                    if key.trim().is_empty() {
+                        return None;
+                    }
+                    Some((key.clone(), trigger.kind, trigger.modifiers.clone()))
+                })
+            else {
+                continue;
+            };
+            return resolved_surface_shortcut(
+                declaration,
+                key,
+                modifiers,
+                trigger_kind,
+                KeybindResolutionSource::LocaleDefault { locale },
+            );
+        }
     }
 
     let kind = declaration.generic_trigger.kind;

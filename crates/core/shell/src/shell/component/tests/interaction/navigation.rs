@@ -925,7 +925,38 @@ end
 }
 
 #[test]
-fn keybind_locale_shortcut_uses_localized_trigger() {
+fn keybind_override_cannot_create_missing_manifest_declaration() {
+    let component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+    );
+    let keyboard_settings = mesh_core_config::KeyboardSettings {
+        surface_shortcuts: HashMap::from([(
+            "@test/reactive-surface".into(),
+            HashMap::from([(
+                "missing".into(),
+                mesh_core_config::SurfaceShortcutOverride {
+                    key: Some("x".into()),
+                },
+            )]),
+        )]),
+        ..mesh_core_config::KeyboardSettings::default()
+    };
+
+    let resolved = component.resolved_surface_shortcuts(&keyboard_settings);
+
+    assert!(
+        resolved
+            .iter()
+            .all(|shortcut| shortcut.keybind_id != "missing"),
+        "unknown override action ids must not create resolved shortcuts"
+    );
+}
+
+#[test]
+fn keybind_locale_shortcut_keeps_generic_trigger_without_user_override() {
     let mut component = test_frontend_component(
         r#"
 <template><box /></template>
@@ -962,17 +993,12 @@ end
         component.resolved_surface_shortcuts(&mesh_core_config::KeyboardSettings::default());
 
     assert_eq!(resolved.len(), 1);
-    assert_eq!(resolved[0].key, "p");
+    assert_eq!(resolved[0].key, "a");
     assert_eq!(
         resolved[0].trigger_kind,
-        mesh_core_module::KeybindTriggerKind::AccessKey
+        mesh_core_module::KeybindTriggerKind::Shortcut
     );
-    assert_eq!(
-        resolved[0].source,
-        KeybindResolutionSource::LocaleDefault {
-            locale: "sk".into()
-        }
-    );
+    assert_eq!(resolved[0].source, KeybindResolutionSource::ModuleDefault);
 }
 
 #[test]
