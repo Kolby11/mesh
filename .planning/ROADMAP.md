@@ -22,7 +22,7 @@ The target authoring model is "Lua objects over typed runtime lanes": durable da
 | 66 | State And Export Read Model | Make backend `state` and frontend `exports` first-class replayable object fields. | MSTATE-01, MSTATE-02, MSTATE-03, MSTATE-04 | Complete 2026-05-23 |
 | 67 | Method Call Result Lane | Route object method calls through typed runtime calls with visible acknowledgements/results. | MMETH-01, MMETH-02, MMETH-03, MMETH-04 | Complete 2026-05-23 |
 | 68 | Typed Event Subscription Lane | Implement declared event emission, validation, subscription, and cleanup. | MEVT-01, MEVT-02, MEVT-03, MEVT-04 | Complete 2026-05-23 |
-| 69 | Shipped Module Object Proof | Prove the completed object model on bundled audio/navigation modules and document the author contract. | MPROOF-01, MPROOF-02, MPROOF-03, MPROOF-04 | Shipped modules use canonical object syntax for state, exports, methods, and events with tests and docs. |
+| 69 | Shipped Module Object Proof | Prove the completed object model on bundled audio/navigation modules and document the author contract. | MPROOF-01, MPROOF-02, MPROOF-03, MPROOF-04 | Complete 2026-05-23 |
 
 ## Execution Rules
 
@@ -95,7 +95,7 @@ The target authoring model is "Lua objects over typed runtime lanes": durable da
 
 **Requirements:** MPROOF-01, MPROOF-02, MPROOF-03, MPROOF-04
 
-**Status:** Planned
+**Status:** Complete
 
 **Success criteria:**
 1. Bundled audio modules use canonical object syntax for state reads, method calls, and at least one typed event proof.

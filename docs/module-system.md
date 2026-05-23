@@ -34,6 +34,11 @@ is an internal-only migration path rather than public author vocabulary.
 6. **Capabilities gate host power.** Shared libraries do not grant access by
    themselves. The module using a library must still request the capabilities
    needed by its calls.
+7. **Modules are object instances at runtime.** Frontend and backend-facing
+   APIs should use normal Luau object surfaces: `module.state`,
+   `module.exports`, `module:<method>(...)`, and `module.events.Name`.
+   Rust still owns routing, validation, replay, permissions, lifecycle, and
+   diagnostics underneath that syntax.
 
 ## Module Manifest Shape
 

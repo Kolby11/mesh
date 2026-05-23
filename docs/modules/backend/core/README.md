@@ -64,6 +64,28 @@ and `mesh.media`), read current service data from
 commands. Some older bundled interfaces still retain read helpers until they
 move to the same state-first pattern.
 
+Command handlers can return structured result tables. The shell records queued
+method calls and backend command results in `mesh.debug.method_calls`, so
+authors can inspect which frontend requested a method, which provider handled
+it, and whether the backend returned success or failure.
+
+## Interface events
+
+`[[events]]` entries in `interface.toml` now produce runtime event channels on
+frontend proxies:
+
+```lua
+local audio = require("mesh.audio")
+local unsubscribe = audio.events.VolumeChanged:subscribe(function(event)
+    print(event.level)
+end)
+```
+
+Use events for transient facts that should not become durable state. Current
+provider state still flows through `state` snapshots. Event payload transport
+and durable backend state are separate lanes, so providers should continue to
+publish current truth through `state` even when they also expose events.
+
 ## Runtime-defined extras
 
 The base contract is the guaranteed portable minimum. Some providers publish

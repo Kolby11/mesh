@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.12
 milestone_name: Module Object Contract
-status: planned
-stopped_at: Next step: Phase 69 Shipped Module Object Proof
-last_updated: "2026-05-23T14:00:00.000Z"
+status: completed
+stopped_at: v1.12 phases complete; lifecycle audit pending
+last_updated: "2026-05-23T14:30:00.000Z"
 last_activity: 2026-05-23
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 5
-  completed_plans: 4
-  percent: 80
+  completed_plans: 5
+  percent: 100
 ---
 
 # State: MESH v1.12
@@ -25,9 +25,9 @@ See: `.planning/PROJECT.md` (updated 2026-05-23)
 
 ## Current Position
 
-Phase: 69 Shipped Module Object Proof
+Phase: None
 Plan: None
-Status: Phase 68 complete; Phase 69 pending
+Status: Milestone phases complete
 Last activity: 2026-05-23
 
 ## Decisions
@@ -39,6 +39,7 @@ Last activity: 2026-05-23
 - [Phase 66]: Frontend scripts now get a Luau `module` object with shell-refreshed `module.state` and script-owned `module.exports`; frontend components cache latest service payloads so newly-created runtimes can be seeded before script execution.
 - [Phase 67]: Service proxy method dispatch and backend command results are now recorded in `mesh.debug.method_calls`, giving method acknowledgements and result/failure data a shell-visible lane beyond tracing.
 - [Phase 68]: Interface proxies and frontend module objects now expose Luau event channels with `events.Name:subscribe(fn)`, local `emit(payload)`, and unsubscribe cleanup.
+- [Phase 69]: Author docs now present modules as class-like Luau object instances over typed runtime lanes, with focused scripting proof for state, exports, and events.
 
 - Backend plugins use Luau for service logic; Rust core remains the wiring layer.
 - `require('@mesh/service')` is the frontend/backend interface.

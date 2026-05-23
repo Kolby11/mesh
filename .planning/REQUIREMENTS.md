@@ -34,10 +34,10 @@
 
 ### Shipped Proof And Docs
 
-- [ ] **MPROOF-01**: Bundled audio modules prove backend state reads, method calls, method result visibility, and at least one typed event path using canonical object syntax.
-- [ ] **MPROOF-02**: Bundled navigation or another frontend module proves frontend exports or events through the same object-instance model.
-- [ ] **MPROOF-03**: Regression tests cover state/export replay, method routing, result/failure visibility, event delivery, subscription cleanup, and capability denial.
-- [ ] **MPROOF-04**: Author docs teach modules as class-like Luau object instances backed by typed runtime lanes for state/exports, methods, and events.
+- [x] **MPROOF-01**: Bundled audio modules prove backend state reads, method calls, method result visibility, and at least one typed event path using canonical object syntax.
+- [x] **MPROOF-02**: Bundled navigation or another frontend module proves frontend exports or events through the same object-instance model.
+- [x] **MPROOF-03**: Regression tests cover state/export replay, method routing, result/failure visibility, event delivery, subscription cleanup, and capability denial.
+- [x] **MPROOF-04**: Author docs teach modules as class-like Luau object instances backed by typed runtime lanes for state/exports, methods, and events.
 
 ## Out of Scope
 
@@ -67,10 +67,10 @@
 | MEVT-02 | Phase 68 | Complete |
 | MEVT-03 | Phase 68 | Complete |
 | MEVT-04 | Phase 68 | Complete |
-| MPROOF-01 | Phase 69 | Planned |
-| MPROOF-02 | Phase 69 | Planned |
-| MPROOF-03 | Phase 69 | Planned |
-| MPROOF-04 | Phase 69 | Planned |
+| MPROOF-01 | Phase 69 | Complete |
+| MPROOF-02 | Phase 69 | Complete |
+| MPROOF-03 | Phase 69 | Complete |
+| MPROOF-04 | Phase 69 | Complete |
 
 **Coverage:**
 - v1 requirements: 19 total

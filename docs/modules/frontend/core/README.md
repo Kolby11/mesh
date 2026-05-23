@@ -13,11 +13,36 @@ runtime, forward raw service payloads into script state, and route emitted
 events back into shell requests or backend commands. Frontend-specific display
 logic still lives in the module.
 
+## Module object model
+
+Every frontend script has a `module` object. Treat it as the local module
+instance:
+
+```luau
+module.exports.visible = true
+module.exports.label = "Audio"
+
+function onRender()
+    local current_label = module.exports.label
+    local previous_count = module.state.render_count or 0
+    render_count = previous_count + 1
+end
+
+local unsubscribe = module.events.ItemActivated:subscribe(function(event)
+    last_item = event.item_id
+end)
+```
+
+`module.state` is a shell-refreshed snapshot of the script's reactive globals.
+`module.exports` is the public values table for the frontend module instance.
+`module.events.<Name>` is an event channel with `subscribe(fn)`, `emit(payload)`,
+and an unsubscribe function.
+
 ## Reading service state
 
 Service proxies are a **state view and command surface**. Read state fields
 directly from the proxy on rerender; call named command methods for backend
-mutations. Do not use callback-style subscriptions — there are none.
+mutations.
 
 ```luau
 -- Acquire the proxy with a version constraint.
@@ -38,8 +63,8 @@ function onRender()
         volumeLevel = "0%"
         return
     end
-    local pct = audio.percent or 0
-    local muted = audio.muted or false
+    local pct = audio.state.percent or 0
+    local muted = audio.state.muted or false
     volumeLevel = string.format("%d%%", pct)
     if muted or pct == 0 then
         volumeIcon = "audio-volume-muted"
@@ -53,9 +78,11 @@ function onRender()
 end
 ```
 
-The runtime tracks every top-level field read from the proxy (`audio.percent`,
-`audio.muted`, etc.) and rerenders the component only when those specific field
-values change in the next backend emission — not on every emission.
+The runtime tracks every state field read from the proxy (`audio.state.percent`,
+`audio.state.muted`, etc.) and rerenders the component only when those specific
+field values change in the next backend emission — not on every emission.
+Direct `audio.percent` reads remain a compatibility alias, but new modules
+should use `audio.state.<field>`.
 
 ## Issuing backend commands
 
@@ -81,15 +108,39 @@ function onToggleWiFi()
 end
 ```
 
+Command methods return an immediate dispatch acknowledgement. Backend command
+results are recorded in `mesh.debug.method_calls` so authors can inspect queued
+calls, target providers, success payloads, and failures.
+
 The command lifecycle is:
 1. Frontend calls a proxy command method (`audio.volume_up()`).
 2. Shell routes it as a `CoreRequest::ServiceCommand` to the backend.
-3. Backend handles it, emits updated state.
-4. Shell applies the updated payload; tracked fields are compared.
-5. Component is rerendered if any tracked field value changed.
+3. Shell records the queued call in debug state.
+4. Backend handles it, returns a command result, and usually emits updated state.
+5. Shell records the backend result in debug state.
+6. Shell applies the updated payload; tracked fields are compared.
+7. Component is rerendered if any tracked field value changed.
 
 Do **not** mutate proxy fields directly — proxy reads are always sourced from
 the backend-emitted payload and are immutable on the frontend side.
+
+## Interface events
+
+Interface contracts can declare events. The proxy exposes declared events under
+`proxy.events`:
+
+```luau
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
+if audio_ok then
+    local unsubscribe = audio.events.VolumeChanged:subscribe(function(event)
+        last_volume_event = event.level
+    end)
+end
+```
+
+Frontend modules use the same event channel shape on `module.events`. The
+current event channel API establishes the author-facing subscription surface;
+backend state remains the authoritative durable read model.
 
 ## Element events and reactive globals
 
