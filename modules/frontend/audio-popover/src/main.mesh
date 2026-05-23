@@ -196,7 +196,8 @@ end
 
 .audio-popover {
     width: 100%;
-    height: 100%;
+    max-width: 360px;
+    max-height: 260px;
     gap: token(spacing.md);
     padding: token(spacing.md);
     border-radius: token(radius.lg);

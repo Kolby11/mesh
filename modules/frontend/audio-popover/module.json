@@ -118,7 +118,12 @@
     }
   },
   "surface_layout": {
-    "size_policy": "fixed"
+    "size_policy": "content_measured",
+    "prefers_content_children_sizing": true,
+    "min_width": 280,
+    "max_width": 360,
+    "min_height": 176,
+    "max_height": 260
   },
   "accessibility": {
     "role": "dialog",

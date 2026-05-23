@@ -151,6 +151,44 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
 }
 
 #[test]
+fn shipped_audio_popover_content_measured_surface_contains_volume_actions() {
+    let theme = default_theme();
+    let mut audio = real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    audio
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+
+    let mut buffer = PixelBuffer::new(280, 164);
+    audio.paint(&theme, 280, 164, &mut buffer).unwrap();
+
+    let (measured_width, measured_height) = audio.requested_layout_size();
+    assert_eq!(measured_width, 280);
+    assert!(
+        measured_height > 164 && measured_height <= 260,
+        "audio popover should grow to fit its controls within max height, got {measured_height}"
+    );
+
+    let tree = audio.last_tree.as_ref().expect("rendered audio popover");
+    let actions = first_node_with_attr(tree, "class", "audio-actions").expect("audio action row");
+    assert_eq!(
+        actions.children.len(),
+        3,
+        "audio popover should render three volume actions"
+    );
+    for action in &actions.children {
+        assert_layout_contains(actions, action, "@mesh/audio-popover volume action");
+    }
+}
+
+#[test]
 fn phase44_navigation_audio_surface_emits_focused_proof_snapshot() {
     let theme = default_theme();
 
