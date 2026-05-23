@@ -382,6 +382,16 @@ mod tests {
     use super::*;
     use mesh_core_elements::WidgetNode;
 
+    fn retained_visual_node() -> WidgetNode {
+        let mut node = WidgetNode::new("box");
+        node.id = 1;
+        node.layout.x = 10.0;
+        node.layout.y = 20.0;
+        node.layout.width = 100.0;
+        node.layout.height = 40.0;
+        node
+    }
+
     #[test]
     fn render_object_tree_preserves_identity_and_reports_slot_diffs() {
         let mut root = WidgetNode::new("row");
@@ -419,6 +429,66 @@ mod tests {
         assert_eq!(dirty.removed, 0);
         assert_eq!(tree.generation(), 2);
         assert_eq!(tree.last_dirty(), dirty);
+    }
+
+    #[test]
+    fn render_object_tree_marks_animated_transform_without_geometry_dirty() {
+        let mut root = retained_visual_node();
+        let mut tree = RenderObjectTree::default();
+        tree.update(&root);
+
+        root.computed_style.transform.translate_x = 24.0;
+        let dirty = tree.update(&root);
+
+        assert_eq!(dirty.transform, 1);
+        assert_eq!(dirty.geometry, 0);
+        assert_eq!(dirty.opacity, 0);
+        assert_eq!(dirty.material, 0);
+        assert_eq!(tree.dirty_node_ids(), &HashSet::from([1]));
+    }
+
+    #[test]
+    fn render_object_tree_marks_animated_opacity_without_geometry_dirty() {
+        let mut root = retained_visual_node();
+        let mut tree = RenderObjectTree::default();
+        tree.update(&root);
+
+        root.computed_style.opacity = 0.42;
+        let dirty = tree.update(&root);
+
+        assert_eq!(dirty.opacity, 1);
+        assert_eq!(dirty.geometry, 0);
+        assert_eq!(dirty.transform, 0);
+        assert_eq!(dirty.material, 0);
+        assert_eq!(tree.dirty_node_ids(), &HashSet::from([1]));
+    }
+
+    #[test]
+    fn render_object_tree_marks_animated_material_without_geometry_dirty() {
+        let mut root = retained_visual_node();
+        let mut tree = RenderObjectTree::default();
+        tree.update(&root);
+
+        root.computed_style.box_shadow = mesh_core_elements::BoxShadow {
+            offset_x: 4.0,
+            offset_y: 6.0,
+            blur_radius: 12.0,
+            spread_radius: 2.0,
+            color: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 128,
+            },
+            inset: false,
+        };
+        let dirty = tree.update(&root);
+
+        assert_eq!(dirty.material, 1);
+        assert_eq!(dirty.geometry, 0);
+        assert_eq!(dirty.transform, 0);
+        assert_eq!(dirty.opacity, 0);
+        assert_eq!(tree.dirty_node_ids(), &HashSet::from([1]));
     }
 
     #[test]

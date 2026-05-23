@@ -40,8 +40,8 @@ created: 2026-05-23
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
 | 56-01-01 | 01 | 1 | ANIM-01, ANIM-02 | T-56-01 | Animation bucket classification remains explicit and diagnostic-friendly | unit | `nix develop -c cargo test -p mesh-core-shell animation_property_bucket -- --nocapture` | ✅ | ✅ green |
 | 56-01-02 | 01 | 1 | ANIM-01 | T-56-02 | Existing token/keyframe parsing remains compatible | unit | `nix develop -c cargo test -p mesh-core-elements animation -- --nocapture` | ✅ | ✅ green |
-| 56-02-01 | 02 | 2 | ANIM-02 | T-56-03 | Paint-only transitions avoid full layout | unit | `nix develop -c cargo test -p mesh-core-shell animation_transition_dirty -- --nocapture` | ✅ | ⬜ pending |
-| 56-02-02 | 02 | 2 | ANIM-02 | T-56-03 | Layout-affecting transitions still relayout | unit | `nix develop -c cargo test -p mesh-core-shell animation_transition_dirty -- --nocapture` | ✅ | ⬜ pending |
+| 56-02-01 | 02 | 2 | ANIM-02 | T-56-03 | Paint-only transitions avoid full layout | unit | `nix develop -c cargo test -p mesh-core-shell animation_transition_dirty -- --nocapture` | ✅ | ✅ green |
+| 56-02-02 | 02 | 2 | ANIM-02 | T-56-03 | Layout-affecting transitions still relayout | unit | `nix develop -c cargo test -p mesh-core-shell animation_transition_dirty -- --nocapture` | ✅ | ✅ green |
 | 56-03-01 | 03 | 3 | ANIM-01, ANIM-02 | T-56-04 | Paint-only keyframes repaint without layout only when stops are classified paint-only | unit | `nix develop -c cargo test -p mesh-core-shell keyframe_animation -- --nocapture` | ✅ | ⬜ pending |
 | 56-03-02 | 03 | 3 | ANIM-01 | T-56-02 | Unsupported/missing animation diagnostics stay visible | unit | `nix develop -c cargo test -p mesh-core-shell animation_token -- --nocapture` | ✅ | ⬜ pending |
 | 56-04-01 | 04 | 4 | ANIM-03 | T-56-05 | Animated bounds include current effect/transform overflow | unit | `nix develop -c cargo test -p mesh-core-shell animation_damage -- --nocapture` | ✅ | ⬜ pending |
