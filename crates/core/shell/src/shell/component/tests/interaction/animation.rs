@@ -109,6 +109,90 @@ fn animation_transition_dirty_uses_relayout_for_geometry_changes() {
 }
 
 #[test]
+fn keyframe_animation_paint_only_rule_uses_visual_repaint() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="panel" /></template>
+<style>
+.panel { animation: pulse 1000ms linear infinite; }
+@keyframes pulse {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut tree = component.build_tree(&theme, 120, 40);
+    component.dirty = false;
+    component.style_only_dirty = false;
+    component.dirty_types = ComponentDirtyFlags::empty();
+    component.apply_style_animations(&mut tree);
+
+    let (requires_tree_rebuild, can_use_retained_path, flags, _) = component.take_dirty_for_paint();
+    assert!(!requires_tree_rebuild);
+    assert!(can_use_retained_path);
+    assert!(flags.contains(ComponentDirtyFlags::STYLE));
+    assert!(flags.contains(ComponentDirtyFlags::PAINT));
+    assert!(!flags.contains(ComponentDirtyFlags::LAYOUT));
+}
+
+#[test]
+fn keyframe_animation_layout_rule_uses_relayout() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="panel" /></template>
+<style>
+.panel { animation: grow 1000ms linear infinite; }
+@keyframes grow {
+  0% { width: 40px; }
+  100% { width: 80px; }
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut tree = component.build_tree(&theme, 120, 40);
+    component.dirty = false;
+    component.style_only_dirty = false;
+    component.dirty_types = ComponentDirtyFlags::empty();
+    component.apply_style_animations(&mut tree);
+
+    let (requires_tree_rebuild, can_use_retained_path, flags, _) = component.take_dirty_for_paint();
+    assert!(!requires_tree_rebuild);
+    assert!(can_use_retained_path);
+    assert!(flags.contains(ComponentDirtyFlags::STYLE));
+    assert!(flags.contains(ComponentDirtyFlags::LAYOUT));
+    assert!(flags.contains(ComponentDirtyFlags::PAINT));
+}
+
+#[test]
+fn keyframe_animation_unknown_rule_stays_conservative() {
+    let node = mesh_core_elements::WidgetNode::new("box");
+    let style = mesh_core_animation::transition::AnimatableStyle::from_node(&node);
+    let rule = mesh_core_animation::keyframes::KeyframeRule {
+        name: "unknown".into(),
+        stops: vec![
+            mesh_core_animation::keyframes::KeyframeStop {
+                offset: 0.0,
+                style,
+                easing: None,
+            },
+            mesh_core_animation::keyframes::KeyframeStop {
+                offset: 1.0,
+                style,
+                easing: None,
+            },
+        ],
+    };
+
+    assert_eq!(
+        crate::shell::component::animation::keyframe_rule_animation_bucket(&rule),
+        mesh_core_elements::style::AnimationPropertyBucket::None
+    );
+}
+
+#[test]
 fn handler_without_state_change_does_not_force_rebuild() {
     let mut component = test_frontend_component(
         r#"
@@ -443,6 +527,8 @@ fn keyframe_animation_missing_name_records_diagnostic() {
 .panel {
   animation-name: pulse-missing;
   animation-duration: 120ms;
+  width: 10px;
+  height: 10px;
 }
 </style>
 "#,
@@ -472,6 +558,8 @@ fn animation_token_runtime_diagnostic_reaches_component() {
 .panel {
   animation-name: pulse;
   animation-duration: token(animation.duration.fastest);
+  width: 10px;
+  height: 10px;
 }
 
 @keyframes pulse {

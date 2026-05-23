@@ -337,6 +337,46 @@ fn merge_animation_bucket(
     }
 }
 
+pub(super) fn keyframe_rule_animation_bucket(rule: &RenderKeyframeRule) -> AnimationPropertyBucket {
+    let mut bucket = AnimationPropertyBucket::None;
+    for pair in rule.stops.windows(2) {
+        let previous = pair[0].style;
+        let next = pair[1].style;
+        let changed = mesh_core_elements::TransitionProperties {
+            border_radius: previous.border_radius != next.border_radius,
+            border_width: previous.border_width != next.border_width,
+            opacity: previous.opacity != next.opacity,
+            background_color: previous.background_color != next.background_color,
+            border_color: previous.border_color != next.border_color,
+            color: previous.color != next.color,
+            width: previous.width != next.width,
+            height: previous.height != next.height,
+            min_width: previous.min_width != next.min_width,
+            max_width: previous.max_width != next.max_width,
+            min_height: previous.min_height != next.min_height,
+            max_height: previous.max_height != next.max_height,
+            padding: previous.padding != next.padding,
+            margin: previous.margin != next.margin,
+            transform: previous.transform != next.transform,
+            box_shadow: previous.box_shadow != next.box_shadow,
+            filter: previous.filter != next.filter,
+            backdrop_filter: previous.backdrop_filter != next.backdrop_filter,
+            font_size: previous.font_size != next.font_size,
+            letter_spacing: previous.letter_spacing != next.letter_spacing,
+            line_height: previous.line_height != next.line_height,
+            gap: previous.gap != next.gap,
+            inset_top: previous.inset_top != next.inset_top,
+            inset_right: previous.inset_right != next.inset_right,
+            inset_bottom: previous.inset_bottom != next.inset_bottom,
+            inset_left: previous.inset_left != next.inset_left,
+            ..mesh_core_elements::TransitionProperties::none()
+        }
+        .animation_bucket();
+        bucket = merge_animation_bucket(bucket, changed);
+    }
+    bucket
+}
+
 impl FrontendSurfaceComponent {
     #[cfg(test)]
     pub(super) fn apply_style_animations(&mut self, tree: &mut WidgetNode) {
@@ -362,6 +402,7 @@ impl FrontendSurfaceComponent {
         let mut has_active_animation = false;
         let mut active_animation_bucket = AnimationPropertyBucket::None;
         let mut has_active_keyframe_animation = false;
+        let mut active_keyframe_bucket = AnimationPropertyBucket::None;
         let theme = self.active_theme.borrow().clone();
         let resolver = StyleResolver::new(&theme);
 
@@ -375,6 +416,7 @@ impl FrontendSurfaceComponent {
             &mut has_active_animation,
             &mut active_animation_bucket,
             &mut has_active_keyframe_animation,
+            &mut active_keyframe_bucket,
         );
 
         self.style_animations
@@ -389,8 +431,13 @@ impl FrontendSurfaceComponent {
             // Animations only mutate style/layout, never script state — keep
             // the cheap restyle-only path engaged so we don't drag the Luau
             // tree-build into every animation tick.
+            let keyframes_need_layout = has_active_keyframe_animation
+                && !matches!(
+                    active_keyframe_bucket,
+                    AnimationPropertyBucket::PaintOnly | AnimationPropertyBucket::LayerEffect
+                );
             let flags = if active_animation_bucket == AnimationPropertyBucket::LayoutAffecting
-                || has_active_keyframe_animation
+                || keyframes_need_layout
             {
                 ComponentDirtyFlags::STYLE_RELAYOUT
             } else {
@@ -411,6 +458,7 @@ impl FrontendSurfaceComponent {
         has_active_animation: &mut bool,
         active_animation_bucket: &mut AnimationPropertyBucket,
         has_active_keyframe_animation: &mut bool,
+        active_keyframe_bucket: &mut AnimationPropertyBucket,
     ) {
         if let Some(key) = node.attributes.get("_mesh_key").cloned() {
             live_keys.insert(key.clone());
@@ -432,6 +480,7 @@ impl FrontendSurfaceComponent {
                 now,
                 live_keyframe_keys,
                 has_active_keyframe_animation,
+                active_keyframe_bucket,
             );
         }
 
@@ -446,6 +495,7 @@ impl FrontendSurfaceComponent {
                 has_active_animation,
                 active_animation_bucket,
                 has_active_keyframe_animation,
+                active_keyframe_bucket,
             );
         }
     }
@@ -561,6 +611,7 @@ impl FrontendSurfaceComponent {
         now: Instant,
         live_keyframe_keys: &mut HashSet<String>,
         has_active_keyframe_animation: &mut bool,
+        active_keyframe_bucket: &mut AnimationPropertyBucket,
     ) {
         let Some(animation_name) = node.computed_style.animation.name.clone() else {
             return;
@@ -578,6 +629,7 @@ impl FrontendSurfaceComponent {
 
         let render_rule =
             self.build_render_keyframe_rule(&animation_key, &parsed_rule, node, resolver);
+        let keyframe_bucket = keyframe_rule_animation_bucket(&render_rule);
         self.keyframe_rules
             .insert(animation_key.clone(), render_rule.clone());
 
@@ -619,6 +671,8 @@ impl FrontendSurfaceComponent {
 
         if active.play_state == AnimationPlayState::Running && !active.finished(now) {
             *has_active_keyframe_animation = true;
+            *active_keyframe_bucket =
+                merge_animation_bucket(*active_keyframe_bucket, keyframe_bucket);
         }
     }
 
