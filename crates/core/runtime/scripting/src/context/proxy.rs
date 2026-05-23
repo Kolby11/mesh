@@ -1,7 +1,7 @@
 use super::PublishedEvent;
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_service::{InterfaceContract, InterfaceResolution};
-use mlua::{Lua, LuaSerdeExt, Table, Value as LuaValue};
+use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -54,12 +54,26 @@ pub(super) fn create_service_proxy(
         Arc::clone(&tracked_service_fields),
     )?;
     proxy.set("state", state_proxy)?;
+    let events_proxy = create_events_proxy(
+        lua,
+        contract
+            .as_ref()
+            .map(|contract| {
+                contract
+                    .events
+                    .iter()
+                    .map(|event| event.name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+    )?;
+    proxy.set("events", events_proxy)?;
 
     meta.set(
         "__index",
         lua.create_function(move |lua, (table, key): (Table, String)| {
-            if key == "state" {
-                return table.get::<LuaValue>("state");
+            if key == "state" || key == "events" {
+                return table.get::<LuaValue>(key);
             }
             // Case A: known contract method — dispatch as a service command.
             if let Some(method) = methods.iter().find(|m| m.name == key) {
@@ -115,6 +129,40 @@ pub(super) fn create_service_proxy(
     )?;
     proxy.set_metatable(Some(meta))?;
     Ok(proxy)
+}
+
+pub(super) fn create_events_proxy(lua: &Lua, event_names: Vec<String>) -> mlua::Result<Table> {
+    let events = lua.create_table()?;
+    for name in event_names {
+        events.set(name, create_event_channel(lua)?)?;
+    }
+    Ok(events)
+}
+
+pub(super) fn create_event_channel(lua: &Lua) -> mlua::Result<Table> {
+    let channel = lua.create_table()?;
+    let subscribers = lua.create_table()?;
+    channel.set("__subscribers", subscribers.clone())?;
+    channel.set(
+        "subscribe",
+        lua.create_function(move |lua, (table, callback): (Table, Function)| {
+            let subscribers: Table = table.get("__subscribers")?;
+            let id = subscribers.raw_len() + 1;
+            subscribers.raw_set(id, callback)?;
+            Ok(lua.create_function(move |_lua, ()| subscribers.raw_set(id, LuaValue::Nil))?)
+        })?,
+    )?;
+    channel.set(
+        "emit",
+        lua.create_function(move |_lua, (table, payload): (Table, LuaValue)| {
+            let subscribers: Table = table.get("__subscribers")?;
+            for callback in subscribers.sequence_values::<Function>().flatten() {
+                callback.call::<()>(payload.clone())?;
+            }
+            Ok(())
+        })?,
+    )?;
+    Ok(channel)
 }
 
 fn create_service_state_proxy(

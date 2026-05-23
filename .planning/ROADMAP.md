@@ -21,7 +21,7 @@ The target authoring model is "Lua objects over typed runtime lanes": durable da
 | 65 | Module Instance Registry | Register backend and frontend modules as stable runtime object instances. | MOBJ-01, MOBJ-02, MOBJ-03 | Complete 2026-05-23 |
 | 66 | State And Export Read Model | Make backend `state` and frontend `exports` first-class replayable object fields. | MSTATE-01, MSTATE-02, MSTATE-03, MSTATE-04 | Complete 2026-05-23 |
 | 67 | Method Call Result Lane | Route object method calls through typed runtime calls with visible acknowledgements/results. | MMETH-01, MMETH-02, MMETH-03, MMETH-04 | Complete 2026-05-23 |
-| 68 | Typed Event Subscription Lane | Implement declared event emission, validation, subscription, and cleanup. | MEVT-01, MEVT-02, MEVT-03, MEVT-04 | `module.events.Name:subscribe(fn)` receives validated transient events and cleans up safely on runtime/module teardown. |
+| 68 | Typed Event Subscription Lane | Implement declared event emission, validation, subscription, and cleanup. | MEVT-01, MEVT-02, MEVT-03, MEVT-04 | Complete 2026-05-23 |
 | 69 | Shipped Module Object Proof | Prove the completed object model on bundled audio/navigation modules and document the author contract. | MPROOF-01, MPROOF-02, MPROOF-03, MPROOF-04 | Shipped modules use canonical object syntax for state, exports, methods, and events with tests and docs. |
 
 ## Execution Rules
@@ -81,7 +81,7 @@ The target authoring model is "Lua objects over typed runtime lanes": durable da
 
 **Requirements:** MEVT-01, MEVT-02, MEVT-03, MEVT-04
 
-**Status:** Planned
+**Status:** Complete
 
 **Success criteria:**
 1. Interface and module event declarations are normalized into runtime event metadata.

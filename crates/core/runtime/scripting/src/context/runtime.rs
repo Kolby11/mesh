@@ -2,7 +2,7 @@ use super::lookup::{
     interface_error_message, lookup_failure_reason, lua_err, lua_value_to_string, map_lua_error,
     record_lookup_diagnostic, record_lookup_diagnostic_lua,
 };
-use super::proxy::create_interface_proxy;
+use super::proxy::{create_event_channel, create_interface_proxy};
 use super::{PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport, ScriptState};
 use crate::host_api::{HostApiManifest, InterfaceProxy};
 use mesh_core_capability::CapabilitySet;
@@ -208,9 +208,29 @@ impl ScriptContext {
         let module_object = self.lua.create_table().map_err(lua_err)?;
         let module_state = self.lua.create_table().map_err(lua_err)?;
         let module_exports = self.lua.create_table().map_err(lua_err)?;
+        let module_events = self.lua.create_table().map_err(lua_err)?;
+        let module_events_meta = self.lua.create_table().map_err(lua_err)?;
+        module_events_meta
+            .set(
+                "__index",
+                self.lua
+                    .create_function(|lua, (table, key): (Table, String)| {
+                        let channel = create_event_channel(lua)?;
+                        table.set(key.as_str(), channel.clone())?;
+                        Ok(channel)
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
+        module_events
+            .set_metatable(Some(module_events_meta))
+            .map_err(lua_err)?;
         module_object.set("state", module_state).map_err(lua_err)?;
         module_object
             .set("exports", module_exports)
+            .map_err(lua_err)?;
+        module_object
+            .set("events", module_events)
             .map_err(lua_err)?;
         globals.set("module", module_object).map_err(lua_err)?;
 

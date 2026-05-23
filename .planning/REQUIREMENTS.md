@@ -27,10 +27,10 @@
 
 ### Events
 
-- [ ] **MEVT-01**: Interface and module event declarations are normalized into runtime metadata rather than remaining documentation-only.
-- [ ] **MEVT-02**: Backend and frontend module instances can emit typed events that are validated against their declarations.
-- [ ] **MEVT-03**: Consumers can subscribe with constrained object syntax such as `module.events.Name:subscribe(fn)`.
-- [ ] **MEVT-04**: Event subscriptions are capability-checked and cleaned up deterministically on runtime, surface, or module teardown.
+- [x] **MEVT-01**: Interface and module event declarations are normalized into runtime metadata rather than remaining documentation-only.
+- [x] **MEVT-02**: Backend and frontend module instances can emit typed events that are validated against their declarations.
+- [x] **MEVT-03**: Consumers can subscribe with constrained object syntax such as `module.events.Name:subscribe(fn)`.
+- [x] **MEVT-04**: Event subscriptions are capability-checked and cleaned up deterministically on runtime, surface, or module teardown.
 
 ### Shipped Proof And Docs
 
@@ -63,10 +63,10 @@
 | MMETH-02 | Phase 67 | Complete |
 | MMETH-03 | Phase 67 | Complete |
 | MMETH-04 | Phase 67 | Complete |
-| MEVT-01 | Phase 68 | Planned |
-| MEVT-02 | Phase 68 | Planned |
-| MEVT-03 | Phase 68 | Planned |
-| MEVT-04 | Phase 68 | Planned |
+| MEVT-01 | Phase 68 | Complete |
+| MEVT-02 | Phase 68 | Complete |
+| MEVT-03 | Phase 68 | Complete |
+| MEVT-04 | Phase 68 | Complete |
 | MPROOF-01 | Phase 69 | Planned |
 | MPROOF-02 | Phase 69 | Planned |
 | MPROOF-03 | Phase 69 | Planned |

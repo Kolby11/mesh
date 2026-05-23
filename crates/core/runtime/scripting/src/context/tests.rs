@@ -2,8 +2,8 @@ use super::*;
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_elements::VariableStore;
 use mesh_core_service::{
-    ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract, InterfaceMethod,
-    InterfaceProvider, parse_contract_version,
+    ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract, InterfaceEvent,
+    InterfaceMethod, InterfaceProvider, parse_contract_version,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -68,7 +68,10 @@ fn audio_catalog() -> InterfaceCatalog {
                 coalesce: false,
             },
         ],
-        events: Vec::new(),
+        events: vec![InterfaceEvent {
+            name: "VolumeChanged".into(),
+            payload: Some("{ device_id: string, level: float }".into()),
+        }],
         types: HashMap::new(),
         capabilities: ContractCapabilities::default(),
     });
@@ -195,6 +198,60 @@ seed_seen = module.state.seeded
     .unwrap();
 
     assert_eq!(ctx.state.get("seed_seen"), Some(serde_json::json!("ready")));
+}
+
+#[test]
+fn interface_event_proxy_subscribes_and_emits() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+seen_level = 0
+
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.events.VolumeChanged:subscribe(function(event)
+        seen_level = event.level
+    end)
+    audio.events.VolumeChanged:emit({ level = 88 })
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("seen_level"), Some(serde_json::json!(88)));
+}
+
+#[test]
+fn module_events_subscribe_emit_and_unsubscribe() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.load_script(
+        r#"
+activation_count = 0
+
+function init()
+    local unsubscribe = module.events.ItemActivated:subscribe(function(event)
+        activation_count = activation_count + event.count
+    end)
+    module.events.ItemActivated:emit({ count = 1 })
+    unsubscribe()
+    module.events.ItemActivated:emit({ count = 1 })
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(
+        ctx.state.get("activation_count"),
+        Some(serde_json::json!(1))
+    );
 }
 
 #[test]
