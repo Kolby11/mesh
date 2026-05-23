@@ -310,6 +310,8 @@ box {
         for property in [
             "opacity",
             "transform",
+            "background-color",
+            "border-color",
             "border-radius",
             "padding",
             "font-size",
@@ -324,7 +326,12 @@ box {
 
     #[test]
     fn keyframe_property_helper_rejects_unsupported_properties() {
-        for property in ["grid-template-columns", "display", "container-type"] {
+        for property in [
+            "grid-template-columns",
+            "display",
+            "position",
+            "container-type",
+        ] {
             assert!(
                 !is_transition_safe_keyframe_property(property),
                 "{property}"
