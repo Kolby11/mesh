@@ -1,5 +1,27 @@
 # MESH Milestones
 
+## v1.11 Surface Keybind Completion (Shipped: 2026-05-23)
+
+**Phases completed:** 5 phases, 5 plans, 12 tasks
+
+**Key accomplishments:**
+
+- Manifest-owned surface keybinds now dispatch through runtime subscribers while preserving focused text input and existing keyboard precedence.
+- Surface keybind resolution now has locked precedence, action-id override safety, and access-key-only localized defaults.
+- Surface keybinds now report invalid, conflicting, unresolved, and unsafe bindings through non-fatal component diagnostics.
+- Resolved focused-surface keybinds are now visible to accessibility and debug consumers, with docs covering the completed author contract.
+- The completed focused-surface keybind system is now proven on real navigation and audio surfaces.
+
+**Known deferred items at close:** 2 open artifacts acknowledged and deferred; see `.planning/STATE.md` Deferred Items.
+
+**Archive artifacts:**
+
+- `.planning/milestones/v1.11-ROADMAP.md`
+- `.planning/milestones/v1.11-REQUIREMENTS.md`
+- `.planning/milestones/v1.11-MILESTONE-AUDIT.md`
+
+---
+
 ## v1.10 Painter Engine (Shipped: 2026-05-23)
 
 **Phases completed:** 9 phases, 29 plans, 36 tasks

@@ -136,12 +136,58 @@
 
 ---
 
+## Milestone: v1.11 - Surface Keybind Completion
+
+**Shipped:** 2026-05-23
+**Phases:** 5 | **Plans:** 5 | **Sessions:** autonomous planning, implementation, audit, and closeout
+
+### What Was Built
+
+- Manifest-owned surface keybind actions now dispatch through focused-surface runtime subscribers.
+- Resolution precedence is locked across user overrides, exact locale, parent locale, generic defaults, and no-binding fallback.
+- Invalid, conflicting, unresolved, and unsafe keybinds produce non-fatal component diagnostics.
+- Accessibility annotations and structured `mesh.debug.keybinds` payloads expose resolved focused-surface keybind metadata.
+- Navigation and audio surfaces now prove the completed keybind system, including audio-popover mute access-key dispatch.
+
+### What Worked
+
+- Resuming the paused v1.6 work after canonical module records existed kept declarations, overrides, diagnostics, and dispatch aligned to one manifest-owned source.
+- Focused shell regression tests made precedence rules concrete: shell-global shortcuts, text input, selection copy, focus traversal, and default activation remained protected.
+- Proving the final behavior on shipped navigation/audio surfaces prevented the feature from staying fixture-only.
+
+### What Was Inefficient
+
+- Older open debug/todo artifacts still surfaced at milestone close, so deferred artifact cleanup remains a recurring closeout cost.
+- The keybind work needed several small focused tests because dispatch, resolution, diagnostics, accessibility, and real-surface proof all touched the same keyboard path.
+- Existing validation metadata still has partial Nyquist frontmatter even where validation artifacts exist.
+
+### Patterns Established
+
+- Surface keybinds are manifest-owned declarations; settings remain override-only and cannot create new action ids.
+- Author/runtime keybind mistakes should degrade component health and emit diagnostics rather than crashing or stealing input.
+- Debug metadata should mirror resolved runtime state while accessibility stays attached to subscribed controls.
+
+### Key Lessons
+
+1. Keyboard features need explicit ownership ordering before implementation; otherwise text input and shell-global shortcuts become accidental regressions.
+2. Localized access keys are useful, but shortcut localization should stay conservative unless a user override explicitly asks for it.
+3. Real bundled surfaces are the right proof target for module-author contracts because they exercise manifests, handlers, docs, accessibility, and debug payloads together.
+
+### Cost Observations
+
+- Model mix: not tracked.
+- Sessions: one autonomous closeout sequence plus earlier phase execution sessions.
+- Notable: the final proof phase had low code churn because earlier phases established clear declaration, resolution, and diagnostic boundaries.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
 
 | Milestone | Sessions | Phases | Key Change |
 |-----------|----------|--------|------------|
+| v1.11 | autonomous plus earlier implementation sessions | 5 | Surface keybind acceptance moved through dispatch, deterministic resolution, diagnostics, accessibility/debug metadata, and shipped-surface proof. |
 | v1.8 | multiple | 4 | Renderer architecture acceptance moved through decision matrix, comparable prototypes, focused production proof, and migration contract. |
 | v1.7 | multiple | 5 | Module extensibility acceptance moved through vocabulary, manifest, graph, diagnostics, and shipped proof in one milestone. |
 | v1.5 | multiple | 6 | Performance acceptance moved from counters-only proof to benchmark plus live-UAT proof. |
@@ -150,6 +196,7 @@
 
 | Milestone | Tests | Coverage | Zero-Dep Additions |
 |-----------|-------|----------|-------------------|
+| v1.11 | Focused shell keybind, diagnostics, debug payload, locale, navigation, and audio-popover regression suites | Requirements 19/19 | None identified |
 | v1.8 | Prototype cargo checks, focused renderer proof tests, shell navigation/audio regressions, workspace test, and docs grep verification | Requirements 13/13 | None identified |
 | v1.7 | Focused Rust manifest, graph, shell, diagnostic, and docs proof tests | Requirements 13/13 | None identified |
 | v1.5 | Focused Rust and `.mesh` regression tests plus live UAT | Requirements 17/17 | None identified |
@@ -160,3 +207,4 @@
 2. Retained renderer work needs stable debug payloads so optimizations remain observable after each phase.
 3. Canonical vocabulary and manifest contracts should be locked before expanding plugin-facing runtime behavior.
 4. Renderer migration work should keep author contracts, rollback gates, and ownership boundaries explicit before broad adoption.
+5. Focused keyboard behavior needs real-surface proof because precedence mistakes can be invisible in declaration-only tests.
