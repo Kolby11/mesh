@@ -320,6 +320,23 @@ pub(super) fn active_transition_bucket(transition: TransitionStyle) -> Animation
     transition.properties.animation_bucket()
 }
 
+fn merge_animation_bucket(
+    current: AnimationPropertyBucket,
+    next: AnimationPropertyBucket,
+) -> AnimationPropertyBucket {
+    match (current, next) {
+        (AnimationPropertyBucket::LayoutAffecting, _)
+        | (_, AnimationPropertyBucket::LayoutAffecting) => AnimationPropertyBucket::LayoutAffecting,
+        (AnimationPropertyBucket::LayerEffect, _) | (_, AnimationPropertyBucket::LayerEffect) => {
+            AnimationPropertyBucket::LayerEffect
+        }
+        (AnimationPropertyBucket::PaintOnly, _) | (_, AnimationPropertyBucket::PaintOnly) => {
+            AnimationPropertyBucket::PaintOnly
+        }
+        _ => AnimationPropertyBucket::None,
+    }
+}
+
 impl FrontendSurfaceComponent {
     #[cfg(test)]
     pub(super) fn apply_style_animations(&mut self, tree: &mut WidgetNode) {
@@ -343,7 +360,7 @@ impl FrontendSurfaceComponent {
         let mut live_keys = HashSet::new();
         let mut live_keyframe_keys = HashSet::new();
         let mut has_active_animation = false;
-        let mut has_layout_affecting_animation = false;
+        let mut active_animation_bucket = AnimationPropertyBucket::None;
         let mut has_active_keyframe_animation = false;
         let theme = self.active_theme.borrow().clone();
         let resolver = StyleResolver::new(&theme);
@@ -356,7 +373,7 @@ impl FrontendSurfaceComponent {
             &mut live_keys,
             &mut live_keyframe_keys,
             &mut has_active_animation,
-            &mut has_layout_affecting_animation,
+            &mut active_animation_bucket,
             &mut has_active_keyframe_animation,
         );
 
@@ -372,7 +389,9 @@ impl FrontendSurfaceComponent {
             // Animations only mutate style/layout, never script state — keep
             // the cheap restyle-only path engaged so we don't drag the Luau
             // tree-build into every animation tick.
-            let flags = if has_layout_affecting_animation || has_active_keyframe_animation {
+            let flags = if active_animation_bucket == AnimationPropertyBucket::LayoutAffecting
+                || has_active_keyframe_animation
+            {
                 ComponentDirtyFlags::STYLE_RELAYOUT
             } else {
                 ComponentDirtyFlags::VISUAL_REPAINT
@@ -390,16 +409,21 @@ impl FrontendSurfaceComponent {
         live_keys: &mut HashSet<String>,
         live_keyframe_keys: &mut HashSet<String>,
         has_active_animation: &mut bool,
-        has_layout_affecting_animation: &mut bool,
+        active_animation_bucket: &mut AnimationPropertyBucket,
         has_active_keyframe_animation: &mut bool,
     ) {
         if let Some(key) = node.attributes.get("_mesh_key").cloned() {
             live_keys.insert(key.clone());
             self.apply_node_style_animation(&key, node, previous_styles, now, has_active_animation);
-            if self.style_animations.get(&key).is_some_and(|animation| {
-                !animation.finished(now) && animation.transition.properties.affects_layout()
-            }) {
-                *has_layout_affecting_animation = true;
+            if let Some(animation) = self
+                .style_animations
+                .get(&key)
+                .filter(|animation| !animation.finished(now))
+            {
+                *active_animation_bucket = merge_animation_bucket(
+                    *active_animation_bucket,
+                    active_transition_bucket(animation.transition),
+                );
             }
             self.apply_node_keyframe_animation(
                 &key,
@@ -420,7 +444,7 @@ impl FrontendSurfaceComponent {
                 live_keys,
                 live_keyframe_keys,
                 has_active_animation,
-                has_layout_affecting_animation,
+                active_animation_bucket,
                 has_active_keyframe_animation,
             );
         }

@@ -1,5 +1,15 @@
 use super::*;
 
+fn transition_test_tree(property: mesh_core_elements::TransitionProperties) -> WidgetNode {
+    let mut node = event_node("box", "root/0", 0.0, 0.0, 100.0, 20.0, &[]);
+    node.computed_style.transition = mesh_core_elements::TransitionStyle {
+        duration_ms: 100,
+        properties: property,
+        ..mesh_core_elements::TransitionStyle::default()
+    };
+    root_with(vec![node])
+}
+
 #[test]
 fn navigation_volume_slider_handler_error_records_diagnostic_and_keeps_last_tree() {
     let mut component = test_frontend_component(
@@ -44,6 +54,58 @@ end
     );
     let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
     assert_eq!(diagnostics.error_count(), 1);
+}
+
+#[test]
+fn animation_transition_dirty_uses_visual_repaint_for_paint_only_changes() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let mut previous = transition_test_tree(mesh_core_elements::TransitionProperties {
+        opacity: true,
+        ..mesh_core_elements::TransitionProperties::none()
+    });
+    previous.children[0].computed_style.opacity = 0.1;
+
+    let mut next = previous.clone();
+    next.children[0].computed_style.opacity = 0.9;
+
+    component.last_tree = Some(previous);
+    component.dirty = false;
+    component.style_only_dirty = false;
+    component.dirty_types = ComponentDirtyFlags::empty();
+    component.apply_style_animations(&mut next);
+
+    let (requires_tree_rebuild, can_use_retained_path, flags, _) = component.take_dirty_for_paint();
+    assert!(!requires_tree_rebuild);
+    assert!(can_use_retained_path);
+    assert!(flags.contains(ComponentDirtyFlags::STYLE));
+    assert!(flags.contains(ComponentDirtyFlags::PAINT));
+    assert!(!flags.contains(ComponentDirtyFlags::LAYOUT));
+}
+
+#[test]
+fn animation_transition_dirty_uses_relayout_for_geometry_changes() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let mut previous = transition_test_tree(mesh_core_elements::TransitionProperties {
+        width: true,
+        ..mesh_core_elements::TransitionProperties::none()
+    });
+    previous.children[0].computed_style.width = mesh_core_elements::Dimension::Px(80.0);
+
+    let mut next = previous.clone();
+    next.children[0].computed_style.width = mesh_core_elements::Dimension::Px(140.0);
+
+    component.last_tree = Some(previous);
+    component.dirty = false;
+    component.style_only_dirty = false;
+    component.dirty_types = ComponentDirtyFlags::empty();
+    component.apply_style_animations(&mut next);
+
+    let (requires_tree_rebuild, can_use_retained_path, flags, _) = component.take_dirty_for_paint();
+    assert!(!requires_tree_rebuild);
+    assert!(can_use_retained_path);
+    assert!(flags.contains(ComponentDirtyFlags::STYLE));
+    assert!(flags.contains(ComponentDirtyFlags::LAYOUT));
+    assert!(flags.contains(ComponentDirtyFlags::PAINT));
 }
 
 #[test]
