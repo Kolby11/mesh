@@ -147,6 +147,13 @@ Example override:
 In that example, `@mesh/navigation-bar` still declares `mesh.keybinds.mute`,
 but the shell changes its effective key from the module default to `u`.
 
+Overrides cannot create new keybind actions. If the surface/action id does not
+exist, the shell reports a non-fatal keybind diagnostic and ignores that
+override. Unsafe overrides that would take shell-owned traversal, activation,
+cancel, or selection-copy behavior are also ignored with diagnostics. Resolved
+bindings remain focused-surface scoped and appear in accessibility shortcut
+metadata and the `mesh.debug.keybinds` payload.
+
 ## Keys, namespaces, and validation
 
 Every key has exactly one owner:

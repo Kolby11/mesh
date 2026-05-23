@@ -10,6 +10,7 @@ pub struct DebugSnapshot {
     pub interfaces: Vec<InterfaceEntry>,
     pub backend_runtimes: Vec<BackendRuntimeEntry>,
     pub health: Vec<HealthEntry>,
+    pub keybinds: Vec<DebugKeybindEntry>,
     pub active_surfaces: Vec<String>,
     pub benchmarks: DebugBenchmarkSnapshot,
     pub profiling: Option<ProfilingSnapshot>,
@@ -17,6 +18,18 @@ pub struct DebugSnapshot {
 
 pub const DEBUG_INTERFACE: &str = "mesh.debug";
 pub const DEBUG_SOURCE_MODULE_ID: &str = "@mesh/core-debug";
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DebugKeybindEntry {
+    pub surface_id: String,
+    pub module_id: String,
+    pub action_id: String,
+    pub key: String,
+    pub modifiers: Vec<String>,
+    pub trigger_kind: String,
+    pub source: String,
+    pub accessibility_shortcut: String,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DebugInspectorView {

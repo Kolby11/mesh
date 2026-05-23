@@ -80,6 +80,9 @@ The shipped controls rely on shell-owned keyboard defaults:
   advertises the `mesh.keybinds.mute` action on the volume control metadata,
   and can be remapped through the shell-level
   `keyboard.surface_shortcuts["@mesh/navigation-bar"]` override
+- The resolved binding is published to the control's accessibility
+  `keyboard_shortcut` metadata and to `mesh.debug.keybinds`; invalid or
+  conflicting keybind data appears as non-fatal component diagnostics.
 
 Use `:focus-visible` when styling the strong keyboard ring or highlight. Use `:focus` for broader logical-focus styling.
 

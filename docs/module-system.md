@@ -210,6 +210,19 @@ preserve the action id, default trigger, and localized triggers so later
 dispatch, conflict, and accessibility phases can inspect the complete
 declaration without re-reading manifests.
 
+Focused-surface keybinds are semantic actions, not global hotkeys. A rendered
+control subscribes by setting `keybind` to the declared action id and providing
+an `onkeybind` handler. The shell resolves the effective binding from user
+override, exact locale access key, parent locale access key, then generic
+trigger. Locale defaults apply to `access_key` declarations; shortcut
+declarations keep their generic shortcut unless a user override exists.
+
+Invalid declarations, duplicate effective bindings, unresolved overrides,
+missing runtime subscribers, and unsafe overrides are reported through
+non-fatal component diagnostics. Resolved bindings are also exposed as
+accessibility keyboard shortcut metadata on subscribed controls and as
+structured `mesh.debug.keybinds` entries for debug consumers.
+
 ## Interface Modules
 
 Interface modules are the stabilizing layer. A contract should define the

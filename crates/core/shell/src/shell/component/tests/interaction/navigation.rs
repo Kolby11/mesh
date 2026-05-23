@@ -1229,6 +1229,40 @@ fn keybind_diagnostic_reports_missing_runtime_subscriber() {
 }
 
 #[test]
+fn keybind_debug_metadata_matches_resolved_accessibility_shortcut() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: vec!["ctrl".into()],
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+
+    let keybinds = component.debug_surface_keybinds();
+
+    assert_eq!(keybinds.len(), 1);
+    assert_eq!(keybinds[0].surface_id, "@test/reactive-surface");
+    assert_eq!(keybinds[0].module_id, "@test/reactive-surface");
+    assert_eq!(keybinds[0].action_id, "mute");
+    assert_eq!(keybinds[0].key, "m");
+    assert_eq!(keybinds[0].modifiers, vec!["ctrl".to_string()]);
+    assert_eq!(keybinds[0].trigger_kind, "shortcut");
+    assert_eq!(keybinds[0].source, "module_default");
+    assert_eq!(keybinds[0].accessibility_shortcut, "Control+m");
+}
+
+#[test]
 fn keybind_locale_shortcut_keeps_generic_trigger_without_user_override() {
     let mut component = test_frontend_component(
         r#"

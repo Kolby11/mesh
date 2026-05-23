@@ -250,6 +250,9 @@ pub trait ShellComponent: Send {
     fn unregister_popover_trigger(&mut self, _popover_surface: &str) {}
     /// Override the surface's effective keyboard_mode at runtime.
     fn set_keyboard_mode_override(&mut self, _mode: Option<KeyboardMode>) {}
+    fn debug_keybinds(&self) -> Vec<mesh_core_debug::DebugKeybindEntry> {
+        Vec::new()
+    }
     fn set_profiling_enabled(&mut self, _enabled: bool) {}
     fn take_profiling_records(&mut self) -> Vec<ComponentProfilingRecord> {
         Vec::new()

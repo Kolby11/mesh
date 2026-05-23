@@ -309,6 +309,34 @@ impl FrontendSurfaceComponent {
         }
     }
 
+    pub(in crate::shell::component) fn debug_surface_keybinds(
+        &self,
+    ) -> Vec<mesh_core_debug::DebugKeybindEntry> {
+        let keyboard_settings = self.current_keyboard_settings();
+        self.resolved_surface_shortcuts(&keyboard_settings)
+            .into_iter()
+            .map(|shortcut| mesh_core_debug::DebugKeybindEntry {
+                surface_id: self.surface_id().to_string(),
+                module_id: self.compiled.manifest.package.id.clone(),
+                action_id: shortcut.keybind_id.clone(),
+                key: shortcut.key.clone(),
+                modifiers: shortcut.modifiers.clone(),
+                trigger_kind: match shortcut.trigger_kind {
+                    mesh_core_module::KeybindTriggerKind::Shortcut => "shortcut".to_string(),
+                    mesh_core_module::KeybindTriggerKind::AccessKey => "access_key".to_string(),
+                },
+                source: match shortcut.source.clone() {
+                    KeybindResolutionSource::UserOverride => "user_override".to_string(),
+                    KeybindResolutionSource::LocaleDefault { locale } => {
+                        format!("locale:{locale}")
+                    }
+                    KeybindResolutionSource::ModuleDefault => "module_default".to_string(),
+                },
+                accessibility_shortcut: format_shortcut_for_accessibility(&shortcut),
+            })
+            .collect()
+    }
+
     fn resolve_surface_shortcut_declaration(
         &self,
         declaration: SurfaceShortcutDeclaration,

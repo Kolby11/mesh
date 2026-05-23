@@ -765,6 +765,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.keyboard_mode_override = mode;
         self.invalidate_surface_config();
     }
+
+    fn debug_keybinds(&self) -> Vec<mesh_core_debug::DebugKeybindEntry> {
+        self.debug_surface_keybinds()
+    }
 }
 
 impl FrontendSurfaceComponent {

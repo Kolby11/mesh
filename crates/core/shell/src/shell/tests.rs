@@ -267,11 +267,22 @@ fn service_update(interface: &str, provider_id: &str, payload: serde_json::Value
 
 struct RecordingComponent {
     events: Arc<Mutex<Vec<ServiceEvent>>>,
+    keybinds: Vec<mesh_core_debug::DebugKeybindEntry>,
 }
 
 impl RecordingComponent {
     fn new(events: Arc<Mutex<Vec<ServiceEvent>>>) -> Self {
-        Self { events }
+        Self {
+            events,
+            keybinds: Vec::new(),
+        }
+    }
+
+    fn with_keybinds(
+        events: Arc<Mutex<Vec<ServiceEvent>>>,
+        keybinds: Vec<mesh_core_debug::DebugKeybindEntry>,
+    ) -> Self {
+        Self { events, keybinds }
     }
 }
 
@@ -333,6 +344,10 @@ impl super::types::ShellComponent for RecordingComponent {
 
     fn theme_changed(&mut self) -> Result<(), super::types::ComponentError> {
         Ok(())
+    }
+
+    fn debug_keybinds(&self) -> Vec<mesh_core_debug::DebugKeybindEntry> {
+        self.keybinds.clone()
     }
 }
 
@@ -1628,6 +1643,50 @@ fn debug_snapshot_publish_delivers_mesh_debug_service_event() {
     assert_eq!(payload["overlay_enabled"], serde_json::json!(true));
     assert_eq!(payload["layout_bounds_enabled"], serde_json::json!(false));
     assert!(payload["benchmarks"]["scenarios"].is_array());
+}
+
+#[test]
+fn debug_snapshot_payload_includes_resolved_keybind_metadata() {
+    let mut shell = Shell::new();
+    shell.debug.enabled = true;
+    let events = Arc::new(Mutex::new(Vec::new()));
+    shell.register_component(Box::new(RecordingComponent::with_keybinds(
+        events.clone(),
+        vec![mesh_core_debug::DebugKeybindEntry {
+            surface_id: "@mesh/navigation-bar".into(),
+            module_id: "@mesh/navigation-bar".into(),
+            action_id: "mute".into(),
+            key: "m".into(),
+            modifiers: vec!["ctrl".into()],
+            trigger_kind: "shortcut".into(),
+            source: "module_default".into(),
+            accessibility_shortcut: "Control+m".into(),
+        }],
+    )));
+
+    shell.publish_debug_snapshot().unwrap();
+
+    let events = events.lock().unwrap();
+    let ServiceEvent::Updated { payload, .. } = events
+        .last()
+        .expect("debug snapshot should be delivered as a service update");
+    assert_eq!(
+        payload["keybinds"][0],
+        serde_json::json!({
+            "surface_id": "@mesh/navigation-bar",
+            "module_id": "@mesh/navigation-bar",
+            "action_id": "mute",
+            "key": "m",
+            "modifiers": ["ctrl"],
+            "trigger_kind": "shortcut",
+            "source": "module_default",
+            "accessibility_shortcut": "Control+m",
+        })
+    );
+    assert!(
+        payload["health"].is_array(),
+        "debug payload should keep diagnostics health visible"
+    );
 }
 
 #[test]

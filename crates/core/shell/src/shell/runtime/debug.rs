@@ -57,6 +57,17 @@ impl Shell {
             })
             .collect();
 
+        let mut keybinds = self
+            .components
+            .iter()
+            .flat_map(|runtime| runtime.component.debug_keybinds())
+            .collect::<Vec<_>>();
+        keybinds.sort_by(|left, right| {
+            left.surface_id
+                .cmp(&right.surface_id)
+                .then_with(|| left.action_id.cmp(&right.action_id))
+        });
+
         let mut backend_runtimes: Vec<BackendRuntimeEntry> = self
             .backend_runtime_statuses
             .values()
@@ -106,6 +117,7 @@ impl Shell {
             interfaces,
             backend_runtimes,
             health,
+            keybinds,
             active_surfaces,
             benchmarks,
             profiling,
@@ -145,6 +157,8 @@ fn debug_service_payload(
         "modules": snapshot.modules.iter().map(module_entry_json).collect::<Vec<_>>(),
         "interfaces": snapshot.interfaces.iter().map(interface_entry_json).collect::<Vec<_>>(),
         "backend_runtimes": snapshot.backend_runtimes.iter().map(backend_runtime_entry_json).collect::<Vec<_>>(),
+        "health": snapshot.health.iter().map(health_entry_json).collect::<Vec<_>>(),
+        "keybinds": snapshot.keybinds.iter().map(keybind_entry_json).collect::<Vec<_>>(),
         "active_surfaces": snapshot.active_surfaces.clone(),
         "benchmarks": benchmark_snapshot_json(&snapshot.benchmarks),
         "profiling": snapshot.profiling.as_ref().map(profiling_snapshot_json),
@@ -679,6 +693,26 @@ fn backend_runtime_entry_json(entry: &BackendRuntimeEntry) -> serde_json::Value 
         "status": entry.status,
         "message": entry.message,
         "failure_count": entry.failure_count,
+    })
+}
+
+fn health_entry_json(entry: &HealthEntry) -> serde_json::Value {
+    serde_json::json!({
+        "module_id": entry.module_id,
+        "status": entry.status,
+    })
+}
+
+fn keybind_entry_json(entry: &mesh_core_debug::DebugKeybindEntry) -> serde_json::Value {
+    serde_json::json!({
+        "surface_id": entry.surface_id,
+        "module_id": entry.module_id,
+        "action_id": entry.action_id,
+        "key": entry.key,
+        "modifiers": entry.modifiers,
+        "trigger_kind": entry.trigger_kind,
+        "source": entry.source,
+        "accessibility_shortcut": entry.accessibility_shortcut,
     })
 }
 
