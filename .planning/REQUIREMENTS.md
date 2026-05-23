@@ -1,81 +1,85 @@
-# Requirements: MESH v1.12 Module Object Contract
+# Requirements: MESH v1.13 Manifest I18n Contract
 
-**Defined:** 2026-05-23
+**Defined:** 2026-05-24
 **Core Value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
 
 ## v1 Requirements
 
-### Module Instances
+### Manifest Text Schema
 
-- [x] **MOBJ-01**: Backend service providers are represented as stable runtime module object instances with module id, instance id, interface/version, lifecycle, capabilities, and active-provider metadata.
-- [x] **MOBJ-02**: Frontend modules are represented as stable runtime module object instances with module id, instance id, lifecycle, capabilities, exports, methods, and events.
-- [x] **MOBJ-03**: Debug or diagnostic state can inspect registered module instances without service-specific Rust branches.
+- [ ] **MI18N-01**: User-facing manifest fields accept a reusable `LocalizedText` value where raw strings are literal text and `{ "t": "...", "fallback": "..." }` declares localized catalog lookup.
+- [ ] **MI18N-02**: Localized text declarations require a non-empty translation key and fallback string.
+- [ ] **MI18N-03**: Manifest parsing accepts the localized text shape without breaking existing raw-string manifests.
+- [ ] **MI18N-04**: Manifest diagnostics warn when raw strings in localized-capable fields look like dotted translation keys.
 
-### State And Exports
+### Contribution Propagation
 
-- [x] **MSTATE-01**: Backend service `state` is the canonical durable read surface exposed as `module.state.<field>`.
-- [x] **MSTATE-02**: Frontend module public values are exposed as `module.exports.<field>` with the same replayable snapshot semantics as backend state.
-- [x] **MSTATE-03**: Latest state/export snapshots are replayed into newly created, shown, or reloaded runtimes so consumers do not depend on a future update to avoid nil fields.
-- [x] **MSTATE-04**: Existing compatibility aliases such as direct `audio.field` reads are either preserved behind the canonical model or diagnosed with an explicit migration path.
+- [ ] **MGRAPH-01**: Installed-graph keybind contribution records preserve localized labels, descriptions, and categories without flattening them to plain strings.
+- [ ] **MGRAPH-02**: Layout contribution labels preserve localized text metadata for later shell resolution.
+- [ ] **MGRAPH-03**: Settings schema descriptions that are shown to users can preserve localized text metadata where the manifest model supports them.
+- [ ] **MGRAPH-04**: Existing graph consumers that need literal strings receive resolved fallback text until locale-aware resolution is available.
 
-### Methods
+### Runtime Resolution
 
-- [x] **MMETH-01**: Object method syntax such as `module:<method>(...)` routes through the shell-owned method/call lane.
-- [x] **MMETH-02**: Method calls are capability-checked, contract-checked, and routed to the correct active backend or frontend module instance.
-- [x] **MMETH-03**: Method handlers can return structured success or failure data that is visible to callers or at least to debug state.
-- [x] **MMETH-04**: Existing generated service proxy command methods continue to work while converging on the object method lane.
-
-### Events
-
-- [x] **MEVT-01**: Interface and module event declarations are normalized into runtime metadata rather than remaining documentation-only.
-- [x] **MEVT-02**: Backend and frontend module instances can emit typed events that are validated against their declarations.
-- [x] **MEVT-03**: Consumers can subscribe with constrained object syntax such as `module.events.Name:subscribe(fn)`.
-- [x] **MEVT-04**: Event subscriptions are capability-checked and cleaned up deterministically on runtime, surface, or module teardown.
+- [ ] **MRES-01**: Shell runtime resolves `LocalizedText::Translation` against active locale, fallback locale, and required fallback text.
+- [ ] **MRES-02**: Resolved keybind debug metadata exposes user-facing text while retaining source key information for diagnostics.
+- [ ] **MRES-03**: Accessibility keyboard shortcut metadata receives resolved strings rather than raw translation keys.
+- [ ] **MRES-04**: Missing translation files or keys produce non-fatal diagnostics with module id, field path, key, and fallback.
 
 ### Shipped Proof And Docs
 
-- [x] **MPROOF-01**: Bundled audio modules prove backend state reads, method calls, method result visibility, and at least one typed event path using canonical object syntax.
-- [x] **MPROOF-02**: Bundled navigation or another frontend module proves frontend exports or events through the same object-instance model.
-- [x] **MPROOF-03**: Regression tests cover state/export replay, method routing, result/failure visibility, event delivery, subscription cleanup, and capability denial.
-- [x] **MPROOF-04**: Author docs teach modules as class-like Luau object instances backed by typed runtime lanes for state/exports, methods, and events.
+- [ ] **MPROOF-01**: Bundled navigation-bar keybind metadata uses explicit localized text objects instead of raw dotted keys.
+- [ ] **MPROOF-02**: Bundled layout/settings examples use either literal strings or explicit localized text objects consistently.
+- [ ] **MPROOF-03**: Regression tests cover parsing, graph preservation, runtime resolution, suspicious raw-key diagnostics, and fallback behavior.
+- [ ] **MPROOF-04**: Author docs explain how `mesh.i18n`, `mesh.contributes.i18n`, and field-local `{ "t": "...", "fallback": "..." }` declarations work together.
+
+## Future Requirements
+
+### Language Packs
+
+- **MLANG-01**: Third-party language-pack modules can provide catalogs for another module namespace.
+- **MLANG-02**: Cross-module localized text references can use an explicit namespace syntax such as `@mesh/common:key`.
+
+### Settings UI
+
+- **MSET-01**: A user-facing settings surface can inspect localized settings schema labels and descriptions.
+- **MSET-02**: A future keybind remapping UI can display localized action labels while preserving stable action ids.
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Arbitrary cross-module shared memory | The contract should stay typed and shell-routed for observability and permission checks. |
-| Unvalidated event payloads | Event declarations should become real runtime contracts. |
-| General-purpose async framework | Method result handling should be enough for module calls without committing to a broad coroutine/task API. |
-| Compositor-global shortcuts | Platform shortcut permissions are separate from the module object contract. |
+| Automatic translation | Authors should supply explicit catalog files and fallbacks. |
+| Automatic access-key generation | v1.11 intentionally kept localized access keys author-declared. |
+| General JSON expression parsing | The accepted shape is structured data, not `t("...")` strings embedded in JSON. |
+| Remote language-pack distribution | This milestone focuses on local manifest and runtime semantics. |
+| Full user-facing settings UI | v1.13 prepares metadata for UI consumers but does not build the settings surface. |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MOBJ-01 | Phase 65 | Complete |
-| MOBJ-02 | Phase 65 | Complete |
-| MOBJ-03 | Phase 65 | Complete |
-| MSTATE-01 | Phase 66 | Complete |
-| MSTATE-02 | Phase 66 | Complete |
-| MSTATE-03 | Phase 66 | Complete |
-| MSTATE-04 | Phase 66 | Complete |
-| MMETH-01 | Phase 67 | Complete |
-| MMETH-02 | Phase 67 | Complete |
-| MMETH-03 | Phase 67 | Complete |
-| MMETH-04 | Phase 67 | Complete |
-| MEVT-01 | Phase 68 | Complete |
-| MEVT-02 | Phase 68 | Complete |
-| MEVT-03 | Phase 68 | Complete |
-| MEVT-04 | Phase 68 | Complete |
-| MPROOF-01 | Phase 69 | Complete |
-| MPROOF-02 | Phase 69 | Complete |
-| MPROOF-03 | Phase 69 | Complete |
-| MPROOF-04 | Phase 69 | Complete |
+| MI18N-01 | Phase 70 | Pending |
+| MI18N-02 | Phase 70 | Pending |
+| MI18N-03 | Phase 70 | Pending |
+| MI18N-04 | Phase 70 | Pending |
+| MGRAPH-01 | Phase 71 | Pending |
+| MGRAPH-02 | Phase 71 | Pending |
+| MGRAPH-03 | Phase 71 | Pending |
+| MGRAPH-04 | Phase 71 | Pending |
+| MRES-01 | Phase 72 | Pending |
+| MRES-02 | Phase 72 | Pending |
+| MRES-03 | Phase 72 | Pending |
+| MRES-04 | Phase 72 | Pending |
+| MPROOF-01 | Phase 73 | Pending |
+| MPROOF-02 | Phase 73 | Pending |
+| MPROOF-03 | Phase 73 | Pending |
+| MPROOF-04 | Phase 73 | Pending |
 
 **Coverage:**
-- v1 requirements: 19 total
-- Mapped to phases: 19
+- v1 requirements: 16 total
+- Mapped to phases: 16
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-05-23*
+*Requirements defined: 2026-05-24*

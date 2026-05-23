@@ -10,11 +10,11 @@ MESH should let plugin authors build distinctive shell UI and service integratio
 
 ## Current State
 
-`v1.12 Module Object Contract` is planned as the next implementation milestone.
-The milestone will turn backend services and frontend modules into class-like
-Luau object instances over typed Rust-managed runtime lanes: replayable
-`module.state` and `module.exports` data, shell-routed object methods with
-visible results, and typed `module.events.Name:subscribe(...)` subscriptions.
+`v1.13 Manifest I18n Contract` is the next implementation milestone. The
+milestone turns the Spike 004 localized manifest text decision into shipped
+behavior: explicit `LocalizedText` parsing, installed-graph preservation,
+runtime resolution, diagnostics for suspicious raw i18n keys, migrated bundled
+manifests, and author docs.
 
 `v1.1` shipped on 2026-05-05.
 
@@ -142,19 +142,41 @@ The project now also has completed surface-scoped keybind behavior with:
 - Accessibility annotations and structured `mesh.debug.keybinds` payloads exposing resolved keybind metadata to assistive/debug consumers.
 - Real navigation and audio surface proof, including the audio popover mute access key and regression coverage for shell-global shortcuts, text input, selection copy, traversal, default activation, locale fallback, and override behavior.
 
-## Last Shipped Milestone: v1.11 Surface Keybind Completion
+`v1.12` shipped on 2026-05-23.
 
-**Goal:** Finish the paused surface-scoped keybind system so frontend modules can declare semantic actions that dispatch safely on focused shell surfaces, report conflicts and invalid overrides, expose accessibility metadata, and prove behavior on shipped navigation/audio surfaces.
+The project now also has a class-like module object contract with:
 
-The milestone resumed the v1.6 keybind work after v1.7 stabilized canonical `module.json` manifests and typed contribution records. v1.11 did not start compositor-global shortcut support or a full user-facing remapping UI; it made the existing surface-focused declaration and localized trigger model operational end to end.
+- Stable runtime module object entries visible through `mesh.debug.module_instances`.
+- Replayable frontend `module.state` and `module.exports` lanes.
+- Service proxy method dispatch and backend command results visible through `mesh.debug.method_calls`.
+- Interface and module event channels with `events.Name:subscribe(fn)`, local emits, and unsubscribe cleanup.
+- Backend `mesh.service.emit_event(...)` transport through shell payload validation into frontend `proxy.events.Name` subscribers.
+- Bundled audio/navigation proof for typed `VolumeChanged` backend-to-frontend event delivery.
+
+## Current Milestone: v1.13 Manifest I18n Contract
+
+**Goal:** Make user-facing `module.json` text fields explicit about literal text versus localized catalog lookup, then resolve that text through shell runtime paths with diagnostics and shipped manifest proof.
 
 **Target features:**
-- Dispatch manifest-owned keybind actions through the existing shell component handler path while preserving shell-global shortcut precedence, text-input behavior, focus traversal, selection copy, and default widget activation.
-- Resolve focused-surface keybinds from canonical `module.json` keybind contributions, localized access-key defaults, active locale, and user overrides with deterministic precedence.
-- Emit non-fatal diagnostics for malformed keybind actions, duplicate effective bindings, missing targets, unsupported trigger forms, and unsafe or unresolved overrides.
-- Keep user overrides keyed by surface id and stable action id, not localized labels or raw handler names.
-- Expose resolved shortcut/access-key metadata through accessibility annotations and debug/profiling payloads without making settings the canonical declaration source.
-- Prove the completed keybind runtime on shipped navigation and audio surfaces, including localized access keys, conflict handling, override behavior, and no regressions to existing keyboard interaction.
+- Add a reusable manifest `LocalizedText` contract for user-facing fields, with raw strings treated as literals and `{ "t": "...", "fallback": "..." }` treated as localized text.
+- Preserve localized text objects through installed-graph contribution records instead of flattening them to strings.
+- Resolve localized keybind, layout, and settings metadata against active locale, fallback locale, and required fallback text.
+- Emit non-fatal manifest diagnostics when raw strings look like translation keys or localized text lacks resolvable catalog metadata.
+- Migrate bundled navigation/audio manifest text to the explicit localized form and prove debug/accessibility metadata still receives resolved strings.
+- Update author docs so `mesh.i18n`, `mesh.contributes.i18n`, and field-local `t` references form one clear localization story.
+
+## Last Shipped Milestone: v1.12 Module Object Contract
+
+**Goal:** Implement backend services and frontend modules as class-like Luau object instances backed by typed Rust-managed runtime lanes for state/exports, methods/results, and events/subscriptions.
+
+The milestone completed the module object model identified by Spike 003 and closed the later backend-to-frontend event gap by adding `mesh.service.emit_event(...)`, shell payload validation, and shipped audio/navigation event proof.
+
+**Target features:**
+- Register backend and frontend modules as inspectable runtime object instances.
+- Replay backend state and frontend exports into newly created, shown, or reloaded runtimes.
+- Route module/service methods through a shell-owned call lane with visible result/failure data.
+- Deliver typed interface/module events through runtime subscriptions with deterministic cleanup.
+- Prove the object model on bundled audio/navigation modules and author docs.
 
 ## Previous Shipped Milestone: v1.8 Rendering Engine Architecture
 
@@ -201,10 +223,15 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.11 Phase 62`: Focused-surface keybind diagnostics now report malformed triggers, duplicate effective bindings, unresolved overrides, missing runtime subscribers, and unsafe overrides through non-fatal component diagnostics.
 - `v1.11 Phase 63`: Resolved focused-surface keybind metadata now reaches accessibility annotations, structured `mesh.debug.keybinds` payloads, debug health output, and author docs.
 - `v1.11 Phase 64`: Real navigation and audio surfaces now prove the completed focused-surface keybind system, including audio-popover access-key dispatch, metadata, and keyboard regression coverage.
+- `v1.12 Phase 65`: Backend and frontend modules now appear as stable runtime object instances through debug state.
+- `v1.12 Phase 66`: Frontend runtimes now receive replayable `module.state` and script-owned `module.exports`.
+- `v1.12 Phase 67`: Service proxy method dispatch and backend command results now have a shell-visible method call lane.
+- `v1.12 Phase 68`: Interface and module events now support runtime subscriptions, local emits, and backend-to-frontend event transport.
+- `v1.12 Phase 69`: Bundled audio/navigation modules prove the class-like module object model with typed `VolumeChanged` event delivery.
 
 ### Active
 
-- Planning next milestone.
+- `v1.13`: Manifest i18n text fields should distinguish literal strings from localized catalog lookups and resolve into shipped keybind/layout/settings metadata.
 
 ### Out of Scope
 
@@ -261,6 +288,9 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Skia is the paint backend, not the render engine | MESH still owns widget traversal, style/layout, animation, retained display lists, damage, module boundaries, input state, and presentation; Skia owns the low-level painter/raster primitives below that boundary | Active for v1.10 |
 | Painter API must stay backend-neutral enough for Vello | The display-list-to-painter contract should describe high-level paint commands, not Skia-only helper calls, so a future Vello backend can implement the same behavior with parity proof | Active for v1.10 |
 | Background images remain bounded shell UI paint data | Phase 55 supports `none`, relative `url(...)`, and compact two-color `linear-gradient(...)` while unsupported browser-like values diagnose instead of silently disappearing | Shipped in v1.10 Phase 55 |
+| Modules are class-like runtime objects over typed lanes | Authors need normal Luau object access while Rust keeps lifecycle, validation, replay, routing, and diagnostics authoritative | Shipped in v1.12 |
+| Backend-to-frontend transient facts use typed interface events | Durable service state should stay replayable, while transient updates like volume changes need declared payload schemas and subscriptions | Shipped in v1.12 gap closure |
+| Manifest-localized text must be explicit at the field site | Plain `module.json` strings cannot tell authors whether text is literal, a translation key, or actually localized | Active for v1.13 |
 
 <details>
 <summary>Archived milestone framing</summary>
@@ -307,4 +337,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-23 after v1.11 milestone*
+*Last updated: 2026-05-24 for v1.13 milestone planning*

@@ -24,6 +24,12 @@ Spike 003 investigates the backend service data, command, and event contract.
 - Interface-declared events must either become runtime-delivered events or be
   documented as deferred metadata so authors do not assume they can subscribe to
   them.
+- User-facing `module.json` text fields must distinguish literal text from
+  localized catalog lookups, and localized text declarations must identify a
+  fallback string at the field site.
+- `module.json` i18n metadata should make both locale support and bundled
+  translation files explicit so authors can trace where manifest-localized text
+  is expected to resolve.
 
 ## Spikes
 
@@ -32,3 +38,4 @@ Spike 003 investigates the backend service data, command, and event contract.
 | 001 | skia-retained-display-list-painter | standard | Given a standalone Rust harness with MESH-like display-list primitives, when rendered through `skia-safe` into a CPU raster surface, then it produces deterministic pixels and can be built in this repo environment | VALIDATED | skia, renderer, spike, cpu-raster |
 | 002 | painter-engine-roadmap | standard | Given the request for a compact web-style painter engine compatible with current XML/CSS/token styling, when decomposed for autonomous LLM execution, then the roadmap defines bounded phases with clear ownership, acceptance criteria, and browser-scope exclusions | VALIDATED | renderer, painter-engine, roadmap, xml-css-token, autonomous |
 | 003 | backend-data-event-contract | standard | Given MESH backend providers publish service state and receive service commands, when the runtime bridge and frontend proxy paths are traced, then the data and event contract is clear enough to complete and harden | PARTIAL | backend, services, events, state, luau, runtime |
+| 004 | manifest-localized-text-contract | standard | Given module.json contains user-facing keybind, layout, and settings text, when authors declare localized labels and descriptions, then the manifest shape makes literal text, localized text, and translation asset ownership explicit | VALIDATED | module-json, i18n, keybinds, manifest, localization |

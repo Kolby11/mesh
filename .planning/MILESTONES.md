@@ -1,26 +1,29 @@
 # MESH Milestones
 
-## v1.12 Module Object Contract (Planned)
+## v1.12 Module Object Contract (Shipped: 2026-05-23)
 
-**Status:** planned
-**Starts after:** v1.11 Surface Keybind Completion
-**Planned phases:** 65-69
+**Phases completed:** 5 phases, 5 plans
 
 **Goal:** Implement backend services and frontend modules as class-like Luau object instances backed by typed Rust-managed runtime lanes for state/exports, methods/results, and events/subscriptions.
 
-**Planned scope:**
+**Key accomplishments:**
 
-- Stable backend and frontend module instance registry with lifecycle, capabilities, interface/version, active-provider, and diagnostic metadata
-- Replayable backend `state` and frontend `exports` object fields with latest snapshot delivery at runtime creation/show/reload boundaries
-- Object method syntax routed through the shell with capability checks, contract checks, target selection, and visible result/failure data
-- Typed event declarations, emissions, subscriptions, validation, and deterministic cleanup
-- Shipped audio/navigation proof and author docs for the class-like module object model
+- Runtime module object instances are visible through `mesh.debug.module_instances`.
+- Frontend scripts now get replayable `module.state` and script-owned `module.exports`.
+- Service proxy method dispatch and backend command results are visible through `mesh.debug.method_calls`.
+- Interface and module event channels support `events.Name:subscribe(fn)`, local emits, and unsubscribe cleanup.
+- Backend scripts can emit typed interface events with `mesh.service.emit_event(...)`; the shell validates declared payload schemas and forwards valid events to frontend subscribers.
+- Bundled PipeWire/PulseAudio providers emit `VolumeChanged`, and shipped navigation/audio frontends subscribe through `audio.events.VolumeChanged`.
+- Backend, frontend, and module-system docs now teach modules as class-like runtime object instances over typed lanes.
 
-**Planning artifacts:**
+**Known deferred items at close:** Full shell verification remains blocked in this local environment by missing `xkbcommon.pc`; focused scripting/backend proof passed.
 
-- `.planning/ROADMAP.md`
-- `.planning/REQUIREMENTS.md`
-- `.planning/spikes/003-backend-data-event-contract/README.md`
+**Archive artifacts:**
+
+- `.planning/milestones/v1.12-ROADMAP.md`
+- `.planning/milestones/v1.12-REQUIREMENTS.md`
+- `.planning/milestones/v1.12-MILESTONE-AUDIT.md`
+- `.planning/milestones/v1.12-phases/`
 
 ---
 

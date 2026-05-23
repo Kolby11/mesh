@@ -1,34 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.12
-milestone_name: Module Object Contract
-status: completed
-stopped_at: v1.12 phases complete; lifecycle audit pending
-last_updated: "2026-05-23T14:30:00.000Z"
-last_activity: 2026-05-23
+milestone: v1.13
+milestone_name: Manifest I18n Contract
+status: planning
+last_updated: "2026-05-23T22:29:52.914Z"
+last_activity: 2026-05-24
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 5
-  completed_plans: 5
-  percent: 100
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: MESH v1.12
+# State: MESH v1.13
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-23)
+See: `.planning/PROJECT.md` (updated 2026-05-24)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.12 Module Object Contract
+**Current focus:** v1.13 Manifest I18n Contract
 
 ## Current Position
 
-Phase: None
-Plan: None
-Status: Milestone phases complete
-Last activity: 2026-05-23
+Phase: Not started (defining requirements)
+Plan: —
+Status: Roadmap ready; awaiting Phase 70 planning
+Last activity: 2026-05-24 — Milestone v1.13 roadmap created
 
 ## Decisions
 
@@ -40,6 +39,11 @@ Last activity: 2026-05-23
 - [Phase 67]: Service proxy method dispatch and backend command results are now recorded in `mesh.debug.method_calls`, giving method acknowledgements and result/failure data a shell-visible lane beyond tracing.
 - [Phase 68]: Interface proxies and frontend module objects now expose Luau event channels with `events.Name:subscribe(fn)`, local `emit(payload)`, and unsubscribe cleanup.
 - [Phase 69]: Author docs now present modules as class-like Luau object instances over typed runtime lanes, with focused scripting proof for state, exports, and events.
+- [v1.12 gap closure]: Backend scripts now emit typed interface events with `mesh.service.emit_event(...)`; the shell validates declared event payload schemas and forwards valid backend events to frontend `proxy.events.Name` subscribers.
+- [v1.12 gap closure]: Bundled PipeWire/PulseAudio backends now emit `VolumeChanged`, and shipped navigation/audio frontends subscribe through `audio.events.VolumeChanged`.
+- [v1.13]: User-facing manifest text fields should distinguish literal strings from localized catalog lookups with a structured `{ "t": "...", "fallback": "..." }` shape.
+- [v1.13]: Raw strings remain literal for backwards compatibility; dotted-key raw strings should produce non-fatal migration diagnostics.
+- [v1.13]: Localized manifest text metadata should be preserved through installed graph records until shell runtime resolution can apply active locale, fallback locale, and required fallback text.
 
 - Backend plugins use Luau for service logic; Rust core remains the wiring layer.
 - `require('@mesh/service')` is the frontend/backend interface.
