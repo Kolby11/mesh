@@ -14,7 +14,7 @@ use mesh_core_component::style as component_style;
 use mesh_core_elements::{
     BoxShadow, Corners, Dimension, Edges, StyleResolver, Transform2D, TransitionEasing,
     TransitionStyle, VisualFilter, WidgetNode,
-    style::{AnimationPlayState, Color},
+    style::{AnimationPlayState, AnimationPropertyBucket, Color},
 };
 
 use super::FrontendSurfaceComponent;
@@ -314,6 +314,10 @@ impl StyleAnimation {
     pub(super) fn finished(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.started_at) >= self.delay + self.duration
     }
+}
+
+pub(super) fn active_transition_bucket(transition: TransitionStyle) -> AnimationPropertyBucket {
+    transition.properties.animation_bucket()
 }
 
 impl FrontendSurfaceComponent {
@@ -734,5 +738,43 @@ mod tests {
         let style = AnimatedVisualStyle::from_node(&node);
 
         assert_eq!(style.border_radius, Corners::all(14.0));
+    }
+
+    #[test]
+    fn animation_property_bucket_shell_helper_preserves_transition_classification() {
+        let opacity = TransitionStyle {
+            properties: mesh_core_elements::TransitionProperties {
+                opacity: true,
+                ..mesh_core_elements::TransitionProperties::none()
+            },
+            ..TransitionStyle::default()
+        };
+        let box_shadow = TransitionStyle {
+            properties: mesh_core_elements::TransitionProperties {
+                box_shadow: true,
+                ..mesh_core_elements::TransitionProperties::none()
+            },
+            ..TransitionStyle::default()
+        };
+        let width = TransitionStyle {
+            properties: mesh_core_elements::TransitionProperties {
+                width: true,
+                ..mesh_core_elements::TransitionProperties::none()
+            },
+            ..TransitionStyle::default()
+        };
+
+        assert_eq!(
+            active_transition_bucket(opacity),
+            AnimationPropertyBucket::PaintOnly
+        );
+        assert_eq!(
+            active_transition_bucket(box_shadow),
+            AnimationPropertyBucket::LayerEffect
+        );
+        assert_eq!(
+            active_transition_bucket(width),
+            AnimationPropertyBucket::LayoutAffecting
+        );
     }
 }
