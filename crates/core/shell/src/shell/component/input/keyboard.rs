@@ -153,22 +153,40 @@ impl FrontendSurfaceComponent {
         keyboard_settings: &mesh_core_config::KeyboardSettings,
     ) -> Vec<ResolvedSurfaceShortcut> {
         let declarations = self.surface_shortcut_declarations();
+        let overrides = keyboard_settings.surface_shortcuts.get(self.surface_id());
+        let active_locale = self.locale.current();
+        let declared_ids = declarations
+            .iter()
+            .map(|declaration| declaration.keybind_id.as_str())
+            .collect::<HashSet<_>>();
+
+        if let Some(overrides) = overrides {
+            for action_id in overrides.keys() {
+                if !declared_ids.contains(action_id.as_str()) {
+                    self.record_keybind_diagnostic(
+                        action_id,
+                        "user override references undeclared keybind action",
+                    );
+                }
+            }
+        }
+
         if declarations.is_empty() {
             return Vec::new();
         }
 
-        let overrides = keyboard_settings.surface_shortcuts.get(self.surface_id());
-        let active_locale = self.locale.current();
-
-        declarations
+        let resolved = declarations
             .into_iter()
             .filter_map(|declaration| {
                 let override_key = overrides
                     .and_then(|surface| surface.get(&declaration.keybind_id))
                     .and_then(|shortcut| shortcut.key.clone());
-                resolve_surface_shortcut_declaration(declaration, override_key, active_locale)
+                self.resolve_surface_shortcut_declaration(declaration, override_key, active_locale)
             })
-            .collect()
+            .collect::<Vec<_>>();
+
+        self.record_duplicate_surface_shortcut_diagnostics(&resolved);
+        resolved
     }
 
     fn surface_shortcut_declarations(&self) -> Vec<SurfaceShortcutDeclaration> {
@@ -182,6 +200,7 @@ impl FrontendSurfaceComponent {
             }
             declarations.push(legacy);
         }
+        declarations.sort_by(|left, right| left.keybind_id.cmp(&right.keybind_id));
         declarations
     }
 
@@ -236,6 +255,10 @@ impl FrontendSurfaceComponent {
             .filter(|subscriber| subscriber.keybind_id == shortcut.keybind_id)
             .collect::<Vec<_>>();
         if subscribers.is_empty() {
+            self.record_keybind_diagnostic(
+                &shortcut.keybind_id,
+                "resolved keybind has no runtime subscribers on focused surface",
+            );
             return Ok(None);
         }
 
@@ -285,6 +308,57 @@ impl FrontendSurfaceComponent {
             }
         }
     }
+
+    fn resolve_surface_shortcut_declaration(
+        &self,
+        declaration: SurfaceShortcutDeclaration,
+        override_key: Option<String>,
+        active_locale: &str,
+    ) -> Option<ResolvedSurfaceShortcut> {
+        if let Some(key) = override_key {
+            let kind = declaration.generic_trigger.kind;
+            let modifiers = declaration.generic_trigger.modifiers.clone();
+            if let Some(reason) = unsafe_override_reason(&key, &modifiers) {
+                self.record_keybind_diagnostic(&declaration.keybind_id, reason);
+                return resolve_surface_shortcut_declaration_without_override(
+                    declaration,
+                    active_locale,
+                    self,
+                );
+            }
+            return resolved_surface_shortcut(
+                declaration,
+                key,
+                modifiers,
+                kind,
+                KeybindResolutionSource::UserOverride,
+                self,
+            );
+        }
+
+        resolve_surface_shortcut_declaration_without_override(declaration, active_locale, self)
+    }
+
+    fn record_duplicate_surface_shortcut_diagnostics(&self, shortcuts: &[ResolvedSurfaceShortcut]) {
+        let mut seen = HashMap::<(String, Vec<String>), String>::new();
+        for shortcut in shortcuts {
+            let key = (
+                normalize_key_name(shortcut.key.trim()),
+                normalized_modifiers(&shortcut.modifiers),
+            );
+            if let Some(first_action_id) = seen.get(&key) {
+                self.record_keybind_diagnostic(
+                    &shortcut.keybind_id,
+                    &format!(
+                        "duplicate effective binding with action '{first_action_id}' for {}",
+                        format_binding(&shortcut.key, &shortcut.modifiers)
+                    ),
+                );
+            } else {
+                seen.insert(key, shortcut.keybind_id.clone());
+            }
+        }
+    }
 }
 
 fn surface_shortcut_declarations_from_settings(
@@ -319,50 +393,46 @@ fn surface_shortcut_declarations_from_settings(
         .collect()
 }
 
-fn resolve_surface_shortcut_declaration(
+fn resolve_surface_shortcut_declaration_without_override(
     declaration: SurfaceShortcutDeclaration,
-    override_key: Option<String>,
     active_locale: &str,
+    component: &FrontendSurfaceComponent,
 ) -> Option<ResolvedSurfaceShortcut> {
-    if let Some(key) = override_key {
-        let kind = declaration.generic_trigger.kind;
-        let modifiers = declaration.generic_trigger.modifiers.clone();
-        return resolved_surface_shortcut(
-            declaration,
-            key,
-            modifiers,
-            kind,
-            KeybindResolutionSource::UserOverride,
-        );
-    }
-
     if declaration.generic_trigger.kind == mesh_core_module::KeybindTriggerKind::AccessKey {
         for locale in keybind_locale_candidates(active_locale) {
-            let Some((key, trigger_kind, modifiers)) = declaration
-                .localized_triggers
-                .get(&locale)
-                .and_then(|trigger| {
-                    let key = trigger.key.as_ref()?;
-                    if key.trim().is_empty() {
-                        return None;
-                    }
-                    Some((key.clone(), trigger.kind, trigger.modifiers.clone()))
-                })
-            else {
+            let Some(trigger) = declaration.localized_triggers.get(&locale).cloned() else {
                 continue;
             };
+            let Some(key) = trigger.key.clone() else {
+                component.record_keybind_diagnostic(
+                    &declaration.keybind_id,
+                    &format!("localized trigger '{locale}' has no key"),
+                );
+                continue;
+            };
+            if key.trim().is_empty() {
+                component.record_keybind_diagnostic(
+                    &declaration.keybind_id,
+                    &format!("localized trigger '{locale}' has empty key"),
+                );
+                continue;
+            }
             return resolved_surface_shortcut(
                 declaration,
                 key,
-                modifiers,
-                trigger_kind,
+                trigger.modifiers,
+                trigger.kind,
                 KeybindResolutionSource::LocaleDefault { locale },
+                component,
             );
         }
     }
 
     let kind = declaration.generic_trigger.kind;
-    let key = declaration.generic_trigger.key.clone()?;
+    let Some(key) = declaration.generic_trigger.key.clone() else {
+        component.record_keybind_diagnostic(&declaration.keybind_id, "trigger has no key");
+        return None;
+    };
     let modifiers = declaration.generic_trigger.modifiers.clone();
     resolved_surface_shortcut(
         declaration,
@@ -370,6 +440,7 @@ fn resolve_surface_shortcut_declaration(
         modifiers,
         kind,
         KeybindResolutionSource::ModuleDefault,
+        component,
     )
 }
 
@@ -379,8 +450,18 @@ fn resolved_surface_shortcut(
     modifiers: Vec<String>,
     trigger_kind: mesh_core_module::KeybindTriggerKind,
     source: KeybindResolutionSource,
+    component: &FrontendSurfaceComponent,
 ) -> Option<ResolvedSurfaceShortcut> {
     if key.trim().is_empty() {
+        component.record_keybind_diagnostic(&declaration.keybind_id, "trigger has empty key");
+        return None;
+    }
+
+    if let Some(modifier) = unsupported_modifier(&modifiers) {
+        component.record_keybind_diagnostic(
+            &declaration.keybind_id,
+            &format!("trigger contains unsupported modifier '{modifier}'"),
+        );
         return None;
     }
 
@@ -391,6 +472,57 @@ fn resolved_surface_shortcut(
         trigger_kind,
         source,
     })
+}
+
+fn unsupported_modifier(modifiers: &[String]) -> Option<String> {
+    modifiers.iter().find_map(|modifier| {
+        let trimmed = modifier.trim();
+        match normalize_key_name(trimmed).as_str() {
+            "ctrl" | "control" | "shift" | "alt" | "option" => None,
+            _ => Some(trimmed.to_string()),
+        }
+    })
+}
+
+fn normalized_modifiers(modifiers: &[String]) -> Vec<String> {
+    let mut normalized = modifiers
+        .iter()
+        .filter_map(
+            |modifier| match normalize_key_name(modifier.trim()).as_str() {
+                "ctrl" | "control" => Some("ctrl".to_string()),
+                "shift" => Some("shift".to_string()),
+                "alt" | "option" => Some("alt".to_string()),
+                _ => None,
+            },
+        )
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized.dedup();
+    normalized
+}
+
+fn format_binding(key: &str, modifiers: &[String]) -> String {
+    let mut parts = normalized_modifiers(modifiers);
+    parts.push(normalize_key_name(key.trim()));
+    parts.join("+")
+}
+
+fn unsafe_override_reason(key: &str, modifiers: &[String]) -> Option<&'static str> {
+    let key = normalize_key_name(key.trim());
+    let modifiers = normalized_modifiers(modifiers);
+    let has_ctrl = modifiers.iter().any(|modifier| modifier == "ctrl");
+    let has_alt = modifiers.iter().any(|modifier| modifier == "alt");
+    let shell_owned_without_modifier = !has_ctrl && !has_alt;
+
+    if shell_owned_without_modifier && matches!(key.as_str(), "tab" | "escape" | "enter" | "space")
+    {
+        return Some("user override uses a shell-owned traversal, cancel, or activation key");
+    }
+    if has_ctrl && key == "c" {
+        return Some("user override uses reserved selection-copy shortcut");
+    }
+
+    None
 }
 
 fn shortcut_modifiers_match(required: &[String], active: KeyModifiers) -> bool {

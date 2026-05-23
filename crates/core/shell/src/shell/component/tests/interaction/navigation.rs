@@ -956,6 +956,279 @@ fn keybind_override_cannot_create_missing_manifest_declaration() {
 }
 
 #[test]
+fn keybind_diagnostic_reports_unresolved_override_action() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+    let keyboard_settings = mesh_core_config::KeyboardSettings {
+        surface_shortcuts: HashMap::from([(
+            "@test/reactive-surface".into(),
+            HashMap::from([(
+                "missing".into(),
+                mesh_core_config::SurfaceShortcutOverride {
+                    key: Some("u".into()),
+                },
+            )]),
+        )]),
+        ..mesh_core_config::KeyboardSettings::default()
+    };
+
+    let resolved = component.resolved_surface_shortcuts(&keyboard_settings);
+
+    assert_eq!(resolved.len(), 1);
+    assert_keybind_diagnostic(
+        &component,
+        "missing",
+        "user override references undeclared keybind action",
+    );
+}
+
+#[test]
+fn keybind_diagnostic_reports_malformed_declaration() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some(" ".into()),
+                modifiers: Vec::new(),
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+
+    let resolved =
+        component.resolved_surface_shortcuts(&mesh_core_config::KeyboardSettings::default());
+
+    assert!(resolved.is_empty());
+    assert_keybind_diagnostic(&component, "mute", "trigger has empty key");
+}
+
+#[test]
+fn keybind_diagnostic_reports_unsupported_modifier() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: vec!["meta".into()],
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+
+    let resolved =
+        component.resolved_surface_shortcuts(&mesh_core_config::KeyboardSettings::default());
+
+    assert!(resolved.is_empty());
+    assert_keybind_diagnostic(
+        &component,
+        "mute",
+        "trigger contains unsupported modifier 'meta'",
+    );
+}
+
+#[test]
+fn keybind_diagnostic_reports_duplicate_effective_binding_and_dispatches_deterministically() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+first_count = 0
+second_count = 0
+function onFirst()
+    first_count = first_count + 1
+end
+function onSecond()
+    second_count = second_count + 1
+end
+</script>
+"#,
+    );
+    for action_id in ["first", "second"] {
+        component.compiled.manifest.keybinds.actions.insert(
+            action_id.into(),
+            mesh_core_module::KeybindAction {
+                trigger: mesh_core_module::KeybindTrigger {
+                    kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                    key: Some("m".into()),
+                    modifiers: Vec::new(),
+                },
+                localized_triggers: HashMap::new(),
+                ..mesh_core_module::KeybindAction::default()
+            },
+        );
+    }
+    component.last_tree = Some(root_with(vec![
+        event_node_with_attrs(
+            "button",
+            "root/0",
+            0.0,
+            0.0,
+            40.0,
+            24.0,
+            &[("keybind", "first")],
+            &[("keybind", "onFirst")],
+        ),
+        event_node_with_attrs(
+            "button",
+            "root/1",
+            40.0,
+            0.0,
+            40.0,
+            24.0,
+            &[("keybind", "second")],
+            &[("keybind", "onSecond")],
+        ),
+    ]));
+
+    component
+        .handle_input(
+            &default_theme(),
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "m".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(runtime_number(&component, "first_count"), 1.0);
+    assert_eq!(runtime_number(&component, "second_count"), 0.0);
+    assert_keybind_diagnostic(
+        &component,
+        "second",
+        "duplicate effective binding with action 'first'",
+    );
+}
+
+#[test]
+fn keybind_diagnostic_rejects_unsafe_user_override() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+    let keyboard_settings = mesh_core_config::KeyboardSettings {
+        surface_shortcuts: HashMap::from([(
+            "@test/reactive-surface".into(),
+            HashMap::from([(
+                "mute".into(),
+                mesh_core_config::SurfaceShortcutOverride {
+                    key: Some("Tab".into()),
+                },
+            )]),
+        )]),
+        ..mesh_core_config::KeyboardSettings::default()
+    };
+
+    let resolved = component.resolved_surface_shortcuts(&keyboard_settings);
+
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].key, "m");
+    assert_eq!(resolved[0].source, KeybindResolutionSource::ModuleDefault);
+    assert_keybind_diagnostic(
+        &component,
+        "mute",
+        "user override uses a shell-owned traversal, cancel, or activation key",
+    );
+}
+
+#[test]
+fn keybind_diagnostic_reports_missing_runtime_subscriber() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+    component.last_tree = Some(root_with(vec![event_node(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        40.0,
+        24.0,
+        &[],
+    )]));
+
+    let requests = component
+        .handle_input(
+            &default_theme(),
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "m".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+
+    assert!(requests.is_empty());
+    assert_keybind_diagnostic(
+        &component,
+        "mute",
+        "resolved keybind has no runtime subscribers on focused surface",
+    );
+}
+
+#[test]
 fn keybind_locale_shortcut_keeps_generic_trigger_without_user_override() {
     let mut component = test_frontend_component(
         r#"
@@ -1956,5 +2229,36 @@ fn phase44_navigation_behavior_survives_focused_proof_path() {
     assert_eq!(
         component.focused_key, component.focus_visible_key,
         "keyboard focus should remain visibly tracked after focused proof paint"
+    );
+}
+
+fn assert_keybind_diagnostic(
+    component: &FrontendSurfaceComponent,
+    action_id: &str,
+    reason_fragment: &str,
+) {
+    let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
+    let mesh_core_diagnostics::HealthStatus::Degraded(message) = diagnostics.health() else {
+        panic!("expected degraded keybind diagnostic");
+    };
+    assert!(
+        message.contains("keybind diagnostic:"),
+        "diagnostic should be keyed as keybind diagnostic: {message}"
+    );
+    assert!(
+        message.contains("module_id='@test/reactive-surface'"),
+        "diagnostic should include module id: {message}"
+    );
+    assert!(
+        message.contains("surface_id='@test/reactive-surface'"),
+        "diagnostic should include surface id: {message}"
+    );
+    assert!(
+        message.contains(&format!("action_id='{action_id}'")),
+        "diagnostic should include action id {action_id}: {message}"
+    );
+    assert!(
+        message.contains(reason_fragment),
+        "diagnostic should include reason fragment '{reason_fragment}': {message}"
     );
 }

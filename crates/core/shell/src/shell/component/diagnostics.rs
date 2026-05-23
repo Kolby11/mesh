@@ -38,4 +38,16 @@ impl FrontendSurfaceComponent {
         diagnostics.degraded(format!("focused renderer proof: {}", diagnostic.message));
         true
     }
+
+    pub(super) fn record_keybind_diagnostic(&self, action_id: &str, reason: &str) -> bool {
+        let Some(diagnostics) = &self.diagnostics else {
+            return false;
+        };
+        diagnostics.degraded(format!(
+            "keybind diagnostic: module_id='{}' surface_id='{}' action_id='{action_id}' reason='{reason}'",
+            self.compiled.manifest.package.id,
+            self.surface_id()
+        ));
+        true
+    }
 }
