@@ -1,34 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.10
-milestone_name: Painter Engine
-status: Milestone shipped
-stopped_at: v1.10 completed and archived
-last_updated: "2026-05-23T09:10:15Z"
+milestone: v1.11
+milestone_name: Surface Keybind Completion
+status: planning
+last_updated: "2026-05-23T09:23:38.282Z"
 last_activity: 2026-05-23
 progress:
-  total_phases: 9
-  completed_phases: 9
-  total_plans: 29
-  completed_plans: 29
-  percent: 100
+  total_phases: 5
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: MESH v1.10
+# State: MESH v1.11
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-05-23)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.10 shipped; ready for next milestone selection
+**Current focus:** v1.11 surface keybind completion
 
 ## Current Position
 
-Phase: Complete
-Plan: All v1.10 phase plans complete
-Status: Milestone shipped
-Last activity: 2026-05-23
+Phase: Not started (defining requirements)
+Plan: —
+Status: Roadmap ready
+Last activity: 2026-05-23 — Milestone v1.11 started
 
 ## Decisions
 

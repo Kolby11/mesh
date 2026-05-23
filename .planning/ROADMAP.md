@@ -1,342 +1,117 @@
-# Roadmap: MESH v1.10 Painter Engine
+# Roadmap: MESH v1.11 Surface Keybind Completion
 
 ## Milestones
 
+- [ ] **v1.11 Surface Keybind Completion** — Phases 60-64 planned
 - [x] **v1.10 Painter Engine** — Phases 51-59 shipped 2026-05-23
 - [x] **v1.9 Renderer Library Integration** — Phases 46-50 shipped 2026-05-21
 - [x] **v1.8 Rendering Engine Architecture** — Phases 42-45 shipped 2026-05-18
 
 ## Intent
 
-Build a bounded WebEngine/Qt-style painter engine for MESH: expressive enough
-for shell UI surfaces, CSS-like styling, animation, shadows, blur, layers,
-images, gradients, retained damage, and backend observability, but deliberately
-smaller than a browser engine. MESH keeps XML/.mesh parsing, CSS/token style
-resolution, layout, animation state, retained display-list ordering, damage,
-z-order, module boundaries, input, and presentation ownership. Skia owns
-low-level paint/raster behavior behind the painter backend boundary.
+Finish the paused surface-scoped keybind system now that canonical module manifests, typed contribution records, retained rendering, and shipped-surface proof infrastructure are stable. v1.11 turns manifest-owned keybind declarations and localized trigger resolution into real focused-surface runtime behavior with diagnostics, override safety, accessibility metadata, and navigation/audio proof.
+
+MESH keeps shell-owned input precedence. Shell-global shortcuts, text input, selection copy, focus traversal, and default widget activation must continue to win over or compose with surface keybinds deterministically. Compositor-global shortcuts and a full remapping UI remain future work.
 
 ## Phase Summary
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 51 | Painter Contract And Backend Boundary | 3/3 | Complete | 2026-05-22 |
-| 52 | Style Profile And Lowering Compatibility | 4/4 | Complete    | 2026-05-22 |
-| 53 | Element And Display-List Primitive Coverage | 4/4 | Complete    | 2026-05-22 |
-| 54 | Skia Shape, Path, Text Highlight, And Border Migration | 5/5 | Complete    | 2026-05-22 |
-| 55 | Effects, Layers, Shadows, Blur, Images, And Gradients | 5/5 | Complete    | 2026-05-23 |
-| 56 | Animation And Transition Paint Integration | 5/5 | Complete    | 2026-05-23 |
-| 57 | Stacking, Clipping, Visual Bounds, And Damage | 5/5 | Complete    | 2026-05-23 |
-| 58 | Backend Capabilities, Diagnostics, And Rollback | 5/5 | Complete    | 2026-05-23 |
-| 59 | Shipped-Surface Proof And Renderer Documentation | 5/5 | Complete    | 2026-05-23 |
+| 60 | Surface Keybind Dispatch Runtime | Route manifest-owned actions through focused-surface component input without breaking existing keyboard precedence | KDISP-01, KDISP-02, KDISP-03, KDISP-04 | 4 |
+| 61 | Localized Resolution And Override Safety | Make effective bindings deterministic across locale defaults, parent locale fallback, generic triggers, user overrides, and legacy fallback | KRES-01, KRES-02, KRES-03, KRES-04 | 4 |
+| 62 | Conflict And Invalid-Keybind Diagnostics | Diagnose malformed declarations, duplicate bindings, missing targets, unsupported triggers, and unsafe overrides non-fatally | KDIAG-01, KDIAG-02, KDIAG-03, KDIAG-04 | 4 |
+| 63 | Accessibility Metadata And Observability | Publish resolved keybind metadata through accessibility/debug paths and document the author contract | KACC-01, KACC-02, KACC-03 | 3 |
+| 64 | Shipped Surface Keybind Proof | Prove navigation/audio keybind behavior end to end and lock regression suites for existing keyboard behavior | KPROOF-01, KPROOF-02, KPROOF-03, KPROOF-04 | 4 |
 
-## Autonomous Execution Rules
+## Execution Rules
 
-These phases are intended to be planned and executed by LLM agents. Each
-generated phase plan should:
-
-- keep changes inside the files named by that phase context unless tests prove
-  a narrower adjacent edit is required;
-- include automated verification commands for every task;
-- preserve `.mesh` XML/CSS/token authoring compatibility unless the task
-  explicitly adds a diagnostic for unsupported syntax;
-- add diagnostics for unsupported combinations instead of silently dropping
-  visual behavior;
-- avoid moving layout, style resolution, animation scheduling, z-order, damage,
-  input, module, or presentation ownership into Skia;
-- keep Skia types out of retained display-list, render-object, and public style
-  data structures;
-- leave a rollback or compatibility path until shipped-surface proof accepts the
-  new behavior.
+- Keep canonical keybind declarations in `module.json` and typed installed-graph contribution records.
+- Treat settings as user overrides or compatibility fallback only; do not make settings the declaration source again.
+- Preserve shell-global shortcut precedence, text input handling, selection copy, focus traversal, and default widget activation.
+- Prefer diagnostics over silent drops for malformed, conflicting, unsupported, or unresolved keybind data.
+- Prove behavior on real shipped surfaces, not only synthetic component fixtures.
 
 ## Phases
 
-### Phase 51: Painter Contract And Backend Boundary
+### Phase 60: Surface Keybind Dispatch Runtime
 
-**Goal:** Define the extensible painter API that sits below the retained display
-list and above Skia/Vello-style backends.
+**Goal:** Route manifest-owned semantic keybind actions through the focused-surface component input path while preserving existing keyboard ownership rules.
 
-**Requirements:** PAINT-01, PAINT-02, BACKEND-01, BACKEND-02
+**Requirements:** KDISP-01, KDISP-02, KDISP-03, KDISP-04
 
-**Status:** Complete 2026-05-22.
-
-**Success criteria:**
-1. `mesh-core-render` has a documented painter command model covering push/pop
-   clip, push/pop layer, rect, rounded rect, path, text, image, shadow, filter,
-   and backend capability behavior.
-2. The painter API does not expose Skia-only types in retained display-list data
-   or public render-object structures.
-3. Existing direct paint helper calls have a migration map to painter commands.
-4. Vello compatibility notes identify which commands can map cleanly, which need
-   approximation, and which require future capability gates.
-
-### Phase 52: Style Profile And Lowering Compatibility
-
-**Goal:** Make the current XML/.mesh, CSS-like parser, and token styling contract
-the source of truth for the painter engine's supported visual subset.
-
-**Requirements:** STYLE-01, STYLE-02, STYLE-03
-
-**Plans:** 4/4 plans complete
-
-Plans:
-- [x] 52-01-PLAN.md — Author-facing style profile and executable support matrix for STYLE-01.
-- [x] 52-02-PLAN.md — Token/custom-property and shipped navigation/audio style compatibility fixtures for STYLE-02.
-- [x] 52-03-PLAN.md — Unsupported and ambiguous web-like property diagnostics for STYLE-03.
-- [x] 52-04-PLAN.md — Component parser keyframe expectation cleanup and final Phase 52 validation gate. (completed 2026-05-22)
-
-**Autonomous task seed:**
-1. Inventory supported style properties across `mesh-core-component`,
-   `mesh-core-elements`, theme tokens, and shipped module styles.
-2. Create a painter-style support matrix that classifies each property as
-   implemented, diagnostic-only, deferred, or out-of-scope.
-3. Ensure style resolution lowers painter-relevant values into retained
-   render-object/display-list data without Skia types.
-4. Add parser/resolver diagnostics for unsupported web-like properties instead
-   of accepting behavior MESH cannot render.
-5. Add regression fixtures proving existing XML/CSS/token styles still resolve.
+**Status:** Planned
 
 **Success criteria:**
-1. A documented style profile defines the supported subset for color, size,
-   spacing, border, radius, opacity, transform, shadow, filter, image, gradient,
-   animation, and transition properties.
-2. Existing token references keep resolving through the current theme/token path.
-3. Unsupported or ambiguous browser CSS properties produce actionable diagnostics.
-4. Shipped navigation/audio styles compile without syntax or token regressions.
-5. Style data passed to render/display-list code remains backend-neutral.
+1. Canonical `module.json` keybind contributions can dispatch semantic actions through the existing component handler path.
+2. Shell-global shortcuts still run before focused-surface keybinds.
+3. Text input, selection copy, focus traversal, and default widget activation keep their current precedence.
+4. Navigation/audio shipped-surface fixtures use manifest-owned actions instead of relying only on legacy settings shortcuts.
 
-### Phase 53: Element And Display-List Primitive Coverage
+### Phase 61: Localized Resolution And Override Safety
 
-**Goal:** Ensure every supported MESH element/control emits retained painter
-intent through backend-neutral commands.
+**Goal:** Make effective keybind resolution deterministic and safe across user overrides, locale-specific access keys, parent locale fallback, generic triggers, and legacy fallback.
 
-**Requirements:** ELEM-01, ELEM-02, PAINT-03
+**Requirements:** KRES-01, KRES-02, KRES-03, KRES-04
 
-**Autonomous task seed:**
-1. Inventory element/control rendering paths in `mesh-core-elements`,
-   `mesh-core-render`, and shipped navigation/audio modules.
-2. Convert remaining helper-shaped widget/control paths into command-backed
-   lowering while preserving compatibility wrappers where needed.
-3. Add display-list command fixtures for box, text selection highlight, icon,
-   image-like primitives, slider/input/control fills, and debug overlay fills.
-4. Prove direct widget-tree painting and retained display-list replay produce the
-   same command classes for the same node/style inputs.
-5. Isolate or delete non-authoritative software helper code that duplicates Skia
-   primitives.
+**Status:** Planned
 
 **Success criteria:**
-1. Supported elements and controls lower into explicit painter commands.
-2. Retained `NodeId` identity, material hashes, and command ordering remain
-   MESH-owned.
-3. Helper-shaped paint calls no longer bypass the command backend on
-   authoritative paths.
-4. Widget/control tests cover both direct and retained replay paths.
-5. Existing shipped surfaces render through the command boundary.
+1. Resolution order is user override, exact active locale, parent locale, generic manifest trigger, then no binding.
+2. Overrides are keyed by surface id and stable action id.
+3. Localized triggers apply only to access-key actions unless an explicit user override exists.
+4. Legacy `settings.keyboard.shortcuts` remains available only as a compatibility fallback for missing manifest actions.
 
-### Phase 54: Skia Shape, Path, Text Highlight, And Border Migration
+### Phase 62: Conflict And Invalid-Keybind Diagnostics
 
-**Goal:** Make Skia authoritative for core shape rasterization while preserving
-MESH ownership of text layout/selection semantics.
+**Goal:** Emit actionable, non-fatal diagnostics for keybind declarations and overrides that cannot be used safely or deterministically.
 
-**Requirements:** SKIA-01, SKIA-04, TEXT-01
+**Requirements:** KDIAG-01, KDIAG-02, KDIAG-03, KDIAG-04
 
-**Autonomous task seed:**
-1. Implement Skia execution for rect, rounded rect, stroke, path, clip, blend,
-   and antialiasing commands.
-2. Migrate border drawing, focus rings, selection highlight rectangles, debug
-   fills, and basic control backgrounds to those commands.
-3. Preserve existing text measurement/drawing handoff; only route text-adjacent
-   highlight/background painting through Skia unless a task explicitly proves a
-   text primitive migration.
-4. Add pixel tests for square/rounded borders, clipped shapes, stroke widths,
-   path fills/strokes, and selection highlight fills.
-5. Remove or fence old software primitive fallbacks from production paths.
+**Status:** Planned
 
 **Success criteria:**
-1. Skia owns rasterization, antialiasing, paths, rounded rects, strokes, clipping,
-   and blend behavior for core primitives.
-2. Current selection and text behavior remains compatible with theme-owned
-   selection colors.
-3. Border and focus rendering retain current visual behavior.
-4. Shape/path tests pass under the Nix graphics environment.
-5. Legacy raster helpers are non-authoritative or test-only.
+1. Malformed declarations include module id, surface id, action id, and reason in diagnostics.
+2. Duplicate effective bindings on one focused surface diagnose without making dispatch order ambiguous.
+3. Missing targets, unsupported trigger forms, and unresolved overrides diagnose instead of disappearing silently.
+4. Unsafe overrides that would steal reserved shell-global shortcuts, text input, or selection copy are rejected or ignored with diagnostics.
 
-### Phase 55: Effects, Layers, Shadows, Blur, Images, And Gradients
+### Phase 63: Accessibility Metadata And Observability
 
-**Goal:** Implement the compact CSS visual-effects subset expected from the MESH
-painter engine.
+**Goal:** Surface resolved keybind metadata to accessibility and debug/diagnostic consumers, and document the completed author contract.
 
-**Requirements:** EFFECT-01, EFFECT-02, EFFECT-03, LAYER-01
+**Requirements:** KACC-01, KACC-02, KACC-03
 
-**Autonomous task seed:**
-1. Lower box shadows, text-adjacent backgrounds, opacity, filters,
-   backdrop-filter, blend mode, and clipping combinations into explicit
-   `PushLayer`/`PopLayer`, `DrawShadow`, `ApplyFilter`, image, and gradient
-   command sequences.
-2. Implement Skia saveLayer/image-filter behavior for supported effects.
-3. Add image and gradient source/lifetime rules that fit existing style/token
-   data and module asset boundaries.
-4. Emit diagnostics for unsupported effect combinations, excessive blur, missing
-   assets, or backend capability gaps.
-5. Add visual-bounds fixtures for pixels outside layout bounds.
+**Status:** Planned
 
 **Success criteria:**
-1. Shadows, blur, backdrop blur, opacity, blend, images, and gradients lower into
-   painter commands where supported.
-2. Skia owns supported layer/effect execution.
-3. Unsupported combinations are explicit through diagnostics or capability data.
-4. Visual bounds include shadow/filter/image/gradient output.
-5. Tests cover clipped, layered, and out-of-bounds effects.
+1. Target controls expose resolved shortcut or access-key metadata through existing accessibility annotations where available.
+2. Debug/profiling payloads can show resolved keybind metadata and diagnostics for focused surfaces.
+3. Author docs explain declaration, localized triggers, overrides, diagnostics, accessibility metadata, and focused-surface scope.
 
-### Phase 56: Animation And Transition Paint Integration
+### Phase 64: Shipped Surface Keybind Proof
 
-**Goal:** Make current CSS/token animation support drive retained painter updates
-without broad browser animation scope.
+**Goal:** Prove the completed surface keybind system on real navigation/audio surfaces and lock regression coverage for existing keyboard behavior.
 
-**Requirements:** ANIM-01, ANIM-02, ANIM-03
+**Requirements:** KPROOF-01, KPROOF-02, KPROOF-03, KPROOF-04
 
-**Autonomous task seed:**
-1. Inventory supported animation/transition properties in
-   `mesh-core-ui-animation`, `mesh-core-elements`, and shell component runtime.
-2. Classify animatable properties into layout-affecting, paint-only,
-   layer/effect, and unsupported buckets.
-3. Route paint-only animation changes through retained render-object/display-list
-   invalidation without forcing unnecessary layout.
-4. Ensure animated shadows, opacity, transforms, colors, filters, and borders
-   update visual bounds and damage correctly.
-5. Add deterministic tests for interpolation, token keyframes, transition start
-   and cancellation, and repaint metrics.
+**Status:** Planned
 
 **Success criteria:**
-1. Existing theme/token animations remain compatible.
-2. Paint-only animations avoid full layout when geometry does not change.
-3. Animated visual bounds are included in damage.
-4. Unsupported animation properties produce diagnostics.
-5. Navigation/audio animation regressions stay within accepted behavior.
+1. Navigation-bar tests prove manifest-owned mute or equivalent actions dispatch correctly with shell-global precedence preserved.
+2. Audio-popover tests prove surface keybinds or access keys work without regressing slider, button, focus, or text input behavior.
+3. Locale and override tests cover exact locale, parent locale, generic default, user override, and no-binding cases.
+4. Final verification runs focused shell/component suites for keyboard, keybind, navigation, and audio-surface behavior.
 
-### Phase 57: Stacking, Clipping, Visual Bounds, And Damage
+## Backlog
 
-**Goal:** Preserve retained rendering correctness as the painter subset gains
-effects, layers, and animation.
+### Future: Compositor-Global Shortcuts
 
-**Requirements:** LAYER-02, LAYER-03, DAMAGE-01, DAMAGE-02
+Compositor-global shortcuts remain deferred until focused-surface keybind semantics are stable. Future work needs platform/session permission design, diagnostics separate from focused surfaces, and likely XDG Desktop Portal or compositor-specific integration.
 
-**Plans:** 1/1 plans complete
+### Future: Keybind Settings UI
 
-Plans:
-- [x] 57-01-PLAN.md — Retained ordering, visual bounds, damage diagnostics. (completed 2026-05-23)
+A full user-facing remapping UI remains deferred. v1.11 validates override schema and runtime behavior so a later settings surface can safely inspect and modify overrides.
 
-**Autonomous task seed:**
-1. Prove z-order and stacking order stay computed before backend execution.
-2. Expand visual bounds for shadows, filters, transforms, layers, images, and
-   animated effects.
-3. Update damage selection and partial-present logic to include effect overflow
-   and clipped descendants.
-4. Add diagnostics or fallback thresholds for pathological damage expansion.
-5. Add tests for overlapping elements, nested clips, animated effects, and
-   retained replay ordering.
+### Future: Generated Access Keys
 
-**Success criteria:**
-1. MESH retains z-order, stacking, node traversal, and command ordering.
-2. Damage includes pixels affected outside layout bounds.
-3. Partial repaint and full-surface fallback remain deterministic.
-4. Profiling counters distinguish changed layout, changed paint, effect overflow,
-   and fallback promotion.
-5. Retained display-list tests cover layered/effect ordering.
-
-### Phase 58: Backend Capabilities, Diagnostics, And Rollback
-
-**Goal:** Make painter-engine behavior inspectable enough for autonomous work and
-safe enough to continue migrating.
-
-**Requirements:** BACKEND-03, OBS-01, OBS-02
-
-**Plans:** 1/1 plans complete
-
-Plans:
-- [x] 58-01-PLAN.md — Painter backend snapshot and rollback docs. (completed 2026-05-23)
-
-**Autonomous task seed:**
-1. Publish backend id, capability records, unsupported features, and recent
-   painter diagnostics through existing debug/profiling payloads.
-2. Add feature flag or configuration wiring for backend selection/rollback where
-   the current architecture expects it.
-3. Ensure diagnostics include source node/style context where available without
-   polluting retained identity.
-4. Add proof tests for capability reporting, unsupported command diagnostics,
-   rollback path, and profiling payload shape.
-5. Document backend selection and rollback in renderer docs.
-
-**Success criteria:**
-1. Backend selection and capability data are visible in renderer diagnostics.
-2. Unsupported feature behavior is testable and non-fatal where possible.
-3. Rollback path remains documented until shipped-surface proof accepts Skia
-   parity.
-4. Debug/profiling payloads remain stable for existing inspector consumers.
-5. Capability tests gate future Vello compatibility.
-
-### Phase 59: Shipped-Surface Proof And Renderer Documentation
-
-**Goal:** Prove the painter engine against real MESH surfaces and lock the
-architecture docs for future LLM-run milestones.
-
-**Requirements:** VERIFY-01, VERIFY-02, VERIFY-03
-
-**Plans:** 1/1 plans complete
-
-Plans:
-- [x] 59-01-PLAN.md — Painter engine proof and docs. (completed 2026-05-23)
-
-**Autonomous task seed:**
-1. Build an automated proof suite covering style profile, element lowering,
-   shapes, borders, shadows, blur, images, gradients, animations, damage, and
-   retained replay.
-2. Run shipped navigation bar and audio popover regressions with the painter
-   engine path enabled.
-3. Verify selection rendering, text handoff, profiling payloads, diagnostics,
-   and partial damage metrics.
-4. Update `crates/core/frontend/render/README.md`,
-   `docs/renderer-ownership.md`, and `docs/renderer-migration.md`.
-5. Finalize requirement traceability and mark deferred items for v1.11.
-
-**Success criteria:**
-1. Automated tests cover the supported painter-engine subset end to end.
-2. Shipped surfaces render without accepted regressions.
-3. Documentation distinguishes MESH render engine, style/layout/animation
-   ownership, Skia painter backend, presentation, and future Vello backend.
-4. Requirements traceability maps every v1.10 requirement to exactly one phase.
-5. Remaining web/CSS ambitions are captured as deferred bounded-profile work,
-   not implicit browser compatibility.
-
-## Progress
-
-| Phase | Milestone | Plans Complete | Status | Completed |
-|-------|-----------|----------------|--------|-----------|
-| 51. Painter Contract And Backend Boundary | v1.10 | 3/3 | Complete | 2026-05-22 |
-| 52. Style Profile And Lowering Compatibility | v1.10 | 4/4 | Complete | 2026-05-22 |
-| 53. Element And Display-List Primitive Coverage | v1.10 | 4/4 | Complete | 2026-05-22 |
-| 54. Skia Shape, Path, Text Highlight, And Border Migration | v1.10 | 5/5 | Complete | 2026-05-22 |
-| 55. Effects, Layers, Shadows, Blur, Images, And Gradients | v1.10 | 5/5 | Complete | 2026-05-23 |
-| 56. Animation And Transition Paint Integration | v1.10 | 5/5 | Complete | 2026-05-23 |
-| 57. Stacking, Clipping, Visual Bounds, And Damage | v1.10 | 1/1 | Complete | 2026-05-23 |
-| 58. Backend Capabilities, Diagnostics, And Rollback | v1.10 | 1/1 | Complete | 2026-05-23 |
-| 59. Shipped-Surface Proof And Renderer Documentation | v1.10 | 1/1 | Complete | 2026-05-23 |
-
-## Deferred Context
-
-- Full Vello backend production work is deferred until the Skia-backed painter
-  engine proves the contract and capability gates.
-- Full browser/Web platform compatibility remains out of scope. MESH supports a
-  bounded shell UI style/rendering profile, not arbitrary HTML/CSS/DOM behavior.
-- Text engine replacement is deferred unless a bounded task proves a backend
-  text primitive preserves current selection, shaping, font, and theme behavior.
-- GPU compositor replacement remains out of scope; presentation stays in
-  `mesh-core-presentation`.
-- Audio popover transition-delay polish remains accepted debt unless Phase 56
-  touches the same animation path and can fix it safely.
-- Module install requirement resolution remains separate from painter engine
-  architecture.
-- Paused v1.6 keybind dispatch, conflict diagnostics, and accessibility proof
-  remain separate from renderer paint backend work.
-
-Run `$gsd-plan-phase 52` to plan the next autonomous implementation phase.
+Automatic locale-aware access-key generation remains deferred. v1.11 keeps authors responsible for explicit localized trigger defaults.

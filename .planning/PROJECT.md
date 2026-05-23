@@ -111,29 +111,19 @@ The project now also has a rendering engine architecture direction with:
 - A production-adjacent focused proof adapter preserving retained identity, typed invalidation, damage/profiling, diagnostics, selection, and AccessKit-compatible boundaries.
 - A phased, reversible renderer migration roadmap with explicit ownership classification, build/CI/Linux/Nix/binary-risk gates, rollback expectations, and an author-facing `.mesh` renderer contract.
 
-## Current Milestone: v1.10 Painter Engine
+## Current Milestone: v1.11 Surface Keybind Completion
 
-**Goal:** Build a bounded WebEngine/Qt-style painter engine for MESH. The engine should support the current XML/.mesh, CSS-like parser, theme tokens, retained elements, animations, shadows, blur, layers, images, gradients, damage, and diagnostics without becoming a full browser engine. MESH keeps render-engine ownership while Skia owns low-level raster, effects, layers, and paint primitives behind a backend contract that can later support Vello.
+**Goal:** Finish the paused surface-scoped keybind system so frontend modules can declare semantic actions that dispatch safely on focused shell surfaces, report conflicts and invalid overrides, expose accessibility metadata, and prove behavior on shipped navigation/audio surfaces.
 
-Phase 51 of v1.10 is complete. `mesh-core-render` now has a
-backend-neutral painter command contract, `PaintBackend` capability and
-diagnostic reporting, command-backed compatibility helpers, docs for the
-helper-to-command migration path, and Vello compatibility notes that keep Skia
-types behind the Skia backend boundary.
-
-Phase 55 of v1.10 is complete. MESH now has bounded background-image style
-data, backend-neutral image and linear-gradient painter commands, Skia-backed
-layer/image/gradient execution, non-fatal diagnostics for unsupported effect
-cases, visual-bounds proof for supported effects, and backend-neutrality
-validation that keeps Skia types out of retained style and display-list data.
+This milestone resumes the v1.6 keybind work after v1.7 stabilized canonical `module.json` manifests and typed contribution records. v1.11 does not start compositor-global shortcut support or a full user-facing remapping UI; it makes the existing surface-focused declaration and localized trigger model operational end to end.
 
 **Target features:**
-- Define and use a high-level painter command API below the retained display list: push clip, push layer, draw rect/rounded rect/path/text/image/shadow, apply filter, pop layer, and pop clip.
-- Lock the bounded MESH style profile for XML/.mesh, CSS-like syntax, and theme tokens so unsupported browser CSS produces diagnostics instead of hidden missing behavior.
-- Lower supported elements and controls into retained painter commands while preserving NodeId identity, style/layout ownership, accessibility metadata, and shipped surface behavior.
-- Make Skia the authoritative implementation for rasterization, antialiasing, paths, rounded rects, strokes, shadows, blurs, image filters, blend modes, clipping, layers/saveLayer, gradients/images, and eligible text-adjacent primitives.
-- Preserve and route existing CSS/token animation behavior through retained style, render-object, display-list, visual-bounds, damage, and painter execution.
-- Keep the painter contract backend-neutral enough for a future Vello backend, with explicit capabilities, diagnostics, parity tests, rollback, and shipped-surface proof before any additional backend can be promoted.
+- Dispatch manifest-owned keybind actions through the existing shell component handler path while preserving shell-global shortcut precedence, text-input behavior, focus traversal, selection copy, and default widget activation.
+- Resolve focused-surface keybinds from canonical `module.json` keybind contributions, localized access-key defaults, active locale, and user overrides with deterministic precedence.
+- Emit non-fatal diagnostics for malformed keybind actions, duplicate effective bindings, missing targets, unsupported trigger forms, and unsafe or unresolved overrides.
+- Keep user overrides keyed by surface id and stable action id, not localized labels or raw handler names.
+- Expose resolved shortcut/access-key metadata through accessibility annotations and debug/profiling payloads without making settings the canonical declaration source.
+- Prove the completed keybind runtime on shipped navigation and audio surfaces, including localized access keys, conflict handling, override behavior, and no regressions to existing keyboard interaction.
 
 Phase 46 of v1.9 is complete. MESH now has production Cargo dependencies and disabled-by-default renderer-library feature gates for Taffy, Parley, AccessKit, AnyRender, and Vello encoding, plus documented build, rollback, Linux/Nix, binary-risk, and CI boundaries.
 
@@ -193,10 +183,10 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 
 ### Active
 
-- Implement the bounded painter engine below XML/.mesh, CSS-like styling, token resolution, retained elements, layout, and animation state.
-- Move low-level painter behavior to Skia primitives instead of MESH-owned raster helpers.
-- Preserve MESH render-engine ownership around style/layout/animation/display-list/damage/presentation while making the paint backend swappable.
-- Prove the Skia-backed painter engine through retained display-list, shipped-surface, effects, animation, damage, diagnostics, and profiling tests.
+- Finish surface-scoped semantic keybind dispatch for frontend modules without bypassing shell-owned input precedence.
+- Add keybind diagnostics for conflicts, malformed declarations, unresolved targets, unsupported triggers, and unsafe user overrides.
+- Preserve localized trigger and user override precedence from v1.6/v1.7 while making it operational on focused surfaces.
+- Expose resolved keybind metadata through accessibility/debug surfaces and prove behavior on shipped navigation/audio surfaces.
 
 ### Out of Scope
 
@@ -205,9 +195,11 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - Compositor-global shortcuts via XDG desktop portals or compositor-specific APIs.
 - Replacing keyboard focus traversal, text-input behavior, or shipped widget activation semantics.
 - Replacing the MESH render engine wholesale with Skia, Vello, Blitz, WebEngine, or Qt.
-- Finishing all paused v1.6 keybind runtime behavior; this milestone only preserves and migrates the declaration/resolution model where it intersects modularity.
 - Full GPU compositor implementation, arbitrary browser compatibility, and complete CSS/Web platform behavior.
 - Full Vello backend implementation beyond API shape, fixtures, and compatibility notes for a future milestone.
+- Compositor-global shortcuts through XDG Desktop Portal or compositor-specific APIs.
+- Full user-facing keybind settings UI; v1.11 validates override schema and runtime behavior but does not build the settings surface.
+- Automatic translation or automatic access-key generation.
 
 ## Key Decisions
 
@@ -238,6 +230,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Resource and settings compatibility gaps are diagnostics, not graph-load failures | Missing packs, unmapped semantic icons, and duplicate settings namespaces should be visible to tools/settings UI without blocking unrelated modules | Shipped in v1.7 Phase 39 |
 | Legacy manifest names are migration inputs, not public aliases | Authors need concrete replacement/removal guidance without reopening old terminology as supported vocabulary | Shipped in v1.7 Phase 40 |
 | Module keybind declarations remain canonical while settings only override effective shortcuts | Future dispatch/conflict/accessibility work needs manifest-owned keybind data and user settings must not become a declaration source again | Shipped in v1.7 Phase 40 |
+| v1.11 resumes keybind completion as surface-scoped runtime work | The module graph and renderer foundations are now stable enough to finish dispatch, diagnostics, overrides, accessibility metadata, and shipped-surface proof without taking on compositor-global shortcut scope | Active for v1.11 |
 | Direct Blitz production adoption remains blocked | Wayland shell model fit, browser-engine-level overhead, and high-level crate compile evidence make direct adoption too risky for MESH's shell-owned renderer path | Shipped in v1.8 Phase 42 |
 | MESH-owned focused-crate path is the selected renderer direction | The focused path preserved retained MESH-shaped evidence across layout, text, paint, interaction, and accessibility without replacing the production renderer wholesale | Shipped in v1.8 Phase 43 |
 | Focused renderer proof is adapter-owned, not public API | Phase 44 proof snapshots validate migration boundaries while current renderer/shell ownership remains authoritative for production behavior | Shipped in v1.8 Phase 44 |
@@ -291,4 +284,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-23 after Phase 55*
+*Last updated: 2026-05-23 after starting v1.11*
