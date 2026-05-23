@@ -289,13 +289,21 @@ impl FrontendSurfaceComponent {
                 {
                     return Ok(vec![CoreRequest::WriteClipboard { text }]);
                 }
-                if let Some(requests) =
-                    self.dispatch_surface_shortcut(&tree, &key, modifiers, &keyboard_settings)?
-                {
-                    return Ok(requests);
+
+                let focused_key = self.normalized_focused_key(&tree);
+                let focused_text_input_has_bare_printable_key = focused_key
+                    .as_deref()
+                    .is_some_and(|focused_key| is_input_key(&tree, focused_key))
+                    && is_bare_printable_key(&key, modifiers);
+                if !focused_text_input_has_bare_printable_key {
+                    if let Some(requests) =
+                        self.dispatch_surface_shortcut(&tree, &key, modifiers, &keyboard_settings)?
+                    {
+                        return Ok(requests);
+                    }
                 }
                 self.focus_visible_key = self.focused_key.clone();
-                if let Some(focused_key) = self.normalized_focused_key(&tree) {
+                if let Some(focused_key) = focused_key {
                     let mut requests = self.dispatch_focused_keyboard_handler(
                         &tree,
                         &focused_key,
@@ -413,4 +421,11 @@ impl FrontendSurfaceComponent {
 
         Ok(Vec::new())
     }
+}
+
+fn is_bare_printable_key(key: &str, modifiers: KeyModifiers) -> bool {
+    !modifiers.ctrl
+        && !modifiers.alt
+        && key.chars().count() == 1
+        && key.chars().all(|ch| !ch.is_control())
 }

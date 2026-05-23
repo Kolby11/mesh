@@ -512,6 +512,174 @@ end
 }
 
 #[test]
+fn keyboard_shortcuts_manifest_keybind_dispatches_only_to_runtime_subscribers() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+mute_count = 0
+keydown_count = 0
+keydown_key = ""
+
+function onMuteShortcut()
+    mute_count = mute_count + 1
+end
+
+function onKeyDown(event)
+    keydown_count = keydown_count + 1
+    keydown_key = event.key
+end
+</script>
+"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+    component.last_tree = Some(root_with(vec![event_node_with_attrs(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        40.0,
+        24.0,
+        &[("keybind", "mute")],
+        &[("keybind", "onMuteShortcut")],
+    )]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "m".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(runtime_number(&component, "mute_count"), 1.0);
+    assert_eq!(runtime_number(&component, "keydown_count"), 0.0);
+
+    component.last_tree = Some(root_with(vec![event_node(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        40.0,
+        24.0,
+        &[("keydown", "onKeyDown")],
+    )]));
+    component.focused_key = Some("root/0".into());
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "m".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(runtime_number(&component, "mute_count"), 1.0);
+    assert_eq!(runtime_number(&component, "keydown_count"), 1.0);
+    assert_eq!(
+        runtime_value(&component, "keydown_key"),
+        Some(serde_json::Value::String("m".into()))
+    );
+}
+
+#[test]
+fn keyboard_shortcuts_bare_printable_does_not_steal_focused_text_input() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+mute_count = 0
+keydown_key = ""
+input_seen = ""
+
+function onMuteShortcut()
+    mute_count = mute_count + 1
+end
+
+function onInputKeyDown(event)
+    keydown_key = event.key
+end
+
+function onInputChange(value)
+    input_seen = value
+end
+</script>
+"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+    component.last_tree = Some(root_with(vec![event_node_with_attrs(
+        "input",
+        "root/0",
+        0.0,
+        0.0,
+        100.0,
+        24.0,
+        &[("keybind", "mute")],
+        &[
+            ("keybind", "onMuteShortcut"),
+            ("keydown", "onInputKeyDown"),
+            ("change", "onInputChange"),
+        ],
+    )]));
+    component.focused_key = Some("root/0".into());
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "m".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(runtime_number(&component, "mute_count"), 0.0);
+    assert_eq!(
+        runtime_value(&component, "keydown_key"),
+        Some(serde_json::Value::String("m".into()))
+    );
+
+    component
+        .handle_input(&theme, 240, 160, ComponentInput::Char { ch: 'm' })
+        .unwrap();
+    assert_eq!(
+        runtime_value(&component, "input_seen"),
+        Some(serde_json::Value::String("m".into()))
+    );
+}
+
+#[test]
 fn keyboard_shortcuts_manifest_declaration_wins_over_legacy_settings_same_id() {
     let mut component = test_frontend_component(
         r#"

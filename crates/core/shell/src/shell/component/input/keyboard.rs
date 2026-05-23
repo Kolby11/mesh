@@ -235,6 +235,10 @@ impl FrontendSurfaceComponent {
             .into_iter()
             .filter(|subscriber| subscriber.keybind_id == shortcut.keybind_id)
             .collect::<Vec<_>>();
+        if subscribers.is_empty() {
+            return Ok(None);
+        }
+
         let mut requests = Vec::new();
         for subscriber in subscribers {
             let mut event =
