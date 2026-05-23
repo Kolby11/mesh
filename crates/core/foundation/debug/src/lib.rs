@@ -7,6 +7,7 @@
 #[derive(Debug, Clone, Default)]
 pub struct DebugSnapshot {
     pub modules: Vec<ModuleEntry>,
+    pub module_instances: Vec<ModuleObjectEntry>,
     pub interfaces: Vec<InterfaceEntry>,
     pub backend_runtimes: Vec<BackendRuntimeEntry>,
     pub health: Vec<HealthEntry>,
@@ -386,6 +387,18 @@ pub struct ModuleEntry {
     pub state: String,
     pub error_count: u32,
     pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleObjectEntry {
+    pub instance_id: String,
+    pub module_id: String,
+    pub object_kind: String,
+    pub interface: Option<String>,
+    pub version: Option<String>,
+    pub lifecycle: String,
+    pub active: bool,
+    pub capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -7,9 +7,9 @@
 
 ### Module Instances
 
-- [ ] **MOBJ-01**: Backend service providers are represented as stable runtime module object instances with module id, instance id, interface/version, lifecycle, capabilities, and active-provider metadata.
-- [ ] **MOBJ-02**: Frontend modules are represented as stable runtime module object instances with module id, instance id, lifecycle, capabilities, exports, methods, and events.
-- [ ] **MOBJ-03**: Debug or diagnostic state can inspect registered module instances without service-specific Rust branches.
+- [x] **MOBJ-01**: Backend service providers are represented as stable runtime module object instances with module id, instance id, interface/version, lifecycle, capabilities, and active-provider metadata.
+- [x] **MOBJ-02**: Frontend modules are represented as stable runtime module object instances with module id, instance id, lifecycle, capabilities, exports, methods, and events.
+- [x] **MOBJ-03**: Debug or diagnostic state can inspect registered module instances without service-specific Rust branches.
 
 ### State And Exports
 
@@ -52,9 +52,9 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MOBJ-01 | Phase 65 | Planned |
-| MOBJ-02 | Phase 65 | Planned |
-| MOBJ-03 | Phase 65 | Planned |
+| MOBJ-01 | Phase 65 | Complete |
+| MOBJ-02 | Phase 65 | Complete |
+| MOBJ-03 | Phase 65 | Complete |
 | MSTATE-01 | Phase 66 | Planned |
 | MSTATE-02 | Phase 66 | Planned |
 | MSTATE-03 | Phase 66 | Planned |

@@ -18,7 +18,7 @@ The target authoring model is "Lua objects over typed runtime lanes": durable da
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 65 | Module Instance Registry | Register backend and frontend modules as stable runtime object instances. | MOBJ-01, MOBJ-02, MOBJ-03 | Registry exposes stable ids, interface/version metadata, capabilities, lifecycle, and diagnostics for every module instance. |
+| 65 | Module Instance Registry | Register backend and frontend modules as stable runtime object instances. | MOBJ-01, MOBJ-02, MOBJ-03 | Complete 2026-05-23 |
 | 66 | State And Export Read Model | Make backend `state` and frontend `exports` first-class replayable object fields. | MSTATE-01, MSTATE-02, MSTATE-03, MSTATE-04 | New runtimes can read latest backend state and frontend exports through canonical object syntax without transient nil gaps. |
 | 67 | Method Call Result Lane | Route object method calls through typed runtime calls with visible acknowledgements/results. | MMETH-01, MMETH-02, MMETH-03, MMETH-04 | `module:<method>(...)` routes through shell checks, reaches the target instance, and exposes result/failure data beyond tracing. |
 | 68 | Typed Event Subscription Lane | Implement declared event emission, validation, subscription, and cleanup. | MEVT-01, MEVT-02, MEVT-03, MEVT-04 | `module.events.Name:subscribe(fn)` receives validated transient events and cleans up safely on runtime/module teardown. |
@@ -40,7 +40,7 @@ The target authoring model is "Lua objects over typed runtime lanes": durable da
 
 **Requirements:** MOBJ-01, MOBJ-02, MOBJ-03
 
-**Status:** Planned
+**Status:** Complete
 
 **Success criteria:**
 1. Backend service providers and frontend modules have stable object identities in a shell-owned registry.

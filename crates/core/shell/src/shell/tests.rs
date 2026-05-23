@@ -710,6 +710,36 @@ fn debug_snapshot_omits_profiling_payload_when_disabled() {
 }
 
 #[test]
+fn debug_snapshot_exposes_module_object_instances() {
+    let mut shell = Shell::new();
+    shell.interfaces.register(InterfaceProvider {
+        interface: "mesh.example".to_string(),
+        version: Some("1.0".to_string()),
+        base_module: Some("@mesh/example-interface".to_string()),
+        provider_module: "@mesh/example-backend".to_string(),
+        backend_name: "Example".to_string(),
+        priority: 10,
+    });
+    shell.record_backend_runtime_status(
+        "mesh.example".to_string(),
+        "@mesh/example-backend".to_string(),
+        BackendRuntimeStatus::Running,
+        "backend runtime started".to_string(),
+    );
+
+    let snapshot = shell.build_debug_snapshot();
+
+    assert!(snapshot.module_instances.iter().any(|entry| {
+        entry.object_kind == "backend"
+            && entry.instance_id == "mesh.example:@mesh/example-backend"
+            && entry.module_id == "@mesh/example-backend"
+            && entry.interface.as_deref() == Some("mesh.example")
+            && entry.version.as_deref() == Some("1.0")
+            && entry.lifecycle == "running"
+    }));
+}
+
+#[test]
 fn benchmark_snapshot_exposes_five_stable_scenarios() {
     let mut shell = Shell::new();
     let snapshot = shell.build_debug_snapshot();

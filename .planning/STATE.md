@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.12
 milestone_name: Module Object Contract
 status: planned
-stopped_at: Next step: $gsd-plan-phase 65
-last_updated: "2026-05-23T12:00:00.000Z"
+stopped_at: Next step: Phase 66 State And Export Read Model
+last_updated: "2026-05-23T12:30:00.000Z"
 last_activity: 2026-05-23
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 20
 ---
 
 # State: MESH v1.12
@@ -25,9 +25,9 @@ See: `.planning/PROJECT.md` (updated 2026-05-23)
 
 ## Current Position
 
-Phase: 65 Module Instance Registry
+Phase: 66 State And Export Read Model
 Plan: None
-Status: Planned
+Status: Phase 65 complete; Phase 66 pending
 Last activity: 2026-05-23
 
 ## Decisions
@@ -35,6 +35,7 @@ Last activity: 2026-05-23
 - [v1.12]: Backend services and frontend modules should be represented as class-like Luau object instances over typed Rust-managed runtime lanes.
 - [v1.12]: Durable data uses replayable `module.state.<field>` and `module.exports.<field>` snapshots; transient facts use typed `module.events.Name:subscribe(fn)` subscriptions; cross-module work uses object method calls with visible results.
 - [v1.12]: Rust shell remains responsible for module instance registration, routing, validation, capabilities, replay, lifecycle cleanup, provider selection, and diagnostics.
+- [Phase 65]: The first module object registry is exposed through `mesh.debug.module_instances`, derived from discovered modules, mounted frontend components, and registered backend providers without adding service-specific Rust branches.
 
 - Backend plugins use Luau for service logic; Rust core remains the wiring layer.
 - `require('@mesh/service')` is the frontend/backend interface.

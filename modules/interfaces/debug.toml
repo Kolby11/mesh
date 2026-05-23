@@ -32,6 +32,11 @@ type = "[ModuleEntry]"
 description = "Loaded module lifecycle entries"
 
 [[state_fields]]
+name = "module_instances"
+type = "[ModuleObjectEntry]"
+description = "Runtime module object instances registered for backend and frontend access"
+
+[[state_fields]]
 name = "interfaces"
 type = "[InterfaceEntry]"
 description = "Registered interface providers"
@@ -58,6 +63,18 @@ fields = [
   { name = "state", type = "string" },
   { name = "error_count", type = "integer" },
   { name = "last_error", type = "string" }
+]
+
+[types.ModuleObjectEntry]
+fields = [
+  { name = "instance_id", type = "string" },
+  { name = "module_id", type = "string" },
+  { name = "object_kind", type = "string" },
+  { name = "interface", type = "string" },
+  { name = "version", type = "string" },
+  { name = "lifecycle", type = "string" },
+  { name = "active", type = "boolean" },
+  { name = "capabilities", type = "[string]" }
 ]
 
 [types.InterfaceEntry]

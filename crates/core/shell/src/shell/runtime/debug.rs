@@ -27,6 +27,8 @@ impl Shell {
             })
             .collect();
 
+        let module_instances = self.module_object_entries();
+
         let catalog = self.interfaces.catalog();
         let mut interfaces: Vec<InterfaceEntry> = catalog
             .providers
@@ -114,6 +116,7 @@ impl Shell {
 
         DebugSnapshot {
             modules,
+            module_instances,
             interfaces,
             backend_runtimes,
             health,
@@ -155,6 +158,7 @@ fn debug_service_payload(
         "profiling_session_id": debug.profiling_session_id,
         "active_view": debug.active_view.label(),
         "modules": snapshot.modules.iter().map(module_entry_json).collect::<Vec<_>>(),
+        "module_instances": snapshot.module_instances.iter().map(module_object_entry_json).collect::<Vec<_>>(),
         "interfaces": snapshot.interfaces.iter().map(interface_entry_json).collect::<Vec<_>>(),
         "backend_runtimes": snapshot.backend_runtimes.iter().map(backend_runtime_entry_json).collect::<Vec<_>>(),
         "health": snapshot.health.iter().map(health_entry_json).collect::<Vec<_>>(),
@@ -163,6 +167,88 @@ fn debug_service_payload(
         "benchmarks": benchmark_snapshot_json(&snapshot.benchmarks),
         "profiling": snapshot.profiling.as_ref().map(profiling_snapshot_json),
     })
+}
+
+impl Shell {
+    fn module_object_entries(&self) -> Vec<mesh_core_debug::ModuleObjectEntry> {
+        let mut entries = Vec::new();
+
+        for module in self.modules.values() {
+            let module_id = module.manifest.package.id.clone();
+            let kind = format!("{:?}", module.manifest.package.module_type).to_lowercase();
+            entries.push(mesh_core_debug::ModuleObjectEntry {
+                instance_id: module_id.clone(),
+                module_id,
+                object_kind: kind,
+                interface: None,
+                version: Some(module.manifest.package.version.clone()),
+                lifecycle: module.state.to_string(),
+                active: true,
+                capabilities: module.manifest.capabilities.required.clone(),
+            });
+        }
+
+        for runtime in &self.components {
+            let module_id = runtime.component.id().to_string();
+            entries.push(mesh_core_debug::ModuleObjectEntry {
+                instance_id: runtime.surface_id.clone(),
+                module_id,
+                object_kind: "frontend".to_string(),
+                interface: None,
+                version: self
+                    .modules
+                    .get(runtime.component.id())
+                    .map(|module| module.manifest.package.version.clone()),
+                lifecycle: self
+                    .modules
+                    .get(runtime.component.id())
+                    .map(|module| module.state.to_string())
+                    .unwrap_or_else(|| "mounted".to_string()),
+                active: self
+                    .core
+                    .surfaces
+                    .get(&runtime.surface_id)
+                    .map(|surface| surface.visible)
+                    .unwrap_or(true),
+                capabilities: self
+                    .modules
+                    .get(runtime.component.id())
+                    .map(|module| module.manifest.capabilities.required.clone())
+                    .unwrap_or_default(),
+            });
+        }
+
+        for (interface, providers) in self.interfaces.catalog().providers {
+            for provider in providers {
+                let active = self
+                    .backend_runtimes
+                    .get(&interface)
+                    .is_some_and(|slot| slot.provider_id == provider.provider_module);
+                let lifecycle = self
+                    .backend_runtime_statuses
+                    .get(&(interface.clone(), provider.provider_module.clone()))
+                    .map(|status| status.status.as_str().to_string())
+                    .unwrap_or_else(|| "registered".to_string());
+                entries.push(mesh_core_debug::ModuleObjectEntry {
+                    instance_id: format!("{}:{}", interface, provider.provider_module),
+                    module_id: provider.provider_module,
+                    object_kind: "backend".to_string(),
+                    interface: Some(interface.clone()),
+                    version: provider.version,
+                    lifecycle,
+                    active,
+                    capabilities: Vec::new(),
+                });
+            }
+        }
+
+        entries.sort_by(|left, right| {
+            left.object_kind
+                .cmp(&right.object_kind)
+                .then_with(|| left.instance_id.cmp(&right.instance_id))
+        });
+        entries
+    }
 }
 
 fn benchmark_snapshot(
@@ -669,6 +755,19 @@ fn module_entry_json(entry: &ModuleEntry) -> serde_json::Value {
         "state": entry.state,
         "error_count": entry.error_count,
         "last_error": entry.last_error,
+    })
+}
+
+fn module_object_entry_json(entry: &mesh_core_debug::ModuleObjectEntry) -> serde_json::Value {
+    serde_json::json!({
+        "instance_id": entry.instance_id,
+        "module_id": entry.module_id,
+        "object_kind": entry.object_kind,
+        "interface": entry.interface,
+        "version": entry.version,
+        "lifecycle": entry.lifecycle,
+        "active": entry.active,
+        "capabilities": entry.capabilities,
     })
 }
 
