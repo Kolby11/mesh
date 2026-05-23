@@ -23,7 +23,7 @@
         <button class="audio-action audio-action-compact" onclick={onVolumeDown} aria-label="Lower volume">
           <text class="audio-action-text">-</text>
         </button>
-        <button class="audio-action" onclick={onToggleMute} aria-label="{mute_button_label}">
+        <button class="audio-action" onclick={onToggleMute} keybind="{this.keybinds.toggle_mute.id}" onkeybind={onToggleMute} aria-label="{mute_button_label}">
           <text class="audio-action-text">{mute_button_text}</text>
         </button>
         <button class="audio-action audio-action-compact" onclick={onVolumeUp} aria-label="Raise volume">

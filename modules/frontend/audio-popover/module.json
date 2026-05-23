@@ -40,6 +40,23 @@
   "entrypoints": {
     "main": "src/main.mesh"
   },
+  "keybinds": {
+    "toggle_mute": {
+      "label": "Toggle mute",
+      "description": "Toggle audio mute from the focused audio popover",
+      "category": "Audio",
+      "trigger": {
+        "kind": "access_key",
+        "key": "m"
+      },
+      "localized_triggers": {
+        "sk": {
+          "kind": "access_key",
+          "key": "s"
+        }
+      }
+    }
+  },
   "settings": {
     "namespace": "@mesh/audio-popover",
     "schema": {

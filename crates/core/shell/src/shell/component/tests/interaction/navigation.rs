@@ -2171,6 +2171,75 @@ fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
 }
 
 #[test]
+fn audio_popover_access_key_toggles_mute_on_real_surface() {
+    let mut component =
+        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 220);
+    component.paint(&theme, 320, 220, &mut buffer).unwrap();
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered audio popover");
+    let subscribers = component.keybind_subscribers(tree);
+    assert!(
+        subscribers
+            .iter()
+            .any(|subscriber| subscriber.keybind_id == "toggle_mute"
+                && subscriber.handler.contains("onToggleMute")),
+        "audio popover mute button should subscribe to its manifest access key"
+    );
+    let mute_button = first_node_with_attr(tree, "keybind", "toggle_mute")
+        .expect("audio popover mute button should carry keybind metadata");
+    assert_eq!(
+        mute_button.accessibility.keyboard_shortcut.as_deref(),
+        Some("m")
+    );
+    let keybinds = component.debug_surface_keybinds();
+    assert!(
+        keybinds.iter().any(|entry| {
+            entry.surface_id == "@mesh/audio-popover"
+                && entry.action_id == "toggle_mute"
+                && entry.trigger_kind == "access_key"
+                && entry.accessibility_shortcut == "m"
+        }),
+        "audio popover keybind should be visible in debug metadata"
+    );
+
+    let requests = component
+        .handle_input(
+            &theme,
+            320,
+            220,
+            ComponentInput::KeyPressed {
+                key: "m".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        requests.as_slice(),
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+            if interface == "mesh.audio"
+                && command == "set_muted"
+                && payload["device_id"] == serde_json::json!("default")
+                && payload["muted"] == serde_json::json!(true)
+    ));
+}
+
+#[test]
 fn navigation_bar_compact_width_hides_secondary_status_before_controls() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
