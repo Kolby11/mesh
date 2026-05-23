@@ -184,10 +184,11 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.11 Phase 61`: Focused-surface keybind resolution now has deterministic override, exact locale, parent locale, generic, and no-binding precedence, with settings unable to create undeclared actions and localized defaults limited to access keys.
 - `v1.11 Phase 62`: Focused-surface keybind diagnostics now report malformed triggers, duplicate effective bindings, unresolved overrides, missing runtime subscribers, and unsafe overrides through non-fatal component diagnostics.
 - `v1.11 Phase 63`: Resolved focused-surface keybind metadata now reaches accessibility annotations, structured `mesh.debug.keybinds` payloads, debug health output, and author docs.
+- `v1.11 Phase 64`: Real navigation and audio surfaces now prove the completed focused-surface keybind system, including audio-popover access-key dispatch, metadata, and keyboard regression coverage.
 
 ### Active
 
-- Prove completed keybind behavior on shipped navigation/audio surfaces.
+- v1.11 implementation phases are complete; milestone lifecycle audit and closeout are next.
 
 ### Out of Scope
 
@@ -236,6 +237,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Localized keybind defaults are access-key scoped | Shortcut actions keep generic defaults unless user overrides exist, while settings overrides cannot create missing action ids | Shipped in v1.11 Phase 61 |
 | Keybind diagnostics are non-fatal component diagnostics | Author/runtime keybind mistakes should be observable with module id, surface id, action id, and reason while preserving safe focused-surface dispatch | Shipped in v1.11 Phase 62 |
 | Resolved keybind observability uses existing shell channels | Accessibility metadata remains on subscribed controls, while debug consumers inspect structured `mesh.debug.keybinds` entries and component health | Shipped in v1.11 Phase 63 |
+| Shipped keybind proof uses real surfaces and handlers | Navigation remains the shortcut proof and audio popover proves a manifest-owned access key through its real mute action without regressing slider/focus behavior | Shipped in v1.11 Phase 64 |
 | Direct Blitz production adoption remains blocked | Wayland shell model fit, browser-engine-level overhead, and high-level crate compile evidence make direct adoption too risky for MESH's shell-owned renderer path | Shipped in v1.8 Phase 42 |
 | MESH-owned focused-crate path is the selected renderer direction | The focused path preserved retained MESH-shaped evidence across layout, text, paint, interaction, and accessibility without replacing the production renderer wholesale | Shipped in v1.8 Phase 43 |
 | Focused renderer proof is adapter-owned, not public API | Phase 44 proof snapshots validate migration boundaries while current renderer/shell ownership remains authoritative for production behavior | Shipped in v1.8 Phase 44 |
@@ -289,4 +291,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-23 after completing Phase 63*
+*Last updated: 2026-05-23 after completing Phase 64*

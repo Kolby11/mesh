@@ -21,7 +21,7 @@ MESH keeps shell-owned input precedence. Shell-global shortcuts, text input, sel
 | 61 | Localized Resolution And Override Safety | 1/1 | Complete    | 2026-05-23 |
 | 62 | Conflict And Invalid-Keybind Diagnostics | 1/1 | Complete    | 2026-05-23 |
 | 63 | Accessibility Metadata And Observability | 1/1 | Complete    | 2026-05-23 |
-| 64 | Shipped Surface Keybind Proof | Prove navigation/audio keybind behavior end to end and lock regression suites for existing keyboard behavior | KPROOF-01, KPROOF-02, KPROOF-03, KPROOF-04 | 4 |
+| 64 | Shipped Surface Keybind Proof | 1/1 | Complete    | 2026-05-23 |
 
 ## Execution Rules
 

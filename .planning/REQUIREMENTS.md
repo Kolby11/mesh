@@ -34,10 +34,10 @@
 
 ### Shipped Surface Proof
 
-- [ ] **KPROOF-01**: Navigation-bar tests prove manifest-owned mute or equivalent actions dispatch correctly with shell-global precedence preserved.
-- [ ] **KPROOF-02**: Audio-popover tests prove surface keybinds or access keys work on real controls without regressing slider, button, focus, or text input behavior.
-- [ ] **KPROOF-03**: Locale and override regression tests prove deterministic resolution across exact locale, parent locale, generic default, user override, and no-binding cases.
-- [ ] **KPROOF-04**: Final verification runs the focused shell/component test suites needed to prove no regressions to existing keyboard behavior.
+- [x] **KPROOF-01**: Navigation-bar tests prove manifest-owned mute or equivalent actions dispatch correctly with shell-global precedence preserved.
+- [x] **KPROOF-02**: Audio-popover tests prove surface keybinds or access keys work on real controls without regressing slider, button, focus, or text input behavior.
+- [x] **KPROOF-03**: Locale and override regression tests prove deterministic resolution across exact locale, parent locale, generic default, user override, and no-binding cases.
+- [x] **KPROOF-04**: Final verification runs the focused shell/component test suites needed to prove no regressions to existing keyboard behavior.
 
 ## Future Requirements
 
@@ -84,10 +84,10 @@
 | KACC-01 | Phase 63 | Complete |
 | KACC-02 | Phase 63 | Complete |
 | KACC-03 | Phase 63 | Complete |
-| KPROOF-01 | Phase 64 | Pending |
-| KPROOF-02 | Phase 64 | Pending |
-| KPROOF-03 | Phase 64 | Pending |
-| KPROOF-04 | Phase 64 | Pending |
+| KPROOF-01 | Phase 64 | Complete |
+| KPROOF-02 | Phase 64 | Complete |
+| KPROOF-03 | Phase 64 | Complete |
+| KPROOF-04 | Phase 64 | Complete |
 
 **Coverage:**
 - v1 requirements: 19 total
