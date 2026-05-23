@@ -1,9 +1,9 @@
 ---
 phase: 56
 slug: animation-and-transition-paint-integration
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: complete
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-05-23
 ---
 
@@ -46,8 +46,8 @@ created: 2026-05-23
 | 56-03-02 | 03 | 3 | ANIM-01 | T-56-02 | Unsupported/missing animation diagnostics stay visible | unit | `nix develop -c cargo test -p mesh-core-shell animation_token -- --nocapture` | ✅ | ✅ green |
 | 56-04-01 | 04 | 4 | ANIM-03 | T-56-05 | Animated bounds include current effect/transform overflow | unit | `nix develop -c cargo test -p mesh-core-shell animation_damage -- --nocapture` | ✅ | ✅ green |
 | 56-04-02 | 04 | 4 | ANIM-03 | T-56-05 | Damage includes previous and current animated bounds | unit | `nix develop -c cargo test -p mesh-core-shell animation_damage -- --nocapture` | ✅ | ✅ green |
-| 56-05-01 | 05 | 5 | ANIM-01, ANIM-02, ANIM-03 | T-56-06 | Shipped navigation/audio animation regressions stay bounded | integration | `nix develop -c cargo test -p mesh-core-shell shipped_navigation -- --nocapture` | ✅ | ⬜ pending |
-| 56-05-02 | 05 | 5 | ANIM-01, ANIM-02, ANIM-03 | — | Full Phase 56 proof and metadata update | integration | `nix develop -c cargo test -p mesh-core-shell animation -- --nocapture && nix develop -c cargo test -p mesh-core-shell shipped_navigation -- --nocapture && nix develop -c cargo test -p mesh-core-render render_object_tree_marks -- --nocapture` | ✅ | ⬜ pending |
+| 56-05-01 | 05 | 5 | ANIM-01, ANIM-02, ANIM-03 | T-56-06 | Shipped navigation/audio animation regressions stay bounded | integration | `nix develop -c cargo test -p mesh-core-shell shipped_navigation -- --nocapture` | ✅ | ✅ green |
+| 56-05-02 | 05 | 5 | ANIM-01, ANIM-02, ANIM-03 | — | Full Phase 56 proof and metadata update | integration | `nix develop -c cargo test -p mesh-core-shell animation -- --nocapture && nix develop -c cargo test -p mesh-core-shell shipped_navigation -- --nocapture && nix develop -c cargo test -p mesh-core-render render_object_tree_marks -- --nocapture` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -67,11 +67,11 @@ All Phase 56 behaviors should have automated verification.
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 180s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 180s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval: complete**
