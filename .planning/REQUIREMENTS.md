@@ -43,9 +43,9 @@ responsive on real interaction paths.
 
 ### Animation And Transitions
 
-- [ ] **ANIM-01**: Existing CSS/token keyframes and transitions remain compatible with the painter engine.
-- [ ] **ANIM-02**: Paint-only animation updates for color, opacity, transform, shadow, filter, border, and related visual properties avoid full layout when geometry does not change.
-- [ ] **ANIM-03**: Animated visual bounds and damage include effect overflow and transformed pixels.
+- [x] **ANIM-01**: Existing CSS/token keyframes and transitions remain compatible with the painter engine.
+- [x] **ANIM-02**: Paint-only animation updates for color, opacity, transform, shadow, filter, border, and related visual properties avoid full layout when geometry does not change.
+- [x] **ANIM-03**: Animated visual bounds and damage include effect overflow and transformed pixels.
 
 ### Damage, Stacking, And Visual Bounds
 
@@ -113,9 +113,9 @@ responsive on real interaction paths.
 | EFFECT-02 | Phase 55 | Complete |
 | EFFECT-03 | Phase 55 | Complete |
 | LAYER-01 | Phase 55 | Complete |
-| ANIM-01 | Phase 56 | Pending |
-| ANIM-02 | Phase 56 | Pending |
-| ANIM-03 | Phase 56 | Pending |
+| ANIM-01 | Phase 56 | Complete |
+| ANIM-02 | Phase 56 | Complete |
+| ANIM-03 | Phase 56 | Complete |
 | LAYER-02 | Phase 57 | Pending |
 | LAYER-03 | Phase 57 | Pending |
 | DAMAGE-01 | Phase 57 | Pending |

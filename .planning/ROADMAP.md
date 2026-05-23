@@ -25,7 +25,7 @@ low-level paint/raster behavior behind the painter backend boundary.
 | 53 | Element And Display-List Primitive Coverage | 4/4 | Complete    | 2026-05-22 |
 | 54 | Skia Shape, Path, Text Highlight, And Border Migration | 5/5 | Complete    | 2026-05-22 |
 | 55 | Effects, Layers, Shadows, Blur, Images, And Gradients | 5/5 | Complete    | 2026-05-23 |
-| 56 | Animation And Transition Paint Integration | Preserve and extend supported CSS/token animation behavior through retained style, render-object, display-list, damage, and painter execution. | ANIM-01, ANIM-02, ANIM-03 | 5 |
+| 56 | Animation And Transition Paint Integration | 5/5 | Complete    | 2026-05-23 |
 | 57 | Stacking, Clipping, Visual Bounds, And Damage | Make z-order, clipping, transformed/effect visual bounds, and retained repaint selection correct for the richer painter subset. | LAYER-02, LAYER-03, DAMAGE-01, DAMAGE-02 | 5 |
 | 58 | Backend Capabilities, Diagnostics, And Rollback | Make unsupported-feature behavior, backend choice, profiling, and rollback explicit enough for autonomous migration work. | BACKEND-03, OBS-01, OBS-02 | 5 |
 | 59 | Shipped-Surface Proof And Renderer Documentation | Prove the painter engine on shipped surfaces and update the author/internal architecture docs. | VERIFY-01, VERIFY-02, VERIFY-03 | 5 |
