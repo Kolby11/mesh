@@ -148,6 +148,56 @@ end
 }
 
 #[test]
+fn module_object_exposes_state_and_exports() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.load_script(
+        r#"
+count = 1
+module.exports.visible = true
+module.exports.label = "Audio"
+
+function onRender()
+    count = count + 1
+    latest_count = module.state.count
+    exported_label = module.exports.label
+end
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        ctx.state.get("exports"),
+        Some(serde_json::json!({ "visible": true, "label": "Audio" }))
+    );
+
+    ctx.call_handler("onRender", &[]).unwrap();
+
+    assert_eq!(ctx.state.get("count"), Some(serde_json::json!(2)));
+    assert_eq!(ctx.state.get("latest_count"), Some(serde_json::json!(1)));
+    assert_eq!(
+        ctx.state.get("exported_label"),
+        Some(serde_json::json!("Audio"))
+    );
+}
+
+#[test]
+fn module_state_reflects_host_seeded_values_before_script_runs() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.set_global_state("seeded", serde_json::json!("ready"))
+        .unwrap();
+    ctx.load_script(
+        r#"
+seed_seen = module.state.seeded
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(ctx.state.get("seed_seen"), Some(serde_json::json!("ready")));
+}
+
+#[test]
 fn require_imports_interface_proxy() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("service.audio.read"));

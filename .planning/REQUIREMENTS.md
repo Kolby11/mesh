@@ -13,10 +13,10 @@
 
 ### State And Exports
 
-- [ ] **MSTATE-01**: Backend service `state` is the canonical durable read surface exposed as `module.state.<field>`.
-- [ ] **MSTATE-02**: Frontend module public values are exposed as `module.exports.<field>` with the same replayable snapshot semantics as backend state.
-- [ ] **MSTATE-03**: Latest state/export snapshots are replayed into newly created, shown, or reloaded runtimes so consumers do not depend on a future update to avoid nil fields.
-- [ ] **MSTATE-04**: Existing compatibility aliases such as direct `audio.field` reads are either preserved behind the canonical model or diagnosed with an explicit migration path.
+- [x] **MSTATE-01**: Backend service `state` is the canonical durable read surface exposed as `module.state.<field>`.
+- [x] **MSTATE-02**: Frontend module public values are exposed as `module.exports.<field>` with the same replayable snapshot semantics as backend state.
+- [x] **MSTATE-03**: Latest state/export snapshots are replayed into newly created, shown, or reloaded runtimes so consumers do not depend on a future update to avoid nil fields.
+- [x] **MSTATE-04**: Existing compatibility aliases such as direct `audio.field` reads are either preserved behind the canonical model or diagnosed with an explicit migration path.
 
 ### Methods
 
@@ -55,10 +55,10 @@
 | MOBJ-01 | Phase 65 | Complete |
 | MOBJ-02 | Phase 65 | Complete |
 | MOBJ-03 | Phase 65 | Complete |
-| MSTATE-01 | Phase 66 | Planned |
-| MSTATE-02 | Phase 66 | Planned |
-| MSTATE-03 | Phase 66 | Planned |
-| MSTATE-04 | Phase 66 | Planned |
+| MSTATE-01 | Phase 66 | Complete |
+| MSTATE-02 | Phase 66 | Complete |
+| MSTATE-03 | Phase 66 | Complete |
+| MSTATE-04 | Phase 66 | Complete |
 | MMETH-01 | Phase 67 | Planned |
 | MMETH-02 | Phase 67 | Planned |
 | MMETH-03 | Phase 67 | Planned |

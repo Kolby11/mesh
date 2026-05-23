@@ -83,6 +83,7 @@ impl ScriptContext {
         self.clear_tracked_service_fields();
         self.install_host_api()?;
         self.install_interface_imports(imports)?;
+        self.refresh_module_object();
         // Snapshot all pre-script globals so auto-sync excludes them.
         self.builtin_globals = self
             .lua
@@ -109,6 +110,7 @@ impl ScriptContext {
         if let Ok(lua_value) = self.lua.to_value(payload) {
             let _ = self.lua.globals().set(service_key, lua_value);
         }
+        self.refresh_module_object();
     }
 
     pub fn set_global_state(&mut self, name: &str, value: Value) -> Result<(), ScriptError> {
@@ -118,6 +120,7 @@ impl ScriptContext {
             .set(name, lua_value)
             .map_err(map_lua_error)?;
         self.state.set(name.to_string(), value);
+        self.refresh_module_object();
         Ok(())
     }
 
@@ -202,6 +205,15 @@ impl ScriptContext {
 
     fn install_host_api(&mut self) -> Result<(), ScriptError> {
         let globals = self.lua.globals();
+        let module_object = self.lua.create_table().map_err(lua_err)?;
+        let module_state = self.lua.create_table().map_err(lua_err)?;
+        let module_exports = self.lua.create_table().map_err(lua_err)?;
+        module_object.set("state", module_state).map_err(lua_err)?;
+        module_object
+            .set("exports", module_exports)
+            .map_err(lua_err)?;
+        globals.set("module", module_object).map_err(lua_err)?;
+
         let mesh = self.lua.create_table().map_err(lua_err)?;
         let mesh_core_service = self.lua.create_table().map_err(lua_err)?;
         let mesh_core_events = self.lua.create_table().map_err(lua_err)?;
@@ -572,6 +584,9 @@ impl ScriptContext {
             }
         }
 
+        self.sync_module_exports_from_lua();
+        self.refresh_module_object();
+
         if self
             .lua
             .globals()
@@ -597,5 +612,26 @@ impl ScriptContext {
             }
         }
         self.interface_bindings = self.shared_interface_bindings.lock().unwrap().clone();
+    }
+
+    fn sync_module_exports_from_lua(&mut self) {
+        let Ok(module_table) = self.lua.globals().get::<Table>("module") else {
+            return;
+        };
+        let Ok(exports) = module_table.get::<LuaValue>("exports") else {
+            return;
+        };
+        if let Ok(value) = self.lua.from_value::<Value>(exports) {
+            self.state.set("exports", value);
+        }
+    }
+
+    fn refresh_module_object(&self) {
+        let Ok(module_table) = self.lua.globals().get::<Table>("module") else {
+            return;
+        };
+        if let Ok(state_value) = self.lua.to_value(&self.state.snapshot()) {
+            let _ = module_table.set("state", state_value);
+        }
     }
 }

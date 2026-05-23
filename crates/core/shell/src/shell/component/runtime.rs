@@ -167,6 +167,19 @@ impl FrontendSurfaceComponent {
         for (key, value) in props {
             script_ctx.state_mut().set(key.clone(), value.clone());
         }
+        for (service_name, payload) in &self.cached_service_payloads {
+            let interface = format!("mesh.{service_name}");
+            if script_has_service_read(&script_ctx, &interface, service_name) {
+                apply_service_update(
+                    script_ctx.state_mut(),
+                    true,
+                    &interface,
+                    "<cached>",
+                    payload.clone(),
+                );
+                script_ctx.apply_service_payload(service_name, payload);
+            }
+        }
 
         if let Some(script) = &component.script {
             let interface_imports = component
@@ -467,6 +480,17 @@ impl FrontendSurfaceComponent {
 
         Ok(events)
     }
+}
+
+fn script_has_service_read(
+    script_ctx: &ScriptContext,
+    interface: &str,
+    service_name: &str,
+) -> bool {
+    let capabilities = &script_ctx.capabilities;
+    capabilities.is_granted(&Capability::new(format!("service.{service_name}.read")))
+        || (interface == "mesh.theme" && capabilities.is_granted(&Capability::new("theme.read")))
+        || (interface == "mesh.locale" && capabilities.is_granted(&Capability::new("locale.read")))
 }
 
 fn module_descriptor_from_manifest(manifest: &mesh_core_module::Manifest) -> serde_json::Value {

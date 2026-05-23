@@ -89,6 +89,16 @@ impl ScriptState {
     pub fn has_proxy(&self, name: &str) -> bool {
         self.proxies.contains_key(name)
     }
+
+    /// Return a JSON object snapshot of all visible state variables.
+    pub fn snapshot(&self) -> Value {
+        let object = self
+            .keys()
+            .into_iter()
+            .filter_map(|key| self.get(&key).map(|value| (key, value)))
+            .collect();
+        Value::Object(object)
+    }
 }
 
 fn reactive_values_equal(previous: &Value, next: &Value) -> bool {

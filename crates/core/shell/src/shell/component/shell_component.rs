@@ -125,11 +125,13 @@ impl ShellComponent for FrontendSurfaceComponent {
             payload,
         } = event;
         self.last_service_update = Some(format!("{service}:{source_module}"));
+        let service_name = crate::shell::service::service_name_from_interface(service);
+        self.cached_service_payloads
+            .insert(service_name.clone(), payload.clone());
         let mut needs_rebuild = false;
         {
             let mut runtimes = self.runtimes.lock().unwrap();
             for runtime in runtimes.values_mut() {
-                let service_name = crate::shell::service::service_name_from_interface(service);
                 let required = format!("service.{service_name}.read");
                 let capabilities = &runtime.script_ctx.capabilities;
                 let has_read = capabilities.is_granted(&Capability::new(&required))
