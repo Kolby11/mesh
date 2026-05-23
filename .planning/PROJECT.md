@@ -10,6 +10,12 @@ MESH should let plugin authors build distinctive shell UI and service integratio
 
 ## Current State
 
+`v1.12 Module Object Contract` is planned as the next implementation milestone.
+The milestone will turn backend services and frontend modules into class-like
+Luau object instances over typed Rust-managed runtime lanes: replayable
+`module.state` and `module.exports` data, shell-routed object methods with
+visible results, and typed `module.events.Name:subscribe(...)` subscriptions.
+
 `v1.1` shipped on 2026-05-05.
 
 The project now has a backend plugin MVP with:

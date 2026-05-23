@@ -1,5 +1,29 @@
 # MESH Milestones
 
+## v1.12 Module Object Contract (Planned)
+
+**Status:** planned
+**Starts after:** v1.11 Surface Keybind Completion
+**Planned phases:** 65-69
+
+**Goal:** Implement backend services and frontend modules as class-like Luau object instances backed by typed Rust-managed runtime lanes for state/exports, methods/results, and events/subscriptions.
+
+**Planned scope:**
+
+- Stable backend and frontend module instance registry with lifecycle, capabilities, interface/version, active-provider, and diagnostic metadata
+- Replayable backend `state` and frontend `exports` object fields with latest snapshot delivery at runtime creation/show/reload boundaries
+- Object method syntax routed through the shell with capability checks, contract checks, target selection, and visible result/failure data
+- Typed event declarations, emissions, subscriptions, validation, and deterministic cleanup
+- Shipped audio/navigation proof and author docs for the class-like module object model
+
+**Planning artifacts:**
+
+- `.planning/ROADMAP.md`
+- `.planning/REQUIREMENTS.md`
+- `.planning/spikes/003-backend-data-event-contract/README.md`
+
+---
+
 ## v1.11 Surface Keybind Completion (Shipped: 2026-05-23)
 
 **Phases completed:** 5 phases, 5 plans, 12 tasks

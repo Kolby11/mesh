@@ -1,36 +1,40 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.11
-milestone_name: Surface Keybind Completion
-status: completed
-stopped_at: Phase 61 context gathered
-last_updated: "2026-05-23T10:32:15.520Z"
+milestone: v1.12
+milestone_name: Module Object Contract
+status: planned
+stopped_at: Next step: $gsd-plan-phase 65
+last_updated: "2026-05-23T12:00:00.000Z"
 last_activity: 2026-05-23
 progress:
   total_phases: 5
-  completed_phases: 5
+  completed_phases: 0
   total_plans: 5
-  completed_plans: 5
-  percent: 100
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: MESH v1.11
+# State: MESH v1.12
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-05-23)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** Planning next milestone
+**Current focus:** v1.12 Module Object Contract
 
 ## Current Position
 
-Phase: None
+Phase: 65 Module Instance Registry
 Plan: None
-Status: Milestone complete
+Status: Planned
 Last activity: 2026-05-23
 
 ## Decisions
+
+- [v1.12]: Backend services and frontend modules should be represented as class-like Luau object instances over typed Rust-managed runtime lanes.
+- [v1.12]: Durable data uses replayable `module.state.<field>` and `module.exports.<field>` snapshots; transient facts use typed `module.events.Name:subscribe(fn)` subscriptions; cross-module work uses object method calls with visible results.
+- [v1.12]: Rust shell remains responsible for module instance registration, routing, validation, capabilities, replay, lifecycle cleanup, provider selection, and diagnostics.
 
 - Backend plugins use Luau for service logic; Rust core remains the wiring layer.
 - `require('@mesh/service')` is the frontend/backend interface.
