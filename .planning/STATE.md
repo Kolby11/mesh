@@ -272,6 +272,10 @@ Items acknowledged and deferred at `v1.11` close on 2026-05-23:
 | v1.9 archived roadmap | `.planning/milestones/v1.9-ROADMAP.md` |
 | v1.9 audit | `.planning/milestones/v1.9-MILESTONE-AUDIT.md` |
 | v1.9 phase archive | `.planning/milestones/v1.9-phases/` |
+| v1.11 archived requirements | `.planning/milestones/v1.11-REQUIREMENTS.md` |
+| v1.11 archived roadmap | `.planning/milestones/v1.11-ROADMAP.md` |
+| v1.11 audit | `.planning/milestones/v1.11-MILESTONE-AUDIT.md` |
+| v1.11 phase archive | `.planning/milestones/v1.11-phases/` |
 | v1.7 research details | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
 | v1.4 research | `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md` |
 | Codebase map | `.planning/codebase/` |

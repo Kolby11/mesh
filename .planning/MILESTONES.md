@@ -19,6 +19,7 @@
 - `.planning/milestones/v1.11-ROADMAP.md`
 - `.planning/milestones/v1.11-REQUIREMENTS.md`
 - `.planning/milestones/v1.11-MILESTONE-AUDIT.md`
+- `.planning/milestones/v1.11-phases/`
 
 ---
 
