@@ -420,6 +420,152 @@ fn shipped_navigation_volume_button_publishes_immediate_audio_popover_show() {
 }
 
 #[test]
+fn shipped_navigation_animation_keeps_status_pulse_repaint_only() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    component.visible = true;
+
+    let theme = default_theme();
+    let mut tree = component.build_tree(&theme, 960, 80);
+    let status_accent =
+        first_node_with_attr(&tree, "class", "status-accent").expect("status pulse node");
+    assert_eq!(
+        status_accent.computed_style.animation.name.as_deref(),
+        Some("status-pulse")
+    );
+    component.dirty = false;
+    component.style_only_dirty = false;
+    component.dirty_types = ComponentDirtyFlags::empty();
+    component.apply_style_animations(&mut tree);
+
+    let (requires_tree_rebuild, can_use_retained_path, flags, _) = component.take_dirty_for_paint();
+    assert!(!requires_tree_rebuild);
+    assert!(can_use_retained_path);
+    assert!(flags.contains(ComponentDirtyFlags::STYLE));
+    assert!(flags.contains(ComponentDirtyFlags::PAINT));
+    assert!(!flags.contains(ComponentDirtyFlags::LAYOUT));
+}
+
+#[test]
+fn shipped_navigation_audio_popover_transition_delay_stays_bounded() {
+    let mut component =
+        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    assert_eq!(
+        component.hide_transition_ms(),
+        120,
+        "audio popover should keep the shipped bounded hide transition"
+    );
+
+    component.set_surface_exiting(true);
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 220);
+    component.paint(&theme, 320, 220, &mut buffer).unwrap();
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered audio popover");
+    assert!(
+        tree.attributes
+            .get("class")
+            .is_some_and(|class| class.contains("mesh-surface-exiting")),
+        "closing transition should expose mesh-surface-exiting state to styles"
+    );
+}
+
+#[test]
+fn shipped_navigation_audio_popover_transition_does_not_consume_first_input() {
+    let mut navigation =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    navigation.visible = true;
+
+    let theme = default_theme();
+    let mut nav_buffer = PixelBuffer::new(960, 80);
+    navigation.paint(&theme, 960, 80, &mut nav_buffer).unwrap();
+    let tree = navigation
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation bar");
+    let button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+    )
+    .expect("volume button");
+    let click_handler = button.event_handlers.get("click").unwrap().clone();
+    let button_key = button
+        .attributes
+        .get("_mesh_key")
+        .expect("button mesh key")
+        .clone();
+    let open_requests = navigation
+        .call_namespaced_handler(
+            &click_handler,
+            &[serde_json::json!({
+                "trigger": { "type": "pointer" },
+                "current": { "key": button_key },
+                "current_target": {
+                    "key": button_key,
+                    "position": {
+                        "margin_left": 32,
+                        "margin_bottom": 40
+                    }
+                }
+            })],
+        )
+        .unwrap();
+    assert!(
+        open_requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ActivatePopover { surface_id, focus, .. }
+                if surface_id == "@mesh/audio-popover" && !*focus
+        )),
+        "first pointer click should open the audio popover without stealing focus: {open_requests:?}"
+    );
+
+    let mut audio = real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    audio
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    let mut audio_buffer = PixelBuffer::new(320, 220);
+    audio.paint(&theme, 320, 220, &mut audio_buffer).unwrap();
+    let audio_tree = audio.last_tree.as_ref().expect("rendered audio popover");
+    let slider = first_node_by_tag(audio_tree, "slider").expect("slider node");
+    let slider_key = slider
+        .attributes
+        .get("_mesh_key")
+        .expect("slider key")
+        .clone();
+    audio.focused_key = Some(slider_key);
+
+    let requests = audio
+        .handle_input(
+            &theme,
+            320,
+            220,
+            ComponentInput::KeyPressed {
+                key: "ArrowRight".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ServiceCommand { interface, command, .. }
+                if interface == "mesh.audio" && command == "set_volume"
+        )),
+        "first audio popover input should reach the service command path: {requests:?}"
+    );
+}
+
+#[test]
 fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());

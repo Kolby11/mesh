@@ -1046,12 +1046,16 @@ fn clip_damage(rect: DamageRect, surface: DamageRect) -> Option<DamageRect> {
         .y
         .saturating_add(rect.height)
         .min(surface.y.saturating_add(surface.height));
-    (right > left && bottom > top).then_some(DamageRect {
-        x: left,
-        y: top,
-        width: right - left,
-        height: bottom - top,
-    })
+    if right > left && bottom > top {
+        Some(DamageRect {
+            x: left,
+            y: top,
+            width: right - left,
+            height: bottom - top,
+        })
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
