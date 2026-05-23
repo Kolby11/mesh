@@ -1581,6 +1581,161 @@ mod tests {
     }
 
     #[test]
+    fn animation_property_bucket_classifies_paint_only_properties() {
+        for (name, properties) in [
+            (
+                "opacity",
+                TransitionProperties {
+                    opacity: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+            (
+                "background-color",
+                TransitionProperties {
+                    background_color: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+            (
+                "border-color",
+                TransitionProperties {
+                    border_color: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+            (
+                "color",
+                TransitionProperties {
+                    color: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+            (
+                "border-radius",
+                TransitionProperties {
+                    border_radius: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+            (
+                "transform",
+                TransitionProperties {
+                    transform: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+            (
+                "border-width",
+                TransitionProperties {
+                    border_width: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+        ] {
+            assert_eq!(
+                properties.animation_bucket(),
+                AnimationPropertyBucket::PaintOnly,
+                "{name}"
+            );
+            assert!(properties.has_paint_only_animation(), "{name}");
+        }
+    }
+
+    #[test]
+    fn animation_property_bucket_classifies_layer_effect_properties() {
+        for (name, properties) in [
+            (
+                "box-shadow",
+                TransitionProperties {
+                    box_shadow: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+            (
+                "filter",
+                TransitionProperties {
+                    filter: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+            (
+                "backdrop-filter",
+                TransitionProperties {
+                    backdrop_filter: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+        ] {
+            assert_eq!(
+                properties.animation_bucket(),
+                AnimationPropertyBucket::LayerEffect,
+                "{name}"
+            );
+            assert!(properties.has_layer_effect_animation(), "{name}");
+        }
+    }
+
+    #[test]
+    fn animation_property_bucket_classifies_layout_affecting_properties() {
+        for (name, properties) in [
+            (
+                "width",
+                TransitionProperties {
+                    width: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+            (
+                "height",
+                TransitionProperties {
+                    height: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+            (
+                "padding",
+                TransitionProperties {
+                    padding: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+            (
+                "font-size",
+                TransitionProperties {
+                    font_size: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+            (
+                "inset-left",
+                TransitionProperties {
+                    inset_left: true,
+                    ..TransitionProperties::none()
+                },
+            ),
+        ] {
+            assert_eq!(
+                properties.animation_bucket(),
+                AnimationPropertyBucket::LayoutAffecting,
+                "{name}"
+            );
+            assert!(properties.has_layout_affecting_animation(), "{name}");
+        }
+    }
+
+    #[test]
+    fn animation_property_bucket_treats_all_as_layout_affecting() {
+        let properties = TransitionProperties::all();
+
+        assert_eq!(
+            properties.animation_bucket(),
+            AnimationPropertyBucket::LayoutAffecting
+        );
+        assert!(properties.has_layout_affecting_animation());
+    }
+
+    #[test]
     fn animation_longhands_store_metadata_only() {
         let theme = mesh_core_theme::default_theme();
         let resolver = StyleResolver::new(&theme);

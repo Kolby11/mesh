@@ -935,6 +935,14 @@ pub struct TransitionProperties {
     pub inset_left: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnimationPropertyBucket {
+    None,
+    PaintOnly,
+    LayerEffect,
+    LayoutAffecting,
+}
+
 impl TransitionProperties {
     pub fn none() -> Self {
         Self::default()
@@ -1095,6 +1103,58 @@ impl TransitionProperties {
             || self.inset_right
             || self.inset_bottom
             || self.inset_left
+    }
+
+    pub fn animation_bucket(self) -> AnimationPropertyBucket {
+        if self.all
+            || self.width
+            || self.height
+            || self.min_width
+            || self.max_width
+            || self.min_height
+            || self.max_height
+            || self.padding
+            || self.margin
+            || self.font_size
+            || self.letter_spacing
+            || self.line_height
+            || self.gap
+            || self.inset_top
+            || self.inset_right
+            || self.inset_bottom
+            || self.inset_left
+        {
+            return AnimationPropertyBucket::LayoutAffecting;
+        }
+
+        if self.box_shadow || self.filter || self.backdrop_filter {
+            return AnimationPropertyBucket::LayerEffect;
+        }
+
+        if self.border_radius
+            || self.border_width
+            || self.opacity
+            || self.background_color
+            || self.border_color
+            || self.color
+            || self.transform
+        {
+            return AnimationPropertyBucket::PaintOnly;
+        }
+
+        AnimationPropertyBucket::None
+    }
+
+    pub fn has_paint_only_animation(self) -> bool {
+        self.animation_bucket() == AnimationPropertyBucket::PaintOnly
+    }
+
+    pub fn has_layer_effect_animation(self) -> bool {
+        self.animation_bucket() == AnimationPropertyBucket::LayerEffect
+    }
+
+    pub fn has_layout_affecting_animation(self) -> bool {
+        self.animation_bucket() == AnimationPropertyBucket::LayoutAffecting
     }
 }
 
