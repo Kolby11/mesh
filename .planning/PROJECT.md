@@ -121,6 +121,12 @@ diagnostic reporting, command-backed compatibility helpers, docs for the
 helper-to-command migration path, and Vello compatibility notes that keep Skia
 types behind the Skia backend boundary.
 
+Phase 55 of v1.10 is complete. MESH now has bounded background-image style
+data, backend-neutral image and linear-gradient painter commands, Skia-backed
+layer/image/gradient execution, non-fatal diagnostics for unsupported effect
+cases, visual-bounds proof for supported effects, and backend-neutrality
+validation that keeps Skia types out of retained style and display-list data.
+
 **Target features:**
 - Define and use a high-level painter command API below the retained display list: push clip, push layer, draw rect/rounded rect/path/text/image/shadow, apply filter, pop layer, and pop clip.
 - Lock the bounded MESH style profile for XML/.mesh, CSS-like syntax, and theme tokens so unsupported browser CSS produces diagnostics instead of hidden missing behavior.
@@ -183,6 +189,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.9 Phase 46`: Production renderer-library dependencies and adapter feature gates are installed with documented rollback, build, CI, Linux/Nix, binary-risk, and ownership boundaries.
 - `v1.9 Phase 47`: Taffy-backed layout is authoritative for in-scope retained MESH geometry while shipped navigation/audio surfaces, layout parity cases, diagnostics, and proof/damage payloads remain verified.
 - `v1.10 Phase 51`: The painter command API, backend capability contract, compatibility helper lowering, helper migration map, and Vello compatibility notes are in place below retained display-list ownership.
+- `v1.10 Phase 55`: Supported background images, linear gradients, layers, images, blur, shadows, effect diagnostics, visual bounds, and backend-neutral validation are proven through focused style/render/effect suites.
 
 ### Active
 
@@ -237,6 +244,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Broad renderer migration must be phased and reversible | Future adoption needs author-contract, ownership-classification, build/CI/release, and rollback gates before becoming broad production behavior | Shipped in v1.8 Phase 45 |
 | Skia is the paint backend, not the render engine | MESH still owns widget traversal, style/layout, animation, retained display lists, damage, module boundaries, input state, and presentation; Skia owns the low-level painter/raster primitives below that boundary | Active for v1.10 |
 | Painter API must stay backend-neutral enough for Vello | The display-list-to-painter contract should describe high-level paint commands, not Skia-only helper calls, so a future Vello backend can implement the same behavior with parity proof | Active for v1.10 |
+| Background images remain bounded shell UI paint data | Phase 55 supports `none`, relative `url(...)`, and compact two-color `linear-gradient(...)` while unsupported browser-like values diagnose instead of silently disappearing | Shipped in v1.10 Phase 55 |
 
 <details>
 <summary>Archived milestone framing</summary>
@@ -283,4 +291,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-21 after starting milestone v1.10*
+*Last updated: 2026-05-23 after Phase 55*
