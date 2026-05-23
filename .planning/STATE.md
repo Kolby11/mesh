@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.11
 milestone_name: Surface Keybind Completion
-status: planning
+status: ready_to_plan
 stopped_at: Phase 61 context gathered
-last_updated: "2026-05-23T10:18:12.074Z"
+last_updated: "2026-05-23T10:25:23.886Z"
 last_activity: 2026-05-23
 progress:
   total_phases: 5
-  completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
+  completed_phases: 5
+  total_plans: 4
+  completed_plans: 4
   percent: 100
 ---
 
@@ -25,7 +25,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-23)
 
 ## Current Position
 
-Phase: 62
+Phase: 64
 Plan: Not started
 Status: Ready to plan
 Last activity: 2026-05-23
@@ -127,6 +127,7 @@ Last activity: 2026-05-23
 - [Phase 60]: Bare printable keys remain owned by focused text inputs before surface keybind dispatch; matched shortcuts with no runtime subscribers fall through as unhandled. — Preserves shell/input precedence and prevents declared-but-unrendered keybinds from swallowing normal focused keyboard handling.
 - [Phase 61]: Localized keybind defaults apply only to access-key declarations, while user overrides apply only to existing action declarations and cannot create missing action ids. — This satisfies KRES-02 and KRES-03 while keeping manifest declarations canonical and settings override-only.
 - [Phase 62]: Keybind diagnostics use degraded component health with module id, surface id, action id, and reason. — Keybind author and override mistakes should be observable without crashing the focused surface or changing shell input precedence.
+- [Phase 63]: Resolved keybind metadata is exposed through structured mesh.debug keybind entries while accessibility uses existing keyboard_shortcut annotations. — Debug consumers need inspectable focused-surface keybind state without coupling to frontend internals or replacing the accessibility path.
 
 ## Performance Metrics
 
@@ -170,6 +171,7 @@ Last activity: 2026-05-23
 | Phase 60 P01 | 25min | 3 tasks | 3 files |
 | Phase 61 P01 | 18min | 3 tasks | 2 files |
 | Phase 62 P01 | 20min | 3 tasks | 3 files |
+| Phase 63 P01 | 24min | 3 tasks | 10 files |
 
 ## Session
 

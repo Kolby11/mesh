@@ -28,9 +28,9 @@
 
 ### Accessibility And Observability
 
-- [ ] **KACC-01**: Resolved shortcut and access-key metadata is exposed through existing accessibility annotations for target controls where available.
-- [ ] **KACC-02**: Debug or profiling payloads can show resolved surface keybind metadata and keybind diagnostics without making settings the canonical declaration source.
-- [ ] **KACC-03**: Author docs explain the surface keybind lifecycle: manifest declaration, localized triggers, user overrides, diagnostics, accessibility metadata, and focused-surface scope.
+- [x] **KACC-01**: Resolved shortcut and access-key metadata is exposed through existing accessibility annotations for target controls where available.
+- [x] **KACC-02**: Debug or profiling payloads can show resolved surface keybind metadata and keybind diagnostics without making settings the canonical declaration source.
+- [x] **KACC-03**: Author docs explain the surface keybind lifecycle: manifest declaration, localized triggers, user overrides, diagnostics, accessibility metadata, and focused-surface scope.
 
 ### Shipped Surface Proof
 
@@ -81,9 +81,9 @@
 | KDIAG-02 | Phase 62 | Complete |
 | KDIAG-03 | Phase 62 | Complete |
 | KDIAG-04 | Phase 62 | Complete |
-| KACC-01 | Phase 63 | Pending |
-| KACC-02 | Phase 63 | Pending |
-| KACC-03 | Phase 63 | Pending |
+| KACC-01 | Phase 63 | Complete |
+| KACC-02 | Phase 63 | Complete |
+| KACC-03 | Phase 63 | Complete |
 | KPROOF-01 | Phase 64 | Pending |
 | KPROOF-02 | Phase 64 | Pending |
 | KPROOF-03 | Phase 64 | Pending |
