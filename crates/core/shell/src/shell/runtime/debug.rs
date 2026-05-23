@@ -119,6 +119,7 @@ impl Shell {
             module_instances,
             interfaces,
             backend_runtimes,
+            method_calls: self.debug.recent_method_calls.clone(),
             health,
             keybinds,
             active_surfaces,
@@ -161,6 +162,7 @@ fn debug_service_payload(
         "module_instances": snapshot.module_instances.iter().map(module_object_entry_json).collect::<Vec<_>>(),
         "interfaces": snapshot.interfaces.iter().map(interface_entry_json).collect::<Vec<_>>(),
         "backend_runtimes": snapshot.backend_runtimes.iter().map(backend_runtime_entry_json).collect::<Vec<_>>(),
+        "method_calls": snapshot.method_calls.iter().map(method_call_entry_json).collect::<Vec<_>>(),
         "health": snapshot.health.iter().map(health_entry_json).collect::<Vec<_>>(),
         "keybinds": snapshot.keybinds.iter().map(keybind_entry_json).collect::<Vec<_>>(),
         "active_surfaces": snapshot.active_surfaces.clone(),
@@ -248,6 +250,42 @@ impl Shell {
                 .then_with(|| left.instance_id.cmp(&right.instance_id))
         });
         entries
+    }
+
+    pub(in crate::shell) fn record_method_call(&mut self, entry: mesh_core_debug::MethodCallEntry) {
+        const MAX_METHOD_CALLS: usize = 50;
+        self.debug.recent_method_calls.push(entry);
+        if self.debug.recent_method_calls.len() > MAX_METHOD_CALLS {
+            let overflow = self.debug.recent_method_calls.len() - MAX_METHOD_CALLS;
+            self.debug.recent_method_calls.drain(0..overflow);
+        }
+    }
+
+    pub(in crate::shell) fn record_backend_method_result(
+        &mut self,
+        interface: String,
+        provider_id: String,
+        command: String,
+        result: serde_json::Value,
+    ) {
+        let ok = result
+            .get("ok")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true);
+        let error = result
+            .get("error")
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned);
+        self.record_method_call(mesh_core_debug::MethodCallEntry {
+            interface,
+            provider_id: Some(provider_id),
+            source_module_id: "<backend>".to_string(),
+            command,
+            status: if ok { "completed" } else { "failed" }.to_string(),
+            queued: false,
+            result: Some(result),
+            error,
+        });
     }
 }
 
@@ -792,6 +830,19 @@ fn backend_runtime_entry_json(entry: &BackendRuntimeEntry) -> serde_json::Value 
         "status": entry.status,
         "message": entry.message,
         "failure_count": entry.failure_count,
+    })
+}
+
+fn method_call_entry_json(entry: &mesh_core_debug::MethodCallEntry) -> serde_json::Value {
+    serde_json::json!({
+        "interface": entry.interface,
+        "provider_id": entry.provider_id,
+        "source_module_id": entry.source_module_id,
+        "command": entry.command,
+        "status": entry.status,
+        "queued": entry.queued,
+        "result": entry.result,
+        "error": entry.error,
     })
 }
 

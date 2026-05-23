@@ -98,6 +98,12 @@ pub(super) enum ShellMessage {
         status: String,
         message: String,
     },
+    BackendCommandResult {
+        interface: String,
+        provider_id: String,
+        command: String,
+        result: serde_json::Value,
+    },
     Ipc(CoreRequest),
 }
 

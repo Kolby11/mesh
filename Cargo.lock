@@ -1428,6 +1428,9 @@ dependencies = [
 [[package]]
 name = "mesh-core-debug"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "mesh-core-diagnostics"

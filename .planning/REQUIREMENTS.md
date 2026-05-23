@@ -20,10 +20,10 @@
 
 ### Methods
 
-- [ ] **MMETH-01**: Object method syntax such as `module:<method>(...)` routes through the shell-owned method/call lane.
-- [ ] **MMETH-02**: Method calls are capability-checked, contract-checked, and routed to the correct active backend or frontend module instance.
-- [ ] **MMETH-03**: Method handlers can return structured success or failure data that is visible to callers or at least to debug state.
-- [ ] **MMETH-04**: Existing generated service proxy command methods continue to work while converging on the object method lane.
+- [x] **MMETH-01**: Object method syntax such as `module:<method>(...)` routes through the shell-owned method/call lane.
+- [x] **MMETH-02**: Method calls are capability-checked, contract-checked, and routed to the correct active backend or frontend module instance.
+- [x] **MMETH-03**: Method handlers can return structured success or failure data that is visible to callers or at least to debug state.
+- [x] **MMETH-04**: Existing generated service proxy command methods continue to work while converging on the object method lane.
 
 ### Events
 
@@ -59,10 +59,10 @@
 | MSTATE-02 | Phase 66 | Complete |
 | MSTATE-03 | Phase 66 | Complete |
 | MSTATE-04 | Phase 66 | Complete |
-| MMETH-01 | Phase 67 | Planned |
-| MMETH-02 | Phase 67 | Planned |
-| MMETH-03 | Phase 67 | Planned |
-| MMETH-04 | Phase 67 | Planned |
+| MMETH-01 | Phase 67 | Complete |
+| MMETH-02 | Phase 67 | Complete |
+| MMETH-03 | Phase 67 | Complete |
+| MMETH-04 | Phase 67 | Complete |
 | MEVT-01 | Phase 68 | Planned |
 | MEVT-02 | Phase 68 | Planned |
 | MEVT-03 | Phase 68 | Planned |

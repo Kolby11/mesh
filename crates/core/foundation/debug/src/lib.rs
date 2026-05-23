@@ -10,6 +10,7 @@ pub struct DebugSnapshot {
     pub module_instances: Vec<ModuleObjectEntry>,
     pub interfaces: Vec<InterfaceEntry>,
     pub backend_runtimes: Vec<BackendRuntimeEntry>,
+    pub method_calls: Vec<MethodCallEntry>,
     pub health: Vec<HealthEntry>,
     pub keybinds: Vec<DebugKeybindEntry>,
     pub active_surfaces: Vec<String>,
@@ -424,6 +425,18 @@ pub struct BackendRuntimeEntry {
     pub failure_count: u64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodCallEntry {
+    pub interface: String,
+    pub provider_id: Option<String>,
+    pub source_module_id: String,
+    pub command: String,
+    pub status: String,
+    pub queued: bool,
+    pub result: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct HealthEntry {
     pub module_id: String,
@@ -440,6 +453,7 @@ pub struct DebugOverlayState {
     pub profiling_enabled: bool,
     pub profiling_session_id: u64,
     pub latest_benchmark_run: Option<DebugBenchmarkRunState>,
+    pub recent_method_calls: Vec<MethodCallEntry>,
 }
 
 impl DebugOverlayState {

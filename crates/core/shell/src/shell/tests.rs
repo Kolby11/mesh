@@ -35,7 +35,7 @@ use mesh_core_service::{
     parse_contract_version,
 };
 use mesh_core_wayland::{ClipboardError, ClipboardWriter};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -4231,6 +4231,70 @@ fn service_contract_unknown_service_command_returns_failure_result() {
                     && health.to_string().contains("unsupported_service_command")
             })
     );
+}
+
+#[test]
+fn service_command_dispatch_records_debug_method_call() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+    let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.audio.control",
+    ));
+
+    let result = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_volume",
+        &serde_json::json!({ "volume": 0.4 }),
+        "@mesh/panel",
+        &capabilities,
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(true));
+    assert_eq!(rx.try_recv().unwrap().command, "set_volume");
+    let snapshot = shell.build_debug_snapshot();
+    assert!(snapshot.method_calls.iter().any(|entry| {
+        entry.interface == "mesh.audio"
+            && entry.provider_id.as_deref() == Some("@mesh/pipewire-audio")
+            && entry.source_module_id == "@mesh/panel"
+            && entry.command == "set_volume"
+            && entry.status == "queued"
+            && entry.queued
+    }));
+}
+
+#[test]
+fn backend_command_result_records_debug_method_result() {
+    let mut shell = Shell::new();
+    let mut pending = VecDeque::new();
+
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::BackendCommandResult {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/pipewire-audio".to_string(),
+                command: "set_volume".to_string(),
+                result: serde_json::json!({ "ok": true, "volume": 0.4 }),
+            },
+        )
+        .unwrap();
+
+    let snapshot = shell.build_debug_snapshot();
+    assert!(snapshot.method_calls.iter().any(|entry| {
+        entry.interface == "mesh.audio"
+            && entry.provider_id.as_deref() == Some("@mesh/pipewire-audio")
+            && entry.source_module_id == "<backend>"
+            && entry.command == "set_volume"
+            && entry.status == "completed"
+            && !entry.queued
+    }));
 }
 
 #[test]

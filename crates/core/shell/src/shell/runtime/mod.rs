@@ -85,6 +85,7 @@ impl Shell {
             ShellMessage::Service(_) => "service_event",
             ShellMessage::BackendServiceUpdate { .. } => "backend_service_update",
             ShellMessage::BackendLifecycle { .. } => "backend_lifecycle",
+            ShellMessage::BackendCommandResult { .. } => "backend_command_result",
             ShellMessage::Ipc(_) => "ipc",
         };
         match message {
@@ -117,6 +118,12 @@ impl Shell {
                 status,
                 message,
             } => self.handle_backend_lifecycle(interface, provider_id, stage, status, message),
+            ShellMessage::BackendCommandResult {
+                interface,
+                provider_id,
+                command,
+                result,
+            } => self.record_backend_method_result(interface, provider_id, command, result),
             ShellMessage::Ipc(request) => {
                 pending.push_back(request);
             }

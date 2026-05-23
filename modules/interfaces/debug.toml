@@ -47,6 +47,11 @@ type = "[BackendRuntimeEntry]"
 description = "Backend runtime lifecycle and health entries"
 
 [[state_fields]]
+name = "method_calls"
+type = "[MethodCallEntry]"
+description = "Recent shell-routed module method calls and backend command results"
+
+[[state_fields]]
 name = "active_surfaces"
 type = "[string]"
 description = "Currently visible shell surface identifiers"
@@ -96,6 +101,18 @@ fields = [
   { name = "status", type = "string" },
   { name = "message", type = "string" },
   { name = "failure_count", type = "integer" }
+]
+
+[types.MethodCallEntry]
+fields = [
+  { name = "interface", type = "string" },
+  { name = "provider_id", type = "string" },
+  { name = "source_module_id", type = "string" },
+  { name = "command", type = "string" },
+  { name = "status", type = "string" },
+  { name = "queued", type = "boolean" },
+  { name = "result", type = "object" },
+  { name = "error", type = "string" }
 ]
 
 [types.ProfilingSnapshot]

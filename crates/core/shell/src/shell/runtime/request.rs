@@ -367,6 +367,20 @@ impl Shell {
                 required_capability = %required,
                 "denied unauthorized service command dispatch"
             );
+            self.record_method_call(mesh_core_debug::MethodCallEntry {
+                interface: canonical_interface_name(interface),
+                provider_id: None,
+                source_module_id: source_module_id.to_string(),
+                command: command.to_string(),
+                status: "capability_denied".to_string(),
+                queued: false,
+                result: Some(serde_json::json!({
+                    "ok": false,
+                    "error": "capability_denied",
+                    "status": "capability_denied",
+                })),
+                error: Some("capability_denied".to_string()),
+            });
             return serde_json::json!({
                 "ok": false,
                 "error": "capability_denied",
@@ -387,6 +401,20 @@ impl Shell {
                 "unsupported_service_command",
                 message.clone(),
             );
+            self.record_method_call(mesh_core_debug::MethodCallEntry {
+                interface: canonical_interface_name(interface),
+                provider_id: None,
+                source_module_id: source_module_id.to_string(),
+                command: command.to_string(),
+                status: "unsupported_service_command".to_string(),
+                queued: false,
+                result: Some(serde_json::json!({
+                    "ok": false,
+                    "error": message,
+                    "status": "unsupported_service_command",
+                })),
+                error: Some(message.clone()),
+            });
             return serde_json::json!({
                 "ok": false,
                 "error": message,
@@ -470,6 +498,40 @@ impl Shell {
             self.apply_optimistic_audio_muted_state(muted);
             dispatch_result["optimistic"] = serde_json::json!(true);
         }
+
+        let provider_id = self
+            .backend_runtimes
+            .get(&canonical_interface_name(interface))
+            .map(|slot| slot.provider_id.clone());
+        let queued = dispatch_result
+            .get("queued")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        let status = dispatch_result
+            .get("status")
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| {
+                if queued {
+                    "queued".to_string()
+                } else {
+                    "failed".to_string()
+                }
+            });
+        let error = dispatch_result
+            .get("error")
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned);
+        self.record_method_call(mesh_core_debug::MethodCallEntry {
+            interface: canonical_interface_name(interface),
+            provider_id,
+            source_module_id: source_module_id.to_string(),
+            command: command.to_string(),
+            status,
+            queued,
+            result: Some(dispatch_result.clone()),
+            error,
+        });
 
         dispatch_result
     }

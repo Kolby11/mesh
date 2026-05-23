@@ -114,6 +114,12 @@ impl Shell {
                         }
                     }
                     BackendServiceEvent::CommandResult(result) => {
+                        let _ = shell_tx.send(ShellMessage::BackendCommandResult {
+                            interface: bridge_interface.clone(),
+                            provider_id: bridge_provider_id.clone(),
+                            command: result.command.clone(),
+                            result: result.result.clone(),
+                        });
                         tracing::debug!(
                             interface = bridge_interface.as_str(),
                             provider_id = bridge_provider_id.as_str(),
