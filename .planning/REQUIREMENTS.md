@@ -21,10 +21,10 @@
 
 ### Diagnostics And Safety
 
-- [ ] **KDIAG-01**: Malformed keybind declarations emit non-fatal diagnostics with module id, surface id, action id, and concise reason.
-- [ ] **KDIAG-02**: Duplicate effective bindings on the same focused surface emit diagnostics without making dispatch nondeterministic.
-- [ ] **KDIAG-03**: Missing targets, unsupported trigger forms, and unresolved overrides emit diagnostics instead of silently dropping behavior.
-- [ ] **KDIAG-04**: Override validation rejects or ignores unsafe bindings that would steal reserved shell-global shortcuts, text input ownership, or selection-copy behavior.
+- [x] **KDIAG-01**: Malformed keybind declarations emit non-fatal diagnostics with module id, surface id, action id, and concise reason.
+- [x] **KDIAG-02**: Duplicate effective bindings on the same focused surface emit diagnostics without making dispatch nondeterministic.
+- [x] **KDIAG-03**: Missing targets, unsupported trigger forms, and unresolved overrides emit diagnostics instead of silently dropping behavior.
+- [x] **KDIAG-04**: Override validation rejects or ignores unsafe bindings that would steal reserved shell-global shortcuts, text input ownership, or selection-copy behavior.
 
 ### Accessibility And Observability
 
@@ -77,10 +77,10 @@
 | KRES-02 | Phase 61 | Complete |
 | KRES-03 | Phase 61 | Complete |
 | KRES-04 | Phase 61 | Complete |
-| KDIAG-01 | Phase 62 | Pending |
-| KDIAG-02 | Phase 62 | Pending |
-| KDIAG-03 | Phase 62 | Pending |
-| KDIAG-04 | Phase 62 | Pending |
+| KDIAG-01 | Phase 62 | Complete |
+| KDIAG-02 | Phase 62 | Complete |
+| KDIAG-03 | Phase 62 | Complete |
+| KDIAG-04 | Phase 62 | Complete |
 | KACC-01 | Phase 63 | Pending |
 | KACC-02 | Phase 63 | Pending |
 | KACC-03 | Phase 63 | Pending |
