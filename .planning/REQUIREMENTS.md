@@ -7,10 +7,10 @@
 
 ### Action Dispatch
 
-- [ ] **KDISP-01**: Frontend module authors can declare semantic surface keybind actions in canonical `module.json` and have those actions dispatch through the existing shell component handler path.
-- [ ] **KDISP-02**: Surface keybind dispatch preserves shell-global shortcut precedence, text input handling, text selection copy, focus traversal, and default widget activation behavior.
-- [ ] **KDISP-03**: Keybind actions can target declared controls or focused-surface handlers without relying on localized labels or raw display text.
-- [ ] **KDISP-04**: Shipped navigation and audio surfaces exercise real manifest-owned keybind dispatch rather than legacy settings-only shortcuts.
+- [x] **KDISP-01**: Frontend module authors can declare semantic surface keybind actions in canonical `module.json` and have those actions dispatch through the existing shell component handler path.
+- [x] **KDISP-02**: Surface keybind dispatch preserves shell-global shortcut precedence, text input handling, text selection copy, focus traversal, and default widget activation behavior.
+- [x] **KDISP-03**: Keybind actions can target declared controls or focused-surface handlers without relying on localized labels or raw display text.
+- [x] **KDISP-04**: Shipped navigation and audio surfaces exercise real manifest-owned keybind dispatch rather than legacy settings-only shortcuts.
 
 ### Resolution And Overrides
 
@@ -69,10 +69,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| KDISP-01 | Phase 60 | Pending |
-| KDISP-02 | Phase 60 | Pending |
-| KDISP-03 | Phase 60 | Pending |
-| KDISP-04 | Phase 60 | Pending |
+| KDISP-01 | Phase 60 | Complete |
+| KDISP-02 | Phase 60 | Complete |
+| KDISP-03 | Phase 60 | Complete |
+| KDISP-04 | Phase 60 | Complete |
 | KRES-01 | Phase 61 | Pending |
 | KRES-02 | Phase 61 | Pending |
 | KRES-03 | Phase 61 | Pending |

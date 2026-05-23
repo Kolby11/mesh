@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.11
 milestone_name: Surface Keybind Completion
-status: executing
-stopped_at: Phase 60 context gathered
-last_updated: "2026-05-23T09:36:04.912Z"
-last_activity: 2026-05-23 -- Phase 60 planning complete
+status: planning
+stopped_at: Completed 60-01-PLAN.md
+last_updated: "2026-05-23T09:46:36.107Z"
+last_activity: 2026-05-23
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 1
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 100
 ---
 
 # State: MESH v1.11
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-23)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.11 surface keybind completion
+**Current focus:** Phase 60 — surface-keybind-dispatch-runtime
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Ready to execute
-Last activity: 2026-05-23 -- Phase 60 planning complete
+Phase: 61
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-05-23
 
 ## Decisions
 
@@ -124,6 +124,7 @@ Last activity: 2026-05-23 -- Phase 60 planning complete
 - [Phase 52-01]: MESH shell CSS profile statuses are exactly implemented, diagnostic-only, deferred, and out-of-scope.
 - [Phase 52-01]: Style profile metadata remains backend-neutral and colocated with supported_css_properties.
 - [Phase 52-01]: CSS custom properties remain local StyleResolver variables and are distinct from mesh-core-theme tokens.
+- [Phase 60]: Bare printable keys remain owned by focused text inputs before surface keybind dispatch; matched shortcuts with no runtime subscribers fall through as unhandled. — Preserves shell/input precedence and prevents declared-but-unrendered keybinds from swallowing normal focused keyboard handling.
 
 ## Performance Metrics
 
@@ -164,12 +165,13 @@ Last activity: 2026-05-23 -- Phase 60 planning complete
 | Phase 40 P01 | 16 min | 3 tasks | 3 files |
 | Phase 40 P02 | 9 min | 3 tasks | 10 files |
 | Phase 52 P01 | 5min | 2 tasks | 3 files |
+| Phase 60 P01 | 25min | 3 tasks | 3 files |
 
 ## Session
 
-Last session: 2026-05-23T09:28:27.052Z
-Stopped At: Phase 60 context gathered
-Resume File: .planning/phases/60-surface-keybind-dispatch-runtime/60-CONTEXT.md
+Last session: 2026-05-23T09:44:56.032Z
+Stopped At: Completed 60-01-PLAN.md
+Resume File: None
 
 ## Accumulated Context
 

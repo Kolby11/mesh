@@ -17,7 +17,7 @@ MESH keeps shell-owned input precedence. Shell-global shortcuts, text input, sel
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 60 | Surface Keybind Dispatch Runtime | Route manifest-owned actions through focused-surface component input without breaking existing keyboard precedence | KDISP-01, KDISP-02, KDISP-03, KDISP-04 | 4 |
+| 60 | Surface Keybind Dispatch Runtime | 1/1 | Complete    | 2026-05-23 |
 | 61 | Localized Resolution And Override Safety | Make effective bindings deterministic across locale defaults, parent locale fallback, generic triggers, user overrides, and legacy fallback | KRES-01, KRES-02, KRES-03, KRES-04 | 4 |
 | 62 | Conflict And Invalid-Keybind Diagnostics | Diagnose malformed declarations, duplicate bindings, missing targets, unsupported triggers, and unsafe overrides non-fatally | KDIAG-01, KDIAG-02, KDIAG-03, KDIAG-04 | 4 |
 | 63 | Accessibility Metadata And Observability | Publish resolved keybind metadata through accessibility/debug paths and document the author contract | KACC-01, KACC-02, KACC-03 | 3 |
