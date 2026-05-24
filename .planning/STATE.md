@@ -1,34 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.13
-milestone_name: Manifest I18n Contract
-status: completed
-stopped_at: Phase 73 completed
-last_updated: "2026-05-24T07:57:52.663Z"
-last_activity: 2026-05-24 -- v1.13 archived
+milestone: v1.14
+milestone_name: Unified Luau Import Contract
+status: planning
+last_updated: "2026-05-24T08:08:25.667Z"
+last_activity: 2026-05-24
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 4
-  completed_plans: 4
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: MESH v1.13
+# State: MESH v1.14
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-05-24)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.13 Manifest I18n Contract complete
+**Current focus:** v1.14 Unified Luau Import Contract
 
 ## Current Position
 
-Phase: 73 — COMPLETE
-Plan: 1 of 1
-Status: Phase 73 complete
-Last activity: 2026-05-24 -- v1.13 archived
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-05-24 — Milestone v1.14 started
 
 ## Decisions
 

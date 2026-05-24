@@ -170,6 +170,18 @@ The project now also has a class-like module object contract with:
 - Migrated bundled navigation keybind metadata to explicit localized text objects.
 - Updated author docs so `mesh.i18n`, `mesh.contributes.i18n`, and field-local `t` references form one clear localization story.
 
+## Current Milestone: v1.14 Unified Luau Import Contract
+
+**Goal:** Make frontend and backend Luau authors use one explicit `require(...)`-based import model for shell APIs, service/interface proxies, module objects, libraries, and frontend components.
+
+**Target features:**
+- Define a canonical require namespace for shell APIs that replaces implicit reliance on the global `mesh` table over time.
+- Unify service/interface imports across frontend and backend Luau runtimes, including capability checks, version constraints, diagnostics, and pcall behavior.
+- Add frontend component imports to the same authoring model so `.mesh` files can require local and module components instead of using a separate `import ... from` syntax.
+- Support ergonomic Luau table usage patterns, such as `local audio = require("mesh.audio@>=1.0")` and `local locale = require("mesh.locale")`, without inventing a non-Luau parser extension for named imports.
+- Preserve compatibility for current globals and component `import` syntax with migration diagnostics and shipped-module proof.
+- Update docs and shipped navigation/audio/backend modules so frontend and backend examples teach one unified import story.
+
 ## Previous Shipped Milestone: v1.12 Module Object Contract
 
 **Goal:** Implement backend services and frontend modules as class-like Luau object instances backed by typed Rust-managed runtime lanes for state/exports, methods/results, and events/subscriptions.
@@ -229,6 +241,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.11 Phase 63`: Resolved focused-surface keybind metadata now reaches accessibility annotations, structured `mesh.debug.keybinds` payloads, debug health output, and author docs.
 - `v1.11 Phase 64`: Real navigation and audio surfaces now prove the completed focused-surface keybind system, including audio-popover access-key dispatch, metadata, and keyboard regression coverage.
 - `v1.13`: Manifest i18n text fields distinguish literal strings from localized catalog lookups and resolve into shipped keybind metadata.
+- `v1.14`: Luau runtime imports should converge on explicit `require(...)` across frontend and backend scripts rather than split global `mesh`, `.mesh import`, and service proxy conventions.
 - `v1.12 Phase 65`: Backend and frontend modules now appear as stable runtime object instances through debug state.
 - `v1.12 Phase 66`: Frontend runtimes now receive replayable `module.state` and script-owned `module.exports`.
 - `v1.12 Phase 67`: Service proxy method dispatch and backend command results now have a shell-visible method call lane.
@@ -237,7 +250,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 
 ### Active
 
-- `v1.13`: Manifest i18n text fields should distinguish literal strings from localized catalog lookups and resolve into shipped keybind/layout/settings metadata.
+- `v1.14`: Unified Luau imports should cover shell APIs, service/interface proxies, module objects, libraries, and frontend component imports across both frontend and backend runtimes.
 
 ### Out of Scope
 
@@ -297,6 +310,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Modules are class-like runtime objects over typed lanes | Authors need normal Luau object access while Rust keeps lifecycle, validation, replay, routing, and diagnostics authoritative | Shipped in v1.12 |
 | Backend-to-frontend transient facts use typed interface events | Durable service state should stay replayable, while transient updates like volume changes need declared payload schemas and subscriptions | Shipped in v1.12 gap closure |
 | Manifest-localized text must be explicit at the field site | Plain `module.json` strings cannot tell authors whether text is literal, a translation key, or actually localized | Shipped in v1.13 |
+| Luau imports should be explicit and unified across runtimes | Authors should learn one `require(...)` model for shell APIs, interfaces, libraries, module objects, and frontend components instead of switching between globals and `.mesh` import syntax | Active for v1.14 |
 
 <details>
 <summary>Archived milestone framing</summary>
@@ -343,4 +357,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-24 after v1.13 milestone archive*
+*Last updated: 2026-05-24 for v1.14 milestone planning*
