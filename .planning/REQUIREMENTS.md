@@ -28,10 +28,10 @@
 
 ### Shipped Proof And Docs
 
-- [ ] **MPROOF-01**: Bundled navigation-bar keybind metadata uses explicit localized text objects instead of raw dotted keys.
-- [ ] **MPROOF-02**: Bundled layout/settings examples use either literal strings or explicit localized text objects consistently.
-- [ ] **MPROOF-03**: Regression tests cover parsing, graph preservation, runtime resolution, suspicious raw-key diagnostics, and fallback behavior.
-- [ ] **MPROOF-04**: Author docs explain how `mesh.i18n`, `mesh.contributes.i18n`, and field-local `{ "t": "...", "fallback": "..." }` declarations work together.
+- [x] **MPROOF-01**: Bundled navigation-bar keybind metadata uses explicit localized text objects instead of raw dotted keys.
+- [x] **MPROOF-02**: Bundled layout/settings examples use either literal strings or explicit localized text objects consistently.
+- [x] **MPROOF-03**: Regression tests cover parsing, graph preservation, runtime resolution, suspicious raw-key diagnostics, and fallback behavior.
+- [x] **MPROOF-04**: Author docs explain how `mesh.i18n`, `mesh.contributes.i18n`, and field-local `{ "t": "...", "fallback": "..." }` declarations work together.
 
 ## Future Requirements
 
@@ -71,10 +71,10 @@
 | MRES-02 | Phase 72 | Complete |
 | MRES-03 | Phase 72 | Complete |
 | MRES-04 | Phase 72 | Complete |
-| MPROOF-01 | Phase 73 | Pending |
-| MPROOF-02 | Phase 73 | Pending |
-| MPROOF-03 | Phase 73 | Pending |
-| MPROOF-04 | Phase 73 | Pending |
+| MPROOF-01 | Phase 73 | Complete |
+| MPROOF-02 | Phase 73 | Complete |
+| MPROOF-03 | Phase 73 | Complete |
+| MPROOF-04 | Phase 73 | Complete |
 
 **Coverage:**
 - v1 requirements: 16 total
