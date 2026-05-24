@@ -1491,6 +1491,176 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
 }
 
 #[test]
+fn contribution_index_preserves_keybind_localized_text() {
+    let mut frontend = loaded_module(
+        "@mesh/example-widget",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    frontend.manifest.mesh.keybinds.actions.insert(
+        "mute".into(),
+        crate::manifest::KeybindAction {
+            label: Some(crate::manifest::LocalizedText::Translation {
+                key: "keybind.mute.label".into(),
+                fallback: "Mute".into(),
+            }),
+            description: Some(crate::manifest::LocalizedText::Translation {
+                key: "keybind.mute.description".into(),
+                fallback: "Mute audio".into(),
+            }),
+            category: Some(crate::manifest::LocalizedText::Translation {
+                key: "keybind.category.audio".into(),
+                fallback: "Audio".into(),
+            }),
+            trigger: crate::manifest::KeybindTrigger {
+                kind: crate::manifest::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            ..crate::manifest::KeybindAction::default()
+        },
+    );
+    let root = root_with_modules(&[("@mesh/example-widget", ModuleKind::Frontend)], &[], None);
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
+    let keybind = &graph.keybind_actions()[0];
+
+    assert_eq!(
+        keybind.label,
+        Some(crate::manifest::LocalizedText::Translation {
+            key: "keybind.mute.label".into(),
+            fallback: "Mute".into()
+        })
+    );
+    assert_eq!(
+        keybind.description,
+        Some(crate::manifest::LocalizedText::Translation {
+            key: "keybind.mute.description".into(),
+            fallback: "Mute audio".into()
+        })
+    );
+    assert_eq!(
+        keybind.category,
+        Some(crate::manifest::LocalizedText::Translation {
+            key: "keybind.category.audio".into(),
+            fallback: "Audio".into()
+        })
+    );
+    assert_eq!(keybind.label_text(), Some("Mute"));
+    assert_eq!(keybind.description_text(), Some("Mute audio"));
+    assert_eq!(keybind.category_text(), Some("Audio"));
+}
+
+#[test]
+fn contribution_index_preserves_layout_localized_text() {
+    let mut contributes = MeshContributes::default();
+    contributes.layout.push(LayoutContribution {
+        id: "main".into(),
+        entrypoint: "src/main.mesh".into(),
+        label: Some(crate::manifest::LocalizedText::Translation {
+            key: "layout.main.label".into(),
+            fallback: "Main shell".into(),
+        }),
+    });
+    let frontend = loaded_module(
+        "@mesh/example-widget",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        contributes,
+    );
+    let root = root_with_modules(
+        &[("@mesh/example-widget", ModuleKind::Frontend)],
+        &[],
+        Some("@mesh/example-widget:main"),
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
+    let layout = graph
+        .contributed_layouts()
+        .iter()
+        .find(|layout| layout.id == "main")
+        .unwrap();
+
+    assert_eq!(
+        layout.label,
+        Some(crate::manifest::LocalizedText::Translation {
+            key: "layout.main.label".into(),
+            fallback: "Main shell".into()
+        })
+    );
+    assert_eq!(layout.label_text(), Some("Main shell"));
+    assert_eq!(
+        graph.layout_entrypoint().unwrap().module_id,
+        "@mesh/example-widget"
+    );
+
+    let parsed = ModuleManifest::from_json_str(
+        r#"{
+          "name": "@mesh/layout",
+          "version": "0.1.0",
+          "mesh": {
+            "apiVersion": "0.1",
+            "kind": "frontend",
+            "contributes": {
+              "layout": [
+                {
+                  "id": "main",
+                  "entrypoint": "src/main.mesh",
+                  "label": { "t": "layout.main.label", "fallback": "Main shell" }
+                }
+              ]
+            }
+          }
+        }"#,
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.mesh.contributes.layout[0].label,
+        Some(crate::manifest::LocalizedText::Translation {
+            key: "layout.main.label".into(),
+            fallback: "Main shell".into()
+        })
+    );
+}
+
+#[test]
+fn contribution_index_preserves_settings_schema_localized_descriptions() {
+    let mut contributes = MeshContributes::default();
+    contributes.settings = Some(SettingsContribution {
+        namespace: "@mesh/example-widget".into(),
+        schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "description": {
+                        "t": "settings.mode.description",
+                        "fallback": "Theme mode"
+                    }
+                }
+            }
+        }),
+    });
+    let frontend = loaded_module(
+        "@mesh/example-widget",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        contributes,
+    );
+    let root = root_with_modules(&[("@mesh/example-widget", ModuleKind::Frontend)], &[], None);
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
+    let description = &graph.settings_schemas()[0].schema["properties"]["mode"]["description"];
+
+    assert_eq!(description["t"], "settings.mode.description");
+    assert_eq!(description["fallback"], "Theme mode");
+}
+
+#[test]
 fn contribution_index_reports_resource_and_settings_compatibility_diagnostics() {
     let mut deps = MeshDependencies::default();
     deps.icons.insert("@mesh/missing-icons".into(), "*".into());

@@ -179,7 +179,7 @@ impl ModuleManifest {
                 contributes.layout.push(LayoutContribution {
                     id: "main".into(),
                     entrypoint: main,
-                    label: package.name.clone(),
+                    label: package.name.clone().map(manifest::LocalizedText::Literal),
                 });
             }
         }
@@ -805,7 +805,7 @@ pub struct LayoutContribution {
     pub id: String,
     pub entrypoint: String,
     #[serde(default)]
-    pub label: Option<String>,
+    pub label: Option<manifest::LocalizedText>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -371,6 +371,10 @@ impl InstalledModuleGraph {
         &self.contributions.frontend_entrypoints
     }
 
+    pub fn contributed_layouts(&self) -> &[ContributedLayout] {
+        &self.contributions.layout
+    }
+
     pub fn keybind_actions(&self) -> &[ContributedKeybindAction] {
         &self.contributions.keybinds
     }
@@ -880,18 +884,9 @@ impl ModuleContributionIndex {
                 module_id: module_id.into(),
                 action_id: action_id.clone(),
                 scope: action.scope,
-                label: action
-                    .label
-                    .as_ref()
-                    .map(|text| text.fallback_text().to_string()),
-                description: action
-                    .description
-                    .as_ref()
-                    .map(|text| text.fallback_text().to_string()),
-                category: action
-                    .category
-                    .as_ref()
-                    .map(|text| text.fallback_text().to_string()),
+                label: action.label.clone(),
+                description: action.description.clone(),
+                category: action.category.clone(),
                 trigger: action.trigger.clone(),
                 localized_triggers: action.localized_triggers.clone(),
             });
@@ -957,7 +952,15 @@ pub struct ContributedLayout {
     pub module_id: String,
     pub id: String,
     pub path: String,
-    pub label: Option<String>,
+    pub label: Option<manifest::LocalizedText>,
+}
+
+impl ContributedLayout {
+    pub fn label_text(&self) -> Option<&str> {
+        self.label
+            .as_ref()
+            .map(manifest::LocalizedText::fallback_text)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1026,11 +1029,31 @@ pub struct ContributedKeybindAction {
     pub module_id: String,
     pub action_id: String,
     pub scope: manifest::KeybindScope,
-    pub label: Option<String>,
-    pub description: Option<String>,
-    pub category: Option<String>,
+    pub label: Option<manifest::LocalizedText>,
+    pub description: Option<manifest::LocalizedText>,
+    pub category: Option<manifest::LocalizedText>,
     pub trigger: manifest::KeybindTrigger,
     pub localized_triggers: HashMap<String, manifest::KeybindTrigger>,
+}
+
+impl ContributedKeybindAction {
+    pub fn label_text(&self) -> Option<&str> {
+        self.label
+            .as_ref()
+            .map(manifest::LocalizedText::fallback_text)
+    }
+
+    pub fn description_text(&self) -> Option<&str> {
+        self.description
+            .as_ref()
+            .map(manifest::LocalizedText::fallback_text)
+    }
+
+    pub fn category_text(&self) -> Option<&str> {
+        self.category
+            .as_ref()
+            .map(manifest::LocalizedText::fallback_text)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
