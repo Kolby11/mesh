@@ -18,7 +18,7 @@ pub mod backend;
 pub mod context;
 pub mod host_api;
 
-pub use backend::{BackendScriptContext, BackendScriptError};
+pub use backend::{BackendScriptContext, BackendScriptError, BackendScriptEvent};
 pub use context::{
     LocaleBoundState, PublishedEvent, ScriptContext, ScriptError, ScriptInterfaceImport,
     ScriptState,

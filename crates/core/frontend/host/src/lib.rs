@@ -191,6 +191,12 @@ pub enum ServiceEvent {
         /// Structured state emitted by the backend module.
         payload: serde_json::Value,
     },
+    InterfaceEvent {
+        service: String,
+        source_module: String,
+        name: String,
+        payload: serde_json::Value,
+    },
 }
 
 pub trait ShellComponent: Send {

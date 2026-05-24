@@ -104,6 +104,25 @@ fn emit_unavailable_stores_unavailable_payload() {
 }
 
 #[test]
+fn mesh_service_emit_event_buffers_typed_interface_event() {
+    let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.load_script(
+        "function init()\nend\nfunction on_poll()\nmesh.service.emit_event(\"VolumeChanged\", { device_id = \"default\", level = 67 })\nend",
+    )
+    .unwrap();
+
+    ctx.run_poll().unwrap();
+    let events = ctx.drain_events();
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].name, "VolumeChanged");
+    assert_eq!(
+        events[0].payload,
+        serde_json::json!({ "device_id": "default", "level": 67 })
+    );
+}
+
+#[test]
 fn command_handler_reads_payload_via_api() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(

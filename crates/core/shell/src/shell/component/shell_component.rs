@@ -1,4 +1,5 @@
 use super::*;
+use crate::shell::component::runtime::script_has_service_read;
 
 impl ShellComponent for FrontendSurfaceComponent {
     fn id(&self) -> &str {
@@ -123,7 +124,10 @@ impl ShellComponent for FrontendSurfaceComponent {
             service,
             source_module,
             payload,
-        } = event;
+        } = event
+        else {
+            return self.handle_interface_event(event);
+        };
         self.last_service_update = Some(format!("{service}:{source_module}"));
         let service_name = crate::shell::service::service_name_from_interface(service);
         self.cached_service_payloads
@@ -774,6 +778,46 @@ impl ShellComponent for FrontendSurfaceComponent {
 }
 
 impl FrontendSurfaceComponent {
+    fn handle_interface_event(
+        &mut self,
+        event: &ServiceEvent,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let ServiceEvent::InterfaceEvent {
+            service,
+            name,
+            payload,
+            ..
+        } = event
+        else {
+            return Ok(Vec::new());
+        };
+        let service_name = crate::shell::service::service_name_from_interface(service);
+        let mut needs_rebuild = false;
+        {
+            let mut runtimes = self.runtimes.lock().unwrap();
+            for runtime in runtimes.values_mut() {
+                if !script_has_service_read(&runtime.script_ctx, service, &service_name) {
+                    continue;
+                }
+                runtime
+                    .script_ctx
+                    .emit_interface_event(&service_name, name, payload)
+                    .map_err(|source| ComponentError::Script {
+                        component_id: runtime.module_id.clone(),
+                        source,
+                    })?;
+                if runtime.script_ctx.state().is_dirty() {
+                    needs_rebuild = true;
+                }
+            }
+        }
+        if needs_rebuild {
+            self.render_hooks_pending = true;
+            self.invalidate_script_state();
+        }
+        Ok(Vec::new())
+    }
+
     #[cfg(test)]
     pub(super) fn last_focused_proof_snapshot(
         &self,

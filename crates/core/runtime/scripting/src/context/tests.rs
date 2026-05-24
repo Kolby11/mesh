@@ -227,6 +227,43 @@ end
 }
 
 #[test]
+fn interface_event_proxy_receives_host_delivered_event() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+seen_level = 0
+seen_device = ""
+
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.events.VolumeChanged:subscribe(function(event)
+        seen_level = event.level
+        seen_device = event.device_id
+    end)
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    ctx.emit_interface_event(
+        "audio",
+        "VolumeChanged",
+        &serde_json::json!({ "device_id": "default", "level": 42 }),
+    )
+    .unwrap();
+
+    assert_eq!(ctx.state.get("seen_level"), Some(serde_json::json!(42)));
+    assert_eq!(
+        ctx.state.get("seen_device"),
+        Some(serde_json::json!("default"))
+    );
+}
+
+#[test]
 fn module_events_subscribe_emit_and_unsubscribe() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();

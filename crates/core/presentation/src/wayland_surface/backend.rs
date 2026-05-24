@@ -556,16 +556,6 @@ impl LayerShellBackend {
             })
     }
 
-    pub fn present(
-        &mut self,
-        surface_id: &str,
-        title: &str,
-        visible: bool,
-        buffer: &PixelBuffer,
-    ) -> Result<(), PresentationError> {
-        self.present_with_damage(surface_id, title, visible, buffer, None)
-    }
-
     pub fn present_with_damage(
         &mut self,
         surface_id: &str,

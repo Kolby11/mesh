@@ -27,10 +27,17 @@ pub struct BackendScriptContext {
     runtime: Arc<Mutex<BackendRuntime>>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BackendScriptEvent {
+    pub name: String,
+    pub payload: JsonValue,
+}
+
 #[derive(Debug, Default)]
 struct BackendRuntime {
     poll_interval_ms: u64,
     pending_emit: Option<JsonValue>,
+    pending_events: Vec<BackendScriptEvent>,
     current_payload: JsonValue,
     settings: JsonValue,
 }
@@ -65,6 +72,7 @@ impl BackendScriptContext {
         let runtime = Arc::new(Mutex::new(BackendRuntime {
             poll_interval_ms: 1000,
             pending_emit: None,
+            pending_events: Vec::new(),
             current_payload: JsonValue::Null,
             settings,
         }));
@@ -231,6 +239,10 @@ impl BackendScriptContext {
             })
     }
 
+    pub fn drain_events(&self) -> Vec<BackendScriptEvent> {
+        std::mem::take(&mut self.runtime.lock().unwrap().pending_events)
+    }
+
     fn install_host_api(&mut self) -> mlua::Result<()> {
         let globals = self.lua.globals();
         let mesh = self.lua.create_table()?;
@@ -297,6 +309,24 @@ impl BackendScriptContext {
                 }));
                 Ok(())
             })?,
+        )?;
+
+        let runtime = Arc::clone(&self.runtime);
+        service.set(
+            "emit_event",
+            self.lua
+                .create_function(move |lua, (name, payload): (String, Option<LuaValue>)| {
+                    let payload = match payload {
+                        Some(value) => lua.from_value::<JsonValue>(value)?,
+                        None => JsonValue::Null,
+                    };
+                    runtime
+                        .lock()
+                        .unwrap()
+                        .pending_events
+                        .push(BackendScriptEvent { name, payload });
+                    Ok(())
+                })?,
         )?;
 
         let runtime = Arc::clone(&self.runtime);
@@ -383,6 +413,7 @@ impl BackendScriptContext {
     fn reset_for_call(&mut self, payload: JsonValue) {
         let mut runtime = self.runtime.lock().unwrap();
         runtime.pending_emit = None;
+        runtime.pending_events.clear();
         runtime.current_payload = payload;
     }
 

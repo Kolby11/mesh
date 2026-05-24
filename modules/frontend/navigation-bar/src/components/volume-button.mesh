@@ -40,8 +40,18 @@ local function update_audio_copy(percent, muted)
     end
 end
 
+if audio_ok and audio and audio.events and audio.events.VolumeChanged then
+    audio.events.VolumeChanged:subscribe(function(event)
+        local percent = math.floor(tonumber(event.level) or 0)
+        if percent < 0 then percent = 0 end
+        if percent > 100 then percent = 100 end
+        local muted = audio and audio.muted or false
+        update_audio_copy(percent, muted)
+    end)
+end
+
 function onRender()
-    if not audio_ok or not audio or audio.available == false then
+    if not audio_ok or not audio or audio.available ~= true then
         icon_name = "audio-volume-muted"
         audio_tooltip = "Audio service unavailable"
         audio_percent = 0

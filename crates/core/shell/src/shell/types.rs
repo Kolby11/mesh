@@ -104,6 +104,12 @@ pub(super) enum ShellMessage {
         command: String,
         result: serde_json::Value,
     },
+    BackendInterfaceEvent {
+        interface: String,
+        provider_id: String,
+        name: String,
+        payload: serde_json::Value,
+    },
     Ipc(CoreRequest),
 }
 

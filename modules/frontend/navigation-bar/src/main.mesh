@@ -61,7 +61,7 @@ local function clamp_percent(value)
 end
 
 function onRender()
-    if audio_ok and audio and audio.available ~= false then
+    if audio_ok and audio and audio.available == true then
         local percent = clamp_percent(audio.percent)
         if audio.muted then
             secondary_status = string.format("Audio muted at %d%%", percent)
@@ -71,6 +71,17 @@ function onRender()
     else
         secondary_status = "Audio service offline"
     end
+end
+
+if audio_ok and audio and audio.events and audio.events.VolumeChanged then
+    audio.events.VolumeChanged:subscribe(function(event)
+        local percent = clamp_percent(event.level)
+        if audio and audio.muted then
+            secondary_status = string.format("Audio muted at %d%%", percent)
+        else
+            secondary_status = string.format("Audio steady at %d%%", percent)
+        end
+    end)
 end
 
 function onToggleAudioSurface(event)

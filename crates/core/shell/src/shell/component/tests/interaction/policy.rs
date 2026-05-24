@@ -182,6 +182,21 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
     let height = 180;
     let mut buffer = PixelBuffer::new(width, height);
 
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let requests = component
+        .call_namespaced_handler("onToggleMute", &[])
+        .unwrap();
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ServiceCommand { command, payload, .. }
+                if command == "set_muted"
+                    && payload["device_id"] == serde_json::json!("default")
+                    && payload["muted"] == serde_json::json!(true)
+        )),
+        "mute action should dispatch when the audio proxy exists but the first state payload has not arrived: {requests:?}"
+    );
+
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),

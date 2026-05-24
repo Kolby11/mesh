@@ -60,6 +60,14 @@ pub struct BackendCommandResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct BackendInterfaceEvent {
+    pub service: String,
+    pub source_module: String,
+    pub name: String,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone)]
 pub enum BackendServiceEvent {
     Started {
         service: String,
@@ -84,6 +92,7 @@ pub enum BackendServiceEvent {
         message: String,
     },
     CommandResult(BackendCommandResult),
+    InterfaceEvent(BackendInterfaceEvent),
     Stopped {
         service: String,
         source_module: String,
@@ -146,6 +155,7 @@ pub async fn spawn_backend_service(
             return;
         }
     }
+    publish_script_events(&tx, &service_name, &module_id, ctx.drain_events());
 
     loop {
         tokio::select! {
@@ -178,7 +188,12 @@ pub async fn spawn_backend_service(
                     }
                 };
                 refresh_interval(&ctx, &mut interval_ms, &mut tick);
-                let Some(payload) = payload else { continue };
+                let Some(payload) = payload else {
+                    if !publish_script_events(&tx, &service_name, &module_id, ctx.drain_events()) {
+                        break;
+                    }
+                    continue;
+                };
                 if !publish_changed_update(
                     &tx,
                     &service_name,
@@ -188,6 +203,7 @@ pub async fn spawn_backend_service(
                 ) {
                     break;
                 }
+                publish_script_events(&tx, &service_name, &module_id, ctx.drain_events());
             }
             cmd = cmd_rx.recv() => {
                 let Some(first) = cmd else { break };
@@ -230,6 +246,12 @@ pub async fn spawn_backend_service(
                                     break;
                                 }
                             }
+                            publish_script_events(
+                                &tx,
+                                &service_name,
+                                &module_id,
+                                ctx.drain_events(),
+                            );
                         }
                         Err(err) => {
                             let stage = match &err {
@@ -258,6 +280,28 @@ pub async fn spawn_backend_service(
         service: service_name,
         source_module: module_id,
     });
+}
+
+fn publish_script_events(
+    tx: &mpsc::UnboundedSender<BackendServiceEvent>,
+    service_name: &str,
+    module_id: &str,
+    events: Vec<mesh_core_scripting::BackendScriptEvent>,
+) -> bool {
+    for event in events {
+        if tx
+            .send(BackendServiceEvent::InterfaceEvent(BackendInterfaceEvent {
+                service: service_name.to_string(),
+                source_module: module_id.to_string(),
+                name: event.name,
+                payload: event.payload,
+            }))
+            .is_err()
+        {
+            return false;
+        }
+    }
+    true
 }
 
 fn publish_changed_update(
@@ -400,6 +444,21 @@ mod tests {
         }
     }
 
+    async fn next_interface_event(
+        rx: &mut mpsc::UnboundedReceiver<BackendServiceEvent>,
+        reason: &str,
+    ) -> BackendInterfaceEvent {
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+                .await
+                .expect(reason)
+                .expect("event channel should stay open");
+            if let BackendServiceEvent::InterfaceEvent(event) = event {
+                return event;
+            }
+        }
+    }
+
     #[tokio::test]
     async fn spawn_backend_service_passes_settings_into_backend_context() {
         let (update_tx, mut update_rx) = mpsc::unbounded_channel();
@@ -469,6 +528,53 @@ mod tests {
         assert_eq!(
             update.payload.get("percent").and_then(|v| v.as_u64()),
             Some(65)
+        );
+
+        drop(cmd_tx);
+        drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn spawn_backend_service_forwards_script_interface_events() {
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/audio".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "state = { available = true, percent = 40 }\n\
+             function init()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function on_command_set_volume()\n\
+               local payload = mesh.service.payload()\n\
+               mesh.service.emit_event(\"VolumeChanged\", { device_id = payload.device_id, level = payload.volume })\n\
+             end"
+            .to_string(),
+            update_tx,
+            cmd_rx,
+        ));
+
+        cmd_tx
+            .send(BackendServiceCommand {
+                command: "set_volume".to_string(),
+                payload: serde_json::json!({ "device_id": "default", "volume": 0.42 }),
+                coalesce: false,
+            })
+            .unwrap();
+
+        let event =
+            next_interface_event(&mut update_rx, "command should publish interface event").await;
+        assert_eq!(event.service, "audio");
+        assert_eq!(event.source_module, "@test/audio");
+        assert_eq!(event.name, "VolumeChanged");
+        assert_eq!(
+            event.payload,
+            serde_json::json!({ "device_id": "default", "level": 0.42 })
         );
 
         drop(cmd_tx);

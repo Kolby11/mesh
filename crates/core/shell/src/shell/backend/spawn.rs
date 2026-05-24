@@ -128,6 +128,21 @@ impl Shell {
                             "backend command result"
                         );
                     }
+                    BackendServiceEvent::InterfaceEvent(event) => {
+                        let _ = shell_tx.send(ShellMessage::BackendInterfaceEvent {
+                            interface: bridge_interface.clone(),
+                            provider_id: bridge_provider_id.clone(),
+                            name: event.name.clone(),
+                            payload: event.payload.clone(),
+                        });
+                        tracing::debug!(
+                            interface = bridge_interface.as_str(),
+                            provider_id = bridge_provider_id.as_str(),
+                            event = event.name.as_str(),
+                            payload = %event.payload,
+                            "backend interface event"
+                        );
+                    }
                     BackendServiceEvent::Started { .. } => {
                         let _ = shell_tx.send(ShellMessage::BackendLifecycle {
                             interface: bridge_interface.clone(),

@@ -8,7 +8,7 @@ pub const MIN_POLL_INTERVAL_MS: u64 = 50;
 
 pub use command::BackendCommandOutcome;
 pub use errors::BackendScriptError;
-pub use runtime::BackendScriptContext;
+pub use runtime::{BackendScriptContext, BackendScriptEvent};
 
 #[cfg(test)]
 mod tests;

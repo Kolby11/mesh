@@ -37,7 +37,10 @@ impl Shell {
             service,
             source_module,
             mut payload,
-        } = event;
+        } = event
+        else {
+            return event;
+        };
         let interface = canonical_interface_name(&service);
         let shell_authoritative_theme_update =
             interface == "mesh.theme" && source_module == "@mesh/shell";
@@ -83,7 +86,10 @@ impl Shell {
             service,
             source_module,
             payload,
-        } = event;
+        } = event
+        else {
+            return true;
+        };
         let interface = canonical_interface_name(service);
         let shell_authoritative_theme_update =
             interface == "mesh.theme" && source_module == "@mesh/shell";
@@ -178,6 +184,42 @@ impl Shell {
         Ok(requests)
     }
 
+    pub(in crate::shell) fn broadcast_backend_interface_event(
+        &mut self,
+        interface: String,
+        provider_id: String,
+        name: String,
+        payload: serde_json::Value,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        if let Some(slot) = self.backend_runtimes.get(&interface)
+            && slot.provider_id != provider_id
+        {
+            tracing::debug!(
+                interface,
+                provider_id,
+                active_provider = %slot.provider_id,
+                event = name,
+                "ignoring interface event from inactive provider"
+            );
+            return Ok(VecDeque::new());
+        }
+
+        let warnings = self.service_event_contract_warnings(&interface, &name, &payload);
+        if !warnings.is_empty() {
+            for warning in warnings {
+                self.record_service_contract_warning(&interface, &provider_id, warning);
+            }
+            return Ok(VecDeque::new());
+        }
+
+        self.deliver_service_event(&ServiceEvent::InterfaceEvent {
+            service: interface,
+            source_module: provider_id,
+            name,
+            payload,
+        })
+    }
+
     fn validate_service_state_shape(
         &mut self,
         interface: &str,
@@ -191,6 +233,34 @@ impl Shell {
         for warning in service_state_contract_warnings(contract, payload) {
             self.record_service_contract_warning(interface, provider_id, warning);
         }
+    }
+
+    fn service_event_contract_warnings(
+        &self,
+        interface: &str,
+        event_name: &str,
+        payload: &serde_json::Value,
+    ) -> Vec<String> {
+        let resolution = self.interfaces.resolve(interface, None);
+        let Some(contract) = resolution.contract.as_ref() else {
+            return vec![format!(
+                "event '{event_name}' emitted for unknown interface {interface}"
+            )];
+        };
+        let Some(event) = contract
+            .events
+            .iter()
+            .find(|event| event.name == event_name)
+        else {
+            return vec![format!(
+                "event '{event_name}' is not declared for {}",
+                contract.interface
+            )];
+        };
+        let Some(schema) = event.payload.as_deref() else {
+            return Vec::new();
+        };
+        event_payload_contract_warnings(&contract.interface, event_name, schema, payload)
     }
 
     fn record_service_contract_warning(
@@ -263,6 +333,64 @@ fn service_state_contract_warnings(
         }
     }
     warnings
+}
+
+fn event_payload_contract_warnings(
+    interface: &str,
+    event_name: &str,
+    schema: &str,
+    payload: &serde_json::Value,
+) -> Vec<String> {
+    let fields = parse_inline_object_schema(schema);
+    if fields.is_empty() {
+        return Vec::new();
+    }
+    let Some(object) = payload.as_object() else {
+        return vec![format!(
+            "event '{event_name}' for {interface} must be a JSON object, got {}",
+            json_type_name(payload)
+        )];
+    };
+
+    let mut warnings = Vec::new();
+    for (field_name, field_type) in fields {
+        let Some(value) = object.get(&field_name) else {
+            warnings.push(format!(
+                "event '{event_name}' for {interface} missing required payload field '{field_name}'"
+            ));
+            continue;
+        };
+        if !json_value_matches_contract_type(value, &field_type) {
+            warnings.push(format!(
+                "event '{event_name}' for {interface} payload field '{field_name}' expected {}, got {}",
+                field_type,
+                json_type_name(value)
+            ));
+        }
+    }
+    warnings
+}
+
+fn parse_inline_object_schema(schema: &str) -> Vec<(String, String)> {
+    let trimmed = schema.trim();
+    let Some(inner) = trimmed
+        .strip_prefix('{')
+        .and_then(|value| value.strip_suffix('}'))
+    else {
+        return Vec::new();
+    };
+    inner
+        .split(',')
+        .filter_map(|part| {
+            let (name, field_type) = part.split_once(':')?;
+            let name = name.trim();
+            let field_type = field_type.trim();
+            if name.is_empty() || field_type.is_empty() {
+                return None;
+            }
+            Some((name.to_string(), field_type.to_string()))
+        })
+        .collect()
 }
 
 fn is_runtime_metadata_state_field(name: &str) -> bool {

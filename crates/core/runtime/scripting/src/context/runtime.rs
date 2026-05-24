@@ -2,7 +2,7 @@ use super::lookup::{
     interface_error_message, lookup_failure_reason, lua_err, lua_value_to_string, map_lua_error,
     record_lookup_diagnostic, record_lookup_diagnostic_lua,
 };
-use super::proxy::{create_event_channel, create_interface_proxy};
+use super::proxy::{create_event_channel, create_interface_proxy, interface_event_channel};
 use super::{PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport, ScriptState};
 use crate::host_api::{HostApiManifest, InterfaceProxy};
 use mesh_core_capability::CapabilitySet;
@@ -111,6 +111,22 @@ impl ScriptContext {
             let _ = self.lua.globals().set(service_key, lua_value);
         }
         self.refresh_module_object();
+    }
+
+    pub fn emit_interface_event(
+        &mut self,
+        service: &str,
+        event_name: &str,
+        payload: &Value,
+    ) -> Result<(), ScriptError> {
+        let channel = interface_event_channel(&self.lua, service, event_name).map_err(lua_err)?;
+        let emit = channel.get::<Function>("emit").map_err(lua_err)?;
+        let lua_payload = self.lua.to_value(payload).map_err(lua_err)?;
+        emit.call::<()>((channel, lua_payload))
+            .map_err(map_lua_error)?;
+        self.sync_state_from_lua();
+        self.sync_side_channels();
+        Ok(())
     }
 
     pub fn set_global_state(&mut self, name: &str, value: Value) -> Result<(), ScriptError> {

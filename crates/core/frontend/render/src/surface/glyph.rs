@@ -57,7 +57,6 @@ struct CachedGlyph {
     width: u32,
     height: u32,
     placement_left: i32,
-    placement_top: i32,
     pixels: Vec<u8>,
 }
 
@@ -135,7 +134,6 @@ fn rasterize(
         width: image.placement.width,
         height: image.placement.height,
         placement_left: image.placement.left,
-        placement_top: image.placement.top,
         pixels: image.data,
     })
 }
@@ -333,7 +331,6 @@ mod tests {
                 width: 2,
                 height: 2,
                 placement_left: 0,
-                placement_top: 0,
                 pixels: vec![255, 128, 64, 255],
             }),
         );

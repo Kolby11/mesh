@@ -72,19 +72,25 @@ it, and whether the backend returned success or failure.
 ## Interface events
 
 `[[events]]` entries in `interface.toml` now produce runtime event channels on
-frontend proxies:
+frontend proxies. Backends emit those events through the shell-owned typed lane:
 
 ```lua
+mesh.service.emit_event("VolumeChanged", {
+    device_id = "default",
+    level = state.percent,
+})
+
 local audio = require("mesh.audio")
 local unsubscribe = audio.events.VolumeChanged:subscribe(function(event)
     print(event.level)
 end)
 ```
 
-Use events for transient facts that should not become durable state. Current
-provider state still flows through `state` snapshots. Event payload transport
-and durable backend state are separate lanes, so providers should continue to
-publish current truth through `state` even when they also expose events.
+Use events for transient facts that should not become durable state. The shell
+validates event payloads against the interface event declaration before
+delivering them to frontend subscribers. Current provider state still flows
+through `state` snapshots, so providers should continue to publish current truth
+through `state` even when they also expose events.
 
 ## Runtime-defined extras
 

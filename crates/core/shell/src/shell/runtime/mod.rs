@@ -86,6 +86,7 @@ impl Shell {
             ShellMessage::BackendServiceUpdate { .. } => "backend_service_update",
             ShellMessage::BackendLifecycle { .. } => "backend_lifecycle",
             ShellMessage::BackendCommandResult { .. } => "backend_command_result",
+            ShellMessage::BackendInterfaceEvent { .. } => "backend_interface_event",
             ShellMessage::Ipc(_) => "ipc",
         };
         match message {
@@ -124,6 +125,19 @@ impl Shell {
                 command,
                 result,
             } => self.record_backend_method_result(interface, provider_id, command, result),
+            ShellMessage::BackendInterfaceEvent {
+                interface,
+                provider_id,
+                name,
+                payload,
+            } => {
+                pending.extend(self.broadcast_backend_interface_event(
+                    interface,
+                    provider_id,
+                    name,
+                    payload,
+                )?);
+            }
             ShellMessage::Ipc(request) => {
                 pending.push_back(request);
             }

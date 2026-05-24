@@ -65,6 +65,15 @@ local function refresh_state()
     end
 end
 
+local function emit_volume_changed()
+    if state.available then
+        mesh.service.emit_event("VolumeChanged", {
+            device_id = "default",
+            level = state.percent,
+        })
+    end
+end
+
 local function clamp_percent(percent)
     percent = tonumber(percent) or 0
     return math.max(0, math.min(100, percent))
@@ -100,6 +109,7 @@ function on_command_volume_up()
     local volume = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", "+5%" })
     local mute = mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", "0" })
     refresh_state()
+    emit_volume_changed()
     return { ok = volume.success and mute.success, error = volume.stderr ~= "" and volume.stderr or mute.stderr }
 end
 
@@ -107,6 +117,7 @@ function on_command_volume_down()
     debug_info("received volume_down()")
     local result = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", "-5%" })
     refresh_state()
+    emit_volume_changed()
     return { ok = result.success, error = result.stderr }
 end
 
@@ -116,6 +127,7 @@ function on_command_set_volume()
     debug_info("received set_volume payload volume=" .. tostring(payload.volume) .. " percent=" .. tostring(percent))
     local result = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", tostring(percent) .. "%" })
     refresh_state()
+    emit_volume_changed()
     return { ok = result.success, error = result.stderr }
 end
 
@@ -123,6 +135,7 @@ function on_command_toggle_mute()
     debug_info("received toggle_mute()")
     local result = mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", "toggle" })
     refresh_state()
+    emit_volume_changed()
     return { ok = result.success, error = result.stderr }
 end
 
@@ -132,6 +145,7 @@ function on_command_set_muted()
     debug_info("received set_muted(" .. tostring(muted) .. ")")
     local result = mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", muted and "1" or "0" })
     refresh_state()
+    emit_volume_changed()
     return { ok = result.success, error = result.stderr }
 end
 

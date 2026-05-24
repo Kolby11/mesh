@@ -2,11 +2,14 @@ use super::*;
 use crate::surface::icon;
 use crate::surface::painter::geometry::rounded_rect_coverage;
 use mesh_core_elements::{BoxShadow, VisualFilter};
-use skia_safe::{BlurStyle, MaskFilter, PaintStyle, RRect, Rect, TileMode, canvas::SaveLayerRec};
-use skia_safe::{Data, Path as SkiaPath, PathBuilder, Point};
+use skia_safe::{
+    BlurStyle, Color4f, Data, ImageInfo, MaskFilter, PaintStyle, Path as SkiaPath, PathBuilder,
+    Point, RRect, Rect, TileMode, canvas::SaveLayerRec, gradient as skia_gradient, image_filters,
+    images,
+};
 
 pub(crate) const MAX_EFFECT_BLUR_RADIUS: f32 = 96.0;
-use skia_safe::{Image, ImageInfo, SamplingOptions, gradient_shader, image_filters};
+use skia_safe::SamplingOptions;
 
 #[allow(dead_code)]
 pub(crate) trait PaintBackend: Send + Sync {
@@ -315,15 +318,6 @@ pub(crate) enum PainterFilter {
     None,
     Blur(VisualFilter),
     Backdrop(VisualFilter),
-}
-
-impl PainterFilter {
-    pub(crate) fn is_none(self) -> bool {
-        match self {
-            Self::None => true,
-            Self::Blur(filter) | Self::Backdrop(filter) => filter.is_none(),
-        }
-    }
 }
 
 impl Default for PainterFilter {
@@ -988,18 +982,21 @@ impl SkiaPaintBackend {
                 rect.height as f32,
             );
             let colors = [
-                crate::surface::buffer::skia_color(gradient.from),
-                crate::surface::buffer::skia_color(gradient.to),
+                Color4f::from(crate::surface::buffer::skia_color(gradient.from)),
+                Color4f::from(crate::surface::buffer::skia_color(gradient.to)),
             ];
-            let Some(shader) = gradient_shader::linear(
+            let gradient_colors =
+                skia_gradient::Colors::new_evenly_spaced(colors.as_slice(), TileMode::Clamp, None);
+            let shader_gradient = skia_gradient::Gradient::new(
+                gradient_colors,
+                skia_gradient::Interpolation::default(),
+            );
+            let Some(shader) = skia_gradient::shaders::linear_gradient(
                 (
                     Point::new(rect.left(), rect.top()),
                     Point::new(rect.left(), rect.bottom()),
                 ),
-                colors.as_slice(),
-                None,
-                TileMode::Clamp,
-                None,
+                &shader_gradient,
                 None,
             ) else {
                 canvas.restore_to_count(save_count);
@@ -1047,7 +1044,7 @@ impl SkiaPaintBackend {
             None,
         );
         let data = Data::new_copy(rgba.as_raw());
-        let Some(skia_image) = Image::from_raster_data(&info, data, (rgba.width() * 4) as usize)
+        let Some(skia_image) = images::raster_from_data(&info, data, (rgba.width() * 4) as usize)
         else {
             diagnostics.push(PainterDiagnostic {
                 backend_id: self.id(),

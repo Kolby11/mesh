@@ -31,8 +31,8 @@ use mesh_core_module::package::{
 };
 use mesh_core_scripting::{PublishedEvent, ScriptState};
 use mesh_core_service::{
-    ContractCapabilities, InterfaceContract, InterfaceMethod, contract::ContractStateField,
-    parse_contract_version,
+    ContractCapabilities, InterfaceContract, InterfaceEvent, InterfaceMethod,
+    contract::ContractStateField, parse_contract_version,
 };
 use mesh_core_wayland::{ClipboardError, ClipboardWriter};
 use std::collections::{HashMap, VecDeque};
@@ -217,7 +217,10 @@ fn test_contract(interface: &str) -> InterfaceContract {
                 coalesce: false,
             },
         ],
-        events: Vec::new(),
+        events: vec![InterfaceEvent {
+            name: "VolumeChanged".to_string(),
+            payload: Some("{ device_id: string, level: float }".to_string()),
+        }],
         types: HashMap::new(),
         capabilities: ContractCapabilities::default(),
     }
@@ -1667,7 +1670,10 @@ fn debug_snapshot_publish_delivers_mesh_debug_service_event() {
         payload,
     } = events
         .last()
-        .expect("debug snapshot should be delivered as a service update");
+        .expect("debug snapshot should be delivered as a service update")
+    else {
+        panic!("expected debug snapshot service update");
+    };
     assert_eq!(service, mesh_core_debug::DEBUG_INTERFACE);
     assert_eq!(source_module, mesh_core_debug::DEBUG_SOURCE_MODULE_ID);
     assert_eq!(payload["overlay_enabled"], serde_json::json!(true));
@@ -1699,7 +1705,10 @@ fn debug_snapshot_payload_includes_resolved_keybind_metadata() {
     let events = events.lock().unwrap();
     let ServiceEvent::Updated { payload, .. } = events
         .last()
-        .expect("debug snapshot should be delivered as a service update");
+        .expect("debug snapshot should be delivered as a service update")
+    else {
+        panic!("expected debug snapshot service update");
+    };
     assert_eq!(
         payload["keybinds"][0],
         serde_json::json!({
@@ -2201,6 +2210,7 @@ fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() 
     assert_eq!(
         events.lock().unwrap().last().and_then(|event| match event {
             ServiceEvent::Updated { payload, .. } => payload.get("muted").cloned(),
+            ServiceEvent::InterfaceEvent { .. } => None,
         }),
         Some(serde_json::json!(false)),
         "optimistic set_muted(false) should update frontend consumers immediately"
@@ -2235,6 +2245,7 @@ fn set_muted_command_broadcasts_optimistic_audio_state_until_backend_confirms() 
     assert_eq!(
         events.lock().unwrap().last().and_then(|event| match event {
             ServiceEvent::Updated { payload, .. } => payload.get("muted").cloned(),
+            ServiceEvent::InterfaceEvent { .. } => None,
         }),
         Some(serde_json::json!(false)),
         "stale backend muted=true must not flip UI while set_muted(false) is pending"
@@ -3493,14 +3504,20 @@ fn stale_provider_update_does_not_reach_components() {
         source_module,
         payload,
         ..
-    } = &events[0];
+    } = &events[0]
+    else {
+        panic!("expected first service update");
+    };
     assert_eq!(source_module, "@mesh/pipewire-audio");
     assert_eq!(payload["percent"], serde_json::json!(40.0));
     let ServiceEvent::Updated {
         source_module,
         payload,
         ..
-    } = events.last().unwrap();
+    } = events.last().unwrap()
+    else {
+        panic!("expected last service update");
+    };
     assert_eq!(source_module, "@mesh/pulseaudio-audio");
     assert_eq!(payload["percent"], serde_json::json!(55.0));
 }
@@ -4014,7 +4031,9 @@ fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
 
     let events = seen_events.lock().unwrap();
     assert_eq!(events.len(), 2);
-    let ServiceEvent::Updated { payload, .. } = events.last().unwrap();
+    let ServiceEvent::Updated { payload, .. } = events.last().unwrap() else {
+        panic!("expected theme service update");
+    };
     assert_eq!(
         payload["current"],
         serde_json::json!("mesh-recovered-light")
@@ -4295,6 +4314,81 @@ fn backend_command_result_records_debug_method_result() {
             && entry.status == "completed"
             && !entry.queued
     }));
+}
+
+#[test]
+fn backend_interface_event_validates_and_delivers_to_components() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    shell.register_component(Box::new(RecordingComponent::new(events.clone())));
+
+    let requests = shell
+        .broadcast_backend_interface_event(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            "VolumeChanged".to_string(),
+            serde_json::json!({ "device_id": "default", "level": 42.0 }),
+        )
+        .unwrap();
+
+    assert!(requests.is_empty());
+    let events = events.lock().unwrap();
+    assert_eq!(events.len(), 1);
+    let ServiceEvent::InterfaceEvent {
+        service,
+        source_module,
+        name,
+        payload,
+    } = events.last().unwrap()
+    else {
+        panic!("expected interface event");
+    };
+    assert_eq!(service, "mesh.audio");
+    assert_eq!(source_module, "@mesh/pipewire-audio");
+    assert_eq!(name, "VolumeChanged");
+    assert_eq!(payload["level"], serde_json::json!(42.0));
+}
+
+#[test]
+fn backend_interface_event_drops_invalid_payload_with_diagnostic() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    shell.register_component(Box::new(RecordingComponent::new(events.clone())));
+
+    shell
+        .broadcast_backend_interface_event(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            "VolumeChanged".to_string(),
+            serde_json::json!({ "device_id": "default", "level": "loud" }),
+        )
+        .unwrap();
+
+    assert!(events.lock().unwrap().is_empty());
+    assert!(
+        shell
+            .diagnostics
+            .snapshot()
+            .iter()
+            .any(|(module_id, health)| {
+                module_id == "@mesh/pipewire-audio"
+                    && health
+                        .to_string()
+                        .contains("payload field 'level' expected float")
+            })
+    );
 }
 
 #[test]

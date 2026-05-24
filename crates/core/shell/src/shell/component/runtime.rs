@@ -482,7 +482,7 @@ impl FrontendSurfaceComponent {
     }
 }
 
-fn script_has_service_read(
+pub(super) fn script_has_service_read(
     script_ctx: &ScriptContext,
     interface: &str,
     service_name: &str,

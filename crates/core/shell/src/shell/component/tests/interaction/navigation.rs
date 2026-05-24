@@ -2225,18 +2225,67 @@ fn audio_popover_access_key_toggles_mute_on_real_surface() {
     );
 
     let requests = component
+        .handle_input(&theme, 320, 220, ComponentInput::Char { ch: 'm' })
+        .unwrap();
+    assert!(matches!(
+        requests.as_slice(),
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+            if interface == "mesh.audio"
+                && command == "set_muted"
+                && payload["device_id"] == serde_json::json!("default")
+                && payload["muted"] == serde_json::json!(true)
+    ));
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, 320, 220, &mut buffer).unwrap();
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("re-rendered audio popover");
+    let mute_key = first_node_with_attr(tree, "keybind", "toggle_mute")
+        .and_then(|node| node.attributes.get("_mesh_key"))
+        .cloned()
+        .expect("audio popover mute button key");
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, &mute_key, 0.0, 0.0).expect("mute button bounds");
+    let x = (left + right) * 0.5;
+    let y = (top + bottom) * 0.5;
+    component
         .handle_input(
             &theme,
             320,
             220,
-            ComponentInput::KeyPressed {
-                key: "m".into(),
-                modifiers: KeyModifiers::default(),
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    let click_requests = component
+        .handle_input(
+            &theme,
+            320,
+            220,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                pressed: false,
             },
         )
         .unwrap();
     assert!(matches!(
-        requests.as_slice(),
+        click_requests.as_slice(),
         [CoreRequest::ServiceCommand { interface, command, payload, .. }]
             if interface == "mesh.audio"
                 && command == "set_muted"

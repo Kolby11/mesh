@@ -268,6 +268,17 @@ impl FrontendSurfaceComponent {
                         );
                     }
                 }
+
+                let keyboard_settings = self.current_keyboard_settings();
+                let key = ch.to_string();
+                if let Some(requests) = self.dispatch_surface_shortcut(
+                    &tree,
+                    &key,
+                    KeyModifiers::default(),
+                    &keyboard_settings,
+                )? {
+                    return Ok(requests);
+                }
             }
             ComponentInput::KeyPressed { key, modifiers } => {
                 let keyboard_settings = self.current_keyboard_settings();

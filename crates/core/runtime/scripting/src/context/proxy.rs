@@ -56,6 +56,7 @@ pub(super) fn create_service_proxy(
     proxy.set("state", state_proxy)?;
     let events_proxy = create_events_proxy(
         lua,
+        &service_name,
         contract
             .as_ref()
             .map(|contract| {
@@ -131,12 +132,51 @@ pub(super) fn create_service_proxy(
     Ok(proxy)
 }
 
-pub(super) fn create_events_proxy(lua: &Lua, event_names: Vec<String>) -> mlua::Result<Table> {
+pub(super) fn create_events_proxy(
+    lua: &Lua,
+    service_name: &str,
+    event_names: Vec<String>,
+) -> mlua::Result<Table> {
     let events = lua.create_table()?;
     for name in event_names {
-        events.set(name, create_event_channel(lua)?)?;
+        events.set(
+            name.as_str(),
+            interface_event_channel(lua, service_name, &name)?,
+        )?;
     }
     Ok(events)
+}
+
+pub(super) fn interface_event_channel(
+    lua: &Lua,
+    service_name: &str,
+    event_name: &str,
+) -> mlua::Result<Table> {
+    let globals = lua.globals();
+    let registry = match globals.get::<LuaValue>("__mesh_interface_event_channels") {
+        Ok(LuaValue::Table(table)) => table,
+        _ => {
+            let table = lua.create_table()?;
+            globals.set("__mesh_interface_event_channels", table.clone())?;
+            table
+        }
+    };
+    let service_table = match registry.get::<LuaValue>(service_name)? {
+        LuaValue::Table(table) => table,
+        _ => {
+            let table = lua.create_table()?;
+            registry.set(service_name, table.clone())?;
+            table
+        }
+    };
+    match service_table.get::<LuaValue>(event_name)? {
+        LuaValue::Table(channel) => Ok(channel),
+        _ => {
+            let channel = create_event_channel(lua)?;
+            service_table.set(event_name, channel.clone())?;
+            Ok(channel)
+        }
+    }
 }
 
 pub(super) fn create_event_channel(lua: &Lua) -> mlua::Result<Table> {
