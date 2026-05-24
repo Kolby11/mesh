@@ -719,20 +719,23 @@ fn keyboard_shortcuts_manifest_declaration_wins_over_legacy_settings_same_id() {
 }
 
 #[test]
-fn manifest_descriptor_exposes_keybind_i18n_keys_to_lua_and_markup() {
+fn manifest_descriptor_resolves_keybind_localized_text() {
     let mut manifest = minimal_test_manifest("@test/keybind-descriptor");
     manifest.keybinds.actions.insert(
         "mute".into(),
         mesh_core_module::KeybindAction {
-            label: Some(mesh_core_module::LocalizedText::Literal(
-                "keybind.mute.label".into(),
-            )),
-            description: Some(mesh_core_module::LocalizedText::Literal(
-                "keybind.mute.description".into(),
-            )),
-            category: Some(mesh_core_module::LocalizedText::Literal(
-                "keybind.category.audio".into(),
-            )),
+            label: Some(mesh_core_module::LocalizedText::Translation {
+                key: "keybind.mute.label".into(),
+                fallback: "Mute".into(),
+            }),
+            description: Some(mesh_core_module::LocalizedText::Translation {
+                key: "keybind.mute.description".into(),
+                fallback: "Toggle audio output".into(),
+            }),
+            category: Some(mesh_core_module::LocalizedText::Translation {
+                key: "keybind.category.audio".into(),
+                fallback: "Audio".into(),
+            }),
             trigger: mesh_core_module::KeybindTrigger {
                 kind: mesh_core_module::KeybindTriggerKind::Shortcut,
                 key: Some("m".into()),
@@ -745,7 +748,9 @@ fn manifest_descriptor_exposes_keybind_i18n_keys_to_lua_and_markup() {
         r#"
 <template>
   <box>
-    <text>{t(this.keybinds.mute.label)}</text>
+    <text>{this.keybinds.mute.label}</text>
+    <text>{this.keybinds.mute.label_key}</text>
+    <text>{this.keybinds.mute.label_fallback}</text>
     <text>{lua_label}</text>
     <text>{this.keybinds.mute.trigger.key}</text>
   </box>
@@ -756,6 +761,22 @@ lua_label = this.keybinds.mute.label
 "#,
         manifest,
     );
+    component
+        .locale
+        .load_translations(mesh_core_locale::TranslationSet {
+            locale: "sk".into(),
+            messages: HashMap::from([
+                ("keybind.mute.label".into(), "Stlmit".into()),
+                (
+                    "keybind.mute.description".into(),
+                    "Prepnúť zvukový výstup".into(),
+                ),
+                ("keybind.category.audio".into(), "Zvuk".into()),
+            ]),
+        });
+    component.locale.set_locale("sk");
+    component.runtimes.lock().unwrap().clear();
+    component.init_root_runtime().unwrap();
 
     let tree = component.build_tree(&default_theme(), 240, 160);
     let mut text = Vec::new();
@@ -763,10 +784,83 @@ lua_label = this.keybinds.mute.label
 
     assert_eq!(
         runtime_value(&component, "lua_label").and_then(|value| value.as_str().map(str::to_string)),
-        Some("keybind.mute.label".into())
+        Some("Stlmit".into())
     );
+    assert!(text.iter().any(|line| line == "Stlmit"));
     assert!(text.iter().any(|line| line == "keybind.mute.label"));
+    assert!(text.iter().any(|line| line == "Mute"));
     assert!(text.iter().any(|line| line == "m"));
+}
+
+#[test]
+fn manifest_descriptor_missing_translation_uses_fallback_and_diagnostic() {
+    let mut manifest = minimal_test_manifest("@test/keybind-descriptor");
+    manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            label: Some(mesh_core_module::LocalizedText::Translation {
+                key: "keybind.mute.label".into(),
+                fallback: "Mute".into(),
+            }),
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+    let mut component = test_frontend_component_with_manifest(
+        r#"
+<template>
+  <box>
+    <text>{this.keybinds.mute.label}</text>
+    <text>{this.keybinds.mute.label_key}</text>
+  </box>
+</template>
+<script lang="luau">
+lua_label = this.keybinds.mute.label
+</script>
+"#,
+        manifest,
+    );
+    component.locale.set_locale("sk");
+
+    let tree = component.build_tree(&default_theme(), 240, 160);
+    let mut text = Vec::new();
+    collect_text_content(&tree, &mut text);
+
+    assert_eq!(
+        runtime_value(&component, "lua_label").and_then(|value| value.as_str().map(str::to_string)),
+        Some("Mute".into())
+    );
+    assert!(text.iter().any(|line| line == "Mute"));
+    assert!(text.iter().any(|line| line == "keybind.mute.label"));
+
+    let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
+    let mesh_core_diagnostics::HealthStatus::Degraded(message) = diagnostics.health() else {
+        panic!("expected degraded missing translation diagnostic");
+    };
+    assert!(
+        message.contains("missing localized manifest text"),
+        "diagnostic should describe missing manifest text: {message}"
+    );
+    assert!(
+        message.contains("module_id='@test/keybind-descriptor'"),
+        "diagnostic should include module id: {message}"
+    );
+    assert!(
+        message.contains("field_path='mesh.keybinds.mute.label'"),
+        "diagnostic should include field path: {message}"
+    );
+    assert!(
+        message.contains("key='keybind.mute.label'"),
+        "diagnostic should include key: {message}"
+    );
+    assert!(
+        message.contains("fallback='Mute'"),
+        "diagnostic should include fallback: {message}"
+    );
 }
 
 #[test]
@@ -1265,6 +1359,74 @@ fn keybind_debug_metadata_matches_resolved_accessibility_shortcut() {
     assert_eq!(keybinds[0].modifiers, vec!["ctrl".to_string()]);
     assert_eq!(keybinds[0].trigger_kind, "shortcut");
     assert_eq!(keybinds[0].source, "module_default");
+    assert_eq!(keybinds[0].accessibility_shortcut, "Control+m");
+}
+
+#[test]
+fn keybind_debug_metadata_includes_resolved_manifest_text() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+    );
+    component
+        .locale
+        .load_translations(mesh_core_locale::TranslationSet {
+            locale: "sk".into(),
+            messages: HashMap::from([
+                ("keybind.mute.label".into(), "Stlmit".into()),
+                (
+                    "keybind.mute.description".into(),
+                    "Prepnúť zvukový výstup".into(),
+                ),
+                ("keybind.category.audio".into(), "Zvuk".into()),
+            ]),
+        });
+    component.locale.set_locale("sk");
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            label: Some(mesh_core_module::LocalizedText::Translation {
+                key: "keybind.mute.label".into(),
+                fallback: "Mute".into(),
+            }),
+            description: Some(mesh_core_module::LocalizedText::Translation {
+                key: "keybind.mute.description".into(),
+                fallback: "Toggle audio output".into(),
+            }),
+            category: Some(mesh_core_module::LocalizedText::Translation {
+                key: "keybind.category.audio".into(),
+                fallback: "Audio".into(),
+            }),
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: vec!["ctrl".into()],
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+
+    let keybinds = component.debug_surface_keybinds();
+
+    assert_eq!(keybinds.len(), 1);
+    assert_eq!(keybinds[0].label.as_deref(), Some("Stlmit"));
+    assert_eq!(
+        keybinds[0].description.as_deref(),
+        Some("Prepnúť zvukový výstup")
+    );
+    assert_eq!(keybinds[0].category.as_deref(), Some("Zvuk"));
+    assert_eq!(keybinds[0].label_key.as_deref(), Some("keybind.mute.label"));
+    assert_eq!(
+        keybinds[0].description_key.as_deref(),
+        Some("keybind.mute.description")
+    );
+    assert_eq!(
+        keybinds[0].category_key.as_deref(),
+        Some("keybind.category.audio")
+    );
     assert_eq!(keybinds[0].accessibility_shortcut, "Control+m");
 }
 

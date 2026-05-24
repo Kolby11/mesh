@@ -165,7 +165,7 @@ impl FrontendSurfaceComponent {
         script_ctx.set_interface_catalog(self.interface_catalog.clone());
         seed_service_state(script_ctx.state_mut());
         script_ctx
-            .set_global_state("this", module_descriptor_from_manifest(manifest))
+            .set_global_state("this", self.module_descriptor_from_manifest(manifest))
             .map_err(|source| ComponentError::Script {
                 component_id: component_id.clone(),
                 source,
@@ -506,6 +506,13 @@ impl FrontendSurfaceComponent {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::shell::component) struct ResolvedManifestText {
+    pub(in crate::shell::component) text: String,
+    pub(in crate::shell::component) key: Option<String>,
+    pub(in crate::shell::component) fallback: Option<String>,
+}
+
 pub(super) fn script_has_service_read(
     script_ctx: &ScriptContext,
     interface: &str,
@@ -517,67 +524,140 @@ pub(super) fn script_has_service_read(
         || (interface == "mesh.locale" && capabilities.is_granted(&Capability::new("locale.read")))
 }
 
-fn module_descriptor_from_manifest(manifest: &mesh_core_module::Manifest) -> serde_json::Value {
-    let keybinds = manifest
-        .keybinds
-        .actions
-        .iter()
-        .map(|(keybind_id, action)| {
-            let mut descriptor = serde_json::Map::new();
-            descriptor.insert("id".into(), serde_json::json!(keybind_id));
-            descriptor.insert(
-                "scope".into(),
-                serde_json::json!(match action.scope {
-                    mesh_core_module::KeybindScope::Surface => "surface",
-                    mesh_core_module::KeybindScope::Access => "access",
-                }),
-            );
-            descriptor.insert(
-                "label".into(),
-                serde_json::json!(action.label.clone().unwrap_or_else(|| {
+impl FrontendSurfaceComponent {
+    pub(in crate::shell::component) fn resolve_manifest_text(
+        &self,
+        module_id: &str,
+        field_path: &str,
+        text: &mesh_core_module::LocalizedText,
+    ) -> ResolvedManifestText {
+        match text {
+            mesh_core_module::LocalizedText::Literal(value) => ResolvedManifestText {
+                text: value.clone(),
+                key: None,
+                fallback: None,
+            },
+            mesh_core_module::LocalizedText::Translation { key, fallback } => {
+                let resolved = self
+                    .locale
+                    .translate(key)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        if let Some(diagnostics) = &self.diagnostics {
+                            diagnostics.degraded(format!(
+                                "missing localized manifest text: module_id='{module_id}' field_path='{field_path}' key='{key}' fallback='{fallback}'"
+                            ));
+                        }
+                        text.fallback_text().to_string()
+                    });
+                ResolvedManifestText {
+                    text: resolved,
+                    key: Some(key.clone()),
+                    fallback: Some(fallback.clone()),
+                }
+            }
+        }
+    }
+
+    fn module_descriptor_from_manifest(
+        &self,
+        manifest: &mesh_core_module::Manifest,
+    ) -> serde_json::Value {
+        let keybinds = manifest
+            .keybinds
+            .actions
+            .iter()
+            .map(|(keybind_id, action)| {
+                let mut descriptor = serde_json::Map::new();
+                descriptor.insert("id".into(), serde_json::json!(keybind_id));
+                descriptor.insert(
+                    "scope".into(),
+                    serde_json::json!(match action.scope {
+                        mesh_core_module::KeybindScope::Surface => "surface",
+                        mesh_core_module::KeybindScope::Access => "access",
+                    }),
+                );
+                let label = action.label.clone().unwrap_or_else(|| {
                     mesh_core_module::LocalizedText::Literal(format!("keybind.{keybind_id}.label"))
-                })),
-            );
-            descriptor.insert(
-                "description".into(),
-                serde_json::json!(action.description.clone().unwrap_or_else(|| {
+                });
+                insert_resolved_manifest_text(
+                    &mut descriptor,
+                    "label",
+                    self.resolve_manifest_text(
+                        &manifest.package.id,
+                        &format!("mesh.keybinds.{keybind_id}.label"),
+                        &label,
+                    ),
+                );
+                let description = action.description.clone().unwrap_or_else(|| {
                     mesh_core_module::LocalizedText::Literal(format!(
                         "keybind.{keybind_id}.description"
                     ))
-                })),
-            );
-            if let Some(category) = &action.category {
-                descriptor.insert("category".into(), serde_json::json!(category));
-            }
-            descriptor.insert(
-                "trigger".into(),
-                keybind_trigger_descriptor(&action.trigger),
-            );
-            descriptor.insert(
-                "localized_triggers".into(),
-                serde_json::Value::Object(
-                    action
-                        .localized_triggers
-                        .iter()
-                        .map(|(locale, trigger)| {
-                            (locale.clone(), keybind_trigger_descriptor(trigger))
-                        })
-                        .collect(),
-                ),
-            );
-            (keybind_id.clone(), serde_json::Value::Object(descriptor))
-        })
-        .collect::<serde_json::Map<_, _>>();
+                });
+                insert_resolved_manifest_text(
+                    &mut descriptor,
+                    "description",
+                    self.resolve_manifest_text(
+                        &manifest.package.id,
+                        &format!("mesh.keybinds.{keybind_id}.description"),
+                        &description,
+                    ),
+                );
+                if let Some(category) = &action.category {
+                    insert_resolved_manifest_text(
+                        &mut descriptor,
+                        "category",
+                        self.resolve_manifest_text(
+                            &manifest.package.id,
+                            &format!("mesh.keybinds.{keybind_id}.category"),
+                            category,
+                        ),
+                    );
+                }
+                descriptor.insert(
+                    "trigger".into(),
+                    keybind_trigger_descriptor(&action.trigger),
+                );
+                descriptor.insert(
+                    "localized_triggers".into(),
+                    serde_json::Value::Object(
+                        action
+                            .localized_triggers
+                            .iter()
+                            .map(|(locale, trigger)| {
+                                (locale.clone(), keybind_trigger_descriptor(trigger))
+                            })
+                            .collect(),
+                    ),
+                );
+                (keybind_id.clone(), serde_json::Value::Object(descriptor))
+            })
+            .collect::<serde_json::Map<_, _>>();
 
-    serde_json::json!({
-        "id": manifest.package.id.clone(),
-        "name": manifest.package.name.clone(),
-        "version": manifest.package.version.clone(),
-        "type": manifest.package.module_type,
-        "api_version": manifest.package.api_version.clone(),
-        "description": manifest.package.description.clone(),
-        "keybinds": keybinds,
-    })
+        serde_json::json!({
+            "id": manifest.package.id.clone(),
+            "name": manifest.package.name.clone(),
+            "version": manifest.package.version.clone(),
+            "type": manifest.package.module_type,
+            "api_version": manifest.package.api_version.clone(),
+            "description": manifest.package.description.clone(),
+            "keybinds": keybinds,
+        })
+    }
+}
+
+fn insert_resolved_manifest_text(
+    descriptor: &mut serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    resolved: ResolvedManifestText,
+) {
+    descriptor.insert(field.into(), serde_json::json!(resolved.text));
+    if let Some(key) = resolved.key {
+        descriptor.insert(format!("{field}_key"), serde_json::json!(key));
+    }
+    if let Some(fallback) = resolved.fallback {
+        descriptor.insert(format!("{field}_fallback"), serde_json::json!(fallback));
+    }
 }
 
 fn keybind_trigger_descriptor(trigger: &mesh_core_module::KeybindTrigger) -> serde_json::Value {

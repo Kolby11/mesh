@@ -315,24 +315,65 @@ impl FrontendSurfaceComponent {
         let keyboard_settings = self.current_keyboard_settings();
         self.resolved_surface_shortcuts(&keyboard_settings)
             .into_iter()
-            .map(|shortcut| mesh_core_debug::DebugKeybindEntry {
-                surface_id: self.surface_id().to_string(),
-                module_id: self.compiled.manifest.package.id.clone(),
-                action_id: shortcut.keybind_id.clone(),
-                key: shortcut.key.clone(),
-                modifiers: shortcut.modifiers.clone(),
-                trigger_kind: match shortcut.trigger_kind {
-                    mesh_core_module::KeybindTriggerKind::Shortcut => "shortcut".to_string(),
-                    mesh_core_module::KeybindTriggerKind::AccessKey => "access_key".to_string(),
-                },
-                source: match shortcut.source.clone() {
-                    KeybindResolutionSource::UserOverride => "user_override".to_string(),
-                    KeybindResolutionSource::LocaleDefault { locale } => {
-                        format!("locale:{locale}")
-                    }
-                    KeybindResolutionSource::ModuleDefault => "module_default".to_string(),
-                },
-                accessibility_shortcut: format_shortcut_for_accessibility(&shortcut),
+            .map(|shortcut| {
+                let action = self
+                    .compiled
+                    .manifest
+                    .keybinds
+                    .actions
+                    .get(&shortcut.keybind_id);
+                let label = action.and_then(|action| {
+                    action.label.as_ref().map(|text| {
+                        self.resolve_manifest_text(
+                            &self.compiled.manifest.package.id,
+                            &format!("mesh.keybinds.{}.label", shortcut.keybind_id),
+                            text,
+                        )
+                    })
+                });
+                let description = action.and_then(|action| {
+                    action.description.as_ref().map(|text| {
+                        self.resolve_manifest_text(
+                            &self.compiled.manifest.package.id,
+                            &format!("mesh.keybinds.{}.description", shortcut.keybind_id),
+                            text,
+                        )
+                    })
+                });
+                let category = action.and_then(|action| {
+                    action.category.as_ref().map(|text| {
+                        self.resolve_manifest_text(
+                            &self.compiled.manifest.package.id,
+                            &format!("mesh.keybinds.{}.category", shortcut.keybind_id),
+                            text,
+                        )
+                    })
+                });
+                mesh_core_debug::DebugKeybindEntry {
+                    surface_id: self.surface_id().to_string(),
+                    module_id: self.compiled.manifest.package.id.clone(),
+                    action_id: shortcut.keybind_id.clone(),
+                    label: label.as_ref().map(|text| text.text.clone()),
+                    description: description.as_ref().map(|text| text.text.clone()),
+                    category: category.as_ref().map(|text| text.text.clone()),
+                    label_key: label.and_then(|text| text.key),
+                    description_key: description.and_then(|text| text.key),
+                    category_key: category.and_then(|text| text.key),
+                    key: shortcut.key.clone(),
+                    modifiers: shortcut.modifiers.clone(),
+                    trigger_kind: match shortcut.trigger_kind {
+                        mesh_core_module::KeybindTriggerKind::Shortcut => "shortcut".to_string(),
+                        mesh_core_module::KeybindTriggerKind::AccessKey => "access_key".to_string(),
+                    },
+                    source: match shortcut.source.clone() {
+                        KeybindResolutionSource::UserOverride => "user_override".to_string(),
+                        KeybindResolutionSource::LocaleDefault { locale } => {
+                            format!("locale:{locale}")
+                        }
+                        KeybindResolutionSource::ModuleDefault => "module_default".to_string(),
+                    },
+                    accessibility_shortcut: format_shortcut_for_accessibility(&shortcut),
+                }
             })
             .collect()
     }
