@@ -14,10 +14,10 @@
 
 ### Contribution Propagation
 
-- [ ] **MGRAPH-01**: Installed-graph keybind contribution records preserve localized labels, descriptions, and categories without flattening them to plain strings.
-- [ ] **MGRAPH-02**: Layout contribution labels preserve localized text metadata for later shell resolution.
-- [ ] **MGRAPH-03**: Settings schema descriptions that are shown to users can preserve localized text metadata where the manifest model supports them.
-- [ ] **MGRAPH-04**: Existing graph consumers that need literal strings receive resolved fallback text until locale-aware resolution is available.
+- [x] **MGRAPH-01**: Installed-graph keybind contribution records preserve localized labels, descriptions, and categories without flattening them to plain strings.
+- [x] **MGRAPH-02**: Layout contribution labels preserve localized text metadata for later shell resolution.
+- [x] **MGRAPH-03**: Settings schema descriptions that are shown to users can preserve localized text metadata where the manifest model supports them.
+- [x] **MGRAPH-04**: Existing graph consumers that need literal strings receive resolved fallback text until locale-aware resolution is available.
 
 ### Runtime Resolution
 
@@ -63,10 +63,10 @@
 | MI18N-02 | Phase 70 | Complete |
 | MI18N-03 | Phase 70 | Complete |
 | MI18N-04 | Phase 70 | Complete |
-| MGRAPH-01 | Phase 71 | Pending |
-| MGRAPH-02 | Phase 71 | Pending |
-| MGRAPH-03 | Phase 71 | Pending |
-| MGRAPH-04 | Phase 71 | Pending |
+| MGRAPH-01 | Phase 71 | Complete |
+| MGRAPH-02 | Phase 71 | Complete |
+| MGRAPH-03 | Phase 71 | Complete |
+| MGRAPH-04 | Phase 71 | Complete |
 | MRES-01 | Phase 72 | Pending |
 | MRES-02 | Phase 72 | Pending |
 | MRES-03 | Phase 72 | Pending |
