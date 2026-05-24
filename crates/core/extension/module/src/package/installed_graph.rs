@@ -880,9 +880,18 @@ impl ModuleContributionIndex {
                 module_id: module_id.into(),
                 action_id: action_id.clone(),
                 scope: action.scope,
-                label: action.label.clone(),
-                description: action.description.clone(),
-                category: action.category.clone(),
+                label: action
+                    .label
+                    .as_ref()
+                    .map(|text| text.fallback_text().to_string()),
+                description: action
+                    .description
+                    .as_ref()
+                    .map(|text| text.fallback_text().to_string()),
+                category: action
+                    .category
+                    .as_ref()
+                    .map(|text| text.fallback_text().to_string()),
                 trigger: action.trigger.clone(),
                 localized_triggers: action.localized_triggers.clone(),
             });
@@ -1112,11 +1121,12 @@ pub fn load_module_manifest(
             source,
         })? {
             let manifest = ModuleManifest::from_path(&module_json)?;
+            let diagnostics = manifest.localized_text_diagnostics(&module_json);
             return Ok(LoadedModuleManifest {
                 manifest,
                 path: module_json,
                 source: ModuleManifestSource::CanonicalModuleJson,
-                diagnostics: Vec::new(),
+                diagnostics,
             });
         }
 

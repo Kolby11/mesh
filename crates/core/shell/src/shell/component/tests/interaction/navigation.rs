@@ -724,9 +724,15 @@ fn manifest_descriptor_exposes_keybind_i18n_keys_to_lua_and_markup() {
     manifest.keybinds.actions.insert(
         "mute".into(),
         mesh_core_module::KeybindAction {
-            label: Some("keybind.mute.label".into()),
-            description: Some("keybind.mute.description".into()),
-            category: Some("keybind.category.audio".into()),
+            label: Some(mesh_core_module::LocalizedText::Literal(
+                "keybind.mute.label".into(),
+            )),
+            description: Some(mesh_core_module::LocalizedText::Literal(
+                "keybind.mute.description".into(),
+            )),
+            category: Some(mesh_core_module::LocalizedText::Literal(
+                "keybind.category.audio".into(),
+            )),
             trigger: mesh_core_module::KeybindTrigger {
                 kind: mesh_core_module::KeybindTriggerKind::Shortcut,
                 key: Some("m".into()),

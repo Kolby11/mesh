@@ -1,4 +1,4 @@
-use super::{ModuleManifestError, validate_relative_path};
+use super::{ModuleManifestDiagnostic, ModuleManifestError, validate_relative_path};
 use crate::manifest::{self, CapabilitiesSection, DependencySpec, Manifest, ModuleType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -58,6 +58,11 @@ impl ModuleManifest {
             repository.validate()?;
         }
         self.mesh.validate()
+    }
+
+    pub(crate) fn localized_text_diagnostics(&self, path: &Path) -> Vec<ModuleManifestDiagnostic> {
+        self.mesh
+            .localized_text_diagnostics(path, self.name.as_str())
     }
 
     pub fn into_runtime_manifest(self) -> Manifest {
@@ -387,6 +392,43 @@ impl MeshModuleSection {
 
     pub fn implementations(&self) -> impl Iterator<Item = &MeshProvidesDeclaration> {
         self.provides.iter().chain(self.implements.iter())
+    }
+
+    fn localized_text_diagnostics(
+        &self,
+        path: &Path,
+        module_id: &str,
+    ) -> Vec<ModuleManifestDiagnostic> {
+        let mut diagnostics = Vec::new();
+
+        for (action_id, action) in &self.keybinds.actions {
+            for (field, value) in [
+                ("label", action.label.as_ref()),
+                ("description", action.description.as_ref()),
+                ("category", action.category.as_ref()),
+            ] {
+                let Some(value) = value else {
+                    continue;
+                };
+                if !value.is_suspicious_raw_i18n_key() {
+                    continue;
+                }
+
+                let field_path = format!("mesh.keybinds.{action_id}.{field}");
+                let key = value.fallback_text();
+                diagnostics.push(ModuleManifestDiagnostic::warning(
+                    path,
+                    Some(module_id.to_string()),
+                    Some(field_path.clone()),
+                    format!("{field_path} looks like an i18n key but is a raw literal string"),
+                    format!(
+                        "use {{ \"t\": \"{key}\", \"fallback\": \"...\" }} to localize this field"
+                    ),
+                ));
+            }
+        }
+
+        diagnostics
     }
 }
 

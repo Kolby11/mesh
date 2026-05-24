@@ -385,6 +385,56 @@ fn module_manifest_loader_accepts_canonical_module_json() {
 }
 
 #[test]
+fn module_manifest_loader_warns_for_raw_dotted_keybind_label() {
+    let dir = temp_dir("canonical-module-raw-keybind-label");
+    fs::write(
+        dir.join("module.json"),
+        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","keybinds":{"mute":{"label":"keybind.mute.label","trigger":{"kind":"shortcut","key":"m"}}}}}"#,
+    )
+    .unwrap();
+
+    let loaded = load_module_manifest(&dir).unwrap();
+
+    assert_eq!(loaded.source, ModuleManifestSource::CanonicalModuleJson);
+    assert_eq!(loaded.diagnostics.len(), 1);
+    let diagnostic = &loaded.diagnostics[0];
+    assert_eq!(
+        diagnostic.severity,
+        ModuleManifestDiagnosticSeverity::Warning
+    );
+    assert_eq!(diagnostic.module_id.as_deref(), Some("@mesh/module"));
+    assert_eq!(
+        diagnostic.field_path.as_deref(),
+        Some("mesh.keybinds.mute.label")
+    );
+    assert!(
+        diagnostic
+            .message
+            .contains("looks like an i18n key but is a raw literal string")
+    );
+    assert!(
+        diagnostic
+            .suggested_action
+            .contains(r#"{ "t": "keybind.mute.label", "fallback": "..." }"#)
+    );
+}
+
+#[test]
+fn module_manifest_loader_does_not_warn_for_literal_keybind_label() {
+    let dir = temp_dir("canonical-module-literal-keybind-label");
+    fs::write(
+        dir.join("module.json"),
+        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","keybinds":{"mute":{"label":"Mute","trigger":{"kind":"shortcut","key":"m"}}}}}"#,
+    )
+    .unwrap();
+
+    let loaded = load_module_manifest(&dir).unwrap();
+
+    assert_eq!(loaded.source, ModuleManifestSource::CanonicalModuleJson);
+    assert!(loaded.diagnostics.is_empty());
+}
+
+#[test]
 fn module_manifest_loader_accepts_legacy_package_json_with_replacement_warning() {
     let dir = temp_dir("legacy-package");
     fs::write(
@@ -1333,7 +1383,7 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
     frontend.manifest.mesh.keybinds.actions.insert(
         "mute".into(),
         crate::manifest::KeybindAction {
-            label: Some("Mute".into()),
+            label: Some(crate::manifest::LocalizedText::Literal("Mute".into())),
             scope: crate::manifest::KeybindScope::Surface,
             trigger: crate::manifest::KeybindTrigger {
                 kind: crate::manifest::KeybindTriggerKind::Shortcut,

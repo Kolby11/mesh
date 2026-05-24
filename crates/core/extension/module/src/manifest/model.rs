@@ -393,6 +393,76 @@ pub struct SettingsSection {
     pub inline_schema: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum LocalizedText {
+    Literal(String),
+    Translation {
+        #[serde(rename = "t")]
+        key: String,
+        fallback: String,
+    },
+}
+
+impl<'de> Deserialize<'de> for LocalizedText {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum RawLocalizedText {
+            Literal(String),
+            Translation { t: String, fallback: String },
+        }
+
+        match RawLocalizedText::deserialize(deserializer)? {
+            RawLocalizedText::Literal(value) => Ok(Self::Literal(value)),
+            RawLocalizedText::Translation { t, fallback } => {
+                Ok(Self::Translation { key: t, fallback })
+            }
+        }
+    }
+}
+
+impl LocalizedText {
+    pub fn fallback_text(&self) -> &str {
+        match self {
+            Self::Literal(value) => value,
+            Self::Translation { fallback, .. } => fallback,
+        }
+    }
+
+    pub fn translation_key(&self) -> Option<&str> {
+        match self {
+            Self::Literal(_) => None,
+            Self::Translation { key, .. } => Some(key),
+        }
+    }
+
+    pub fn validate(&self, field_path: &str) -> Result<(), String> {
+        match self {
+            Self::Literal(value) if value.trim().is_empty() => {
+                Err(format!("{field_path} cannot be empty"))
+            }
+            Self::Translation { key, .. } if key.trim().is_empty() => {
+                Err(format!("{field_path}.t cannot be empty"))
+            }
+            Self::Translation { fallback, .. } if fallback.trim().is_empty() => {
+                Err(format!("{field_path}.fallback cannot be empty"))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub fn is_suspicious_raw_i18n_key(&self) -> bool {
+        match self {
+            Self::Literal(value) => value.contains('.') && !value.chars().any(char::is_whitespace),
+            Self::Translation { .. } => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct KeybindsSection {
     #[serde(default, flatten)]
@@ -420,11 +490,11 @@ pub struct KeybindAction {
     #[serde(default)]
     pub scope: KeybindScope,
     #[serde(default)]
-    pub label: Option<String>,
+    pub label: Option<LocalizedText>,
     #[serde(default)]
-    pub description: Option<String>,
+    pub description: Option<LocalizedText>,
     #[serde(default)]
-    pub category: Option<String>,
+    pub category: Option<LocalizedText>,
     #[serde(default)]
     pub trigger: KeybindTrigger,
     #[serde(default, alias = "localizedTriggers")]
@@ -433,9 +503,9 @@ pub struct KeybindAction {
 
 impl KeybindAction {
     fn validate(&self, action_id: &str) -> Result<(), String> {
-        validate_optional_keybind_text_key(action_id, "label", self.label.as_deref())?;
-        validate_optional_keybind_text_key(action_id, "description", self.description.as_deref())?;
-        validate_optional_keybind_text_key(action_id, "category", self.category.as_deref())?;
+        validate_optional_keybind_text(action_id, "label", self.label.as_ref())?;
+        validate_optional_keybind_text(action_id, "description", self.description.as_ref())?;
+        validate_optional_keybind_text(action_id, "category", self.category.as_ref())?;
         self.trigger.validate(action_id)?;
         for (locale, trigger) in &self.localized_triggers {
             if locale.trim().is_empty() {
@@ -462,13 +532,13 @@ impl Default for KeybindAction {
     }
 }
 
-fn validate_optional_keybind_text_key(
+fn validate_optional_keybind_text(
     action_id: &str,
     field: &str,
-    value: Option<&str>,
+    value: Option<&LocalizedText>,
 ) -> Result<(), String> {
-    if value.is_some_and(|value| value.trim().is_empty()) {
-        return Err(format!("mesh.keybinds.{action_id}.{field} cannot be empty"));
+    if let Some(value) = value {
+        value.validate(&format!("mesh.keybinds.{action_id}.{field}"))?;
     }
     Ok(())
 }

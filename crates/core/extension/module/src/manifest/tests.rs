@@ -194,13 +194,110 @@ fn parses_module_json_keybind_display_keys() {
 
     let action = &manifest.keybinds.actions["mute"];
     assert_eq!(action.scope, KeybindScope::Surface);
-    assert_eq!(action.label.as_deref(), Some("keybind.mute.label"));
     assert_eq!(
-        action.description.as_deref(),
-        Some("keybind.mute.description")
+        action.label.as_ref(),
+        Some(&LocalizedText::Literal("keybind.mute.label".into()))
     );
-    assert_eq!(action.category.as_deref(), Some("keybind.category.audio"));
+    assert_eq!(
+        action.description.as_ref(),
+        Some(&LocalizedText::Literal("keybind.mute.description".into()))
+    );
+    assert_eq!(
+        action.category.as_ref(),
+        Some(&LocalizedText::Literal("keybind.category.audio".into()))
+    );
     assert_eq!(action.localized_triggers["sk"].key.as_deref(), Some("s"));
+}
+
+#[test]
+fn parses_module_json_keybind_localized_display_text() {
+    let content = r#"
+{
+  "id": "@mesh/panel",
+  "version": "0.1.0",
+  "type": "surface",
+  "api_version": "0.1",
+  "keybinds": {
+    "mute": {
+      "label": { "t": "keybind.mute.label", "fallback": "Mute" },
+      "description": { "t": "keybind.mute.description", "fallback": "Mute audio" },
+      "category": { "t": "keybind.category.audio", "fallback": "Audio" }
+    }
+  }
+}
+"#;
+
+    let parsed: JsonManifest = serde_json::from_str(content).unwrap();
+    let manifest = parsed.into_manifest();
+    manifest.validate_keybinds().unwrap();
+
+    let action = &manifest.keybinds.actions["mute"];
+    assert_eq!(
+        action.label.as_ref(),
+        Some(&LocalizedText::Translation {
+            key: "keybind.mute.label".into(),
+            fallback: "Mute".into(),
+        })
+    );
+    assert_eq!(
+        action
+            .description
+            .as_ref()
+            .map(LocalizedText::fallback_text),
+        Some("Mute audio")
+    );
+    assert_eq!(
+        action
+            .category
+            .as_ref()
+            .and_then(LocalizedText::translation_key),
+        Some("keybind.category.audio")
+    );
+}
+
+#[test]
+fn manifest_localized_text_raw_string_is_literal() {
+    let text: LocalizedText = serde_json::from_str(r#""Mute""#).unwrap();
+
+    assert_eq!(text, LocalizedText::Literal("Mute".into()));
+    assert_eq!(text.fallback_text(), "Mute");
+    assert_eq!(text.translation_key(), None);
+    text.validate("mesh.keybinds.mute.label").unwrap();
+}
+
+#[test]
+fn manifest_localized_text_object_is_translation() {
+    let text: LocalizedText =
+        serde_json::from_str(r#"{ "t": "keybind.mute.label", "fallback": "Mute" }"#).unwrap();
+
+    assert_eq!(
+        text,
+        LocalizedText::Translation {
+            key: "keybind.mute.label".into(),
+            fallback: "Mute".into(),
+        }
+    );
+    assert_eq!(text.fallback_text(), "Mute");
+    assert_eq!(text.translation_key(), Some("keybind.mute.label"));
+}
+
+#[test]
+fn manifest_localized_text_empty_key_is_rejected() {
+    let text: LocalizedText = serde_json::from_str(r#"{ "t": " ", "fallback": "Mute" }"#).unwrap();
+
+    let err = text.validate("mesh.keybinds.mute.label").unwrap_err();
+
+    assert!(err.contains("mesh.keybinds.mute.label.t cannot be empty"));
+}
+
+#[test]
+fn manifest_localized_text_empty_fallback_is_rejected() {
+    let text: LocalizedText =
+        serde_json::from_str(r#"{ "t": "keybind.mute.label", "fallback": "" }"#).unwrap();
+
+    let err = text.validate("mesh.keybinds.mute.label").unwrap_err();
+
+    assert!(err.contains("mesh.keybinds.mute.label.fallback cannot be empty"));
 }
 
 #[test]
