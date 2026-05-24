@@ -4,8 +4,8 @@ milestone: v1.13
 milestone_name: Manifest I18n Contract
 status: completed
 stopped_at: Phase 73 completed
-last_updated: "2026-05-24T07:48:55Z"
-last_activity: 2026-05-24 -- Phase 73 marked complete
+last_updated: "2026-05-24T07:57:52.663Z"
+last_activity: 2026-05-24 -- v1.13 archived
 progress:
   total_phases: 4
   completed_phases: 4
@@ -28,7 +28,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-24)
 Phase: 73 — COMPLETE
 Plan: 1 of 1
 Status: Phase 73 complete
-Last activity: 2026-05-24 -- Phase 73 marked complete
+Last activity: 2026-05-24 -- v1.13 archived
 
 ## Decisions
 
@@ -47,6 +47,7 @@ Last activity: 2026-05-24 -- Phase 73 marked complete
 - [v1.13]: Localized manifest text metadata should be preserved through installed graph records until shell runtime resolution can apply active locale, fallback locale, and required fallback text.
 - [Phase 70]: `LocalizedText` is the reusable manifest representation for localized-capable text fields, and keybind label, description, and category now parse raw literals or `{ "t": "...", "fallback": "..." }` declarations.
 - [Phase 70]: Existing keybind contribution consumers still receive fallback strings until Phase 71 preserves rich localized metadata through installed graph records.
+- [v1.13 shipped]: Localized manifest text now parses explicitly, preserves source metadata through installed graph records, resolves in shell runtime/debug keybind metadata, diagnoses missing translations non-fatally, and is proven on the shipped navigation manifest.
 
 - Backend plugins use Luau for service logic; Rust core remains the wiring layer.
 - `require('@mesh/service')` is the frontend/backend interface.
@@ -264,6 +265,13 @@ Items acknowledged and deferred at `v1.11` close on 2026-05-23:
 | debug | phase31-live-uat-diagnosis | updated |
 | todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
 
+Items acknowledged and deferred at `v1.13` close on 2026-05-24:
+
+| Category | Item | Status |
+|----------|------|--------|
+| debug | phase31-live-uat-diagnosis | updated |
+| todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
+
 ## Blockers
 
 (None)
@@ -294,12 +302,15 @@ Items acknowledged and deferred at `v1.11` close on 2026-05-23:
 | v1.11 archived roadmap | `.planning/milestones/v1.11-ROADMAP.md` |
 | v1.11 audit | `.planning/milestones/v1.11-MILESTONE-AUDIT.md` |
 | v1.11 phase archive | `.planning/milestones/v1.11-phases/` |
+| v1.13 archived requirements | `.planning/milestones/v1.13-REQUIREMENTS.md` |
+| v1.13 archived roadmap | `.planning/milestones/v1.13-ROADMAP.md` |
+| v1.13 phase archive | `.planning/milestones/v1.13-phases/` |
 | v1.7 research details | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
 | v1.4 research | `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-23 after milestone v1.11 archive*
+*State updated: 2026-05-24 after milestone v1.13 archive*
 
 ## Operator Next Steps
 

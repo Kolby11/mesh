@@ -10,11 +10,16 @@ MESH should let plugin authors build distinctive shell UI and service integratio
 
 ## Current State
 
-`v1.13 Manifest I18n Contract` is the next implementation milestone. The
-milestone turns the Spike 004 localized manifest text decision into shipped
-behavior: explicit `LocalizedText` parsing, installed-graph preservation,
-runtime resolution, diagnostics for suspicious raw i18n keys, migrated bundled
-manifests, and author docs.
+`v1.13 Manifest I18n Contract` shipped on 2026-05-24.
+
+The project now also has explicit localized manifest text behavior with:
+
+- Reusable `LocalizedText` parsing for manifest fields where raw strings are literals and `{ "t": "...", "fallback": "..." }` declares catalog lookup.
+- Non-fatal migration diagnostics for raw dotted strings that look like accidental i18n keys.
+- Installed-graph preservation of localized keybind and layout text metadata with fallback accessors for existing consumers.
+- Shell runtime and debug keybind metadata that resolve localized manifest text against the active locale and retain source translation keys.
+- Shipped navigation manifest proof using explicit localized keybind text objects and bundled English/Slovak catalogs.
+- Author docs tying together `mesh.i18n`, `mesh.contributes.i18n`, and field-local localized text objects.
 
 `v1.1` shipped on 2026-05-05.
 
@@ -153,19 +158,19 @@ The project now also has a class-like module object contract with:
 - Backend `mesh.service.emit_event(...)` transport through shell payload validation into frontend `proxy.events.Name` subscribers.
 - Bundled audio/navigation proof for typed `VolumeChanged` backend-to-frontend event delivery.
 
-## Current Milestone: v1.13 Manifest I18n Contract
+## Last Shipped Milestone: v1.13 Manifest I18n Contract
 
 **Goal:** Make user-facing `module.json` text fields explicit about literal text versus localized catalog lookup, then resolve that text through shell runtime paths with diagnostics and shipped manifest proof.
 
-**Target features:**
-- Add a reusable manifest `LocalizedText` contract for user-facing fields, with raw strings treated as literals and `{ "t": "...", "fallback": "..." }` treated as localized text.
-- Preserve localized text objects through installed-graph contribution records instead of flattening them to strings.
-- Resolve localized keybind, layout, and settings metadata against active locale, fallback locale, and required fallback text.
-- Emit non-fatal manifest diagnostics when raw strings look like translation keys or localized text lacks resolvable catalog metadata.
-- Migrate bundled navigation/audio manifest text to the explicit localized form and prove debug/accessibility metadata still receives resolved strings.
-- Update author docs so `mesh.i18n`, `mesh.contributes.i18n`, and field-local `t` references form one clear localization story.
+**Shipped features:**
+- Added a reusable manifest `LocalizedText` contract for localized-capable user-facing fields.
+- Preserved localized keybind and layout metadata through installed graph contribution records.
+- Resolved localized keybind metadata in runtime descriptors and `mesh.debug.keybinds`.
+- Emitted non-fatal diagnostics for suspicious raw dotted keys and missing runtime translations.
+- Migrated bundled navigation keybind metadata to explicit localized text objects.
+- Updated author docs so `mesh.i18n`, `mesh.contributes.i18n`, and field-local `t` references form one clear localization story.
 
-## Last Shipped Milestone: v1.12 Module Object Contract
+## Previous Shipped Milestone: v1.12 Module Object Contract
 
 **Goal:** Implement backend services and frontend modules as class-like Luau object instances backed by typed Rust-managed runtime lanes for state/exports, methods/results, and events/subscriptions.
 
@@ -223,6 +228,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.11 Phase 62`: Focused-surface keybind diagnostics now report malformed triggers, duplicate effective bindings, unresolved overrides, missing runtime subscribers, and unsafe overrides through non-fatal component diagnostics.
 - `v1.11 Phase 63`: Resolved focused-surface keybind metadata now reaches accessibility annotations, structured `mesh.debug.keybinds` payloads, debug health output, and author docs.
 - `v1.11 Phase 64`: Real navigation and audio surfaces now prove the completed focused-surface keybind system, including audio-popover access-key dispatch, metadata, and keyboard regression coverage.
+- `v1.13`: Manifest i18n text fields distinguish literal strings from localized catalog lookups and resolve into shipped keybind metadata.
 - `v1.12 Phase 65`: Backend and frontend modules now appear as stable runtime object instances through debug state.
 - `v1.12 Phase 66`: Frontend runtimes now receive replayable `module.state` and script-owned `module.exports`.
 - `v1.12 Phase 67`: Service proxy method dispatch and backend command results now have a shell-visible method call lane.
@@ -290,7 +296,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Background images remain bounded shell UI paint data | Phase 55 supports `none`, relative `url(...)`, and compact two-color `linear-gradient(...)` while unsupported browser-like values diagnose instead of silently disappearing | Shipped in v1.10 Phase 55 |
 | Modules are class-like runtime objects over typed lanes | Authors need normal Luau object access while Rust keeps lifecycle, validation, replay, routing, and diagnostics authoritative | Shipped in v1.12 |
 | Backend-to-frontend transient facts use typed interface events | Durable service state should stay replayable, while transient updates like volume changes need declared payload schemas and subscriptions | Shipped in v1.12 gap closure |
-| Manifest-localized text must be explicit at the field site | Plain `module.json` strings cannot tell authors whether text is literal, a translation key, or actually localized | Active for v1.13 |
+| Manifest-localized text must be explicit at the field site | Plain `module.json` strings cannot tell authors whether text is literal, a translation key, or actually localized | Shipped in v1.13 |
 
 <details>
 <summary>Archived milestone framing</summary>
@@ -337,4 +343,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-24 for v1.13 milestone planning*
+*Last updated: 2026-05-24 after v1.13 milestone archive*

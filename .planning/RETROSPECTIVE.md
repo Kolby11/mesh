@@ -181,12 +181,57 @@
 
 ---
 
+## Milestone: v1.13 - Manifest I18n Contract
+
+**Shipped:** 2026-05-24
+**Phases:** 4 | **Plans:** 4 | **Sessions:** autonomous planning, implementation, verification, and closeout
+
+### What Was Built
+
+- Reusable localized text manifest values for keybind display metadata, with fallback compatibility and canonical loader migration diagnostics.
+- Installed graph records preserve localized keybind and layout metadata while keeping fallback accessors for current consumers.
+- Shell runtime metadata resolves localized manifest keybind text against the active locale and keeps source keys for debugging.
+- The shipped navigation manifest uses the explicit localized text contract and proves parser, graph, runtime, debug, and docs behavior on the real module path.
+
+### What Worked
+
+- The milestone split was clean: parser contract, graph preservation, runtime resolution, and shipped proof each had a narrow boundary.
+- Synthetic tests caught fallback and diagnostic behavior before shipped fixture tests proved real navigation catalog behavior.
+- Keeping raw strings as literals preserved compatibility while still giving authors a diagnosable explicit localization path.
+
+### What Was Inefficient
+
+- The milestone closed without a dedicated `v1.13-MILESTONE-AUDIT.md`; closeout relied on completed phase verification and roadmap/requirements state.
+- Older open debug/todo artifacts still surfaced at close and were deferred again.
+- The SDK archive copied the full roadmap, so ROADMAP/PROJECT cleanup still required manual interpretation.
+
+### Patterns Established
+
+- Manifest text fields that can be localized should carry structured source metadata until the shell resolves them at the consumer boundary.
+- Runtime-facing metadata should expose resolved user text as the primary field and retain source keys as additive debug metadata.
+- Shipped module proof should assert both manifest/catalog authoring and runtime/debug resolution behavior.
+
+### Key Lessons
+
+1. Field-local localization objects are clearer than string conventions because they carry both intent and fallback.
+2. Locale behavior should be proven at the real runtime metadata boundary, not only in manifest parser tests.
+3. Author docs should show `mesh.i18n`, `mesh.contributes.i18n`, and field-local text declarations together so catalog ownership is explicit.
+
+### Cost Observations
+
+- Model mix: not tracked.
+- Sessions: one autonomous milestone completion sequence plus earlier phase execution.
+- Notable: the most valuable regression was the real navigation debug metadata test because it exercised shipped catalogs and runtime recreation together.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
 
 | Milestone | Sessions | Phases | Key Change |
 |-----------|----------|--------|------------|
+| v1.13 | autonomous plus earlier implementation sessions | 4 | Manifest i18n acceptance moved through parser contract, graph preservation, runtime resolution, and shipped-module proof. |
 | v1.11 | autonomous plus earlier implementation sessions | 5 | Surface keybind acceptance moved through dispatch, deterministic resolution, diagnostics, accessibility/debug metadata, and shipped-surface proof. |
 | v1.8 | multiple | 4 | Renderer architecture acceptance moved through decision matrix, comparable prototypes, focused production proof, and migration contract. |
 | v1.7 | multiple | 5 | Module extensibility acceptance moved through vocabulary, manifest, graph, diagnostics, and shipped proof in one milestone. |
@@ -196,6 +241,7 @@
 
 | Milestone | Tests | Coverage | Zero-Dep Additions |
 |-----------|-------|----------|-------------------|
+| v1.13 | Focused manifest parser, installed graph, runtime descriptor/debug metadata, shipped navigation catalog, docs grep, and shell compile checks | Requirements 16/16 | None identified |
 | v1.11 | Focused shell keybind, diagnostics, debug payload, locale, navigation, and audio-popover regression suites | Requirements 19/19 | None identified |
 | v1.8 | Prototype cargo checks, focused renderer proof tests, shell navigation/audio regressions, workspace test, and docs grep verification | Requirements 13/13 | None identified |
 | v1.7 | Focused Rust manifest, graph, shell, diagnostic, and docs proof tests | Requirements 13/13 | None identified |
@@ -208,3 +254,4 @@
 3. Canonical vocabulary and manifest contracts should be locked before expanding plugin-facing runtime behavior.
 4. Renderer migration work should keep author contracts, rollback gates, and ownership boundaries explicit before broad adoption.
 5. Focused keyboard behavior needs real-surface proof because precedence mistakes can be invisible in declaration-only tests.
+6. Localized manifest text needs source metadata preservation until runtime consumers can resolve against active locale state.

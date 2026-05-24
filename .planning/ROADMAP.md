@@ -2,122 +2,44 @@
 
 ## Milestones
 
-- [ ] **v1.13 Manifest I18n Contract** - Phase 70 complete, phases 71-73 planned
-- [x] **v1.12 Module Object Contract** - Phases 65-69 shipped 2026-05-23
-- [x] **v1.11 Surface Keybind Completion** - Phases 60-64 shipped 2026-05-23
-- [x] **v1.10 Painter Engine** - Phases 51-59 shipped 2026-05-23
-- [x] **v1.9 Renderer Library Integration** - Phases 46-50 shipped 2026-05-21
-
-## Intent
-
-Implement the Spike 004 manifest-localized-text contract. User-facing
-`module.json` fields should make localization intent explicit at the field
-site, preserve that metadata through installed graph records, resolve it through
-the shell's locale/catalog runtime, and diagnose ambiguous legacy dotted-key
-strings.
-
-The target authoring model is structured and function-like without adding a
-JSON expression parser:
-
-```json
-{ "t": "keybind.mute.label", "fallback": "Mute" }
-```
-
-Raw JSON strings remain valid literal text. Localized fields use the structured
-object.
-
-## Phase Summary
-
-| # | Phase | Goal | Requirements | Success Criteria |
-|---|-------|------|--------------|------------------|
-| 70 | Localized Text Manifest Model | Add the reusable manifest schema, parser, compatibility behavior, and diagnostics for localized text declarations. | MI18N-01, MI18N-02, MI18N-03, MI18N-04 | 4 |
-| 71 | Contribution Propagation | 1/1 | Complete   | 2026-05-24 |
-| 72 | Runtime Text Resolution | 1/1 | Complete   | 2026-05-24 |
-| 73 | Shipped Manifest I18n Proof | 1/1 | Complete   | 2026-05-24 |
-
-## Execution Rules
-
-- Treat raw strings in user-facing manifest fields as literal text for backwards compatibility.
-- Require localized text declarations to include both a translation key and fallback string.
-- Preserve source metadata until shell/runtime resolution; do not flatten localized text during manifest parsing or installed-graph indexing.
-- Diagnostics must be non-fatal and must identify module id, field path, and corrective action.
-- Keep translation/catalog ownership explicit through existing `mesh.i18n` and `mesh.contributes.i18n` metadata.
-- Prove behavior on the shipped navigation/audio path, not only synthetic fixtures.
+- ✅ **v1.13 Manifest I18n Contract** — Phases 70-73 shipped 2026-05-24 ([archive](milestones/v1.13-ROADMAP.md))
+- ✅ **v1.12 Module Object Contract** — Phases 65-69 shipped 2026-05-23 ([archive](milestones/v1.12-ROADMAP.md))
+- ✅ **v1.11 Surface Keybind Completion** — Phases 60-64 shipped 2026-05-23 ([archive](milestones/v1.11-ROADMAP.md))
+- ✅ **v1.10 Painter Engine** — Phases 51-59 shipped 2026-05-23 ([archive](milestones/v1.10-ROADMAP.md))
+- ✅ **v1.9 Renderer Library Integration** — Phases 46-50 shipped 2026-05-21 ([archive](milestones/v1.9-ROADMAP.md))
 
 ## Phases
 
-- [x] Phase 70: Localized Text Manifest Model
-- [x] Phase 71: Contribution Propagation (completed 2026-05-24)
-- [x] Phase 72: Runtime Text Resolution (completed 2026-05-24)
-- [x] Phase 73: Shipped Manifest I18n Proof (completed 2026-05-24)
+<details>
+<summary>✅ v1.13 Manifest I18n Contract (Phases 70-73) — SHIPPED 2026-05-24</summary>
 
-### Phase 70: Localized Text Manifest Model
+- [x] Phase 70: Localized Text Manifest Model (1/1 plans) — completed 2026-05-24
+- [x] Phase 71: Contribution Propagation (1/1 plans) — completed 2026-05-24
+- [x] Phase 72: Runtime Text Resolution (1/1 plans) — completed 2026-05-24
+- [x] Phase 73: Shipped Manifest I18n Proof (1/1 plans) — completed 2026-05-24
 
-**Goal:** Add the reusable manifest schema, parser, compatibility behavior, and diagnostics for localized text declarations.
+</details>
 
-**Requirements:** MI18N-01, MI18N-02, MI18N-03, MI18N-04
+## Progress
 
-**Status:** Complete - 2026-05-24
-
-**Success criteria:**
-1. Manifest model exposes a reusable localized-text type for user-facing fields.
-2. JSON deserialization accepts raw literal strings and structured `{ "t": "...", "fallback": "..." }` objects.
-3. Empty keys or fallbacks are rejected or diagnosed with field-specific messages.
-4. Existing dotted-key raw strings load but produce migration diagnostics.
-
-### Phase 71: Contribution Propagation
-
-**Goal:** Preserve localized text metadata through installed-graph contribution records and compatibility consumers.
-
-**Requirements:** MGRAPH-01, MGRAPH-02, MGRAPH-03, MGRAPH-04
-
-**Status:** Complete - 2026-05-24
-
-**Success criteria:**
-1. Keybind contribution labels, descriptions, and categories retain localized text metadata.
-2. Layout labels retain localized text metadata.
-3. Settings schema descriptions preserve localized text where the manifest model supports user-facing descriptions.
-4. Existing consumers that still expect strings receive deterministic fallback text.
-
-### Phase 72: Runtime Text Resolution
-
-**Goal:** Resolve localized manifest text in shell runtime metadata with fallback and diagnostics.
-
-**Requirements:** MRES-01, MRES-02, MRES-03, MRES-04
-
-**Status:** Complete - 2026-05-24
-
-**Success criteria:**
-1. Shell resolution checks active locale, fallback locale, then required fallback text.
-2. Debug keybind metadata includes resolved text and source key details.
-3. Accessibility metadata receives resolved labels/descriptions rather than raw keys.
-4. Missing catalogs or keys produce non-fatal diagnostics with actionable field paths.
-
-### Phase 73: Shipped Manifest I18n Proof
-
-**Goal:** Migrate bundled manifests and publish docs/tests proving the author contract.
-
-**Requirements:** MPROOF-01, MPROOF-02, MPROOF-03, MPROOF-04
-
-**Status:** Complete - 2026-05-24
-
-**Success criteria:**
-1. `@mesh/navigation-bar` keybind metadata uses explicit localized text objects.
-2. Bundled layout/settings manifest text consistently uses literal strings or explicit localized text objects.
-3. Regression tests cover parsing, propagation, runtime resolution, diagnostics, and fallback behavior.
-4. Author docs show `mesh.i18n`, `mesh.contributes.i18n`, and `{ "t": "...", "fallback": "..." }` together.
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 70. Localized Text Manifest Model | v1.13 | 1/1 | Complete | 2026-05-24 |
+| 71. Contribution Propagation | v1.13 | 1/1 | Complete | 2026-05-24 |
+| 72. Runtime Text Resolution | v1.13 | 1/1 | Complete | 2026-05-24 |
+| 73. Shipped Manifest I18n Proof | v1.13 | 1/1 | Complete | 2026-05-24 |
 
 ## Backlog
 
 ### Future: Language Pack Namespaces
 
-Cross-module language-pack references remain future work. v1.13 should keep the
+Cross-module language-pack references remain future work. v1.13 kept the
 localized text object extensible enough for a later explicit namespace field or
 `@module:key` syntax.
 
 ### Future: Keybind Settings UI
 
-A full user-facing remapping UI remains deferred. v1.13 should prepare resolved
+A full user-facing remapping UI remains deferred. v1.13 prepared resolved
 metadata so a later settings UI can display localized labels without changing
 stable action ids.
 

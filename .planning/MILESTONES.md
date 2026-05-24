@@ -1,5 +1,28 @@
 # MESH Milestones
 
+## v1.13 Manifest I18n Contract (Shipped: 2026-05-24)
+
+**Phases completed:** 4 phases, 4 plans, 13 tasks
+
+**Goal:** Make user-facing `module.json` text fields explicit about literal text versus localized catalog lookup, then resolve that text through shell runtime paths with diagnostics and shipped manifest proof.
+
+**Key accomplishments:**
+
+- Reusable localized text manifest values for keybind display metadata, with fallback compatibility and canonical loader migration diagnostics
+- Installed graph records now retain localized keybind and layout metadata while keeping fallback accessors for current consumers
+- Shell runtime metadata now resolves localized manifest keybind text against the active locale and keeps source keys for debugging.
+- The shipped navigation manifest now uses the explicit localized text contract and the real module path proves parser, graph, runtime, debug, and docs behavior.
+
+**Known deferred items at close:** 2 open artifacts acknowledged and deferred; see `.planning/STATE.md` Deferred Items.
+
+**Archive artifacts:**
+
+- `.planning/milestones/v1.13-ROADMAP.md`
+- `.planning/milestones/v1.13-REQUIREMENTS.md`
+- `.planning/milestones/v1.13-phases/`
+
+---
+
 ## v1.12 Module Object Contract (Shipped: 2026-05-23)
 
 **Phases completed:** 5 phases, 5 plans
