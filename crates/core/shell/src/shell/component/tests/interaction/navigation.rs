@@ -1799,6 +1799,32 @@ fn navigation_shipped_i18n_covers_all_template_translation_keys() {
 }
 
 #[test]
+fn navigation_shipped_keybind_metadata_resolves_from_i18n_catalogs() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    component.locale.set_locale("sk");
+    component.runtimes.lock().unwrap().clear();
+    component.init_root_runtime().unwrap();
+
+    let keybinds = component.debug_surface_keybinds();
+    let mute = keybinds
+        .iter()
+        .find(|entry| entry.action_id == "mute")
+        .expect("navigation mute debug keybind");
+
+    assert_eq!(mute.label.as_deref(), Some("Stlmit zvuk"));
+    assert_eq!(mute.description.as_deref(), Some("Prepnut stlmenie zvuku"));
+    assert_eq!(mute.category.as_deref(), Some("Zvuk"));
+    assert_eq!(mute.label_key.as_deref(), Some("keybind.mute.label"));
+    assert_eq!(
+        mute.description_key.as_deref(),
+        Some("keybind.mute.description")
+    );
+    assert_eq!(mute.category_key.as_deref(), Some("keybind.category.audio"));
+    assert_eq!(mute.accessibility_shortcut, "m");
+}
+
+#[test]
 fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());

@@ -15,6 +15,13 @@
         "locale.write"
       ]
     },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": [
+        "en",
+        "sk"
+      ]
+    },
     "dependencies": {
       "modules": {
         "@mesh/audio-popover": ">=0.1.0"
@@ -40,9 +47,18 @@
     },
     "keybinds": {
       "mute": {
-        "label": "keybind.mute.label",
-        "description": "keybind.mute.description",
-        "category": "keybind.category.audio",
+        "label": {
+          "t": "keybind.mute.label",
+          "fallback": "Mute audio"
+        },
+        "description": {
+          "t": "keybind.mute.description",
+          "fallback": "Toggle audio mute"
+        },
+        "category": {
+          "t": "keybind.category.audio",
+          "fallback": "Audio"
+        },
         "trigger": {
           "kind": "shortcut",
           "key": "m"
@@ -50,6 +66,18 @@
       }
     },
     "contributes": {
+      "i18n": [
+        {
+          "id": "en",
+          "locale": "en",
+          "path": "config/i18n/en.json"
+        },
+        {
+          "id": "sk",
+          "locale": "sk",
+          "path": "config/i18n/sk.json"
+        }
+      ],
       "layout": [
         {
           "id": "main",

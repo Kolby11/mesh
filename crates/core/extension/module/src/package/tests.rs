@@ -537,6 +537,78 @@ fn module_manifest_loader_preserves_navigation_bar_entrypoint() {
 }
 
 #[test]
+fn shipped_navigation_manifest_uses_explicit_localized_keybind_text() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../modules/frontend/navigation-bar");
+    let loaded = load_module_manifest(&dir).unwrap();
+
+    assert!(
+        loaded.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("looks like an i18n key but is a raw literal string")
+        }),
+        "shipped navigation manifest should not use ambiguous raw i18n keys: {:?}",
+        loaded.diagnostics
+    );
+    assert_eq!(
+        loaded.manifest.mesh.i18n.default_locale.as_deref(),
+        Some("en")
+    );
+    assert_eq!(
+        loaded.manifest.mesh.i18n.supported_locales,
+        vec!["en", "sk"]
+    );
+    assert!(
+        loaded
+            .manifest
+            .mesh
+            .contributes
+            .i18n
+            .iter()
+            .any(|entry| entry.locale == "en" && entry.path == "config/i18n/en.json")
+    );
+    assert!(
+        loaded
+            .manifest
+            .mesh
+            .contributes
+            .i18n
+            .iter()
+            .any(|entry| entry.locale == "sk" && entry.path == "config/i18n/sk.json")
+    );
+
+    let action = loaded
+        .manifest
+        .mesh
+        .keybinds
+        .actions
+        .get("mute")
+        .expect("navigation mute keybind");
+    assert_eq!(
+        action.label,
+        Some(crate::manifest::LocalizedText::Translation {
+            key: "keybind.mute.label".into(),
+            fallback: "Mute audio".into(),
+        })
+    );
+    assert_eq!(
+        action.description,
+        Some(crate::manifest::LocalizedText::Translation {
+            key: "keybind.mute.description".into(),
+            fallback: "Toggle audio mute".into(),
+        })
+    );
+    assert_eq!(
+        action.category,
+        Some(crate::manifest::LocalizedText::Translation {
+            key: "keybind.category.audio".into(),
+            fallback: "Audio".into(),
+        })
+    );
+}
+
+#[test]
 fn shipped_module_graph_loads_repo_module_fixture() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
@@ -610,6 +682,39 @@ fn shipped_module_graph_loads_repo_module_fixture() {
             .iter()
             .any(|icon_pack| icon_pack.module_id == "@mesh/icons-default"
                 && icon_pack.id == "default")
+    );
+}
+
+#[test]
+fn shipped_module_graph_preserves_navigation_localized_keybind_text() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
+    let keybind = graph
+        .keybind_actions()
+        .iter()
+        .find(|keybind| keybind.module_id == "@mesh/navigation-bar" && keybind.action_id == "mute")
+        .expect("navigation mute keybind contribution");
+
+    assert_eq!(
+        keybind.label.as_ref(),
+        Some(&crate::manifest::LocalizedText::Translation {
+            key: "keybind.mute.label".into(),
+            fallback: "Mute audio".into(),
+        })
+    );
+    assert_eq!(
+        keybind.description.as_ref(),
+        Some(&crate::manifest::LocalizedText::Translation {
+            key: "keybind.mute.description".into(),
+            fallback: "Toggle audio mute".into(),
+        })
+    );
+    assert_eq!(
+        keybind.category.as_ref(),
+        Some(&crate::manifest::LocalizedText::Translation {
+            key: "keybind.category.audio".into(),
+            fallback: "Audio".into(),
+        })
     );
 }
 

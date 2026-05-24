@@ -215,6 +215,50 @@ preserve the action id, default trigger, and localized triggers so later
 dispatch, conflict, and accessibility phases can inspect the complete
 declaration without re-reading manifests.
 
+Raw strings in manifest text fields are literals. A value such as
+`"label": "keybind.mute.label"` displays as that exact text and should be
+treated as a migration mistake if the author meant to localize it. Use a
+field-local localized text object when the field should resolve through the
+module's catalogs:
+
+```json
+{
+  "mesh": {
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en", "sk"]
+    },
+    "keybinds": {
+      "mute": {
+        "label": { "t": "keybind.mute.label", "fallback": "Mute audio" },
+        "description": {
+          "t": "keybind.mute.description",
+          "fallback": "Toggle audio mute"
+        },
+        "category": { "t": "keybind.category.audio", "fallback": "Audio" },
+        "trigger": { "kind": "shortcut", "key": "m" }
+      }
+    },
+    "contributes": {
+      "i18n": [
+        { "id": "en", "locale": "en", "path": "config/i18n/en.json" },
+        { "id": "sk", "locale": "sk", "path": "config/i18n/sk.json" }
+      ]
+    }
+  }
+}
+```
+
+The `t` value is resolved in the declaring module's i18n namespace. The
+`fallback` value is required and is used when the active locale and fallback
+locale do not provide the key. Missing keys are non-fatal diagnostics that
+include the module id, field path, key, and fallback.
+
+Use `mesh.i18n` to declare the module's locale support and fallback locale.
+Use `mesh.contributes.i18n` to list bundled catalog files. Use field-local
+localized text objects only for the fields that should be catalog-backed;
+plain labels such as `"Navigation Bar"` remain valid literal strings.
+
 Focused-surface keybinds are semantic actions, not global hotkeys. A rendered
 control subscribes by setting `keybind` to the declared action id and providing
 an `onkeybind` handler. The shell resolves the effective binding from user
