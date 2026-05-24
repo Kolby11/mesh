@@ -25,6 +25,7 @@
         "battery-low": "hicolor/battery-low",
         "battery-good": "hicolor/battery-good",
         "battery-full": "hicolor/battery-full",
+        "language": "hicolor/preferences-desktop-locale",
         "wifi": "hicolor/network-wireless",
         "bluetooth": "hicolor/bluetooth",
         "close": "hicolor/window-close"
