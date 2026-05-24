@@ -74,23 +74,36 @@ Use classes, metadata, accessibility attributes, and component boundaries for
 semantics.
 
 Custom component tags must be PascalCase and must be imported in the script
-block before they can be used:
+block before they can be used. New author-facing code uses Luau
+`require(...)`:
 
 ```luau
-import BatteryWidget from "./components/battery-widget.mesh"
-import VolumeBar from "@mesh/volume-bar"
-import audio from "mesh.audio@>=1.0"
+local BatteryWidget = require("./components/battery-widget.mesh")
+local VolumeBar = require("@mesh/volume-bar")
 ```
 
 Local component imports resolve relative to the importing file, `@src/...`
 resolves from the module's `src/` directory, module component imports resolve
-through declared module dependencies, and `mesh.*` imports expose the same
-interface proxy returned by `require("mesh.<service>")`.
+through declared module dependencies. The older
+`import Alias from "..."` component syntax is compatibility-era syntax and
+should not be used in new examples.
 
-Imported components are standalone. Inside an imported component template,
-expressions and event handlers may resolve only:
-- that component's own script-defined globals/functions
-- explicit props passed at the call site
+Imported components are definitions, not mounted instances. Markup creates the
+instance:
+
+```xml
+<VolumeBar device_id="{active_device}" bind:this={volume_bar} />
+```
+
+Markup attributes become public fields on the mounted instance. `bind:this`
+stores a reference to that mounted instance, so the parent can use public
+fields/functions such as `volume_bar.volume` and
+`volume_bar.increase_volume(10)`.
+
+Inside an imported component template, expressions and event handlers may
+resolve only:
+- that component's own private locals and public fields/functions
+- public fields initialized by markup attributes
 - built-in runtime bindings such as `t(...)`, `refs`, and `settings`
 
 Imported components do not read parent template/script scope implicitly.
@@ -150,17 +163,41 @@ state.
 The runtime reads the initial value from script state and writes back on
 change. The variable should be initialized in `<script>`.
 
-### Component props
+### Component fields
 
 Pass data into an imported component explicitly with attributes on the
-component tag:
+component tag. Attribute names map to public fields on the mounted component
+instance:
 
 ```xml
 <WifiItem network_id="{network.id}" network_name="{network.name}" />
 ```
 
-Those prop names are available only inside the imported component instance.
-They are the supported boundary for parent-to-child data flow.
+Inside `WifiItem`, those fields are normal public script members:
+
+```luau
+network_id = nil
+network_name = ""
+display_name = ""
+
+function render(self)
+  display_name = network_name
+end
+```
+
+They are the supported boundary for parent-to-child data flow. Do not document
+or use a separate `self.props` table for new components.
+
+### Component instance binding
+
+Use `bind:this` when the parent needs the mounted child instance:
+
+```xml
+<VolumeBar bind:this={volume_bar} />
+```
+
+The bound variable references the mounted instance, not the component
+definition imported with `require(...)`.
 
 ### Event handlers
 
@@ -262,27 +299,30 @@ Always include accessibility attributes where they add meaning. MESH treats thes
 
 ## Script block
 
-Logic lives in the `<script lang="luau">` block. Variables declared here are reactive — the template re-renders when they change.
+Logic lives in the `<script lang="luau">` block. Non-local variables declared
+here are public reactive component members; the template re-renders when they
+change. `local` variables and functions stay private to the script.
 
 ```xml
 <script lang="luau">
-mesh.state.set("active", "Dashboard")
-mesh.state.set("volume", 42)
+active = "Dashboard"
+volume = 42
+local audio = require("mesh.audio@>=1.0")
 
 function onVolumeClick(event)
-  mesh.events.publish("shell.position-surface", {
-    surface_id = "@mesh/quick-settings",
-    margin_top = event.current_target.position.margin_top,
-    margin_left = event.current_target.position.margin_left,
-  })
-  mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/quick-settings" })
+  audio.toggle_mute()
 end
 
-function onSearch(event)
-  -- event.value holds the current input value
+function render(self)
+  self.storage.last_volume = volume
 end
 </script>
 ```
+
+`local` variables and functions are private to the component. Non-local
+variables and functions are public fields/functions on the mounted component
+instance. `self.meta` and `self.storage` are runtime-provided current-instance
+context; external dependencies still come from `require(...)`.
 
 ### Receiving service data
 
@@ -292,13 +332,13 @@ locally in their own script code.
 
 ```xml
 <script lang="luau">
-mesh.state.set("volume_icon_name", "audio-volume-muted")
-mesh.state.set("volume_label", "0%")
-mesh.state.set("volume_tooltip", "Volume unavailable")
+volume_icon_name = "audio-volume-muted"
+volume_label = "0%"
+volume_tooltip = "Volume unavailable"
 
 local audio = require("mesh.audio@>=1.0")
 
-function onRender()
+function render(self)
   local audio_percent = audio.percent or 0
   local audio_muted = audio.muted or false
   if audio_muted or audio_percent == 0 then
@@ -318,7 +358,7 @@ end
 ```
 
 The template should read derived globals such as `volume_icon_name` and
-`volume_label`. The script reads proxy fields directly during `onRender()`
+`volume_label`. The script reads proxy fields directly during `render(self)`
 and derives presentation state locally.
 
 For pointer-driven handlers like `onclick`, the callback also receives an
@@ -433,14 +473,14 @@ tokens belong on the animation shorthand itself, for example
 </template>
 
 <script lang="luau">
-mesh.state.set("active", "Dashboard")
-mesh.state.set("volume_icon_name", "audio-volume-muted")
-mesh.state.set("volume_label", "0%")
-mesh.state.set("volume_tooltip", "Volume unavailable")
+active = "Dashboard"
+volume_icon_name = "audio-volume-muted"
+volume_label = "0%"
+volume_tooltip = "Volume unavailable"
 
 local audio = require("mesh.audio@>=1.0")
 
-function onRender()
+function render(self)
     local audio_percent = audio.percent or 0
     local audio_muted = audio.muted or false
     if audio_muted or audio_percent == 0 then

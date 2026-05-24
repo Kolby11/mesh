@@ -152,8 +152,8 @@ unavailable" pattern, keep the rendering logic in the frontend module and use
 health events as just another input:
 
 ```luau
-mesh.state.set("health_reason", "")
-mesh.state.set("service_available", true)
+health_reason = ""
+service_available = true
 
 mesh.events.on("interface.health/mesh.audio", function(h)
     service_available = h.state ~= "unavailable"

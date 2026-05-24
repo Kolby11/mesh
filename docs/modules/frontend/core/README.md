@@ -9,34 +9,61 @@ ID. If no implementation is registered, `pcall(require, ...)` returns false and
 the frontend is expected to degrade gracefully with visible explanatory copy.
 
 The core's job here is generic: compile the `.mesh` file, host the Luau
-runtime, forward raw service payloads into script state, and route emitted
-events back into shell requests or backend commands. Frontend-specific display
-logic still lives in the module.
+runtime, forward raw service payloads into script-visible objects, and route
+commands/events back into shell requests or backend commands.
+Frontend-specific display logic still lives in the module.
 
-## Module object model
+## Script object model
 
-Every frontend script has a `module` object. Treat it as the local module
-instance:
+New frontend scripts use Lua's own public/private split. `local` members are
+private to the component. Non-local variables and functions are public members
+on the mounted component instance:
 
 ```luau
-module.exports.visible = true
-module.exports.label = "Audio"
+local private_cache = {}
 
-function onRender()
-    local current_label = module.exports.label
-    local previous_count = module.state.render_count or 0
-    render_count = previous_count + 1
+visible = true
+label = "Audio"
+render_count = 0
+
+function render(self)
+    render_count = render_count + 1
+    self.storage.last_label = label
 end
 
-local unsubscribe = module.events.ItemActivated:subscribe(function(event)
-    last_item = event.item_id
-end)
+function focus_audio()
+    -- public instance method
+end
 ```
 
-`module.state` is a shell-refreshed snapshot of the script's reactive globals.
-`module.exports` is the public values table for the frontend module instance.
-`module.events.<Name>` is an event channel with `subscribe(fn)`, `emit(payload)`,
-and an unsubscribe function.
+`self` is passed by the runtime to lifecycle/render hooks and represents the
+current mounted instance. The author-facing `self` surface is intentionally
+narrow:
+
+- `self.meta` exposes identity and diagnostic context.
+- `self.storage` exposes shell-backed persistent storage scoped to the current
+  module/component identity.
+
+Frontend component imports return definitions:
+
+```luau
+local AudioSection = require("./components/audio-section.mesh")
+```
+
+Markup creates instances. Use `bind:this` when parent code needs the mounted
+instance:
+
+```xml
+<AudioSection device_id="{active_device}" bind:this={audio_section} />
+```
+
+The `device_id` attribute becomes a public field on the mounted instance.
+The bound `audio_section` value exposes public fields/functions such as
+`audio_section.label` and `audio_section.focus_audio()`.
+
+Older code and v1.12 notes may mention `module.state`, `module.exports`, and
+`module.events`. Those names describe compatibility/runtime lanes, not the
+preferred v1.14 authoring syntax.
 
 ## Reading service state
 
@@ -47,16 +74,16 @@ mutations.
 ```luau
 -- Acquire the proxy with a version constraint.
 -- pcall catches failures so the surface degrades gracefully.
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
--- Reactive globals are the template's source of truth.
+-- Public component members are the template's source of truth.
 volumeIcon = "audio-volume-muted"
 volumeLevel = "0%"
 
--- onRender() is called by the shell on each rerender.
+-- render(self) is called by the shell on each rerender.
 -- Read proxy fields directly here — no callbacks needed.
-function onRender()
+function render(self)
     if not audio_ok or not audio then
         -- Explicit user-visible copy for the degraded path.
         volumeIcon = "audio-volume-muted"
@@ -138,14 +165,15 @@ if audio_ok then
 end
 ```
 
-Frontend modules use the same event channel shape on `module.events`. The
-current event channel API establishes the author-facing subscription surface;
-backend state remains the authoritative durable read model.
+The v1.12 compatibility lane also exposed module-local event channels. The
+v1.14 component event authoring syntax is still being redesigned, so do not
+introduce new public component-event examples around `module.events` here.
+Backend state remains the authoritative durable read model.
 
-## Element events and reactive globals
+## Element events and public members
 
-Element handlers update top-level reactive globals, and changed globals drive
-the next render. `onchange` handlers receive a typed value directly: sliders
+Element handlers update top-level public members, and changed values drive the
+next render. `onchange` handlers receive a typed value directly: sliders
 receive a number, switches and checkboxes receive a boolean, and text inputs
 receive a string.
 
@@ -155,7 +183,7 @@ receive a string.
 </template>
 
 <script lang="luau">
-local audio_ok, audio = pcall(require, "@mesh/audio@>=1.0")
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 slider_value = 0.0
@@ -193,7 +221,7 @@ if not network_ok then network = nil end
 
 wifi_networks = {}
 
-function onRender()
+function render(self)
     if not network_ok or not network then
         -- Fallback copy that is user-visible in the Quick Settings drawer.
         wifi_networks = {}
@@ -246,9 +274,9 @@ boundaries are visually distinct from MESH primitives. They must be imported
 explicitly in the `<script>` block:
 
 ```luau
-import AudioSection from "./components/audio-section.mesh"
-import WifiSection from "./components/wifi-section.mesh"
-import CalendarCard from "@mesh/calendar-card"
+local AudioSection = require("./components/audio-section.mesh")
+local WifiSection = require("./components/wifi-section.mesh")
+local CalendarCard = require("@mesh/calendar-card")
 ```
 
 If you create a reusable frontend component, export its custom tag explicitly in
@@ -264,7 +292,7 @@ these blocks:
 | Block                  | Purpose                                                                                                                                                                                                          |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `<template>`           | XHTML-like markup describing the UI tree. Dynamic attributes use `{}` and event handlers use `onclick={handler}`-style attributes.                                                                               |
-| `<script lang="luau">` | Luau code implementing state, service proxy reads via `require("mesh.<service>")`, display-state derivation in `onRender()`, and element event handlers.                                                          |
+| `<script lang="luau">` | Luau code implementing public/private component members, service proxy reads via `require("mesh.<service>")`, display-state derivation in `render(self)`, and element event handlers.                              |
 | `<style>`              | CSS-like styling. Token references use `token(group.name)` and inherit the active theme. Supports `overflow`, `overflow-x`, `overflow-y`, and container breakpoints via `@container (min-width: 640px) { ... }`. |
 
 ## Core surfaces

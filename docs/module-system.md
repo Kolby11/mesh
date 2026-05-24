@@ -35,10 +35,61 @@ is an internal-only migration path rather than public author vocabulary.
    themselves. The module using a library must still request the capabilities
    needed by its calls.
 7. **Modules are object instances at runtime.** Frontend and backend-facing
-   APIs should use normal Luau object surfaces: `module.state`,
-   `module.exports`, `module:<method>(...)`, and `module.events.Name`.
-   Rust still owns routing, validation, replay, permissions, lifecycle, and
-   diagnostics underneath that syntax.
+   APIs should use normal Luau object surfaces. In the v1.14 authoring model,
+   `local` members are private, non-local variables/functions are public
+   object members, `self` is the current instance context, and `require(...)`
+   imports external services, libraries, and component definitions. Rust still
+   owns routing, validation, replay, permissions, lifecycle, and diagnostics
+   underneath that syntax.
+
+## Luau Authoring Model
+
+MESH separates the current runtime instance from external dependencies:
+
+```luau
+local audio = require("mesh.audio@>=1.0")
+
+local private_cache = {}
+
+volume = 0
+
+function increase_volume(amount)
+  volume = volume + amount
+  audio.set_volume(volume)
+end
+
+function render(self)
+  local id = self.meta.id
+  local last_volume = self.storage.last_volume
+end
+```
+
+- `local` variables and functions are private to the script.
+- Non-local variables and functions are public members of the module,
+  component instance, or backend provider object.
+- `self.meta` exposes identity and diagnostic context for the current
+  frontend component or backend provider instance.
+- `self.storage` exposes shell-backed persistent storage scoped to the current
+  module/component identity.
+- `require(...)` is for external dependencies: shell APIs, service/interface
+  proxies, Luau libraries, and frontend component definitions.
+
+For frontend components, `require("./Component")` returns a component
+definition. Markup instantiates it, and `bind:this` exposes the mounted
+instance:
+
+```xml
+<AudioSlider device_id="{active_device}" bind:this={audio_slider} />
+```
+
+The attribute `device_id` becomes a public field on that mounted instance.
+The bound `audio_slider` reference exposes public fields and functions such as
+`audio_slider.volume` and `audio_slider.increase_volume(10)`.
+
+Older docs and shipped code may mention `module.state`, `module.exports`, or
+`module.events`. Those names describe the v1.12 runtime lanes and remain useful
+as compatibility/internal vocabulary, but new author-facing syntax should use
+the `self` plus Lua public/private member model above.
 
 ## Module Manifest Shape
 
@@ -476,7 +527,7 @@ if not ok then audio = nil end
 volume_label = "N/A"
 volume_icon = "audio-volume-muted"
 
-function onRender()
+function render(self)
     if not audio then
         volume_label = "N/A"
         volume_icon = "audio-volume-muted"

@@ -114,7 +114,7 @@ component `import ... from` syntax.
 
 **Success criteria:**
 1. Module-system and frontend syntax docs describe canonical require namespaces and pcall behavior.
-2. Backend docs show the same import model for services, shell APIs, self context, module objects, and libraries.
+2. Backend docs show the same import model for services, shell APIs, self context, public/private script members, and libraries.
 3. Regression tests cover synthetic and shipped-module require behavior.
 4. Requirements traceability and validation artifacts cover all v1.14 requirements.
 5. Docs explain `self.meta`, `self.storage`, local/private members, public members, markup-bound fields, and reload behavior.

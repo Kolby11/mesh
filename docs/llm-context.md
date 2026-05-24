@@ -172,7 +172,7 @@ elements (`button`, `icon`, `input`, etc.) or other components. Do not call a
 full frontend module a component; the module owns settings,
 capabilities, manifests, and one or more components.
 
-**CRITICAL CODE STYLE**: Component files should be small and focused. Always extract layout sections, list items, and logically distinct UI blocks into their own separate components (e.g., in a `components/` subdirectory). Custom PascalCase component tags must be imported explicitly in the script block, such as `import ItemRow from "./components/item-row.mesh"`. This is especially important for items inside `{#for ...}` loops so they can encapsulate their own event state (like capturing list item IDs) instead of relying on DOM dataset attributes (which are not supported in event handlers).
+**CRITICAL CODE STYLE**: Component files should be small and focused. Always extract layout sections, list items, and logically distinct UI blocks into their own separate components (e.g., in a `components/` subdirectory). Custom PascalCase component definitions must be imported explicitly in the script block with Luau `require(...)`, such as `local ItemRow = require("./components/item-row.mesh")`. Markup instantiates the component, and `bind:this={item_row}` exposes the mounted instance when parent code needs to call public fields/functions. This is especially important for items inside `{#for ...}` loops so they can encapsulate their own event state (like capturing list item IDs) instead of relying on DOM dataset attributes (which are not supported in event handlers).
 
 ---
 
@@ -452,7 +452,7 @@ local audio = require("mesh.audio@>=1.0")
 icon_name = "audio-volume-muted"
 audio_label = "0%"
 
-function onRender()
+function render(self)
     local p = audio.percent or 0
     local m = audio.muted or false
     if m or p == 0 then
@@ -473,13 +473,21 @@ The template binds `{icon_name}` — a reactive global, not a service field.
 
 **If you find core injecting computed display fields (icon names, formatted labels, derived booleans) into service payloads, that is a bug.**
 
-### Reactive state
+### Public/private script members
 
-Any bare global assignment in the `<script>` block is automatically reactive — no registration needed. Globals are synced to `ScriptState` after each handler call and exposed to templates via `{key}`. `local` variables are private to the script.
+Any bare non-local assignment in the `<script>` block is a public component
+member and is automatically reactive. Templates bind to public members with
+`{key}`. `local` variables/functions are private to the script. Runtime hooks
+receive `self`; use `self.meta` for current-instance identity/diagnostics and
+`self.storage` for shell-backed persistence.
 
 ```lua
-icon_name = "audio-volume-muted"  -- reactive, visible in template as {icon_name}
-local helper = function() end     -- private, not synced
+icon_name = "audio-volume-muted"  -- public, visible in template as {icon_name}
+local helper = function() end     -- private
+
+function render(self)
+    self.storage.last_icon = icon_name
+end
 ```
 
 ### Interface proxies
@@ -494,7 +502,7 @@ local p = audio.percent   -- number
 local m = audio.muted     -- boolean
 
 -- Derive display state during render
-function onRender()
+function render(self)
     icon_name = audio.muted and "audio-volume-muted" or "audio-volume-high"
 end
 
@@ -510,7 +518,7 @@ LSP completions for `audio.` derive state fields and commands by analyzing the b
 - **Everything is a module.** The shell core must not hardcode module IDs or behavior. Layout defaults, size policies, and content sizing are declared in `module.json`, not in Rust match arms.
 - **`mesh-core-shell/src/shell.rs` is large** (~4000 lines). When reading it, use `Grep` to find specific functions rather than reading the whole file.
 - **Frontend modules are compiled at startup**, not interpreted at runtime. Hot-reload is supported via file watching (`reload_module_settings`, `source_path()` watching).
-- **Globals are reactive state.** Any global assigned in `<script>` is synced to `ScriptState` after each call. Templates bind to `{variable_name}`. `local` variables are private.
+- **Public/private script members.** Any non-local assigned in `<script>` is a public reactive member. Templates bind to `{variable_name}`. `local` variables/functions are private. Runtime hooks receive `self`; current-instance metadata and persistent storage live at `self.meta` and `self.storage`.
 - **Surface layout is user-configurable.** Any surface can have its anchor, layer, size, keyboard mode overridden via `config/settings.json` inside the module directory.
 - **`SurfaceSizePolicy::ContentMeasured`** means the surface resizes itself to fit its content. Declared in `module.json` as `mesh.surfaceLayout.size_policy = "content_measured"`. Only the launcher uses this currently.
 - **Test location:** unit tests live in `#[cfg(test)]` modules at the bottom of each source file.

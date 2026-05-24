@@ -8,7 +8,7 @@
 ### Import Model
 
 - [ ] **LUAIMP-01**: Frontend and backend Luau runtimes share one documented `require(...)` resolution contract.
-- [ ] **LUAIMP-02**: `require(...)` supports canonical shell API modules for current global `mesh` sub-APIs, including locale, logging, events, UI/redraw, popover, service, and module object access where capabilities allow.
+- [ ] **LUAIMP-02**: `require(...)` supports canonical shell API modules for current global `mesh` sub-APIs, including locale, logging, UI/redraw, popover, service access, and other external dependencies where capabilities allow.
 - [ ] **LUAIMP-03**: `require(...)` supports service/interface proxies with version constraints, preserving current `require("mesh.audio@>=1.0")` behavior.
 - [ ] **LUAIMP-04**: `require(...)` failures have consistent pcall-safe errors and diagnostics across frontend and backend contexts.
 - [ ] **LUAIMP-05**: The runtime defines a canonical `self` instance context for module/component identity and shell-backed storage without requiring global `mesh` or a module-context import.
@@ -40,7 +40,7 @@
 
 - [ ] **LUADOC-01**: Author docs define canonical require namespaces, accepted module specifiers, version syntax, capability behavior, and pcall error handling.
 - [ ] **LUADOC-02**: Frontend docs show component requires, service requires, shell API requires, and migration examples from old import/global syntax.
-- [ ] **LUADOC-03**: Backend docs show the same require model for service APIs, shell host APIs, module object access, and library modules.
+- [ ] **LUADOC-03**: Backend docs show the same require model for service APIs, shell host APIs, runtime-provided `self` context, and library modules.
 - [ ] **LUADOC-04**: Regression tests prove parser/compiler/runtime behavior on both synthetic fixtures and shipped modules.
 - [ ] **LUADOC-05**: Author docs show how `self.meta`, `self.storage`, local/private members, public members, markup-bound fields, and reload persistence should work.
 
