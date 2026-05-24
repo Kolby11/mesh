@@ -21,10 +21,10 @@
 
 ### Runtime Resolution
 
-- [ ] **MRES-01**: Shell runtime resolves `LocalizedText::Translation` against active locale, fallback locale, and required fallback text.
-- [ ] **MRES-02**: Resolved keybind debug metadata exposes user-facing text while retaining source key information for diagnostics.
-- [ ] **MRES-03**: Accessibility keyboard shortcut metadata receives resolved strings rather than raw translation keys.
-- [ ] **MRES-04**: Missing translation files or keys produce non-fatal diagnostics with module id, field path, key, and fallback.
+- [x] **MRES-01**: Shell runtime resolves `LocalizedText::Translation` against active locale, fallback locale, and required fallback text.
+- [x] **MRES-02**: Resolved keybind debug metadata exposes user-facing text while retaining source key information for diagnostics.
+- [x] **MRES-03**: Accessibility keyboard shortcut metadata receives resolved strings rather than raw translation keys.
+- [x] **MRES-04**: Missing translation files or keys produce non-fatal diagnostics with module id, field path, key, and fallback.
 
 ### Shipped Proof And Docs
 
@@ -67,10 +67,10 @@
 | MGRAPH-02 | Phase 71 | Complete |
 | MGRAPH-03 | Phase 71 | Complete |
 | MGRAPH-04 | Phase 71 | Complete |
-| MRES-01 | Phase 72 | Pending |
-| MRES-02 | Phase 72 | Pending |
-| MRES-03 | Phase 72 | Pending |
-| MRES-04 | Phase 72 | Pending |
+| MRES-01 | Phase 72 | Complete |
+| MRES-02 | Phase 72 | Complete |
+| MRES-03 | Phase 72 | Complete |
+| MRES-04 | Phase 72 | Complete |
 | MPROOF-01 | Phase 73 | Pending |
 | MPROOF-02 | Phase 73 | Pending |
 | MPROOF-03 | Phase 73 | Pending |

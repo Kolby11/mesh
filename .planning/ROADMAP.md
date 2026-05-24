@@ -32,7 +32,7 @@ object.
 |---|-------|------|--------------|------------------|
 | 70 | Localized Text Manifest Model | Add the reusable manifest schema, parser, compatibility behavior, and diagnostics for localized text declarations. | MI18N-01, MI18N-02, MI18N-03, MI18N-04 | 4 |
 | 71 | Contribution Propagation | 1/1 | Complete   | 2026-05-24 |
-| 72 | Runtime Text Resolution | Resolve localized manifest text in shell runtime metadata with fallback and diagnostics. | MRES-01, MRES-02, MRES-03, MRES-04 | 4 |
+| 72 | Runtime Text Resolution | 1/1 | Complete   | 2026-05-24 |
 | 73 | Shipped Manifest I18n Proof | Migrate bundled manifests and publish docs/tests proving the author contract. | MPROOF-01, MPROOF-02, MPROOF-03, MPROOF-04 | 4 |
 
 ## Execution Rules
@@ -48,7 +48,7 @@ object.
 
 - [x] Phase 70: Localized Text Manifest Model
 - [x] Phase 71: Contribution Propagation (completed 2026-05-24)
-- [ ] Phase 72: Runtime Text Resolution
+- [x] Phase 72: Runtime Text Resolution (completed 2026-05-24)
 - [ ] Phase 73: Shipped Manifest I18n Proof
 
 ### Phase 70: Localized Text Manifest Model
@@ -85,7 +85,7 @@ object.
 
 **Requirements:** MRES-01, MRES-02, MRES-03, MRES-04
 
-**Status:** Not started
+**Status:** Complete - 2026-05-24
 
 **Success criteria:**
 1. Shell resolution checks active locale, fallback locale, then required fallback text.
