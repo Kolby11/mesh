@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.13
 milestone_name: Manifest I18n Contract
 status: executing
-stopped_at: Phase 70 planned; ready to execute
-last_updated: "2026-05-24T00:00:00.000Z"
-last_activity: 2026-05-24 -- Phase 70 planning complete
+stopped_at: Phase 70 complete
+last_updated: "2026-05-24T06:36:10Z"
+last_activity: 2026-05-24 -- Phase 70 completed
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 1
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 25
 ---
 
 # State: MESH v1.13
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-24)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.13 Manifest I18n Contract
+**Current focus:** Phase 71 — Contribution Propagation
 
 ## Current Position
 
-Phase: 70 - Localized Text Manifest Model
-Plan: 70-01 - Localized Text Manifest Model
-Status: Ready to execute
-Last activity: 2026-05-24 -- Phase 70 planning complete
+Phase: 71 (Contribution Propagation) — READY
+Plan: Not planned
+Status: Phase 70 complete; ready to plan Phase 71
+Last activity: 2026-05-24 -- Phase 70 completed
 
 ## Decisions
 
@@ -45,6 +45,8 @@ Last activity: 2026-05-24 -- Phase 70 planning complete
 - [v1.13]: User-facing manifest text fields should distinguish literal strings from localized catalog lookups with a structured `{ "t": "...", "fallback": "..." }` shape.
 - [v1.13]: Raw strings remain literal for backwards compatibility; dotted-key raw strings should produce non-fatal migration diagnostics.
 - [v1.13]: Localized manifest text metadata should be preserved through installed graph records until shell runtime resolution can apply active locale, fallback locale, and required fallback text.
+- [Phase 70]: `LocalizedText` is the reusable manifest representation for localized-capable text fields, and keybind label, description, and category now parse raw literals or `{ "t": "...", "fallback": "..." }` declarations.
+- [Phase 70]: Existing keybind contribution consumers still receive fallback strings until Phase 71 preserves rich localized metadata through installed graph records.
 
 - Backend plugins use Luau for service logic; Rust core remains the wiring layer.
 - `require('@mesh/service')` is the frontend/backend interface.
@@ -148,6 +150,7 @@ Last activity: 2026-05-24 -- Phase 70 planning complete
 
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
+| Phase 70 P01 | 15min | 3 tasks | 7 files |
 | Phase 02 P01 | 7min | 3 tasks | 4 files |
 | Phase 03 P02 | 9min | 3 tasks | 7 files |
 | Phase 03 P03 | 5min | 3 tasks | 4 files |

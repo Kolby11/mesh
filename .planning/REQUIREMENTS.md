@@ -7,10 +7,10 @@
 
 ### Manifest Text Schema
 
-- [ ] **MI18N-01**: User-facing manifest fields accept a reusable `LocalizedText` value where raw strings are literal text and `{ "t": "...", "fallback": "..." }` declares localized catalog lookup.
-- [ ] **MI18N-02**: Localized text declarations require a non-empty translation key and fallback string.
-- [ ] **MI18N-03**: Manifest parsing accepts the localized text shape without breaking existing raw-string manifests.
-- [ ] **MI18N-04**: Manifest diagnostics warn when raw strings in localized-capable fields look like dotted translation keys.
+- [x] **MI18N-01**: User-facing manifest fields accept a reusable `LocalizedText` value where raw strings are literal text and `{ "t": "...", "fallback": "..." }` declares localized catalog lookup.
+- [x] **MI18N-02**: Localized text declarations require a non-empty translation key and fallback string.
+- [x] **MI18N-03**: Manifest parsing accepts the localized text shape without breaking existing raw-string manifests.
+- [x] **MI18N-04**: Manifest diagnostics warn when raw strings in localized-capable fields look like dotted translation keys.
 
 ### Contribution Propagation
 
@@ -59,10 +59,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MI18N-01 | Phase 70 | Pending |
-| MI18N-02 | Phase 70 | Pending |
-| MI18N-03 | Phase 70 | Pending |
-| MI18N-04 | Phase 70 | Pending |
+| MI18N-01 | Phase 70 | Complete |
+| MI18N-02 | Phase 70 | Complete |
+| MI18N-03 | Phase 70 | Complete |
+| MI18N-04 | Phase 70 | Complete |
 | MGRAPH-01 | Phase 71 | Pending |
 | MGRAPH-02 | Phase 71 | Pending |
 | MGRAPH-03 | Phase 71 | Pending |

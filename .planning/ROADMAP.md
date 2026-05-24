@@ -2,7 +2,7 @@
 
 ## Milestones
 
-- [ ] **v1.13 Manifest I18n Contract** - Phases 70-73 planned
+- [ ] **v1.13 Manifest I18n Contract** - Phase 70 complete, phases 71-73 planned
 - [x] **v1.12 Module Object Contract** - Phases 65-69 shipped 2026-05-23
 - [x] **v1.11 Surface Keybind Completion** - Phases 60-64 shipped 2026-05-23
 - [x] **v1.10 Painter Engine** - Phases 51-59 shipped 2026-05-23
@@ -46,7 +46,7 @@ object.
 
 ## Phases
 
-- [ ] Phase 70: Localized Text Manifest Model
+- [x] Phase 70: Localized Text Manifest Model
 - [ ] Phase 71: Contribution Propagation
 - [ ] Phase 72: Runtime Text Resolution
 - [ ] Phase 73: Shipped Manifest I18n Proof
@@ -57,7 +57,7 @@ object.
 
 **Requirements:** MI18N-01, MI18N-02, MI18N-03, MI18N-04
 
-**Status:** Not started
+**Status:** Complete - 2026-05-24
 
 **Success criteria:**
 1. Manifest model exposes a reusable localized-text type for user-facing fields.
