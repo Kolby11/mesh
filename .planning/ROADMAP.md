@@ -12,16 +12,16 @@
 
 Unify MESH Luau authoring around explicit `require(...)` imports across frontend
 and backend runtimes. Authors should learn one model for shell APIs,
-service/interface proxies, module-specific variables/state, module objects,
-libraries, and frontend components instead of switching between implicit global
-`mesh`, explicit interface import globals, and `.mesh` component
-`import ... from` syntax.
+service/interface proxies, runtime-provided `self` context, public/private
+script members, libraries, and frontend components instead of switching between
+implicit global `mesh`, explicit interface import globals, and `.mesh`
+component `import ... from` syntax.
 
 ## Phase Summary
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 74 | Import Resolver Contract | Define and implement the shared require resolver for shell APIs, service/interface proxies, and module scope imports. | LUAIMP-01, LUAIMP-02, LUAIMP-03, LUAIMP-04, LUAIMP-05 | 5 |
+| 74 | Import Resolver Contract | Define and implement the shared require resolver for shell APIs, service/interface proxies, and runtime-provided self context. | LUAIMP-01, LUAIMP-02, LUAIMP-03, LUAIMP-04, LUAIMP-05 | 5 |
 | 75 | Runtime Parity | Apply the canonical require model consistently across frontend and backend Luau contexts. | LUART-01, LUART-02, LUART-03, LUART-04, LUART-05, LUART-06 | 6 |
 | 76 | Component Require Imports | Bring frontend local/module component imports into the unified require model while preserving current import syntax. | LUACOMP-01, LUACOMP-02, LUACOMP-03, LUACOMP-04 | 4 |
 | 77 | Compatibility Migration Proof | Keep existing globals/imports working, add migration diagnostics, and migrate shipped proof modules to the new style. | LUACOMPAT-01, LUACOMPAT-02, LUACOMPAT-03, LUACOMPAT-04 | 4 |
@@ -34,7 +34,7 @@ libraries, and frontend components instead of switching between implicit global
 - Keep frontend and backend runtime behavior aligned unless a capability or host-context difference is explicit.
 - Do not invent JavaScript-style named imports until the Luau-native require contract is stable.
 - Shell APIs must remain capability-gated and observable through diagnostics.
-- Module-specific variables and state must be accessed through an explicit module-scope import that is isolated by module identity.
+- Module/component identity and persistent storage must be accessed through runtime-provided `self`, while script variables/functions use Lua local-vs-public member rules.
 - Prove behavior on shipped navigation, audio popover, and backend provider scripts, not only synthetic fixtures.
 
 ## Phases
@@ -47,7 +47,7 @@ libraries, and frontend components instead of switching between implicit global
 
 ### Phase 74: Import Resolver Contract
 
-**Goal:** Define and implement the shared require resolver for shell APIs, service/interface proxies, and module scope imports.
+**Goal:** Define and implement the shared require resolver for shell APIs, service/interface proxies, and runtime-provided self context.
 
 **Requirements:** LUAIMP-01, LUAIMP-02, LUAIMP-03, LUAIMP-04, LUAIMP-05
 
@@ -58,7 +58,7 @@ libraries, and frontend components instead of switching between implicit global
 2. `require("mesh.audio@>=1.0")` behavior remains compatible.
 3. Shell APIs such as locale/log/events/ui/popover are available through documented require specifiers.
 4. Unsupported or unavailable imports produce consistent pcall-safe errors and diagnostics.
-5. A canonical module-scope import exposes module-specific variables, persistent state, exports, and lifecycle metadata.
+5. Runtime-provided `self` exposes instance metadata and shell-backed storage without requiring an import.
 
 ### Phase 75: Runtime Parity
 
@@ -73,8 +73,8 @@ libraries, and frontend components instead of switching between implicit global
 2. Frontend scripts can require canonical shell APIs and allowed interfaces.
 3. Capability denial is enforced and diagnosed uniformly in both runtime contexts.
 4. Imported module-object APIs preserve v1.12 state/export/event semantics.
-5. Module-specific state behaves identically in frontend and backend contexts for reads, writes, events, and reload boundaries.
-6. Module-scoped variables remain isolated by module identity.
+5. `self.meta` and `self.storage` behave consistently across frontend and backend contexts where their host contexts overlap.
+6. Public script members and storage remain isolated by module/component identity.
 
 ### Phase 76: Component Require Imports
 
@@ -114,10 +114,10 @@ libraries, and frontend components instead of switching between implicit global
 
 **Success criteria:**
 1. Module-system and frontend syntax docs describe canonical require namespaces and pcall behavior.
-2. Backend docs show the same import model for services, shell APIs, module objects, and libraries.
+2. Backend docs show the same import model for services, shell APIs, self context, module objects, and libraries.
 3. Regression tests cover synthetic and shipped-module require behavior.
 4. Requirements traceability and validation artifacts cover all v1.14 requirements.
-5. Docs explain module-specific variables/state naming, persistence, observation, and reload behavior.
+5. Docs explain `self.meta`, `self.storage`, local/private members, public members, markup-bound fields, and reload behavior.
 
 ## Backlog
 

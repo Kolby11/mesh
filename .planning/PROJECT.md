@@ -172,12 +172,15 @@ The project now also has a class-like module object contract with:
 
 ## Current Milestone: v1.14 Unified Luau Import Contract
 
-**Goal:** Make frontend and backend Luau authors use one explicit `require(...)`-based import model for shell APIs, service/interface proxies, module objects, libraries, and frontend components.
+**Goal:** Make frontend and backend Luau authors use one explicit model for external imports, runtime-provided `self` context, public/private script members, services, libraries, and frontend components.
 
 **Target features:**
 - Define a canonical require namespace for shell APIs that replaces implicit reliance on the global `mesh` table over time.
 - Unify service/interface imports across frontend and backend Luau runtimes, including capability checks, version constraints, diagnostics, and pcall behavior.
 - Add frontend component imports to the same authoring model so `.mesh` files can require local and module components instead of using a separate `import ... from` syntax.
+- Define `self.meta` and `self.storage` as the narrow runtime-provided current-instance context instead of using an importable module-context object.
+- Treat Lua `local` members as private and non-local variables/functions as public object members, with markup attributes binding directly to public component fields.
+- Treat frontend `require("./Component")` as a component definition import, with markup instantiation and Svelte-style `bind:this` for mounted component instance references.
 - Support ergonomic Luau table usage patterns, such as `local audio = require("mesh.audio@>=1.0")` and `local locale = require("mesh.locale")`, without inventing a non-Luau parser extension for named imports.
 - Preserve compatibility for current globals and component `import` syntax with migration diagnostics and shipped-module proof.
 - Update docs and shipped navigation/audio/backend modules so frontend and backend examples teach one unified import story.
@@ -250,7 +253,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 
 ### Active
 
-- `v1.14`: Unified Luau imports should cover shell APIs, service/interface proxies, module objects, libraries, and frontend component imports across both frontend and backend runtimes.
+- `v1.14`: Unified Luau scripting should cover external `require(...)` imports, runtime-provided `self` context, public/private script members, services, libraries, and frontend component definitions/instances across both frontend and backend runtimes.
 
 ### Out of Scope
 
@@ -310,7 +313,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Modules are class-like runtime objects over typed lanes | Authors need normal Luau object access while Rust keeps lifecycle, validation, replay, routing, and diagnostics authoritative | Shipped in v1.12 |
 | Backend-to-frontend transient facts use typed interface events | Durable service state should stay replayable, while transient updates like volume changes need declared payload schemas and subscriptions | Shipped in v1.12 gap closure |
 | Manifest-localized text must be explicit at the field site | Plain `module.json` strings cannot tell authors whether text is literal, a translation key, or actually localized | Shipped in v1.13 |
-| Luau imports should be explicit and unified across runtimes | Authors should learn one `require(...)` model for shell APIs, interfaces, libraries, module objects, and frontend components instead of switching between globals and `.mesh` import syntax | Active for v1.14 |
+| Luau scripting should split current instance context from external dependencies | Authors should use runtime-provided `self` for the current object instance and `require(...)` for external shell APIs, services, libraries, and component definitions | Active for v1.14 |
 
 <details>
 <summary>Archived milestone framing</summary>

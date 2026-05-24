@@ -11,7 +11,7 @@
 - [ ] **LUAIMP-02**: `require(...)` supports canonical shell API modules for current global `mesh` sub-APIs, including locale, logging, events, UI/redraw, popover, service, and module object access where capabilities allow.
 - [ ] **LUAIMP-03**: `require(...)` supports service/interface proxies with version constraints, preserving current `require("mesh.audio@>=1.0")` behavior.
 - [ ] **LUAIMP-04**: `require(...)` failures have consistent pcall-safe errors and diagnostics across frontend and backend contexts.
-- [ ] **LUAIMP-05**: `require(...)` defines a canonical module scope import for module-specific variables, persistent state, exports, and lifecycle metadata without requiring global `mesh`.
+- [ ] **LUAIMP-05**: The runtime defines a canonical `self` instance context for module/component identity and shell-backed storage without requiring global `mesh` or a module-context import.
 
 ### Runtime Parity
 
@@ -19,8 +19,8 @@
 - [ ] **LUART-02**: Frontend Luau scripts can use the same canonical shell API and service/interface import paths as backend scripts where their capabilities allow.
 - [ ] **LUART-03**: Capability checks for imported shell APIs and interfaces are enforced at require time and remain visible through diagnostics.
 - [ ] **LUART-04**: Imported APIs preserve existing module object state/export/event semantics without requiring global `mesh`.
-- [ ] **LUART-05**: Module-specific state imported through the canonical module scope has identical behavior in frontend and backend contexts for reads, writes, subscriptions/events, and lifecycle reload boundaries.
-- [ ] **LUART-06**: Module-scoped variables are isolated by module identity so two modules cannot accidentally read or mutate each other's state through shared imports.
+- [ ] **LUART-05**: `self.meta` and `self.storage` have consistent identity, diagnostics, persistence, and lifecycle reload behavior across frontend and backend contexts where their host contexts overlap.
+- [ ] **LUART-06**: Public script members and storage are isolated by module/component identity so two modules cannot accidentally read or mutate each other's state through shared imports.
 
 ### Component Imports
 
@@ -42,7 +42,7 @@
 - [ ] **LUADOC-02**: Frontend docs show component requires, service requires, shell API requires, and migration examples from old import/global syntax.
 - [ ] **LUADOC-03**: Backend docs show the same require model for service APIs, shell host APIs, module object access, and library modules.
 - [ ] **LUADOC-04**: Regression tests prove parser/compiler/runtime behavior on both synthetic fixtures and shipped modules.
-- [ ] **LUADOC-05**: Author docs show how module-specific variables and state should be imported, named, persisted, observed, and reset across reloads.
+- [ ] **LUADOC-05**: Author docs show how `self.meta`, `self.storage`, local/private members, public members, markup-bound fields, and reload persistence should work.
 
 ## Future Requirements
 

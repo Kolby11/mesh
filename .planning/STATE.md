@@ -24,10 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-24)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 74 Import Resolver Contract discussed
 Plan: —
-Status: Defining requirements
-Last activity: 2026-05-24 — Milestone v1.14 started
+Status: Ready for phase 74 planning
+Last activity: 2026-05-24 — Captured v1.14 Luau scripting context decisions
 
 ## Decisions
 
