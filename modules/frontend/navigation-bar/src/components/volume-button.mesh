@@ -5,7 +5,7 @@
     keybind="{this.keybinds.mute.id}"
     onclick={onActivate}
     onkeybind={onMuteKeybind}
-    title="{audio_tooltip}"
+    title="{t(audio_tooltip_key) .. audio_tooltip_value}"
     aria-label="{t('nav.open_audio')}"
   >
     <icon class="nav-button-glyph" name="{icon_name}" size="18" />
@@ -17,7 +17,8 @@ local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 icon_name = "audio-volume-muted"
-audio_tooltip = "Volume unavailable"
+audio_tooltip_key = "nav.volume_unavailable"
+audio_tooltip_value = ""
 audio_percent = 0
 
 local function update_audio_copy(percent, muted)
@@ -34,10 +35,11 @@ local function update_audio_copy(percent, muted)
     end
 
     if muted then
-        audio_tooltip = string.format("Volume muted at %d%%", percent)
+        audio_tooltip_key = "nav.volume_muted_at"
     else
-        audio_tooltip = string.format("Volume %d%%", percent)
+        audio_tooltip_key = "nav.volume_level"
     end
+    audio_tooltip_value = string.format(" %d%%", percent)
 end
 
 if audio_ok and audio and audio.events and audio.events.VolumeChanged then
@@ -51,9 +53,10 @@ if audio_ok and audio and audio.events and audio.events.VolumeChanged then
 end
 
 function onRender()
-    if not audio_ok or not audio or audio.available ~= true then
+    if not audio_ok or not audio or audio.available == false then
         icon_name = "audio-volume-muted"
-        audio_tooltip = "Audio service unavailable"
+        audio_tooltip_key = "nav.audio_service_unavailable"
+        audio_tooltip_value = ""
         audio_percent = 0
         return
     end

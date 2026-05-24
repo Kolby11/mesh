@@ -1463,6 +1463,180 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
 }
 
 #[test]
+fn navigation_language_button_publishes_locale_request_on_real_surface() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let theme = default_theme();
+    let width = 960;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.locale".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({
+                "locale": "en",
+                "current": "en"
+            }),
+        })
+        .unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree");
+    let language_button =
+        first_node_with_attr(tree, "title", "Choose language").expect("language menu button");
+    assert_eq!(
+        language_button.attributes.get("title").map(String::as_str),
+        Some("Choose language")
+    );
+    let language_key = language_button
+        .attributes
+        .get("_mesh_key")
+        .expect("language menu button mesh key")
+        .clone();
+    component.focused_key = Some(language_key.clone());
+    component.focus_visible_key = Some(language_key);
+
+    let open_requests = component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!(open_requests.is_empty());
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation tree with language menu");
+    let slovak_option =
+        first_node_with_attr(tree, "title", "Slovak").expect("Slovak language option");
+    let slovak_key = slovak_option
+        .attributes
+        .get("_mesh_key")
+        .expect("Slovak option mesh key")
+        .clone();
+    component.focused_key = Some(slovak_key.clone());
+    component.focus_visible_key = Some(slovak_key);
+
+    let activation_requests = component
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        activation_requests.as_slice(),
+        [CoreRequest::SetLocale { locale }] if locale == "sk"
+    ));
+}
+
+#[test]
+fn navigation_shipped_i18n_covers_all_template_translation_keys() {
+    fn collect_keys(source: &str, keys: &mut Vec<String>) {
+        for (index, _) in source.match_indices("t(") {
+            if index > 0 {
+                let previous = source[..index].chars().next_back().unwrap_or(' ');
+                if previous.is_ascii_alphanumeric() || previous == '_' {
+                    continue;
+                }
+            }
+            let fragment = &source[index + 2..];
+            let Some(end) = fragment.find(')') else {
+                continue;
+            };
+            let raw = fragment[..end].trim();
+            let quoted = raw
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+                .or_else(|| {
+                    raw.strip_prefix('\'')
+                        .and_then(|value| value.strip_suffix('\''))
+                });
+            if let Some(key) = quoted {
+                keys.push(key.to_string());
+            }
+        }
+    }
+
+    let mut keys = Vec::new();
+    for source in [
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/navigation-bar/src/main.mesh"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/navigation-bar/src/components/battery-button.mesh"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/navigation-bar/src/components/language-button.mesh"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/navigation-bar/src/components/meta-label.mesh"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/navigation-bar/src/components/meta-pill.mesh"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/navigation-bar/src/components/settings-button.mesh"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/navigation-bar/src/components/theme-button.mesh"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
+        )),
+    ] {
+        collect_keys(source, &mut keys);
+    }
+    keys.sort();
+    keys.dedup();
+
+    let en: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../modules/frontend/navigation-bar/config/i18n/en.json"
+    )))
+    .unwrap();
+    let sk: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../modules/frontend/navigation-bar/config/i18n/sk.json"
+    )))
+    .unwrap();
+
+    for key in keys {
+        assert!(
+            en.get(&key).is_some(),
+            "missing English nav translation for {key}"
+        );
+        assert!(
+            sk.get(&key).is_some(),
+            "missing Slovak nav translation for {key}"
+        );
+    }
+}
+
+#[test]
 fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());

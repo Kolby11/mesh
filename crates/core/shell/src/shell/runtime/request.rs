@@ -294,6 +294,7 @@ impl Shell {
                 close_source,
             ),
             CoreRequest::SetTheme { theme_id } => self.apply_set_theme(&theme_id),
+            CoreRequest::SetLocale { locale } => self.apply_set_locale(&locale),
             CoreRequest::ToggleDebugOverlay => {
                 self.debug.toggle();
                 tracing::debug!(
@@ -924,6 +925,7 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::ServiceCommand { .. } => "service_command",
         CoreRequest::WriteClipboard { .. } => "write_clipboard",
         CoreRequest::SetTheme { .. } => "set_theme",
+        CoreRequest::SetLocale { .. } => "set_locale",
         CoreRequest::ActivatePopover { .. } => "activate_popover",
         CoreRequest::TransferTabFocus { .. } => "transfer_tab_focus",
         CoreRequest::ToggleDebugOverlay => "toggle_debug_overlay",

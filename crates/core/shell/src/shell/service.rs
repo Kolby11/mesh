@@ -108,6 +108,15 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
                 .map(|id| CoreRequest::SetTheme {
                     theme_id: id.to_string(),
                 }),
+            "shell.set-locale" => {
+                event
+                    .payload
+                    .get("locale")
+                    .and_then(|v| v.as_str())
+                    .map(|locale| CoreRequest::SetLocale {
+                        locale: locale.to_string(),
+                    })
+            }
             "shell.toggle-debug-overlay" => Some(CoreRequest::ToggleDebugOverlay),
             "shell.toggle-debug-layout-bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
             "shell.toggle-debug-profiling" => Some(CoreRequest::ToggleDebugProfiling),

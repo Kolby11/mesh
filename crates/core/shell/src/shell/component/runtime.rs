@@ -18,32 +18,7 @@ impl FrontendSurfaceComponent {
         let mut state_dirty = false;
         let mut runtimes = self.runtimes.lock().unwrap();
         for runtime in runtimes.values_mut() {
-            if !runtime.script_ctx.has_handler("onRender") {
-                continue;
-            }
-
-            if let Err(source) = runtime.script_ctx.call_handler("onRender", &[]) {
-                let component_id = runtime.module_id.clone();
-                let error_message = source.to_string();
-                tracing::warn!(
-                    component_id = %component_id,
-                    handler = "onRender",
-                    error = %error_message,
-                    "frontend render hook failed"
-                );
-                if let Some(diagnostics) = &self.diagnostics {
-                    diagnostics.record_handler_error(
-                        component_id,
-                        "onRender".to_string(),
-                        error_message,
-                    );
-                }
-                Self::drain_script_diagnostics(&self.diagnostics, runtime);
-                continue;
-            }
-            Self::drain_script_diagnostics(&self.diagnostics, runtime);
-
-            if runtime.script_ctx.state().is_dirty() {
+            if Self::call_runtime_render_hook(&self.diagnostics, runtime) {
                 state_dirty = true;
             }
         }
@@ -51,6 +26,37 @@ impl FrontendSurfaceComponent {
         if state_dirty {
             self.invalidate_script_state();
         }
+    }
+
+    pub(super) fn call_runtime_render_hook(
+        diagnostics: &Option<Diagnostics>,
+        runtime: &mut EmbeddedFrontendRuntime,
+    ) -> bool {
+        if !runtime.script_ctx.has_handler("onRender") {
+            return false;
+        }
+
+        if let Err(source) = runtime.script_ctx.call_handler("onRender", &[]) {
+            let component_id = runtime.module_id.clone();
+            let error_message = source.to_string();
+            tracing::warn!(
+                component_id = %component_id,
+                handler = "onRender",
+                error = %error_message,
+                "frontend render hook failed"
+            );
+            if let Some(diagnostics) = diagnostics {
+                diagnostics.record_handler_error(
+                    component_id,
+                    "onRender".to_string(),
+                    error_message,
+                );
+            }
+            Self::drain_script_diagnostics(diagnostics, runtime);
+            return false;
+        }
+        Self::drain_script_diagnostics(diagnostics, runtime);
+        runtime.script_ctx.state().is_dirty()
     }
 
     pub(super) fn drain_script_diagnostics(
@@ -164,6 +170,20 @@ impl FrontendSurfaceComponent {
                 component_id: component_id.clone(),
                 source,
             })?;
+        if script_has_service_read(&script_ctx, "mesh.locale", "locale") {
+            let payload = serde_json::json!({
+                "locale": self.locale.current(),
+                "current": self.locale.current()
+            });
+            apply_service_update(
+                script_ctx.state_mut(),
+                true,
+                "mesh.locale",
+                "@mesh/shell",
+                payload.clone(),
+            );
+            script_ctx.apply_service_payload("locale", &payload);
+        }
         for (key, value) in props {
             script_ctx.state_mut().set(key.clone(), value.clone());
         }
@@ -255,6 +275,8 @@ impl FrontendSurfaceComponent {
                 });
             };
             let runtime = self.create_runtime(&entry.compiled, props)?;
+            let mut runtime = runtime;
+            Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
             self.runtimes
                 .lock()
                 .unwrap()
@@ -309,6 +331,8 @@ impl FrontendSurfaceComponent {
                 component,
                 props,
             )?;
+            let mut runtime = runtime;
+            Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
             self.runtimes
                 .lock()
                 .unwrap()
@@ -510,21 +534,17 @@ fn module_descriptor_from_manifest(manifest: &mesh_core_module::Manifest) -> ser
             );
             descriptor.insert(
                 "label".into(),
-                serde_json::json!(
-                    action
-                        .label
-                        .clone()
-                        .unwrap_or_else(|| format!("keybind.{keybind_id}.label"))
-                ),
+                serde_json::json!(action.label.clone().unwrap_or_else(|| {
+                    mesh_core_module::LocalizedText::Literal(format!("keybind.{keybind_id}.label"))
+                })),
             );
             descriptor.insert(
                 "description".into(),
-                serde_json::json!(
-                    action
-                        .description
-                        .clone()
-                        .unwrap_or_else(|| format!("keybind.{keybind_id}.description"))
-                ),
+                serde_json::json!(action.description.clone().unwrap_or_else(|| {
+                    mesh_core_module::LocalizedText::Literal(format!(
+                        "keybind.{keybind_id}.description"
+                    ))
+                })),
             );
             if let Some(category) = &action.category {
                 descriptor.insert("category".into(), serde_json::json!(category));

@@ -1,0 +1,16 @@
+{
+  "audio.unavailable": "Zvuk nedostupny",
+  "audio.service_unavailable": "Zvukova sluzba nedostupna",
+  "audio.controls_unavailable": "Ovladanie zvuku nedostupne",
+  "audio.output": "Zvukovy vystup",
+  "audio.muted": "Zvuk stlmeny",
+  "audio.volume": "Hlasitost",
+  "audio.muted_at": "Stlmene na",
+  "audio.mute": "Stlmit",
+  "audio.unmute": "Zrusit stlmenie",
+  "audio.toggle_mute": "Prepnut stlmenie",
+  "audio.mute_audio": "Stlmit zvuk",
+  "audio.unmute_audio": "Zrusit stlmenie zvuku",
+  "audio.lower_volume": "Znizit hlasitost",
+  "audio.raise_volume": "Zvysit hlasitost"
+}

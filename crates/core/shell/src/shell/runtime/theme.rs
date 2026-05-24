@@ -161,6 +161,7 @@ impl Shell {
                 new_i18n.fallback_locale.clone(),
             );
             self.mark_components_locale_changed()?;
+            requests.extend(self.sync_locale_service_state()?);
         }
 
         self.settings = new_settings;
@@ -180,5 +181,37 @@ impl Shell {
         }
         let _ = self.broadcast_core_event(CoreEvent::LocaleChanged { locale: locale_id })?;
         Ok(())
+    }
+
+    pub(in crate::shell) fn apply_set_locale(
+        &mut self,
+        locale: &str,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let locale = locale.trim();
+        if locale.is_empty() {
+            tracing::warn!("ignoring empty locale request");
+            return Ok(VecDeque::new());
+        }
+        if self.locale.current() == locale {
+            return self.sync_locale_service_state();
+        }
+        tracing::info!("active locale changed to '{locale}'");
+        self.locale.set_locale(locale);
+        self.mark_components_locale_changed()?;
+        self.sync_locale_service_state()
+    }
+
+    pub(in crate::shell) fn sync_locale_service_state(
+        &mut self,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let locale = self.locale.current().to_string();
+        self.broadcast_service_event(ServiceEvent::Updated {
+            service: "mesh.locale".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({
+                "locale": locale.clone(),
+                "current": locale
+            }),
+        })
     }
 }

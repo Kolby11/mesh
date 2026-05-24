@@ -496,6 +496,14 @@ pub(super) fn real_frontend_module_component(
                 )))
                 .unwrap(),
             ),
+            (
+                "LanguageButton".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/navigation-bar/src/components/language-button.mesh"
+                )))
+                .unwrap(),
+            ),
         ]),
         module_component_imports: HashMap::from([(
             "AudioPopover".into(),

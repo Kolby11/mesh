@@ -110,6 +110,14 @@ impl ScriptContext {
         if let Ok(lua_value) = self.lua.to_value(payload) {
             let _ = self.lua.globals().set(service_key, lua_value);
         }
+        if service == "locale"
+            && let Some(locale) = payload
+                .get("locale")
+                .or_else(|| payload.get("current"))
+                .and_then(|value| value.as_str())
+        {
+            let _ = self.lua.globals().set("__mesh_locale_current", locale);
+        }
         self.refresh_module_object();
     }
 
@@ -256,11 +264,13 @@ impl ScriptContext {
         let mesh_ui_api = self.lua.create_table().map_err(lua_err)?;
         let mesh_log = self.lua.create_table().map_err(lua_err)?;
         let mesh_popover = self.lua.create_table().map_err(lua_err)?;
+        let mesh_locale = self.lua.create_table().map_err(lua_err)?;
         let interface_catalog = self.interface_catalog.clone();
         let manifest = HostApiManifest::from_capabilities(&self.capabilities);
         let allowed_interfaces = manifest.interface_capabilities.clone();
         let has_theme_read = manifest.has_theme_read;
         let has_locale_read = manifest.has_locale_read;
+        let has_locale_write = manifest.has_locale_write;
 
         let published_events = Arc::clone(&self.shared_published_events);
         let module_id = self.module_id.clone();
@@ -291,6 +301,47 @@ impl ScriptContext {
                 self.lua
                     .create_function(|lua, ()| {
                         lua.globals().set("__mesh_request_redraw", true)?;
+                        Ok(())
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
+
+        mesh_locale
+            .set(
+                "current",
+                self.lua
+                    .create_function(|lua, ()| {
+                        lua.globals()
+                            .get::<Option<String>>("__mesh_locale_current")
+                            .map(|locale| locale.unwrap_or_else(|| "en".to_string()))
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
+
+        let published_events_for_locale = Arc::clone(&self.shared_published_events);
+        let module_id_for_locale = self.module_id.clone();
+        let capabilities_for_locale = self.capabilities.clone();
+        mesh_locale
+            .set(
+                "set",
+                self.lua
+                    .create_function(move |_lua, locale: String| {
+                        if !has_locale_write {
+                            return Err(LuaError::external(ScriptError::CapabilityDenied(
+                                "locale.write".to_string(),
+                            )));
+                        }
+                        published_events_for_locale
+                            .lock()
+                            .unwrap()
+                            .push(PublishedEvent {
+                                channel: "shell.set-locale".to_string(),
+                                payload: serde_json::json!({ "locale": locale }),
+                                source_module_id: module_id_for_locale.clone(),
+                                source_capabilities: capabilities_for_locale.clone(),
+                            });
                         Ok(())
                     })
                     .map_err(lua_err)?,
@@ -444,9 +495,13 @@ impl ScriptContext {
         mesh.set("ui", mesh_ui_api).map_err(lua_err)?;
         mesh.set("log", mesh_log).map_err(lua_err)?;
         mesh.set("popover", mesh_popover).map_err(lua_err)?;
+        mesh.set("locale", mesh_locale).map_err(lua_err)?;
         globals.set("mesh", mesh).map_err(lua_err)?;
         globals
             .set("__mesh_request_redraw", false)
+            .map_err(lua_err)?;
+        globals
+            .set("__mesh_locale_current", "en")
             .map_err(lua_err)?;
 
         let published_events = Arc::clone(&self.shared_published_events);

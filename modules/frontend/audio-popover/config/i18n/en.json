@@ -1,0 +1,16 @@
+{
+  "audio.unavailable": "Audio unavailable",
+  "audio.service_unavailable": "Audio service unavailable",
+  "audio.controls_unavailable": "Audio controls unavailable",
+  "audio.output": "Audio output",
+  "audio.muted": "Audio muted",
+  "audio.volume": "Volume",
+  "audio.muted_at": "Muted at",
+  "audio.mute": "Mute",
+  "audio.unmute": "Unmute",
+  "audio.toggle_mute": "Toggle mute",
+  "audio.mute_audio": "Mute audio",
+  "audio.unmute_audio": "Unmute audio",
+  "audio.lower_volume": "Lower volume",
+  "audio.raise_volume": "Raise volume"
+}

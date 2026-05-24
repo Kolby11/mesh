@@ -3,7 +3,7 @@
     <row class="nav-shell">
       <column class="status-cluster">
         <row class="status-head">
-          <text ref="status-primary" class="status-primary">{primary_status}</text>
+          <text ref="status-primary" class="status-primary">{t(primary_status_key)}</text>
           <box class="status-accent">
             <MetaPill />
           </box>
@@ -11,7 +11,7 @@
         <column class="status-copy">
           <row ref="status-secondary" class="status-secondary-row">
             <MetaLabel />
-            <text class="status-secondary">{secondary_status}</text>
+            <text class="status-secondary">{t(secondary_status_key) .. secondary_status_value}</text>
             <BatteryButton />
           </row>
         </column>
@@ -26,6 +26,9 @@
         </row>
         <row class="control-button-cell">
           <ThemeButton />
+        </row>
+        <row class="control-button-cell">
+          <LanguageButton />
         </row>
         <row class="control-button-cell">
           <SettingsButton />
@@ -44,14 +47,16 @@ import MetaPill from "./components/meta-pill.mesh"
 import SettingsButton from "./components/settings-button.mesh"
 import VolumeButton from "./components/volume-button.mesh"
 import ThemeButton from "./components/theme-button.mesh"
+import LanguageButton from "./components/language-button.mesh"
 
 local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 audio_surface_id = "@mesh/audio-popover"
 audio_surface_hidden = true
-primary_status = "Shell surface active"
-secondary_status = "Audio service offline"
+primary_status_key = "nav.surface_active"
+secondary_status_key = "nav.audio_offline"
+secondary_status_value = ""
 
 local function clamp_percent(value)
     local percent = math.floor(tonumber(value) or 0)
@@ -64,12 +69,14 @@ function onRender()
     if audio_ok and audio and audio.available == true then
         local percent = clamp_percent(audio.percent)
         if audio.muted then
-            secondary_status = string.format("Audio muted at %d%%", percent)
+            secondary_status_key = "nav.audio_muted_at"
         else
-            secondary_status = string.format("Audio steady at %d%%", percent)
+            secondary_status_key = "nav.audio_steady_at"
         end
+        secondary_status_value = string.format(" %d%%", percent)
     else
-        secondary_status = "Audio service offline"
+        secondary_status_key = "nav.audio_offline"
+        secondary_status_value = ""
     end
 end
 
@@ -77,10 +84,11 @@ if audio_ok and audio and audio.events and audio.events.VolumeChanged then
     audio.events.VolumeChanged:subscribe(function(event)
         local percent = clamp_percent(event.level)
         if audio and audio.muted then
-            secondary_status = string.format("Audio muted at %d%%", percent)
+            secondary_status_key = "nav.audio_muted_at"
         else
-            secondary_status = string.format("Audio steady at %d%%", percent)
+            secondary_status_key = "nav.audio_steady_at"
         end
+        secondary_status_value = string.format(" %d%%", percent)
     end)
 end
 

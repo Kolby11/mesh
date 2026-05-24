@@ -189,6 +189,113 @@ fn shipped_audio_popover_content_measured_surface_contains_volume_actions() {
 }
 
 #[test]
+fn audio_popover_theme_repaint_keeps_audio_state_without_available_flag() {
+    let theme = default_theme();
+    let mut audio = real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    audio
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+
+    let mut buffer = PixelBuffer::new(320, 220);
+    audio.paint(&theme, 320, 220, &mut buffer).unwrap();
+    assert_eq!(
+        runtime_value(&audio, "audio_title_key"),
+        Some(serde_json::json!("audio.output"))
+    );
+    assert_eq!(
+        runtime_value(&audio, "audio_percent_label"),
+        Some(serde_json::json!("50%"))
+    );
+
+    audio.theme_changed().unwrap();
+    audio.paint(&theme, 320, 220, &mut buffer).unwrap();
+
+    let text = rendered_text(&audio);
+    assert!(
+        text.iter().any(|line| line == "Audio output"),
+        "theme repaint should preserve usable audio copy, got {text:?}"
+    );
+    assert!(
+        text.iter().any(|line| line == "50%"),
+        "theme repaint should preserve audio percent, got {text:?}"
+    );
+    assert!(
+        !text.iter().any(|line| line == "Audio unavailable"),
+        "theme repaint should not fall back to unavailable copy, got {text:?}"
+    );
+}
+
+#[test]
+fn audio_popover_shipped_i18n_covers_template_translation_keys() {
+    let source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../modules/frontend/audio-popover/src/main.mesh"
+    ));
+    let mut keys = Vec::new();
+    for (index, _) in source.match_indices("t(") {
+        if index > 0 {
+            let previous = source[..index].chars().next_back().unwrap_or(' ');
+            if previous.is_ascii_alphanumeric() || previous == '_' {
+                continue;
+            }
+        }
+        let fragment = &source[index + 2..];
+        let Some(end) = fragment.find(')') else {
+            continue;
+        };
+        let raw = fragment[..end].trim();
+        let quoted = raw
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .or_else(|| {
+                raw.strip_prefix('\'')
+                    .and_then(|value| value.strip_suffix('\''))
+            });
+        if let Some(key) = quoted {
+            keys.push(key.to_string());
+        }
+    }
+    for quote in ['"', '\''] {
+        for fragment in source.split(quote).skip(1).step_by(2) {
+            if fragment.starts_with("audio.") {
+                keys.push(fragment.to_string());
+            }
+        }
+    }
+    keys.sort();
+    keys.dedup();
+
+    let en: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../modules/frontend/audio-popover/config/i18n/en.json"
+    )))
+    .unwrap();
+    let sk: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../modules/frontend/audio-popover/config/i18n/sk.json"
+    )))
+    .unwrap();
+
+    for key in keys {
+        assert!(
+            en.get(&key).is_some(),
+            "missing English audio translation for {key}"
+        );
+        assert!(
+            sk.get(&key).is_some(),
+            "missing Slovak audio translation for {key}"
+        );
+    }
+}
+
+#[test]
 fn phase44_navigation_audio_surface_emits_focused_proof_snapshot() {
     let theme = default_theme();
 
@@ -656,8 +763,21 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
 
     assert_eq!(
         find_tooltip_text_by_key(tree, &icon_key).as_deref(),
-        Some("Volume unavailable"),
+        Some("Volume 50%"),
         "tooltip lookup should inherit the button title when hovering the icon"
+    );
+
+    let slovak_locale = mesh_core_locale::LocaleEngine::new("sk");
+    component.locale_changed(&slovak_locale).unwrap();
+    component.paint(&theme, width, height, &mut buffer).unwrap();
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered localized navigation bar");
+    assert_eq!(
+        find_tooltip_text_by_key(tree, &icon_key).as_deref(),
+        Some("Hlasitost 50%"),
+        "volume tooltip should update when the shell locale changes"
     );
 
     component

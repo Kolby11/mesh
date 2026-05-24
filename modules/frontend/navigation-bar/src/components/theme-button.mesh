@@ -2,8 +2,8 @@
   <button
     class="nav-button"
     onclick={onThemeToggle}
-    title="{theme_tooltip}"
-    aria-label="{theme_tooltip}"
+    title="{t(theme_tooltip_key)}"
+    aria-label="{t(theme_tooltip_key)}"
   >
     <icon class="nav-button-glyph" name="{theme_icon}" size="18" />
   </button>
@@ -11,7 +11,7 @@
 
 <script lang="luau">
 theme_icon = "weather-clear-night"
-theme_tooltip = "Switch to light theme"
+theme_tooltip_key = "nav.switch_light"
 theme_is_dark = true
 
 local theme_ok, theme = pcall(function()
@@ -49,10 +49,10 @@ function onRender()
     sync_theme_state()
     if theme_is_dark then
         theme_icon = "weather-clear-night"
-        theme_tooltip = "Switch to light theme"
+        theme_tooltip_key = "nav.switch_light"
     else
         theme_icon = "weather-clear"
-        theme_tooltip = "Switch to dark theme"
+        theme_tooltip_key = "nav.switch_dark"
     end
 end
 

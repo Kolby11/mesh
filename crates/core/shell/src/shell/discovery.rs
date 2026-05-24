@@ -65,6 +65,14 @@ impl Shell {
             backend_name: "Shell Theme".to_string(),
             priority: 200,
         });
+        interfaces.register(InterfaceProvider {
+            interface: "mesh.locale".to_string(),
+            version: Some("1.0".to_string()),
+            base_module: Some("@mesh/locale-interface".to_string()),
+            provider_module: "@mesh/shell".to_string(),
+            backend_name: "Shell Locale".to_string(),
+            priority: 200,
+        });
 
         Self {
             config,

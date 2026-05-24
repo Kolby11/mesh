@@ -1,0 +1,221 @@
+<template>
+  <row class="language-control">
+    <button
+      class="nav-button"
+      onclick={onLanguageMenuToggle}
+      title="{t('nav.language_menu')}"
+      aria-label="{t('nav.language_menu')}"
+    >
+      <row class="language-button-content">
+        <icon class="nav-button-glyph" name="language" size="18" />
+        <text class="language-code">{language_code}</text>
+      </row>
+    </button>
+    <row class="{language_menu_class}" title="{t('nav.language_menu')}">
+      <button
+        class="{english_option_class}"
+        onclick={onSelectEnglish}
+        title="{t('nav.language_english')}"
+        aria-label="{t('nav.language_english')}"
+      >
+        <text class="language-option-text">{t('nav.language_english')}</text>
+      </button>
+      <button
+        class="{slovak_option_class}"
+        onclick={onSelectSlovak}
+        title="{t('nav.language_slovak')}"
+        aria-label="{t('nav.language_slovak')}"
+      >
+        <text class="language-option-text">{t('nav.language_slovak')}</text>
+      </button>
+    </row>
+  </row>
+</template>
+
+<script lang="luau">
+language_code = "EN"
+language_menu_open = false
+language_menu_class = "language-menu language-menu-hidden"
+english_option_class = "language-option language-option-selected"
+slovak_option_class = "language-option"
+
+local function locale_is_slovak(locale)
+    return locale == "sk" or string.find(locale or "", "sk-", 1, true) == 1
+end
+
+local function current_locale()
+    local locale = mesh.locale.current()
+    if type(locale) ~= "string" or locale == "" then
+        return "en"
+    end
+    return locale
+end
+
+local function update_menu_class()
+    if language_menu_open then
+        language_menu_class = "language-menu"
+    else
+        language_menu_class = "language-menu language-menu-hidden"
+    end
+end
+
+function onRender()
+    if locale_is_slovak(current_locale()) then
+        language_code = "SK"
+        english_option_class = "language-option"
+        slovak_option_class = "language-option language-option-selected"
+    else
+        language_code = "EN"
+        english_option_class = "language-option language-option-selected"
+        slovak_option_class = "language-option"
+    end
+    update_menu_class()
+end
+
+function onLanguageMenuToggle()
+    language_menu_open = not language_menu_open
+    update_menu_class()
+end
+
+function onSelectEnglish()
+    language_menu_open = false
+    update_menu_class()
+    mesh.locale.set("en")
+end
+
+function onSelectSlovak()
+    language_menu_open = false
+    update_menu_class()
+    mesh.locale.set("sk")
+end
+</script>
+
+<style>
+.language-control {
+    height: 40px;
+    align-items: center;
+    gap: token(spacing.xs);
+}
+
+.nav-button {
+    min-width: 52px;
+    height: 40px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    padding: token(spacing.xs);
+    border-radius: token(radius.md);
+    transform: translateY(0px) scale(1);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+    border-width: 2px;
+    border-style: solid;
+    border-color: transparent;
+    text-wrap: none;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate),
+                transform token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
+}
+
+.nav-button:hover,
+.language-option:hover {
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
+    border-radius: token(radius.md);
+    transform: translateY(-1px) scale(1.04);
+}
+
+.nav-button:focus,
+.nav-button:focus-visible,
+.language-option:focus,
+.language-option:focus-visible {
+    background: token(color.tertiary-container);
+    color: token(color.on-tertiary-container);
+    border-radius: token(radius.md);
+    transform: translateY(-1px) scale(1.03);
+}
+
+.nav-button:active,
+.language-option:active,
+.language-option-selected {
+    background: token(color.primary);
+    color: token(color.on-primary);
+    border-color: token(color.primary);
+    border-radius: token(radius.full);
+    transform: translateY(0px) scale(0.94);
+}
+
+.language-button-content {
+    gap: token(spacing.xs);
+    align-items: center;
+    justify-content: center;
+}
+
+.nav-button-glyph {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    color: inherit;
+    transition: color token(animation.duration.short) token(animation.curves.bezier.standard);
+}
+
+.language-code {
+    min-width: 20px;
+    font-size: 12px;
+    font-weight: 700;
+    color: inherit;
+    text-wrap: none;
+}
+
+.language-menu {
+    height: 40px;
+    align-items: center;
+    gap: token(spacing.xs);
+}
+
+.language-menu-hidden {
+    display: none;
+}
+
+.language-option {
+    height: 32px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    padding-inline: token(spacing.sm);
+    border-radius: token(radius.md);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+    border-width: 2px;
+    border-style: solid;
+    border-color: transparent;
+    text-wrap: none;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate),
+                transform token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
+}
+
+.language-option-text {
+    color: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    text-wrap: none;
+}
+
+@container (max-width: 720px) {
+    .nav-button {
+        min-width: 48px;
+        padding: token(spacing.xs);
+    }
+
+    .language-option {
+        padding-inline: token(spacing.xs);
+    }
+}
+</style>

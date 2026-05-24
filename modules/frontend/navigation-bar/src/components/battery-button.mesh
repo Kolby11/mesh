@@ -1,8 +1,8 @@
 <template>
   <box
     class="battery-widget"
-    title="{battery_tooltip}"
-    aria-label="{battery_aria_label}"
+    title="{t(battery_tooltip_key) .. battery_tooltip_value}"
+    aria-label="{t(battery_aria_key) .. battery_aria_value}"
   >
     <icon class="battery-glyph" name="{battery_icon_name}" size="18" />
     <text class="battery-value">{battery_label}</text>
@@ -15,8 +15,10 @@ if not power_ok then power = nil end
 
 battery_icon_name = "battery-empty"
 battery_label = "--%"
-battery_tooltip = "Battery status unavailable"
-battery_aria_label = "Battery status unavailable"
+battery_tooltip_key = "nav.battery_unavailable"
+battery_tooltip_value = ""
+battery_aria_key = "nav.battery_unavailable"
+battery_aria_value = ""
 
 function round_percent(level_value)
     local safe = level_value or 0
@@ -30,7 +32,7 @@ end
 
 function format_minutes(total_minutes)
     if total_minutes == nil or total_minutes <= 0 then
-        return "Unavailable"
+        return "--"
     end
     local hours = math.floor(total_minutes / 60)
     local minutes = total_minutes % 60
@@ -45,14 +47,14 @@ end
 
 function format_watts(watts)
     if watts == nil or watts <= 0 then
-        return "Unavailable"
+        return "--"
     end
     return string.format("%.1f W", watts)
 end
 
 function format_capacity(energy_now, energy_full)
     if energy_now == nil or energy_full == nil or energy_full <= 0 then
-        return "Unavailable"
+        return "--"
     end
     return string.format("%.1f / %.1f Wh", energy_now, energy_full)
 end
@@ -69,8 +71,10 @@ function onRender()
     if not power_ok or not power or not power.available then
         battery_icon_name = "battery-empty"
         battery_label = "N/A"
-        battery_tooltip = "Battery status unavailable"
-        battery_aria_label = "Battery status unavailable"
+        battery_tooltip_key = "nav.battery_unavailable"
+        battery_tooltip_value = ""
+        battery_aria_key = "nav.battery_unavailable"
+        battery_aria_value = ""
         return
     end
 
@@ -79,21 +83,20 @@ function onRender()
     local remaining_label = charging
         and format_minutes(power.time_to_full_minutes)
         or format_minutes(power.time_remaining_minutes)
-    local remaining_prefix = charging and "Time to full" or "Estimated remaining"
-    local status_label = charging and "Charging" or "On battery"
+    local status_key = charging and "nav.charging" or "nav.on_battery"
 
     battery_icon_name = battery_icon_for(percent_value)
     battery_label = string.format("%d%%", percent_value)
-    battery_tooltip = string.format(
-        "%s at %d%%. %s: %s. Power draw: %s. Charge: %s.",
-        status_label,
+    battery_tooltip_key = status_key
+    battery_tooltip_value = string.format(
+        " %d%%. %s: %s. %s: %s.",
         percent_value,
-        remaining_prefix,
         remaining_label,
         format_watts(power.power_draw_watts),
         format_capacity(power.energy_now_watt_hours, power.energy_full_watt_hours)
     )
-    battery_aria_label = string.format("Battery %d percent, %s", percent_value, status_label)
+    battery_aria_key = "nav.battery"
+    battery_aria_value = string.format(" %d%%", percent_value)
 end
 </script>
 

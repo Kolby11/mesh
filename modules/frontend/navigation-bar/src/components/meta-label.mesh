@@ -1,5 +1,5 @@
 <template>
-  <text class="meta-label">audio</text>
+  <text class="meta-label">{t('nav.audio')}</text>
 </template>
 
 <script lang="luau">

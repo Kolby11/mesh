@@ -34,6 +34,7 @@ impl Shell {
         pending.extend(self.mount_components()?);
         pending.extend(self.replay_cached_service_events()?);
         self.mark_components_locale_changed()?;
+        pending.extend(self.sync_locale_service_state()?);
         pending.extend(self.broadcast_core_event(CoreEvent::Started)?);
         play_shell_sound(
             SoundKind::Startup,

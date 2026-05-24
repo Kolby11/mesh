@@ -11,7 +11,8 @@
         "service.audio.read",
         "service.audio.control",
         "theme.read",
-        "locale.read"
+        "locale.read",
+        "locale.write"
       ]
     },
     "dependencies": {
@@ -27,6 +28,7 @@
         "settings",
         "weather-clear-night",
         "weather-clear",
+        "language",
         "audio-volume-muted",
         "audio-volume-low",
         "audio-volume-medium",

@@ -116,6 +116,9 @@ pub enum CoreRequest {
     SetTheme {
         theme_id: String,
     },
+    SetLocale {
+        locale: String,
+    },
     /// Show a surface as a popover triggered by a specific element.
     ///
     /// The shell records `(trigger_surface, trigger_key)` on the trigger's

@@ -1,6 +1,6 @@
 <template>
   <box class="meta-pill">
-    <text class="meta-pill-text">live</text>
+    <text class="meta-pill-text">{t('nav.live')}</text>
   </box>
 </template>
 

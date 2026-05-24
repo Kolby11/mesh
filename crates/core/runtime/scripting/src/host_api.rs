@@ -13,6 +13,7 @@
 /// mesh.theme.on_change(cb)    → subscription   (requires theme.read)
 /// mesh.locale.current()       → string         (requires locale.read)
 /// mesh.locale.translate(key)  → string         (requires locale.read)
+/// mesh.locale.set(locale)     → publishes locale change request (requires locale.write)
 /// mesh.config()               → table          (backend helper; full module settings)
 /// mesh.exec(program, args)    → table          (backend helper)
 /// mesh.service.set_poll_interval(ms)           (backend helper)
@@ -34,6 +35,7 @@ use mesh_core_capability::{Capability, CapabilitySet};
 pub struct HostApiManifest {
     pub has_theme_read: bool,
     pub has_locale_read: bool,
+    pub has_locale_write: bool,
     pub interface_capabilities: Vec<String>,
     pub service_capabilities: Vec<String>,
     pub has_events: bool,
@@ -44,6 +46,7 @@ impl HostApiManifest {
     pub fn from_capabilities(caps: &CapabilitySet) -> Self {
         let has_theme_read = caps.is_granted(&Capability::new("theme.read"));
         let has_locale_read = caps.is_granted(&Capability::new("locale.read"));
+        let has_locale_write = caps.is_granted(&Capability::new("locale.write"));
 
         // Collect service capabilities (anything matching service.*.read or service.*.control).
         let service_capabilities: Vec<String> = caps
@@ -66,6 +69,7 @@ impl HostApiManifest {
         Self {
             has_theme_read,
             has_locale_read,
+            has_locale_write,
             interface_capabilities,
             service_capabilities,
             has_events: true, // Events are always available.

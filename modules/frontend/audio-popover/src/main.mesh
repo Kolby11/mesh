@@ -4,8 +4,8 @@
       <row class="audio-header">
         <icon class="audio-icon" name="{icon_name}" size="18" />
         <column class="audio-copy">
-          <text class="audio-title">{audio_title}</text>
-          <text class="audio-status">{audio_status}</text>
+          <text class="audio-title">{t(audio_title_key)}</text>
+          <text class="audio-status">{t(audio_status_key) .. audio_status_value}</text>
         </column>
         <text class="audio-percent">{audio_percent_label}</text>
       </row>
@@ -20,13 +20,13 @@
       />
 
       <row class="audio-actions">
-        <button class="audio-action audio-action-compact" onclick={onVolumeDown} aria-label="Lower volume">
+        <button class="audio-action audio-action-compact" onclick={onVolumeDown} aria-label="{t('audio.lower_volume')}">
           <text class="audio-action-text">-</text>
         </button>
-        <button class="audio-action" onclick={onToggleMute} keybind="{this.keybinds.toggle_mute.id}" onkeybind={onToggleMute} aria-label="{mute_button_label}">
-          <text class="audio-action-text">{mute_button_text}</text>
+        <button class="audio-action" onclick={onToggleMute} keybind="{this.keybinds.toggle_mute.id}" onkeybind={onToggleMute} aria-label="{t(mute_button_label_key)}">
+          <text class="audio-action-text">{t(mute_button_text_key)}</text>
         </button>
-        <button class="audio-action audio-action-compact" onclick={onVolumeUp} aria-label="Raise volume">
+        <button class="audio-action audio-action-compact" onclick={onVolumeUp} aria-label="{t('audio.raise_volume')}">
           <text class="audio-action-text">+</text>
         </button>
       </row>
@@ -39,12 +39,13 @@ local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
 icon_name = "audio-volume-muted"
-audio_title = "Audio unavailable"
-audio_status = "Audio service unavailable"
+audio_title_key = "audio.unavailable"
+audio_status_key = "audio.service_unavailable"
+audio_status_value = ""
 audio_percent_label = "--%"
 slider_value = 0.0
-mute_button_text = "Mute"
-mute_button_label = "Toggle mute"
+mute_button_text_key = "audio.mute"
+mute_button_label_key = "audio.toggle_mute"
 volume_dragging = false
 pending_slider_value = nil
 audio_muted = false
@@ -81,15 +82,17 @@ local function sync_audio_copy(percent, muted)
     end
 
     if muted then
-        audio_title = "Audio muted"
-        audio_status = string.format("Muted at %d%%", safe_percent)
-        mute_button_text = "Unmute"
-        mute_button_label = "Unmute audio"
+        audio_title_key = "audio.muted"
+        audio_status_key = "audio.muted_at"
+        audio_status_value = string.format(" %d%%", safe_percent)
+        mute_button_text_key = "audio.unmute"
+        mute_button_label_key = "audio.unmute_audio"
     else
-        audio_title = "Audio output"
-        audio_status = string.format("Volume %d%%", safe_percent)
-        mute_button_text = "Mute"
-        mute_button_label = "Mute audio"
+        audio_title_key = "audio.output"
+        audio_status_key = "audio.volume"
+        audio_status_value = string.format(" %d%%", safe_percent)
+        mute_button_text_key = "audio.mute"
+        mute_button_label_key = "audio.mute_audio"
     end
 end
 
@@ -106,14 +109,15 @@ if audio_ok and audio and audio.events and audio.events.VolumeChanged then
 end
 
 function onRender()
-    if not audio_ok or not audio or audio.available ~= true then
+    if not audio_ok or not audio or audio.available == false then
         icon_name = "audio-volume-muted"
-        audio_title = "Audio unavailable"
-        audio_status = "Audio service unavailable"
+        audio_title_key = "audio.unavailable"
+        audio_status_key = "audio.service_unavailable"
+        audio_status_value = ""
         audio_percent_label = "--%"
         slider_value = 0.0
-        mute_button_text = "Mute"
-        mute_button_label = "Audio unavailable"
+        mute_button_text_key = "audio.mute"
+        mute_button_label_key = "audio.unavailable"
         volume_dragging = false
         pending_slider_value = nil
         return
@@ -146,7 +150,8 @@ function onVolumeChange(value)
             audio.set_volume("default", normalized)
         end
     else
-        audio_status = "Audio controls unavailable"
+        audio_status_key = "audio.controls_unavailable"
+        audio_status_value = ""
     end
 end
 
@@ -165,7 +170,8 @@ function onToggleMute()
             audio.toggle_mute()
         end
     else
-        audio_status = "Audio controls unavailable"
+        audio_status_key = "audio.controls_unavailable"
+        audio_status_value = ""
     end
 end
 
@@ -176,7 +182,8 @@ function onVolumeDown()
         sync_audio_copy(next_value * 100, audio_muted)
         audio.set_volume("default", next_value)
     else
-        audio_status = "Audio controls unavailable"
+        audio_status_key = "audio.controls_unavailable"
+        audio_status_value = ""
     end
 end
 
@@ -187,7 +194,8 @@ function onVolumeUp()
         sync_audio_copy(next_value * 100, audio_muted)
         audio.set_volume("default", next_value)
     else
-        audio_status = "Audio controls unavailable"
+        audio_status_key = "audio.controls_unavailable"
+        audio_status_value = ""
     end
 end
 </script>
