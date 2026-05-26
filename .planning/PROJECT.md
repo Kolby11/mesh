@@ -193,17 +193,18 @@ The project now also has a class-like module object contract with:
 - Persist through temp-file write plus rename under the MESH/XDG data area, recover corrupt files non-fatally, and isolate storage by module/component/provider/runtime instance identity.
 - Seed storage before `mount/start`, flush on `unmount/stop` and orderly shell shutdown, and integrate storage reads/writes with automatic rerendering.
 
-## Next Milestone: v1.16 Elements Improvements
+## Current Milestone: v1.16 Element Library
 
-**Goal:** Improve MESH's built-in markup element set so common shell controls
-are native primitives instead of bespoke frontend component workarounds.
+**Goal:** Build a broad native MESH element library so module authors can
+compose meaningful shell surfaces from first-class markup primitives instead
+of bespoke component workarounds.
 
 **Target features:**
-- Add first-class `<select>` and `<option>` markup elements.
-- Render selected value as a compact control and open a visible vertical dropdown for options.
-- Support pointer selection, keyboard navigation, focus behavior, disabled states, value binding/change events, and accessibility metadata.
-- Keep styling within the existing shell CSS profile rather than promising browser-compatible form control behavior.
-- Prove the element on the shipped navigation bar by replacing the horizontal language selector with a native dropdown.
+- Lock the shared element contract for attributes, state, style hooks, events, focus, accessibility, parser diagnostics, and runtime value propagation.
+- Add layout, display, action, text input, numeric input, choice, menu, container, collection, progress, and disclosure elements covering common shell UI use cases.
+- Make each element configurable through markup attributes, shell CSS classes/pseudo-states, and Luau value/change events where appropriate.
+- Use HTML, Qt Widgets/layouts, and Flutter widget categories as coverage references while keeping behavior MESH-native rather than browser/toolkit-compatible.
+- Prove the library on shipped shell surfaces, including replacing the horizontal navigation language selector with a native visible dropdown.
 
 ## Previous Shipped Milestone: v1.12 Module Object Contract
 

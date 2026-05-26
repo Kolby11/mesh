@@ -2,38 +2,38 @@
 
 ## Active Autonomy Queue
 
-**Current autonomous starting point:** v1.16 Elements Improvements
+**Current autonomous starting point:** v1.16 Element Library Phase 86
 
 Run order:
 
-1. Start **v1.16 Elements Improvements**, beginning with the native select/dropdown element.
-2. Define requirements and roadmap for first-class `<select>/<option>`.
-3. Execute, audit, and archive v1.16.
-
-Use `$gsd-new-milestone` from the repository root to define v1.16.
+1. Plan and execute **Phase 86 Element Contract And Infrastructure**.
+2. Execute Phases 87-91 to build the broad native element library.
+3. Audit and archive v1.16 after shell proof, docs, and hardening pass.
 
 ---
 
-## v1.16 Elements Improvements (Queued)
+## v1.16 Element Library (Active)
 
 **Starts after:** v1.15 Persistent Storage System
 
-**Goal:** Add common native markup controls that reduce custom component
-workarounds and improve shipped UI behavior.
+**Goal:** Build a broad native MESH element library so module authors can
+compose meaningful shell surfaces from first-class markup primitives instead
+of bespoke component workarounds.
 
 **Planned scope:**
 
-- First-class `<select>` and `<option>` element support in MESH markup
-- Visible dropdown/popup behavior with vertical option layout
-- Keyboard navigation, focus, selection, disabled states, value binding/change events, and accessibility metadata
-- Styling hooks that fit the existing shell CSS profile without requiring browser CSS compatibility
-- Shipped proof by replacing the navigation bar language selector's horizontal custom menu
+- Shared element contract and infrastructure for parser registration, attributes, defaults, state, style hooks, events, diagnostics, focus, and accessibility.
+- Layout and display primitives for common shell structure: boxes, rows, columns, grids, stacks, dividers, labels, text, icons, images, badges, keyboard glyphs, and code-like text.
+- Action and text input controls: button, toggle button, icon button, link/action text, text field, text area, password field, search field, numeric field/spinner, and slider/range.
+- Choice and menu controls: checkbox, radio group, switch, select, option, combo box/search select, segmented control, menu, menu item, context menu, toolbar, and overflow menu.
+- Containers and collections: panel, group box/fieldset, tabs, accordion/disclosure, dialog/popover anchor contract, list, table/list-view, tree/sidebar nav, progress, meter, and status.
+- Shipped proof, author docs, examples, diagnostics, regression tests, and migration of bespoke shipped controls where practical.
 
 **Out of scope:**
 
-- Full browser-compatible `<select>` behavior
-- Arbitrary HTML form submission semantics
-- Multi-select unless explicitly promoted during phase discussion
+- One-for-one compatibility with HTML, Qt, Flutter, or browser form submission behavior.
+- Native platform widget embedding.
+- Full rich text editing, virtualized mega-tables, drag-and-drop builder interactions, and advanced multi-select unless explicitly promoted during phase planning.
 
 ---
 

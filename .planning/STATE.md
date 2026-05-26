@@ -1,12 +1,12 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.16
-milestone_name: Elements Improvements
-status: ready_for_requirements
-last_updated: "2026-05-26T14:45:00.000Z"
+milestone_name: Element Library
+status: planning
+last_updated: "2026-05-26T15:10:00.000Z"
 last_activity: 2026-05-26
 progress:
-  total_phases: 0
+  total_phases: 6
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,17 +20,18 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-26)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.16 Elements Improvements
+**Current focus:** v1.16 Element Library
 
 ## Current Position
 
-Phase: none
+Phase: 86 Element Contract And Infrastructure
 Plan: none
-Status: v1.15 archived; ready to define v1.16 requirements
-Last activity: 2026-05-26 — Archived v1.15 Persistent Storage System milestone
+Status: Requirements and roadmap defined; ready for Phase 86 discussion/planning
+Last activity: 2026-05-26 — Started v1.16 Element Library milestone
 
 ## Decisions
 
+- [v1.16]: MESH element library should provide a broad shell-native control set informed by HTML, Qt Widgets/layouts, and Flutter widget categories, but implemented through MESH retained rendering, Luau events, shell CSS, diagnostics, and accessibility rather than one-for-one framework compatibility.
 - [v1.12]: Backend services and frontend modules should be represented as class-like Luau object instances over typed Rust-managed runtime lanes.
 - [v1.12]: Durable data uses replayable `module.state.<field>` and `module.exports.<field>` snapshots; transient facts use typed `module.events.Name:subscribe(fn)` subscriptions; cross-module work uses object method calls with visible results.
 - [v1.12]: Rust shell remains responsible for module instance registration, routing, validation, capabilities, replay, lifecycle cleanup, provider selection, and diagnostics.
