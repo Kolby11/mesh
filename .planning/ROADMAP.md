@@ -2,129 +2,179 @@
 
 ## Milestones
 
-- 🚧 **v1.14 Unified Luau Import Contract** — Phases 74-78 planned
+- 🚧 **v1.14 Unified Luau Scripting Runtime** — Phases 74-80 planned
+- ⏭️ **v1.15 Persistent Storage System** — queued after v1.14
 - ✅ **v1.13 Manifest I18n Contract** — Phases 70-73 shipped 2026-05-24 ([archive](milestones/v1.13-ROADMAP.md))
 - ✅ **v1.12 Module Object Contract** — Phases 65-69 shipped 2026-05-23 ([archive](milestones/v1.12-ROADMAP.md))
 - ✅ **v1.11 Surface Keybind Completion** — Phases 60-64 shipped 2026-05-23 ([archive](milestones/v1.11-ROADMAP.md))
-- ✅ **v1.10 Painter Engine** — Phases 51-59 shipped 2026-05-23 ([archive](milestones/v1.10-ROADMAP.md))
 
 ## Intent
 
-Unify MESH Luau authoring around explicit `require(...)` imports across frontend
-and backend runtimes. Authors should learn one model for shell APIs,
-service/interface proxies, runtime-provided `self` context, public/private
-script members, libraries, and frontend components instead of switching between
-implicit global `mesh`, explicit interface import globals, and `.mesh`
-component `import ... from` syntax.
+Unify MESH Luau authoring around one runtime model: `require(...)` imports
+external dependencies, runtime-provided `self` identifies the current instance,
+Lua locals are private, non-local variables/functions are public members,
+frontend component definitions are imported and instantiated through markup,
+events use named channel objects, and normal render dependencies rerender
+automatically.
+
+This milestone deliberately keeps existing APIs compatible while moving author
+examples and docs to the new model. Full persistent `self.storage` backing is
+queued as v1.15; v1.14 defines the `self.meta` identity and render-dependency
+contract needed for that storage milestone.
 
 ## Phase Summary
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 74 | Import Resolver Contract | Define and implement the shared require resolver for shell APIs, service/interface proxies, and runtime-provided self context. | LUAIMP-01, LUAIMP-02, LUAIMP-03, LUAIMP-04, LUAIMP-05 | 5 |
-| 75 | Runtime Parity | Apply the canonical require model consistently across frontend and backend Luau contexts. | LUART-01, LUART-02, LUART-03, LUART-04, LUART-05, LUART-06 | 6 |
-| 76 | Component Require Imports | Bring frontend local/module component imports into the unified require model while preserving current import syntax. | LUACOMP-01, LUACOMP-02, LUACOMP-03, LUACOMP-04 | 4 |
-| 77 | Compatibility Migration Proof | Keep existing globals/imports working, add migration diagnostics, and migrate shipped proof modules to the new style. | LUACOMPAT-01, LUACOMPAT-02, LUACOMPAT-03, LUACOMPAT-04 | 4 |
-| 78 | Author Docs And Final Proof | Publish the unified Luau import contract and prove it through docs, regression tests, and shipped modules. | LUADOC-01, LUADOC-02, LUADOC-03, LUADOC-04 | 4 |
+| 74 | Scripting Context Core | Inject runtime-provided `self` into frontend/backend lifecycle hooks and expose stable `self.meta` identity while preserving legacy entrypoints. | LUACTX-01, LUACTX-02, LUACTX-03, LUACTX-04 | 4 |
+| 75 | Require Resolver And Host APIs | Implement the shared require resolver for shell APIs, service/interface proxies, Luau libraries, and component definitions. | LUAREQ-01, LUAREQ-02, LUAREQ-03, LUAREQ-04, LUAREQ-05 | 5 |
+| 76 | Public Private Member Model | Treat locals as private and non-local variables/functions as public object members, with lifecycle hooks reserved. | LUAMEM-01, LUAMEM-02, LUAMEM-03, LUAMEM-04 | 4 |
+| 77 | Component Definitions And Binding | Support require-based frontend component definitions, markup instantiation, direct public-field attributes, and `bind:this` mounted instance references. | LUACOMP-01, LUACOMP-02, LUACOMP-03, LUACOMP-04, LUACOMP-05, LUACOMP-06 | 6 |
+| 78 | Named Event Channels | Replace new author-facing string event APIs with named channel objects on service proxies and `self` while keeping compatibility paths. | LUAEVT-01, LUAEVT-02, LUAEVT-03, LUAEVT-04, LUAEVT-05, LUAEVT-06 | 6 |
+| 79 | Automatic Rerender Dependencies | Track render reads of service state, locale/theme data, bound public fields, and future storage reads so affected components rerender automatically. | LUARERENDER-01, LUARERENDER-02, LUARERENDER-03, LUARERENDER-04, LUARERENDER-05, LUARERENDER-06 | 6 |
+| 80 | Proof Migration And Docs | Migrate shipped navigation/audio examples, preserve labeled compatibility examples, update docs/LLM context, and prove the full scripting contract. | LUAPROOF-01, LUAPROOF-02, LUAPROOF-03, LUAPROOF-04, LUAPROOF-05 | 5 |
 
 ## Execution Rules
 
-- Treat `require(...)` as the canonical author-facing import mechanism for Luau runtimes.
-- Preserve global `mesh` and current `.mesh import` syntax during v1.14; migration should be diagnostic and documented, not breaking.
+- Use `require(...)` as the canonical author-facing import mechanism for external dependencies: services, shell APIs, Luau libraries, and component definitions.
+- Use runtime-provided `self` only for current instance context, beginning with `self.meta` in v1.14 and persistent `self.storage` in v1.15.
+- Preserve global `mesh`, legacy `module`, `init`, `onRender`, existing handler behavior, current service proxy event paths, and current component `import` syntax during v1.14.
 - Keep frontend and backend runtime behavior aligned unless a capability or host-context difference is explicit.
-- Do not invent JavaScript-style named imports until the Luau-native require contract is stable.
-- Shell APIs must remain capability-gated and observable through diagnostics.
-- Module/component identity and persistent storage must be accessed through runtime-provided `self`, while script variables/functions use Lua local-vs-public member rules.
-- Prove behavior on shipped navigation, audio popover, and backend provider scripts, not only synthetic fixtures.
+- Do not introduce JavaScript-style named imports or string-literal event APIs as the new canonical authoring model.
+- Treat `local` members as private and non-local variables/functions as public members; lifecycle hooks are reserved runtime hooks.
+- Markup attributes write direct public fields on mounted child instances. `bind:this` stores the mounted instance reference for public field/function access.
+- Event channel names must not conflict with service methods, state fields, or public members.
+- Normal authors should not call explicit invalidation for service, locale, theme, future storage, or bound-field changes.
+- Prove behavior on shipped navigation, audio popover, and backend providers, not only synthetic fixtures.
 
 ## Phases
 
-- [ ] Phase 74: Import Resolver Contract
-- [ ] Phase 75: Runtime Parity
-- [ ] Phase 76: Component Require Imports
-- [ ] Phase 77: Compatibility Migration Proof
-- [ ] Phase 78: Author Docs And Final Proof
+- [ ] Phase 74: Scripting Context Core
+- [ ] Phase 75: Require Resolver And Host APIs
+- [ ] Phase 76: Public Private Member Model
+- [ ] Phase 77: Component Definitions And Binding
+- [ ] Phase 78: Named Event Channels
+- [ ] Phase 79: Automatic Rerender Dependencies
+- [ ] Phase 80: Proof Migration And Docs
 
-### Phase 74: Import Resolver Contract
+### Phase 74: Scripting Context Core
 
-**Goal:** Define and implement the shared require resolver for shell APIs, service/interface proxies, and runtime-provided self context.
+**Goal:** Inject runtime-provided `self` into frontend/backend lifecycle hooks and expose stable `self.meta` identity while preserving legacy entrypoints.
 
-**Requirements:** LUAIMP-01, LUAIMP-02, LUAIMP-03, LUAIMP-04, LUAIMP-05
+**Requirements:** LUACTX-01, LUACTX-02, LUACTX-03, LUACTX-04
+
+**Status:** Discussed; ready for planning
+
+**Success criteria:**
+1. Frontend `render(self)`, `mount(self)`, and `unmount(self)` receive a runtime-owned current instance object.
+2. Backend `start(self)` and `stop(self)` receive a runtime-owned current provider object.
+3. `self.meta` includes module id, component/provider id, kind, instance identity, and diagnostics identity.
+4. Legacy `module`, global `mesh`, `init`, `onRender`, and current handlers keep working during migration.
+
+### Phase 75: Require Resolver And Host APIs
+
+**Goal:** Implement the shared require resolver for shell APIs, service/interface proxies, Luau libraries, and component definitions.
+
+**Requirements:** LUAREQ-01, LUAREQ-02, LUAREQ-03, LUAREQ-04, LUAREQ-05
 
 **Status:** Not started
 
 **Success criteria:**
 1. One resolver path handles canonical shell API modules and service/interface proxies.
-2. `require("mesh.audio@>=1.0")` behavior remains compatible.
-3. Shell APIs such as locale/log/events/ui/popover are available through documented require specifiers.
-4. Unsupported or unavailable imports produce consistent pcall-safe errors and diagnostics.
-5. Runtime-provided `self` exposes instance metadata and shell-backed storage without requiring an import.
+2. `require("mesh.audio@>=1.0")` remains compatible.
+3. Current global `mesh` sub-APIs with host support have canonical require specifiers.
+4. Luau libraries and frontend component definitions resolve through the same require contract.
+5. Unsupported or unavailable imports produce consistent pcall-safe errors and diagnostics.
 
-### Phase 75: Runtime Parity
+### Phase 76: Public Private Member Model
 
-**Goal:** Apply the canonical require model consistently across frontend and backend Luau contexts.
+**Goal:** Treat locals as private and non-local variables/functions as public object members, with lifecycle hooks reserved.
 
-**Requirements:** LUART-01, LUART-02, LUART-03, LUART-04, LUART-05, LUART-06
-
-**Status:** Not started
-
-**Success criteria:**
-1. Backend scripts can require canonical shell APIs and allowed interfaces.
-2. Frontend scripts can require canonical shell APIs and allowed interfaces.
-3. Capability denial is enforced and diagnosed uniformly in both runtime contexts.
-4. Imported module-object APIs preserve v1.12 state/export/event semantics.
-5. `self.meta` and `self.storage` behave consistently across frontend and backend contexts where their host contexts overlap.
-6. Public script members and storage remain isolated by module/component identity.
-
-### Phase 76: Component Require Imports
-
-**Goal:** Bring frontend local/module component imports into the unified require model while preserving current import syntax.
-
-**Requirements:** LUACOMP-01, LUACOMP-02, LUACOMP-03, LUACOMP-04
+**Requirements:** LUAMEM-01, LUAMEM-02, LUAMEM-03, LUAMEM-04
 
 **Status:** Not started
 
 **Success criteria:**
-1. Local `.mesh` components can be imported through a require-shaped authoring path.
-2. Module-provided frontend components can be imported through a require-shaped authoring path.
-3. Existing `import Alias from "..."` component syntax keeps working.
-4. Compiler and runtime diagnostics identify missing, duplicate, or unsupported component import targets.
+1. Local variables/functions remain private to the script.
+2. Non-local variables/functions are exposed as public object members.
+3. Lifecycle hooks are callable by the runtime and inspectable for diagnostics but not normal public API members.
+4. Existing reactive global syncing remains compatible while diagnostics/docs teach the public-member vocabulary.
 
-### Phase 77: Compatibility Migration Proof
+### Phase 77: Component Definitions And Binding
 
-**Goal:** Keep existing globals/imports working, add migration diagnostics, and migrate shipped proof modules to the new style.
+**Goal:** Support require-based frontend component definitions, markup instantiation, direct public-field attributes, and `bind:this` mounted instance references.
 
-**Requirements:** LUACOMPAT-01, LUACOMPAT-02, LUACOMPAT-03, LUACOMPAT-04
-
-**Status:** Not started
-
-**Success criteria:**
-1. Existing global `mesh` calls continue working.
-2. Existing explicit interface import globals continue working.
-3. Diagnostics and docs point authors toward explicit require imports.
-4. Navigation, audio popover, and backend providers demonstrate the new import style without behavior regressions.
-
-### Phase 78: Author Docs And Final Proof
-
-**Goal:** Publish the unified Luau import contract and prove it through docs, regression tests, and shipped modules.
-
-**Requirements:** LUADOC-01, LUADOC-02, LUADOC-03, LUADOC-04, LUADOC-05
+**Requirements:** LUACOMP-01, LUACOMP-02, LUACOMP-03, LUACOMP-04, LUACOMP-05, LUACOMP-06
 
 **Status:** Not started
 
 **Success criteria:**
-1. Module-system and frontend syntax docs describe canonical require namespaces and pcall behavior.
-2. Backend docs show the same import model for services, shell APIs, self context, public/private script members, and libraries.
-3. Regression tests cover synthetic and shipped-module require behavior.
-4. Requirements traceability and validation artifacts cover all v1.14 requirements.
-5. Docs explain `self.meta`, `self.storage`, local/private members, public members, markup-bound fields, and reload behavior.
+1. Local `.mesh` components can be imported with `local Component = require("./component.mesh")`.
+2. Module-provided frontend components can be imported through require.
+3. Existing `import Alias from "..."` component syntax keeps working with migration diagnostics.
+4. Markup usage instantiates component definitions and attributes write direct public fields.
+5. `bind:this={name}` exposes the mounted instance for public field/function access.
+6. Compiler/runtime diagnostics identify definition-vs-instance misuse and bad component import targets.
+
+### Phase 78: Named Event Channels
+
+**Goal:** Replace new author-facing string event APIs with named channel objects on service proxies and `self` while keeping compatibility paths.
+
+**Requirements:** LUAEVT-01, LUAEVT-02, LUAEVT-03, LUAEVT-04, LUAEVT-05, LUAEVT-06
+
+**Status:** Not started
+
+**Success criteria:**
+1. Declared interface events appear directly on service proxies as named channels, for example `audio.VolumeChanged:on(fn)`.
+2. Local component/provider events appear on `self`, for example `self.Changed:fire(payload)`.
+3. Channel subscriptions and local/provider emission use `:on(fn)` and `:fire(payload)`.
+4. Subscriptions are cleaned up automatically on unmount/stop.
+5. Existing event APIs remain compatibility paths.
+6. Event/member conflicts produce actionable diagnostics.
+
+### Phase 79: Automatic Rerender Dependencies
+
+**Goal:** Track render reads of service state, locale/theme data, bound public fields, and future storage reads so affected components rerender automatically.
+
+**Requirements:** LUARERENDER-01, LUARERENDER-02, LUARERENDER-03, LUARERENDER-04, LUARERENDER-05, LUARERENDER-06
+
+**Status:** Not started
+
+**Success criteria:**
+1. Service state reads during render become tracked rerender dependencies.
+2. Locale and theme reads during render become tracked rerender dependencies.
+3. Bound public field reads during render become tracked rerender dependencies.
+4. The dependency model reserves storage-read tracking for v1.15 storage.
+5. Tracked changes automatically rerender affected components.
+6. Explicit redraw APIs remain compatibility/debug escape hatches.
+
+### Phase 80: Proof Migration And Docs
+
+**Goal:** Migrate shipped navigation/audio examples, preserve labeled compatibility examples, update docs/LLM context, and prove the full scripting contract.
+
+**Requirements:** LUAPROOF-01, LUAPROOF-02, LUAPROOF-03, LUAPROOF-04, LUAPROOF-05
+
+**Status:** Not started
+
+**Success criteria:**
+1. Shipped navigation/audio frontend examples use the new syntax where applicable.
+2. Shipped backend providers use the new syntax where applicable.
+3. Old examples remain only as explicitly labeled compatibility examples.
+4. Docs and LLM context teach require, self, public/private members, component binding, named events, automatic rerendering, and migration paths.
+5. Regression tests cover the full v1.14 contract and compatibility paths.
+
+## Queued Milestone: v1.15 Persistent Storage System
+
+**Goal:** Implement `self.storage` as shell-backed, component/provider instance-scoped persistent key-value storage using atomic JSON files under the MESH/XDG data area.
+
+**Planned phases:**
+- Storage Foundation: scoped identity, JSON document load/get/set/remove/clear/snapshot, atomic temp-file plus rename persistence.
+- Luau `self.storage` Binding: table-like reads/writes/deletes, invalid value diagnostics, immediate in-memory updates, scheduled persistence.
+- Lifecycle And Rerender Integration: seed before `mount/start`, flush on `unmount/stop` and shell shutdown, rerender tracked storage readers only on watched value changes.
+- Operational Behavior: corrupt-file recovery, module/component privacy, no cross-module reads, no schema validation.
+- Tests And Proof: path scoping, atomic persistence, corrupt-file recovery, invalid value diagnostics, frontend/backend runtime coverage, shipped UI preference proof, and two-instance isolation regression.
 
 ## Backlog
-
-### Future: Named Import Syntax
-
-Named import syntax remains future work. Authors can use Luau table destructuring
-or local aliases after `require(...)` while the runtime contract stabilizes.
 
 ### Future: Package Distribution
 

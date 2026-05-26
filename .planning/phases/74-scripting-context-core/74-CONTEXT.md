@@ -1,4 +1,4 @@
-# Phase 74: Import Resolver Contract - Context
+# Phase 74: Scripting Context Core - Context
 
 **Gathered:** 2026-05-24
 **Status:** Ready for planning
@@ -6,7 +6,7 @@
 <domain>
 ## Phase Boundary
 
-Phase 74 defines the author-facing Luau import and execution-context contract for MESH runtimes. It must clarify how scripts import external dependencies and how the current frontend component or backend provider exposes its own fields/functions, without implementing the later component compiler work from Phase 76.
+Phase 74 defines the runtime-provided `self` execution-context contract for MESH frontend and backend Luau runtimes. It must inject current-instance context into lifecycle hooks, expose stable metadata for diagnostics/storage identity, and preserve legacy entrypoints before later phases implement the shared require resolver, public member model, component binding, named events, and automatic rerendering.
 
 </domain>
 
@@ -16,7 +16,7 @@ Phase 74 defines the author-facing Luau import and execution-context contract fo
 ### Current Instance Context
 - **D-01:** Use explicit lifecycle parameters for the current runtime instance: `function render(self)`, `function mount(self)`, `function unmount(self)` for frontend components and `function start(self)`, `function stop(self)` for backend providers.
 - **D-02:** `self` represents the current object instance, not an importable dependency. Do not introduce `require("mesh.module")` as the way to access the current module/component context.
-- **D-03:** Keep the author-facing `self` surface narrow for now: `self.meta` for identity/diagnostics and `self.storage` for shell-backed persistence.
+- **D-03:** Keep the v1.14 author-facing `self` surface narrow: `self.meta` for identity/diagnostics. Reserve `self.storage` for v1.15 persistent storage after the scripting surface lands.
 
 ### Public And Private Script Members
 - **D-04:** Lua `local` variables and functions are private implementation details of the script/component.
@@ -46,8 +46,11 @@ Phase 74 defines the author-facing Luau import and execution-context contract fo
 - **D-20:** The runtime/planner may choose the dependency tracking mechanism, but the user-facing contract should be automatic rerendering of dependencies.
 
 ### Events
-- **D-21:** Event syntax is not locked yet. The user does not like `emit(...)` with string literal event names as the final authoring model.
-- **D-22:** Event design is a required follow-up discussion before planning phases that expose or consume new public event APIs.
+- **D-21:** New event authoring uses named channel objects, not string-literal event APIs.
+- **D-22:** Interface events become direct generated channels on service proxies for declared PascalCase event names, for example `audio.VolumeChanged:on(fn)`.
+- **D-23:** Component/provider local events become named channels on `self`, for example `self.Changed:fire(payload)`.
+- **D-24:** Existing `proxy.events.Name:subscribe`, `module.events`, `mesh.events.publish`, and backend `mesh.service.emit_event(...)` remain compatibility paths during v1.14.
+- **D-25:** Event names that conflict with service methods, state fields, or public members produce diagnostics and require contract renaming.
 
 ### the agent's Discretion
 The agent may choose the best implementation details for lifecycle cleanup, error boundaries, async/timer helpers, capability checks, type validation, and reload semantics, as long as they preserve the locked author-facing syntax above and keep frontend/backend behavior aligned where their host contexts overlap.
@@ -60,14 +63,14 @@ The agent may choose the best implementation details for lifecycle cleanup, erro
 **Downstream agents MUST read these before planning or implementing.**
 
 ### Milestone Planning
-- `.planning/REQUIREMENTS.md` - v1.14 requirements, including import resolver, runtime parity, component imports, compatibility, and docs.
+- `.planning/REQUIREMENTS.md` - v1.14 requirements, including self injection, require resolver, public/private members, component binding, named events, automatic rerendering, compatibility, and docs.
 - `.planning/ROADMAP.md` - phase boundaries and execution rules for v1.14.
 
 ### Existing Module Object Contract
 - `.planning/milestones/v1.12-phases/65-module-instance-registry/65-CONTEXT.md` - prior decision that backend and frontend modules should feel like class-like Luau object instances.
 - `.planning/milestones/v1.12-phases/66-state-and-export-read-model/66-CONTEXT.md` - existing state/export read model and `require("mesh.audio").state.field` compatibility.
 - `.planning/milestones/v1.12-phases/67-method-call-result-lane/67-CONTEXT.md` - method call result lane decisions.
-- `.planning/milestones/v1.12-phases/68-typed-event-subscription-lane/68-CONTEXT.md` - current event subscription API decisions; revisit because event syntax remains unlocked for v1.14.
+- `.planning/milestones/v1.12-phases/68-typed-event-subscription-lane/68-CONTEXT.md` - current event subscription API decisions and compatibility paths that v1.14 should wrap with named channel syntax.
 - `.planning/milestones/v1.12-phases/69-shipped-module-object-proof/69-CONTEXT.md` - shipped module object proof context.
 
 ### Runtime And Author Docs
@@ -88,7 +91,7 @@ The agent may choose the best implementation details for lifecycle cleanup, erro
 
 ### Established Patterns
 - Service/interface imports already use `require("mesh.<interface>@<constraint>")` and should remain compatible.
-- v1.12 established module object registry, state/export reads, method results, and typed event channels. v1.14 should align author syntax with that model rather than discarding the runtime foundation.
+- v1.12 established module object registry, state/export reads, method results, and typed event channels. v1.14 should align author syntax with that model through named channels rather than discarding the runtime foundation.
 - v1.13 established runtime localization updates and should inform automatic rerender dependency behavior for locale/theme/service changes.
 
 ### Integration Points
@@ -111,7 +114,7 @@ The agent may choose the best implementation details for lifecycle cleanup, erro
 <deferred>
 ## Deferred Ideas
 
-- Final event authoring syntax is deferred to a dedicated follow-up discussion. Avoid locking `emit("event.name")` string-literal APIs as the long-term public model.
+- Full persistent `self.storage` backing is deferred to v1.15; v1.14 should only establish the `self.meta` identity needed for storage scoping.
 - JavaScript-style named imports remain deferred until the Luau-native contract is stable.
 - Advanced component instantiation APIs such as manually calling `.new(...)` from Lua remain deferred; markup owns frontend component instantiation for now.
 
@@ -119,5 +122,5 @@ The agent may choose the best implementation details for lifecycle cleanup, erro
 
 ---
 
-*Phase: 74-Import Resolver Contract*
+*Phase: 74-Scripting Context Core*
 *Context gathered: 2026-05-24*

@@ -1,55 +1,77 @@
-# Requirements: MESH v1.14 Unified Luau Import Contract
+# Requirements: MESH v1.14 Unified Luau Scripting Runtime
 
 **Defined:** 2026-05-24
+**Revised:** 2026-05-24
 **Core Value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
 
 ## v1 Requirements
 
-### Import Model
+### Scripting Context Core
 
-- [ ] **LUAIMP-01**: Frontend and backend Luau runtimes share one documented `require(...)` resolution contract.
-- [ ] **LUAIMP-02**: `require(...)` supports canonical shell API modules for current global `mesh` sub-APIs, including locale, logging, UI/redraw, popover, service access, and other external dependencies where capabilities allow.
-- [ ] **LUAIMP-03**: `require(...)` supports service/interface proxies with version constraints, preserving current `require("mesh.audio@>=1.0")` behavior.
-- [ ] **LUAIMP-04**: `require(...)` failures have consistent pcall-safe errors and diagnostics across frontend and backend contexts.
-- [ ] **LUAIMP-05**: The runtime defines a canonical `self` instance context for module/component identity and shell-backed storage without requiring global `mesh` or a module-context import.
+- [ ] **LUACTX-01**: Frontend lifecycle hooks receive runtime-provided `self` as `render(self)`, `mount(self)`, and `unmount(self)`.
+- [ ] **LUACTX-02**: Backend lifecycle hooks receive runtime-provided `self` as `start(self)` and `stop(self)`.
+- [ ] **LUACTX-03**: `self.meta` exposes module id, component/provider id, runtime kind, runtime instance identity, and diagnostics identity.
+- [ ] **LUACTX-04**: Legacy `module`, global `mesh`, `init`, `onRender`, and current handler behavior continue working during migration with diagnostics where appropriate.
 
-### Runtime Parity
+### Require Resolver And Host APIs
 
-- [ ] **LUART-01**: Backend Luau scripts can use the same canonical shell API and service/interface import paths as frontend scripts where their capabilities allow.
-- [ ] **LUART-02**: Frontend Luau scripts can use the same canonical shell API and service/interface import paths as backend scripts where their capabilities allow.
-- [ ] **LUART-03**: Capability checks for imported shell APIs and interfaces are enforced at require time and remain visible through diagnostics.
-- [ ] **LUART-04**: Imported APIs preserve existing module object state/export/event semantics without requiring global `mesh`.
-- [ ] **LUART-05**: `self.meta` and `self.storage` have consistent identity, diagnostics, persistence, and lifecycle reload behavior across frontend and backend contexts where their host contexts overlap.
-- [ ] **LUART-06**: Public script members and storage are isolated by module/component identity so two modules cannot accidentally read or mutate each other's state through shared imports.
+- [ ] **LUAREQ-01**: Frontend and backend Luau runtimes share one documented `require(...)` resolution contract.
+- [ ] **LUAREQ-02**: `require(...)` supports canonical shell API modules for current global `mesh` sub-APIs where already supported by host capabilities.
+- [ ] **LUAREQ-03**: `require(...)` supports service/interface proxies with version constraints, preserving current `require("mesh.audio@>=1.0")` behavior.
+- [ ] **LUAREQ-04**: `require(...)` supports Luau library modules and frontend component definitions without adding JavaScript-style import syntax.
+- [ ] **LUAREQ-05**: Unsupported imports and capability denials produce consistent pcall-safe errors plus diagnostics across frontend and backend contexts.
 
-### Component Imports
+### Public And Private Members
 
-- [ ] **LUACOMP-01**: `.mesh` frontend modules can import local component files through the unified require model.
-- [ ] **LUACOMP-02**: `.mesh` frontend modules can import module-provided components through the unified require model.
-- [ ] **LUACOMP-03**: Existing `import Alias from "..."` component syntax remains compatible during migration.
-- [ ] **LUACOMP-04**: Component import diagnostics identify missing local files, missing module components, duplicate aliases, and unsupported require targets.
+- [ ] **LUAMEM-01**: Lua `local` variables and functions are treated as private implementation details.
+- [ ] **LUAMEM-02**: Non-local variables and functions are treated as public object members available to valid module/component consumers.
+- [ ] **LUAMEM-03**: Lifecycle hooks are reserved runtime hooks, visible for diagnostics but not exposed as ordinary public API members.
+- [ ] **LUAMEM-04**: Existing reactive global syncing remains compatible while docs and diagnostics rename the author-facing model to public members.
 
-### Compatibility And Migration
+### Frontend Components And Binding
 
-- [ ] **LUACOMPAT-01**: Existing global `mesh` access continues to work during this milestone.
-- [ ] **LUACOMPAT-02**: Existing explicit interface import syntax and compiled interface globals continue to work during this milestone.
-- [ ] **LUACOMPAT-03**: Migration diagnostics and docs steer authors from global `mesh` and `.mesh import` syntax toward explicit `require(...)`.
-- [ ] **LUACOMPAT-04**: Shipped navigation, audio popover, and backend providers continue to pass current runtime behavior while demonstrating the new import style.
+- [ ] **LUACOMP-01**: `.mesh` frontend modules can import local component files through `local Component = require("./component.mesh")`.
+- [ ] **LUACOMP-02**: `.mesh` frontend modules can import module-provided frontend component definitions through the unified require model.
+- [ ] **LUACOMP-03**: Existing `import Alias from "..."` component syntax remains compatible during migration and produces migration guidance.
+- [ ] **LUACOMP-04**: Markup instantiates component definitions returned by require, while markup attributes write direct public fields on the mounted child instance.
+- [ ] **LUACOMP-05**: `bind:this={name}` stores the mounted child instance reference so scripts can read public fields and call public functions.
+- [ ] **LUACOMP-06**: Diagnostics identify definition-versus-instance misuse, missing files, missing module components, duplicate aliases, and unsupported require targets.
 
-### Documentation And Proof
+### Named Event Channels
 
-- [ ] **LUADOC-01**: Author docs define canonical require namespaces, accepted module specifiers, version syntax, capability behavior, and pcall error handling.
-- [ ] **LUADOC-02**: Frontend docs show component requires, service requires, shell API requires, and migration examples from old import/global syntax.
-- [ ] **LUADOC-03**: Backend docs show the same require model for service APIs, shell host APIs, runtime-provided `self` context, and library modules.
-- [ ] **LUADOC-04**: Regression tests prove parser/compiler/runtime behavior on both synthetic fixtures and shipped modules.
-- [ ] **LUADOC-05**: Author docs show how `self.meta`, `self.storage`, local/private members, public members, markup-bound fields, and reload persistence should work.
+- [ ] **LUAEVT-01**: Interface events are exposed as direct named channel objects on service proxies for declared PascalCase event names, for example `audio.VolumeChanged:on(fn)`.
+- [ ] **LUAEVT-02**: Component/provider local events are exposed as named channel objects on `self`, for example `self.Changed:fire(payload)`.
+- [ ] **LUAEVT-03**: Channel objects support `:on(fn)` subscriptions and `:fire(payload)` emission where emission is allowed by the local/provider contract.
+- [ ] **LUAEVT-04**: Event subscriptions are lifecycle-bound and automatically cleaned up on component unmount or backend stop.
+- [ ] **LUAEVT-05**: Existing `proxy.events.Name:subscribe`, `module.events`, `mesh.events.publish`, and backend `mesh.service.emit_event(...)` remain compatibility paths during v1.14.
+- [ ] **LUAEVT-06**: Event names that conflict with methods, state fields, or public members produce diagnostics and require contract renaming.
+
+### Automatic Rerendering
+
+- [ ] **LUARERENDER-01**: Runtime render dependency tracking covers service state fields read during render.
+- [ ] **LUARERENDER-02**: Runtime render dependency tracking covers locale and theme reads used during render.
+- [ ] **LUARERENDER-03**: Runtime render dependency tracking covers bound public field reads used during render.
+- [ ] **LUARERENDER-04**: Storage read dependency tracking is defined as part of the authoring contract but implemented with the persistent storage milestone.
+- [ ] **LUARERENDER-05**: Affected frontend components rerender automatically when tracked dependencies change, without requiring normal authors to call explicit invalidation APIs.
+- [ ] **LUARERENDER-06**: Existing explicit redraw/invalidation APIs remain available only as compatibility and debug escape hatches.
+
+### Proof And Migration
+
+- [ ] **LUAPROOF-01**: Shipped navigation and audio frontend examples use the new require/self/public-member/component-binding/event syntax where applicable.
+- [ ] **LUAPROOF-02**: Shipped backend providers use `start(self)`, `stop(self)`, canonical require imports, public members, and named event channels where applicable.
+- [ ] **LUAPROOF-03**: Compatibility examples remain only where explicitly labeled as compatibility or migration material.
+- [ ] **LUAPROOF-04**: Author docs and LLM context describe the unified scripting runtime, migration paths, and compatibility window.
+- [ ] **LUAPROOF-05**: Regression tests cover resolver behavior, self injection, public/private members, component binding, named events, automatic rerendering, and compatibility paths.
 
 ## Future Requirements
 
-### Named Imports
+### Persistent Storage Milestone
 
-- **LUANAME-01**: A future syntax layer may support named imports if it can be expressed without making `.mesh` scripts diverge from normal Luau semantics.
-- **LUANAME-02**: Tooling may provide autocomplete or linting for destructured require tables.
+- **LUASTORE-01**: `self.storage` becomes a component/provider instance-scoped persistent JSON-like key-value object.
+- **LUASTORE-02**: Storage values allow only nil, boolean, number, string, arrays, and objects; functions, userdata, component definitions, component instances, and event channels are rejected with diagnostics.
+- **LUASTORE-03**: Storage persists through atomic JSON files under the MESH/XDG data area with scope isolation by module id, component/provider identity, and runtime instance identity.
+- **LUASTORE-04**: Storage loads before `mount/start`, flushes on `unmount/stop` and orderly shell shutdown, and recovers from corrupt JSON with diagnostics and empty scoped storage.
+- **LUASTORE-05**: Storage writes integrate with render dependency tracking so watched storage values rerender affected components only when changed.
 
 ### Package Distribution
 
@@ -60,45 +82,57 @@
 
 | Feature | Reason |
 |---------|--------|
+| Full persistent `self.storage` implementation in v1.14 | Storage is the next milestone after the scripting runtime contract lands. |
 | Removing global `mesh` immediately | Existing scripts and shipped modules need a compatibility window. |
-| Inventing JavaScript-style `import { x } from ...` syntax | The milestone should converge on Luau-native `require(...)` semantics first. |
+| Inventing JavaScript-style import syntax | The milestone should converge on Luau-native `require(...)` semantics first. |
 | Remote package manager behavior | Runtime import semantics must be stable before distribution. |
-| Compositor-global shortcuts | Unrelated to scripting imports. |
-| Replacing module object state/export/event semantics | v1.12 established this runtime contract; v1.14 should import it, not redesign it. |
+| Compositor-global shortcuts | Unrelated to scripting runtime authoring. |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LUAIMP-01 | Phase 74 | Pending |
-| LUAIMP-02 | Phase 74 | Pending |
-| LUAIMP-03 | Phase 74 | Pending |
-| LUAIMP-04 | Phase 74 | Pending |
-| LUAIMP-05 | Phase 74 | Pending |
-| LUART-01 | Phase 75 | Pending |
-| LUART-02 | Phase 75 | Pending |
-| LUART-03 | Phase 75 | Pending |
-| LUART-04 | Phase 75 | Pending |
-| LUART-05 | Phase 75 | Pending |
-| LUART-06 | Phase 75 | Pending |
-| LUACOMP-01 | Phase 76 | Pending |
-| LUACOMP-02 | Phase 76 | Pending |
-| LUACOMP-03 | Phase 76 | Pending |
-| LUACOMP-04 | Phase 76 | Pending |
-| LUACOMPAT-01 | Phase 77 | Pending |
-| LUACOMPAT-02 | Phase 77 | Pending |
-| LUACOMPAT-03 | Phase 77 | Pending |
-| LUACOMPAT-04 | Phase 77 | Pending |
-| LUADOC-01 | Phase 78 | Pending |
-| LUADOC-02 | Phase 78 | Pending |
-| LUADOC-03 | Phase 78 | Pending |
-| LUADOC-04 | Phase 78 | Pending |
-| LUADOC-05 | Phase 78 | Pending |
+| LUACTX-01 | Phase 74 | Pending |
+| LUACTX-02 | Phase 74 | Pending |
+| LUACTX-03 | Phase 74 | Pending |
+| LUACTX-04 | Phase 74 | Pending |
+| LUAREQ-01 | Phase 75 | Pending |
+| LUAREQ-02 | Phase 75 | Pending |
+| LUAREQ-03 | Phase 75 | Pending |
+| LUAREQ-04 | Phase 75 | Pending |
+| LUAREQ-05 | Phase 75 | Pending |
+| LUAMEM-01 | Phase 76 | Pending |
+| LUAMEM-02 | Phase 76 | Pending |
+| LUAMEM-03 | Phase 76 | Pending |
+| LUAMEM-04 | Phase 76 | Pending |
+| LUACOMP-01 | Phase 77 | Pending |
+| LUACOMP-02 | Phase 77 | Pending |
+| LUACOMP-03 | Phase 77 | Pending |
+| LUACOMP-04 | Phase 77 | Pending |
+| LUACOMP-05 | Phase 77 | Pending |
+| LUACOMP-06 | Phase 77 | Pending |
+| LUAEVT-01 | Phase 78 | Pending |
+| LUAEVT-02 | Phase 78 | Pending |
+| LUAEVT-03 | Phase 78 | Pending |
+| LUAEVT-04 | Phase 78 | Pending |
+| LUAEVT-05 | Phase 78 | Pending |
+| LUAEVT-06 | Phase 78 | Pending |
+| LUARERENDER-01 | Phase 79 | Pending |
+| LUARERENDER-02 | Phase 79 | Pending |
+| LUARERENDER-03 | Phase 79 | Pending |
+| LUARERENDER-04 | Phase 79 | Pending |
+| LUARERENDER-05 | Phase 79 | Pending |
+| LUARERENDER-06 | Phase 79 | Pending |
+| LUAPROOF-01 | Phase 80 | Pending |
+| LUAPROOF-02 | Phase 80 | Pending |
+| LUAPROOF-03 | Phase 80 | Pending |
+| LUAPROOF-04 | Phase 80 | Pending |
+| LUAPROOF-05 | Phase 80 | Pending |
 
 **Coverage:**
-- v1 requirements: 24 total
-- Mapped to phases: 24
+- v1 requirements: 36 total
+- Mapped to phases: 36
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-05-24*
+*Requirements revised: 2026-05-24*

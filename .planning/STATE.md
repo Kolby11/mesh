@@ -1,14 +1,14 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.14
-milestone_name: Unified Luau Import Contract
+milestone_name: Unified Luau Scripting Runtime
 status: planning
-last_updated: "2026-05-24T08:08:25.667Z"
+last_updated: "2026-05-24T10:30:00.000Z"
 last_activity: 2026-05-24
 progress:
-  total_phases: 5
+  total_phases: 7
   completed_phases: 0
-  total_plans: 5
+  total_plans: 7
   completed_plans: 0
   percent: 0
 ---
@@ -20,14 +20,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-24)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.14 Unified Luau Import Contract
+**Current focus:** v1.14 Unified Luau Scripting Runtime
 
 ## Current Position
 
-Phase: 74 Import Resolver Contract discussed
+Phase: 74 Scripting Context Core discussed
 Plan: —
 Status: Ready for phase 74 planning
-Last activity: 2026-05-24 — Captured v1.14 Luau scripting context decisions
+Last activity: 2026-05-24 — Revised v1.14 into unified Luau scripting runtime and queued v1.15 persistent storage
 
 ## Decisions
 
@@ -47,6 +47,10 @@ Last activity: 2026-05-24 — Captured v1.14 Luau scripting context decisions
 - [Phase 70]: `LocalizedText` is the reusable manifest representation for localized-capable text fields, and keybind label, description, and category now parse raw literals or `{ "t": "...", "fallback": "..." }` declarations.
 - [Phase 70]: Existing keybind contribution consumers still receive fallback strings until Phase 71 preserves rich localized metadata through installed graph records.
 - [v1.13 shipped]: Localized manifest text now parses explicitly, preserves source metadata through installed graph records, resolves in shell runtime/debug keybind metadata, diagnoses missing translations non-fatally, and is proven on the shipped navigation manifest.
+- [v1.14]: Unified Luau scripting is broader than imports: it includes runtime-provided lifecycle `self`, `self.meta`, public/private member rules, frontend component definitions and bound instances, named event channels, and automatic dependency rerendering.
+- [v1.14]: New event authoring uses named channel objects such as `audio.VolumeChanged:on(fn)` and `self.Changed:fire(payload)`; existing `proxy.events.Name:subscribe`, `module.events`, `mesh.events.publish`, and `mesh.service.emit_event(...)` remain compatibility paths.
+- [v1.14]: `self.storage` persistence is intentionally deferred to v1.15. v1.14 should establish the instance identity and render-dependency foundations without implementing the storage backing store.
+- [v1.15 queued]: Persistent storage will be component/provider instance-scoped, shell-backed, JSON-like, atomic on disk under the MESH/XDG data area, lifecycle-flushed, and private to the owning module/component/provider identity.
 
 - Backend plugins use Luau for service logic; Rust core remains the wiring layer.
 - `require('@mesh/service')` is the frontend/backend interface.
