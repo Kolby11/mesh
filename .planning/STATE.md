@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.16
 milestone_name: Element Library
-status: executing
+status: Awaiting next milestone
 stopped_at: Phase 71 completed
-last_updated: "2026-05-26T18:07:50.851Z"
-last_activity: 2026-05-26
+last_updated: "2026-05-26T18:10:02.748Z"
+last_activity: 2026-05-26 — Milestone v1.16 completed and archived
 progress:
   total_phases: 6
   completed_phases: 6
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-26)
 
 ## Current Position
 
-Phase: 91
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-26
+Phase: Milestone v1.16 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-05-26 — Milestone v1.16 completed and archived
 
 ## Decisions
 
@@ -289,6 +289,13 @@ Items acknowledged and deferred at `v1.13` close on 2026-05-24:
 | debug | phase31-live-uat-diagnosis | updated |
 | todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
 
+Items acknowledged and deferred at `v1.16` close on 2026-05-26:
+
+| Category | Item | Status |
+|----------|------|--------|
+| debug | phase31-live-uat-diagnosis | updated |
+| todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
+
 ## Blockers
 
 (None)
@@ -322,14 +329,17 @@ Items acknowledged and deferred at `v1.13` close on 2026-05-24:
 | v1.13 archived requirements | `.planning/milestones/v1.13-REQUIREMENTS.md` |
 | v1.13 archived roadmap | `.planning/milestones/v1.13-ROADMAP.md` |
 | v1.13 phase archive | `.planning/milestones/v1.13-phases/` |
+| v1.16 archived requirements | `.planning/milestones/v1.16-REQUIREMENTS.md` |
+| v1.16 archived roadmap | `.planning/milestones/v1.16-ROADMAP.md` |
+| v1.16 audit | `.planning/milestones/v1.16-MILESTONE-AUDIT.md` |
+| v1.16 phase archive | `.planning/milestones/v1.16-phases/` |
 | v1.7 research details | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
 | v1.4 research | `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md` |
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-24 after milestone v1.13 archive*
+*State updated: 2026-05-26 after milestone v1.16 archive*
 
 ## Operator Next Steps
 
-- Start the next milestone with `$gsd-new-milestone`.
-- Review deferred polish when planning future transition/smoothness work: `.planning/todos/pending/2026-05-13-phase31-audio-popover-transition-delay.md`
+- Start the next milestone with /gsd-new-milestone

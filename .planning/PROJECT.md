@@ -10,6 +10,18 @@ MESH should let plugin authors build distinctive shell UI and service integratio
 
 ## Current State
 
+`v1.16 Element Library` shipped on 2026-05-26.
+
+The project now also has a broad MESH-native element library with:
+
+- Canonical element taxonomy metadata, shared control state, source-tag lowering, diagnostics, and author docs.
+- Layout, structure, display, action, text input, choice/menu, container, and collection primitives that preserve retained rendering and accessibility behavior.
+- A single native `button` behavior model with configurable state and child `<icon>` markup instead of separate native button variants.
+- Native choice/menu behavior for `select`/`option`, checkbox, switch, radio groups, and menus with Luau value/change/activation events.
+- Native container and collection semantics for popover, dialog, tabs/tab, details, list/list-item, and empty-state while keeping richer panel/sheet/table/tree behavior deferred or configured.
+- Shipped proof across navigation language selection, audio popover, debug inspector tabs/shell, surfaces view, and backend services view.
+- Documented non-parity boundaries for browser forms, rich data tables/trees, full modal traps, advanced select APIs, and one-for-one HTML/Qt/Flutter compatibility.
+
 `v1.15 Persistent Storage System` shipped on 2026-05-26.
 
 The project now also has shell-backed persistent storage for Luau runtimes with:
