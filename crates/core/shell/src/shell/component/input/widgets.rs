@@ -103,6 +103,144 @@ impl FrontendSurfaceComponent {
         next
     }
 
+    pub(super) fn source_tag_for_key<'a>(
+        &self,
+        tree: &'a WidgetNode,
+        key: &str,
+    ) -> Option<&'a str> {
+        find_node_by_key(tree, key).map(source_element_tag)
+    }
+
+    pub(super) fn is_checkable_choice_key(&self, tree: &WidgetNode, key: &str) -> bool {
+        find_node_by_key(tree, key).is_some_and(|node| {
+            node_is_source(node, &["switch", "checkbox"])
+                || matches!(node.tag.as_str(), "switch" | "checkbox")
+        })
+    }
+
+    pub(super) fn is_radio_key(&self, tree: &WidgetNode, key: &str) -> bool {
+        find_node_by_key(tree, key).is_some_and(|node| node_is_source(node, &["radio"]))
+    }
+
+    pub(super) fn is_option_key(&self, tree: &WidgetNode, key: &str) -> bool {
+        find_node_by_key(tree, key).is_some_and(|node| node_is_source(node, &["option"]))
+    }
+
+    pub(super) fn is_menu_item_key(&self, tree: &WidgetNode, key: &str) -> bool {
+        find_node_by_key(tree, key).is_some_and(|node| {
+            node_is_source(node, &["menu-item", "command-item", "preference-row"])
+        })
+    }
+
+    pub(super) fn dispatch_activation_handlers(
+        &mut self,
+        tree: &WidgetNode,
+        key: &str,
+        click_event: serde_json::Value,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let mut requests = Vec::new();
+        if let Some(handler) = find_click_handler(tree, key) {
+            requests.extend(self.call_namespaced_handler(&handler, &[click_event.clone()])?);
+        }
+        requests.extend(self.call_node_handler(tree, key, "activate", &[click_event])?);
+        Ok(requests)
+    }
+
+    pub(super) fn activate_option_choice(
+        &mut self,
+        tree: &WidgetNode,
+        option_key: &str,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(option) = find_node_by_key(tree, option_key) else {
+            return Ok(Vec::new());
+        };
+        if node_disabled(option) {
+            return Ok(Vec::new());
+        }
+        let value = option
+            .attributes
+            .get("value")
+            .cloned()
+            .or_else(|| option.attributes.get("label").cloned())
+            .unwrap_or_default();
+        self.checked_values.insert(option_key.to_string(), true);
+
+        let Some(select_key) = ancestor_source_key(tree, option_key, &["select"]) else {
+            return self.call_node_handler(tree, option_key, "change", &[serde_json::json!(value)]);
+        };
+        self.input_values.insert(select_key.clone(), value.clone());
+        let mut requests = self.call_node_handler(
+            tree,
+            &select_key,
+            "change",
+            &[serde_json::json!(value.clone())],
+        )?;
+        requests.extend(self.call_node_handler(
+            tree,
+            option_key,
+            "change",
+            &[serde_json::json!(value)],
+        )?);
+        self.invalidate_text_state();
+        Ok(requests)
+    }
+
+    pub(super) fn activate_radio_choice(
+        &mut self,
+        tree: &WidgetNode,
+        radio_key: &str,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(radio) = find_node_by_key(tree, radio_key) else {
+            return Ok(Vec::new());
+        };
+        if node_disabled(radio) {
+            return Ok(Vec::new());
+        }
+        let value = radio.attributes.get("value").cloned().unwrap_or_default();
+        if let Some(group_key) = ancestor_source_key(tree, radio_key, &["radio-group"]) {
+            for sibling in descendant_source_keys(tree, &group_key, &["radio"]) {
+                self.checked_values.insert(sibling, false);
+            }
+            self.input_values.insert(group_key.clone(), value.clone());
+            self.checked_values.insert(radio_key.to_string(), true);
+            let mut requests = self.call_node_handler(
+                tree,
+                &group_key,
+                "change",
+                &[serde_json::json!(value.clone())],
+            )?;
+            requests.extend(self.call_node_handler(
+                tree,
+                radio_key,
+                "change",
+                &[serde_json::json!(value)],
+            )?);
+            self.invalidate_interaction_restyle();
+            return Ok(requests);
+        }
+
+        self.checked_values.insert(radio_key.to_string(), true);
+        self.invalidate_interaction_restyle();
+        self.call_node_handler(tree, radio_key, "change", &[serde_json::json!(value)])
+    }
+
+    pub(super) fn rove_focus_within_parent(
+        &mut self,
+        tree: &WidgetNode,
+        key: &str,
+        backward: bool,
+    ) -> Option<String> {
+        let source = self.source_tag_for_key(tree, key)?;
+        let item_tags: &[&str] = if source == "option" {
+            &["option"]
+        } else if matches!(source, "menu-item" | "command-item" | "preference-row") {
+            &["menu-item", "command-item", "preference-row"]
+        } else {
+            return None;
+        };
+        sibling_source_key(tree, key, item_tags, backward)
+    }
+
     pub(super) fn pointer_event_target_key(
         &self,
         tree: &WidgetNode,
@@ -212,4 +350,98 @@ impl FrontendSurfaceComponent {
         let stepped = (((raw_next - min) / step).round() * step + min).clamp(min, max);
         Some(stepped)
     }
+}
+
+fn node_disabled(node: &WidgetNode) -> bool {
+    node.attributes
+        .get("disabled")
+        .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1" | "disabled"))
+        || node
+            .attributes
+            .get("aria-disabled")
+            .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1" | "disabled"))
+}
+
+fn ancestor_source_key(tree: &WidgetNode, key: &str, source_tags: &[&str]) -> Option<String> {
+    let path = key_path(tree, key)?;
+    path.into_iter().rev().skip(1).find(|candidate| {
+        find_node_by_key(tree, candidate).is_some_and(|node| node_is_source(node, source_tags))
+    })
+}
+
+fn sibling_source_key(
+    tree: &WidgetNode,
+    key: &str,
+    source_tags: &[&str],
+    backward: bool,
+) -> Option<String> {
+    let path = key_path(tree, key)?;
+    let parent_key = path.iter().rev().nth(1)?;
+    let siblings = find_node_by_key(tree, parent_key)?;
+    let candidates: Vec<String> = siblings
+        .children
+        .iter()
+        .filter(|child| node_is_source(child, source_tags) && !node_disabled(child))
+        .filter_map(|child| child.attributes.get("_mesh_key").cloned())
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    let index = candidates.iter().position(|candidate| candidate == key)?;
+    let next_index = if backward {
+        if index == 0 {
+            candidates.len() - 1
+        } else {
+            index - 1
+        }
+    } else {
+        (index + 1) % candidates.len()
+    };
+    candidates.get(next_index).cloned()
+}
+
+fn descendant_source_keys(tree: &WidgetNode, root_key: &str, source_tags: &[&str]) -> Vec<String> {
+    let mut keys = Vec::new();
+    if let Some(root) = find_node_by_key(tree, root_key) {
+        collect_descendant_source_keys(root, source_tags, &mut keys);
+    }
+    keys
+}
+
+fn collect_descendant_source_keys(node: &WidgetNode, source_tags: &[&str], keys: &mut Vec<String>) {
+    if node_is_source(node, source_tags)
+        && let Some(key) = node.attributes.get("_mesh_key")
+    {
+        keys.push(key.clone());
+    }
+    for child in &node.children {
+        collect_descendant_source_keys(child, source_tags, keys);
+    }
+}
+
+fn key_path(tree: &WidgetNode, key: &str) -> Option<Vec<String>> {
+    let mut path = Vec::new();
+    if collect_key_path(tree, key, &mut path) {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn collect_key_path(node: &WidgetNode, key: &str, path: &mut Vec<String>) -> bool {
+    if let Some(node_key) = node.attributes.get("_mesh_key") {
+        path.push(node_key.clone());
+        if node_key == key {
+            return true;
+        }
+    }
+    for child in &node.children {
+        if collect_key_path(child, key, path) {
+            return true;
+        }
+    }
+    if node.attributes.contains_key("_mesh_key") {
+        path.pop();
+    }
+    false
 }

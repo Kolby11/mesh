@@ -297,6 +297,9 @@ impl FrontendSurfaceComponent {
             for node in find_nodes_by_keybind_mut(tree, &shortcut.keybind_id) {
                 match node.accessibility.keyboard_shortcut.as_deref() {
                     Some(existing) if existing == accessibility_shortcut => {}
+                    Some(existing) if existing == shortcut.keybind_id => {
+                        node.accessibility.keyboard_shortcut = Some(accessibility_shortcut.clone());
+                    }
                     Some(existing) => {
                         node.accessibility.keyboard_shortcut =
                             Some(format!("{existing}, {accessibility_shortcut}"));

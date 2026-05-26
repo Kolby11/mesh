@@ -1482,6 +1482,29 @@ fn validate_phase87_attribute_value(
             "input" | "textarea" | "search" | "password" | "number-input" | "stepper",
             "disabled" | "readonly" | "required" | "invalid" | "multiline" | "masked",
         ) => validate_bool_attribute(tag, name, value),
+        (
+            "select" | "option" | "checkbox" | "switch" | "radio" | "radio-group" | "menu"
+            | "menu-item" | "command-item" | "preference-row",
+            "disabled" | "checked" | "selected" | "expanded" | "required" | "invalid",
+        ) => validate_bool_attribute(tag, name, value),
+        ("option", "value") if value.trim().is_empty() => Some(invalid_attr(
+            tag,
+            name,
+            "options need a non-empty value",
+            "Set value to the string that the parent <select> should receive on change.",
+        )),
+        ("radio", "value") if value.trim().is_empty() => Some(invalid_attr(
+            tag,
+            name,
+            "radio choices need a non-empty value",
+            "Set value to the string that the parent <radio-group> should receive on change.",
+        )),
+        ("radio", "name") if value.trim().is_empty() => Some(invalid_attr(
+            tag,
+            name,
+            "radio choices need group metadata when not nested in a radio-group",
+            "Wrap radios in <radio-group> or set a non-empty name.",
+        )),
         ("number-input" | "stepper", "min" | "max" | "value") => {
             validate_number_attribute(tag, name, value)
         }
@@ -2194,6 +2217,25 @@ mod tests {
         assert!(validate_element_attribute("number-input", "min", "0").is_none());
         assert!(validate_element_attribute("number-input", "max", "100").is_none());
         assert!(validate_element_attribute("number-input", "step", "5").is_none());
+    }
+
+    #[test]
+    fn phase89_choice_and_menu_diagnostics_validate_authoring_state() {
+        let option = validate_element_attribute("option", "value", "").expect("option diagnostic");
+        assert_eq!(option.kind, ElementDiagnosticKind::InvalidAttributeValue);
+        assert!(option.message.contains("options need"));
+
+        let radio = validate_element_attribute("radio", "value", "").expect("radio diagnostic");
+        assert_eq!(radio.kind, ElementDiagnosticKind::InvalidAttributeValue);
+        assert!(radio.message.contains("radio choices"));
+
+        let checked =
+            validate_element_attribute("checkbox", "checked", "maybe").expect("bool diagnostic");
+        assert_eq!(checked.kind, ElementDiagnosticKind::InvalidAttributeValue);
+
+        assert!(validate_element_attribute("menu-item", "disabled", "true").is_none());
+        assert!(validate_element_event("menu-item", "activate").is_none());
+        assert!(validate_element_event("select", "change").is_none());
     }
 
     #[test]

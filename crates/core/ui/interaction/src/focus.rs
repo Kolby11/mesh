@@ -196,8 +196,20 @@ fn node_is_tabbable(node: &WidgetNode) -> bool {
 }
 
 fn node_is_native_focusable(node: &WidgetNode) -> bool {
-    matches!(
-        node.tag.as_str(),
-        "input" | "button" | "slider" | "switch" | "checkbox"
-    )
+    matches!(node.tag.as_str(), "input" | "button" | "slider")
+        || crate::node_is_source(
+            node,
+            &[
+                "select",
+                "option",
+                "switch",
+                "checkbox",
+                "radio",
+                "segmented-control",
+                "menu",
+                "menu-item",
+                "command-item",
+                "preference-row",
+            ],
+        )
 }

@@ -1143,4 +1143,83 @@ mod tests {
                 && diagnostic.kind == ElementDiagnosticKind::InvalidAttributeValue
         }));
     }
+
+    #[test]
+    fn phase89_choice_menu_source_semantics_survive_lowering() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<template>
+  <select value="en" onchange={onLocaleChange} label="Language">
+    <option value="en">English</option>
+    <option value="sk" selected="true">Slovak</option>
+  </select>
+  <menu label="Commands">
+    <menu-item onactivate={onCommand} keybind="ctrl+k">Command</menu-item>
+  </menu>
+</template>
+"#,
+        )
+        .unwrap();
+        let manifest = test_manifest();
+        let theme = mesh_core_theme::default_theme();
+
+        let tree = build_widget_tree_from_component(
+            &component,
+            &manifest,
+            &theme,
+            320.0,
+            160.0,
+            None,
+            "root",
+            None,
+            &[],
+        );
+
+        let select = &tree.children[0];
+        assert_eq!(select.tag, "input");
+        assert_eq!(
+            select.attributes.get("data-mesh-element"),
+            Some(&"select".to_string())
+        );
+        assert_eq!(
+            select.event_handlers.get("change"),
+            Some(&"onLocaleChange".into())
+        );
+        assert_eq!(
+            select.accessibility.role,
+            mesh_core_elements::AccessibilityRole::Menu
+        );
+        assert_eq!(select.accessibility.state.value.as_deref(), Some("en"));
+        assert_eq!(select.children.len(), 2);
+
+        let option = &select.children[1];
+        assert_eq!(
+            option.attributes.get("data-mesh-element"),
+            Some(&"option".to_string())
+        );
+        assert!(option.accessibility.state.selected);
+
+        let menu = &tree.children[1];
+        assert_eq!(
+            menu.attributes.get("data-mesh-element"),
+            Some(&"menu".into())
+        );
+        assert_eq!(
+            menu.accessibility.role,
+            mesh_core_elements::AccessibilityRole::Menu
+        );
+        let item = &menu.children[0];
+        assert_eq!(
+            item.attributes.get("data-mesh-element"),
+            Some(&"menu-item".to_string())
+        );
+        assert_eq!(
+            item.event_handlers.get("activate"),
+            Some(&"onCommand".into())
+        );
+        assert_eq!(
+            item.accessibility.keyboard_shortcut.as_deref(),
+            Some("ctrl+k")
+        );
+    }
 }

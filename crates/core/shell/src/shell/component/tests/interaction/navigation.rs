@@ -98,6 +98,119 @@ end
 }
 
 #[test]
+fn phase89_option_activation_dispatches_parent_select_change() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+selected_locale = ""
+function onLocaleChange(value)
+    selected_locale = value
+end
+</script>
+"#,
+    );
+    let mut select = event_node_with_attrs(
+        "input",
+        "root/0",
+        0.0,
+        0.0,
+        120.0,
+        64.0,
+        &[("data-mesh-element", "select"), ("value", "en")],
+        &[("change", "onLocaleChange")],
+    );
+    select.children.push(event_node_with_attrs(
+        "input",
+        "root/0/0",
+        0.0,
+        24.0,
+        120.0,
+        20.0,
+        &[("data-mesh-element", "option"), ("value", "en")],
+        &[],
+    ));
+    select.children.push(event_node_with_attrs(
+        "input",
+        "root/0/1",
+        0.0,
+        44.0,
+        120.0,
+        20.0,
+        &[("data-mesh-element", "option"), ("value", "sk")],
+        &[],
+    ));
+    component.last_tree = Some(root_with(vec![select]));
+    component.focused_key = Some("root/0/1".into());
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        runtime_value(&component, "selected_locale"),
+        Some(serde_json::Value::String("sk".into()))
+    );
+    assert_eq!(
+        component.input_values.get("root/0").map(String::as_str),
+        Some("sk")
+    );
+}
+
+#[test]
+fn phase89_menu_item_activation_uses_activate_handler() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+activated = false
+function onActivate()
+    activated = true
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![event_node_with_attrs(
+        "row",
+        "root/0",
+        0.0,
+        0.0,
+        120.0,
+        24.0,
+        &[("data-mesh-element", "menu-item")],
+        &[("activate", "onActivate")],
+    )]));
+    component.focused_key = Some("root/0".into());
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        runtime_value(&component, "activated"),
+        Some(serde_json::Value::Bool(true))
+    );
+}
+
+#[test]
 fn keyboard_handlers_keydown_and_keyup_payloads_route_to_focused_node() {
     let mut component = test_frontend_component(
         r#"

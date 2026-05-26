@@ -10,8 +10,8 @@ use mesh_core_interaction::{
     annotate_overflow_tree, collect_focus_traversal, find_click_handler, find_event_handler,
     find_focusable_at, find_node_bounds_by_key, find_node_by_key, find_node_path_at,
     find_scrollable_at, find_tooltip_by_key, find_tooltip_text_by_key, is_input_key, is_slider_key,
-    measure_content_size, namespace_event_handlers, next_focus_target, parse_namespaced_handler,
-    scroll_limits,
+    measure_content_size, namespace_event_handlers, next_focus_target, node_is_source,
+    parse_namespaced_handler, scroll_limits, source_element_tag,
 };
 mod animation;
 mod catalog;

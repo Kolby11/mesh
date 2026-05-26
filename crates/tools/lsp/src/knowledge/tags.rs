@@ -110,6 +110,10 @@ const INTERACTIVE_ELEMENT_ATTRS: &[AttrDef] = &[
         description: "Click / tap handler function",
     },
     AttrDef {
+        name: "onactivate",
+        description: "Keyboard or command activation handler function",
+    },
+    AttrDef {
         name: "onchange",
         description: "Value change handler function",
     },
@@ -423,6 +427,85 @@ static CHECKBOX_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "label",
         description: "Associated label text",
+    },
+];
+
+static SELECT_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "value",
+        description: "Selected option value",
+    },
+    AttrDef {
+        name: "disabled",
+        description: "Disables selection changes",
+    },
+    AttrDef {
+        name: "required",
+        description: "Requires a selected value",
+    },
+];
+
+static OPTION_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "value",
+        description: "Value sent to the parent select onchange handler",
+    },
+    AttrDef {
+        name: "selected",
+        description: "Marks this option as selected",
+    },
+    AttrDef {
+        name: "disabled",
+        description: "Disables this option",
+    },
+];
+
+static RADIO_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "value",
+        description: "Value sent to the parent radio-group onchange handler",
+    },
+    AttrDef {
+        name: "name",
+        description: "Radio group name when not nested in a radio-group",
+    },
+    AttrDef {
+        name: "checked",
+        description: "Whether this radio choice is checked",
+    },
+    AttrDef {
+        name: "disabled",
+        description: "Disables this radio choice",
+    },
+];
+
+static MENU_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "expanded",
+        description: "Whether the menu is expanded",
+    },
+    AttrDef {
+        name: "disabled",
+        description: "Disables the menu",
+    },
+];
+
+static MENU_ITEM_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "disabled",
+        description: "Disables item activation",
+    },
+    AttrDef {
+        name: "selected",
+        description: "Whether this item is selected",
+    },
+    AttrDef {
+        name: "keybind",
+        description: "Associated keybind id or display shortcut",
+    },
+    AttrDef {
+        name: "command",
+        description: "Command intent metadata",
     },
 ];
 
@@ -828,6 +911,78 @@ pub static TAG_DEFS: &[TagDef] = &[
         attributes: CHECKBOX_ATTRS,
     },
     TagDef {
+        name: "select",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Native choice control with static child option elements.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: SELECT_ATTRS,
+    },
+    TagDef {
+        name: "option",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Static option inside a select.",
+        bases: BASE_MESH,
+        attributes: OPTION_ATTRS,
+    },
+    TagDef {
+        name: "radio-group",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Exclusive group for radio choices.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: SELECT_ATTRS,
+    },
+    TagDef {
+        name: "radio",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Exclusive radio choice inside a radio-group.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: RADIO_ATTRS,
+    },
+    TagDef {
+        name: "segmented-control",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Configured choice group; native split behavior is deferred.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: SELECT_ATTRS,
+    },
+    TagDef {
+        name: "menu",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Roving-focus command list.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: MENU_ATTRS,
+    },
+    TagDef {
+        name: "menu-item",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Command item inside a menu.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: MENU_ITEM_ATTRS,
+    },
+    TagDef {
+        name: "command-item",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Command-oriented menu item alias.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: MENU_ITEM_ATTRS,
+    },
+    TagDef {
+        name: "preference-row",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Configured menu/preference row.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: MENU_ITEM_ATTRS,
+    },
+    TagDef {
         name: "list",
         category: TagCategory::Structure,
         self_closing: false,
@@ -1002,5 +1157,37 @@ mod tests {
                 "number-input should complete {name}"
             );
         }
+    }
+
+    #[test]
+    fn phase89_lsp_choice_and_menu_tags_include_static_authoring_attrs() {
+        for name in [
+            "select",
+            "option",
+            "checkbox",
+            "switch",
+            "radio-group",
+            "radio",
+            "segmented-control",
+            "menu",
+            "menu-item",
+            "command-item",
+            "preference-row",
+        ] {
+            tag(name);
+        }
+
+        let select_attrs = attr_names(tag("select"));
+        assert!(select_attrs.contains(&"value"));
+        assert!(select_attrs.contains(&"onchange"));
+
+        let option_attrs = attr_names(tag("option"));
+        assert!(option_attrs.contains(&"value"));
+        assert!(option_attrs.contains(&"selected"));
+
+        let menu_item_attrs = attr_names(tag("menu-item"));
+        assert!(menu_item_attrs.contains(&"onactivate"));
+        assert!(menu_item_attrs.contains(&"disabled"));
+        assert!(menu_item_attrs.contains(&"keybind"));
     }
 }

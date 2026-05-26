@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use bitflags::bitflags;
 use mesh_core_elements::style::{Color, ComputedStyle, Corners, Dimension, Edges, Transform2D};
 use mesh_core_elements::{ElementState, LayoutRect, NodeId, WidgetNode, element_snapshot_json};
-use mesh_core_interaction::ScrollOffsetState;
+use mesh_core_interaction::{ScrollOffsetState, node_is_source, source_element_tag};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -526,6 +526,7 @@ pub(super) fn annotate_runtime_tree(
     }
     node.accessibility.focused = node.state.focused;
 
+    let source_tag = source_element_tag(node).to_string();
     match node.tag.as_str() {
         "input" => {
             let value = input_values
@@ -571,6 +572,34 @@ pub(super) fn annotate_runtime_tree(
             );
         }
         _ => {}
+    }
+
+    if node_is_source(node, &["switch", "checkbox", "radio", "option"]) {
+        node.attributes.insert(
+            "checked".into(),
+            if checked { "true" } else { "false" }.into(),
+        );
+        if matches!(source_tag.as_str(), "radio" | "option") {
+            node.attributes.insert(
+                "selected".into(),
+                if checked { "true" } else { "false" }.into(),
+            );
+        }
+        node.state.checked = checked;
+        node.state.selected = checked;
+        node.accessibility.state.checked = Some(checked);
+        node.accessibility.state.selected = checked;
+    }
+
+    if node_is_source(node, &["select", "radio-group"])
+        && let Some(value) = input_values
+            .get(&key)
+            .cloned()
+            .or_else(|| node.attributes.get("value").cloned())
+    {
+        node.attributes.insert("value".into(), value.clone());
+        node.state.value = true;
+        node.accessibility.state.value = Some(value);
     }
 
     let offset = scroll_offsets.get(&key).copied().unwrap_or_default();

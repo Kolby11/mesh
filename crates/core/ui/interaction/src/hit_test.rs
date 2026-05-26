@@ -18,6 +18,18 @@ pub fn find_node_by_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a Widge
     None
 }
 
+pub fn source_element_tag(node: &WidgetNode) -> &str {
+    node.attributes
+        .get("data-mesh-element")
+        .map(String::as_str)
+        .unwrap_or(node.tag.as_str())
+}
+
+pub fn node_is_source(node: &WidgetNode, tags: &[&str]) -> bool {
+    let source = source_element_tag(node);
+    tags.iter().any(|tag| *tag == source)
+}
+
 pub fn find_node_bounds_by_key(
     node: &WidgetNode,
     key: &str,
@@ -142,7 +154,25 @@ fn node_tooltip_owner_text(node: &WidgetNode) -> Option<(String, String)> {
 }
 
 pub fn is_input_key(tree: &WidgetNode, key: &str) -> bool {
-    find_node_by_key(tree, key).is_some_and(|node| node.tag == "input")
+    find_node_by_key(tree, key).is_some_and(|node| {
+        node.tag == "input"
+            && node_is_source(
+                node,
+                &[
+                    "input",
+                    "textarea",
+                    "search",
+                    "password",
+                    "number-input",
+                    "stepper",
+                    "text-input",
+                    "password-input",
+                    "search-input",
+                    "email-input",
+                    "url-input",
+                ],
+            )
+    })
 }
 
 pub fn is_slider_key(tree: &WidgetNode, key: &str) -> bool {

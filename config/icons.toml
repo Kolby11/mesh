@@ -37,6 +37,11 @@ settings = [
   "system:preferences-system-symbolic",
   "system:settings",
 ]
+language = [
+  "system:preferences-desktop-locale",
+  "system:language",
+  "system:preferences-desktop-locale-symbolic",
+]
 weather-clear-night = [
   "system:weather-clear-night",
   "system:weather-clear-night-symbolic",

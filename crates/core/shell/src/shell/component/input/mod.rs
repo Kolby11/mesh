@@ -75,9 +75,11 @@ impl FrontendSurfaceComponent {
                             self.invalidate_script_state();
                         } else {
                             self.active_slider_key = None;
-                            if find_node_by_key(&tree, &node_key).is_some_and(|node| {
-                                matches!(node.tag.as_str(), "switch" | "checkbox")
-                            }) {
+                            if self.is_option_key(&tree, &node_key) {
+                                requests.extend(self.activate_option_choice(&tree, &node_key)?);
+                            } else if self.is_radio_key(&tree, &node_key) {
+                                requests.extend(self.activate_radio_choice(&tree, &node_key)?);
+                            } else if self.is_checkable_choice_key(&tree, &node_key) {
                                 let value = self.toggle_checked_value(&tree, &node_key);
                                 requests.extend(self.call_node_handler(
                                     &tree,
@@ -134,7 +136,14 @@ impl FrontendSurfaceComponent {
                             .then_some(down_key.clone())
                     });
                     if let Some(node_key) = captured_click_key {
-                        if let Some(handler) = find_click_handler(&tree, &node_key) {
+                        if self.is_menu_item_key(&tree, &node_key) {
+                            let click_event = self.build_click_event(&tree, &node_key, x, y);
+                            requests.extend(self.dispatch_activation_handlers(
+                                &tree,
+                                &node_key,
+                                click_event,
+                            )?);
+                        } else if let Some(handler) = find_click_handler(&tree, &node_key) {
                             let click_event = self.build_click_event(&tree, &node_key, x, y);
                             requests
                                 .extend(self.call_namespaced_handler(&handler, &[click_event])?);
@@ -369,6 +378,15 @@ impl FrontendSurfaceComponent {
                         }
                     }
 
+                    if matches!(key.as_str(), "ArrowDown" | "ArrowUp")
+                        && let Some(next_key) =
+                            self.rove_focus_within_parent(&tree, &focused_key, key == "ArrowUp")
+                    {
+                        requests.extend(self.set_focus_target(&tree, Some(next_key), true)?);
+                        self.invalidate_interaction_restyle();
+                        return Ok(requests);
+                    }
+
                     if !requests.is_empty() {
                         return Ok(requests);
                     }
@@ -406,18 +424,33 @@ impl FrontendSurfaceComponent {
                     if Self::key_matches_any_binding(
                         &key,
                         &keyboard_settings.toggle_activation_keys,
-                    ) && find_node_by_key(&tree, &focused_key)
-                        .is_some_and(|node| matches!(node.tag.as_str(), "switch" | "checkbox"))
+                    ) && (self.is_checkable_choice_key(&tree, &focused_key)
+                        || self.is_radio_key(&tree, &focused_key)
+                        || self.is_option_key(&tree, &focused_key)
+                        || self.is_menu_item_key(&tree, &focused_key))
                     {
                         self.clear_selection();
-                        let value = self.toggle_checked_value(&tree, &focused_key);
                         self.invalidate_interaction_restyle();
-                        requests.extend(self.call_node_handler(
-                            &tree,
-                            &focused_key,
-                            "change",
-                            &[serde_json::json!(value)],
-                        )?);
+                        if self.is_option_key(&tree, &focused_key) {
+                            requests.extend(self.activate_option_choice(&tree, &focused_key)?);
+                        } else if self.is_radio_key(&tree, &focused_key) {
+                            requests.extend(self.activate_radio_choice(&tree, &focused_key)?);
+                        } else if self.is_menu_item_key(&tree, &focused_key) {
+                            let click_event = self.build_click_event(&tree, &focused_key, 0.0, 0.0);
+                            requests.extend(self.dispatch_activation_handlers(
+                                &tree,
+                                &focused_key,
+                                click_event,
+                            )?);
+                        } else {
+                            let value = self.toggle_checked_value(&tree, &focused_key);
+                            requests.extend(self.call_node_handler(
+                                &tree,
+                                &focused_key,
+                                "change",
+                                &[serde_json::json!(value)],
+                            )?);
+                        }
                         return Ok(requests);
                     }
 

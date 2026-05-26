@@ -40,10 +40,21 @@ impl FrontendSurfaceComponent {
         // switch (Space toggle). Buttons activate immediately on click so a
         // focus ring is noise rather than help.
         find_node_by_key(tree, key).is_some_and(|node| {
-            matches!(
-                node.tag.as_str(),
-                "input" | "slider" | "checkbox" | "switch"
-            )
+            matches!(node.tag.as_str(), "input" | "slider")
+                || node_is_source(
+                    node,
+                    &[
+                        "select",
+                        "option",
+                        "checkbox",
+                        "switch",
+                        "radio",
+                        "menu",
+                        "menu-item",
+                        "command-item",
+                        "preference-row",
+                    ],
+                )
         })
     }
 
@@ -241,10 +252,22 @@ impl FrontendSurfaceComponent {
         let path = find_node_path_at(tree, x, y)?;
         if path.iter().any(|key| {
             find_node_by_key(tree, key).is_some_and(|node| {
-                matches!(
-                    node.tag.as_str(),
-                    "button" | "slider" | "switch" | "checkbox" | "input"
-                ) || node.event_handlers.contains_key("click")
+                matches!(node.tag.as_str(), "button" | "slider" | "input")
+                    || node_is_source(
+                        node,
+                        &[
+                            "select",
+                            "option",
+                            "switch",
+                            "checkbox",
+                            "radio",
+                            "menu",
+                            "menu-item",
+                            "command-item",
+                            "preference-row",
+                        ],
+                    )
+                    || node.event_handlers.contains_key("click")
             })
         }) {
             return None;

@@ -9,7 +9,7 @@ pub use hit_test::find_click_handler;
 pub use hit_test::{
     find_event_handler, find_node_bounds_by_key, find_node_by_key, find_node_path_at,
     find_tooltip_by_key, find_tooltip_text_by_key, is_input_key, is_slider_key,
-    namespace_event_handlers, parse_namespaced_handler,
+    namespace_event_handlers, node_is_source, parse_namespaced_handler, source_element_tag,
 };
 pub use scroll::{annotate_overflow_tree, find_scrollable_at, measure_content_size, scroll_limits};
 

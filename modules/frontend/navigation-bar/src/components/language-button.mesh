@@ -1,8 +1,9 @@
 <template>
   <row class="language-control">
-    <button
-      class="nav-button"
-      onclick={onLanguageMenuToggle}
+    <select
+      class="nav-button language-select"
+      value="{language_locale}"
+      onchange={onLanguageChange}
       title="{t('nav.language_menu')}"
       aria-label="{t('nav.language_menu')}"
     >
@@ -10,32 +11,29 @@
         <icon class="nav-button-glyph" name="language" size="18" />
         <text class="language-code">{language_code}</text>
       </row>
-    </button>
-    <row class="{language_menu_class}" title="{t('nav.language_menu')}">
-      <button
+      <option
         class="{english_option_class}"
-        onclick={onSelectEnglish}
+        value="en"
         title="{t('nav.language_english')}"
         aria-label="{t('nav.language_english')}"
       >
         <text class="language-option-text">{t('nav.language_english')}</text>
-      </button>
-      <button
+      </option>
+      <option
         class="{slovak_option_class}"
-        onclick={onSelectSlovak}
+        value="sk"
         title="{t('nav.language_slovak')}"
         aria-label="{t('nav.language_slovak')}"
       >
         <text class="language-option-text">{t('nav.language_slovak')}</text>
-      </button>
-    </row>
+      </option>
+    </select>
   </row>
 </template>
 
 <script lang="luau">
 language_code = "EN"
-language_menu_open = false
-language_menu_class = "language-menu language-menu-hidden"
+language_locale = "en"
 english_option_class = "language-option language-option-selected"
 slovak_option_class = "language-option"
 
@@ -59,14 +57,6 @@ local function stored_locale()
     return nil
 end
 
-local function update_menu_class()
-    if language_menu_open then
-        language_menu_class = "language-menu"
-    else
-        language_menu_class = "language-menu language-menu-hidden"
-    end
-end
-
 function init(self)
     local locale = stored_locale()
     if locale ~= nil then
@@ -77,34 +67,24 @@ end
 function render(self)
     local locale = stored_locale() or current_locale()
     if locale_is_slovak(locale) then
+        language_locale = "sk"
         language_code = "SK"
         english_option_class = "language-option"
         slovak_option_class = "language-option language-option-selected"
     else
+        language_locale = "en"
         language_code = "EN"
         english_option_class = "language-option language-option-selected"
         slovak_option_class = "language-option"
     end
-    update_menu_class()
 end
 
-function onLanguageMenuToggle()
-    language_menu_open = not language_menu_open
-    update_menu_class()
-end
-
-function onSelectEnglish()
-    language_menu_open = false
-    update_menu_class()
-    self.storage.language = "en"
-    mesh.locale.set("en")
-end
-
-function onSelectSlovak()
-    language_menu_open = false
-    update_menu_class()
-    self.storage.language = "sk"
-    mesh.locale.set("sk")
+function onLanguageChange(locale)
+    if locale ~= "sk" then
+        locale = "en"
+    end
+    self.storage.language = locale
+    mesh.locale.set(locale)
 end
 </script>
 
@@ -193,19 +173,13 @@ end
     text-wrap: none;
 }
 
-.language-menu {
-    height: 40px;
-    align-items: center;
+.language-select {
     gap: 2px;
-    padding-inline: 1px;
-    padding-block: 0;
-}
-
-.language-menu-hidden {
-    display: none;
+    overflow: visible;
 }
 
 .language-option {
+    display: none;
     height: 32px;
     flex-shrink: 0;
     justify-content: center;

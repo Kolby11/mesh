@@ -78,8 +78,17 @@ reserved for explicitly imported custom components.
 | `email-input`    | Email text input               |
 | `url-input`      | URL text input                 |
 | `slider`         | Range input                    |
+| `select`         | Static option choice control   |
+| `option`         | Select option                  |
 | `switch`         | Switch control                 |
 | `checkbox`       | Checkbox control               |
+| `radio-group`    | Exclusive radio group          |
+| `radio`          | Radio choice                   |
+| `segmented-control` | Configured choice group     |
+| `menu`           | Roving-focus command list      |
+| `menu-item`      | Menu command item              |
+| `command-item`   | Command menu item              |
+| `preference-row` | Configured preference row      |
 | `icon`           | Icon or image asset            |
 | `image`          | Image asset                    |
 | `list`           | List container                 |
@@ -106,6 +115,21 @@ button, including dedicated `icon` elements:
 The compatibility action tags lower to the same button runtime. Prefer
 configured `button` markup unless a future native element needs distinct focus,
 event, accessibility, value, or renderer behavior.
+
+Choice controls use shared value and change semantics. Author selects with
+static child options:
+
+```xml
+<select value="{language}" onchange={onLanguageChange} aria-label="Language">
+  <option value="en">English</option>
+  <option value="sk">Slovak</option>
+</select>
+```
+
+`onchange` receives the selected option value. `checkbox` and `switch` receive a
+boolean checked value. `radio` values are exclusive inside `radio-group`.
+Menus use `menu-item` or `command-item` children and activate through `onclick`
+or `onactivate`; put icons and shortcut labels inside the item markup.
 
 Custom component tags must be PascalCase and must be imported in the script
 block before they can be used. New author-facing code uses Luau

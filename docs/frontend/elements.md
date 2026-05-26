@@ -106,6 +106,35 @@ Text inputs support `value`, `placeholder`, `disabled`, `readonly`, `required`, 
 <number-input value="{limit}" min="1" max="20" step="1" onchange={on_limit_change} />
 ```
 
+## Choice Controls And Menus
+
+Phase 89 adds native behavior for the choice/menu controls that need distinct value or focus semantics: `select`, `checkbox`, `switch`, `radio-group`/`radio`, and `menu`. `segmented-control`, `menu-item`, `command-item`, `separator`, and `preference-row` remain configured source elements over existing runtime primitives until they need separate rendering or value behavior.
+
+Use static child `option` elements for selects:
+
+```xml
+<select value="{language}" onchange={on_language_change} aria-label="Language">
+  <option value="en">English</option>
+  <option value="sk">Slovak</option>
+</select>
+```
+
+Selecting an option dispatches `onchange` on the parent `select` with the option `value`. `option` supports `value`, `selected`, and `disabled`.
+
+`checkbox` and `switch` dispatch `onchange` with a boolean checked value. `radio` dispatches its string `value`, and nested radios are exclusive within their parent `radio-group`.
+
+Menus use roving focus for command rows. Use child `icon`, `text`, and `shortcut` elements for menu content; menu items activate through `onclick` or `onactivate`.
+
+```xml
+<menu aria-label="Audio menu">
+  <menu-item onactivate={toggle_mute} keybind="audio.toggle">
+    <icon name="audio-volume-muted" />
+    <text>Mute</text>
+    <shortcut>Ctrl+M</shortcut>
+  </menu-item>
+</menu>
+```
+
 ## Shared State
 
 Shared state names are `disabled`, `read-only`, `required`, `focused`, `selected`, `checked`, `expanded`, `pressed`, `invalid`, `active`, and `value`. Not every element uses every state. Element metadata defines which states apply, and the runtime exposes applicable state through retained nodes, style hooks, accessibility metadata, and Luau event payloads.
@@ -130,9 +159,11 @@ For Phase 87, diagnostics intentionally keep the layout/display scope narrow: un
 
 For Phase 88, diagnostics reject button icon shortcut attributes, unsupported browser form/navigation behavior, invalid numeric input values, non-positive numeric steps, and invalid boolean state values.
 
+For Phase 89, diagnostics validate choice/menu state attributes, require non-empty `option` and `radio` values when authored statically, and reject invalid boolean state values.
+
 ## Deferred Element Behavior
 
-The following families remain defined by the native element taxonomy but are not expanded yet: choice/menu controls, container/collection controls, full gallery proof, distinct `meter` runtime behavior, distinct action button runtimes, and full multiline text editing.
+The following families remain defined by the native element taxonomy but are not expanded yet: rich data-driven option APIs, nested menu popups, full gallery proof, container/collection controls, distinct `meter` runtime behavior, distinct action button runtimes, and full multiline text editing.
 
 ## Relationship To HTML Qt And Flutter
 
