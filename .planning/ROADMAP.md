@@ -2,7 +2,7 @@
 
 ## Milestones
 
-- 🚧 **v1.15 Persistent Storage System** — Phases 81-85 planned
+- 🚧 **v1.15 Persistent Storage System** — Phase 81 complete; Phases 82-85 planned
 - ⏭️ **v1.16 Elements Improvements** — queued after v1.15
 - ✅ **v1.14 Unified Luau Scripting Runtime** — Phases 74-80 shipped 2026-05-26 ([archive](milestones/v1.14-ROADMAP.md))
 - ✅ **v1.13 Manifest I18n Contract** — Phases 70-73 shipped 2026-05-24 ([archive](milestones/v1.13-ROADMAP.md))
@@ -24,7 +24,7 @@ system.
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 81 | Storage Foundation | Add the shell-owned scoped storage subsystem, path scoping, document operations, atomic writes, and corrupt-file recovery. | STORECORE-01, STORECORE-02, STORECORE-03, STORECORE-04, STORECORE-05, STORECORE-06 | 6 |
+| 81 | Storage Foundation | Add the shell-owned scoped storage subsystem, path scoping, document operations, atomic writes, and corrupt-file recovery. | STORECORE-01, STORECORE-02, STORECORE-03, STORECORE-04, STORECORE-05, STORECORE-06 | ✅ 6/6 |
 | 82 | Luau Self Storage Binding | Expose `self.storage` to frontend/backend runtimes with table-like reads, writes, deletes, snapshots, and invalid value diagnostics. | STOREAPI-01, STOREAPI-02, STOREAPI-03, STOREAPI-04, STOREAPI-05, STOREAPI-06 | 6 |
 | 83 | Lifecycle Persistence | Load storage before lifecycle user code, coalesce writes, flush on teardown/shutdown, and preserve instance isolation. | STORELIFE-01, STORELIFE-02, STORELIFE-03, STORELIFE-04, STORELIFE-05 | 5 |
 | 84 | Storage Rerender Integration | Track render-time storage reads and rerender only components whose watched keys changed. | STORERENDER-01, STORERENDER-02, STORERENDER-03, STORERENDER-04 | 4 |
@@ -44,7 +44,7 @@ system.
 
 ## Phases
 
-- [ ] Phase 81: Storage Foundation
+- [x] Phase 81: Storage Foundation
 - [ ] Phase 82: Luau Self Storage Binding
 - [ ] Phase 83: Lifecycle Persistence
 - [ ] Phase 84: Storage Rerender Integration
@@ -56,7 +56,7 @@ system.
 
 **Requirements:** STORECORE-01, STORECORE-02, STORECORE-03, STORECORE-04, STORECORE-05, STORECORE-06
 
-**Status:** Not started
+**Status:** Complete — 2026-05-26
 
 **Success criteria:**
 1. Storage scope derives from `self.meta` for frontend component instances and backend providers.

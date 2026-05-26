@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.15
 milestone_name: Persistent Storage System
-status: planning
-last_updated: "2026-05-26T12:22:39.000Z"
+status: executing
+last_updated: "2026-05-26T12:48:00.000Z"
 last_activity: 2026-05-26
 progress:
   total_phases: 5
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 20
 ---
 
 # State: MESH v1.15
@@ -24,10 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-26)
 
 ## Current Position
 
-Phase: 81 Storage Foundation
-Plan: none
-Status: Requirements and roadmap defined; ready for Phase 81 discussion/planning
-Last activity: 2026-05-26 — Started v1.15 Persistent Storage System milestone
+Phase: 82 Luau Self Storage Binding
+Plan: pending
+Status: Phase 81 complete; ready for Phase 82 planning/execution
+Last activity: 2026-05-26 — Completed Phase 81 storage foundation
 
 ## Decisions
 
@@ -58,6 +58,7 @@ Last activity: 2026-05-26 — Started v1.15 Persistent Storage System milestone
 - [Phase 78]: Named event channels now use direct service proxy and `self` properties with `:on`/`:fire`, while `proxy.events.Name`, `module.events`, and `mesh.service.emit_event(...)` remain compatibility paths.
 - [Phase 79]: Automatic rerendering relies on tracked service fields, locale/theme rebuild invalidation, and normal parent state dirtying for bound child snapshots; `self.storage` read dependencies remain reserved for v1.15.
 - [Phase 80]: Shipped navigation/audio frontends and backend providers now demonstrate the v1.14 authoring model; compatibility paths remain tested and documented for migration.
+- [Phase 81]: Shell-owned storage foundation now provides scoped frontend/backend identities, deterministic sanitized paths, JSON document operations, temp-file plus rename persistence, scope-private documents, and non-fatal corrupt-file diagnostics.
 
 - Backend plugins use Luau for service logic; Rust core remains the wiring layer.
 - `require('@mesh/service')` is the frontend/backend interface.

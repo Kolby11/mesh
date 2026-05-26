@@ -17,6 +17,7 @@ pub mod backend;
 /// `mesh.service.bind` and `mesh.service.on`.
 pub mod context;
 pub mod host_api;
+pub mod storage;
 
 pub use backend::{BackendScriptContext, BackendScriptError, BackendScriptEvent};
 pub use context::{

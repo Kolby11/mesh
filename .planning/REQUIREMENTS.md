@@ -7,12 +7,12 @@
 
 ### Storage Foundation
 
-- [ ] **STORECORE-01**: Storage scopes are derived from `self.meta` for frontend component instances and backend provider instances.
-- [ ] **STORECORE-02**: Storage data is private to the owning module/component/provider/runtime identity and cannot be read across unrelated modules.
-- [ ] **STORECORE-03**: Storage files live under the MESH/XDG data area using deterministic, sanitized, collision-resistant paths.
-- [ ] **STORECORE-04**: Storage documents support load, get, set, remove, clear, and snapshot operations through a shell-owned storage subsystem.
-- [ ] **STORECORE-05**: Persistence writes use temp-file plus rename semantics so partial writes do not corrupt the last valid document.
-- [ ] **STORECORE-06**: Corrupt or unreadable storage files recover non-fatally with diagnostics and an empty in-memory document.
+- [x] **STORECORE-01**: Storage scopes are derived from `self.meta` for frontend component instances and backend provider instances.
+- [x] **STORECORE-02**: Storage data is private to the owning module/component/provider/runtime identity and cannot be read across unrelated modules.
+- [x] **STORECORE-03**: Storage files live under the MESH/XDG data area using deterministic, sanitized, collision-resistant paths.
+- [x] **STORECORE-04**: Storage documents support load, get, set, remove, clear, and snapshot operations through a shell-owned storage subsystem.
+- [x] **STORECORE-05**: Persistence writes use temp-file plus rename semantics so partial writes do not corrupt the last valid document.
+- [x] **STORECORE-06**: Corrupt or unreadable storage files recover non-fatally with diagnostics and an empty in-memory document.
 
 ### Luau `self.storage` Binding
 
@@ -77,12 +77,12 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STORECORE-01 | Phase 81 | Pending |
-| STORECORE-02 | Phase 81 | Pending |
-| STORECORE-03 | Phase 81 | Pending |
-| STORECORE-04 | Phase 81 | Pending |
-| STORECORE-05 | Phase 81 | Pending |
-| STORECORE-06 | Phase 81 | Pending |
+| STORECORE-01 | Phase 81 | Complete |
+| STORECORE-02 | Phase 81 | Complete |
+| STORECORE-03 | Phase 81 | Complete |
+| STORECORE-04 | Phase 81 | Complete |
+| STORECORE-05 | Phase 81 | Complete |
+| STORECORE-06 | Phase 81 | Complete |
 | STOREAPI-01 | Phase 82 | Pending |
 | STOREAPI-02 | Phase 82 | Pending |
 | STOREAPI-03 | Phase 82 | Pending |
