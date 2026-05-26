@@ -921,6 +921,65 @@ mod tests {
     }
 
     #[test]
+    fn phase87_layout_runtime_stack_spacer_divider_and_scroll_area_stay_compatible() {
+        let mut stack = make_node("stack", Dimension::Px(160.0), Dimension::Px(90.0));
+        let mut base = make_node("base", Dimension::Px(160.0), Dimension::Px(90.0));
+        base.computed_style.position = Position::Absolute;
+        base.computed_style.inset_left = Some(0.0);
+        base.computed_style.inset_top = Some(0.0);
+        let mut overlay = make_node("overlay", Dimension::Px(40.0), Dimension::Px(20.0));
+        overlay.computed_style.position = Position::Absolute;
+        overlay.computed_style.inset_left = Some(0.0);
+        overlay.computed_style.inset_top = Some(0.0);
+        overlay.computed_style.z_index = 1;
+        stack.children = vec![base, overlay];
+        LayoutEngine::compute(&mut stack, 160.0, 90.0);
+        assert_eq!(stack.children[0].layout.x, 0.0);
+        assert_eq!(stack.children[1].layout.x, 0.0);
+        assert_eq!(stack.children[0].layout.y, 0.0);
+        assert_eq!(stack.children[1].layout.y, 0.0);
+        assert!(
+            stack.children[1].computed_style.z_index > stack.children[0].computed_style.z_index
+        );
+
+        let mut row = make_node("row", Dimension::Px(240.0), Dimension::Px(24.0));
+        row.computed_style.direction = FlexDirection::Row;
+        let fixed = make_node("fixed", Dimension::Px(40.0), Dimension::Px(24.0));
+        let mut spacer = make_node("spacer", Dimension::Auto, Dimension::Px(24.0));
+        spacer.computed_style.flex_grow = 1.0;
+        let divider = make_node("divider", Dimension::Px(1.0), Dimension::Px(24.0));
+        row.children = vec![fixed, spacer, divider];
+        LayoutEngine::compute(&mut row, 240.0, 24.0);
+        assert_eq!(row.children[0].layout.width, 40.0);
+        assert!((row.children[1].layout.width - 199.0).abs() < 0.5);
+        assert_eq!(row.children[2].layout.width, 1.0);
+
+        let mut scroll_area = make_node("scroll", Dimension::Px(120.0), Dimension::Px(60.0));
+        scroll_area
+            .attributes
+            .insert("data-mesh-element".into(), "scroll-area".into());
+        scroll_area
+            .attributes
+            .insert("_mesh_scroll_y".into(), "12.50".into());
+        scroll_area.children = vec![make_node(
+            "content",
+            Dimension::Px(120.0),
+            Dimension::Px(180.0),
+        )];
+        LayoutEngine::compute(&mut scroll_area, 120.0, 60.0);
+        assert_eq!(
+            scroll_area
+                .attributes
+                .get("data-mesh-element")
+                .map(String::as_str),
+            Some("scroll-area")
+        );
+        assert_eq!(scroll_area.layout.width, 120.0);
+        assert_eq!(scroll_area.layout.height, 60.0);
+        assert_eq!(scroll_area.children[0].layout.height, 180.0);
+    }
+
+    #[test]
     fn taffy_diagnostic_records_node_identity_and_reason() {
         let node = make_node("diagnostic-target", Dimension::Auto, Dimension::Auto);
         let mut report = TaffyLayoutReport::default();

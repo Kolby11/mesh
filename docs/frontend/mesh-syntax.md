@@ -44,11 +44,23 @@ reserved for explicitly imported custom components.
 | `box`            | Generic container              |
 | `row`            | Horizontal layout container    |
 | `column`         | Vertical layout container      |
+| `grid`           | Conservative grid metadata     |
 | `stack`          | Stacked layout container       |
 | `text`           | Text content                   |
 | `label`          | Input label                    |
 | `scroll`         | Scrollable region              |
 | `scroll-view`    | Semantic scrollable region     |
+| `scroll-area`    | Canonical scrollable region    |
+| `section`        | Semantic section container     |
+| `header`         | Semantic header container      |
+| `footer`         | Semantic footer container      |
+| `group`          | Semantic grouped content       |
+| `form-row`       | Semantic label/control row     |
+| `badge`          | Compact status text            |
+| `progress`       | Progress display metadata      |
+| `tooltip`        | Tooltip metadata/content       |
+| `avatar`         | Avatar image or icon metadata  |
+| `shortcut`       | Keyboard shortcut label        |
 | `button`         | Clickable action               |
 | `icon-button`    | Icon-only clickable action     |
 | `input`          | Text input                     |

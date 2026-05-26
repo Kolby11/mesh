@@ -12,7 +12,7 @@ use mesh_core_component::template::{
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{
     ComputedStyle, ElementDiagnostic, StyleContext, StyleResolver, VariableStore, WidgetNode,
-    validate_element_attribute, validate_element_event,
+    element_contract_for_tag, validate_element_attribute, validate_element_event,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
@@ -314,10 +314,14 @@ fn build_element_node(
     instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> WidgetNode {
+    let source_tag = element.tag.as_str();
     let tag = lower_source_tag(&element.tag_kind).as_str().to_string();
     let _element_diagnostics = collect_element_diagnostics(element);
     let (classes, id, mut attributes, event_handlers) =
         parse_attributes(&element.attributes, state);
+    attributes
+        .entry("data-mesh-element".into())
+        .or_insert_with(|| source_tag.to_string());
     if tag == "input" && !attributes.contains_key("type") {
         if let Some(input_type) = default_input_type(&element.tag_kind) {
             attributes.insert("type".into(), input_type.into());
@@ -343,7 +347,7 @@ fn build_element_node(
     if let Some(parent_style) = parent_style {
         inherit_text_style(&mut node.computed_style, parent_style, inherited_mask);
     }
-    node.accessibility = accessibility_for_tag(&tag);
+    node.accessibility = accessibility_for_element(source_tag, &tag, &node.attributes);
 
     if let Some(id) = id {
         node.attributes.insert("id".into(), id);
@@ -388,7 +392,7 @@ fn build_element_node(
 }
 
 pub fn collect_element_diagnostics(element: &ElementNode) -> Vec<ElementDiagnostic> {
-    let tag = lower_source_tag(&element.tag_kind).as_str();
+    let tag = element.tag.as_str();
     let mut diagnostics = Vec::new();
     for attribute in &element.attributes {
         if attribute.name == "class" || attribute.name == "id" || attribute.name == "bind:this" {
@@ -399,11 +403,20 @@ pub fn collect_element_diagnostics(element: &ElementNode) -> Vec<ElementDiagnost
             if let Some(diagnostic) = validate_element_event(tag, &event_name) {
                 diagnostics.push(diagnostic);
             }
-        } else if let Some(diagnostic) = validate_element_attribute(tag, &attribute.name, "") {
+        } else if let Some(diagnostic) =
+            validate_element_attribute(tag, &attribute.name, attribute_static_value(attribute))
+        {
             diagnostics.push(diagnostic);
         }
     }
     diagnostics
+}
+
+fn attribute_static_value(attribute: &Attribute) -> &str {
+    match &attribute.value {
+        AttributeValue::Static(value) => value,
+        _ => "",
+    }
 }
 
 fn is_inline_template_node(node: &TemplateNode) -> bool {
@@ -592,24 +605,74 @@ fn is_event_handler_attribute(name: &str) -> bool {
     )
 }
 
-fn accessibility_for_tag(tag: &str) -> AccessibilityInfo {
+fn accessibility_for_element(
+    source_tag: &str,
+    runtime_tag: &str,
+    attributes: &HashMap<String, String>,
+) -> AccessibilityInfo {
     let mut info = AccessibilityInfo::default();
-    info.role = match tag {
-        "button" => mesh_core_elements::AccessibilityRole::Button,
-        "input" => mesh_core_elements::AccessibilityRole::TextInput,
-        "slider" => mesh_core_elements::AccessibilityRole::Slider,
-        "checkbox" => mesh_core_elements::AccessibilityRole::Checkbox,
-        "switch" => mesh_core_elements::AccessibilityRole::Switch,
-        "text" => mesh_core_elements::AccessibilityRole::Label,
-        _ => mesh_core_elements::AccessibilityRole::Region,
-    };
-    info.focusable = matches!(tag, "button" | "input" | "slider" | "checkbox" | "switch");
+    if let Some(contract) = element_contract_for_tag(source_tag) {
+        info.role = contract.accessibility.role.clone();
+        info.focusable = contract.accessibility.focusable;
+    } else {
+        info.role = match runtime_tag {
+            "button" => mesh_core_elements::AccessibilityRole::Button,
+            "input" => mesh_core_elements::AccessibilityRole::TextInput,
+            "slider" => mesh_core_elements::AccessibilityRole::Slider,
+            "checkbox" => mesh_core_elements::AccessibilityRole::Checkbox,
+            "switch" => mesh_core_elements::AccessibilityRole::Switch,
+            "text" => mesh_core_elements::AccessibilityRole::Label,
+            _ => mesh_core_elements::AccessibilityRole::Region,
+        };
+        info.focusable = matches!(
+            runtime_tag,
+            "button" | "input" | "slider" | "checkbox" | "switch"
+        );
+    }
+    info.label = attributes
+        .get("aria-label")
+        .or_else(|| attributes.get("label"))
+        .or_else(|| attributes.get("alt"))
+        .cloned();
+    info.description = attributes
+        .get("title")
+        .or_else(|| attributes.get("tooltip"))
+        .cloned();
+    info.keyboard_shortcut = attributes
+        .get("key")
+        .or_else(|| attributes.get("shortcut"))
+        .cloned();
+    info.state.disabled = bool_attr(attributes, "disabled");
+    info.state.checked = attributes.get("checked").map(|value| bool_value(value));
+    info.state.expanded = attributes.get("expanded").map(|value| bool_value(value));
+    info.state.selected = bool_attr(attributes, "selected");
+    info.state.value = attributes.get("value").cloned();
+    info.state.value_min = number_attr(attributes, "min");
+    info.state.value_max = number_attr(attributes, "max");
     info
+}
+
+#[cfg(test)]
+fn accessibility_for_tag(tag: &str) -> AccessibilityInfo {
+    accessibility_for_element(tag, tag, &HashMap::new())
+}
+
+fn bool_attr(attributes: &HashMap<String, String>, name: &str) -> bool {
+    attributes.get(name).is_some_and(|value| bool_value(value))
+}
+
+fn bool_value(value: &str) -> bool {
+    matches!(value.trim(), "" | "true" | "1")
+}
+
+fn number_attr(attributes: &HashMap<String, String>, name: &str) -> Option<f32> {
+    attributes.get(name)?.trim().parse::<f32>().ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mesh_core_elements::ElementDiagnosticKind;
 
     fn test_manifest() -> Manifest {
         Manifest {
@@ -806,5 +869,100 @@ mod tests {
         };
 
         assert!(collect_element_diagnostics(&element).is_empty());
+    }
+
+    #[test]
+    fn phase87_layout_display_source_semantics_survive_lowering() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<template>
+  <grid columns="120px auto" label="Main grid">
+    <progress value="50" min="0" max="100" label="Loading" />
+    <section label="Details">
+      <badge>Ready</badge>
+    </section>
+  </grid>
+</template>
+"#,
+        )
+        .unwrap();
+        let manifest = test_manifest();
+        let theme = mesh_core_theme::default_theme();
+
+        let tree = build_widget_tree_from_component(
+            &component,
+            &manifest,
+            &theme,
+            320.0,
+            120.0,
+            None,
+            "root",
+            None,
+            &[],
+        );
+
+        let grid = tree.children.first().expect("grid node");
+        assert_eq!(grid.tag, "box");
+        assert_eq!(
+            grid.attributes.get("data-mesh-element"),
+            Some(&"grid".to_string())
+        );
+        assert_eq!(
+            grid.accessibility.role,
+            mesh_core_elements::AccessibilityRole::Region
+        );
+        assert_eq!(grid.accessibility.label.as_deref(), Some("Main grid"));
+
+        let progress = grid
+            .children
+            .iter()
+            .find(|node| {
+                node.attributes
+                    .get("data-mesh-element")
+                    .is_some_and(|value| value == "progress")
+            })
+            .expect("progress node");
+        assert_eq!(progress.tag, "text");
+        assert_eq!(
+            progress.accessibility.role,
+            mesh_core_elements::AccessibilityRole::ProgressBar
+        );
+        assert_eq!(progress.accessibility.state.value.as_deref(), Some("50"));
+        assert_eq!(progress.accessibility.state.value_min, Some(0.0));
+        assert_eq!(progress.accessibility.state.value_max, Some(100.0));
+    }
+
+    #[test]
+    fn phase87_collects_source_tag_diagnostics_before_lowering() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<template>
+  <grid columns="1fr 2fr" />
+  <progress value="half" />
+</template>
+"#,
+        )
+        .unwrap();
+        let template = component.template.expect("template");
+        let diagnostics: Vec<_> = template
+            .root
+            .iter()
+            .filter_map(|node| match node {
+                TemplateNode::Element(element) => Some(collect_element_diagnostics(element)),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.tag == "grid"
+                && diagnostic.name == "columns"
+                && diagnostic.kind == ElementDiagnosticKind::InvalidAttributeValue
+        }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.tag == "progress"
+                && diagnostic.name == "value"
+                && diagnostic.kind == ElementDiagnosticKind::InvalidAttributeValue
+        }));
     }
 }

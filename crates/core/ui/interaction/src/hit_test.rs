@@ -87,6 +87,7 @@ pub fn node_tooltip_text(node: &WidgetNode) -> Option<String> {
         .attributes
         .get("title")
         .cloned()
+        .or_else(|| node.attributes.get("tooltip").cloned())
         .or_else(|| node.attributes.get("aria-label").cloned())
         .or_else(|| node.attributes.get("description").cloned())
         .or_else(|| node.attributes.get("aria-description").cloned())
@@ -173,4 +174,32 @@ pub fn namespace_event_handlers(node: &mut WidgetNode, instance_key: &str) {
 pub fn parse_namespaced_handler(handler: &str) -> Option<(&str, &str)> {
     let rest = handler.strip_prefix("__mesh_embed__::")?;
     rest.rsplit_once("::")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mesh_core_elements::WidgetNode;
+
+    #[test]
+    fn phase87_tooltip_attribute_participates_in_inherited_tooltip_lookup() {
+        let mut owner = WidgetNode::new("box");
+        owner.attributes.insert("_mesh_key".into(), "owner".into());
+        owner
+            .attributes
+            .insert("tooltip".into(), "Open details".into());
+
+        let mut child = WidgetNode::new("icon");
+        child.attributes.insert("_mesh_key".into(), "child".into());
+        owner.children.push(child);
+
+        assert_eq!(
+            find_tooltip_text_by_key(&owner, "child").as_deref(),
+            Some("Open details")
+        );
+        assert_eq!(
+            find_tooltip_by_key(&owner, "child"),
+            Some(("owner".into(), "Open details".into()))
+        );
+    }
 }

@@ -557,10 +557,16 @@ static LABEL_FIELDS: &[ElementFieldDef] = &[field(
 static COMMON_ATTRIBUTES: &[ElementAttributeDef] = &[
     attr("id", ElementAttributeType::String, "Template id attribute"),
     attr("class", ElementAttributeType::String, "Style class list"),
+    attr("style", ElementAttributeType::String, "Inline style rules"),
     attr(
         "ref",
         ElementAttributeType::String,
         "Template ref attribute",
+    ),
+    attr(
+        "data-mesh-element",
+        ElementAttributeType::String,
+        "Original source element tag before runtime lowering",
     ),
     attr("label", ElementAttributeType::String, "Accessible label"),
     attr(
@@ -568,14 +574,110 @@ static COMMON_ATTRIBUTES: &[ElementAttributeDef] = &[
         ElementAttributeType::String,
         "Accessible label",
     ),
+    attr("role", ElementAttributeType::String, "Accessibility role"),
+    attr(
+        "aria-role",
+        ElementAttributeType::String,
+        "Accessibility role override",
+    ),
+    attr("title", ElementAttributeType::String, "Accessible title"),
     attr("disabled", ElementAttributeType::Boolean, "Disabled state"),
     attr("readonly", ElementAttributeType::Boolean, "Read-only state"),
     attr("required", ElementAttributeType::Boolean, "Required state"),
     attr("value", ElementAttributeType::String, "Current value"),
+    attr("min", ElementAttributeType::Number, "Minimum value"),
+    attr("max", ElementAttributeType::Number, "Maximum value"),
     attr("checked", ElementAttributeType::Boolean, "Checked state"),
     attr("selected", ElementAttributeType::Boolean, "Selected state"),
     attr("expanded", ElementAttributeType::Boolean, "Expanded state"),
     attr("invalid", ElementAttributeType::Boolean, "Invalid state"),
+    attr("align", ElementAttributeType::String, "Layout alignment"),
+    attr(
+        "justify",
+        ElementAttributeType::String,
+        "Main-axis layout justification",
+    ),
+    attr("spacing", ElementAttributeType::Number, "Layout spacing"),
+    attr("gap", ElementAttributeType::Number, "Layout gap"),
+    attr("width", ElementAttributeType::String, "Requested width"),
+    attr("height", ElementAttributeType::String, "Requested height"),
+    attr("min-width", ElementAttributeType::String, "Minimum width"),
+    attr("max-width", ElementAttributeType::String, "Maximum width"),
+    attr("min-height", ElementAttributeType::String, "Minimum height"),
+    attr("max-height", ElementAttributeType::String, "Maximum height"),
+    attr(
+        "overflow",
+        ElementAttributeType::String,
+        "Overflow behavior",
+    ),
+    attr(
+        "overflow-x",
+        ElementAttributeType::String,
+        "Horizontal overflow behavior",
+    ),
+    attr(
+        "overflow-y",
+        ElementAttributeType::String,
+        "Vertical overflow behavior",
+    ),
+    attr(
+        "scroll-x",
+        ElementAttributeType::Number,
+        "Initial horizontal scroll offset",
+    ),
+    attr(
+        "scroll-y",
+        ElementAttributeType::Number,
+        "Initial vertical scroll offset",
+    ),
+    attr(
+        "columns",
+        ElementAttributeType::String,
+        "Conservative grid column track list",
+    ),
+    attr(
+        "rows",
+        ElementAttributeType::String,
+        "Conservative grid row track list",
+    ),
+    attr(
+        "column",
+        ElementAttributeType::Number,
+        "Grid column placement",
+    ),
+    attr("row", ElementAttributeType::Number, "Grid row placement"),
+    attr(
+        "column-span",
+        ElementAttributeType::Number,
+        "Grid column span",
+    ),
+    attr("row-span", ElementAttributeType::Number, "Grid row span"),
+    attr("layer", ElementAttributeType::Number, "Stacking layer"),
+    attr("for", ElementAttributeType::String, "Associated element id"),
+    attr("src", ElementAttributeType::String, "Image or icon source"),
+    attr(
+        "name",
+        ElementAttributeType::String,
+        "Icon or shortcut name",
+    ),
+    attr(
+        "alt",
+        ElementAttributeType::String,
+        "Accessible alternate text",
+    ),
+    attr("size", ElementAttributeType::Number, "Display size hint"),
+    attr("key", ElementAttributeType::String, "Shortcut key label"),
+    attr("tooltip", ElementAttributeType::String, "Tooltip text"),
+    attr(
+        "tooltip-for",
+        ElementAttributeType::String,
+        "Tooltip owner element id",
+    ),
+    attr(
+        "indeterminate",
+        ElementAttributeType::Boolean,
+        "Progress has no determinate value",
+    ),
 ];
 
 static COMMON_STATES: &[ElementStateFlag] = &[
@@ -614,6 +716,11 @@ static COMMON_STYLE_HOOKS: &[&str] = &[
     "invalid",
     "active",
     "value",
+    "layout",
+    "display",
+    "structure",
+    "progress",
+    "tooltip",
 ];
 
 static HTML_REF: &[ElementCompatibilityRef] = &[compat(
@@ -1279,12 +1386,11 @@ pub fn common_state_flags() -> &'static [ElementStateFlag] {
     COMMON_STATES
 }
 
-pub fn validate_element_attribute(
-    tag: &str,
-    name: &str,
-    _value: &str,
-) -> Option<ElementDiagnostic> {
+pub fn validate_element_attribute(tag: &str, name: &str, value: &str) -> Option<ElementDiagnostic> {
     let contract = element_contract_for_tag(tag)?;
+    if let Some(diagnostic) = validate_phase87_attribute_value(tag, name, value) {
+        return Some(diagnostic);
+    }
     if contract.attributes.iter().any(|attr| attr.name == name)
         || name.starts_with("data-")
         || name.starts_with("aria-")
@@ -1309,6 +1415,100 @@ pub fn validate_element_attribute(
                 .join(", ")
         ),
     })
+}
+
+fn validate_phase87_attribute_value(
+    tag: &str,
+    name: &str,
+    value: &str,
+) -> Option<ElementDiagnostic> {
+    match (tag, name) {
+        ("grid", "columns" | "rows") => validate_grid_tracks(tag, name, value),
+        ("progress", "min" | "max" | "value") => validate_number_attribute(tag, name, value),
+        ("progress", "indeterminate") => validate_bool_attribute(tag, name, value),
+        ("tooltip", "tooltip-for") if value.trim().is_empty() => Some(invalid_attr(
+            tag,
+            name,
+            "tooltip-for must reference a non-empty owner id",
+            "Set tooltip-for to the id of the element that owns this tooltip.",
+        )),
+        ("section" | "header" | "footer" | "group" | "form-row", "value" | "checked") => {
+            Some(invalid_attr(
+                tag,
+                name,
+                "structure elements do not expose control value state",
+                "Move value state to an input/control element or remove the attribute.",
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn validate_grid_tracks(tag: &str, name: &str, value: &str) -> Option<ElementDiagnostic> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Some(invalid_attr(
+            tag,
+            name,
+            "grid tracks cannot be empty",
+            "Use a space-separated list of fixed pixel values or auto tracks.",
+        ));
+    }
+
+    for track in trimmed.split_whitespace() {
+        if track == "auto" {
+            continue;
+        }
+        if let Some(px) = track.strip_suffix("px") {
+            if px.parse::<f32>().is_ok_and(|value| value >= 0.0) {
+                continue;
+            }
+        }
+        return Some(invalid_attr(
+            tag,
+            name,
+            "unsupported grid track value",
+            "Use only fixed pixel tracks like 120px or auto in Phase 87.",
+        ));
+    }
+
+    None
+}
+
+fn validate_number_attribute(tag: &str, name: &str, value: &str) -> Option<ElementDiagnostic> {
+    if value.trim().is_empty() || value.trim().parse::<f32>().is_ok() {
+        return None;
+    }
+
+    Some(invalid_attr(
+        tag,
+        name,
+        "expected a numeric value",
+        "Use a numeric literal or a binding that resolves to a number.",
+    ))
+}
+
+fn validate_bool_attribute(tag: &str, name: &str, value: &str) -> Option<ElementDiagnostic> {
+    if matches!(value.trim(), "" | "true" | "false") {
+        return None;
+    }
+
+    Some(invalid_attr(
+        tag,
+        name,
+        "expected a boolean value",
+        "Use true, false, or omit the value for true.",
+    ))
+}
+
+fn invalid_attr(tag: &str, name: &str, message: &str, action: &str) -> ElementDiagnostic {
+    ElementDiagnostic {
+        tag: tag.to_string(),
+        name: name.to_string(),
+        kind: ElementDiagnosticKind::InvalidAttributeValue,
+        message: format!("invalid attribute '{name}' on <{tag}>: {message}"),
+        action: action.to_string(),
+    }
 }
 
 pub fn validate_element_event(tag: &str, event_name: &str) -> Option<ElementDiagnostic> {
@@ -1719,6 +1919,94 @@ mod tests {
         ] {
             assert!(flags.contains(&flag), "missing {flag:?}");
         }
+    }
+
+    #[test]
+    fn phase87_layout_display_contract_exposes_required_metadata() {
+        let grid = element_contract_for_tag("grid").expect("grid contract");
+        assert!(grid.attributes.iter().any(|attr| attr.name == "columns"));
+        assert!(grid.attributes.iter().any(|attr| attr.name == "rows"));
+        assert!(grid.attributes.iter().any(|attr| attr.name == "column"));
+        assert!(grid.style_hooks.contains(&"layout"));
+
+        let scroll_area = element_contract_for_tag("scroll-area").expect("scroll-area contract");
+        assert!(
+            scroll_area
+                .attributes
+                .iter()
+                .any(|attr| attr.name == "overflow-y")
+        );
+
+        for tag in ["section", "header", "footer", "group", "form-row"] {
+            let contract = element_contract_for_tag(tag).expect("structure contract");
+            assert_eq!(contract.family, ElementFamily::Layout);
+            assert!(contract.attributes.iter().any(|attr| attr.name == "label"));
+            assert!(contract.style_hooks.contains(&"structure"));
+        }
+
+        let progress = element_contract_for_tag("progress").expect("progress contract");
+        assert_eq!(progress.accessibility.role, AccessibilityRole::ProgressBar);
+        assert!(progress.attributes.iter().any(|attr| attr.name == "min"));
+        assert!(progress.attributes.iter().any(|attr| attr.name == "max"));
+        assert!(
+            progress
+                .attributes
+                .iter()
+                .any(|attr| attr.name == "indeterminate")
+        );
+        assert!(progress.style_hooks.contains(&"progress"));
+
+        let meter = element_contract_for_tag("meter").expect("meter contract");
+        assert_eq!(meter.family, ElementFamily::Display);
+        assert_eq!(meter.accessibility.role, AccessibilityRole::ProgressBar);
+
+        for tag in ["badge", "avatar", "shortcut", "tooltip"] {
+            let contract = element_contract_for_tag(tag).expect("display contract");
+            assert_eq!(contract.family, ElementFamily::Display);
+            assert!(contract.style_hooks.contains(&"display"));
+        }
+    }
+
+    #[test]
+    fn phase87_layout_display_diagnostics_validate_values() {
+        let diagnostic = validate_element_attribute("grid", "columns", "1fr 2fr")
+            .expect("invalid grid track diagnostic");
+        assert_eq!(
+            diagnostic.kind,
+            ElementDiagnosticKind::InvalidAttributeValue
+        );
+        assert!(diagnostic.message.contains("unsupported grid track"));
+
+        assert!(validate_element_attribute("grid", "columns", "120px auto").is_none());
+
+        let diagnostic = validate_element_attribute("progress", "value", "half")
+            .expect("invalid progress value diagnostic");
+        assert_eq!(
+            diagnostic.kind,
+            ElementDiagnosticKind::InvalidAttributeValue
+        );
+        assert!(diagnostic.message.contains("expected a numeric value"));
+
+        let diagnostic = validate_element_attribute("progress", "indeterminate", "maybe")
+            .expect("invalid progress boolean diagnostic");
+        assert_eq!(
+            diagnostic.kind,
+            ElementDiagnosticKind::InvalidAttributeValue
+        );
+
+        let diagnostic = validate_element_attribute("tooltip", "tooltip-for", "")
+            .expect("invalid tooltip owner diagnostic");
+        assert_eq!(
+            diagnostic.kind,
+            ElementDiagnosticKind::InvalidAttributeValue
+        );
+
+        let diagnostic = validate_element_attribute("section", "value", "active")
+            .expect("structure value diagnostic");
+        assert_eq!(
+            diagnostic.kind,
+            ElementDiagnosticKind::InvalidAttributeValue
+        );
     }
 
     #[test]

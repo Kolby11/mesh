@@ -247,6 +247,109 @@ static IMAGE_ATTRS: &[AttrDef] = &[
     },
 ];
 
+static LAYOUT_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "align",
+        description: "Cross-axis alignment",
+    },
+    AttrDef {
+        name: "justify",
+        description: "Main-axis justification",
+    },
+    AttrDef {
+        name: "spacing",
+        description: "Spacing between children",
+    },
+    AttrDef {
+        name: "gap",
+        description: "Gap between children",
+    },
+    AttrDef {
+        name: "overflow",
+        description: "Overflow behavior",
+    },
+    AttrDef {
+        name: "overflow-x",
+        description: "Horizontal overflow behavior",
+    },
+    AttrDef {
+        name: "overflow-y",
+        description: "Vertical overflow behavior",
+    },
+];
+
+static GRID_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "columns",
+        description: "Grid columns as fixed px or auto tracks",
+    },
+    AttrDef {
+        name: "rows",
+        description: "Grid rows as fixed px or auto tracks",
+    },
+    AttrDef {
+        name: "column",
+        description: "Grid column placement",
+    },
+    AttrDef {
+        name: "row",
+        description: "Grid row placement",
+    },
+    AttrDef {
+        name: "column-span",
+        description: "Grid column span",
+    },
+    AttrDef {
+        name: "row-span",
+        description: "Grid row span",
+    },
+];
+
+static STACK_ATTRS: &[AttrDef] = &[AttrDef {
+    name: "layer",
+    description: "Layer order for overlapping children",
+}];
+
+static DISPLAY_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "label",
+        description: "Accessible label",
+    },
+    AttrDef {
+        name: "tooltip",
+        description: "Accessible tooltip text",
+    },
+];
+
+static SHORTCUT_ATTRS: &[AttrDef] = &[AttrDef {
+    name: "key",
+    description: "Shortcut key label",
+}];
+
+static TOOLTIP_ATTRS: &[AttrDef] = &[AttrDef {
+    name: "tooltip-for",
+    description: "ID of the element that owns this tooltip",
+}];
+
+static PROGRESS_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "value",
+        description: "Current progress value",
+    },
+    AttrDef {
+        name: "min",
+        description: "Minimum progress value",
+    },
+    AttrDef {
+        name: "max",
+        description: "Maximum progress value",
+    },
+    AttrDef {
+        name: "indeterminate",
+        description: "Progress has no determinate value",
+    },
+];
+
 static BUTTON_ATTRS: &[AttrDef] = &[AttrDef {
     name: "variant",
     description: "Visual variant: filled | outlined | text | tonal",
@@ -350,7 +453,15 @@ pub static TAG_DEFS: &[TagDef] = &[
         self_closing: false,
         description: "Vertical layout container.",
         bases: BASE_MESH,
-        attributes: NO_ATTRS,
+        attributes: LAYOUT_ATTRS,
+    },
+    TagDef {
+        name: "grid",
+        category: TagCategory::Layout,
+        self_closing: false,
+        description: "Conservative grid container with fixed px or auto tracks.",
+        bases: BASE_MESH,
+        attributes: GRID_ATTRS,
     },
     TagDef {
         name: "stack",
@@ -358,7 +469,7 @@ pub static TAG_DEFS: &[TagDef] = &[
         self_closing: false,
         description: "Layered container where children overlap.",
         bases: BASE_MESH,
-        attributes: NO_ATTRS,
+        attributes: STACK_ATTRS,
     },
     TagDef {
         name: "scroll-view",
@@ -366,7 +477,15 @@ pub static TAG_DEFS: &[TagDef] = &[
         self_closing: false,
         description: "Semantic scrollable region.",
         bases: BASE_MESH,
-        attributes: NO_ATTRS,
+        attributes: LAYOUT_ATTRS,
+    },
+    TagDef {
+        name: "scroll-area",
+        category: TagCategory::Layout,
+        self_closing: false,
+        description: "Canonical semantic scrollable region.",
+        bases: BASE_MESH,
+        attributes: LAYOUT_ATTRS,
     },
     TagDef {
         name: "scroll",
@@ -385,12 +504,60 @@ pub static TAG_DEFS: &[TagDef] = &[
         attributes: NO_ATTRS,
     },
     TagDef {
+        name: "divider",
+        category: TagCategory::Layout,
+        self_closing: true,
+        description: "Horizontal or vertical visual divider line.",
+        bases: BASE_MESH,
+        attributes: NO_ATTRS,
+    },
+    TagDef {
         name: "separator",
         category: TagCategory::Layout,
         self_closing: true,
         description: "Horizontal or vertical visual separator line.",
         bases: BASE_MESH,
         attributes: NO_ATTRS,
+    },
+    TagDef {
+        name: "section",
+        category: TagCategory::Structure,
+        self_closing: false,
+        description: "Semantic section container.",
+        bases: BASE_MESH,
+        attributes: DISPLAY_ATTRS,
+    },
+    TagDef {
+        name: "header",
+        category: TagCategory::Structure,
+        self_closing: false,
+        description: "Semantic header container.",
+        bases: BASE_MESH,
+        attributes: DISPLAY_ATTRS,
+    },
+    TagDef {
+        name: "footer",
+        category: TagCategory::Structure,
+        self_closing: false,
+        description: "Semantic footer container.",
+        bases: BASE_MESH,
+        attributes: DISPLAY_ATTRS,
+    },
+    TagDef {
+        name: "group",
+        category: TagCategory::Structure,
+        self_closing: false,
+        description: "Semantic grouped controls or content.",
+        bases: BASE_MESH,
+        attributes: DISPLAY_ATTRS,
+    },
+    TagDef {
+        name: "form-row",
+        category: TagCategory::Structure,
+        self_closing: false,
+        description: "Semantic label/control row.",
+        bases: BASE_MESH,
+        attributes: DISPLAY_ATTRS,
     },
     TagDef {
         name: "text",
@@ -423,6 +590,54 @@ pub static TAG_DEFS: &[TagDef] = &[
         description: "Raster or vector image.",
         bases: BASE_MESH,
         attributes: IMAGE_ATTRS,
+    },
+    TagDef {
+        name: "badge",
+        category: TagCategory::Content,
+        self_closing: false,
+        description: "Compact status text.",
+        bases: BASE_MESH,
+        attributes: DISPLAY_ATTRS,
+    },
+    TagDef {
+        name: "progress",
+        category: TagCategory::Content,
+        self_closing: true,
+        description: "Progress indicator with determinate or indeterminate state.",
+        bases: BASE_MESH,
+        attributes: PROGRESS_ATTRS,
+    },
+    TagDef {
+        name: "meter",
+        category: TagCategory::Content,
+        self_closing: true,
+        description: "Reserved taxonomy entry; runtime behavior is deferred.",
+        bases: BASE_MESH,
+        attributes: NO_ATTRS,
+    },
+    TagDef {
+        name: "tooltip",
+        category: TagCategory::Content,
+        self_closing: false,
+        description: "Tooltip content associated with another element.",
+        bases: BASE_MESH,
+        attributes: TOOLTIP_ATTRS,
+    },
+    TagDef {
+        name: "avatar",
+        category: TagCategory::Content,
+        self_closing: true,
+        description: "Avatar image or icon.",
+        bases: BASE_MESH,
+        attributes: IMAGE_ATTRS,
+    },
+    TagDef {
+        name: "shortcut",
+        category: TagCategory::Content,
+        self_closing: false,
+        description: "Keyboard shortcut label.",
+        bases: BASE_MESH,
+        attributes: SHORTCUT_ATTRS,
     },
     TagDef {
         name: "button",
@@ -561,3 +776,71 @@ pub static TAG_DEFS: &[TagDef] = &[
         attributes: NO_ATTRS,
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tag(name: &str) -> &'static TagDef {
+        TAG_DEFS
+            .iter()
+            .find(|tag| tag.name == name)
+            .unwrap_or_else(|| panic!("missing tag {name}"))
+    }
+
+    fn attr_names(tag: &TagDef) -> Vec<&'static str> {
+        tag.all_attributes()
+            .into_iter()
+            .map(|attr| attr.name)
+            .collect()
+    }
+
+    #[test]
+    fn phase87_lsp_tag_knowledge_includes_layout_display_primitives() {
+        for name in [
+            "grid",
+            "scroll-area",
+            "section",
+            "header",
+            "footer",
+            "group",
+            "form-row",
+            "badge",
+            "progress",
+            "tooltip",
+            "avatar",
+            "shortcut",
+        ] {
+            tag(name);
+        }
+    }
+
+    #[test]
+    fn phase87_lsp_progress_and_grid_attributes_match_contract() {
+        let progress_attrs = attr_names(tag("progress"));
+        for name in ["value", "min", "max", "indeterminate"] {
+            assert!(
+                progress_attrs.contains(&name),
+                "progress should complete {name}"
+            );
+        }
+
+        let grid_attrs = attr_names(tag("grid"));
+        for name in [
+            "columns",
+            "rows",
+            "column",
+            "row",
+            "column-span",
+            "row-span",
+        ] {
+            assert!(grid_attrs.contains(&name), "grid should complete {name}");
+        }
+
+        let meter_attrs = attr_names(tag("meter"));
+        assert!(
+            !meter_attrs.contains(&"indeterminate"),
+            "meter stays taxonomy-only in Phase 87"
+        );
+    }
+}

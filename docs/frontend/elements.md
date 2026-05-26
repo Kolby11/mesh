@@ -22,7 +22,56 @@ Lowercase tags are built-in MESH elements. PascalCase tags are imported componen
 
 ## Common Attributes
 
-Common attributes include `id`, `class`, `ref`, `label`, `aria-label`, `disabled`, `readonly`, `required`, `value`, `checked`, `selected`, `expanded`, and `invalid`. Element-specific phases may add narrower attributes, but shared attributes keep diagnostics and Luau state handling consistent across families.
+Common attributes include `id`, `class`, `style`, `ref`, `label`, `aria-label`, `role`, `aria-role`, `title`, `disabled`, `readonly`, `required`, `value`, `checked`, `selected`, `expanded`, and `invalid`. Element-specific phases may add narrower attributes, but shared attributes keep diagnostics and Luau state handling consistent across families.
+
+## Layout And Display Elements
+
+Phase 87 makes the layout, structure, and display subset usable for shell composition. These layout and display elements are the first behavior slice built on the native taxonomy.
+
+Layout primitives:
+
+| Tag | Behavior |
+|-----|----------|
+| `box` | Generic retained container. |
+| `row` | Horizontal flex layout. |
+| `column` | Vertical flex layout. |
+| `grid` | Conservative source-level grid metadata. `columns` and `rows` accept fixed pixel tracks such as `120px` and `auto`; broader browser grid syntax is diagnosed. |
+| `stack` | Overlay composition using existing absolute positioning and z-order behavior. |
+| `spacer` | Flexible empty space, typically with flex growth or explicit size. |
+| `divider` / `separator` | Visual separator elements. |
+| `scroll-area` | Canonical semantic scroll region. Runtime behavior remains compatible with existing `scroll` and `scroll-view` tags. |
+
+Structure primitives:
+
+`section`, `header`, `footer`, `group`, and `form-row` lower to compatible runtime containers while preserving source semantics through metadata, accessibility roles, labels, and style hooks. Use these tags when the grouping matters to styling or assistive technology, not to request browser-like document behavior.
+
+Display primitives:
+
+| Tag | Behavior |
+|-----|----------|
+| `text` | Text content. |
+| `icon` | Icon theme or source-backed icon. |
+| `image` | Image source with accessible alternate text. |
+| `badge` | Compact status text. |
+| `progress` | Progress indicator metadata with `value`, `min`, `max`, and `indeterminate`. |
+| `tooltip` | Tooltip content or ownership metadata tied into the existing title/tooltip lookup path. |
+| `avatar` | Image/icon-backed avatar metadata. |
+| `shortcut` | Keyboard shortcut label metadata. |
+
+`meter` remains part of the taxonomy for future coverage, but Phase 87 does not create separate runtime behavior for it. Use `progress` for current progress-like display.
+
+Example:
+
+```xml
+<scroll-area class="panel-scroll" overflow-y="auto">
+  <grid columns="120px auto" gap="8" label="Download status">
+    <text>Package</text>
+    <badge>Ready</badge>
+    <text>Progress</text>
+    <progress value="{download_percent}" min="0" max="100" label="Download progress" />
+  </grid>
+</scroll-area>
+```
 
 ## Shared State
 
@@ -43,6 +92,12 @@ Native elements carry accessibility roles, focusability, labels, descriptions, v
 ## Diagnostics
 
 Unsupported attributes, unsupported event handlers, invalid values, invalid nesting, missing assets, and missing accessible names should produce actionable diagnostics. Diagnostics should identify the tag, the attribute or event, why it is unsupported, and what the author can do instead.
+
+For Phase 87, diagnostics intentionally keep the scope narrow: unsupported complex grid syntax is rejected, progress range/value fields must be numeric, boolean progress fields must be boolean-like, structure elements reject control value state, and tooltip ownership must point at a non-empty owner id.
+
+## Deferred Element Behavior
+
+The following families remain defined by the native element taxonomy but are not expanded by the Phase 87 behavior slice: action controls beyond existing button compatibility, text and numeric input variants, choice/menu controls, container/collection controls, full gallery proof, and distinct `meter` runtime behavior.
 
 ## Relationship To HTML Qt And Flutter
 
