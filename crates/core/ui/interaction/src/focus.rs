@@ -210,6 +210,8 @@ fn node_is_native_focusable(node: &WidgetNode) -> bool {
                 "menu-item",
                 "command-item",
                 "preference-row",
+                "tab",
+                "list-item",
             ],
         )
 }

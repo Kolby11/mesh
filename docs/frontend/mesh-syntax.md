@@ -97,6 +97,14 @@ reserved for explicitly imported custom components.
 | `spacer`         | Flexible spacing node          |
 | `surface`        | Surface composition primitive  |
 | `widget`         | Widget composition primitive   |
+| `tabs`           | Tab group container            |
+| `tab`            | Activatable tab                |
+| `accordion`      | Expandable section group       |
+| `details`        | Expandable details container   |
+| `popover`        | Popover container              |
+| `dialog`         | Dialog container               |
+| `sheet`          | Configured sheet container     |
+| `empty-state`    | Empty collection content       |
 
 HTML compatibility tags are intentionally not part of the component vocabulary.
 Use classes, metadata, accessibility attributes, and component boundaries for
@@ -130,6 +138,24 @@ static child options:
 boolean checked value. `radio` values are exclusive inside `radio-group`.
 Menus use `menu-item` or `command-item` children and activate through `onclick`
 or `onactivate`; put icons and shortcut labels inside the item markup.
+
+Container and collection elements preserve shell-native source semantics. Use
+`tabs` with activatable `tab` children, and `list` with activatable
+`list-item` children:
+
+```xml
+<tabs label="Debug views">
+  <tab selected="{current_view == 'overview'}" onactivate={showOverview}>Overview</tab>
+  <tab selected="{current_view == 'surfaces'}" onactivate={showSurfaces}>Surfaces</tab>
+</tabs>
+
+<list label="Surfaces">
+  <list-item selected="{is_active}" onactivate={openSurface}>
+    <text>{surface_id}</text>
+  </list-item>
+  <empty-state hidden="{has_rows}">No rows</empty-state>
+</list>
+```
 
 Custom component tags must be PascalCase and must be imported in the script
 block before they can be used. New author-facing code uses Luau

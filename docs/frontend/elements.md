@@ -135,6 +135,32 @@ Menus use roving focus for command rows. Use child `icon`, `text`, and `shortcut
 </menu>
 ```
 
+## Containers And Collections
+
+Phase 90 adds native source semantics for the container and collection elements needed by shipped shell surfaces.
+
+Containers include `popover`, `dialog`, `tabs`, `tab`, `accordion`, and `details`. `panel` and `sheet` remain configured containers for now. Popover focus and escape behavior continue to use the existing shell cross-surface popover system; Phase 90 does not add a full in-tree modal trap or backdrop model.
+
+Tabs are an activatable group:
+
+```xml
+<tabs label="Debug views">
+  <tab selected="{view == 'overview'}" onactivate={show_overview}>Overview</tab>
+  <tab selected="{view == 'surfaces'}" onactivate={show_surfaces}>Surfaces</tab>
+</tabs>
+```
+
+Collections start with `list` and `list-item`. List items can expose `selected`, `active`, `disabled`, `onclick`, and `onactivate`. `table`, `cell`, `tree`, and `empty-state` carry semantic metadata and style hooks, but rich table/tree keyboard models are deferred.
+
+```xml
+<list label="Surfaces">
+  <list-item selected="{is_current}" onactivate={open_surface}>
+    <text>{surface_id}</text>
+  </list-item>
+  <empty-state hidden="{has_rows}">No recent surface activity</empty-state>
+</list>
+```
+
 ## Shared State
 
 Shared state names are `disabled`, `read-only`, `required`, `focused`, `selected`, `checked`, `expanded`, `pressed`, `invalid`, `active`, and `value`. Not every element uses every state. Element metadata defines which states apply, and the runtime exposes applicable state through retained nodes, style hooks, accessibility metadata, and Luau event payloads.
@@ -161,9 +187,11 @@ For Phase 88, diagnostics reject button icon shortcut attributes, unsupported br
 
 For Phase 89, diagnostics validate choice/menu state attributes, require non-empty `option` and `radio` values when authored statically, and reject invalid boolean state values.
 
+For Phase 90, diagnostics validate container and collection boolean state attributes and require non-empty labels on interactive popover/dialog containers when authored statically.
+
 ## Deferred Element Behavior
 
-The following families remain defined by the native element taxonomy but are not expanded yet: rich data-driven option APIs, nested menu popups, full gallery proof, container/collection controls, distinct `meter` runtime behavior, distinct action button runtimes, and full multiline text editing.
+The following families remain defined by the native element taxonomy but are not expanded yet: rich data-driven option APIs, nested menu popups, full modal focus traps/backdrops, rich table/tree behavior, full gallery proof, distinct `meter` runtime behavior, distinct action button runtimes, and full multiline text editing.
 
 ## Relationship To HTML Qt And Flutter
 

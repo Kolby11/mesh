@@ -601,8 +601,10 @@ static COMMON_ATTRIBUTES: &[ElementAttributeDef] = &[
     attr("checked", ElementAttributeType::Boolean, "Checked state"),
     attr("selected", ElementAttributeType::Boolean, "Selected state"),
     attr("expanded", ElementAttributeType::Boolean, "Expanded state"),
+    attr("open", ElementAttributeType::Boolean, "Open state"),
     attr("pressed", ElementAttributeType::Boolean, "Pressed state"),
     attr("invalid", ElementAttributeType::Boolean, "Invalid state"),
+    attr("hidden", ElementAttributeType::Boolean, "Hidden state"),
     attr(
         "keybind",
         ElementAttributeType::String,
@@ -1487,6 +1489,19 @@ fn validate_phase87_attribute_value(
             | "menu-item" | "command-item" | "preference-row",
             "disabled" | "checked" | "selected" | "expanded" | "required" | "invalid",
         ) => validate_bool_attribute(tag, name, value),
+        (
+            "popover" | "dialog" | "sheet" | "tabs" | "tab" | "accordion" | "details" | "list"
+            | "list-item" | "table" | "cell" | "tree" | "empty-state",
+            "open" | "expanded" | "selected" | "active" | "disabled" | "hidden",
+        ) => validate_bool_attribute(tag, name, value),
+        ("dialog" | "popover", "label" | "aria-label") if value.trim().is_empty() => {
+            Some(invalid_attr(
+                tag,
+                name,
+                "interactive containers need a non-empty accessible label",
+                "Provide visible text, label, or aria-label for the container.",
+            ))
+        }
         ("option", "value") if value.trim().is_empty() => Some(invalid_attr(
             tag,
             name,
@@ -2236,6 +2251,23 @@ mod tests {
         assert!(validate_element_attribute("menu-item", "disabled", "true").is_none());
         assert!(validate_element_event("menu-item", "activate").is_none());
         assert!(validate_element_event("select", "change").is_none());
+    }
+
+    #[test]
+    fn phase90_container_and_collection_diagnostics_validate_state() {
+        let dialog =
+            validate_element_attribute("dialog", "aria-label", "").expect("label diagnostic");
+        assert_eq!(dialog.kind, ElementDiagnosticKind::InvalidAttributeValue);
+        assert!(dialog.message.contains("accessible label"));
+
+        let tab =
+            validate_element_attribute("tab", "selected", "sometimes").expect("bool diagnostic");
+        assert_eq!(tab.kind, ElementDiagnosticKind::InvalidAttributeValue);
+
+        assert!(validate_element_attribute("details", "open", "true").is_none());
+        assert!(validate_element_attribute("list-item", "selected", "false").is_none());
+        assert!(validate_element_event("tab", "activate").is_none());
+        assert!(validate_element_event("list-item", "activate").is_none());
     }
 
     #[test]

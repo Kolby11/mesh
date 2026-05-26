@@ -667,7 +667,10 @@ fn accessibility_for_element(
         .cloned();
     info.state.disabled = bool_attr(attributes, "disabled");
     info.state.checked = attributes.get("checked").map(|value| bool_value(value));
-    info.state.expanded = attributes.get("expanded").map(|value| bool_value(value));
+    info.state.expanded = attributes
+        .get("expanded")
+        .or_else(|| attributes.get("open"))
+        .map(|value| bool_value(value));
     info.state.selected = bool_attr(attributes, "selected");
     info.state.pressed = bool_attr(attributes, "pressed");
     info.state.busy = bool_attr(attributes, "busy");
@@ -1221,5 +1224,86 @@ mod tests {
             item.accessibility.keyboard_shortcut.as_deref(),
             Some("ctrl+k")
         );
+    }
+
+    #[test]
+    fn phase90_container_collection_source_semantics_survive_lowering() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<template>
+  <tabs label="Debug views">
+    <tab selected="true" onactivate={onOverview}>Overview</tab>
+    <tab onactivate={onSurfaces}>Surfaces</tab>
+  </tabs>
+  <list label="Surfaces">
+    <list-item selected="true" onactivate={onSurface}>Navigation</list-item>
+    <empty-state>No rows</empty-state>
+  </list>
+  <details open="true" label="Advanced">
+    <text>Details body</text>
+  </details>
+</template>
+"#,
+        )
+        .unwrap();
+        let manifest = test_manifest();
+        let theme = mesh_core_theme::default_theme();
+
+        let tree = build_widget_tree_from_component(
+            &component,
+            &manifest,
+            &theme,
+            320.0,
+            160.0,
+            None,
+            "root",
+            None,
+            &[],
+        );
+
+        let tabs = &tree.children[0];
+        assert_eq!(
+            tabs.attributes.get("data-mesh-element"),
+            Some(&"tabs".into())
+        );
+        let tab = &tabs.children[0];
+        assert_eq!(tab.attributes.get("data-mesh-element"), Some(&"tab".into()));
+        assert_eq!(
+            tab.event_handlers.get("activate"),
+            Some(&"onOverview".into())
+        );
+        assert_eq!(
+            tab.accessibility.role,
+            mesh_core_elements::AccessibilityRole::Tab
+        );
+        assert!(tab.accessibility.state.selected);
+
+        let list = &tree.children[1];
+        assert_eq!(list.tag, "column");
+        assert_eq!(
+            list.attributes.get("data-mesh-element"),
+            Some(&"list".into())
+        );
+        assert_eq!(
+            list.accessibility.role,
+            mesh_core_elements::AccessibilityRole::List
+        );
+        let item = &list.children[0];
+        assert_eq!(
+            item.attributes.get("data-mesh-element"),
+            Some(&"list-item".to_string())
+        );
+        assert_eq!(
+            item.accessibility.role,
+            mesh_core_elements::AccessibilityRole::ListItem
+        );
+        assert!(item.accessibility.state.selected);
+
+        let details = &tree.children[2];
+        assert_eq!(
+            details.attributes.get("data-mesh-element"),
+            Some(&"details".to_string())
+        );
+        assert_eq!(details.accessibility.state.expanded, Some(true));
     }
 }

@@ -53,6 +53,8 @@ impl FrontendSurfaceComponent {
                         "menu-item",
                         "command-item",
                         "preference-row",
+                        "tab",
+                        "list-item",
                     ],
                 )
         })
@@ -265,6 +267,8 @@ impl FrontendSurfaceComponent {
                             "menu-item",
                             "command-item",
                             "preference-row",
+                            "tab",
+                            "list-item",
                         ],
                     )
                     || node.event_handlers.contains_key("click")

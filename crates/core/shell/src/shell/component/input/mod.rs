@@ -136,7 +136,9 @@ impl FrontendSurfaceComponent {
                             .then_some(down_key.clone())
                     });
                     if let Some(node_key) = captured_click_key {
-                        if self.is_menu_item_key(&tree, &node_key) {
+                        if self.is_menu_item_key(&tree, &node_key)
+                            || self.is_container_collection_item_key(&tree, &node_key)
+                        {
                             let click_event = self.build_click_event(&tree, &node_key, x, y);
                             requests.extend(self.dispatch_activation_handlers(
                                 &tree,
@@ -427,7 +429,8 @@ impl FrontendSurfaceComponent {
                     ) && (self.is_checkable_choice_key(&tree, &focused_key)
                         || self.is_radio_key(&tree, &focused_key)
                         || self.is_option_key(&tree, &focused_key)
-                        || self.is_menu_item_key(&tree, &focused_key))
+                        || self.is_menu_item_key(&tree, &focused_key)
+                        || self.is_container_collection_item_key(&tree, &focused_key))
                     {
                         self.clear_selection();
                         self.invalidate_interaction_restyle();
@@ -435,7 +438,9 @@ impl FrontendSurfaceComponent {
                             requests.extend(self.activate_option_choice(&tree, &focused_key)?);
                         } else if self.is_radio_key(&tree, &focused_key) {
                             requests.extend(self.activate_radio_choice(&tree, &focused_key)?);
-                        } else if self.is_menu_item_key(&tree, &focused_key) {
+                        } else if self.is_menu_item_key(&tree, &focused_key)
+                            || self.is_container_collection_item_key(&tree, &focused_key)
+                        {
                             let click_event = self.build_click_event(&tree, &focused_key, 0.0, 0.0);
                             requests.extend(self.dispatch_activation_handlers(
                                 &tree,

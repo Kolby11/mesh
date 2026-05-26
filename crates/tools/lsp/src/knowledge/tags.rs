@@ -509,14 +509,44 @@ static MENU_ITEM_ATTRS: &[AttrDef] = &[
     },
 ];
 
-static LIST_ITEM_ATTRS: &[AttrDef] = &[
+static CONTAINER_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "open",
+        description: "Whether the container is open",
+    },
+    AttrDef {
+        name: "expanded",
+        description: "Whether the container is expanded",
+    },
+    AttrDef {
+        name: "label",
+        description: "Accessible label",
+    },
+];
+
+static TAB_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "selected",
+        description: "Whether this tab is selected",
+    },
+    AttrDef {
+        name: "disabled",
+        description: "Disables tab activation",
+    },
+];
+
+static COLLECTION_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "selected",
         description: "Whether this item is selected",
     },
     AttrDef {
         name: "disabled",
-        description: "Disables the list item",
+        description: "Disables item activation",
+    },
+    AttrDef {
+        name: "active",
+        description: "Marks the active row or item",
     },
 ];
 
@@ -986,17 +1016,105 @@ pub static TAG_DEFS: &[TagDef] = &[
         name: "list",
         category: TagCategory::Structure,
         self_closing: false,
-        description: "List container.",
-        bases: BASE_MESH,
-        attributes: NO_ATTRS,
+        description: "Selectable collection container.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: CONTAINER_ATTRS,
     },
     TagDef {
         name: "list-item",
         category: TagCategory::Structure,
         self_closing: false,
-        description: "A single item inside a list.",
+        description: "Activatable item inside a list.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: COLLECTION_ATTRS,
+    },
+    TagDef {
+        name: "empty-state",
+        category: TagCategory::Structure,
+        self_closing: false,
+        description: "Fallback content shown when a collection is empty.",
         bases: BASE_MESH,
-        attributes: LIST_ITEM_ATTRS,
+        attributes: CONTAINER_ATTRS,
+    },
+    TagDef {
+        name: "tabs",
+        category: TagCategory::Composition,
+        self_closing: false,
+        description: "Tab group container.",
+        bases: BASE_MESH,
+        attributes: CONTAINER_ATTRS,
+    },
+    TagDef {
+        name: "tab",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Activatable tab inside tabs.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: TAB_ATTRS,
+    },
+    TagDef {
+        name: "accordion",
+        category: TagCategory::Composition,
+        self_closing: false,
+        description: "Expandable section group.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: CONTAINER_ATTRS,
+    },
+    TagDef {
+        name: "details",
+        category: TagCategory::Composition,
+        self_closing: false,
+        description: "Expandable details container.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: CONTAINER_ATTRS,
+    },
+    TagDef {
+        name: "popover",
+        category: TagCategory::Composition,
+        self_closing: false,
+        description: "Popover container using shell popover focus behavior when surfaced separately.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: CONTAINER_ATTRS,
+    },
+    TagDef {
+        name: "dialog",
+        category: TagCategory::Composition,
+        self_closing: false,
+        description: "Dialog container; full modal trapping is deferred.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: CONTAINER_ATTRS,
+    },
+    TagDef {
+        name: "sheet",
+        category: TagCategory::Composition,
+        self_closing: false,
+        description: "Configured sheet container.",
+        bases: BASE_MESH,
+        attributes: CONTAINER_ATTRS,
+    },
+    TagDef {
+        name: "table",
+        category: TagCategory::Structure,
+        self_closing: false,
+        description: "Semantic table collection; rich behavior is deferred.",
+        bases: BASE_MESH,
+        attributes: CONTAINER_ATTRS,
+    },
+    TagDef {
+        name: "cell",
+        category: TagCategory::Structure,
+        self_closing: false,
+        description: "Semantic table cell.",
+        bases: BASE_MESH,
+        attributes: COLLECTION_ATTRS,
+    },
+    TagDef {
+        name: "tree",
+        category: TagCategory::Structure,
+        self_closing: false,
+        description: "Semantic tree collection; rich behavior is deferred.",
+        bases: BASE_MESH,
+        attributes: CONTAINER_ATTRS,
     },
     TagDef {
         name: "slot",
@@ -1189,5 +1307,38 @@ mod tests {
         assert!(menu_item_attrs.contains(&"onactivate"));
         assert!(menu_item_attrs.contains(&"disabled"));
         assert!(menu_item_attrs.contains(&"keybind"));
+    }
+
+    #[test]
+    fn phase90_lsp_container_and_collection_tags_include_authoring_attrs() {
+        for name in [
+            "popover",
+            "dialog",
+            "sheet",
+            "tabs",
+            "tab",
+            "accordion",
+            "details",
+            "list",
+            "list-item",
+            "table",
+            "cell",
+            "tree",
+            "empty-state",
+        ] {
+            tag(name);
+        }
+
+        let tab_attrs = attr_names(tag("tab"));
+        assert!(tab_attrs.contains(&"selected"));
+        assert!(tab_attrs.contains(&"onactivate"));
+
+        let item_attrs = attr_names(tag("list-item"));
+        assert!(item_attrs.contains(&"selected"));
+        assert!(item_attrs.contains(&"onactivate"));
+
+        let dialog_attrs = attr_names(tag("dialog"));
+        assert!(dialog_attrs.contains(&"open"));
+        assert!(dialog_attrs.contains(&"label"));
     }
 }

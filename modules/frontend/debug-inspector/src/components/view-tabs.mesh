@@ -1,30 +1,30 @@
 <template>
-  <row class="view-tabs">
-    <button class="view-tab" onclick={onOverview}>
+  <tabs class="view-tabs" label="Debug inspector views">
+    <tab class="view-tab" onactivate={onOverview} onclick={onOverview}>
       <column class="view-tab-copy">
         <text class="view-tab-label">Overview</text>
         <box class="view-tab-indicator" hidden={overview_indicator_hidden} />
       </column>
-    </button>
-    <button class="view-tab" onclick={onSurfaces}>
+    </tab>
+    <tab class="view-tab" onactivate={onSurfaces} onclick={onSurfaces}>
       <column class="view-tab-copy">
         <text class="view-tab-label">Surfaces</text>
         <box class="view-tab-indicator" hidden={surfaces_indicator_hidden} />
       </column>
-    </button>
-    <button class="view-tab" onclick={onBackendServices}>
+    </tab>
+    <tab class="view-tab" onactivate={onBackendServices} onclick={onBackendServices}>
       <column class="view-tab-copy">
         <text class="view-tab-label">Backend services</text>
         <box class="view-tab-indicator" hidden={backend_services_indicator_hidden} />
       </column>
-    </button>
-    <button class="view-tab" onclick={onBenchmark}>
+    </tab>
+    <tab class="view-tab" onactivate={onBenchmark} onclick={onBenchmark}>
       <column class="view-tab-copy">
         <text class="view-tab-label">Benchmark</text>
         <box class="view-tab-indicator" hidden={benchmark_indicator_hidden} />
       </column>
-    </button>
-  </row>
+    </tab>
+  </tabs>
 </template>
 
 <script lang="luau">

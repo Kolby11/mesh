@@ -211,6 +211,81 @@ end
 }
 
 #[test]
+fn phase90_tab_and_list_item_keyboard_activation_use_activate_handler() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+activated = ""
+function onTab()
+    activated = "tab"
+end
+function onListItem()
+    activated = "list-item"
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![
+        event_node_with_attrs(
+            "box",
+            "root/0",
+            0.0,
+            0.0,
+            120.0,
+            24.0,
+            &[("data-mesh-element", "tab")],
+            &[("activate", "onTab")],
+        ),
+        event_node_with_attrs(
+            "row",
+            "root/1",
+            0.0,
+            32.0,
+            120.0,
+            24.0,
+            &[("data-mesh-element", "list-item")],
+            &[("activate", "onListItem")],
+        ),
+    ]));
+    component.focused_key = Some("root/0".into());
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        runtime_value(&component, "activated"),
+        Some(serde_json::Value::String("tab".into()))
+    );
+
+    component.focused_key = Some("root/1".into());
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        runtime_value(&component, "activated"),
+        Some(serde_json::Value::String("list-item".into()))
+    );
+}
+
+#[test]
 fn keyboard_handlers_keydown_and_keyup_payloads_route_to_focused_node() {
     let mut component = test_frontend_component(
         r#"
