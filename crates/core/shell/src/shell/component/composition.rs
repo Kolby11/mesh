@@ -18,20 +18,27 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
     ) -> Option<WidgetNode> {
         if let Some(entry) = self.frontend_catalog.modules.get(&host.package.id) {
             if entry.compiled.local_components.contains_key(alias) {
+                let bind_this = props.get("__mesh_bind_this").cloned();
                 let props_json: HashMap<String, serde_json::Value> = props
                     .iter()
-                    .filter(|(key, _)| !key.starts_with("__mesh_binding_"))
+                    .filter(|(key, _)| {
+                        !key.starts_with("__mesh_binding_") && key.as_str() != "__mesh_bind_this"
+                    })
                     .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
                     .collect();
                 let instance_key = format!("{host_instance_key}/local:{alias}");
-                return Some(self.render_local_component(
+                let node = self.render_local_component(
                     host,
                     alias,
                     &instance_key,
                     &props_json,
                     container_width,
                     container_height,
-                ));
+                );
+                if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {
+                    self.bind_child_instance(host_instance_key, &binding, &instance_key);
+                }
+                return Some(node);
             }
         }
 
@@ -72,17 +79,24 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
 
         let props_json: HashMap<String, serde_json::Value> = props
             .iter()
-            .filter(|(key, _)| !key.starts_with("__mesh_binding_"))
+            .filter(|(key, _)| {
+                !key.starts_with("__mesh_binding_") && key.as_str() != "__mesh_bind_this"
+            })
             .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
             .collect();
+        let bind_this = props.get("__mesh_bind_this").cloned();
         let instance_key = format!("{host_instance_key}/import:{alias}");
-        Some(self.render_embedded_instance(
+        let node = self.render_embedded_instance(
             &instance_key,
             &module_id,
             &props_json,
             container_width,
             container_height,
-        ))
+        );
+        if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {
+            self.bind_child_instance(host_instance_key, &binding, &instance_key);
+        }
+        Some(node)
     }
 
     fn render_slot(
@@ -161,4 +175,45 @@ fn simple_state_binding(binding: &str) -> Option<String> {
         return None;
     }
     Some(trimmed.to_string())
+}
+
+impl FrontendSurfaceComponent {
+    pub(super) fn bind_child_instance(
+        &self,
+        host_instance_key: &str,
+        binding: &str,
+        child_instance_key: &str,
+    ) {
+        let child_snapshot = {
+            let runtimes = self.runtimes.lock().unwrap();
+            let Some(child) = runtimes.get(child_instance_key) else {
+                return;
+            };
+            let mut snapshot = child.script_ctx.public_member_snapshot();
+            if let serde_json::Value::Object(object) = &mut snapshot {
+                object.insert(
+                    "__instance_id".to_string(),
+                    serde_json::Value::String(child_instance_key.to_string()),
+                );
+            }
+            snapshot
+        };
+
+        if let Some(parent) = self.runtimes.lock().unwrap().get_mut(host_instance_key) {
+            if let Err(source) = parent.script_ctx.install_bound_instance_proxy(
+                host_instance_key,
+                binding,
+                child_instance_key,
+                &child_snapshot,
+            ) {
+                tracing::warn!(
+                    component_id = %parent.module_id,
+                    binding = %binding,
+                    child_instance_key = %child_instance_key,
+                    error = %source,
+                    "failed to install bound child instance proxy"
+                );
+            }
+        }
+    }
 }

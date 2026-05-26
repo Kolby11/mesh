@@ -32,25 +32,22 @@ impl FrontendSurfaceComponent {
         diagnostics: &Option<Diagnostics>,
         runtime: &mut EmbeddedFrontendRuntime,
     ) -> bool {
-        if !runtime.script_ctx.has_handler("onRender") {
+        if !runtime.script_ctx.has_handler("render") && !runtime.script_ctx.has_handler("onRender")
+        {
             return false;
         }
 
-        if let Err(source) = runtime.script_ctx.call_handler("onRender", &[]) {
+        if let Err(source) = runtime.script_ctx.call_render_lifecycle() {
             let component_id = runtime.module_id.clone();
             let error_message = source.to_string();
             tracing::warn!(
                 component_id = %component_id,
-                handler = "onRender",
+                handler = "render",
                 error = %error_message,
                 "frontend render hook failed"
             );
             if let Some(diagnostics) = diagnostics {
-                diagnostics.record_handler_error(
-                    component_id,
-                    "onRender".to_string(),
-                    error_message,
-                );
+                diagnostics.record_handler_error(component_id, "render".to_string(), error_message);
             }
             Self::drain_script_diagnostics(diagnostics, runtime);
             return false;
@@ -496,13 +493,78 @@ impl FrontendSurfaceComponent {
         }
         Self::drain_script_diagnostics(&self.diagnostics, runtime);
         let state_dirty = runtime.script_ctx.state().is_dirty();
-        let events = script_events_to_requests(runtime.script_ctx.drain_published_events());
+        let mut events = script_events_to_requests(runtime.script_ctx.drain_published_events());
+        let bound_calls = runtime.script_ctx.drain_bound_instance_calls();
         drop(runtimes);
+        let (bound_state_dirty, mut bound_events) = self.process_bound_instance_calls(bound_calls);
+        events.append(&mut bound_events);
         if state_dirty {
+            self.invalidate_script_state();
+        }
+        if bound_state_dirty {
             self.invalidate_script_state();
         }
 
         Ok(events)
+    }
+
+    fn process_bound_instance_calls(
+        &mut self,
+        calls: Vec<BoundInstanceCall>,
+    ) -> (bool, Vec<CoreRequest>) {
+        let mut pending = std::collections::VecDeque::from(calls);
+        let mut state_dirty = false;
+        let mut events = Vec::new();
+
+        while let Some(call) = pending.pop_front() {
+            let child_dirty = {
+                let mut runtimes = self.runtimes.lock().unwrap();
+                let Some(child) = runtimes.get_mut(&call.child_instance_key) else {
+                    continue;
+                };
+
+                if let Err(source) = child
+                    .script_ctx
+                    .call_handler(&call.function_name, &call.args)
+                {
+                    let error_message = source.to_string();
+                    tracing::warn!(
+                        component_id = %child.module_id,
+                        handler = %call.function_name,
+                        error = %error_message,
+                        "bound child instance call failed"
+                    );
+                    if let Some(diagnostics) = &self.diagnostics {
+                        diagnostics.record_handler_error(
+                            child.module_id.clone(),
+                            call.function_name.clone(),
+                            error_message,
+                        );
+                    }
+                    Self::drain_script_diagnostics(&self.diagnostics, child);
+                    continue;
+                }
+
+                Self::drain_script_diagnostics(&self.diagnostics, child);
+                pending.extend(child.script_ctx.drain_bound_instance_calls());
+                let dirty = child.script_ctx.state().is_dirty();
+                events.extend(script_events_to_requests(
+                    child.script_ctx.drain_published_events(),
+                ));
+                dirty
+            };
+
+            if child_dirty {
+                state_dirty = true;
+            }
+            self.bind_child_instance(
+                &call.parent_instance_key,
+                &call.binding,
+                &call.child_instance_key,
+            );
+        }
+
+        (state_dirty, events)
     }
 }
 

@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.15
 milestone_name: Persistent Storage System
-status: executing
-last_updated: "2026-05-26T12:48:00.000Z"
+status: complete
+last_updated: "2026-05-26T14:28:00.000Z"
 last_activity: 2026-05-26
 progress:
   total_phases: 5
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 20
+  completed_phases: 5
+  total_plans: 5
+  completed_plans: 5
+  percent: 100
 ---
 
 # State: MESH v1.15
@@ -24,10 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-26)
 
 ## Current Position
 
-Phase: 82 Luau Self Storage Binding
-Plan: pending
-Status: Phase 81 complete; ready for Phase 82 planning/execution
-Last activity: 2026-05-26 — Completed Phase 81 storage foundation
+Phase: 85 Storage Proof And Docs
+Plan: complete
+Status: v1.15 milestone implementation complete; ready for milestone audit/completion
+Last activity: 2026-05-26 — Completed Phase 85 storage proof and docs
 
 ## Decisions
 
@@ -59,6 +59,10 @@ Last activity: 2026-05-26 — Completed Phase 81 storage foundation
 - [Phase 79]: Automatic rerendering relies on tracked service fields, locale/theme rebuild invalidation, and normal parent state dirtying for bound child snapshots; `self.storage` read dependencies remain reserved for v1.15.
 - [Phase 80]: Shipped navigation/audio frontends and backend providers now demonstrate the v1.14 authoring model; compatibility paths remain tested and documented for migration.
 - [Phase 81]: Shell-owned storage foundation now provides scoped frontend/backend identities, deterministic sanitized paths, JSON document operations, temp-file plus rename persistence, scope-private documents, and non-fatal corrupt-file diagnostics.
+- [Phase 82]: Frontend and backend lifecycle `self` tables now expose `self.storage` with table reads, JSON-like assignment, nil deletion, `:snapshot()`, and non-fatal unsupported-value diagnostics.
+- [Phase 83]: Storage now loads before lifecycle code, coalesces in-memory writes until flush points, persists on frontend unmount/backend stop or explicit shutdown flush, preserves in-memory state on persistence failures, and emits non-fatal diagnostics.
+- [Phase 84]: Frontend render reads from `self.storage` are tracked by key, and storage writes mark script state dirty only when they touch a watched key; unwatched writes do not trigger rebuilds and explicit redraw remains available separately.
+- [Phase 85]: Shipped navigation language selection now uses `self.storage.language` as product proof, and author docs cover storage scope, values, lifecycle timing, diagnostics, and render dependency behavior.
 
 - Backend plugins use Luau for service logic; Rust core remains the wiring layer.
 - `require('@mesh/service')` is the frontend/backend interface.

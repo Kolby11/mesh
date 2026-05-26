@@ -15,7 +15,7 @@ local function debug_warn(message)
     mesh.log.warn("[pulseaudio-audio] " .. message)
 end
 
-function init()
+function start(self)
     mesh.service.set_poll_interval(500)
     debug_info("initialized with 500ms poll interval")
 end
@@ -65,9 +65,9 @@ local function refresh_state()
     end
 end
 
-local function emit_volume_changed()
+local function emit_volume_changed(self)
     if state.available then
-        mesh.service.emit_event("VolumeChanged", {
+        self.VolumeChanged:fire({
             device_id = "default",
             level = state.percent,
         })
@@ -100,56 +100,56 @@ local function resolve_sound_path(path)
     return path
 end
 
-function on_poll()
+function on_poll(self)
     refresh_state()
 end
 
-function on_command_volume_up()
+function on_command_volume_up(self)
     debug_info("received volume_up()")
     local volume = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", "+5%" })
     local mute = mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", "0" })
     refresh_state()
-    emit_volume_changed()
+    emit_volume_changed(self)
     return { ok = volume.success and mute.success, error = volume.stderr ~= "" and volume.stderr or mute.stderr }
 end
 
-function on_command_volume_down()
+function on_command_volume_down(self)
     debug_info("received volume_down()")
     local result = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", "-5%" })
     refresh_state()
-    emit_volume_changed()
+    emit_volume_changed(self)
     return { ok = result.success, error = result.stderr }
 end
 
-function on_command_set_volume()
+function on_command_set_volume(self)
     local payload = mesh.service.payload()
     local percent = command_percent_from_payload(payload)
     debug_info("received set_volume payload volume=" .. tostring(payload.volume) .. " percent=" .. tostring(percent))
     local result = mesh.exec("pactl", { "set-sink-volume", "@DEFAULT_SINK@", tostring(percent) .. "%" })
     refresh_state()
-    emit_volume_changed()
+    emit_volume_changed(self)
     return { ok = result.success, error = result.stderr }
 end
 
-function on_command_toggle_mute()
+function on_command_toggle_mute(self)
     debug_info("received toggle_mute()")
     local result = mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", "toggle" })
     refresh_state()
-    emit_volume_changed()
+    emit_volume_changed(self)
     return { ok = result.success, error = result.stderr }
 end
 
-function on_command_set_muted()
+function on_command_set_muted(self)
     local payload = mesh.service.payload()
     local muted = payload.muted == true
     debug_info("received set_muted(" .. tostring(muted) .. ")")
     local result = mesh.exec("pactl", { "set-sink-mute", "@DEFAULT_SINK@", muted and "1" or "0" })
     refresh_state()
-    emit_volume_changed()
+    emit_volume_changed(self)
     return { ok = result.success, error = result.stderr }
 end
 
-function on_command_play_sound()
+function on_command_play_sound(self)
     local payload = mesh.service.payload()
     local path = resolve_sound_path(payload.path)
     if not path then

@@ -276,6 +276,15 @@ pub async fn spawn_backend_service(
         }
     }
 
+    if let Err(err) = ctx.call_stop() {
+        let _ = tx.send(BackendServiceEvent::Failed {
+            service: service_name.clone(),
+            source_module: module_id.clone(),
+            stage: "stop".to_string(),
+            message: err.to_string(),
+        });
+    }
+
     let _ = tx.send(BackendServiceEvent::Stopped {
         service: service_name,
         source_module: module_id,

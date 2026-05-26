@@ -67,7 +67,7 @@ function battery_icon_for(percent_value)
     return "battery-empty"
 end
 
-function onRender()
+function render(self)
     if not power_ok or not power or not power.available then
         battery_icon_name = "battery-empty"
         battery_label = "N/A"

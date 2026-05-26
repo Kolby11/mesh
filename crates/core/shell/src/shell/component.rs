@@ -44,7 +44,9 @@ use mesh_core_frontend::{
     CompiledFrontendModule, FrontendRenderMode, compile_frontend_module, root_accessibility_role,
 };
 use mesh_core_locale::LocaleEngine;
-use mesh_core_scripting::{LocaleBoundState, ScriptContext, ScriptInterfaceImport};
+use mesh_core_scripting::{
+    BoundInstanceCall, LocaleBoundState, ScriptContext, ScriptInterfaceImport,
+};
 use mesh_core_theme::{Theme, default_theme};
 use mesh_core_wayland::{Edge, KeyboardMode, ShellSurface};
 use std::cell::RefCell;

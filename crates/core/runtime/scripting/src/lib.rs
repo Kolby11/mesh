@@ -21,6 +21,6 @@ pub mod storage;
 
 pub use backend::{BackendScriptContext, BackendScriptError, BackendScriptEvent};
 pub use context::{
-    LocaleBoundState, PublishedEvent, ScriptContext, ScriptError, ScriptInterfaceImport,
-    ScriptState,
+    BoundInstanceCall, LocaleBoundState, PublishedEvent, ScriptContext, ScriptError,
+    ScriptInterfaceImport, ScriptState,
 };

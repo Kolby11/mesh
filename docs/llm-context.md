@@ -435,7 +435,7 @@ Core wires the module. The module does the work.
 
 Backend modules emit raw data (volume percent, mute flag, etc.). Frontend modules transform that into display-ready state (icon names, labels, formatted strings) inside their own scripts.
 
-The mechanism: when a service update arrives, core calls `on_<service>_update()` on the frontend script if it declares that handler. The handler reads from `audio.*` (the raw payload) and writes to local script variables, which the template then binds to.
+The mechanism: render hooks and event handlers read from `audio.*` (the raw payload) and write to public script variables, which the template then binds to. Service field reads are tracked so changed fields rerender the affected component automatically.
 
 Example of what is WRONG:
 ```rust
@@ -479,14 +479,15 @@ Any bare non-local assignment in the `<script>` block is a public component
 member and is automatically reactive. Templates bind to public members with
 `{key}`. `local` variables/functions are private to the script. Runtime hooks
 receive `self`; use `self.meta` for current-instance identity/diagnostics and
-`self.storage` for shell-backed persistence.
+`self.storage` for shell-backed JSON-like persistence scoped to the current
+frontend component or backend provider instance.
 
 ```lua
 icon_name = "audio-volume-muted"  -- public, visible in template as {icon_name}
 local helper = function() end     -- private
 
 function render(self)
-    self.storage.last_icon = icon_name
+    local id = self.meta.instance_id
 end
 ```
 
@@ -509,6 +510,16 @@ end
 -- Call commands (published as events to the backend)
 audio.volume_up()
 audio.toggle_mute()
+```
+
+Declared interface events are direct named channels on the service proxy. The
+old `audio.events.VolumeChanged:subscribe(...)` form remains compatibility
+syntax.
+
+```lua
+audio.VolumeChanged:on(function(event)
+    audio_label = string.format("%d%%", event.level)
+end)
 ```
 
 LSP completions for `audio.` derive state fields and commands by analyzing the backend `main.luau` — no separate type declarations required.

@@ -44,16 +44,9 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
     } else {
         (Vec::new(), None)
     };
-    let imported_components: std::collections::HashSet<String> = imports
+    let imported_components: HashMap<String, ComponentImportTarget> = imports
         .iter()
-        .filter(|import| {
-            matches!(
-                import.target,
-                ComponentImportTarget::ComponentLocal(_)
-                    | ComponentImportTarget::ComponentModule(_)
-            )
-        })
-        .map(|import| import.alias.clone())
+        .map(|import| (import.alias.clone(), import.target.clone()))
         .collect();
 
     let template = blocks
@@ -715,6 +708,65 @@ mesh.state.set("ready", true)
     }
 
     #[test]
+    fn parses_luau_require_imports_without_stripping_source() {
+        let source = r#"
+<template>
+  <BatteryWidget />
+  <VolumeBar />
+</template>
+<script lang="luau">
+local BatteryWidget = require("./components/battery-widget.mesh")
+local VolumeBar = require("@mesh/volume-bar")
+local audio = require("mesh.audio@>=1.0")
+</script>
+"#;
+        let file = parse_component(source).unwrap();
+        assert_eq!(file.imports.len(), 3);
+        assert!(matches!(
+            file.imports[0].target,
+            ComponentImportTarget::ComponentLocal(_)
+        ));
+        assert!(matches!(
+            file.imports[1].target,
+            ComponentImportTarget::ComponentModule(_)
+        ));
+        assert!(matches!(
+            file.imports[2].target,
+            ComponentImportTarget::InterfaceApi { .. }
+        ));
+        let script = file.script.unwrap();
+        assert!(
+            script
+                .source
+                .contains("local BatteryWidget = require(\"./components/battery-widget.mesh\")")
+        );
+    }
+
+    #[test]
+    fn parses_component_bind_this_attribute() {
+        let source = r#"
+<template>
+  <AudioSlider bind:this="{audio_slider}" />
+</template>
+<script lang="luau">
+local AudioSlider = require("./audio-slider.mesh")
+</script>
+"#;
+        let file = parse_component(source).unwrap();
+        let tmpl = file.template.unwrap();
+        match &tmpl.root[0] {
+            TemplateNode::Component(component) => {
+                assert_eq!(component.name, "AudioSlider");
+                assert!(matches!(
+                    &component.props[0].value,
+                    AttributeValue::InstanceBinding(value) if value == "audio_slider"
+                ));
+            }
+            other => panic!("expected component ref, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn rejects_api_import_used_as_component_tag() {
         let source = r#"
 <template>
@@ -727,7 +779,7 @@ import Audio from "mesh.audio"
         let err = parse_component(source).unwrap_err();
         assert!(
             err.to_string()
-                .contains("component <Audio> is not imported"),
+                .contains("component <Audio> refers to interface import"),
             "unexpected error: {err}"
         );
     }
@@ -738,6 +790,21 @@ import Audio from "mesh.audio"
 <script lang="luau">
 import Thing from "./components/one.mesh"
 import Thing from "./components/two.mesh"
+</script>
+"#;
+        let err = parse_component(source).unwrap_err();
+        assert!(
+            err.to_string().contains("duplicate import alias `Thing`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_alias_between_import_and_require() {
+        let source = r#"
+<script lang="luau">
+import Thing from "./components/one.mesh"
+local Thing = require("./components/two.mesh")
 </script>
 "#;
         let err = parse_component(source).unwrap_err();

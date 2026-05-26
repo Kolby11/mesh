@@ -40,14 +40,14 @@
 </template>
 
 <script lang="luau">
-import AudioPopover from "@mesh/audio-popover"
-import BatteryButton from "./components/battery-button.mesh"
-import MetaLabel from "./components/meta-label.mesh"
-import MetaPill from "./components/meta-pill.mesh"
-import SettingsButton from "./components/settings-button.mesh"
-import VolumeButton from "./components/volume-button.mesh"
-import ThemeButton from "./components/theme-button.mesh"
-import LanguageButton from "./components/language-button.mesh"
+local AudioPopover = require("@mesh/audio-popover")
+local BatteryButton = require("./components/battery-button.mesh")
+local MetaLabel = require("./components/meta-label.mesh")
+local MetaPill = require("./components/meta-pill.mesh")
+local SettingsButton = require("./components/settings-button.mesh")
+local VolumeButton = require("./components/volume-button.mesh")
+local ThemeButton = require("./components/theme-button.mesh")
+local LanguageButton = require("./components/language-button.mesh")
 
 local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
@@ -65,7 +65,7 @@ local function clamp_percent(value)
     return percent
 end
 
-function onRender()
+function render(self)
     if audio_ok and audio and audio.available == true then
         local percent = clamp_percent(audio.percent)
         if audio.muted then
@@ -80,8 +80,8 @@ function onRender()
     end
 end
 
-if audio_ok and audio and audio.events and audio.events.VolumeChanged then
-    audio.events.VolumeChanged:subscribe(function(event)
+if audio_ok and audio and audio.VolumeChanged then
+    audio.VolumeChanged:on(function(event)
         local percent = clamp_percent(event.level)
         if audio and audio.muted then
             secondary_status_key = "nav.audio_muted_at"
@@ -203,13 +203,16 @@ end
     height: 100%;
     flex-shrink: 0;
     align-items: center;
-    gap: token(spacing.xs);
+    gap: 2px;
+    transition: gap token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
 .control-button-cell {
     height: 40px;
     flex-shrink: 0;
     align-items: center;
+    padding-inline: 1px;
+    padding-block: 0;
 }
 
 @keyframes status-pulse {
@@ -247,6 +250,10 @@ end
 
     .status-secondary-row {
         gap: token(spacing.xs);
+    }
+
+    .control-cluster {
+        gap: 1px;
     }
 
     .status-secondary {

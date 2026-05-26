@@ -69,12 +69,42 @@ pub(super) fn create_service_proxy(
             .unwrap_or_default(),
     )?;
     proxy.set("events", events_proxy)?;
+    let event_names = contract
+        .as_ref()
+        .map(|contract| {
+            contract
+                .events
+                .iter()
+                .map(|event| event.name.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let method_names = methods
+        .iter()
+        .map(|method| method.name.clone())
+        .collect::<HashSet<_>>();
+    let state_field_names = contract
+        .as_ref()
+        .map(|contract| {
+            contract
+                .state_fields
+                .iter()
+                .map(|field| field.name.clone())
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
 
     meta.set(
         "__index",
         lua.create_function(move |lua, (table, key): (Table, String)| {
             if key == "state" || key == "events" {
                 return table.get::<LuaValue>(key);
+            }
+            if event_names.iter().any(|name| name == &key)
+                && !method_names.contains(&key)
+                && !state_field_names.contains(&key)
+            {
+                return interface_event_channel(lua, &service_name, &key).map(LuaValue::Table);
             }
             // Case A: known contract method — dispatch as a service command.
             if let Some(method) = methods.iter().find(|m| m.name == key) {
@@ -192,6 +222,7 @@ pub(super) fn create_event_channel(lua: &Lua) -> mlua::Result<Table> {
             Ok(lua.create_function(move |_lua, ()| subscribers.raw_set(id, LuaValue::Nil))?)
         })?,
     )?;
+    channel.set("on", channel.get::<Function>("subscribe")?)?;
     channel.set(
         "emit",
         lua.create_function(move |_lua, (table, payload): (Table, LuaValue)| {
@@ -202,6 +233,7 @@ pub(super) fn create_event_channel(lua: &Lua) -> mlua::Result<Table> {
             Ok(())
         })?,
     )?;
+    channel.set("fire", channel.get::<Function>("emit")?)?;
     Ok(channel)
 }
 

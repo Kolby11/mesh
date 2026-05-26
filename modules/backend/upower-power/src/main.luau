@@ -4,10 +4,10 @@ state = {
     charging = false,
 }
 
-function init()
+function start(self)
     mesh.service.set_poll_interval(5000)
 end
 
-function on_poll()
+function on_poll(self)
     state = state
 end

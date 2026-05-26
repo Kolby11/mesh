@@ -429,6 +429,8 @@ fn build_component_ref(
             );
         } else if let AttributeValue::Binding(binding) = &attr.value {
             props.insert(format!("__mesh_binding_{}", attr.name), binding.clone());
+        } else if let AttributeValue::InstanceBinding(binding) = &attr.value {
+            props.insert("__mesh_bind_this".to_string(), binding.clone());
         }
     }
     if let Some(composition) = composition {
@@ -506,6 +508,7 @@ pub(crate) fn parse_attributes(
                     resolved.insert(attr.name.clone(), value);
                 }
             }
+            AttributeValue::InstanceBinding(_) => {}
             AttributeValue::EventHandler(handler) => {
                 let resolved_handler = resolve_event_handler_value(state, handler);
                 event_handlers.insert(normalize_event_handler_name(&attr.name), resolved_handler);

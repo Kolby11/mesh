@@ -2,9 +2,11 @@ use super::command::{BackendCommandOutcome, command_error_result, command_result
 use super::exec::{exec_denied_to_lua, missing_exec_capability, run_exec};
 use super::logging::log_message;
 use super::{BackendScriptError, MIN_POLL_INTERVAL_MS};
-use mlua::{Function, Lua, LuaSerdeExt, Value as LuaValue};
+use crate::storage::{ScopedStorage, StorageManager, StorageScope, create_lua_storage_table};
+use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value as JsonValue;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 /// Executes a backend module's Luau script.
@@ -25,6 +27,8 @@ pub struct BackendScriptContext {
     capabilities: HashSet<String>,
     pub(super) lua: Lua,
     runtime: Arc<Mutex<BackendRuntime>>,
+    builtin_globals: HashSet<String>,
+    storage: Arc<Mutex<ScopedStorage>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,6 +44,7 @@ struct BackendRuntime {
     pending_events: Vec<BackendScriptEvent>,
     current_payload: JsonValue,
     settings: JsonValue,
+    storage_diagnostics: Vec<String>,
 }
 
 impl BackendScriptContext {
@@ -67,14 +72,51 @@ impl BackendScriptContext {
         settings: JsonValue,
         capabilities: impl IntoIterator<Item = String>,
     ) -> Self {
+        Self::new_with_settings_capabilities_and_storage_root(
+            module_id,
+            settings,
+            capabilities,
+            default_runtime_storage_root(),
+        )
+    }
+
+    pub fn new_with_storage_root(
+        module_id: impl Into<String>,
+        storage_root: impl Into<PathBuf>,
+    ) -> Self {
+        Self::new_with_settings_capabilities_and_storage_root(
+            module_id,
+            serde_json::json!({}),
+            Vec::<String>::new(),
+            storage_root,
+        )
+    }
+
+    pub fn new_with_settings_capabilities_and_storage_root(
+        module_id: impl Into<String>,
+        settings: JsonValue,
+        capabilities: impl IntoIterator<Item = String>,
+        storage_root: impl Into<PathBuf>,
+    ) -> Self {
         let module_id = module_id.into();
         let lua = Lua::new();
+        let storage = StorageManager::new(storage_root.into()).open(StorageScope::backend(
+            module_id.clone(),
+            module_id.clone(),
+            module_id.clone(),
+        ));
+        let storage_diagnostics = storage
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.reason.clone())
+            .collect();
         let runtime = Arc::new(Mutex::new(BackendRuntime {
             poll_interval_ms: 1000,
             pending_emit: None,
             pending_events: Vec::new(),
             current_payload: JsonValue::Null,
             settings,
+            storage_diagnostics,
         }));
 
         let mut ctx = Self {
@@ -82,9 +124,17 @@ impl BackendScriptContext {
             capabilities: capabilities.into_iter().collect(),
             lua,
             runtime,
+            builtin_globals: HashSet::new(),
+            storage: Arc::new(Mutex::new(storage)),
         };
         ctx.install_host_api()
             .expect("backend host API setup should succeed");
+        ctx.builtin_globals = ctx
+            .lua
+            .globals()
+            .pairs::<String, LuaValue>()
+            .filter_map(|result| result.ok().map(|(key, _)| key))
+            .collect();
         ctx
     }
 
@@ -106,23 +156,63 @@ impl BackendScriptContext {
         Ok(())
     }
 
-    /// Call the backend script's required `init()` entrypoint once after load.
+    /// Call the backend script's startup entrypoint once after load.
+    ///
+    /// Canonical v1.14 scripts use `start(self)`. Legacy `init()` remains a
+    /// compatibility fallback and receives the same current-provider context.
     pub fn call_init(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
         self.reset_for_call(JsonValue::Null);
         let globals = self.lua.globals();
-        let init =
-            globals
-                .get::<Function>("init")
-                .map_err(|_| BackendScriptError::MissingEntrypoint {
+        let entrypoint_name = if globals.get::<Function>("start").is_ok() {
+            "start"
+        } else {
+            "init"
+        };
+        let entrypoint = globals.get::<Function>(entrypoint_name).map_err(|_| {
+            BackendScriptError::MissingEntrypoint {
+                module_id: self.module_id.clone(),
+                name: "start".to_string(),
+            }
+        })?;
+        let current_self =
+            self.current_self_table()
+                .map_err(|err| BackendScriptError::Runtime {
                     module_id: self.module_id.clone(),
-                    name: "init".to_string(),
+                    message: err.to_string(),
                 })?;
-        init.call::<()>(())
+        entrypoint
+            .call::<()>(current_self)
             .map_err(|err| BackendScriptError::Runtime {
                 module_id: self.module_id.clone(),
                 message: err.to_string(),
             })?;
         self.take_service_state_snapshot()
+    }
+
+    /// Call the backend script's optional `stop(self)` lifecycle hook.
+    pub fn call_stop(&mut self) -> Result<(), BackendScriptError> {
+        self.reset_for_call(JsonValue::Null);
+        let globals = self.lua.globals();
+        let stop = match globals.get::<Function>("stop") {
+            Ok(stop) => stop,
+            Err(_) => {
+                self.flush_storage();
+                return Ok(());
+            }
+        };
+        let current_self =
+            self.current_self_table()
+                .map_err(|err| BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: err.to_string(),
+                })?;
+        stop.call::<()>(current_self)
+            .map_err(|err| BackendScriptError::Runtime {
+                module_id: self.module_id.clone(),
+                message: err.to_string(),
+            })?;
+        self.flush_storage();
+        Ok(())
     }
 
     /// Call `on_poll()` if it exists. Returns any exported service state.
@@ -133,8 +223,14 @@ impl BackendScriptContext {
             Ok(handler) => handler,
             Err(_) => return Ok(None),
         };
+        let current_self =
+            self.current_self_table()
+                .map_err(|err| BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: err.to_string(),
+                })?;
         handler
-            .call::<()>(())
+            .call::<()>(current_self)
             .map_err(|err| BackendScriptError::Runtime {
                 module_id: self.module_id.clone(),
                 message: err.to_string(),
@@ -160,8 +256,14 @@ impl BackendScriptContext {
             Ok(handler) => handler,
             Err(_) => return Ok(None),
         };
+        let current_self =
+            self.current_self_table()
+                .map_err(|err| BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: err.to_string(),
+                })?;
         handler
-            .call::<()>(())
+            .call::<()>(current_self)
             .map_err(|err| BackendScriptError::Runtime {
                 module_id: self.module_id.clone(),
                 message: err.to_string(),
@@ -193,7 +295,13 @@ impl BackendScriptContext {
             }
         };
 
-        let returned = match handler.call::<LuaValue>(()) {
+        let current_self =
+            self.current_self_table()
+                .map_err(|err| BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: err.to_string(),
+                })?;
+        let returned = match handler.call::<LuaValue>(current_self) {
             Ok(returned) => returned,
             Err(err) => {
                 let message = err.to_string();
@@ -243,8 +351,43 @@ impl BackendScriptContext {
         std::mem::take(&mut self.runtime.lock().unwrap().pending_events)
     }
 
+    pub fn drain_storage_diagnostics(&self) -> Vec<String> {
+        std::mem::take(&mut self.runtime.lock().unwrap().storage_diagnostics)
+    }
+
+    pub fn flush_storage(&self) {
+        let result = self.storage.lock().unwrap().flush_if_dirty();
+        if let Err(error) = result {
+            self.runtime
+                .lock()
+                .unwrap()
+                .storage_diagnostics
+                .push(format!("storage persistence failed: {error}"));
+        }
+    }
+
+    pub fn public_function_names(&self) -> Vec<String> {
+        let globals = self.lua.globals();
+        let mut names = globals
+            .pairs::<String, LuaValue>()
+            .filter_map(|pair| {
+                let (name, value) = pair.ok()?;
+                if self.builtin_globals.contains(&name)
+                    || is_reserved_backend_hook(&name)
+                    || !matches!(value, LuaValue::Function(_))
+                {
+                    return None;
+                }
+                Some(name)
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
     fn install_host_api(&mut self) -> mlua::Result<()> {
         let globals = self.lua.globals();
+        globals.set("self", self.current_self_table()?)?;
         let mesh = self.lua.create_table()?;
         let service = self.lua.create_table()?;
         let log = self.lua.create_table()?;
@@ -420,4 +563,115 @@ impl BackendScriptContext {
     fn take_pending_emit(&self) -> Option<JsonValue> {
         self.runtime.lock().unwrap().pending_emit.take()
     }
+
+    fn current_self_table(&self) -> mlua::Result<mlua::Table> {
+        let current_self = self.lua.create_table()?;
+        let meta = self.lua.create_table()?;
+        meta.set("module_id", self.module_id.as_str())?;
+        meta.set("provider_id", self.module_id.as_str())?;
+        meta.set("kind", "backend")?;
+        meta.set("instance_id", self.module_id.as_str())?;
+        meta.set("diagnostics_id", self.module_id.as_str())?;
+        current_self.set("meta", meta)?;
+        let runtime_for_storage_diagnostics = Arc::clone(&self.runtime);
+        let storage = create_lua_storage_table(
+            &self.lua,
+            Arc::clone(&self.storage),
+            Arc::new(move |reason| {
+                runtime_for_storage_diagnostics
+                    .lock()
+                    .unwrap()
+                    .storage_diagnostics
+                    .push(reason);
+            }),
+            Arc::new(|_key| {}),
+            Arc::new(|_key| {}),
+        )?;
+        current_self.set("storage", storage)?;
+        let runtime = Arc::clone(&self.runtime);
+        let self_events_meta = self.lua.create_table()?;
+        self_events_meta.set(
+            "__index",
+            self.lua
+                .create_function(move |lua, (table, key): (Table, String)| {
+                    if key == "meta" {
+                        return table.get::<LuaValue>("meta");
+                    }
+                    if !is_named_event_channel(&key) {
+                        return Ok(LuaValue::Nil);
+                    }
+                    let channel = create_backend_event_channel(lua, &key, Arc::clone(&runtime))?;
+                    table.set(key.as_str(), channel.clone())?;
+                    Ok(LuaValue::Table(channel))
+                })?,
+        )?;
+        current_self.set_metatable(Some(self_events_meta))?;
+        Ok(current_self)
+    }
+}
+
+fn is_reserved_backend_hook(name: &str) -> bool {
+    matches!(name, "init" | "start" | "stop")
+}
+
+fn is_named_event_channel(name: &str) -> bool {
+    name.chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_uppercase())
+        && name
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn default_runtime_storage_root() -> PathBuf {
+    std::env::temp_dir()
+        .join("mesh")
+        .join("runtime-storage")
+        .join(std::process::id().to_string())
+}
+
+fn create_backend_event_channel(
+    lua: &Lua,
+    event_name: &str,
+    runtime: Arc<Mutex<BackendRuntime>>,
+) -> mlua::Result<Table> {
+    let channel = lua.create_table()?;
+    let subscribers = lua.create_table()?;
+    channel.set("__subscribers", subscribers.clone())?;
+    channel.set(
+        "subscribe",
+        lua.create_function(move |lua, (table, callback): (Table, Function)| {
+            let subscribers: Table = table.get("__subscribers")?;
+            let id = subscribers.raw_len() + 1;
+            subscribers.raw_set(id, callback)?;
+            Ok(lua.create_function(move |_lua, ()| subscribers.raw_set(id, LuaValue::Nil))?)
+        })?,
+    )?;
+    channel.set("on", channel.get::<Function>("subscribe")?)?;
+
+    let fire_event_name = event_name.to_string();
+    channel.set(
+        "fire",
+        lua.create_function(move |lua, (table, payload): (Table, Option<LuaValue>)| {
+            let payload = match payload {
+                Some(value) => lua.from_value::<JsonValue>(value)?,
+                None => JsonValue::Null,
+            };
+            let subscribers: Table = table.get("__subscribers")?;
+            for callback in subscribers.sequence_values::<Function>().flatten() {
+                callback.call::<()>(lua.to_value(&payload)?)?;
+            }
+            runtime
+                .lock()
+                .unwrap()
+                .pending_events
+                .push(BackendScriptEvent {
+                    name: fire_event_name.clone(),
+                    payload,
+                });
+            Ok(())
+        })?,
+    )?;
+    channel.set("emit", channel.get::<Function>("fire")?)?;
+    Ok(channel)
 }

@@ -1,5 +1,20 @@
 use super::*;
 use mlua::{Function, Table};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn temp_storage_root(name: &str) -> std::path::PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "mesh-backend-storage-{name}-{}-{nanos}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_file(&root);
+    root
+}
 
 fn bundled_backend_script(path: &str) -> String {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -21,6 +36,197 @@ fn loads_poll_interval_from_script() {
         .unwrap();
     ctx.call_init().unwrap();
     assert_eq!(ctx.poll_interval_ms(), 250);
+}
+
+#[test]
+fn start_receives_backend_self_meta() {
+    let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.load_script(
+        "state = {}\n\
+         function start(self)\n\
+           state = { module_id = self.meta.module_id, provider_id = self.meta.provider_id, kind = self.meta.kind, diagnostics_id = self.meta.diagnostics_id }\n\
+         end",
+    )
+    .unwrap();
+
+    let payload = ctx.call_init().unwrap().unwrap();
+
+    assert_eq!(
+        payload.get("module_id").and_then(|v| v.as_str()),
+        Some("@test/backend")
+    );
+    assert_eq!(
+        payload.get("provider_id").and_then(|v| v.as_str()),
+        Some("@test/backend")
+    );
+    assert_eq!(
+        payload.get("kind").and_then(|v| v.as_str()),
+        Some("backend")
+    );
+    assert_eq!(
+        payload.get("diagnostics_id").and_then(|v| v.as_str()),
+        Some("@test/backend")
+    );
+}
+
+#[test]
+fn start_receives_backend_self_storage() {
+    let mut ctx = BackendScriptContext::new("@test/storage-backend");
+    ctx.load_script(
+        "state = {}\n\
+         function start(self)\n\
+           self.storage.mode = \"compact\"\n\
+           self.storage.settings = { visible = true, order = { \"a\", \"b\" } }\n\
+           self.storage.removed = true\n\
+           self.storage.removed = nil\n\
+           self.storage.invalid = function() return true end\n\
+           local snapshot = self.storage:snapshot()\n\
+           state = { mode = self.storage.mode, missing = self.storage.removed == nil, visible = snapshot.settings.visible }\n\
+         end",
+    )
+    .unwrap();
+
+    let payload = ctx.call_init().unwrap().unwrap();
+
+    assert_eq!(
+        payload.get("mode").and_then(|v| v.as_str()),
+        Some("compact")
+    );
+    assert_eq!(payload.get("missing").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(payload.get("visible").and_then(|v| v.as_bool()), Some(true));
+
+    let diagnostics = ctx.drain_storage_diagnostics();
+    assert_eq!(diagnostics.len(), 1);
+    assert!(diagnostics[0].contains("unsupported storage value"));
+}
+
+#[test]
+fn backend_storage_flushes_on_stop_and_loads_before_start() {
+    let root = temp_storage_root("backend-flush");
+    let mut writer = BackendScriptContext::new_with_storage_root("@test/storage-lifecycle", &root);
+    writer
+        .load_script(
+            r#"
+state = {}
+
+function start(self)
+    self.storage.counter = 1
+end
+
+function on_poll(self)
+    self.storage.counter = 2
+end
+
+function stop(self)
+    self.storage.counter = 3
+end
+"#,
+        )
+        .unwrap();
+
+    writer.call_init().unwrap();
+    writer.run_poll().unwrap();
+
+    let mut before_flush =
+        BackendScriptContext::new_with_storage_root("@test/storage-lifecycle", &root);
+    before_flush
+        .load_script(
+            "state = {}\nfunction start(self)\nstate = { loaded = self.storage.counter }\nend",
+        )
+        .unwrap();
+    let before_payload = before_flush.call_init().unwrap().unwrap();
+    assert_eq!(before_payload.get("loaded"), None);
+
+    writer.call_stop().unwrap();
+
+    let mut reader = BackendScriptContext::new_with_storage_root("@test/storage-lifecycle", &root);
+    reader
+        .load_script(
+            "state = {}\nfunction start(self)\nstate = { loaded = self.storage.counter }\nend",
+        )
+        .unwrap();
+    let payload = reader.call_init().unwrap().unwrap();
+    assert_eq!(
+        payload.get("loaded").and_then(|value| value.as_i64()),
+        Some(3)
+    );
+}
+
+#[test]
+fn backend_storage_persistence_failure_is_diagnostic_and_keeps_memory_state() {
+    let root = temp_storage_root("backend-failure");
+    std::fs::write(&root, "not a directory").unwrap();
+    let mut ctx = BackendScriptContext::new_with_storage_root("@test/storage-failure", &root);
+    ctx.load_script(
+        r#"
+state = {}
+
+function start(self)
+    self.storage.value = "kept"
+end
+
+function stop(self)
+    state = { latest = self.storage.value }
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    ctx.call_stop().unwrap();
+    let payload = ctx.take_service_state_snapshot().unwrap().unwrap();
+
+    assert_eq!(
+        payload.get("latest").and_then(|value| value.as_str()),
+        Some("kept")
+    );
+    let diagnostics = ctx.drain_storage_diagnostics();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains("storage persistence failed"))
+    );
+}
+
+#[test]
+fn stop_receives_backend_self_meta() {
+    let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.load_script(
+        "state = {}\n\
+         function start(self)\n\
+           state = { stopped = false }\n\
+         end\n\
+         function stop(self)\n\
+           state = { stopped = true, stopped_kind = self.meta.kind }\n\
+         end",
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    ctx.call_stop().unwrap();
+    let payload = ctx.take_service_state_snapshot().unwrap().unwrap();
+
+    assert_eq!(payload.get("stopped").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        payload.get("stopped_kind").and_then(|v| v.as_str()),
+        Some("backend")
+    );
+}
+
+#[test]
+fn backend_public_function_inspection_excludes_lifecycle_hooks() {
+    let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.load_script(
+        "function start(self)\nend\n\
+         function stop(self)\nend\n\
+         function public_method()\nreturn { ok = true }\nend",
+    )
+    .unwrap();
+
+    assert_eq!(
+        ctx.public_function_names(),
+        vec!["public_method".to_string()]
+    );
 }
 
 #[test]
@@ -119,6 +325,32 @@ fn mesh_service_emit_event_buffers_typed_interface_event() {
     assert_eq!(
         events[0].payload,
         serde_json::json!({ "device_id": "default", "level": 67 })
+    );
+}
+
+#[test]
+fn backend_self_named_event_channel_fires_typed_event() {
+    let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.load_script(
+        r#"
+function start(self)
+end
+
+function on_poll(self)
+    self.VolumeChanged:fire({ device_id = "default", level = 72 })
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.run_poll().unwrap();
+    let events = ctx.drain_events();
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].name, "VolumeChanged");
+    assert_eq!(
+        events[0].payload,
+        serde_json::json!({ "device_id": "default", "level": 72 })
     );
 }
 
@@ -858,7 +1090,7 @@ fn backend_missing_init_entrypoint_is_reported() {
         "expected MissingEntrypoint, got {err:?}"
     );
     assert!(
-        err.to_string().contains("init"),
+        err.to_string().contains("start"),
         "error message should name the missing entrypoint: {err}"
     );
 }

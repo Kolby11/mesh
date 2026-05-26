@@ -392,7 +392,9 @@ fn validate_attributes(
 ) -> Result<(), CompileFrontendError> {
     for attr in attrs {
         match &attr.value {
-            AttributeValue::Binding(expr) | AttributeValue::TwoWayBinding(expr) => {
+            AttributeValue::Binding(expr)
+            | AttributeValue::TwoWayBinding(expr)
+            | AttributeValue::InstanceBinding(expr) => {
                 validate_expression(expr, path, allowed_symbols, loop_locals)?;
             }
             AttributeValue::EventHandler(handler) => {

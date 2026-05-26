@@ -142,6 +142,8 @@ pub enum AttributeValue {
     Binding(String),
     /// Two-way binding: `bind:value="volume"` — reads from and writes back to script state.
     TwoWayBinding(String),
+    /// Mounted component instance binding: `bind:this={child}`.
+    InstanceBinding(String),
     /// Event handler: `onclick="onTap"` — calls a script function.
     EventHandler(String),
 }

@@ -41,7 +41,7 @@ local function sync_state()
     }
 end
 
-function init()
+function start(self)
     mesh.service.set_poll_interval(5000)
     playlist = build_playlist(mesh.config())
     current_index = 1
@@ -49,17 +49,17 @@ function init()
     sync_state()
 end
 
-function on_poll()
+function on_poll(self)
     sync_state()
 end
 
-function on_command_play()
+function on_command_play(self)
     playback_state = "playing"
     sync_state()
     return { ok = true }
 end
 
-function on_command_pause()
+function on_command_pause(self)
     if playback_state ~= "playing" then
         return { ok = false, error = "not currently playing" }
     end
@@ -69,13 +69,13 @@ function on_command_pause()
     return { ok = true }
 end
 
-function on_command_next()
+function on_command_next(self)
     current_index = (current_index % #playlist) + 1
     sync_state()
     return { ok = true }
 end
 
-function on_command_previous()
+function on_command_previous(self)
     current_index = ((current_index - 2) % #playlist) + 1
     sync_state()
     return { ok = true }

@@ -45,7 +45,7 @@ local function sync_theme_state()
     theme_is_dark = read_theme_is_dark()
 end
 
-function onRender()
+function render(self)
     sync_theme_state()
     if theme_is_dark then
         theme_icon = "weather-clear-night"

@@ -51,6 +51,14 @@ local function current_locale()
     return locale
 end
 
+local function stored_locale()
+    local locale = self.storage.language
+    if locale == "en" or locale == "sk" then
+        return locale
+    end
+    return nil
+end
+
 local function update_menu_class()
     if language_menu_open then
         language_menu_class = "language-menu"
@@ -59,8 +67,16 @@ local function update_menu_class()
     end
 end
 
-function onRender()
-    if locale_is_slovak(current_locale()) then
+function init(self)
+    local locale = stored_locale()
+    if locale ~= nil then
+        mesh.locale.set(locale)
+    end
+end
+
+function render(self)
+    local locale = stored_locale() or current_locale()
+    if locale_is_slovak(locale) then
         language_code = "SK"
         english_option_class = "language-option"
         slovak_option_class = "language-option language-option-selected"
@@ -80,12 +96,14 @@ end
 function onSelectEnglish()
     language_menu_open = false
     update_menu_class()
+    self.storage.language = "en"
     mesh.locale.set("en")
 end
 
 function onSelectSlovak()
     language_menu_open = false
     update_menu_class()
+    self.storage.language = "sk"
     mesh.locale.set("sk")
 end
 </script>
@@ -94,7 +112,9 @@ end
 .language-control {
     height: 40px;
     align-items: center;
-    gap: token(spacing.xs);
+    gap: 2px;
+    padding-inline: 1px;
+    padding-block: 0;
 }
 
 .nav-button {
@@ -148,9 +168,11 @@ end
 }
 
 .language-button-content {
-    gap: token(spacing.xs);
+    gap: 4px;
     align-items: center;
     justify-content: center;
+    padding-inline: 1px;
+    padding-block: 0;
 }
 
 .nav-button-glyph {
@@ -174,7 +196,9 @@ end
 .language-menu {
     height: 40px;
     align-items: center;
-    gap: token(spacing.xs);
+    gap: 2px;
+    padding-inline: 1px;
+    padding-block: 0;
 }
 
 .language-menu-hidden {

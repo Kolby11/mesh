@@ -21,17 +21,17 @@ local function sync_theme(theme_id, payload)
     }
 end
 
-function init()
+function start(self)
     mesh.service.set_poll_interval(5000)
     local config = mesh.config()
     sync_theme(config.current_theme or config.theme_id or state.current, {})
 end
 
-function on_poll()
+function on_poll(self)
     state = state
 end
 
-function on_command_set_current()
+function on_command_set_current(self)
     local payload = mesh.service.payload()
     sync_theme(payload.current or payload.theme_id or state.current, payload)
 end

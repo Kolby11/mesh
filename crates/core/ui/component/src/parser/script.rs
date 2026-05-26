@@ -21,11 +21,57 @@ pub(super) fn extract_imports(source: &str) -> Result<(Vec<ComponentImport>, Str
             stripped.push('\n');
             continue;
         }
+        if let Some(import) = parse_require_import_line(trimmed, index + 1)? {
+            if !aliases.insert(import.alias.clone()) {
+                return Err(ParseError::InvalidImport {
+                    line: index + 1,
+                    message: format!("duplicate import alias `{}`", import.alias),
+                });
+            }
+            imports.push(import);
+        }
         stripped.push_str(line);
         stripped.push('\n');
     }
 
     Ok((imports, stripped))
+}
+
+fn parse_require_import_line(
+    line: &str,
+    line_number: usize,
+) -> Result<Option<ComponentImport>, ParseError> {
+    let Some(rest) = line.strip_prefix("local ") else {
+        return Ok(None);
+    };
+    let Some((alias, expr)) = rest.split_once('=') else {
+        return Ok(None);
+    };
+    let alias = alias.trim();
+    if alias.contains(',') || !is_valid_import_alias(alias) {
+        return Ok(None);
+    }
+    let expr = expr.trim();
+    let Some(source_part) = expr
+        .strip_prefix("require(")
+        .and_then(|value| value.strip_suffix(')'))
+        .map(str::trim)
+    else {
+        return Ok(None);
+    };
+    let source =
+        parse_quoted_import_source(source_part).ok_or_else(|| ParseError::InvalidImport {
+            line: line_number,
+            message: "require source must be a quoted string".into(),
+        })?;
+    let Some(target) = classify_import_target(&source) else {
+        return Ok(None);
+    };
+
+    Ok(Some(ComponentImport {
+        alias: alias.to_string(),
+        target,
+    }))
 }
 
 fn parse_import_line(line: &str, line_number: usize) -> Result<ComponentImport, ParseError> {

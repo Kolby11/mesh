@@ -96,8 +96,8 @@ local function sync_audio_copy(percent, muted)
     end
 end
 
-if audio_ok and audio and audio.events and audio.events.VolumeChanged then
-    audio.events.VolumeChanged:subscribe(function(event)
+if audio_ok and audio and audio.VolumeChanged then
+    audio.VolumeChanged:on(function(event)
         local percent = clamp_percent(event.level)
         local muted = audio_muted
         if audio and audio.muted ~= nil then
@@ -108,7 +108,7 @@ if audio_ok and audio and audio.events and audio.events.VolumeChanged then
     end)
 end
 
-function onRender()
+function render(self)
     if not audio_ok or not audio or audio.available == false then
         icon_name = "audio-volume-muted"
         audio_title_key = "audio.unavailable"

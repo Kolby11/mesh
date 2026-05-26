@@ -8,6 +8,21 @@ use mesh_core_service::{
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn temp_storage_root(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "mesh-context-storage-{name}-{}-{nanos}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_file(&root);
+    root
+}
 
 fn audio_catalog() -> InterfaceCatalog {
     let mut catalog = InterfaceCatalog::default();
@@ -185,6 +200,284 @@ end
 }
 
 #[test]
+fn lifecycle_self_meta_is_passed_to_init_and_render() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/test-component", caps).unwrap();
+    ctx.load_script(
+        r#"
+init_module = ""
+render_kind = ""
+global_self_kind = self.meta.kind
+
+function init(self)
+    init_module = self.meta.module_id
+end
+
+function render(self)
+    render_kind = self.meta.kind
+    render_instance = self.meta.instance_id
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    ctx.call_render_lifecycle().unwrap();
+
+    assert_eq!(
+        ctx.state.get("init_module"),
+        Some(serde_json::json!("@mesh/test-component"))
+    );
+    assert_eq!(
+        ctx.state.get("render_kind"),
+        Some(serde_json::json!("frontend"))
+    );
+    assert_eq!(
+        ctx.state.get("render_instance"),
+        Some(serde_json::json!("@mesh/test-component"))
+    );
+    assert_eq!(
+        ctx.state.get("global_self_kind"),
+        Some(serde_json::json!("frontend"))
+    );
+}
+
+#[test]
+fn lifecycle_self_storage_supports_json_values_snapshot_and_diagnostics() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/storage-component", caps).unwrap();
+    ctx.load_script(
+        r#"
+storage_language = ""
+storage_missing = false
+snapshot_theme = ""
+render_language = ""
+
+function init(self)
+    self.storage.language = "sk"
+    self.storage.theme = { name = "dark", accents = { "blue", "green" } }
+    self.storage.removed = true
+    self.storage.removed = nil
+    storage_language = self.storage.language
+    storage_missing = self.storage.removed == nil
+    storage_snapshot = self.storage:snapshot()
+    snapshot_theme = storage_snapshot.theme.name
+    self.storage.invalid = function() return true end
+end
+
+function render(self)
+    render_language = self.storage.language
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    ctx.call_render_lifecycle().unwrap();
+
+    assert_eq!(
+        ctx.state.get("storage_language"),
+        Some(serde_json::json!("sk"))
+    );
+    assert_eq!(
+        ctx.state.get("storage_missing"),
+        Some(serde_json::json!(true))
+    );
+    assert_eq!(
+        ctx.state.get("snapshot_theme"),
+        Some(serde_json::json!("dark"))
+    );
+    assert_eq!(
+        ctx.state.get("render_language"),
+        Some(serde_json::json!("sk"))
+    );
+
+    let diagnostics = ctx.drain_diagnostics();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].interface, "self.storage");
+    assert!(diagnostics[0].reason.contains("unsupported storage value"));
+}
+
+#[test]
+fn frontend_storage_flushes_on_unmount_and_loads_before_init() {
+    let root = temp_storage_root("frontend-flush");
+    let caps = CapabilitySet::new();
+    let mut writer =
+        ScriptContext::new_with_storage_root("@mesh/storage-lifecycle", caps.clone(), &root)
+            .unwrap();
+    writer
+        .load_script(
+            r#"
+function init(self)
+    self.storage.counter = 1
+end
+
+function render(self)
+    self.storage.counter = 2
+end
+
+function unmount(self)
+    self.storage.counter = 3
+end
+"#,
+        )
+        .unwrap();
+
+    writer.call_init().unwrap();
+    writer.call_render_lifecycle().unwrap();
+
+    let mut before_flush =
+        ScriptContext::new_with_storage_root("@mesh/storage-lifecycle", caps.clone(), &root)
+            .unwrap();
+    before_flush
+        .load_script("function init(self)\nloaded = self.storage.counter\nend")
+        .unwrap();
+    before_flush.call_init().unwrap();
+    assert_eq!(before_flush.state.get("loaded"), None);
+
+    writer.call_handler("unmount", &[]).unwrap();
+
+    let mut reader =
+        ScriptContext::new_with_storage_root("@mesh/storage-lifecycle", caps, &root).unwrap();
+    reader
+        .load_script("function init(self)\nloaded = self.storage.counter\nend")
+        .unwrap();
+    reader.call_init().unwrap();
+    assert_eq!(reader.state.get("loaded"), Some(serde_json::json!(3)));
+}
+
+#[test]
+fn frontend_storage_persistence_failure_is_diagnostic_and_keeps_memory_state() {
+    let root = temp_storage_root("frontend-failure");
+    std::fs::write(&root, "not a directory").unwrap();
+    let caps = CapabilitySet::new();
+    let mut ctx =
+        ScriptContext::new_with_storage_root("@mesh/storage-failure", caps, &root).unwrap();
+    ctx.load_script(
+        r#"
+function init(self)
+    self.storage.value = "kept"
+end
+
+function render(self)
+    latest = self.storage.value
+end
+
+function unmount(self)
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    ctx.call_handler("unmount", &[]).unwrap();
+    ctx.call_render_lifecycle().unwrap();
+
+    assert_eq!(ctx.state.get("latest"), Some(serde_json::json!("kept")));
+    let diagnostics = ctx.drain_diagnostics();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.reason.contains("storage persistence failed"))
+    );
+}
+
+#[test]
+fn frontend_storage_render_reads_track_only_watched_key_writes() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/storage-watch", caps).unwrap();
+    ctx.load_script(
+        r#"
+function render(self)
+    rendered_theme = self.storage.theme
+end
+
+function set_watched()
+    self.storage.theme = "dark"
+end
+
+function set_unwatched()
+    self.storage.locale = "sk"
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.state_mut().clear_dirty();
+    ctx.call_render_lifecycle().unwrap();
+    assert!(ctx.tracked_storage_keys().contains("theme"));
+
+    ctx.state_mut().clear_dirty();
+    ctx.call_handler("set_unwatched", &[]).unwrap();
+    assert!(!ctx.state().is_dirty());
+
+    ctx.call_handler("set_watched", &[]).unwrap();
+    assert!(ctx.state().is_dirty());
+}
+
+#[test]
+fn legacy_on_render_remains_render_lifecycle_fallback() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/legacy-component", caps).unwrap();
+    ctx.load_script(
+        r#"
+render_count = 0
+
+function init()
+    initialized = true
+end
+
+function onRender()
+    render_count = render_count + 1
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    assert!(ctx.call_render_lifecycle().unwrap());
+
+    assert_eq!(ctx.state.get("initialized"), Some(serde_json::json!(true)));
+    assert_eq!(ctx.state.get("render_count"), Some(serde_json::json!(1)));
+}
+
+#[test]
+fn public_member_inspection_keeps_locals_private_and_hooks_reserved() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/member-test", caps).unwrap();
+    ctx.load_script(
+        r#"
+local private_count = 1
+local function private_helper()
+end
+
+public_count = 2
+
+function public_action()
+    public_count = public_count + 1
+end
+
+function render(self)
+end
+
+function onRender()
+end
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(ctx.public_field_names(), vec!["public_count".to_string()]);
+    assert_eq!(
+        ctx.public_function_names(),
+        vec!["public_action".to_string()]
+    );
+    assert!(ctx.state.get("private_count").is_none());
+
+    ctx.call_handler("public_action", &[]).unwrap();
+    assert_eq!(ctx.state.get("public_count"), Some(serde_json::json!(3)));
+}
+
+#[test]
 fn module_state_reflects_host_seeded_values_before_script_runs() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
@@ -264,6 +557,60 @@ end
 }
 
 #[test]
+fn interface_named_event_channel_subscribes_with_on_alias() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+seen_level = 0
+
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.VolumeChanged:on(function(event)
+        seen_level = event.level
+    end)
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    ctx.emit_interface_event(
+        "audio",
+        "VolumeChanged",
+        &serde_json::json!({ "level": 91 }),
+    )
+    .unwrap();
+
+    assert_eq!(ctx.state.get("seen_level"), Some(serde_json::json!(91)));
+}
+
+#[test]
+fn self_named_event_channel_supports_on_and_fire() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.load_script(
+        r#"
+changed_count = 0
+
+function init(self)
+    self.Changed:on(function(event)
+        changed_count = changed_count + event.count
+    end)
+    self.Changed:fire({ count = 2 })
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("changed_count"), Some(serde_json::json!(2)));
+}
+
+#[test]
 fn module_events_subscribe_emit_and_unsubscribe() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
@@ -307,6 +654,103 @@ end
     )
     .unwrap();
     ctx.call_init().unwrap();
+}
+
+#[test]
+fn require_resolves_existing_host_api_tables() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("locale.read"));
+    let mut ctx = ScriptContext::new("@mesh/host-api-test", caps).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    local locale = require("mesh.locale")
+    local ui = require("mesh.ui")
+    local log = require("mesh.log")
+    current_locale = locale.current()
+    ui_type = type(ui.request_redraw)
+    log_type = type(log.info)
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(
+        ctx.state.get("current_locale"),
+        Some(serde_json::json!("en"))
+    );
+    assert_eq!(
+        ctx.state.get("ui_type"),
+        Some(serde_json::json!("function"))
+    );
+    assert_eq!(
+        ctx.state.get("log_type"),
+        Some(serde_json::json!("function"))
+    );
+}
+
+#[test]
+fn require_resolves_mesh_i18n_library_alias() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/i18n-test", caps).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    local i18n = require("mesh.i18n")
+    label = i18n.t("nav.volume")
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(
+        ctx.state.get("label"),
+        Some(serde_json::json!("nav.volume"))
+    );
+}
+
+#[test]
+fn require_component_definition_specifier_returns_placeholder() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/component-host", caps).unwrap();
+    ctx.load_script(
+        r#"
+local LocalChild = require("./child.mesh")
+local ModuleChild = require("@mesh/audio-popover")
+local_ok = LocalChild.__mesh_component_definition == true
+module_source = ModuleChild.source
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(ctx.state.get("local_ok"), Some(serde_json::json!(true)));
+    assert_eq!(
+        ctx.state.get("module_source"),
+        Some(serde_json::json!("@mesh/audio-popover"))
+    );
+}
+
+#[test]
+fn pcall_unsupported_require_is_false_without_diagnostic() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/unsupported-test", caps).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    ok = pcall(require, "not-a-real-module")
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("ok"), Some(serde_json::json!(false)));
+    assert!(ctx.drain_diagnostics().is_empty());
 }
 
 #[test]
@@ -1028,4 +1472,54 @@ end
         Some(Value::Number(128.into()))
     );
     assert_eq!(ctx.state.get("last_pointer_x"), Some(serde_json::json!(42)));
+}
+
+#[test]
+fn bound_instance_proxy_queues_public_function_call() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@test/parent", caps).unwrap();
+    ctx.load_script(
+        r#"
+called = false
+
+function invoke_child()
+    slider.increase_volume(10)
+    slider:decrease_volume(3)
+    called = true
+end
+"#,
+    )
+    .unwrap();
+    ctx.install_bound_instance_proxy(
+        "parent-instance",
+        "slider",
+        "child-instance",
+        &serde_json::json!({
+            "__instance_id": "child-instance",
+            "volume": 42,
+            "__functions": ["increase_volume", "decrease_volume"]
+        }),
+    )
+    .unwrap();
+
+    ctx.call_handler("invoke_child", &[]).unwrap();
+
+    assert_eq!(ctx.state.get("called"), Some(serde_json::json!(true)));
+    assert_eq!(
+        ctx.state.get("slider"),
+        Some(serde_json::json!({
+            "__instance_id": "child-instance",
+            "volume": 42,
+            "__functions": ["increase_volume", "decrease_volume"]
+        }))
+    );
+    let calls = ctx.drain_bound_instance_calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].parent_instance_key, "parent-instance");
+    assert_eq!(calls[0].binding, "slider");
+    assert_eq!(calls[0].child_instance_key, "child-instance");
+    assert_eq!(calls[0].function_name, "increase_volume");
+    assert_eq!(calls[0].args, vec![serde_json::json!(10)]);
+    assert_eq!(calls[1].function_name, "decrease_volume");
+    assert_eq!(calls[1].args, vec![serde_json::json!(3)]);
 }

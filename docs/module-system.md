@@ -74,6 +74,41 @@ end
 - `require(...)` is for external dependencies: shell APIs, service/interface
   proxies, Luau libraries, and frontend component definitions.
 
+### Persistent `self.storage`
+
+`self.storage` is a small JSON-like document owned by the shell and scoped to
+the current frontend component instance or backend provider instance. Use it
+for durable preferences and provider-local state that should survive runtime
+recreation:
+
+```luau
+function init(self)
+  local saved = self.storage.language
+  if saved == "en" or saved == "sk" then
+    mesh.locale.set(saved)
+  end
+end
+
+function onSelectSlovak()
+  self.storage.language = "sk"
+  mesh.locale.set("sk")
+end
+```
+
+Supported values are `nil`, booleans, numbers, strings, arrays, and plain
+objects. Assigning `nil` removes a key. `self.storage:snapshot()` returns a
+plain table copy of the current document. Functions, userdata, component
+definitions, component instances, event channels, and other non-serializable
+values are rejected with non-fatal diagnostics.
+
+Storage loads before lifecycle user code runs. Frontend component storage
+flushes on `unmount`; backend provider storage flushes on `stop`; the shell can
+also call the explicit flush path during orderly shutdown. Writes are coalesced
+in memory until a flush point, and persistence failures preserve the in-memory
+value while emitting diagnostics. Frontend reads during `render(self)` are
+tracked by key, so writes to watched keys rerender only the affected component;
+writes to unwatched keys do not trigger unrelated rerenders.
+
 For frontend components, `require("./Component")` returns a component
 definition. Markup instantiates it, and `bind:this` exposes the mounted
 instance:
@@ -486,11 +521,11 @@ state = {
     muted = false,
 }
 
-function init()
+function start(self)
     mesh.service.set_poll_interval(500)
 end
 
-function on_poll()
+function on_poll(self)
     local out = mesh.exec("wpctl", { "get-volume", "@DEFAULT_AUDIO_SINK@" })
     if not out.success then
         mesh.service.emit_unavailable()
@@ -507,6 +542,17 @@ function on_command_set_volume()
     local volume = tostring(payload.volume or 0)
     local out = mesh.exec("wpctl", { "set-volume", "@DEFAULT_AUDIO_SINK@", volume })
     return result.from_exec(out)
+end
+```
+
+Providers publish typed interface events through named `self` channels:
+
+```luau
+function on_command_set_volume(self)
+    self.VolumeChanged:fire({
+        device_id = "default",
+        level = state.percent,
+    })
 end
 ```
 

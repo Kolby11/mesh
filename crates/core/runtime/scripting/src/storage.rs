@@ -4,6 +4,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+use mlua::{Lua, LuaSerdeExt, Table, Value as LuaValue, Variadic};
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -150,6 +153,7 @@ impl StorageManager {
             path,
             document,
             diagnostics,
+            dirty: false,
         }
     }
 }
@@ -160,6 +164,7 @@ pub struct ScopedStorage {
     path: PathBuf,
     document: Map<String, Value>,
     diagnostics: Vec<StorageDiagnostic>,
+    dirty: bool,
 }
 
 impl ScopedStorage {
@@ -175,19 +180,32 @@ impl ScopedStorage {
         &self.diagnostics
     }
 
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.document.get(key)
     }
 
     pub fn set(&mut self, key: impl Into<String>, value: Value) -> Option<Value> {
-        self.document.insert(key.into(), value)
+        let previous = self.document.insert(key.into(), value);
+        self.dirty = true;
+        previous
     }
 
     pub fn remove(&mut self, key: &str) -> Option<Value> {
-        self.document.remove(key)
+        let previous = self.document.remove(key);
+        if previous.is_some() {
+            self.dirty = true;
+        }
+        previous
     }
 
     pub fn clear(&mut self) {
+        if !self.document.is_empty() {
+            self.dirty = true;
+        }
         self.document.clear();
     }
 
@@ -195,7 +213,7 @@ impl ScopedStorage {
         Value::Object(self.document.clone())
     }
 
-    pub fn persist(&self) -> io::Result<()> {
+    pub fn persist(&mut self) -> io::Result<()> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -204,7 +222,17 @@ impl ScopedStorage {
         let bytes = serde_json::to_vec_pretty(&self.snapshot())
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         fs::write(&temp_path, bytes)?;
-        fs::rename(temp_path, &self.path)
+        fs::rename(temp_path, &self.path)?;
+        self.dirty = false;
+        Ok(())
+    }
+
+    pub fn flush_if_dirty(&mut self) -> io::Result<bool> {
+        if !self.dirty {
+            return Ok(false);
+        }
+        self.persist()?;
+        Ok(true)
     }
 
     fn temp_path(&self) -> PathBuf {
@@ -216,6 +244,96 @@ impl ScopedStorage {
             .unwrap_or("storage.json");
         self.path
             .with_file_name(format!("{file_name}.{count}.{}.tmp", std::process::id()))
+    }
+}
+
+pub type StorageDiagnosticSink = Arc<dyn Fn(String) + Send + Sync>;
+pub type StorageKeySink = Arc<dyn Fn(String) + Send + Sync>;
+
+pub fn create_lua_storage_table(
+    lua: &Lua,
+    storage: Arc<Mutex<ScopedStorage>>,
+    diagnostic_sink: StorageDiagnosticSink,
+    read_sink: StorageKeySink,
+    write_sink: StorageKeySink,
+) -> mlua::Result<Table> {
+    let table = lua.create_table()?;
+    let metatable = lua.create_table()?;
+
+    let index_storage = Arc::clone(&storage);
+    let index_diagnostics = Arc::clone(&diagnostic_sink);
+    metatable.set(
+        "__index",
+        lua.create_function(move |lua, (_table, key): (Table, LuaValue)| {
+            let Some(key) = storage_key_from_lua(&key, &index_diagnostics)? else {
+                return Ok(LuaValue::Nil);
+            };
+
+            if key == "snapshot" {
+                let snapshot_storage = Arc::clone(&index_storage);
+                let snapshot = lua.create_function(move |lua, _args: Variadic<LuaValue>| {
+                    let snapshot = snapshot_storage.lock().unwrap().snapshot();
+                    lua.to_value(&snapshot)
+                })?;
+                return Ok(LuaValue::Function(snapshot));
+            }
+
+            read_sink(key.clone());
+            let value = index_storage.lock().unwrap().get(&key).cloned();
+            match value {
+                Some(value) => lua.to_value(&value),
+                None => Ok(LuaValue::Nil),
+            }
+        })?,
+    )?;
+
+    let newindex_storage = Arc::clone(&storage);
+    metatable.set(
+        "__newindex",
+        lua.create_function(
+            move |lua, (_table, key, value): (Table, LuaValue, LuaValue)| {
+                let Some(key) = storage_key_from_lua(&key, &diagnostic_sink)? else {
+                    return Ok(());
+                };
+
+                if matches!(value, LuaValue::Nil) {
+                    newindex_storage.lock().unwrap().remove(&key);
+                    write_sink(key);
+                    return Ok(());
+                }
+
+                match lua.from_value::<Value>(value) {
+                    Ok(value) => {
+                        newindex_storage.lock().unwrap().set(key.clone(), value);
+                        write_sink(key);
+                    }
+                    Err(error) => {
+                        diagnostic_sink(format!(
+                            "unsupported storage value for key '{key}': {error}"
+                        ));
+                    }
+                }
+                Ok(())
+            },
+        )?,
+    )?;
+
+    table.set_metatable(Some(metatable))?;
+    Ok(table)
+}
+
+fn storage_key_from_lua(
+    value: &LuaValue,
+    diagnostic_sink: &StorageDiagnosticSink,
+) -> mlua::Result<Option<String>> {
+    match value {
+        LuaValue::String(value) => Ok(Some(value.to_str()?.to_string())),
+        LuaValue::Integer(value) => Ok(Some(value.to_string())),
+        LuaValue::Number(value) => Ok(Some(value.to_string())),
+        _ => {
+            diagnostic_sink("storage keys must be strings or numbers".to_string());
+            Ok(None)
+        }
     }
 }
 

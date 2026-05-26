@@ -16,36 +16,36 @@
 
 ### Luau `self.storage` Binding
 
-- [ ] **STOREAPI-01**: Frontend `render/mount/unmount` and backend `start/stop` contexts expose `self.storage`.
-- [ ] **STOREAPI-02**: `self.storage.key` and `self.storage["key"]` reads return persisted values or `nil` for missing keys.
-- [ ] **STOREAPI-03**: Assigning JSON-like values to `self.storage` updates in-memory state and schedules persistence.
-- [ ] **STOREAPI-04**: Assigning `nil` to a storage key removes that key from the scoped document.
-- [ ] **STOREAPI-05**: Storage values accept only nil, boolean, number, string, arrays, and plain objects.
-- [ ] **STOREAPI-06**: Unsupported values such as functions, userdata, component definitions, component instances, and event channels are rejected with non-fatal diagnostics.
+- [x] **STOREAPI-01**: Frontend `render/mount/unmount` and backend `start/stop` contexts expose `self.storage`.
+- [x] **STOREAPI-02**: `self.storage.key` and `self.storage["key"]` reads return persisted values or `nil` for missing keys.
+- [x] **STOREAPI-03**: Assigning JSON-like values to `self.storage` updates in-memory state and schedules persistence.
+- [x] **STOREAPI-04**: Assigning `nil` to a storage key removes that key from the scoped document.
+- [x] **STOREAPI-05**: Storage values accept only nil, boolean, number, string, arrays, and plain objects.
+- [x] **STOREAPI-06**: Unsupported values such as functions, userdata, component definitions, component instances, and event channels are rejected with non-fatal diagnostics.
 
 ### Lifecycle And Persistence
 
-- [ ] **STORELIFE-01**: Storage is loaded before frontend `mount/render` and backend `start` user code can read it.
-- [ ] **STORELIFE-02**: Storage flushes on frontend `unmount`, backend `stop`, and orderly shell shutdown.
-- [ ] **STORELIFE-03**: Multiple writes in one runtime turn coalesce without losing the latest in-memory value.
-- [ ] **STORELIFE-04**: Failed persistence attempts preserve in-memory state and emit observable diagnostics.
-- [ ] **STORELIFE-05**: Two instances of the same component/provider maintain isolated scoped storage unless they intentionally share the same runtime identity.
+- [x] **STORELIFE-01**: Storage is loaded before frontend `mount/render` and backend `start` user code can read it.
+- [x] **STORELIFE-02**: Storage flushes on frontend `unmount`, backend `stop`, and orderly shell shutdown.
+- [x] **STORELIFE-03**: Multiple writes in one runtime turn coalesce without losing the latest in-memory value.
+- [x] **STORELIFE-04**: Failed persistence attempts preserve in-memory state and emit observable diagnostics.
+- [x] **STORELIFE-05**: Two instances of the same component/provider maintain isolated scoped storage unless they intentionally share the same runtime identity.
 
 ### Rerender Integration
 
-- [ ] **STORERENDER-01**: Storage reads during frontend render are tracked as render dependencies.
-- [ ] **STORERENDER-02**: Writes to a watched storage key rerender only components that read that key.
-- [ ] **STORERENDER-03**: Writes to unwatched storage keys do not trigger unrelated frontend rerenders.
-- [ ] **STORERENDER-04**: Existing explicit redraw/invalidation escape hatches remain compatibility/debug-only behavior.
+- [x] **STORERENDER-01**: Storage reads during frontend render are tracked as render dependencies.
+- [x] **STORERENDER-02**: Writes to a watched storage key rerender only components that read that key.
+- [x] **STORERENDER-03**: Writes to unwatched storage keys do not trigger unrelated frontend rerenders.
+- [x] **STORERENDER-04**: Existing explicit redraw/invalidation escape hatches remain compatibility/debug-only behavior.
 
 ### Proof, Diagnostics, And Docs
 
-- [ ] **STOREPROOF-01**: Regression tests cover path scoping, atomic persistence, corrupt-file recovery, invalid value diagnostics, and two-instance isolation.
-- [ ] **STOREPROOF-02**: Frontend runtime tests prove `self.storage` reads, writes, removes, snapshots, and rerender dependency behavior.
-- [ ] **STOREPROOF-03**: Backend runtime tests prove provider `self.storage` reads, writes, lifecycle flush, and invalid value diagnostics.
-- [ ] **STOREPROOF-04**: A shipped UI preference or provider setting uses `self.storage` as real product proof.
-- [ ] **STOREPROOF-05**: Author docs explain storage scope, supported value types, lifecycle timing, persistence location, and diagnostics.
-- [ ] **STOREPROOF-06**: Debug or health output exposes storage diagnostics without leaking stored private values.
+- [x] **STOREPROOF-01**: Regression tests cover path scoping, atomic persistence, corrupt-file recovery, invalid value diagnostics, and two-instance isolation.
+- [x] **STOREPROOF-02**: Frontend runtime tests prove `self.storage` reads, writes, removes, snapshots, and rerender dependency behavior.
+- [x] **STOREPROOF-03**: Backend runtime tests prove provider `self.storage` reads, writes, lifecycle flush, and invalid value diagnostics.
+- [x] **STOREPROOF-04**: A shipped UI preference or provider setting uses `self.storage` as real product proof.
+- [x] **STOREPROOF-05**: Author docs explain storage scope, supported value types, lifecycle timing, persistence location, and diagnostics.
+- [x] **STOREPROOF-06**: Debug or health output exposes storage diagnostics without leaking stored private values.
 
 ## Future Requirements
 
@@ -83,27 +83,27 @@
 | STORECORE-04 | Phase 81 | Complete |
 | STORECORE-05 | Phase 81 | Complete |
 | STORECORE-06 | Phase 81 | Complete |
-| STOREAPI-01 | Phase 82 | Pending |
-| STOREAPI-02 | Phase 82 | Pending |
-| STOREAPI-03 | Phase 82 | Pending |
-| STOREAPI-04 | Phase 82 | Pending |
-| STOREAPI-05 | Phase 82 | Pending |
-| STOREAPI-06 | Phase 82 | Pending |
-| STORELIFE-01 | Phase 83 | Pending |
-| STORELIFE-02 | Phase 83 | Pending |
-| STORELIFE-03 | Phase 83 | Pending |
-| STORELIFE-04 | Phase 83 | Pending |
-| STORELIFE-05 | Phase 83 | Pending |
-| STORERENDER-01 | Phase 84 | Pending |
-| STORERENDER-02 | Phase 84 | Pending |
-| STORERENDER-03 | Phase 84 | Pending |
-| STORERENDER-04 | Phase 84 | Pending |
-| STOREPROOF-01 | Phase 85 | Pending |
-| STOREPROOF-02 | Phase 85 | Pending |
-| STOREPROOF-03 | Phase 85 | Pending |
-| STOREPROOF-04 | Phase 85 | Pending |
-| STOREPROOF-05 | Phase 85 | Pending |
-| STOREPROOF-06 | Phase 85 | Pending |
+| STOREAPI-01 | Phase 82 | Complete |
+| STOREAPI-02 | Phase 82 | Complete |
+| STOREAPI-03 | Phase 82 | Complete |
+| STOREAPI-04 | Phase 82 | Complete |
+| STOREAPI-05 | Phase 82 | Complete |
+| STOREAPI-06 | Phase 82 | Complete |
+| STORELIFE-01 | Phase 83 | Complete |
+| STORELIFE-02 | Phase 83 | Complete |
+| STORELIFE-03 | Phase 83 | Complete |
+| STORELIFE-04 | Phase 83 | Complete |
+| STORELIFE-05 | Phase 83 | Complete |
+| STORERENDER-01 | Phase 84 | Complete |
+| STORERENDER-02 | Phase 84 | Complete |
+| STORERENDER-03 | Phase 84 | Complete |
+| STORERENDER-04 | Phase 84 | Complete |
+| STOREPROOF-01 | Phase 85 | Complete |
+| STOREPROOF-02 | Phase 85 | Complete |
+| STOREPROOF-03 | Phase 85 | Complete |
+| STOREPROOF-04 | Phase 85 | Complete |
+| STOREPROOF-05 | Phase 85 | Complete |
+| STOREPROOF-06 | Phase 85 | Complete |
 
 **Coverage:**
 - v1 requirements: 27 total

@@ -5,12 +5,24 @@ use super::lookup::{
 use super::proxy::{create_event_channel, create_interface_proxy, interface_event_channel};
 use super::{PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport, ScriptState};
 use crate::host_api::{HostApiManifest, InterfaceProxy};
+use crate::storage::{ScopedStorage, StorageManager, StorageScope, create_lua_storage_table};
 use mesh_core_capability::CapabilitySet;
+use mesh_core_elements::VariableStore;
 use mesh_core_service::{InterfaceCatalog, InterfaceResolution};
 use mlua::{Error as LuaError, Function, Lua, LuaSerdeExt, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundInstanceCall {
+    pub parent_instance_key: String,
+    pub binding: String,
+    pub child_instance_key: String,
+    pub function_name: String,
+    pub args: Vec<Value>,
+}
 
 /// A script execution context for one component instance.
 ///
@@ -35,6 +47,12 @@ pub struct ScriptContext {
     shared_published_events: Arc<Mutex<Vec<PublishedEvent>>>,
     diagnostics: Vec<ScriptDiagnostic>,
     shared_diagnostics: Arc<Mutex<Vec<ScriptDiagnostic>>>,
+    bound_instance_calls: Vec<BoundInstanceCall>,
+    shared_bound_instance_calls: Arc<Mutex<Vec<BoundInstanceCall>>>,
+    storage: Arc<Mutex<ScopedStorage>>,
+    tracked_storage_keys: Arc<Mutex<HashSet<String>>>,
+    changed_storage_keys: Arc<Mutex<HashSet<String>>>,
+    tracking_storage_reads: Arc<Mutex<bool>>,
 }
 
 impl ScriptContext {
@@ -43,8 +61,32 @@ impl ScriptContext {
         module_id: impl Into<String>,
         capabilities: CapabilitySet,
     ) -> Result<Self, ScriptError> {
+        Self::new_with_storage_root(module_id, capabilities, default_runtime_storage_root())
+    }
+
+    pub fn new_with_storage_root(
+        module_id: impl Into<String>,
+        capabilities: CapabilitySet,
+        storage_root: impl Into<PathBuf>,
+    ) -> Result<Self, ScriptError> {
+        let module_id = module_id.into();
+        let storage = StorageManager::new(storage_root.into()).open(StorageScope::frontend(
+            module_id.clone(),
+            module_id.clone(),
+            module_id.clone(),
+        ));
+        let storage_diagnostics = storage
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| ScriptDiagnostic {
+                module_id: module_id.clone(),
+                interface: "self.storage".to_string(),
+                requested_version: None,
+                reason: diagnostic.reason.clone(),
+            })
+            .collect();
         Ok(Self {
-            module_id: module_id.into(),
+            module_id,
             capabilities,
             state: ScriptState::new(),
             lua: Lua::new(),
@@ -55,8 +97,14 @@ impl ScriptContext {
             tracked_service_fields: Arc::new(Mutex::new(HashMap::new())),
             published_events: Vec::new(),
             shared_published_events: Arc::new(Mutex::new(Vec::new())),
-            diagnostics: Vec::new(),
+            diagnostics: storage_diagnostics,
             shared_diagnostics: Arc::new(Mutex::new(Vec::new())),
+            bound_instance_calls: Vec::new(),
+            shared_bound_instance_calls: Arc::new(Mutex::new(Vec::new())),
+            storage: Arc::new(Mutex::new(storage)),
+            tracked_storage_keys: Arc::new(Mutex::new(HashSet::new())),
+            changed_storage_keys: Arc::new(Mutex::new(HashSet::new())),
+            tracking_storage_reads: Arc::new(Mutex::new(false)),
         })
     }
 
@@ -80,7 +128,10 @@ impl ScriptContext {
         self.shared_interface_bindings.lock().unwrap().clear();
         self.shared_published_events.lock().unwrap().clear();
         self.shared_diagnostics.lock().unwrap().clear();
+        self.shared_bound_instance_calls.lock().unwrap().clear();
+        self.changed_storage_keys.lock().unwrap().clear();
         self.clear_tracked_service_fields();
+        self.clear_tracked_storage_keys();
         self.install_host_api()?;
         self.install_interface_imports(imports)?;
         self.refresh_module_object();
@@ -165,11 +216,134 @@ impl ScriptContext {
         self.tracked_service_fields.lock().unwrap().clear();
     }
 
-    /// Call the script's `init()` function if it exists.
+    pub fn tracked_storage_keys(&self) -> HashSet<String> {
+        self.tracked_storage_keys.lock().unwrap().clone()
+    }
+
+    pub fn clear_tracked_storage_keys(&self) {
+        self.tracked_storage_keys.lock().unwrap().clear();
+    }
+
+    pub fn public_field_names(&self) -> Vec<String> {
+        let mut names = self
+            .state
+            .keys()
+            .into_iter()
+            .filter(|name| name != "exports")
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    pub fn public_function_names(&self) -> Vec<String> {
+        let globals = self.lua.globals();
+        let mut names = globals
+            .pairs::<String, LuaValue>()
+            .filter_map(|pair| {
+                let (name, value) = pair.ok()?;
+                if self.builtin_globals.contains(&name)
+                    || name.starts_with("__mesh_")
+                    || is_reserved_runtime_hook(&name)
+                    || !matches!(value, LuaValue::Function(_))
+                {
+                    return None;
+                }
+                Some(name)
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    pub fn public_member_snapshot(&self) -> Value {
+        let mut object = serde_json::Map::new();
+        for name in self.public_field_names() {
+            if let Some(value) = self.state.get(&name) {
+                object.insert(name, value);
+            }
+        }
+        object.insert(
+            "__functions".to_string(),
+            Value::Array(
+                self.public_function_names()
+                    .into_iter()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+        Value::Object(object)
+    }
+
+    pub fn install_bound_instance_proxy(
+        &mut self,
+        parent_instance_key: &str,
+        binding: &str,
+        child_instance_key: &str,
+        snapshot: &Value,
+    ) -> Result<(), ScriptError> {
+        self.state.set(binding.to_string(), snapshot.clone());
+
+        let table = self.lua.create_table().map_err(lua_err)?;
+        if let Value::Object(object) = snapshot {
+            for (key, value) in object {
+                if key == "__functions" {
+                    continue;
+                }
+                table
+                    .set(key.as_str(), self.lua.to_value(value).map_err(lua_err)?)
+                    .map_err(lua_err)?;
+            }
+
+            if let Some(functions) = object.get("__functions").and_then(Value::as_array) {
+                for function_name in functions.iter().filter_map(Value::as_str) {
+                    let call_queue = Arc::clone(&self.shared_bound_instance_calls);
+                    let parent_instance_key = parent_instance_key.to_string();
+                    let binding = binding.to_string();
+                    let child_instance_key = child_instance_key.to_string();
+                    let function_name_owned = function_name.to_string();
+                    let function = self
+                        .lua
+                        .create_function(move |lua, args: Variadic<LuaValue>| {
+                            let mut serialized_args = Vec::new();
+                            for (index, arg) in args.into_iter().enumerate() {
+                                if index == 0
+                                    && is_bound_instance_self_arg(&arg, child_instance_key.as_str())
+                                {
+                                    continue;
+                                }
+                                serialized_args.push(lua.from_value(arg)?);
+                            }
+                            call_queue.lock().unwrap().push(BoundInstanceCall {
+                                parent_instance_key: parent_instance_key.clone(),
+                                binding: binding.clone(),
+                                child_instance_key: child_instance_key.clone(),
+                                function_name: function_name_owned.clone(),
+                                args: serialized_args,
+                            });
+                            Ok(())
+                        })
+                        .map_err(lua_err)?;
+                    table.set(function_name, function).map_err(lua_err)?;
+                }
+            }
+        }
+
+        self.lua
+            .globals()
+            .set(binding, table)
+            .map_err(map_lua_error)?;
+        Ok(())
+    }
+
+    /// Call the script's `init(self)` function if it exists.
+    ///
+    /// Legacy no-argument `init()` handlers remain compatible because Luau
+    /// ignores extra arguments.
     pub fn call_init(&mut self) -> Result<(), ScriptError> {
         if let Ok(init) = self.lua.globals().get::<Function>("init") {
             tracing::debug!("calling init() for {}", self.module_id);
-            init.call::<()>(()).map_err(map_lua_error)?;
+            let current_self = self.current_self_table()?;
+            init.call::<()>(current_self).map_err(map_lua_error)?;
             self.sync_state_from_lua();
             self.sync_side_channels();
         }
@@ -183,23 +357,123 @@ impl ScriptContext {
             .get::<Function>(name)
             .map_err(|_| ScriptError::HandlerNotFound(name.to_string()))?;
         tracing::debug!("calling handler {name}() for {}", self.module_id);
-        match args.len() {
-            0 => handler.call::<()>(()).map_err(map_lua_error)?,
-            1 => {
-                let arg = self.lua.to_value(&args[0]).map_err(lua_err)?;
-                handler.call::<()>(arg).map_err(map_lua_error)?;
+        if is_lifecycle_handler(name) {
+            let mut lifecycle_args = mlua::MultiValue::new();
+            lifecycle_args.push_back(LuaValue::Table(self.current_self_table()?));
+            for arg in args {
+                lifecycle_args.push_back(self.lua.to_value(arg).map_err(lua_err)?);
             }
-            _ => {
-                let mut multi_args = mlua::MultiValue::new();
-                for arg in args {
-                    multi_args.push_back(self.lua.to_value(arg).map_err(lua_err)?);
+            handler.call::<()>(lifecycle_args).map_err(map_lua_error)?;
+        } else {
+            match args.len() {
+                0 => handler.call::<()>(()).map_err(map_lua_error)?,
+                1 => {
+                    let arg = self.lua.to_value(&args[0]).map_err(lua_err)?;
+                    handler.call::<()>(arg).map_err(map_lua_error)?;
                 }
-                handler.call::<()>(multi_args).map_err(map_lua_error)?;
+                _ => {
+                    let mut multi_args = mlua::MultiValue::new();
+                    for arg in args {
+                        multi_args.push_back(self.lua.to_value(arg).map_err(lua_err)?);
+                    }
+                    handler.call::<()>(multi_args).map_err(map_lua_error)?;
+                }
             }
         }
         self.sync_state_from_lua();
         self.sync_side_channels();
+        if name == "unmount" {
+            self.flush_storage();
+        }
         Ok(())
+    }
+
+    /// Call the canonical render lifecycle if present, otherwise fall back to
+    /// the legacy handler name used by existing shipped surfaces.
+    pub fn call_render_lifecycle(&mut self) -> Result<bool, ScriptError> {
+        if self.has_handler("render") {
+            self.clear_tracked_storage_keys();
+            *self.tracking_storage_reads.lock().unwrap() = true;
+            let result = self.call_handler("render", &[]);
+            *self.tracking_storage_reads.lock().unwrap() = false;
+            result?;
+            Ok(true)
+        } else if self.has_handler("onRender") {
+            self.clear_tracked_storage_keys();
+            *self.tracking_storage_reads.lock().unwrap() = true;
+            let result = self.call_handler("onRender", &[]);
+            *self.tracking_storage_reads.lock().unwrap() = false;
+            result?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn current_self_table(&self) -> Result<Table, ScriptError> {
+        let current_self = self.lua.create_table().map_err(lua_err)?;
+        let meta = self.lua.create_table().map_err(lua_err)?;
+        meta.set("module_id", self.module_id.as_str())
+            .map_err(lua_err)?;
+        meta.set("component_id", self.module_id.as_str())
+            .map_err(lua_err)?;
+        meta.set("kind", "frontend").map_err(lua_err)?;
+        meta.set("instance_id", self.module_id.as_str())
+            .map_err(lua_err)?;
+        meta.set("diagnostics_id", self.module_id.as_str())
+            .map_err(lua_err)?;
+        current_self.set("meta", meta).map_err(lua_err)?;
+        let storage_diagnostics = Arc::clone(&self.shared_diagnostics);
+        let storage_module_id = self.module_id.clone();
+        let tracked_storage_keys = Arc::clone(&self.tracked_storage_keys);
+        let tracking_storage_reads = Arc::clone(&self.tracking_storage_reads);
+        let changed_storage_keys = Arc::clone(&self.changed_storage_keys);
+        let storage = create_lua_storage_table(
+            &self.lua,
+            Arc::clone(&self.storage),
+            Arc::new(move |reason| {
+                storage_diagnostics.lock().unwrap().push(ScriptDiagnostic {
+                    module_id: storage_module_id.clone(),
+                    interface: "self.storage".to_string(),
+                    requested_version: None,
+                    reason,
+                });
+            }),
+            Arc::new(move |key| {
+                if *tracking_storage_reads.lock().unwrap() {
+                    tracked_storage_keys.lock().unwrap().insert(key);
+                }
+            }),
+            Arc::new(move |key| {
+                changed_storage_keys.lock().unwrap().insert(key);
+            }),
+        )
+        .map_err(lua_err)?;
+        current_self.set("storage", storage).map_err(lua_err)?;
+        let module_id = self.module_id.clone();
+        let self_events_meta = self.lua.create_table().map_err(lua_err)?;
+        self_events_meta
+            .set(
+                "__index",
+                self.lua
+                    .create_function(move |lua, (table, key): (Table, String)| {
+                        if key == "meta" {
+                            return table.get::<LuaValue>("meta");
+                        }
+                        if !is_named_event_channel(&key) {
+                            return Ok(LuaValue::Nil);
+                        }
+                        let channel = self_event_channel(lua, &module_id, &key)?;
+                        table.set(key.as_str(), channel.clone())?;
+                        Ok(LuaValue::Table(channel))
+                    })
+                    .map_err(lua_err)?,
+            )
+            .map_err(lua_err)?;
+        current_self
+            .set_metatable(Some(self_events_meta))
+            .map_err(lua_err)?;
+        Ok(current_self)
     }
 
     /// Get a reference to the current state for tree building.
@@ -217,9 +491,26 @@ impl ScriptContext {
         std::mem::take(&mut self.published_events)
     }
 
+    pub fn drain_bound_instance_calls(&mut self) -> Vec<BoundInstanceCall> {
+        self.sync_side_channels();
+        std::mem::take(&mut self.bound_instance_calls)
+    }
+
     pub fn drain_diagnostics(&mut self) -> Vec<ScriptDiagnostic> {
         self.sync_side_channels();
         std::mem::take(&mut self.diagnostics)
+    }
+
+    pub fn flush_storage(&mut self) {
+        let result = self.storage.lock().unwrap().flush_if_dirty();
+        if let Err(error) = result {
+            self.diagnostics.push(ScriptDiagnostic {
+                module_id: self.module_id.clone(),
+                interface: "self.storage".to_string(),
+                requested_version: None,
+                reason: format!("storage persistence failed: {error}"),
+            });
+        }
     }
 
     /// Check if a handler exists.
@@ -229,6 +520,9 @@ impl ScriptContext {
 
     fn install_host_api(&mut self) -> Result<(), ScriptError> {
         let globals = self.lua.globals();
+        globals
+            .set("self", self.current_self_table()?)
+            .map_err(lua_err)?;
         let module_object = self.lua.create_table().map_err(lua_err)?;
         let module_state = self.lua.create_table().map_err(lua_err)?;
         let module_exports = self.lua.create_table().map_err(lua_err)?;
@@ -512,16 +806,19 @@ impl ScriptContext {
         let require = self
             .lua
             .create_function(move |lua, module: String| {
-                if module == "@mesh/i18n" {
-                    let exports = lua.create_table()?;
-                    exports.set(
-                        "t",
-                        lua.create_function(|_lua, key: LuaValue| match key {
-                            LuaValue::String(value) => Ok(value.to_str()?.to_string()),
-                            other => Ok(lua_value_to_string(other)),
-                        })?,
-                    )?;
-                    return Ok(exports);
+                if module == "@mesh/i18n" || module == "mesh.i18n" {
+                    return create_i18n_library(lua);
+                }
+
+                if let Some(host_api) = resolve_host_api(lua, &module)? {
+                    return Ok(host_api);
+                }
+
+                if is_component_definition_specifier(&module) {
+                    let definition = lua.create_table()?;
+                    definition.set("__mesh_component_definition", true)?;
+                    definition.set("source", module.as_str())?;
+                    return Ok(definition);
                 }
 
                 let mut module_name = module.as_str();
@@ -702,6 +999,25 @@ impl ScriptContext {
                 self.diagnostics.extend(diagnostics.drain(..));
             }
         }
+        {
+            let mut calls = self.shared_bound_instance_calls.lock().unwrap();
+            if !calls.is_empty() {
+                self.bound_instance_calls.extend(calls.drain(..));
+            }
+        }
+        let changed_storage_keys = {
+            let mut changed = self.changed_storage_keys.lock().unwrap();
+            changed.drain().collect::<HashSet<_>>()
+        };
+        if !changed_storage_keys.is_empty() {
+            let tracked_storage_keys = self.tracked_storage_keys.lock().unwrap();
+            if changed_storage_keys
+                .iter()
+                .any(|key| tracked_storage_keys.contains(key))
+            {
+                self.state.dirty = true;
+            }
+        }
         self.interface_bindings = self.shared_interface_bindings.lock().unwrap().clone();
     }
 
@@ -725,4 +1041,95 @@ impl ScriptContext {
             let _ = module_table.set("state", state_value);
         }
     }
+}
+
+fn is_lifecycle_handler(name: &str) -> bool {
+    matches!(name, "init" | "render" | "mount" | "unmount" | "onRender")
+}
+
+fn default_runtime_storage_root() -> PathBuf {
+    std::env::temp_dir()
+        .join("mesh")
+        .join("runtime-storage")
+        .join(std::process::id().to_string())
+}
+
+fn is_reserved_runtime_hook(name: &str) -> bool {
+    is_lifecycle_handler(name)
+}
+
+fn is_bound_instance_self_arg(value: &LuaValue, child_instance_key: &str) -> bool {
+    let LuaValue::Table(table) = value else {
+        return false;
+    };
+    table
+        .get::<String>("__instance_id")
+        .is_ok_and(|instance_id| instance_id == child_instance_key)
+}
+
+fn is_named_event_channel(name: &str) -> bool {
+    name.chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_uppercase())
+        && name
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn self_event_channel(lua: &Lua, module_id: &str, event_name: &str) -> mlua::Result<Table> {
+    let globals = lua.globals();
+    let registry = match globals.get::<LuaValue>("__mesh_self_event_channels") {
+        Ok(LuaValue::Table(table)) => table,
+        _ => {
+            let table = lua.create_table()?;
+            globals.set("__mesh_self_event_channels", table.clone())?;
+            table
+        }
+    };
+    let module_table = match registry.get::<LuaValue>(module_id)? {
+        LuaValue::Table(table) => table,
+        _ => {
+            let table = lua.create_table()?;
+            registry.set(module_id, table.clone())?;
+            table
+        }
+    };
+    match module_table.get::<LuaValue>(event_name)? {
+        LuaValue::Table(channel) => Ok(channel),
+        _ => {
+            let channel = create_event_channel(lua)?;
+            module_table.set(event_name, channel.clone())?;
+            Ok(channel)
+        }
+    }
+}
+
+fn create_i18n_library(lua: &Lua) -> mlua::Result<Table> {
+    let exports = lua.create_table()?;
+    exports.set(
+        "t",
+        lua.create_function(|_lua, key: LuaValue| match key {
+            LuaValue::String(value) => Ok(value.to_str()?.to_string()),
+            other => Ok(lua_value_to_string(other)),
+        })?,
+    )?;
+    Ok(exports)
+}
+
+fn resolve_host_api(lua: &Lua, module: &str) -> mlua::Result<Option<Table>> {
+    let Some(api_name) = module.strip_prefix("mesh.") else {
+        return Ok(None);
+    };
+    let mesh = lua.globals().get::<Table>("mesh")?;
+    match api_name {
+        "events" | "ui" | "log" | "popover" | "locale" => mesh.get(api_name).map(Some),
+        _ => Ok(None),
+    }
+}
+
+fn is_component_definition_specifier(module: &str) -> bool {
+    module.ends_with(".mesh")
+        || module.starts_with("./")
+        || module.starts_with("../")
+        || (module.starts_with("@") && !module[1..].contains('@'))
 }

@@ -72,16 +72,19 @@ it, and whether the backend returned success or failure.
 ## Interface events
 
 `[[events]]` entries in `interface.toml` now produce runtime event channels on
-frontend proxies. Backends emit those events through the shell-owned typed lane:
+frontend proxies. Backends emit those events through named provider `self`
+channels. `mesh.service.emit_event(...)` remains a compatibility path:
 
 ```lua
-mesh.service.emit_event("VolumeChanged", {
-    device_id = "default",
-    level = state.percent,
-})
+function on_command_set_volume(self)
+    self.VolumeChanged:fire({
+        device_id = "default",
+        level = state.percent,
+    })
+end
 
 local audio = require("mesh.audio")
-local unsubscribe = audio.events.VolumeChanged:subscribe(function(event)
+local unsubscribe = audio.VolumeChanged:on(function(event)
     print(event.level)
 end)
 ```

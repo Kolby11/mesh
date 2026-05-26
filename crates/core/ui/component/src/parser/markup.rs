@@ -1,9 +1,10 @@
 use crate::template::*;
 use quick_xml::Reader;
 use quick_xml::events::Event;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use super::ParseError;
+use crate::ComponentImportTarget;
 
 /// Convert `{#for}`, `{#if}`, `{:else if}`, `{:else}`, `{/for}`, `{/if}` directives
 /// into custom XML tags so quick_xml can build a proper element tree.
@@ -245,7 +246,7 @@ fn preprocess_template(source: &str) -> String {
 
 pub(super) fn parse_markup(
     source: &str,
-    imported_components: &HashSet<String>,
+    imported_components: &HashMap<String, ComponentImportTarget>,
 ) -> Result<TemplateBlock, ParseError> {
     let cf_processed = preprocess_control_flow(source.trim());
     let preprocessed = preprocess_template(&cf_processed);
@@ -366,7 +367,10 @@ fn parse_xml_attributes(
             })?
             .into_owned();
 
-        let (attr_name, attr_value) = if let Some(var) = name.strip_prefix("bind:") {
+        let (attr_name, attr_value) = if name == "bind:this" {
+            let binding = extract_brace_expr(&value).unwrap_or(value);
+            (name, AttributeValue::InstanceBinding(binding))
+        } else if let Some(var) = name.strip_prefix("bind:") {
             // bind:value="variable" — two-way binding.
             (var.to_string(), AttributeValue::TwoWayBinding(value))
         } else if is_event_attr(&name) {
@@ -487,7 +491,7 @@ fn build_template_node(
     tag: String,
     attributes: Vec<Attribute>,
     children: Vec<TemplateNode>,
-    imported_components: &HashSet<String>,
+    imported_components: &HashMap<String, ComponentImportTarget>,
 ) -> Result<TemplateNode, ParseError> {
     // Control-flow nodes produced by preprocess_control_flow.
     if tag == "mesh-for" {
@@ -547,12 +551,25 @@ fn build_template_node(
     }
 
     if tag.chars().next().is_some_and(char::is_uppercase) {
-        if !imported_components.contains(&tag) {
-            return Err(ParseError::InvalidTemplate {
-                message: format!(
-                    "component <{tag}> is not imported; add `import {tag} from \"...\"` to the script block"
-                ),
-            });
+        match imported_components.get(&tag) {
+            Some(
+                ComponentImportTarget::ComponentLocal(_)
+                | ComponentImportTarget::ComponentModule(_),
+            ) => {}
+            Some(ComponentImportTarget::InterfaceApi { interface, .. }) => {
+                return Err(ParseError::InvalidTemplate {
+                    message: format!(
+                        "component <{tag}> refers to interface import `{interface}`; component tags must use mounted component definitions, not service/interface instances"
+                    ),
+                });
+            }
+            None => {
+                return Err(ParseError::InvalidTemplate {
+                    message: format!(
+                        "component <{tag}> is not imported; add `import {tag} from \"...\"` to the script block"
+                    ),
+                });
+            }
         }
         return Ok(TemplateNode::Component(ComponentRef {
             name: tag,
