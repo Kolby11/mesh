@@ -1,33 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.14
-milestone_name: Unified Luau Scripting Runtime
-status: planning
-last_updated: "2026-05-24T10:30:00.000Z"
-last_activity: 2026-05-24
+milestone: v1.15
+milestone_name: Persistent Storage System
+status: ready_for_planning
+last_updated: "2026-05-26T12:22:39.000Z"
+last_activity: 2026-05-26
 progress:
-  total_phases: 7
+  total_phases: 0
   completed_phases: 0
-  total_plans: 7
+  total_plans: 0
   completed_plans: 0
   percent: 0
 ---
 
-# State: MESH v1.14
+# State: MESH v1.15
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-24)
+See: `.planning/PROJECT.md` (updated 2026-05-26)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.14 Unified Luau Scripting Runtime
+**Current focus:** v1.15 Persistent Storage System
 
 ## Current Position
 
-Phase: 74 Scripting Context Core discussed
-Plan: —
-Status: Ready for phase 74 planning
-Last activity: 2026-05-24 — Revised v1.14 into unified Luau scripting runtime and queued v1.15 persistent storage
+Phase: between milestones
+Plan: none
+Status: v1.14 archived; v1.15 Persistent Storage System ready for requirements and roadmap planning
+Last activity: 2026-05-26 — Archived v1.14 Unified Luau Scripting Runtime milestone
 
 ## Decisions
 
@@ -51,6 +51,13 @@ Last activity: 2026-05-24 — Revised v1.14 into unified Luau scripting runtime 
 - [v1.14]: New event authoring uses named channel objects such as `audio.VolumeChanged:on(fn)` and `self.Changed:fire(payload)`; existing `proxy.events.Name:subscribe`, `module.events`, `mesh.events.publish`, and `mesh.service.emit_event(...)` remain compatibility paths.
 - [v1.14]: `self.storage` persistence is intentionally deferred to v1.15. v1.14 should establish the instance identity and render-dependency foundations without implementing the storage backing store.
 - [v1.15 queued]: Persistent storage will be component/provider instance-scoped, shell-backed, JSON-like, atomic on disk under the MESH/XDG data area, lifecycle-flushed, and private to the owning module/component/provider identity.
+- [Phase 74]: Frontend and backend Luau runtimes now expose runtime-owned `self.meta` identity. Frontend supports canonical `render(self)` with legacy `onRender` fallback; backend supports `start(self)`/`stop(self)` with legacy `init()` fallback.
+- [Phase 75]: Frontend `require(...)` now resolves existing host API tables and `mesh.i18n` while preserving service/interface proxy resolution. `.mesh` parsing now discovers simple Luau-native component/interface `local Alias = require("...")` imports for later component definition semantics.
+- [Phase 76]: Public fields continue to use existing non-local reactive globals, and public functions are now inspectable while Lua locals remain private and lifecycle hooks stay reserved runtime hooks.
+- [Phase 77]: `bind:this` stores child public field snapshots and instance metadata in parent state, while parent Lua method calls on the bound object queue shell-side child public function invocation to avoid unsafe runtime lock capture.
+- [Phase 78]: Named event channels now use direct service proxy and `self` properties with `:on`/`:fire`, while `proxy.events.Name`, `module.events`, and `mesh.service.emit_event(...)` remain compatibility paths.
+- [Phase 79]: Automatic rerendering relies on tracked service fields, locale/theme rebuild invalidation, and normal parent state dirtying for bound child snapshots; `self.storage` read dependencies remain reserved for v1.15.
+- [Phase 80]: Shipped navigation/audio frontends and backend providers now demonstrate the v1.14 authoring model; compatibility paths remain tested and documented for migration.
 
 - Backend plugins use Luau for service logic; Rust core remains the wiring layer.
 - `require('@mesh/service')` is the frontend/backend interface.

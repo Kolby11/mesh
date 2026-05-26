@@ -1,5 +1,104 @@
 # MESH Milestones
 
+## Active Autonomy Queue
+
+**Current autonomous starting point:** v1.15 Persistent Storage System planning
+
+Run order:
+
+1. Start **v1.15 Persistent Storage System** as the next milestone.
+2. Start **v1.16 Elements Improvements** after v1.15, beginning with the native select/dropdown element.
+
+Use `$gsd-new-milestone` or `$gsd-autonomous` from the repository root to proceed into v1.15.
+After v1.15 ships, promote v1.16 to add the first-class select/dropdown markup
+element and migrate the navigation language selector away from its horizontal
+custom menu.
+
+---
+
+## v1.15 Persistent Storage System (Queued)
+
+**Starts after:** v1.14 Unified Luau Scripting Runtime
+
+**Goal:** Implement `self.storage` as shell-backed, component/provider
+instance-scoped persistent key-value storage using atomic JSON files under the
+MESH/XDG data area.
+
+**Planned scope:**
+
+- Scoped storage identity derived from `self.meta` for frontend components and backend providers
+- JSON-like table reads, writes, removals, snapshots, and invalid value diagnostics
+- Atomic persistence through temp-file write plus rename under the MESH/XDG data area
+- Non-fatal corrupt-file recovery with private scope isolation by module/component/provider identity
+- Lifecycle loading before `mount/start` and flushing on `unmount/stop` plus orderly shell shutdown
+- Render dependency integration so storage readers rerender only when watched values change
+- Shipped proof through a real UI preference or provider setting path
+
+**Out of scope:**
+
+- Cross-module storage reads
+- Schema-backed settings UI
+- Remote synchronization
+- Storing functions, userdata, component definitions, component instances, or event channels
+
+---
+
+## v1.16 Elements Improvements (Queued)
+
+**Starts after:** v1.15 Persistent Storage System
+
+**Goal:** Add common native markup controls that reduce custom component
+workarounds and improve shipped UI behavior.
+
+**Planned scope:**
+
+- First-class `<select>` and `<option>` element support in MESH markup
+- Visible dropdown/popup behavior with vertical option layout
+- Keyboard navigation, focus, selection, disabled states, and accessibility metadata
+- Value binding/change events suitable for Luau component state
+- Styling hooks that fit the existing shell CSS profile without requiring browser CSS compatibility
+- Shipped proof by replacing the navigation bar language selector's horizontal custom menu
+
+**Out of scope:**
+
+- Full browser-compatible `<select>` behavior
+- Arbitrary HTML form submission semantics
+- Multi-select unless explicitly promoted during phase discussion
+
+---
+
+## v1.14 Unified Luau Scripting Runtime (Shipped: 2026-05-26)
+
+**Phases completed:** 7 phases, 7 plans
+**Requirements:** 36/36 satisfied
+**Audit:** tech debt only; no critical milestone blockers
+
+**Goal:** Make frontend and backend Luau authors use one explicit model for
+`require(...)` imports, runtime-provided `self` context, public/private script
+members, frontend component definitions/instances, named event channels, and
+automatic dependency rerendering.
+
+**Key accomplishments:**
+
+- Frontend and backend runtimes expose runtime-owned `self.meta` identity.
+- `require(...)` resolves shell APIs, services/interfaces, Luau helpers, and component definitions.
+- Lua locals remain private while non-local fields/functions form public component/provider members.
+- Component definitions, markup instantiation, direct public-field attributes, and `bind:this` are supported.
+- Named event channels use `:on` and `:fire` on service proxies and `self`.
+- Automatic rerender dependencies cover service reads, locale/theme changes, and bound public fields.
+- Shipped navigation/audio frontend examples and backend providers now demonstrate the unified contract.
+
+**Known deferred items at close:** tech debt only; see `.planning/milestones/v1.14-MILESTONE-AUDIT.md`.
+
+**Archive artifacts:**
+
+- `.planning/milestones/v1.14-ROADMAP.md`
+- `.planning/milestones/v1.14-REQUIREMENTS.md`
+- `.planning/milestones/v1.14-MILESTONE-AUDIT.md`
+- `.planning/milestones/v1.14-phases/`
+
+---
+
 ## v1.13 Manifest I18n Contract (Shipped: 2026-05-24)
 
 **Phases completed:** 4 phases, 4 plans, 13 tasks

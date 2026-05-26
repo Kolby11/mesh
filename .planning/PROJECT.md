@@ -10,6 +10,18 @@ MESH should let plugin authors build distinctive shell UI and service integratio
 
 ## Current State
 
+`v1.14 Unified Luau Scripting Runtime` shipped on 2026-05-26.
+
+The project now also has a unified Luau authoring/runtime model with:
+
+- Runtime-owned `self.meta` identity for frontend components and backend providers.
+- Canonical `require(...)` imports for shell APIs, service/interface proxies, Luau helpers, and component definitions.
+- Lua `local` members treated as private implementation details, with non-local fields/functions forming public object members.
+- Require-based frontend component definitions, markup instantiation, direct public-field attributes, and `bind:this` mounted instance references.
+- Named event channels such as `audio.VolumeChanged:on(fn)` and `self.Changed:fire(payload)` across frontend and backend runtime paths.
+- Automatic rerendering for render-read service state, locale/theme data, and bound public fields.
+- Shipped navigation/audio frontend and backend provider examples migrated to the new contract while compatibility paths remain documented and tested.
+
 `v1.13 Manifest I18n Contract` shipped on 2026-05-24.
 
 The project now also has explicit localized manifest text behavior with:
@@ -158,23 +170,11 @@ The project now also has a class-like module object contract with:
 - Backend `mesh.service.emit_event(...)` transport through shell payload validation into frontend `proxy.events.Name` subscribers.
 - Bundled audio/navigation proof for typed `VolumeChanged` backend-to-frontend event delivery.
 
-## Last Shipped Milestone: v1.13 Manifest I18n Contract
-
-**Goal:** Make user-facing `module.json` text fields explicit about literal text versus localized catalog lookup, then resolve that text through shell runtime paths with diagnostics and shipped manifest proof.
-
-**Shipped features:**
-- Added a reusable manifest `LocalizedText` contract for localized-capable user-facing fields.
-- Preserved localized keybind and layout metadata through installed graph contribution records.
-- Resolved localized keybind metadata in runtime descriptors and `mesh.debug.keybinds`.
-- Emitted non-fatal diagnostics for suspicious raw dotted keys and missing runtime translations.
-- Migrated bundled navigation keybind metadata to explicit localized text objects.
-- Updated author docs so `mesh.i18n`, `mesh.contributes.i18n`, and field-local `t` references form one clear localization story.
-
-## Current Milestone: v1.14 Unified Luau Scripting Runtime
+## Last Shipped Milestone: v1.14 Unified Luau Scripting Runtime
 
 **Goal:** Make frontend and backend Luau authors use one explicit model for `require(...)` imports, runtime-provided `self` context, public/private script members, frontend component definitions/instances, named event channels, and automatic dependency rerendering.
 
-**Target features:**
+**Shipped features:**
 - Define a canonical require namespace for shell APIs that replaces implicit reliance on the global `mesh` table over time.
 - Unify service/interface imports across frontend and backend Luau runtimes, including capability checks, version constraints, diagnostics, and pcall behavior.
 - Add frontend component imports to the same authoring model so `.mesh` files can require local and module components instead of using a separate `import ... from` syntax.
@@ -187,7 +187,7 @@ The project now also has a class-like module object contract with:
 - Preserve compatibility for current globals and component `import` syntax with migration diagnostics and shipped-module proof.
 - Update docs and shipped navigation/audio/backend modules so frontend and backend examples teach one unified import story.
 
-## Queued Milestone: v1.15 Persistent Storage System
+## Next Milestone Goals: v1.15 Persistent Storage System
 
 **Goal:** Implement `self.storage` as shell-backed, component/provider instance-scoped persistent key-value storage using atomic JSON files under the MESH/XDG data area.
 
@@ -197,6 +197,18 @@ The project now also has a class-like module object contract with:
 - Accept only JSON-like values and reject functions, userdata, component definitions, component instances, and event channels with diagnostics.
 - Persist through temp-file write plus rename under the MESH/XDG data area, recover corrupt files non-fatally, and isolate storage by module/component/provider/runtime instance identity.
 - Seed storage before `mount/start`, flush on `unmount/stop` and orderly shell shutdown, and integrate storage reads/writes with automatic rerendering.
+
+## Queued Milestone: v1.16 Elements Improvements
+
+**Goal:** Improve MESH's built-in markup element set so common shell controls
+are native primitives instead of bespoke frontend component workarounds.
+
+**Target features:**
+- Add first-class `<select>` and `<option>` markup elements.
+- Render selected value as a compact control and open a visible vertical dropdown for options.
+- Support pointer selection, keyboard navigation, focus behavior, disabled states, value binding/change events, and accessibility metadata.
+- Keep styling within the existing shell CSS profile rather than promising browser-compatible form control behavior.
+- Prove the element on the shipped navigation bar by replacing the horizontal language selector with a native dropdown.
 
 ## Previous Shipped Milestone: v1.12 Module Object Contract
 
