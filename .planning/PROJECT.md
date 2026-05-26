@@ -187,7 +187,7 @@ The project now also has a class-like module object contract with:
 - Preserve compatibility for current globals and component `import` syntax with migration diagnostics and shipped-module proof.
 - Update docs and shipped navigation/audio/backend modules so frontend and backend examples teach one unified import story.
 
-## Next Milestone Goals: v1.15 Persistent Storage System
+## Current Milestone: v1.15 Persistent Storage System
 
 **Goal:** Implement `self.storage` as shell-backed, component/provider instance-scoped persistent key-value storage using atomic JSON files under the MESH/XDG data area.
 
@@ -279,7 +279,6 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 
 ### Active
 
-- `v1.14`: Unified Luau scripting should cover external `require(...)` imports, runtime-provided `self` context, public/private script members, services, libraries, frontend component definitions/instances, named event channels, and automatic rerendering across both frontend and backend runtimes.
 - `v1.15`: Persistent storage should deliver `self.storage` as private component/provider instance-scoped JSON storage, not shared module-level storage or schema-backed settings.
 
 ### Out of Scope
@@ -340,9 +339,9 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Modules are class-like runtime objects over typed lanes | Authors need normal Luau object access while Rust keeps lifecycle, validation, replay, routing, and diagnostics authoritative | Shipped in v1.12 |
 | Backend-to-frontend transient facts use typed interface events | Durable service state should stay replayable, while transient updates like volume changes need declared payload schemas and subscriptions | Shipped in v1.12 gap closure |
 | Manifest-localized text must be explicit at the field site | Plain `module.json` strings cannot tell authors whether text is literal, a translation key, or actually localized | Shipped in v1.13 |
-| Luau scripting should split current instance context from external dependencies | Authors should use runtime-provided `self` for the current object instance and `require(...)` for external shell APIs, services, libraries, and component definitions | Active for v1.14 |
-| New event authoring uses named channel objects | Authors should subscribe with `audio.VolumeChanged:on(fn)` and emit local/provider events with `self.Changed:fire(payload)`, while string-literal event paths remain compatibility only | Active for v1.14 |
-| Persistent storage is a separate runtime milestone | `self.storage` needs shell-backed persistence, atomic JSON files, lifecycle flushing, type diagnostics, and rerender integration after the unified scripting surface lands | Queued for v1.15 |
+| Luau scripting should split current instance context from external dependencies | Authors should use runtime-provided `self` for the current object instance and `require(...)` for external shell APIs, services, libraries, and component definitions | Shipped in v1.14 |
+| New event authoring uses named channel objects | Authors should subscribe with `audio.VolumeChanged:on(fn)` and emit local/provider events with `self.Changed:fire(payload)`, while string-literal event paths remain compatibility only | Shipped in v1.14 |
+| Persistent storage is a separate runtime milestone | `self.storage` needs shell-backed persistence, atomic JSON files, lifecycle flushing, type diagnostics, and rerender integration after the unified scripting surface lands | Active for v1.15 |
 
 <details>
 <summary>Archived milestone framing</summary>

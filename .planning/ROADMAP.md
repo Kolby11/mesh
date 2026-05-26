@@ -2,61 +2,130 @@
 
 ## Milestones
 
-- ✅ **v1.14 Unified Luau Scripting Runtime** — Phases 74-80 shipped 2026-05-26 ([archive](milestones/v1.14-ROADMAP.md))
-- ⏭️ **v1.15 Persistent Storage System** — next milestone
+- 🚧 **v1.15 Persistent Storage System** — Phases 81-85 planned
 - ⏭️ **v1.16 Elements Improvements** — queued after v1.15
+- ✅ **v1.14 Unified Luau Scripting Runtime** — Phases 74-80 shipped 2026-05-26 ([archive](milestones/v1.14-ROADMAP.md))
 - ✅ **v1.13 Manifest I18n Contract** — Phases 70-73 shipped 2026-05-24 ([archive](milestones/v1.13-ROADMAP.md))
 - ✅ **v1.12 Module Object Contract** — Phases 65-69 shipped 2026-05-23 ([archive](milestones/v1.12-ROADMAP.md))
 - ✅ **v1.11 Surface Keybind Completion** — Phases 60-64 shipped 2026-05-23 ([archive](milestones/v1.11-ROADMAP.md))
 
-## Last Shipped Milestone: v1.14 Unified Luau Scripting Runtime
+## Intent
 
-**Goal:** Make frontend and backend Luau authors use one explicit model for
-`require(...)` imports, runtime-provided `self` context, public/private script
-members, frontend component definitions/instances, named event channels, and
-automatic dependency rerendering.
+Implement `self.storage` as shell-backed, component/provider instance-scoped
+persistent key-value storage using atomic JSON files under the MESH/XDG data
+area.
 
-**Key accomplishments:**
+This milestone builds directly on v1.14's `self.meta` identity and render
+dependency foundations. Storage is deliberately scoped as a small JSON-like
+document primitive, not a settings schema, shared database, or remote sync
+system.
 
-- Runtime-provided `self.meta` identity now exists for frontend components and backend providers.
-- Frontend/backend `require(...)` now covers shell APIs, service/interface proxies, Luau helpers, and component definitions.
-- Lua locals are private while non-local variables/functions are public component/provider members.
-- Frontend component imports, markup instantiation, direct public-field attributes, and `bind:this` mounted instance references are supported.
-- Service and local/provider events are exposed as named channels such as `audio.VolumeChanged:on(fn)` and `self.Changed:fire(payload)`.
-- Render-read service fields, locale/theme data, and bound public fields participate in automatic rerendering.
-- Shipped navigation/audio frontend examples and bundled backend providers now demonstrate the unified scripting contract.
+## Phase Summary
 
-**Known deferred items at close:** tech debt only; see [v1.14 audit](milestones/v1.14-MILESTONE-AUDIT.md).
+| # | Phase | Goal | Requirements | Success Criteria |
+|---|-------|------|--------------|------------------|
+| 81 | Storage Foundation | Add the shell-owned scoped storage subsystem, path scoping, document operations, atomic writes, and corrupt-file recovery. | STORECORE-01, STORECORE-02, STORECORE-03, STORECORE-04, STORECORE-05, STORECORE-06 | 6 |
+| 82 | Luau Self Storage Binding | Expose `self.storage` to frontend/backend runtimes with table-like reads, writes, deletes, snapshots, and invalid value diagnostics. | STOREAPI-01, STOREAPI-02, STOREAPI-03, STOREAPI-04, STOREAPI-05, STOREAPI-06 | 6 |
+| 83 | Lifecycle Persistence | Load storage before lifecycle user code, coalesce writes, flush on teardown/shutdown, and preserve instance isolation. | STORELIFE-01, STORELIFE-02, STORELIFE-03, STORELIFE-04, STORELIFE-05 | 5 |
+| 84 | Storage Rerender Integration | Track render-time storage reads and rerender only components whose watched keys changed. | STORERENDER-01, STORERENDER-02, STORERENDER-03, STORERENDER-04 | 4 |
+| 85 | Storage Proof And Docs | Prove storage through tests, shipped UI/provider usage, diagnostics, and author documentation. | STOREPROOF-01, STOREPROOF-02, STOREPROOF-03, STOREPROOF-04, STOREPROOF-05, STOREPROOF-06 | 6 |
 
-**Archive artifacts:**
+## Execution Rules
 
-- `.planning/milestones/v1.14-ROADMAP.md`
-- `.planning/milestones/v1.14-REQUIREMENTS.md`
-- `.planning/milestones/v1.14-MILESTONE-AUDIT.md`
-- `.planning/milestones/v1.14-phases/`
+- Use v1.14 `self.meta` identity as the source of storage scope. Do not invent a parallel identity model.
+- Keep storage shell-owned. Luau code sees `self.storage`; Rust owns persistence, validation, diagnostics, and lifecycle flushing.
+- Store only JSON-like values: nil, boolean, number, string, arrays, and plain objects.
+- Reject functions, userdata, component definitions, component instances, event channels, and other non-serializable values with non-fatal diagnostics.
+- Persist with temp-file plus rename. Never leave partial writes as the canonical document.
+- Treat corrupt files as recoverable diagnostics; do not crash the shell or module runtime.
+- Keep storage private to the owning module/component/provider/runtime scope.
+- Integrate with the existing render dependency model instead of adding a separate frontend invalidation path.
+- Prove behavior with shipped runtime paths, not only synthetic unit tests.
 
-## Next Milestone: v1.15 Persistent Storage System
+## Phases
 
-**Goal:** Implement `self.storage` as shell-backed, component/provider
-instance-scoped persistent key-value storage using atomic JSON files under the
-MESH/XDG data area.
+- [ ] Phase 81: Storage Foundation
+- [ ] Phase 82: Luau Self Storage Binding
+- [ ] Phase 83: Lifecycle Persistence
+- [ ] Phase 84: Storage Rerender Integration
+- [ ] Phase 85: Storage Proof And Docs
 
-**Planned scope:**
+### Phase 81: Storage Foundation
 
-- Scoped storage identity derived from `self.meta` for frontend components and backend providers
-- JSON-like table reads, writes, removals, snapshots, and invalid value diagnostics
-- Atomic persistence through temp-file write plus rename under the MESH/XDG data area
-- Non-fatal corrupt-file recovery with private scope isolation by module/component/provider identity
-- Lifecycle loading before `mount/start` and flushing on `unmount/stop` plus orderly shell shutdown
-- Render dependency integration so storage readers rerender only when watched values change
-- Shipped proof through a real UI preference or provider setting path
+**Goal:** Add the shell-owned scoped storage subsystem, path scoping, document operations, atomic writes, and corrupt-file recovery.
 
-**Out of scope:**
+**Requirements:** STORECORE-01, STORECORE-02, STORECORE-03, STORECORE-04, STORECORE-05, STORECORE-06
 
-- Cross-module storage reads
-- Schema-backed settings UI
-- Remote synchronization
-- Storing functions, userdata, component definitions, component instances, or event channels
+**Status:** Not started
+
+**Success criteria:**
+1. Storage scope derives from `self.meta` for frontend component instances and backend providers.
+2. Storage documents are private to module/component/provider/runtime identity.
+3. Storage paths are deterministic, sanitized, collision-resistant, and rooted under the MESH/XDG data area.
+4. The shell storage subsystem supports load, get, set, remove, clear, and snapshot operations.
+5. Writes persist through temp-file plus rename.
+6. Corrupt or unreadable storage files recover non-fatally with diagnostics and empty in-memory storage.
+
+### Phase 82: Luau Self Storage Binding
+
+**Goal:** Expose `self.storage` to frontend/backend runtimes with table-like reads, writes, deletes, snapshots, and invalid value diagnostics.
+
+**Requirements:** STOREAPI-01, STOREAPI-02, STOREAPI-03, STOREAPI-04, STOREAPI-05, STOREAPI-06
+
+**Status:** Not started
+
+**Success criteria:**
+1. Frontend and backend lifecycle contexts expose `self.storage`.
+2. `self.storage.key` and `self.storage["key"]` reads return persisted values or `nil`.
+3. Assigning supported values updates in-memory storage and schedules persistence.
+4. Assigning `nil` removes keys.
+5. Supported values are limited to JSON-like values.
+6. Unsupported values are rejected with non-fatal diagnostics.
+
+### Phase 83: Lifecycle Persistence
+
+**Goal:** Load storage before lifecycle user code, coalesce writes, flush on teardown/shutdown, and preserve instance isolation.
+
+**Requirements:** STORELIFE-01, STORELIFE-02, STORELIFE-03, STORELIFE-04, STORELIFE-05
+
+**Status:** Not started
+
+**Success criteria:**
+1. Storage loads before frontend `mount/render` and backend `start` can read it.
+2. Storage flushes on frontend `unmount`, backend `stop`, and orderly shell shutdown.
+3. Multiple writes in one runtime turn coalesce without losing latest in-memory values.
+4. Persistence failures preserve in-memory state and emit diagnostics.
+5. Two instances of the same component/provider keep isolated scoped storage unless they intentionally share identity.
+
+### Phase 84: Storage Rerender Integration
+
+**Goal:** Track render-time storage reads and rerender only components whose watched keys changed.
+
+**Requirements:** STORERENDER-01, STORERENDER-02, STORERENDER-03, STORERENDER-04
+
+**Status:** Not started
+
+**Success criteria:**
+1. Frontend render reads of `self.storage` keys are tracked as dependencies.
+2. Writes to watched keys rerender only the affected components.
+3. Writes to unwatched keys do not trigger unrelated rerenders.
+4. Explicit redraw/invalidation APIs remain compatibility/debug escape hatches.
+
+### Phase 85: Storage Proof And Docs
+
+**Goal:** Prove storage through tests, shipped UI/provider usage, diagnostics, and author documentation.
+
+**Requirements:** STOREPROOF-01, STOREPROOF-02, STOREPROOF-03, STOREPROOF-04, STOREPROOF-05, STOREPROOF-06
+
+**Status:** Not started
+
+**Success criteria:**
+1. Regression tests cover scoping, atomic persistence, corrupt recovery, invalid diagnostics, and two-instance isolation.
+2. Frontend runtime tests prove reads, writes, deletes, snapshots, and rerender dependencies.
+3. Backend runtime tests prove provider storage, lifecycle flush, and invalid diagnostics.
+4. A shipped UI preference or provider setting uses `self.storage`.
+5. Author docs explain scope, value types, lifecycle timing, persistence location, and diagnostics.
+6. Debug or health output exposes storage diagnostics without leaking private stored values.
 
 ## Queued Milestone: v1.16 Elements Improvements
 

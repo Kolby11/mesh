@@ -2,23 +2,25 @@
 
 ## Active Autonomy Queue
 
-**Current autonomous starting point:** v1.15 Persistent Storage System planning
+**Current autonomous starting point:** v1.15 Persistent Storage System Phase 81
 
 Run order:
 
-1. Start **v1.15 Persistent Storage System** as the next milestone.
-2. Start **v1.16 Elements Improvements** after v1.15, beginning with the native select/dropdown element.
+1. Execute **v1.15 Persistent Storage System** phases 81-85.
+2. Audit and archive **v1.15 Persistent Storage System**.
+3. Start **v1.16 Elements Improvements** after v1.15, beginning with the native select/dropdown element.
 
-Use `$gsd-new-milestone` or `$gsd-autonomous` from the repository root to proceed into v1.15.
+Use `$gsd-autonomous` from the repository root to proceed through v1.15.
 After v1.15 ships, promote v1.16 to add the first-class select/dropdown markup
 element and migrate the navigation language selector away from its horizontal
 custom menu.
 
 ---
 
-## v1.15 Persistent Storage System (Queued)
+## v1.15 Persistent Storage System (Active)
 
-**Starts after:** v1.14 Unified Luau Scripting Runtime
+**Phases planned:** 81-85
+**Requirements:** 27 mapped, 0 unmapped
 
 **Goal:** Implement `self.storage` as shell-backed, component/provider
 instance-scoped persistent key-value storage using atomic JSON files under the
@@ -40,6 +42,14 @@ MESH/XDG data area.
 - Schema-backed settings UI
 - Remote synchronization
 - Storing functions, userdata, component definitions, component instances, or event channels
+
+**Phase queue:**
+
+- [ ] Phase 81: Storage Foundation
+- [ ] Phase 82: Luau Self Storage Binding
+- [ ] Phase 83: Lifecycle Persistence
+- [ ] Phase 84: Storage Rerender Integration
+- [ ] Phase 85: Storage Proof And Docs
 
 ---
 

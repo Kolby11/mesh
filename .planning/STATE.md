@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.15
 milestone_name: Persistent Storage System
-status: ready_for_planning
+status: planning
 last_updated: "2026-05-26T12:22:39.000Z"
 last_activity: 2026-05-26
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -24,10 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-26)
 
 ## Current Position
 
-Phase: between milestones
+Phase: 81 Storage Foundation
 Plan: none
-Status: v1.14 archived; v1.15 Persistent Storage System ready for requirements and roadmap planning
-Last activity: 2026-05-26 — Archived v1.14 Unified Luau Scripting Runtime milestone
+Status: Requirements and roadmap defined; ready for Phase 81 discussion/planning
+Last activity: 2026-05-26 — Started v1.15 Persistent Storage System milestone
 
 ## Decisions
 
