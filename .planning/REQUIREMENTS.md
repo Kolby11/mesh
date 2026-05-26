@@ -16,19 +16,19 @@
 
 ### Layout And Structure Elements
 
-- [ ] **ELEMLAYOUT-01**: Layout primitives include `box`, `row`, `column`, `grid`, `stack`, `spacer`, `divider`, and `scroll-area`.
-- [ ] **ELEMLAYOUT-02**: Layout primitives expose configurable alignment, spacing, sizing, overflow, and scroll behavior through markup attributes and style hooks.
-- [ ] **ELEMLAYOUT-03**: Existing layout behavior remains compatible for current shipped modules.
-- [ ] **ELEMLAYOUT-04**: Structure primitives include `section`, `header`, `footer`, `group`, and `form-row` semantics for accessibility and styling.
-- [ ] **ELEMLAYOUT-05**: Layout and structure diagnostics catch invalid child/attribute combinations.
+- [x] **ELEMLAYOUT-01**: Layout primitives include `box`, `row`, `column`, `grid`, `stack`, `spacer`, `divider`, and `scroll-area`.
+- [x] **ELEMLAYOUT-02**: Layout primitives expose configurable alignment, spacing, sizing, overflow, and scroll behavior through markup attributes and style hooks.
+- [x] **ELEMLAYOUT-03**: Existing layout behavior remains compatible for current shipped modules.
+- [x] **ELEMLAYOUT-04**: Structure primitives include `section`, `header`, `footer`, `group`, and `form-row` semantics for accessibility and styling.
+- [x] **ELEMLAYOUT-05**: Layout and structure diagnostics catch invalid child/attribute combinations.
 
 ### Display Elements
 
-- [ ] **ELEMDISPLAY-01**: Display primitives include `text`, `icon`, `image`, `badge`, `progress`, `meter`, `tooltip`, `avatar`, and `shortcut`.
-- [ ] **ELEMDISPLAY-02**: Display primitives expose accessible labels, roles, value metadata, and style hooks.
-- [ ] **ELEMDISPLAY-03**: Progress and meter controls support determinate/indeterminate and min/max/current values.
-- [ ] **ELEMDISPLAY-04**: Tooltip behavior is available to pointer and keyboard users.
-- [ ] **ELEMDISPLAY-05**: Display diagnostics catch missing assets, invalid value ranges, and missing accessible names where relevant.
+- [x] **ELEMDISPLAY-01**: Display primitives include `text`, `icon`, `image`, `badge`, `progress`, `meter`, `tooltip`, `avatar`, and `shortcut`.
+- [x] **ELEMDISPLAY-02**: Display primitives expose accessible labels, roles, value metadata, and style hooks.
+- [x] **ELEMDISPLAY-03**: Progress and meter controls support determinate/indeterminate and min/max/current values.
+- [x] **ELEMDISPLAY-04**: Tooltip behavior is available to pointer and keyboard users.
+- [x] **ELEMDISPLAY-05**: Display diagnostics catch missing assets, invalid value ranges, and missing accessible names where relevant.
 
 ### Action Controls
 
@@ -116,16 +116,16 @@
 | ELEMCORE-04 | Phase 86 | Complete |
 | ELEMCORE-05 | Phase 86 | Complete |
 | ELEMCORE-06 | Phase 86 | Complete |
-| ELEMLAYOUT-01 | Phase 87 | Pending |
-| ELEMLAYOUT-02 | Phase 87 | Pending |
-| ELEMLAYOUT-03 | Phase 87 | Pending |
-| ELEMLAYOUT-04 | Phase 87 | Pending |
-| ELEMLAYOUT-05 | Phase 87 | Pending |
-| ELEMDISPLAY-01 | Phase 87 | Pending |
-| ELEMDISPLAY-02 | Phase 87 | Pending |
-| ELEMDISPLAY-03 | Phase 87 | Pending |
-| ELEMDISPLAY-04 | Phase 87 | Pending |
-| ELEMDISPLAY-05 | Phase 87 | Pending |
+| ELEMLAYOUT-01 | Phase 87 | Complete |
+| ELEMLAYOUT-02 | Phase 87 | Complete |
+| ELEMLAYOUT-03 | Phase 87 | Complete |
+| ELEMLAYOUT-04 | Phase 87 | Complete |
+| ELEMLAYOUT-05 | Phase 87 | Complete |
+| ELEMDISPLAY-01 | Phase 87 | Complete |
+| ELEMDISPLAY-02 | Phase 87 | Complete |
+| ELEMDISPLAY-03 | Phase 87 | Complete |
+| ELEMDISPLAY-04 | Phase 87 | Complete |
+| ELEMDISPLAY-05 | Phase 87 | Complete |
 | ELEMACTION-01 | Phase 88 | Pending |
 | ELEMACTION-02 | Phase 88 | Pending |
 | ELEMACTION-03 | Phase 88 | Pending |
