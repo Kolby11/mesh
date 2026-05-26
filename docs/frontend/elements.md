@@ -73,6 +73,39 @@ Example:
 </scroll-area>
 ```
 
+## Action And Text Input Controls
+
+Phase 88 keeps action controls intentionally small: `button` is the only native action behavior. Use attributes to configure state and intent, and use child markup for visual content.
+
+```xml
+<button class="toolbar-action" onclick={toggle_audio} pressed="{audio_open}" keybind="audio.toggle">
+  <icon name="audio-volume-high" />
+  <text>Audio</text>
+</button>
+```
+
+Do not put icon shortcut attributes on `button`. `icon`, `name`, and `src` belong on a dedicated child `icon` or `image` element. The compatibility tags `icon-button`, `toggle-button`, `command-button`, and `link-button` are still accepted, but they lower to the same runtime `button` path and should not be treated as separate native behavior.
+
+Button attributes include `variant`, `pressed`, `disabled`, `busy`, `default`, `destructive`, `keybind`, `command`, and `href`. `command` and `href` are intent metadata; Luau handlers still own the actual command or navigation behavior.
+
+Text and numeric controls use one native runtime input path. Source tags configure semantics:
+
+| Tag | Runtime behavior |
+|-----|------------------|
+| `input` | Generic single-line input. |
+| `textarea` | Input with multiline source metadata. Full multiline editing remains conservative. |
+| `search` | Input with search type metadata. |
+| `password` | Input with masked source metadata. |
+| `number-input` | Input with numeric `min`, `max`, `step`, and `value` diagnostics. |
+| `stepper` | Numeric input with stepper source semantics and default step metadata. |
+
+Text inputs support `value`, `placeholder`, `disabled`, `readonly`, `required`, `invalid`, `oninput`, and `onchange`. Runtime edits dispatch `oninput` for immediate value updates and keep `onchange` compatibility for committed/current value handlers.
+
+```xml
+<search value="{query}" placeholder="Search modules" oninput={on_query_input} />
+<number-input value="{limit}" min="1" max="20" step="1" onchange={on_limit_change} />
+```
+
 ## Shared State
 
 Shared state names are `disabled`, `read-only`, `required`, `focused`, `selected`, `checked`, `expanded`, `pressed`, `invalid`, `active`, and `value`. Not every element uses every state. Element metadata defines which states apply, and the runtime exposes applicable state through retained nodes, style hooks, accessibility metadata, and Luau event payloads.
@@ -93,11 +126,13 @@ Native elements carry accessibility roles, focusability, labels, descriptions, v
 
 Unsupported attributes, unsupported event handlers, invalid values, invalid nesting, missing assets, and missing accessible names should produce actionable diagnostics. Diagnostics should identify the tag, the attribute or event, why it is unsupported, and what the author can do instead.
 
-For Phase 87, diagnostics intentionally keep the scope narrow: unsupported complex grid syntax is rejected, progress range/value fields must be numeric, boolean progress fields must be boolean-like, structure elements reject control value state, and tooltip ownership must point at a non-empty owner id.
+For Phase 87, diagnostics intentionally keep the layout/display scope narrow: unsupported complex grid syntax is rejected, progress range/value fields must be numeric, boolean progress fields must be boolean-like, structure elements reject control value state, and tooltip ownership must point at a non-empty owner id.
+
+For Phase 88, diagnostics reject button icon shortcut attributes, unsupported browser form/navigation behavior, invalid numeric input values, non-positive numeric steps, and invalid boolean state values.
 
 ## Deferred Element Behavior
 
-The following families remain defined by the native element taxonomy but are not expanded by the Phase 87 behavior slice: action controls beyond existing button compatibility, text and numeric input variants, choice/menu controls, container/collection controls, full gallery proof, and distinct `meter` runtime behavior.
+The following families remain defined by the native element taxonomy but are not expanded yet: choice/menu controls, container/collection controls, full gallery proof, distinct `meter` runtime behavior, distinct action button runtimes, and full multiline text editing.
 
 ## Relationship To HTML Qt And Flutter
 

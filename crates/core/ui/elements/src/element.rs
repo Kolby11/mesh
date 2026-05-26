@@ -582,6 +582,17 @@ static COMMON_ATTRIBUTES: &[ElementAttributeDef] = &[
     ),
     attr("title", ElementAttributeType::String, "Accessible title"),
     attr("disabled", ElementAttributeType::Boolean, "Disabled state"),
+    attr("busy", ElementAttributeType::Boolean, "Busy state"),
+    attr(
+        "default",
+        ElementAttributeType::Boolean,
+        "Default action state",
+    ),
+    attr(
+        "destructive",
+        ElementAttributeType::Boolean,
+        "Destructive action state",
+    ),
     attr("readonly", ElementAttributeType::Boolean, "Read-only state"),
     attr("required", ElementAttributeType::Boolean, "Required state"),
     attr("value", ElementAttributeType::String, "Current value"),
@@ -590,7 +601,36 @@ static COMMON_ATTRIBUTES: &[ElementAttributeDef] = &[
     attr("checked", ElementAttributeType::Boolean, "Checked state"),
     attr("selected", ElementAttributeType::Boolean, "Selected state"),
     attr("expanded", ElementAttributeType::Boolean, "Expanded state"),
+    attr("pressed", ElementAttributeType::Boolean, "Pressed state"),
     attr("invalid", ElementAttributeType::Boolean, "Invalid state"),
+    attr(
+        "keybind",
+        ElementAttributeType::String,
+        "Associated keybind id or display shortcut",
+    ),
+    attr(
+        "command",
+        ElementAttributeType::String,
+        "Command intent metadata",
+    ),
+    attr("href", ElementAttributeType::String, "Link intent metadata"),
+    attr("type", ElementAttributeType::String, "Input type metadata"),
+    attr(
+        "placeholder",
+        ElementAttributeType::String,
+        "Input placeholder text",
+    ),
+    attr(
+        "multiline",
+        ElementAttributeType::Boolean,
+        "Input accepts multiple lines",
+    ),
+    attr(
+        "masked",
+        ElementAttributeType::Boolean,
+        "Input masks displayed text",
+    ),
+    attr("step", ElementAttributeType::Number, "Numeric step size"),
     attr("align", ElementAttributeType::String, "Layout alignment"),
     attr(
         "justify",
@@ -705,6 +745,9 @@ static COMMON_EVENTS: &[ElementEventDef] = &[
 
 static COMMON_STYLE_HOOKS: &[&str] = &[
     "disabled",
+    "busy",
+    "default",
+    "destructive",
     "readonly",
     "required",
     "focus",
@@ -1426,6 +1469,33 @@ fn validate_phase87_attribute_value(
         ("grid", "columns" | "rows") => validate_grid_tracks(tag, name, value),
         ("progress", "min" | "max" | "value") => validate_number_attribute(tag, name, value),
         ("progress", "indeterminate") => validate_bool_attribute(tag, name, value),
+        ("button", "icon" | "name" | "src") => Some(invalid_attr(
+            tag,
+            name,
+            "buttons do not accept icon shortcut attributes",
+            "Put a dedicated <icon> element inside <button> markup instead.",
+        )),
+        ("button", "busy" | "default" | "destructive" | "pressed" | "disabled") => {
+            validate_bool_attribute(tag, name, value)
+        }
+        (
+            "input" | "textarea" | "search" | "password" | "number-input" | "stepper",
+            "disabled" | "readonly" | "required" | "invalid" | "multiline" | "masked",
+        ) => validate_bool_attribute(tag, name, value),
+        ("number-input" | "stepper", "min" | "max" | "value") => {
+            validate_number_attribute(tag, name, value)
+        }
+        ("number-input" | "stepper", "step") => {
+            validate_positive_number_attribute(tag, name, value)
+        }
+        ("button" | "command-button" | "link-button", "form" | "action" | "method") => {
+            Some(invalid_attr(
+                tag,
+                name,
+                "browser form behavior is not supported by MESH buttons",
+                "Use a Luau handler such as onclick or onactivate.",
+            ))
+        }
         ("tooltip", "tooltip-for") if value.trim().is_empty() => Some(invalid_attr(
             tag,
             name,
@@ -1485,6 +1555,23 @@ fn validate_number_attribute(tag: &str, name: &str, value: &str) -> Option<Eleme
         name,
         "expected a numeric value",
         "Use a numeric literal or a binding that resolves to a number.",
+    ))
+}
+
+fn validate_positive_number_attribute(
+    tag: &str,
+    name: &str,
+    value: &str,
+) -> Option<ElementDiagnostic> {
+    if value.trim().is_empty() || value.trim().parse::<f32>().is_ok_and(|parsed| parsed > 0.0) {
+        return None;
+    }
+
+    Some(invalid_attr(
+        tag,
+        name,
+        "expected a positive numeric value",
+        "Use a positive numeric literal or a binding that resolves to one.",
     ))
 }
 
@@ -2007,6 +2094,106 @@ mod tests {
             diagnostic.kind,
             ElementDiagnosticKind::InvalidAttributeValue
         );
+    }
+
+    #[test]
+    fn phase88_single_button_contract_rejects_icon_shortcut_attributes() {
+        let button = element_contract_for_tag("button").expect("button contract");
+
+        assert_eq!(button.family, ElementFamily::Action);
+        assert_eq!(button.accessibility.role, AccessibilityRole::Button);
+        for attr in ["pressed", "busy", "default", "destructive", "keybind"] {
+            assert!(
+                button
+                    .attributes
+                    .iter()
+                    .any(|candidate| candidate.name == attr),
+                "button should expose {attr}"
+            );
+        }
+
+        for attr in ["icon", "name", "src"] {
+            let diagnostic =
+                validate_element_attribute("button", attr, "audio-volume-high").expect(attr);
+            assert_eq!(
+                diagnostic.kind,
+                ElementDiagnosticKind::InvalidAttributeValue
+            );
+            assert!(diagnostic.action.contains("<icon>"));
+        }
+    }
+
+    #[test]
+    fn phase88_input_variant_contract_exposes_configured_input_metadata() {
+        for tag in [
+            "input",
+            "textarea",
+            "search",
+            "password",
+            "number-input",
+            "stepper",
+        ] {
+            let contract = element_contract_for_tag(tag).expect("input contract");
+            assert_eq!(contract.family, ElementFamily::TextInput);
+            assert_eq!(contract.accessibility.role, AccessibilityRole::TextInput);
+            for attr in [
+                "value",
+                "placeholder",
+                "readonly",
+                "required",
+                "invalid",
+                "type",
+            ] {
+                assert!(
+                    contract
+                        .attributes
+                        .iter()
+                        .any(|candidate| candidate.name == attr),
+                    "{tag} should expose {attr}"
+                );
+            }
+        }
+
+        for attr in ["min", "max", "step"] {
+            assert!(
+                element_contract_for_tag("number-input")
+                    .expect("number-input")
+                    .attributes
+                    .iter()
+                    .any(|candidate| candidate.name == attr),
+                "number-input should expose {attr}"
+            );
+        }
+    }
+
+    #[test]
+    fn phase88_input_diagnostics_validate_numeric_and_boolean_values() {
+        let diagnostic = validate_element_attribute("number-input", "value", "many")
+            .expect("invalid numeric value");
+        assert_eq!(
+            diagnostic.kind,
+            ElementDiagnosticKind::InvalidAttributeValue
+        );
+        assert!(diagnostic.message.contains("expected a numeric value"));
+
+        let diagnostic =
+            validate_element_attribute("stepper", "step", "0").expect("invalid step value");
+        assert_eq!(
+            diagnostic.kind,
+            ElementDiagnosticKind::InvalidAttributeValue
+        );
+        assert!(diagnostic.message.contains("positive numeric"));
+
+        let diagnostic =
+            validate_element_attribute("textarea", "multiline", "sometimes").expect("bool value");
+        assert_eq!(
+            diagnostic.kind,
+            ElementDiagnosticKind::InvalidAttributeValue
+        );
+
+        assert!(validate_element_attribute("number-input", "min", "0").is_none());
+        assert!(validate_element_attribute("number-input", "max", "100").is_none());
+        assert!(validate_element_attribute("number-input", "step", "5").is_none());
     }
 
     #[test]

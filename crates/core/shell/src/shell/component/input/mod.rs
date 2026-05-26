@@ -260,11 +260,10 @@ impl FrontendSurfaceComponent {
                         value.push(ch);
                         let current = value.clone();
                         self.invalidate_text_state();
-                        return self.call_node_handler(
+                        return self.dispatch_text_input_value_handlers(
                             &tree,
                             &focused_key,
-                            "change",
-                            &[serde_json::json!(current)],
+                            &current,
                         );
                     }
                 }
@@ -331,11 +330,10 @@ impl FrontendSurfaceComponent {
                                 value.pop();
                                 let current = value.clone();
                                 self.invalidate_text_state();
-                                requests.extend(self.call_node_handler(
+                                requests.extend(self.dispatch_text_input_value_handlers(
                                     &tree,
                                     &focused_key,
-                                    "change",
-                                    &[serde_json::json!(current)],
+                                    &current,
                                 )?);
                                 return Ok(requests);
                             }

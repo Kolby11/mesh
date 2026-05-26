@@ -327,6 +327,7 @@ fn build_element_node(
             attributes.insert("type".into(), input_type.into());
         }
     }
+    apply_source_tag_defaults(&element.tag_kind, &mut attributes);
     let inherited_mask =
         inherited_style_mask(rules, &tag, &classes, id.as_deref(), container_context);
 
@@ -436,6 +437,27 @@ fn default_input_type(source_tag: &SourceTag) -> Option<&'static str> {
         SourceTag::EmailInput => Some("email"),
         SourceTag::UrlInput => Some("url"),
         _ => None,
+    }
+}
+
+fn apply_source_tag_defaults(source_tag: &SourceTag, attributes: &mut HashMap<String, String>) {
+    match source_tag {
+        SourceTag::TextArea => {
+            attributes
+                .entry("multiline".into())
+                .or_insert_with(|| "true".into());
+        }
+        SourceTag::Password | SourceTag::PasswordInput => {
+            attributes
+                .entry("masked".into())
+                .or_insert_with(|| "true".into());
+        }
+        SourceTag::Stepper => {
+            attributes
+                .entry("step".into())
+                .or_insert_with(|| "1".into());
+        }
+        _ => {}
     }
 }
 
@@ -640,12 +662,17 @@ fn accessibility_for_element(
         .cloned();
     info.keyboard_shortcut = attributes
         .get("key")
+        .or_else(|| attributes.get("keybind"))
         .or_else(|| attributes.get("shortcut"))
         .cloned();
     info.state.disabled = bool_attr(attributes, "disabled");
     info.state.checked = attributes.get("checked").map(|value| bool_value(value));
     info.state.expanded = attributes.get("expanded").map(|value| bool_value(value));
     info.state.selected = bool_attr(attributes, "selected");
+    info.state.pressed = bool_attr(attributes, "pressed");
+    info.state.busy = bool_attr(attributes, "busy");
+    info.state.invalid = bool_attr(attributes, "invalid");
+    info.state.required = bool_attr(attributes, "required");
     info.state.value = attributes.get("value").cloned();
     info.state.value_min = number_attr(attributes, "min");
     info.state.value_max = number_attr(attributes, "max");
@@ -962,6 +989,157 @@ mod tests {
         assert!(diagnostics.iter().any(|diagnostic| {
             diagnostic.tag == "progress"
                 && diagnostic.name == "value"
+                && diagnostic.kind == ElementDiagnosticKind::InvalidAttributeValue
+        }));
+    }
+
+    #[test]
+    fn phase88_button_aliases_preserve_source_semantics_without_icon_shortcuts() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<template>
+  <icon-button onclick={onTap} pressed="true" busy="true" keybind="media.play">
+    <icon name="media-playback-start" />
+    <text>Play</text>
+  </icon-button>
+</template>
+"#,
+        )
+        .unwrap();
+        let manifest = test_manifest();
+        let theme = mesh_core_theme::default_theme();
+
+        let tree = build_widget_tree_from_component(
+            &component,
+            &manifest,
+            &theme,
+            240.0,
+            80.0,
+            None,
+            "root",
+            None,
+            &[],
+        );
+
+        let button = tree.children.first().expect("button alias");
+        assert_eq!(button.tag, "button");
+        assert_eq!(
+            button.attributes.get("data-mesh-element"),
+            Some(&"icon-button".to_string())
+        );
+        assert_eq!(button.event_handlers.get("click"), Some(&"onTap".into()));
+        assert_eq!(
+            button.accessibility.role,
+            mesh_core_elements::AccessibilityRole::Button
+        );
+        assert!(button.accessibility.state.pressed);
+        assert!(button.accessibility.state.busy);
+        assert_eq!(
+            button.accessibility.keyboard_shortcut.as_deref(),
+            Some("media.play")
+        );
+        assert!(button.children.iter().any(|child| child.tag == "icon"));
+    }
+
+    #[test]
+    fn phase88_input_variants_configure_single_runtime_input_path() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<template>
+  <textarea value="hello" placeholder="Notes" required="true" />
+  <password value="secret" />
+  <number-input value="5" min="0" max="10" step="1" />
+  <stepper value="2" min="0" max="5" />
+</template>
+"#,
+        )
+        .unwrap();
+        let manifest = test_manifest();
+        let theme = mesh_core_theme::default_theme();
+
+        let tree = build_widget_tree_from_component(
+            &component,
+            &manifest,
+            &theme,
+            240.0,
+            160.0,
+            None,
+            "root",
+            None,
+            &[],
+        );
+
+        let textarea = &tree.children[0];
+        assert_eq!(textarea.tag, "input");
+        assert_eq!(
+            textarea.attributes.get("data-mesh-element"),
+            Some(&"textarea".to_string())
+        );
+        assert_eq!(
+            textarea.attributes.get("type"),
+            Some(&"textarea".to_string())
+        );
+        assert_eq!(
+            textarea.attributes.get("multiline"),
+            Some(&"true".to_string())
+        );
+        assert!(textarea.accessibility.state.required);
+
+        let password = &tree.children[1];
+        assert_eq!(password.tag, "input");
+        assert_eq!(
+            password.attributes.get("type"),
+            Some(&"password".to_string())
+        );
+        assert_eq!(password.attributes.get("masked"), Some(&"true".to_string()));
+
+        let number = &tree.children[2];
+        assert_eq!(number.tag, "input");
+        assert_eq!(
+            number.attributes.get("data-mesh-element"),
+            Some(&"number-input".to_string())
+        );
+        assert_eq!(number.attributes.get("type"), Some(&"number".to_string()));
+        assert_eq!(number.accessibility.state.value.as_deref(), Some("5"));
+        assert_eq!(number.accessibility.state.value_min, Some(0.0));
+        assert_eq!(number.accessibility.state.value_max, Some(10.0));
+
+        let stepper = &tree.children[3];
+        assert_eq!(stepper.tag, "input");
+        assert_eq!(stepper.attributes.get("type"), Some(&"number".to_string()));
+        assert_eq!(stepper.attributes.get("step"), Some(&"1".to_string()));
+    }
+
+    #[test]
+    fn phase88_collects_button_and_numeric_source_diagnostics() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<template>
+  <button name="media-playback-start" />
+  <number-input step="0" />
+</template>
+"#,
+        )
+        .unwrap();
+        let template = component.template.expect("template");
+        let diagnostics: Vec<_> = template
+            .root
+            .iter()
+            .filter_map(|node| match node {
+                TemplateNode::Element(element) => Some(collect_element_diagnostics(element)),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.tag == "button"
+                && diagnostic.name == "name"
+                && diagnostic.kind == ElementDiagnosticKind::InvalidAttributeValue
+        }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.tag == "number-input"
+                && diagnostic.name == "step"
                 && diagnostic.kind == ElementDiagnosticKind::InvalidAttributeValue
         }));
     }

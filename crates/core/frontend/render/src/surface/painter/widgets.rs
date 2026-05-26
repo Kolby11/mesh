@@ -4,6 +4,12 @@ use crate::display_list::{
 
 use super::*;
 
+fn scrollbar_thumb_extent(raw_extent: f32, track_extent: i32, scale: f32) -> i32 {
+    let track_extent = track_extent.max(1);
+    let min_extent = ((18.0 * scale).max(10.0) as i32).min(track_extent);
+    (raw_extent.round() as i32).clamp(min_extent, track_extent)
+}
+
 impl FrontendRenderEngine {
     pub(super) fn render_input_node(
         &self,
@@ -576,9 +582,11 @@ impl FrontendRenderEngine {
             let thumb_height = if content_height <= 0.0 {
                 track_height
             } else {
-                ((viewport_height / content_height.max(viewport_height)) * track_height as f32)
-                    .round()
-                    .clamp((18.0 * scale).max(10.0), track_height as f32) as i32
+                scrollbar_thumb_extent(
+                    (viewport_height / content_height.max(viewport_height)) * track_height as f32,
+                    track_height,
+                    scale,
+                )
             };
             let thumb_range = (track_height - thumb_height).max(0) as f32;
             let thumb_y = track.y
@@ -623,9 +631,11 @@ impl FrontendRenderEngine {
             let thumb_width = if content_width <= 0.0 {
                 track_width
             } else {
-                ((viewport_width / content_width.max(viewport_width)) * track_width as f32)
-                    .round()
-                    .clamp((18.0 * scale).max(10.0), track_width as f32) as i32
+                scrollbar_thumb_extent(
+                    (viewport_width / content_width.max(viewport_width)) * track_width as f32,
+                    track_width,
+                    scale,
+                )
             };
             let thumb_range = (track_width - thumb_width).max(0) as f32;
             let thumb_x = track.x
@@ -701,10 +711,12 @@ impl FrontendRenderEngine {
             let thumb_height = if node.scrollbars.content_height <= 0.0 {
                 track_height
             } else {
-                ((viewport_height / node.scrollbars.content_height.max(viewport_height))
-                    * track_height as f32)
-                    .round()
-                    .clamp((18.0 * scale).max(10.0), track_height as f32) as i32
+                scrollbar_thumb_extent(
+                    (viewport_height / node.scrollbars.content_height.max(viewport_height))
+                        * track_height as f32,
+                    track_height,
+                    scale,
+                )
             };
             let thumb_range = (track_height - thumb_height).max(0) as f32;
             let thumb_y = track.y
@@ -750,10 +762,12 @@ impl FrontendRenderEngine {
             let thumb_width = if node.scrollbars.content_width <= 0.0 {
                 track_width
             } else {
-                ((viewport_width / node.scrollbars.content_width.max(viewport_width))
-                    * track_width as f32)
-                    .round()
-                    .clamp((18.0 * scale).max(10.0), track_width as f32) as i32
+                scrollbar_thumb_extent(
+                    (viewport_width / node.scrollbars.content_width.max(viewport_width))
+                        * track_width as f32,
+                    track_width,
+                    scale,
+                )
             };
             let thumb_range = (track_width - thumb_width).max(0) as f32;
             let thumb_x = track.x

@@ -1,6 +1,18 @@
 use super::super::*;
 
 impl FrontendSurfaceComponent {
+    pub(super) fn dispatch_text_input_value_handlers(
+        &mut self,
+        tree: &WidgetNode,
+        input_key: &str,
+        value: &str,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let payload = serde_json::json!(value);
+        let mut requests = self.call_node_handler(tree, input_key, "input", &[payload.clone()])?;
+        requests.extend(self.call_node_handler(tree, input_key, "change", &[payload])?);
+        Ok(requests)
+    }
+
     pub(super) fn preserve_slider_value(
         &mut self,
         tree: &WidgetNode,

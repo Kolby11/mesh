@@ -49,6 +49,55 @@ end
 }
 
 #[test]
+fn phase88_source_variant_input_dispatches_input_and_change_handlers() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+input_seen = ""
+change_seen = ""
+function onInput(value)
+    input_seen = value
+end
+function onChange(value)
+    change_seen = value
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![event_node_with_attrs(
+        "input",
+        "root/0",
+        0.0,
+        0.0,
+        120.0,
+        24.0,
+        &[("data-mesh-element", "search"), ("type", "search")],
+        &[("input", "onInput"), ("change", "onChange")],
+    )]));
+    component.focused_key = Some("root/0".into());
+    component.input_values.insert("root/0".into(), "me".into());
+
+    let theme = default_theme();
+    component
+        .handle_input(&theme, 240, 160, ComponentInput::Char { ch: 's' })
+        .unwrap();
+
+    assert_eq!(
+        component.input_values.get("root/0").map(String::as_str),
+        Some("mes")
+    );
+    assert_eq!(
+        runtime_value(&component, "input_seen"),
+        Some(serde_json::Value::String("mes".into()))
+    );
+    assert_eq!(
+        runtime_value(&component, "change_seen"),
+        Some(serde_json::Value::String("mes".into()))
+    );
+}
+
+#[test]
 fn keyboard_handlers_keydown_and_keyup_payloads_route_to_focused_node() {
     let mut component = test_frontend_component(
         r#"

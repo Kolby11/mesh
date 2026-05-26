@@ -61,13 +61,20 @@ reserved for explicitly imported custom components.
 | `tooltip`        | Tooltip metadata/content       |
 | `avatar`         | Avatar image or icon metadata  |
 | `shortcut`       | Keyboard shortcut label        |
-| `button`         | Clickable action               |
-| `icon-button`    | Icon-only clickable action     |
+| `button`         | Configurable clickable action  |
+| `icon-button`    | Compatibility button alias     |
+| `toggle-button`  | Compatibility button alias     |
+| `command-button` | Compatibility button alias     |
+| `link-button`    | Compatibility button alias     |
 | `input`          | Text input                     |
+| `textarea`       | Multiline input metadata       |
+| `search`         | Search input metadata          |
+| `password`       | Masked input metadata          |
 | `text-input`     | Semantic text input            |
 | `password-input` | Password text input            |
 | `search-input`   | Search text input              |
 | `number-input`   | Numeric text input             |
+| `stepper`        | Numeric stepper metadata       |
 | `email-input`    | Email text input               |
 | `url-input`      | URL text input                 |
 | `slider`         | Range input                    |
@@ -85,6 +92,20 @@ reserved for explicitly imported custom components.
 HTML compatibility tags are intentionally not part of the component vocabulary.
 Use classes, metadata, accessibility attributes, and component boundaries for
 semantics.
+
+Action controls use one native `button` behavior. Put visual content inside the
+button, including dedicated `icon` elements:
+
+```xml
+<button onclick={toggle_audio} pressed="{audio_open}">
+  <icon name="audio-volume-high" />
+  <text>Audio</text>
+</button>
+```
+
+The compatibility action tags lower to the same button runtime. Prefer
+configured `button` markup unless a future native element needs distinct focus,
+event, accessibility, value, or renderer behavior.
 
 Custom component tags must be PascalCase and must be imported in the script
 block before they can be used. New author-facing code uses Luau

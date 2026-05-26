@@ -147,4 +147,28 @@ mod tests {
         assert_eq!(lower_source_tag(&SourceTag::Switch).as_str(), "input");
         assert_eq!(lower_source_tag(&SourceTag::Checkbox).as_str(), "input");
     }
+
+    #[test]
+    fn phase88_action_and_input_variants_share_native_runtime_primitives() {
+        for source_tag in [
+            SourceTag::Button,
+            SourceTag::IconButton,
+            SourceTag::ToggleButton,
+            SourceTag::CommandButton,
+            SourceTag::LinkButton,
+        ] {
+            assert_eq!(lower_source_tag(&source_tag).as_str(), "button");
+        }
+
+        for source_tag in [
+            SourceTag::Input,
+            SourceTag::TextArea,
+            SourceTag::Search,
+            SourceTag::Password,
+            SourceTag::NumberInput,
+            SourceTag::Stepper,
+        ] {
+            assert_eq!(lower_source_tag(&source_tag).as_str(), "input");
+        }
+    }
 }

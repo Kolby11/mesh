@@ -350,27 +350,63 @@ static PROGRESS_ATTRS: &[AttrDef] = &[
     },
 ];
 
-static BUTTON_ATTRS: &[AttrDef] = &[AttrDef {
-    name: "variant",
-    description: "Visual variant: filled | outlined | text | tonal",
+static BUTTON_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "variant",
+        description: "Visual variant: filled | outlined | text | tonal",
+    },
+    AttrDef {
+        name: "pressed",
+        description: "Whether the button is in a pressed/toggled state",
+    },
+    AttrDef {
+        name: "busy",
+        description: "Whether the action is currently busy",
+    },
+    AttrDef {
+        name: "default",
+        description: "Marks the default action in a group",
+    },
+    AttrDef {
+        name: "destructive",
+        description: "Marks a destructive action",
+    },
+    AttrDef {
+        name: "keybind",
+        description: "Associated keybind id or display shortcut",
+    },
+    AttrDef {
+        name: "command",
+        description: "Command intent metadata",
+    },
+    AttrDef {
+        name: "href",
+        description: "Link intent metadata; navigation is handled by Luau",
+    },
+];
+
+static TEXTAREA_ATTRS: &[AttrDef] = &[AttrDef {
+    name: "multiline",
+    description: "Whether this configured input accepts multiple lines",
 }];
 
-static ICON_BUTTON_ATTRS: &[AttrDef] = &[
+static PASSWORD_ATTRS: &[AttrDef] = &[AttrDef {
+    name: "masked",
+    description: "Whether this configured input masks displayed text",
+}];
+
+static NUMERIC_INPUT_ATTRS: &[AttrDef] = &[
     AttrDef {
-        name: "name",
-        description: "XDG icon name for the button icon",
+        name: "min",
+        description: "Minimum numeric value",
     },
     AttrDef {
-        name: "src",
-        description: "Icon file path",
+        name: "max",
+        description: "Maximum numeric value",
     },
     AttrDef {
-        name: "size",
-        description: "Icon size in pixels",
-    },
-    AttrDef {
-        name: "tooltip",
-        description: "Accessible tooltip text",
+        name: "step",
+        description: "Positive numeric step size",
     },
 ];
 
@@ -650,10 +686,34 @@ pub static TAG_DEFS: &[TagDef] = &[
     TagDef {
         name: "icon-button",
         category: TagCategory::Controls,
-        self_closing: true,
-        description: "Icon-only clickable action.",
+        self_closing: false,
+        description: "Compatibility alias for configured <button>; put <icon> inside button markup.",
         bases: BASE_MESH_INTERACTIVE,
-        attributes: ICON_BUTTON_ATTRS,
+        attributes: BUTTON_ATTRS,
+    },
+    TagDef {
+        name: "toggle-button",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Compatibility alias for configured <button pressed=...>.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: BUTTON_ATTRS,
+    },
+    TagDef {
+        name: "command-button",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Compatibility alias for configured <button command=...>.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: BUTTON_ATTRS,
+    },
+    TagDef {
+        name: "link-button",
+        category: TagCategory::Controls,
+        self_closing: false,
+        description: "Compatibility alias for configured <button href=...>.",
+        bases: BASE_MESH_INTERACTIVE,
+        attributes: BUTTON_ATTRS,
     },
     TagDef {
         name: "input",
@@ -693,7 +753,39 @@ pub static TAG_DEFS: &[TagDef] = &[
         self_closing: true,
         description: "Semantic numeric input.",
         bases: BASE_MESH_INPUT,
+        attributes: NUMERIC_INPUT_ATTRS,
+    },
+    TagDef {
+        name: "textarea",
+        category: TagCategory::Controls,
+        self_closing: true,
+        description: "Configured input with multiline source semantics.",
+        bases: BASE_MESH_INPUT,
+        attributes: TEXTAREA_ATTRS,
+    },
+    TagDef {
+        name: "search",
+        category: TagCategory::Controls,
+        self_closing: true,
+        description: "Configured input with search source semantics.",
+        bases: BASE_MESH_INPUT,
         attributes: NO_ATTRS,
+    },
+    TagDef {
+        name: "password",
+        category: TagCategory::Controls,
+        self_closing: true,
+        description: "Configured input with masked text semantics.",
+        bases: BASE_MESH_INPUT,
+        attributes: PASSWORD_ATTRS,
+    },
+    TagDef {
+        name: "stepper",
+        category: TagCategory::Controls,
+        self_closing: true,
+        description: "Configured numeric input with stepper semantics.",
+        bases: BASE_MESH_INPUT,
+        attributes: NUMERIC_INPUT_ATTRS,
     },
     TagDef {
         name: "email-input",
@@ -842,5 +934,73 @@ mod tests {
             !meter_attrs.contains(&"indeterminate"),
             "meter stays taxonomy-only in Phase 87"
         );
+    }
+
+    #[test]
+    fn phase88_lsp_prefers_single_button_without_icon_shortcut_attributes() {
+        let button_attrs = attr_names(tag("button"));
+        for name in [
+            "variant",
+            "pressed",
+            "busy",
+            "default",
+            "destructive",
+            "keybind",
+        ] {
+            assert!(
+                button_attrs.contains(&name),
+                "button should complete {name}"
+            );
+        }
+        for name in ["icon", "name", "src"] {
+            assert!(
+                !button_attrs.contains(&name),
+                "button should not complete icon shortcut attr {name}"
+            );
+        }
+
+        for name in [
+            "icon-button",
+            "toggle-button",
+            "command-button",
+            "link-button",
+        ] {
+            let compat = tag(name);
+            assert!(
+                compat.description.contains("Compatibility alias"),
+                "{name} should be documented as a compatibility alias"
+            );
+            assert!(!attr_names(compat).contains(&"src"));
+        }
+    }
+
+    #[test]
+    fn phase88_lsp_input_variants_include_config_attrs() {
+        for name in [
+            "input",
+            "textarea",
+            "search",
+            "password",
+            "number-input",
+            "stepper",
+        ] {
+            tag(name);
+        }
+
+        let textarea_attrs = attr_names(tag("textarea"));
+        assert!(textarea_attrs.contains(&"placeholder"));
+        assert!(textarea_attrs.contains(&"multiline"));
+
+        let password_attrs = attr_names(tag("password"));
+        assert!(password_attrs.contains(&"type"));
+        assert!(password_attrs.contains(&"masked"));
+
+        let number_attrs = attr_names(tag("number-input"));
+        for name in ["value", "min", "max", "step"] {
+            assert!(
+                number_attrs.contains(&name),
+                "number-input should complete {name}"
+            );
+        }
     }
 }
