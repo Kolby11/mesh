@@ -10,6 +10,18 @@ MESH should let plugin authors build distinctive shell UI and service integratio
 
 ## Current State
 
+`v1.15 Persistent Storage System` shipped on 2026-05-26.
+
+The project now also has shell-backed persistent storage for Luau runtimes with:
+
+- Scoped frontend component and backend provider storage identities derived from `self.meta`.
+- Deterministic sanitized JSON document paths with temp-file plus rename persistence.
+- `self.storage` table-like reads, JSON-like writes, nil deletion, snapshots, and invalid value diagnostics.
+- Lifecycle loading before user code and flushing on frontend `unmount`, backend `stop`, and explicit shutdown paths.
+- Render-time storage read tracking so writes to watched keys rerender only affected frontend components.
+- Shipped navigation language preference proof through `self.storage.language`.
+- Author documentation for storage scope, supported values, lifecycle timing, diagnostics, and rerender behavior.
+
 `v1.14 Unified Luau Scripting Runtime` shipped on 2026-05-26.
 
 The project now also has a unified Luau authoring/runtime model with:
@@ -170,35 +182,18 @@ The project now also has a class-like module object contract with:
 - Backend `mesh.service.emit_event(...)` transport through shell payload validation into frontend `proxy.events.Name` subscribers.
 - Bundled audio/navigation proof for typed `VolumeChanged` backend-to-frontend event delivery.
 
-## Last Shipped Milestone: v1.14 Unified Luau Scripting Runtime
-
-**Goal:** Make frontend and backend Luau authors use one explicit model for `require(...)` imports, runtime-provided `self` context, public/private script members, frontend component definitions/instances, named event channels, and automatic dependency rerendering.
-
-**Shipped features:**
-- Define a canonical require namespace for shell APIs that replaces implicit reliance on the global `mesh` table over time.
-- Unify service/interface imports across frontend and backend Luau runtimes, including capability checks, version constraints, diagnostics, and pcall behavior.
-- Add frontend component imports to the same authoring model so `.mesh` files can require local and module components instead of using a separate `import ... from` syntax.
-- Define `self.meta` as the narrow runtime-provided current-instance identity surface; full `self.storage` persistence is the next milestone.
-- Treat Lua `local` members as private and non-local variables/functions as public object members, with markup attributes binding directly to public component fields.
-- Treat frontend `require("./Component")` as a component definition import, with markup instantiation and Svelte-style `bind:this` for mounted component instance references.
-- Expose interface and local component/provider events as named channel objects such as `audio.VolumeChanged:on(fn)` and `self.Changed:fire(payload)`.
-- Automatically rerender affected components when render-read service state, locale/theme data, or bound public fields change, with storage-read tracking reserved for the storage milestone.
-- Support ergonomic Luau table usage patterns, such as `local audio = require("mesh.audio@>=1.0")` and `local locale = require("mesh.locale")`, without inventing a non-Luau parser extension for named imports.
-- Preserve compatibility for current globals and component `import` syntax with migration diagnostics and shipped-module proof.
-- Update docs and shipped navigation/audio/backend modules so frontend and backend examples teach one unified import story.
-
-## Current Milestone: v1.15 Persistent Storage System
+## Last Shipped Milestone: v1.15 Persistent Storage System
 
 **Goal:** Implement `self.storage` as shell-backed, component/provider instance-scoped persistent key-value storage using atomic JSON files under the MESH/XDG data area.
 
-**Target features:**
+**Shipped features:**
 - Add a scoped JSON key-value storage subsystem with stable identity derived from `self.meta`.
 - Expose `self.storage` as a Luau table-like object where reads return persisted values, writes update in-memory state and schedule persistence, and assigning `nil` removes a key.
 - Accept only JSON-like values and reject functions, userdata, component definitions, component instances, and event channels with diagnostics.
 - Persist through temp-file write plus rename under the MESH/XDG data area, recover corrupt files non-fatally, and isolate storage by module/component/provider/runtime instance identity.
 - Seed storage before `mount/start`, flush on `unmount/stop` and orderly shell shutdown, and integrate storage reads/writes with automatic rerendering.
 
-## Queued Milestone: v1.16 Elements Improvements
+## Next Milestone: v1.16 Elements Improvements
 
 **Goal:** Improve MESH's built-in markup element set so common shell controls
 are native primitives instead of bespoke frontend component workarounds.
@@ -341,7 +336,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Manifest-localized text must be explicit at the field site | Plain `module.json` strings cannot tell authors whether text is literal, a translation key, or actually localized | Shipped in v1.13 |
 | Luau scripting should split current instance context from external dependencies | Authors should use runtime-provided `self` for the current object instance and `require(...)` for external shell APIs, services, libraries, and component definitions | Shipped in v1.14 |
 | New event authoring uses named channel objects | Authors should subscribe with `audio.VolumeChanged:on(fn)` and emit local/provider events with `self.Changed:fire(payload)`, while string-literal event paths remain compatibility only | Shipped in v1.14 |
-| Persistent storage is a separate runtime milestone | `self.storage` needs shell-backed persistence, atomic JSON files, lifecycle flushing, type diagnostics, and rerender integration after the unified scripting surface lands | Active for v1.15 |
+| Persistent storage is a separate runtime milestone | `self.storage` needs shell-backed persistence, atomic JSON files, lifecycle flushing, type diagnostics, and rerender integration after the unified scripting surface lands | Shipped in v1.15 |
 
 <details>
 <summary>Archived milestone framing</summary>

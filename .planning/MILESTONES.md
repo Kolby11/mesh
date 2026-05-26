@@ -2,54 +2,15 @@
 
 ## Active Autonomy Queue
 
-**Current autonomous starting point:** v1.15 Persistent Storage System Phase 81
+**Current autonomous starting point:** v1.16 Elements Improvements
 
 Run order:
 
-1. Execute **v1.15 Persistent Storage System** phases 81-85.
-2. Audit and archive **v1.15 Persistent Storage System**.
-3. Start **v1.16 Elements Improvements** after v1.15, beginning with the native select/dropdown element.
+1. Start **v1.16 Elements Improvements**, beginning with the native select/dropdown element.
+2. Define requirements and roadmap for first-class `<select>/<option>`.
+3. Execute, audit, and archive v1.16.
 
-Use `$gsd-autonomous` from the repository root to proceed through v1.15.
-After v1.15 ships, promote v1.16 to add the first-class select/dropdown markup
-element and migrate the navigation language selector away from its horizontal
-custom menu.
-
----
-
-## v1.15 Persistent Storage System (Active)
-
-**Phases planned:** 81-85
-**Requirements:** 27 mapped, 0 unmapped
-
-**Goal:** Implement `self.storage` as shell-backed, component/provider
-instance-scoped persistent key-value storage using atomic JSON files under the
-MESH/XDG data area.
-
-**Planned scope:**
-
-- Scoped storage identity derived from `self.meta` for frontend components and backend providers
-- JSON-like table reads, writes, removals, snapshots, and invalid value diagnostics
-- Atomic persistence through temp-file write plus rename under the MESH/XDG data area
-- Non-fatal corrupt-file recovery with private scope isolation by module/component/provider identity
-- Lifecycle loading before `mount/start` and flushing on `unmount/stop` plus orderly shell shutdown
-- Render dependency integration so storage readers rerender only when watched values change
-- Shipped proof through a real UI preference or provider setting path
-
-**Out of scope:**
-
-- Cross-module storage reads
-- Schema-backed settings UI
-- Remote synchronization
-- Storing functions, userdata, component definitions, component instances, or event channels
-
-**Phase queue:**
-
-- [ ] Phase 81: Storage Foundation
-- [ ] Phase 82: Luau Self Storage Binding
-- [ ] Phase 83: Lifecycle Persistence
-- [ ] Phase 84: Storage Rerender Integration
-- [ ] Phase 85: Storage Proof And Docs
+Use `$gsd-new-milestone` from the repository root to define v1.16.
 
 ---
 
@@ -64,8 +25,7 @@ workarounds and improve shipped UI behavior.
 
 - First-class `<select>` and `<option>` element support in MESH markup
 - Visible dropdown/popup behavior with vertical option layout
-- Keyboard navigation, focus, selection, disabled states, and accessibility metadata
-- Value binding/change events suitable for Luau component state
+- Keyboard navigation, focus, selection, disabled states, value binding/change events, and accessibility metadata
 - Styling hooks that fit the existing shell CSS profile without requiring browser CSS compatibility
 - Shipped proof by replacing the navigation bar language selector's horizontal custom menu
 
@@ -74,6 +34,36 @@ workarounds and improve shipped UI behavior.
 - Full browser-compatible `<select>` behavior
 - Arbitrary HTML form submission semantics
 - Multi-select unless explicitly promoted during phase discussion
+
+---
+
+## v1.15 Persistent Storage System (Shipped: 2026-05-26)
+
+**Phases completed:** 5 phases, 5 plans
+**Requirements:** 27/27 satisfied
+**Audit:** passed
+
+**Goal:** Implement `self.storage` as shell-backed, component/provider
+instance-scoped persistent key-value storage using atomic JSON files under the
+MESH/XDG data area.
+
+**Key accomplishments:**
+
+- Shell-owned scoped JSON storage with deterministic sanitized paths, atomic writes, corrupt-file recovery, and private frontend/backend identities.
+- Frontend and backend `self.storage` Luau bindings with table reads, JSON-like writes, nil deletion, snapshots, and non-fatal invalid diagnostics.
+- Lifecycle loading and flush behavior for frontend unmount, backend stop, and explicit shutdown paths.
+- Render dependency tracking so frontend storage readers rerender only when watched keys change.
+- Shipped navigation language preference proof using `self.storage.language`.
+- Author docs covering storage scope, supported values, lifecycle timing, persistence, diagnostics, and rerender behavior.
+
+**Known deferred items at close:** none blocking; v1.16 will replace the custom language selector menu with native `<select>/<option>`.
+
+**Archive artifacts:**
+
+- `.planning/milestones/v1.15-ROADMAP.md`
+- `.planning/milestones/v1.15-REQUIREMENTS.md`
+- `.planning/milestones/v1.15-MILESTONE-AUDIT.md`
+- `.planning/milestones/v1.15-phases/`
 
 ---
 

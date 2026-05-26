@@ -1,33 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.15
-milestone_name: Persistent Storage System
-status: complete
-last_updated: "2026-05-26T14:28:00.000Z"
+milestone: v1.16
+milestone_name: Elements Improvements
+status: ready_for_requirements
+last_updated: "2026-05-26T14:45:00.000Z"
 last_activity: 2026-05-26
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 5
-  completed_plans: 5
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: MESH v1.15
+# State: MESH v1.16
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-05-26)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.15 Persistent Storage System
+**Current focus:** v1.16 Elements Improvements
 
 ## Current Position
 
-Phase: 85 Storage Proof And Docs
-Plan: complete
-Status: v1.15 milestone implementation complete; ready for milestone audit/completion
-Last activity: 2026-05-26 — Completed Phase 85 storage proof and docs
+Phase: none
+Plan: none
+Status: v1.15 archived; ready to define v1.16 requirements
+Last activity: 2026-05-26 — Archived v1.15 Persistent Storage System milestone
 
 ## Decisions
 
