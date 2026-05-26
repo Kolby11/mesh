@@ -75,12 +75,12 @@
 
 ### Proof, Docs, And Hardening
 
-- [ ] **ELEMPROOF-01**: Shipped navigation, audio popover, quick settings/debug surfaces use native library elements for at least one workflow per control family.
-- [ ] **ELEMPROOF-02**: Regression tests cover parser support, rendering, input, keyboard navigation, accessibility, diagnostics, and Luau events for every new element family.
-- [ ] **ELEMPROOF-03**: Author docs include an element reference with attributes, events, states, accessibility notes, and examples.
-- [ ] **ELEMPROOF-04**: A shipped demo/gallery or debug surface can render the element library for visual inspection.
-- [ ] **ELEMPROOF-05**: Unsupported browser/Qt/Flutter parity expectations are documented as out-of-scope or future work.
-- [ ] **ELEMPROOF-06**: Milestone audit verifies no native element family lacks proof coverage.
+- [x] **ELEMPROOF-01**: Shipped navigation, audio popover, quick settings/debug surfaces use native library elements for at least one workflow per control family.
+- [x] **ELEMPROOF-02**: Regression tests cover parser support, rendering, input, keyboard navigation, accessibility, diagnostics, and Luau events for every new element family.
+- [x] **ELEMPROOF-03**: Author docs include an element reference with attributes, events, states, accessibility notes, and examples.
+- [x] **ELEMPROOF-04**: A shipped demo/gallery or debug surface can render the element library for visual inspection.
+- [x] **ELEMPROOF-05**: Unsupported browser/Qt/Flutter parity expectations are documented as out-of-scope or future work.
+- [x] **ELEMPROOF-06**: Milestone audit verifies no native element family lacks proof coverage.
 
 ## Future Requirements
 
@@ -151,12 +151,12 @@
 | ELEMCOLLECT-02 | Phase 90 | Complete |
 | ELEMCOLLECT-03 | Phase 90 | Complete |
 | ELEMCOLLECT-04 | Phase 90 | Complete |
-| ELEMPROOF-01 | Phase 91 | Pending |
-| ELEMPROOF-02 | Phase 91 | Pending |
-| ELEMPROOF-03 | Phase 91 | Pending |
-| ELEMPROOF-04 | Phase 91 | Pending |
-| ELEMPROOF-05 | Phase 91 | Pending |
-| ELEMPROOF-06 | Phase 91 | Pending |
+| ELEMPROOF-01 | Phase 91 | Complete |
+| ELEMPROOF-02 | Phase 91 | Complete |
+| ELEMPROOF-03 | Phase 91 | Complete |
+| ELEMPROOF-04 | Phase 91 | Complete |
+| ELEMPROOF-05 | Phase 91 | Complete |
+| ELEMPROOF-06 | Phase 91 | Complete |
 
 **Coverage:**
 

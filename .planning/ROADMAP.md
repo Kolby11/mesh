@@ -30,7 +30,7 @@ diagnostics.
 | 88 | Action And Text Input Controls | 3/3 | Complete    | 2026-05-26 |
 | 89 | Choice Controls And Menus | 3/3 | Complete    | 2026-05-26 |
 | 90 | Containers And Collections | 3/3 | Complete    | 2026-05-26 |
-| 91 | Shell Proof, Docs, And Hardening | Prove the broad library on shipped surfaces, document authoring, and harden accessibility, diagnostics, and styling behavior. | ELEMPROOF-01, ELEMPROOF-02, ELEMPROOF-03, ELEMPROOF-04, ELEMPROOF-05, ELEMPROOF-06 | 6 |
+| 91 | Shell Proof, Docs, And Hardening | 3/3 | Complete    | 2026-05-26 |
 
 ## Execution Rules
 
@@ -49,7 +49,7 @@ diagnostics.
 - [x] Phase 88: Action And Text Input Controls (completed 2026-05-26)
 - [x] Phase 89: Choice Controls And Menus (completed 2026-05-26)
 - [x] Phase 90: Containers And Collections (completed 2026-05-26)
-- [ ] Phase 91: Shell Proof, Docs, And Hardening
+- [x] Phase 91: Shell Proof, Docs, And Hardening (completed 2026-05-26)
 
 ### Phase 86: Element Contract And Infrastructure
 
