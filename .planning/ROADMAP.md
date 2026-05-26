@@ -29,7 +29,7 @@ diagnostics.
 | 87 | Layout And Display Elements | 3/3 | Complete    | 2026-05-26 |
 | 88 | Action And Text Input Controls | 3/3 | Complete    | 2026-05-26 |
 | 89 | Choice Controls And Menus | 3/3 | Complete    | 2026-05-26 |
-| 90 | Containers And Collections | Implement higher-level containers and collection views for real shell surfaces. | ELEMCONTAINER-01, ELEMCONTAINER-02, ELEMCONTAINER-03, ELEMCONTAINER-04, ELEMCOLLECT-01, ELEMCOLLECT-02, ELEMCOLLECT-03, ELEMCOLLECT-04 | 8 |
+| 90 | Containers And Collections | 3/3 | Complete    | 2026-05-26 |
 | 91 | Shell Proof, Docs, And Hardening | Prove the broad library on shipped surfaces, document authoring, and harden accessibility, diagnostics, and styling behavior. | ELEMPROOF-01, ELEMPROOF-02, ELEMPROOF-03, ELEMPROOF-04, ELEMPROOF-05, ELEMPROOF-06 | 6 |
 
 ## Execution Rules
@@ -48,7 +48,7 @@ diagnostics.
 - [x] Phase 87: Layout And Display Elements (completed 2026-05-26)
 - [x] Phase 88: Action And Text Input Controls (completed 2026-05-26)
 - [x] Phase 89: Choice Controls And Menus (completed 2026-05-26)
-- [ ] Phase 90: Containers And Collections
+- [x] Phase 90: Containers And Collections (completed 2026-05-26)
 - [ ] Phase 91: Shell Proof, Docs, And Hardening
 
 ### Phase 86: Element Contract And Infrastructure

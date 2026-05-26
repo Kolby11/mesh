@@ -61,17 +61,17 @@
 
 ### Containers
 
-- [ ] **ELEMCONTAINER-01**: Containers include `panel`, `popover`, `dialog`, `sheet`, `tabs`, `tab`, `accordion`, and `details`.
-- [ ] **ELEMCONTAINER-02**: Containers support open/closed state, focus trapping/restore where needed, escape/dismiss behavior, labels, and accessibility metadata.
-- [ ] **ELEMCONTAINER-03**: Containers expose style hooks for surface, header, body, footer, backdrop, active tab, expanded item, and disabled states.
-- [ ] **ELEMCONTAINER-04**: Container diagnostics catch invalid nesting and missing labels for modal/interactive containers.
+- [x] **ELEMCONTAINER-01**: Containers include `panel`, `popover`, `dialog`, `sheet`, `tabs`, `tab`, `accordion`, and `details`.
+- [x] **ELEMCONTAINER-02**: Containers support open/closed state, focus trapping/restore where needed, escape/dismiss behavior, labels, and accessibility metadata.
+- [x] **ELEMCONTAINER-03**: Containers expose style hooks for surface, header, body, footer, backdrop, active tab, expanded item, and disabled states.
+- [x] **ELEMCONTAINER-04**: Container diagnostics catch invalid nesting and missing labels for modal/interactive containers.
 
 ### Collections
 
-- [ ] **ELEMCOLLECT-01**: Collection views include `list`, `list-item`, `table`, `row`, `cell`, `tree`, and `empty-state`.
-- [ ] **ELEMCOLLECT-02**: Collections support selection, active row, disabled rows, headers, keyboard navigation, scroll integration, and accessibility metadata.
-- [ ] **ELEMCOLLECT-03**: Collections expose value/change/activation events suitable for Luau state and service-driven payloads.
-- [ ] **ELEMCOLLECT-04**: Collection diagnostics catch invalid row/cell/tree relationships and missing accessibility metadata.
+- [x] **ELEMCOLLECT-01**: Collection views include `list`, `list-item`, `table`, `row`, `cell`, `tree`, and `empty-state`.
+- [x] **ELEMCOLLECT-02**: Collections support selection, active row, disabled rows, headers, keyboard navigation, scroll integration, and accessibility metadata.
+- [x] **ELEMCOLLECT-03**: Collections expose value/change/activation events suitable for Luau state and service-driven payloads.
+- [x] **ELEMCOLLECT-04**: Collection diagnostics catch invalid row/cell/tree relationships and missing accessibility metadata.
 
 ### Proof, Docs, And Hardening
 
@@ -143,14 +143,14 @@
 | ELEMMENU-02 | Phase 89 | Complete |
 | ELEMMENU-03 | Phase 89 | Complete |
 | ELEMMENU-04 | Phase 89 | Complete |
-| ELEMCONTAINER-01 | Phase 90 | Pending |
-| ELEMCONTAINER-02 | Phase 90 | Pending |
-| ELEMCONTAINER-03 | Phase 90 | Pending |
-| ELEMCONTAINER-04 | Phase 90 | Pending |
-| ELEMCOLLECT-01 | Phase 90 | Pending |
-| ELEMCOLLECT-02 | Phase 90 | Pending |
-| ELEMCOLLECT-03 | Phase 90 | Pending |
-| ELEMCOLLECT-04 | Phase 90 | Pending |
+| ELEMCONTAINER-01 | Phase 90 | Complete |
+| ELEMCONTAINER-02 | Phase 90 | Complete |
+| ELEMCONTAINER-03 | Phase 90 | Complete |
+| ELEMCONTAINER-04 | Phase 90 | Complete |
+| ELEMCOLLECT-01 | Phase 90 | Complete |
+| ELEMCOLLECT-02 | Phase 90 | Complete |
+| ELEMCOLLECT-03 | Phase 90 | Complete |
+| ELEMCOLLECT-04 | Phase 90 | Complete |
 | ELEMPROOF-01 | Phase 91 | Pending |
 | ELEMPROOF-02 | Phase 91 | Pending |
 | ELEMPROOF-03 | Phase 91 | Pending |
