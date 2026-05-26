@@ -46,18 +46,18 @@
 
 ### Choice Controls
 
-- [ ] **ELEMCHOICE-01**: Choice controls include `select`, `option`, `checkbox`, `switch`, `radio`, `radio-group`, and `segmented-control`.
-- [ ] **ELEMCHOICE-02**: `select` renders a compact selected value and opens a visible vertical dropdown/popup for options.
-- [ ] **ELEMCHOICE-03**: Choice controls support value/checked state, disabled options, keyboard navigation, pointer selection, and change events.
-- [ ] **ELEMCHOICE-04**: Choice controls expose accessibility roles and selected/checked/value metadata.
-- [ ] **ELEMCHOICE-05**: Choice controls support style hooks for trigger, popup, option, checked, selected, disabled, focus, and active states.
+- [x] **ELEMCHOICE-01**: Choice controls include `select`, `option`, `checkbox`, `switch`, `radio`, `radio-group`, and `segmented-control`.
+- [x] **ELEMCHOICE-02**: `select` renders a compact selected value and opens a visible vertical dropdown/popup for options.
+- [x] **ELEMCHOICE-03**: Choice controls support value/checked state, disabled options, keyboard navigation, pointer selection, and change events.
+- [x] **ELEMCHOICE-04**: Choice controls expose accessibility roles and selected/checked/value metadata.
+- [x] **ELEMCHOICE-05**: Choice controls support style hooks for trigger, popup, option, checked, selected, disabled, focus, and active states.
 
 ### Menus And Command Controls
 
-- [ ] **ELEMMENU-01**: Menu controls include `menu`, `menu-item`, `command-item`, `separator`, and `preference-row`.
-- [ ] **ELEMMENU-02**: Menus support roving focus, activation, disabled items, icons, shortcuts, grouping, and dismissal behavior.
-- [ ] **ELEMMENU-03**: Menu and command controls expose Luau activation/change events and accessibility metadata.
-- [ ] **ELEMMENU-04**: Menu diagnostics catch invalid nesting, missing labels, and invalid command/value relationships.
+- [x] **ELEMMENU-01**: Menu controls include `menu`, `menu-item`, `command-item`, `separator`, and `preference-row`.
+- [x] **ELEMMENU-02**: Menus support roving focus, activation, disabled items, icons, shortcuts, grouping, and dismissal behavior.
+- [x] **ELEMMENU-03**: Menu and command controls expose Luau activation/change events and accessibility metadata.
+- [x] **ELEMMENU-04**: Menu diagnostics catch invalid nesting, missing labels, and invalid command/value relationships.
 
 ### Containers
 
@@ -134,15 +134,15 @@
 | ELEMTEXT-03 | Phase 88 | Complete |
 | ELEMTEXT-04 | Phase 88 | Complete |
 | ELEMTEXT-05 | Phase 88 | Complete |
-| ELEMCHOICE-01 | Phase 89 | Pending |
-| ELEMCHOICE-02 | Phase 89 | Pending |
-| ELEMCHOICE-03 | Phase 89 | Pending |
-| ELEMCHOICE-04 | Phase 89 | Pending |
-| ELEMCHOICE-05 | Phase 89 | Pending |
-| ELEMMENU-01 | Phase 89 | Pending |
-| ELEMMENU-02 | Phase 89 | Pending |
-| ELEMMENU-03 | Phase 89 | Pending |
-| ELEMMENU-04 | Phase 89 | Pending |
+| ELEMCHOICE-01 | Phase 89 | Complete |
+| ELEMCHOICE-02 | Phase 89 | Complete |
+| ELEMCHOICE-03 | Phase 89 | Complete |
+| ELEMCHOICE-04 | Phase 89 | Complete |
+| ELEMCHOICE-05 | Phase 89 | Complete |
+| ELEMMENU-01 | Phase 89 | Complete |
+| ELEMMENU-02 | Phase 89 | Complete |
+| ELEMMENU-03 | Phase 89 | Complete |
+| ELEMMENU-04 | Phase 89 | Complete |
 | ELEMCONTAINER-01 | Phase 90 | Pending |
 | ELEMCONTAINER-02 | Phase 90 | Pending |
 | ELEMCONTAINER-03 | Phase 90 | Pending |

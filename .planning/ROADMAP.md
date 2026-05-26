@@ -28,7 +28,7 @@ diagnostics.
 | 86 | Element Contract And Infrastructure | 3/3 | Complete    | 2026-05-26 |
 | 87 | Layout And Display Elements | 3/3 | Complete    | 2026-05-26 |
 | 88 | Action And Text Input Controls | 3/3 | Complete    | 2026-05-26 |
-| 89 | Choice Controls And Menus | Implement select, option, checkbox, switch, radio, segmented, menu, menu item, command item, and preference row controls. | ELEMCHOICE-01, ELEMCHOICE-02, ELEMCHOICE-03, ELEMCHOICE-04, ELEMCHOICE-05, ELEMMENU-01, ELEMMENU-02, ELEMMENU-03, ELEMMENU-04 | 9 |
+| 89 | Choice Controls And Menus | 3/3 | Complete    | 2026-05-26 |
 | 90 | Containers And Collections | Implement higher-level containers and collection views for real shell surfaces. | ELEMCONTAINER-01, ELEMCONTAINER-02, ELEMCONTAINER-03, ELEMCONTAINER-04, ELEMCOLLECT-01, ELEMCOLLECT-02, ELEMCOLLECT-03, ELEMCOLLECT-04 | 8 |
 | 91 | Shell Proof, Docs, And Hardening | Prove the broad library on shipped surfaces, document authoring, and harden accessibility, diagnostics, and styling behavior. | ELEMPROOF-01, ELEMPROOF-02, ELEMPROOF-03, ELEMPROOF-04, ELEMPROOF-05, ELEMPROOF-06 | 6 |
 
@@ -47,7 +47,7 @@ diagnostics.
 - [x] Phase 86: Element Contract And Infrastructure (completed 2026-05-26)
 - [x] Phase 87: Layout And Display Elements (completed 2026-05-26)
 - [x] Phase 88: Action And Text Input Controls (completed 2026-05-26)
-- [ ] Phase 89: Choice Controls And Menus
+- [x] Phase 89: Choice Controls And Menus (completed 2026-05-26)
 - [ ] Phase 90: Containers And Collections
 - [ ] Phase 91: Shell Proof, Docs, And Hardening
 
