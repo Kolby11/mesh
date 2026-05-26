@@ -25,7 +25,7 @@ diagnostics.
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 86 | Element Contract And Infrastructure | Define the native element taxonomy, parser/runtime metadata, shared control state, events, diagnostics, and author contract. | ELEMCORE-01, ELEMCORE-02, ELEMCORE-03, ELEMCORE-04, ELEMCORE-05, ELEMCORE-06 | 6 |
+| 86 | Element Contract And Infrastructure | 3/3 | Complete    | 2026-05-26 |
 | 87 | Layout And Display Elements | Implement layout, structure, and display primitives needed to compose shell surfaces. | ELEMLAYOUT-01, ELEMLAYOUT-02, ELEMLAYOUT-03, ELEMLAYOUT-04, ELEMLAYOUT-05, ELEMDISPLAY-01, ELEMDISPLAY-02, ELEMDISPLAY-03, ELEMDISPLAY-04, ELEMDISPLAY-05 | 10 |
 | 88 | Action And Text Input Controls | Implement configurable action controls and text/numeric input controls with keyboard, value, and accessibility behavior. | ELEMACTION-01, ELEMACTION-02, ELEMACTION-03, ELEMTEXT-01, ELEMTEXT-02, ELEMTEXT-03, ELEMTEXT-04, ELEMTEXT-05 | 8 |
 | 89 | Choice Controls And Menus | Implement select, option, checkbox, switch, radio, segmented, menu, menu item, command item, and preference row controls. | ELEMCHOICE-01, ELEMCHOICE-02, ELEMCHOICE-03, ELEMCHOICE-04, ELEMCHOICE-05, ELEMMENU-01, ELEMMENU-02, ELEMMENU-03, ELEMMENU-04 | 9 |
@@ -44,7 +44,7 @@ diagnostics.
 
 ## Phases
 
-- [ ] Phase 86: Element Contract And Infrastructure
+- [x] Phase 86: Element Contract And Infrastructure (completed 2026-05-26)
 - [ ] Phase 87: Layout And Display Elements
 - [ ] Phase 88: Action And Text Input Controls
 - [ ] Phase 89: Choice Controls And Menus
@@ -57,9 +57,10 @@ diagnostics.
 
 **Requirements:** ELEMCORE-01, ELEMCORE-02, ELEMCORE-03, ELEMCORE-04, ELEMCORE-05, ELEMCORE-06
 
-**Status:** Not started
+**Status:** Complete
 
 **Success criteria:**
+
 1. MESH has a documented element taxonomy covering layout, display, action, text input, choice/menu, container, collection, and shell-specific controls.
 2. Parser/AST/runtime metadata can represent each planned native element and its common attributes.
 3. Shared control state covers disabled, read-only, required, focus, selected, checked, expanded, pressed, invalid, active, and value state.
@@ -76,6 +77,7 @@ diagnostics.
 **Status:** Not started
 
 **Success criteria:**
+
 1. Layout primitives include `box`, `row`, `column`, `grid`, `stack`, `spacer`, `divider`, and `scroll-area`.
 2. Layout primitives expose configurable alignment, spacing, sizing, overflow, and scroll behavior.
 3. Existing layout behavior remains compatible for current shipped modules.
@@ -96,6 +98,7 @@ diagnostics.
 **Status:** Not started
 
 **Success criteria:**
+
 1. Action controls include `button`, `icon-button`, `toggle-button`, `command-button`, and `link-button`.
 2. Action controls expose pressed, disabled, default, destructive, busy, and keybind-aware states.
 3. Action controls support pointer activation, keyboard activation, accessibility roles, and Luau handlers.
@@ -114,6 +117,7 @@ diagnostics.
 **Status:** Not started
 
 **Success criteria:**
+
 1. Choice controls include `select`, `option`, `checkbox`, `switch`, `radio`, `radio-group`, and `segmented-control`.
 2. `select` renders a compact selected value and opens a visible vertical dropdown/popup for options.
 3. Choice controls support value/checked state, disabled options, keyboard navigation, pointer selection, and change events.
@@ -133,6 +137,7 @@ diagnostics.
 **Status:** Not started
 
 **Success criteria:**
+
 1. Containers include `panel`, `popover`, `dialog`, `sheet`, `tabs`, `tab`, `accordion`, and `details`.
 2. Containers support open/closed state, focus trapping/restore where needed, escape/dismiss behavior, labels, and accessibility metadata.
 3. Containers expose styling hooks for surface, header, body, footer, backdrop, active tab, expanded item, and disabled states.
@@ -151,6 +156,7 @@ diagnostics.
 **Status:** Not started
 
 **Success criteria:**
+
 1. Shipped navigation, audio popover, quick settings/debug surfaces use native library elements for at least one workflow per control family.
 2. Regression tests cover parser support, rendering, input, keyboard navigation, accessibility, diagnostics, and Luau events for every new element family.
 3. Author docs include an element reference with attributes, events, states, accessibility notes, and examples.

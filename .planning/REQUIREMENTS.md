@@ -7,12 +7,12 @@
 
 ### Element Contract And Infrastructure
 
-- [ ] **ELEMCORE-01**: MESH defines a native element taxonomy for layout, display, action, text input, choice/menu, container, collection, and shell-specific controls.
-- [ ] **ELEMCORE-02**: Parser, AST, template, and runtime metadata can represent every planned native element and common attributes without bespoke parser branches per shipped surface.
-- [ ] **ELEMCORE-03**: Shared control state covers disabled, read-only, required, focus, selected, checked, expanded, pressed, invalid, active, and value state.
-- [ ] **ELEMCORE-04**: Shared value/change event plumbing lets Luau handlers consume control changes without per-control state workarounds.
-- [ ] **ELEMCORE-05**: Unsupported or invalid element attributes produce non-fatal diagnostics with concrete author actions.
-- [ ] **ELEMCORE-06**: Author docs explain the MESH-native element model and how it is informed by HTML, Qt Widgets, and Flutter without promising one-for-one compatibility.
+- [x] **ELEMCORE-01**: MESH defines a native element taxonomy for layout, display, action, text input, choice/menu, container, collection, and shell-specific controls.
+- [x] **ELEMCORE-02**: Parser, AST, template, and runtime metadata can represent every planned native element and common attributes without bespoke parser branches per shipped surface.
+- [x] **ELEMCORE-03**: Shared control state covers disabled, read-only, required, focus, selected, checked, expanded, pressed, invalid, active, and value state.
+- [x] **ELEMCORE-04**: Shared value/change event plumbing lets Luau handlers consume control changes without per-control state workarounds.
+- [x] **ELEMCORE-05**: Unsupported or invalid element attributes produce non-fatal diagnostics with concrete author actions.
+- [x] **ELEMCORE-06**: Author docs explain the MESH-native element model and how it is informed by HTML, Qt Widgets, and Flutter without promising one-for-one compatibility.
 
 ### Layout And Structure Elements
 
@@ -110,12 +110,12 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ELEMCORE-01 | Phase 86 | Pending |
-| ELEMCORE-02 | Phase 86 | Pending |
-| ELEMCORE-03 | Phase 86 | Pending |
-| ELEMCORE-04 | Phase 86 | Pending |
-| ELEMCORE-05 | Phase 86 | Pending |
-| ELEMCORE-06 | Phase 86 | Pending |
+| ELEMCORE-01 | Phase 86 | Complete |
+| ELEMCORE-02 | Phase 86 | Complete |
+| ELEMCORE-03 | Phase 86 | Complete |
+| ELEMCORE-04 | Phase 86 | Complete |
+| ELEMCORE-05 | Phase 86 | Complete |
+| ELEMCORE-06 | Phase 86 | Complete |
 | ELEMLAYOUT-01 | Phase 87 | Pending |
 | ELEMLAYOUT-02 | Phase 87 | Pending |
 | ELEMLAYOUT-03 | Phase 87 | Pending |
@@ -159,6 +159,7 @@
 | ELEMPROOF-06 | Phase 91 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 47 total
 - Mapped to phases: 47
 - Unmapped: 0
