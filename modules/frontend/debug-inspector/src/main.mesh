@@ -1,5 +1,5 @@
 <template>
-  <box class="inspector-shell">
+  <dialog class="inspector-shell" aria-label="Debug Inspector">
     <column class="inspector-root">
       <row class="inspector-header">
         <column class="header-copy">
@@ -166,7 +166,7 @@
         />
       </column>
     </column>
-  </box>
+  </dialog>
 </template>
 
 <script lang="luau">

@@ -247,6 +247,13 @@ state.
 The runtime reads the initial value from script state and writes back on
 change. The variable should be initialized in `<script>`.
 
+Native element behavior is proven through shipped shell surfaces. Prefer the
+semantic element that matches the workflow, but keep behavior shell-native:
+`popover` for popover surfaces, `dialog` for dialog-like tools, `tabs`/`tab`
+for view switching, and `list`/`list-item`/`empty-state` for bounded shell
+collections. Browser form semantics, full modal traps, and rich table/tree
+models are not implied by these tags.
+
 ### Component fields
 
 Pass data into an imported component explicitly with attributes on the

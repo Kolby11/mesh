@@ -196,3 +196,9 @@ The following families remain defined by the native element taxonomy but are not
 ## Relationship To HTML Qt And Flutter
 
 MESH is MESH-native, not HTML-compatible, Qt-compatible, or Flutter-compatible. HTML, Qt Widgets/layouts, and Flutter provide coverage references so the element library is broad enough for shell surfaces. MESH does not implement browser form submission, native platform widget embedding, Flutter widget semantics, or one-for-one toolkit behavior.
+
+## Shipped Surface Proof
+
+The v1.16 element library is proven on shipped shell surfaces rather than a separate gallery. Navigation uses native action and choice controls. Audio popover uses popover semantics, slider, buttons, and icon content. Debug inspector uses dialog, tabs, tab, list, list-item, and empty-state semantics. The text-selection proof surface covers selectable text and clipboard behavior.
+
+These proofs intentionally keep behavior shell-native. Browser form submission, full modal backdrop/trap behavior, rich table/tree models, and data-driven select APIs remain explicit future work.

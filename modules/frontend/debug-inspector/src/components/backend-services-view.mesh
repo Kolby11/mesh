@@ -3,15 +3,15 @@
     <text class="section-title">Backend services</text>
     <text class="section-copy">{state_copy}</text>
 
-    <box class="empty-card" hidden={empty_hidden}>
+    <empty-state class="empty-card" hidden={empty_hidden}>
       <column class="empty-copy">
         <text class="empty-title">No backend samples yet</text>
         <text class="empty-text">Runtime health still appears separately once providers report live timing stages.</text>
       </column>
-    </box>
+    </empty-state>
 
-    <column class="backend-list">
-      <box class="backend-card" hidden={row1_hidden}>
+    <list class="backend-list" label="Backend services">
+      <list-item class="backend-card" hidden={row1_hidden}>
         <column class="backend-copy">
           <text class="backend-title">{row1_interface}</text>
           <text class="backend-meta">{row1_provider_id}</text>
@@ -22,9 +22,9 @@
           <text class="backend-metric">command_handling: {row1_command_handling}</text>
           <text class="backend-metric">state_publish_delivery: {row1_state_publish_delivery}</text>
         </column>
-      </box>
+      </list-item>
 
-      <box class="backend-card" hidden={row2_hidden}>
+      <list-item class="backend-card" hidden={row2_hidden}>
         <column class="backend-copy">
           <text class="backend-title">{row2_interface}</text>
           <text class="backend-meta">{row2_provider_id}</text>
@@ -35,9 +35,9 @@
           <text class="backend-metric">command_handling: {row2_command_handling}</text>
           <text class="backend-metric">state_publish_delivery: {row2_state_publish_delivery}</text>
         </column>
-      </box>
+      </list-item>
 
-      <box class="backend-card" hidden={row3_hidden}>
+      <list-item class="backend-card" hidden={row3_hidden}>
         <column class="backend-copy">
           <text class="backend-title">{row3_interface}</text>
           <text class="backend-meta">{row3_provider_id}</text>
@@ -48,8 +48,8 @@
           <text class="backend-metric">command_handling: {row3_command_handling}</text>
           <text class="backend-metric">state_publish_delivery: {row3_state_publish_delivery}</text>
         </column>
-      </box>
-    </column>
+      </list-item>
+    </list>
   </column>
 </template>
 

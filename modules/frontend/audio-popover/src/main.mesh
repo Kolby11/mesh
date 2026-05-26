@@ -1,5 +1,5 @@
 <template>
-  <box class="audio-popover-shell">
+  <popover class="audio-popover-shell" aria-label="Audio controls">
     <column class="audio-popover">
       <row class="audio-header">
         <icon class="audio-icon" name="{icon_name}" size="18" />
@@ -31,7 +31,7 @@
         </button>
       </row>
     </column>
-  </box>
+  </popover>
 </template>
 
 <script lang="luau">
