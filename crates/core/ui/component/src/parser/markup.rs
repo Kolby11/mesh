@@ -591,28 +591,69 @@ fn is_reserved_pascal_primitive(tag: &str) -> bool {
         "Panel"
             | "Row"
             | "Column"
+            | "Grid"
             | "Stack"
             | "ScrollView"
+            | "ScrollArea"
             | "Spacer"
+            | "Divider"
             | "Separator"
+            | "Section"
+            | "Header"
+            | "Footer"
+            | "Group"
+            | "FormRow"
             | "Text"
             | "Label"
             | "Icon"
             | "Image"
+            | "Badge"
+            | "Progress"
+            | "Meter"
+            | "Tooltip"
+            | "Avatar"
+            | "Shortcut"
             | "Button"
             | "IconButton"
+            | "ToggleButton"
+            | "CommandButton"
+            | "LinkButton"
             | "Input"
+            | "TextArea"
             | "TextInput"
             | "PasswordInput"
             | "SearchInput"
+            | "Search"
+            | "Password"
             | "NumberInput"
+            | "Stepper"
             | "EmailInput"
             | "UrlInput"
             | "Slider"
+            | "Select"
+            | "Option"
             | "Switch"
             | "Checkbox"
+            | "Radio"
+            | "RadioGroup"
+            | "SegmentedControl"
+            | "Menu"
+            | "MenuItem"
+            | "CommandItem"
+            | "PreferenceRow"
+            | "Popover"
+            | "Dialog"
+            | "Sheet"
+            | "Tabs"
+            | "Tab"
+            | "Accordion"
+            | "Details"
             | "List"
             | "ListItem"
+            | "Table"
+            | "Cell"
+            | "Tree"
+            | "EmptyState"
             | "Slot"
             | "Surface"
             | "Widget"
@@ -622,14 +663,55 @@ fn is_reserved_pascal_primitive(tag: &str) -> bool {
 fn lowercase_primitive_name(tag: &str) -> &'static str {
     match tag {
         "ScrollView" => "scroll-view",
+        "ScrollArea" => "scroll-area",
         "IconButton" => "icon-button",
+        "ToggleButton" => "toggle-button",
+        "CommandButton" => "command-button",
+        "LinkButton" => "link-button",
+        "TextArea" => "textarea",
         "TextInput" => "text-input",
         "PasswordInput" => "password-input",
         "SearchInput" => "search-input",
+        "RadioGroup" => "radio-group",
+        "SegmentedControl" => "segmented-control",
+        "MenuItem" => "menu-item",
+        "CommandItem" => "command-item",
+        "PreferenceRow" => "preference-row",
+        "FormRow" => "form-row",
         "NumberInput" => "number-input",
+        "EmptyState" => "empty-state",
         "EmailInput" => "email-input",
         "UrlInput" => "url-input",
+        "Grid" => "grid",
         "ListItem" => "list-item",
+        "Divider" => "divider",
+        "Section" => "section",
+        "Header" => "header",
+        "Footer" => "footer",
+        "Group" => "group",
+        "Badge" => "badge",
+        "Progress" => "progress",
+        "Meter" => "meter",
+        "Tooltip" => "tooltip",
+        "Avatar" => "avatar",
+        "Shortcut" => "shortcut",
+        "Search" => "search",
+        "Password" => "password",
+        "Stepper" => "stepper",
+        "Select" => "select",
+        "Option" => "option",
+        "Radio" => "radio",
+        "Menu" => "menu",
+        "Popover" => "popover",
+        "Dialog" => "dialog",
+        "Sheet" => "sheet",
+        "Tabs" => "tabs",
+        "Tab" => "tab",
+        "Accordion" => "accordion",
+        "Details" => "details",
+        "Table" => "table",
+        "Cell" => "cell",
+        "Tree" => "tree",
         "Panel" => "panel",
         "Row" => "row",
         "Column" => "column",
@@ -724,4 +806,41 @@ struct OpenNode {
     tag: String,
     attributes: Vec<Attribute>,
     children: Vec<TemplateNode>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn planned_native_tags_parse_as_elements() {
+        let template = parse_markup(
+            r#"<grid><segmented-control /><empty-state /></grid>"#,
+            &HashMap::new(),
+        )
+        .expect("template parses");
+
+        let TemplateNode::Element(grid) = &template.root[0] else {
+            panic!("expected grid element");
+        };
+        assert_eq!(grid.tag_kind, SourceTag::Grid);
+        let TemplateNode::Element(segmented) = &grid.children[0] else {
+            panic!("expected segmented-control element");
+        };
+        assert_eq!(segmented.tag_kind, SourceTag::SegmentedControl);
+        let TemplateNode::Element(empty_state) = &grid.children[1] else {
+            panic!("expected empty-state element");
+        };
+        assert_eq!(empty_state.tag_kind, SourceTag::EmptyState);
+    }
+
+    #[test]
+    fn reserved_pascal_primitives_report_lowercase_element_names() {
+        let err = parse_markup("<SegmentedControl />", &HashMap::new())
+            .expect_err("PascalCase primitive should be rejected")
+            .to_string();
+
+        assert!(err.contains("built-in UI tag <SegmentedControl> must be lowercase"));
+        assert!(err.contains("<segmented-control>"));
+    }
 }

@@ -3,34 +3,77 @@
 //! Elements are MESH-owned primitives (`button`, `icon`, `input`, etc.).
 //! Components compose these primitives; modules package complete features.
 
-use crate::{ElementState, WidgetNode};
+use crate::{AccessibilityRole, ElementState, WidgetNode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ElementKind {
     Box,
     Row,
     Column,
+    Grid,
     Stack,
     Scroll,
     ScrollView,
+    ScrollArea,
     Spacer,
+    Divider,
     Separator,
+    Section,
+    Header,
+    Footer,
+    Group,
+    FormRow,
     Text,
     Label,
     Icon,
     Image,
+    Badge,
+    Progress,
+    Meter,
+    Tooltip,
+    Avatar,
+    Shortcut,
     Button,
     IconButton,
+    ToggleButton,
+    CommandButton,
+    LinkButton,
     Input,
+    TextArea,
+    Search,
+    Password,
+    NumberInput,
+    Stepper,
     Slider,
+    Select,
+    Option,
     Switch,
     Checkbox,
+    Radio,
+    RadioGroup,
+    SegmentedControl,
+    Menu,
+    MenuItem,
+    CommandItem,
+    PreferenceRow,
+    Panel,
+    Popover,
+    Dialog,
+    Sheet,
+    Tabs,
+    Tab,
+    Accordion,
+    Details,
     List,
     ListItem,
+    Table,
+    Cell,
+    Tree,
+    EmptyState,
     Slot,
     Surface,
     Widget,
@@ -43,23 +86,66 @@ impl ElementKind {
             "box" => Self::Box,
             "row" => Self::Row,
             "column" => Self::Column,
+            "grid" => Self::Grid,
             "stack" => Self::Stack,
             "scroll" => Self::Scroll,
             "scroll-view" => Self::ScrollView,
+            "scroll-area" => Self::ScrollArea,
             "spacer" => Self::Spacer,
+            "divider" => Self::Divider,
             "separator" => Self::Separator,
+            "section" => Self::Section,
+            "header" => Self::Header,
+            "footer" => Self::Footer,
+            "group" => Self::Group,
+            "form-row" => Self::FormRow,
             "text" => Self::Text,
             "label" => Self::Label,
             "icon" => Self::Icon,
             "image" => Self::Image,
+            "badge" => Self::Badge,
+            "progress" => Self::Progress,
+            "meter" => Self::Meter,
+            "tooltip" => Self::Tooltip,
+            "avatar" => Self::Avatar,
+            "shortcut" => Self::Shortcut,
             "button" => Self::Button,
             "icon-button" => Self::IconButton,
+            "toggle-button" => Self::ToggleButton,
+            "command-button" => Self::CommandButton,
+            "link-button" => Self::LinkButton,
             "input" => Self::Input,
+            "textarea" => Self::TextArea,
+            "search" => Self::Search,
+            "password" => Self::Password,
+            "number-input" => Self::NumberInput,
+            "stepper" => Self::Stepper,
             "slider" => Self::Slider,
+            "select" => Self::Select,
+            "option" => Self::Option,
             "switch" => Self::Switch,
             "checkbox" => Self::Checkbox,
+            "radio" => Self::Radio,
+            "radio-group" => Self::RadioGroup,
+            "segmented-control" => Self::SegmentedControl,
+            "menu" => Self::Menu,
+            "menu-item" => Self::MenuItem,
+            "command-item" => Self::CommandItem,
+            "preference-row" => Self::PreferenceRow,
+            "panel" => Self::Panel,
+            "popover" => Self::Popover,
+            "dialog" => Self::Dialog,
+            "sheet" => Self::Sheet,
+            "tabs" => Self::Tabs,
+            "tab" => Self::Tab,
+            "accordion" => Self::Accordion,
+            "details" => Self::Details,
             "list" => Self::List,
             "list-item" => Self::ListItem,
+            "table" => Self::Table,
+            "cell" => Self::Cell,
+            "tree" => Self::Tree,
+            "empty-state" => Self::EmptyState,
             "slot" => Self::Slot,
             "surface" => Self::Surface,
             "widget" => Self::Widget,
@@ -67,32 +153,162 @@ impl ElementKind {
         }
     }
 
-    pub fn type_name(self) -> &'static str {
+    pub const fn type_name(self) -> &'static str {
         match self {
             Self::Icon => "IconElement",
             Self::Image => "ImageElement",
-            Self::Text => "TextElement",
+            Self::Text | Self::Badge | Self::Shortcut => "TextElement",
             Self::Label => "LabelElement",
-            Self::Button => "ButtonElement",
+            Self::Progress => "ProgressElement",
+            Self::Meter => "MeterElement",
+            Self::Tooltip => "TooltipElement",
+            Self::Avatar => "AvatarElement",
+            Self::Button | Self::CommandButton | Self::LinkButton => "ButtonElement",
             Self::IconButton => "IconButtonElement",
-            Self::Input => "InputElement",
+            Self::ToggleButton => "ToggleButtonElement",
+            Self::Input
+            | Self::TextArea
+            | Self::Search
+            | Self::Password
+            | Self::NumberInput
+            | Self::Stepper => "InputElement",
             Self::Slider => "SliderElement",
+            Self::Select => "SelectElement",
+            Self::Option => "OptionElement",
             Self::Switch => "SwitchElement",
-            Self::Checkbox => "CheckboxElement",
+            Self::Checkbox | Self::Radio => "CheckboxElement",
+            Self::RadioGroup => "RadioGroupElement",
+            Self::SegmentedControl => "SegmentedControlElement",
+            Self::Menu => "MenuElement",
+            Self::MenuItem | Self::CommandItem => "MenuItemElement",
+            Self::PreferenceRow => "PreferenceRowElement",
             Self::Row => "RowElement",
             Self::Column => "ColumnElement",
+            Self::Grid => "GridElement",
             Self::Stack => "StackElement",
-            Self::Scroll | Self::ScrollView => "ScrollElement",
+            Self::Scroll | Self::ScrollView | Self::ScrollArea => "ScrollElement",
             Self::Spacer => "SpacerElement",
-            Self::Separator => "SeparatorElement",
+            Self::Separator | Self::Divider => "SeparatorElement",
+            Self::Section => "SectionElement",
+            Self::Header => "HeaderElement",
+            Self::Footer => "FooterElement",
+            Self::Group => "GroupElement",
+            Self::FormRow => "FormRowElement",
+            Self::Panel => "PanelElement",
+            Self::Popover => "PopoverElement",
+            Self::Dialog => "DialogElement",
+            Self::Sheet => "SheetElement",
+            Self::Tabs => "TabsElement",
+            Self::Tab => "TabElement",
+            Self::Accordion => "AccordionElement",
+            Self::Details => "DetailsElement",
             Self::List => "ListElement",
             Self::ListItem => "ListItemElement",
+            Self::Table => "TableElement",
+            Self::Cell => "CellElement",
+            Self::Tree => "TreeElement",
+            Self::EmptyState => "EmptyStateElement",
             Self::Slot => "SlotElement",
             Self::Surface => "SurfaceElement",
             Self::Widget => "WidgetElement",
             Self::Box | Self::Unknown => "MeshElement",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ElementFamily {
+    Layout,
+    Display,
+    Action,
+    TextInput,
+    ChoiceMenu,
+    Container,
+    Collection,
+    Shell,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElementAttributeType {
+    String,
+    Number,
+    Boolean,
+    Token,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ElementAttributeDef {
+    pub name: &'static str,
+    pub attribute_type: ElementAttributeType,
+    pub description: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ElementStateFlag {
+    Disabled,
+    ReadOnly,
+    Required,
+    Focused,
+    Selected,
+    Checked,
+    Expanded,
+    Pressed,
+    Invalid,
+    Active,
+    Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ElementEventDef {
+    pub name: &'static str,
+    pub payload: &'static str,
+    pub description: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub struct ElementAccessibilityDef {
+    pub role: AccessibilityRole,
+    pub focusable: bool,
+    pub label_required: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ElementCompatibilityRef {
+    pub source: &'static str,
+    pub reference: &'static str,
+    pub note: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub struct ElementContractDef {
+    pub kind: ElementKind,
+    pub tag: &'static str,
+    pub family: ElementFamily,
+    pub type_name: &'static str,
+    pub attributes: &'static [ElementAttributeDef],
+    pub states: &'static [ElementStateFlag],
+    pub events: &'static [ElementEventDef],
+    pub accessibility: ElementAccessibilityDef,
+    pub style_hooks: &'static [&'static str],
+    pub compatibility: &'static [ElementCompatibilityRef],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElementDiagnosticKind {
+    UnsupportedAttribute,
+    UnsupportedEvent,
+    InvalidAttributeValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ElementDiagnostic {
+    pub tag: String,
+    pub name: String,
+    pub kind: ElementDiagnosticKind,
+    pub message: String,
+    pub action: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,6 +554,597 @@ static LABEL_FIELDS: &[ElementFieldDef] = &[field(
     "Associated input id",
 )];
 
+static COMMON_ATTRIBUTES: &[ElementAttributeDef] = &[
+    attr("id", ElementAttributeType::String, "Template id attribute"),
+    attr("class", ElementAttributeType::String, "Style class list"),
+    attr(
+        "ref",
+        ElementAttributeType::String,
+        "Template ref attribute",
+    ),
+    attr("label", ElementAttributeType::String, "Accessible label"),
+    attr(
+        "aria-label",
+        ElementAttributeType::String,
+        "Accessible label",
+    ),
+    attr("disabled", ElementAttributeType::Boolean, "Disabled state"),
+    attr("readonly", ElementAttributeType::Boolean, "Read-only state"),
+    attr("required", ElementAttributeType::Boolean, "Required state"),
+    attr("value", ElementAttributeType::String, "Current value"),
+    attr("checked", ElementAttributeType::Boolean, "Checked state"),
+    attr("selected", ElementAttributeType::Boolean, "Selected state"),
+    attr("expanded", ElementAttributeType::Boolean, "Expanded state"),
+    attr("invalid", ElementAttributeType::Boolean, "Invalid state"),
+];
+
+static COMMON_STATES: &[ElementStateFlag] = &[
+    ElementStateFlag::Disabled,
+    ElementStateFlag::ReadOnly,
+    ElementStateFlag::Required,
+    ElementStateFlag::Focused,
+    ElementStateFlag::Selected,
+    ElementStateFlag::Checked,
+    ElementStateFlag::Expanded,
+    ElementStateFlag::Pressed,
+    ElementStateFlag::Invalid,
+    ElementStateFlag::Active,
+    ElementStateFlag::Value,
+];
+
+static COMMON_EVENTS: &[ElementEventDef] = &[
+    event("click", "element", "Activation from pointer or keyboard"),
+    event("input", "value", "Immediate value input"),
+    event("change", "value", "Committed value change"),
+    event("select", "value", "Selection change"),
+    event("activate", "element", "Command or item activation"),
+    event("openchange", "open", "Open state change"),
+];
+
+static COMMON_STYLE_HOOKS: &[&str] = &[
+    "disabled",
+    "readonly",
+    "required",
+    "focus",
+    "focus-visible",
+    "selected",
+    "checked",
+    "expanded",
+    "pressed",
+    "invalid",
+    "active",
+    "value",
+];
+
+static HTML_REF: &[ElementCompatibilityRef] = &[compat(
+    "HTML",
+    "form and semantic elements",
+    "Coverage inspiration only; MESH does not implement browser form semantics.",
+)];
+static QT_REF: &[ElementCompatibilityRef] = &[compat(
+    "Qt Widgets/layouts",
+    "controls and layout categories",
+    "Coverage inspiration only; MESH owns retained rendering and diagnostics.",
+)];
+static FLUTTER_REF: &[ElementCompatibilityRef] = &[compat(
+    "Flutter",
+    "widget categories",
+    "Coverage inspiration only; MESH markup is not a Flutter compatibility layer.",
+)];
+
+macro_rules! contract {
+    ($kind:ident, $tag:literal, $family:ident, $role:expr, $focusable:expr, $compat:expr) => {
+        ElementContractDef {
+            kind: ElementKind::$kind,
+            tag: $tag,
+            family: ElementFamily::$family,
+            type_name: ElementKind::$kind.type_name(),
+            attributes: COMMON_ATTRIBUTES,
+            states: COMMON_STATES,
+            events: COMMON_EVENTS,
+            accessibility: ElementAccessibilityDef {
+                role: $role,
+                focusable: $focusable,
+                label_required: $focusable,
+            },
+            style_hooks: COMMON_STYLE_HOOKS,
+            compatibility: $compat,
+        }
+    };
+}
+
+pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
+    contract!(
+        Box,
+        "box",
+        Layout,
+        AccessibilityRole::Region,
+        false,
+        HTML_REF
+    ),
+    contract!(Row, "row", Layout, AccessibilityRole::Region, false, QT_REF),
+    contract!(
+        Column,
+        "column",
+        Layout,
+        AccessibilityRole::Region,
+        false,
+        QT_REF
+    ),
+    contract!(
+        Grid,
+        "grid",
+        Layout,
+        AccessibilityRole::Region,
+        false,
+        QT_REF
+    ),
+    contract!(
+        Stack,
+        "stack",
+        Layout,
+        AccessibilityRole::Region,
+        false,
+        FLUTTER_REF
+    ),
+    contract!(
+        Spacer,
+        "spacer",
+        Layout,
+        AccessibilityRole::Region,
+        false,
+        QT_REF
+    ),
+    contract!(
+        Divider,
+        "divider",
+        Layout,
+        AccessibilityRole::Separator,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        Separator,
+        "separator",
+        Layout,
+        AccessibilityRole::Separator,
+        false,
+        QT_REF
+    ),
+    contract!(
+        ScrollArea,
+        "scroll-area",
+        Layout,
+        AccessibilityRole::Region,
+        false,
+        QT_REF
+    ),
+    contract!(
+        Section,
+        "section",
+        Layout,
+        AccessibilityRole::Region,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        Header,
+        "header",
+        Layout,
+        AccessibilityRole::Region,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        Footer,
+        "footer",
+        Layout,
+        AccessibilityRole::Region,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        Group,
+        "group",
+        Layout,
+        AccessibilityRole::Region,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        FormRow,
+        "form-row",
+        Layout,
+        AccessibilityRole::Region,
+        false,
+        QT_REF
+    ),
+    contract!(
+        Text,
+        "text",
+        Display,
+        AccessibilityRole::Label,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        Icon,
+        "icon",
+        Display,
+        AccessibilityRole::Image,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        Image,
+        "image",
+        Display,
+        AccessibilityRole::Image,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        Badge,
+        "badge",
+        Display,
+        AccessibilityRole::Status,
+        false,
+        FLUTTER_REF
+    ),
+    contract!(
+        Progress,
+        "progress",
+        Display,
+        AccessibilityRole::ProgressBar,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        Meter,
+        "meter",
+        Display,
+        AccessibilityRole::ProgressBar,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        Tooltip,
+        "tooltip",
+        Display,
+        AccessibilityRole::Alert,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        Avatar,
+        "avatar",
+        Display,
+        AccessibilityRole::Image,
+        false,
+        FLUTTER_REF
+    ),
+    contract!(
+        Shortcut,
+        "shortcut",
+        Display,
+        AccessibilityRole::Label,
+        false,
+        QT_REF
+    ),
+    contract!(
+        Button,
+        "button",
+        Action,
+        AccessibilityRole::Button,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        IconButton,
+        "icon-button",
+        Action,
+        AccessibilityRole::Button,
+        true,
+        FLUTTER_REF
+    ),
+    contract!(
+        ToggleButton,
+        "toggle-button",
+        Action,
+        AccessibilityRole::Button,
+        true,
+        QT_REF
+    ),
+    contract!(
+        CommandButton,
+        "command-button",
+        Action,
+        AccessibilityRole::Button,
+        true,
+        QT_REF
+    ),
+    contract!(
+        LinkButton,
+        "link-button",
+        Action,
+        AccessibilityRole::Button,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        Input,
+        "input",
+        TextInput,
+        AccessibilityRole::TextInput,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        TextArea,
+        "textarea",
+        TextInput,
+        AccessibilityRole::TextInput,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        Search,
+        "search",
+        TextInput,
+        AccessibilityRole::TextInput,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        Password,
+        "password",
+        TextInput,
+        AccessibilityRole::TextInput,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        NumberInput,
+        "number-input",
+        TextInput,
+        AccessibilityRole::TextInput,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        Stepper,
+        "stepper",
+        TextInput,
+        AccessibilityRole::TextInput,
+        true,
+        QT_REF
+    ),
+    contract!(
+        Select,
+        "select",
+        ChoiceMenu,
+        AccessibilityRole::Menu,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        Option,
+        "option",
+        ChoiceMenu,
+        AccessibilityRole::MenuItem,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        Checkbox,
+        "checkbox",
+        ChoiceMenu,
+        AccessibilityRole::Checkbox,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        Switch,
+        "switch",
+        ChoiceMenu,
+        AccessibilityRole::Switch,
+        true,
+        FLUTTER_REF
+    ),
+    contract!(
+        Radio,
+        "radio",
+        ChoiceMenu,
+        AccessibilityRole::Checkbox,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        RadioGroup,
+        "radio-group",
+        ChoiceMenu,
+        AccessibilityRole::Region,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        SegmentedControl,
+        "segmented-control",
+        ChoiceMenu,
+        AccessibilityRole::Toolbar,
+        true,
+        QT_REF
+    ),
+    contract!(
+        Menu,
+        "menu",
+        ChoiceMenu,
+        AccessibilityRole::Menu,
+        true,
+        QT_REF
+    ),
+    contract!(
+        MenuItem,
+        "menu-item",
+        ChoiceMenu,
+        AccessibilityRole::MenuItem,
+        true,
+        QT_REF
+    ),
+    contract!(
+        CommandItem,
+        "command-item",
+        ChoiceMenu,
+        AccessibilityRole::MenuItem,
+        true,
+        QT_REF
+    ),
+    contract!(
+        PreferenceRow,
+        "preference-row",
+        ChoiceMenu,
+        AccessibilityRole::Region,
+        true,
+        QT_REF
+    ),
+    contract!(
+        Panel,
+        "panel",
+        Container,
+        AccessibilityRole::Region,
+        false,
+        QT_REF
+    ),
+    contract!(
+        Popover,
+        "popover",
+        Container,
+        AccessibilityRole::Dialog,
+        true,
+        FLUTTER_REF
+    ),
+    contract!(
+        Dialog,
+        "dialog",
+        Container,
+        AccessibilityRole::Dialog,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        Sheet,
+        "sheet",
+        Container,
+        AccessibilityRole::Dialog,
+        true,
+        FLUTTER_REF
+    ),
+    contract!(
+        Tabs,
+        "tabs",
+        Container,
+        AccessibilityRole::Toolbar,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        Tab,
+        "tab",
+        Container,
+        AccessibilityRole::Tab,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        Accordion,
+        "accordion",
+        Container,
+        AccessibilityRole::Region,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        Details,
+        "details",
+        Container,
+        AccessibilityRole::Region,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        List,
+        "list",
+        Collection,
+        AccessibilityRole::List,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        ListItem,
+        "list-item",
+        Collection,
+        AccessibilityRole::ListItem,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        Table,
+        "table",
+        Collection,
+        AccessibilityRole::Region,
+        true,
+        HTML_REF
+    ),
+    contract!(
+        Cell,
+        "cell",
+        Collection,
+        AccessibilityRole::Region,
+        false,
+        HTML_REF
+    ),
+    contract!(
+        Tree,
+        "tree",
+        Collection,
+        AccessibilityRole::Region,
+        true,
+        QT_REF
+    ),
+    contract!(
+        EmptyState,
+        "empty-state",
+        Collection,
+        AccessibilityRole::Status,
+        false,
+        FLUTTER_REF
+    ),
+    contract!(
+        Slot,
+        "slot",
+        Shell,
+        AccessibilityRole::Region,
+        false,
+        FLUTTER_REF
+    ),
+    contract!(
+        Surface,
+        "surface",
+        Shell,
+        AccessibilityRole::Region,
+        false,
+        QT_REF
+    ),
+    contract!(
+        Widget,
+        "widget",
+        Shell,
+        AccessibilityRole::Region,
+        false,
+        FLUTTER_REF
+    ),
+];
+
 pub static ELEMENT_TYPE_DEFS: &[ElementTypeDef] = &[
     element_type(ElementKind::Box, "box", "MeshElement", &[]),
     element_type(ElementKind::Row, "row", "RowElement", &[]),
@@ -403,6 +1210,42 @@ const fn field(
     }
 }
 
+const fn attr(
+    name: &'static str,
+    attribute_type: ElementAttributeType,
+    description: &'static str,
+) -> ElementAttributeDef {
+    ElementAttributeDef {
+        name,
+        attribute_type,
+        description,
+    }
+}
+
+const fn event(
+    name: &'static str,
+    payload: &'static str,
+    description: &'static str,
+) -> ElementEventDef {
+    ElementEventDef {
+        name,
+        payload,
+        description,
+    }
+}
+
+const fn compat(
+    source: &'static str,
+    reference: &'static str,
+    note: &'static str,
+) -> ElementCompatibilityRef {
+    ElementCompatibilityRef {
+        source,
+        reference,
+        note,
+    }
+}
+
 const fn element_type(
     kind: ElementKind,
     tag: &'static str,
@@ -424,6 +1267,73 @@ pub fn element_type_for_tag(tag: &str) -> &'static ElementTypeDef {
         .unwrap_or(&ELEMENT_TYPE_DEFS[0])
 }
 
+pub fn element_contract_for_tag(tag: &str) -> Option<&'static ElementContractDef> {
+    ELEMENT_CONTRACT_DEFS.iter().find(|def| def.tag == tag)
+}
+
+pub fn element_contract_tags() -> impl Iterator<Item = &'static str> {
+    ELEMENT_CONTRACT_DEFS.iter().map(|def| def.tag)
+}
+
+pub fn common_state_flags() -> &'static [ElementStateFlag] {
+    COMMON_STATES
+}
+
+pub fn validate_element_attribute(
+    tag: &str,
+    name: &str,
+    _value: &str,
+) -> Option<ElementDiagnostic> {
+    let contract = element_contract_for_tag(tag)?;
+    if contract.attributes.iter().any(|attr| attr.name == name)
+        || name.starts_with("data-")
+        || name.starts_with("aria-")
+        || name.starts_with("bind:")
+        || name.starts_with("on")
+    {
+        return None;
+    }
+
+    Some(ElementDiagnostic {
+        tag: tag.to_string(),
+        name: name.to_string(),
+        kind: ElementDiagnosticKind::UnsupportedAttribute,
+        message: format!("unsupported attribute '{name}' on <{tag}>"),
+        action: format!(
+            "Remove the attribute or use one of: {}",
+            contract
+                .attributes
+                .iter()
+                .map(|attr| attr.name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    })
+}
+
+pub fn validate_element_event(tag: &str, event_name: &str) -> Option<ElementDiagnostic> {
+    let contract = element_contract_for_tag(tag)?;
+    if contract.events.iter().any(|event| event.name == event_name) {
+        return None;
+    }
+
+    Some(ElementDiagnostic {
+        tag: tag.to_string(),
+        name: event_name.to_string(),
+        kind: ElementDiagnosticKind::UnsupportedEvent,
+        message: format!("unsupported event '{event_name}' on <{tag}>"),
+        action: format!(
+            "Remove the handler or use one of: {}",
+            contract
+                .events
+                .iter()
+                .map(|event| event.name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElementRect {
     pub left: f32,
@@ -440,7 +1350,14 @@ pub struct ElementStateSnapshot {
     pub active: bool,
     pub focused: bool,
     pub disabled: bool,
+    pub read_only: bool,
+    pub required: bool,
+    pub selected: bool,
     pub checked: bool,
+    pub expanded: bool,
+    pub pressed: bool,
+    pub invalid: bool,
+    pub value: bool,
 }
 
 impl From<ElementState> for ElementStateSnapshot {
@@ -450,7 +1367,14 @@ impl From<ElementState> for ElementStateSnapshot {
             active: state.active,
             focused: state.focused,
             disabled: state.disabled,
+            read_only: state.read_only,
+            required: state.required,
+            selected: state.selected,
             checked: state.checked,
+            expanded: state.expanded,
+            pressed: state.pressed,
+            invalid: state.invalid,
+            value: state.value,
         }
     }
 }
@@ -485,7 +1409,14 @@ pub struct ElementSnapshot {
     pub active: bool,
     pub focused: bool,
     pub disabled: bool,
+    pub read_only: bool,
+    pub required: bool,
+    pub selected: bool,
     pub checked: bool,
+    pub expanded: bool,
+    pub pressed: bool,
+    pub invalid: bool,
+    pub value: bool,
     pub attributes: BTreeMap<String, String>,
 }
 
@@ -562,7 +1493,14 @@ pub fn element_snapshot(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Elem
         active: state.active,
         focused: state.focused,
         disabled: state.disabled,
+        read_only: state.read_only,
+        required: state.required,
+        selected: state.selected,
         checked: state.checked,
+        expanded: state.expanded,
+        pressed: state.pressed,
+        invalid: state.invalid,
+        value: state.value,
         attributes: node
             .attributes
             .iter()
@@ -670,5 +1608,150 @@ mod tests {
         let value = element_snapshot_json(&node, 0.0, 0.0);
 
         assert_eq!(value["element_type"], "MeshElement");
+    }
+
+    #[test]
+    fn element_contract_metadata_types_are_available() {
+        let contract = element_contract_for_tag("button").expect("button contract");
+
+        assert_eq!(contract.family, ElementFamily::Action);
+        assert_eq!(contract.accessibility.role, AccessibilityRole::Button);
+        assert!(
+            contract
+                .attributes
+                .iter()
+                .any(|attribute| attribute.name == "disabled")
+        );
+        assert!(contract.events.iter().any(|event| event.name == "change"));
+    }
+
+    #[test]
+    fn element_contract_covers_v1_16_taxonomy() {
+        let required = [
+            "grid",
+            "scroll-area",
+            "form-row",
+            "badge",
+            "progress",
+            "tooltip",
+            "toggle-button",
+            "textarea",
+            "number-input",
+            "select",
+            "radio-group",
+            "segmented-control",
+            "menu",
+            "command-item",
+            "popover",
+            "tabs",
+            "table",
+            "tree",
+            "empty-state",
+            "surface",
+        ];
+
+        for tag in required {
+            assert!(
+                element_contract_for_tag(tag).is_some(),
+                "missing contract for {tag}"
+            );
+        }
+
+        let families: std::collections::BTreeSet<_> = ELEMENT_CONTRACT_DEFS
+            .iter()
+            .map(|contract| contract.family)
+            .collect();
+        assert!(families.contains(&ElementFamily::Layout));
+        assert!(families.contains(&ElementFamily::Display));
+        assert!(families.contains(&ElementFamily::Action));
+        assert!(families.contains(&ElementFamily::TextInput));
+        assert!(families.contains(&ElementFamily::ChoiceMenu));
+        assert!(families.contains(&ElementFamily::Container));
+        assert!(families.contains(&ElementFamily::Collection));
+        assert!(families.contains(&ElementFamily::Shell));
+    }
+
+    #[test]
+    fn element_state_snapshot_exposes_shared_control_state() {
+        let state = ElementState {
+            hovered: true,
+            active: true,
+            focused: true,
+            focus_visible: true,
+            disabled: true,
+            read_only: true,
+            required: true,
+            selected: true,
+            checked: true,
+            expanded: true,
+            pressed: true,
+            invalid: true,
+            value: true,
+        };
+
+        let snapshot = ElementStateSnapshot::from(state);
+
+        assert!(snapshot.read_only);
+        assert!(snapshot.required);
+        assert!(snapshot.selected);
+        assert!(snapshot.expanded);
+        assert!(snapshot.pressed);
+        assert!(snapshot.invalid);
+        assert!(snapshot.value);
+    }
+
+    #[test]
+    fn element_contract_common_state_flags_cover_required_set() {
+        let flags = common_state_flags();
+
+        for flag in [
+            ElementStateFlag::Disabled,
+            ElementStateFlag::ReadOnly,
+            ElementStateFlag::Required,
+            ElementStateFlag::Focused,
+            ElementStateFlag::Selected,
+            ElementStateFlag::Checked,
+            ElementStateFlag::Expanded,
+            ElementStateFlag::Pressed,
+            ElementStateFlag::Invalid,
+            ElementStateFlag::Active,
+            ElementStateFlag::Value,
+        ] {
+            assert!(flags.contains(&flag), "missing {flag:?}");
+        }
+    }
+
+    #[test]
+    fn element_diagnostic_unsupported_attribute_reports_author_action() {
+        let diagnostic = validate_element_attribute("button", "browser-form-action", "submit")
+            .expect("diagnostic");
+
+        assert_eq!(diagnostic.kind, ElementDiagnosticKind::UnsupportedAttribute);
+        assert_eq!(diagnostic.tag, "button");
+        assert_eq!(diagnostic.name, "browser-form-action");
+        assert!(
+            diagnostic
+                .action
+                .contains("Remove the attribute or use one of")
+        );
+    }
+
+    #[test]
+    fn element_diagnostic_unsupported_event_reports_author_action() {
+        let diagnostic = validate_element_event("button", "formsubmit").expect("diagnostic");
+
+        assert_eq!(diagnostic.kind, ElementDiagnosticKind::UnsupportedEvent);
+        assert_eq!(diagnostic.tag, "button");
+        assert_eq!(diagnostic.name, "formsubmit");
+        assert!(
+            diagnostic
+                .action
+                .contains("Remove the handler or use one of")
+        );
+    }
+
+    #[test]
+    fn element_diagnostic_known_common_attribute_does_not_report_diagnostic() {
+        assert!(validate_element_attribute("button", "disabled", "true").is_none());
     }
 }

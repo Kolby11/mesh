@@ -16,7 +16,14 @@ pub struct ElementState {
     pub focused: bool,
     pub focus_visible: bool,
     pub disabled: bool,
+    pub read_only: bool,
+    pub required: bool,
+    pub selected: bool,
     pub checked: bool,
+    pub expanded: bool,
+    pub pressed: bool,
+    pub invalid: bool,
+    pub value: bool,
 }
 
 /// Unique identifier for a node in the widget tree.

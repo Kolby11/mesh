@@ -721,7 +721,14 @@ fn active_state_names(state: ElementState) -> impl Iterator<Item = &'static str>
         (state.focused, "focused"),
         (state.active, "active"),
         (state.disabled, "disabled"),
+        (state.read_only, "readonly"),
+        (state.required, "required"),
+        (state.selected, "selected"),
         (state.checked, "checked"),
+        (state.expanded, "expanded"),
+        (state.pressed, "pressed"),
+        (state.invalid, "invalid"),
+        (state.value, "value"),
         (state.focus_visible, "focus-visible"),
     ]
     .into_iter()

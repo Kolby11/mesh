@@ -10,7 +10,10 @@ use mesh_core_component::template::{
     Attribute, AttributeValue, ComponentRef, ElementNode, SourceTag, TemplateNode,
 };
 use mesh_core_elements::accessibility::AccessibilityInfo;
-use mesh_core_elements::{ComputedStyle, StyleContext, StyleResolver, VariableStore, WidgetNode};
+use mesh_core_elements::{
+    ComputedStyle, ElementDiagnostic, StyleContext, StyleResolver, VariableStore, WidgetNode,
+    validate_element_attribute, validate_element_event,
+};
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
 
@@ -312,6 +315,7 @@ fn build_element_node(
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> WidgetNode {
     let tag = lower_source_tag(&element.tag_kind).as_str().to_string();
+    let _element_diagnostics = collect_element_diagnostics(element);
     let (classes, id, mut attributes, event_handlers) =
         parse_attributes(&element.attributes, state);
     if tag == "input" && !attributes.contains_key("type") {
@@ -383,16 +387,39 @@ fn build_element_node(
     node
 }
 
+pub fn collect_element_diagnostics(element: &ElementNode) -> Vec<ElementDiagnostic> {
+    let tag = lower_source_tag(&element.tag_kind).as_str();
+    let mut diagnostics = Vec::new();
+    for attribute in &element.attributes {
+        if attribute.name == "class" || attribute.name == "id" || attribute.name == "bind:this" {
+            continue;
+        }
+        if is_event_handler_attribute(&attribute.name) {
+            let event_name = normalize_event_handler_name(&attribute.name);
+            if let Some(diagnostic) = validate_element_event(tag, &event_name) {
+                diagnostics.push(diagnostic);
+            }
+        } else if let Some(diagnostic) = validate_element_attribute(tag, &attribute.name, "") {
+            diagnostics.push(diagnostic);
+        }
+    }
+    diagnostics
+}
+
 fn is_inline_template_node(node: &TemplateNode) -> bool {
     matches!(node, TemplateNode::Text(_) | TemplateNode::Expr(_))
 }
 
 fn default_input_type(source_tag: &SourceTag) -> Option<&'static str> {
     match source_tag {
+        SourceTag::TextArea => Some("textarea"),
+        SourceTag::Search => Some("search"),
+        SourceTag::Password => Some("password"),
+        SourceTag::NumberInput => Some("number"),
+        SourceTag::Stepper => Some("number"),
         SourceTag::TextInput => Some("text"),
         SourceTag::PasswordInput => Some("password"),
         SourceTag::SearchInput => Some("search"),
-        SourceTag::NumberInput => Some("number"),
         SourceTag::EmailInput => Some("email"),
         SourceTag::UrlInput => Some("url"),
         _ => None,
@@ -550,7 +577,18 @@ fn is_event_handler_attribute(name: &str) -> bool {
     }
     matches!(
         normalize_event_handler_name(name).as_str(),
-        "click" | "change" | "release" | "focus" | "blur" | "keydown" | "keyup" | "keybind"
+        "click"
+            | "input"
+            | "change"
+            | "select"
+            | "activate"
+            | "openchange"
+            | "release"
+            | "focus"
+            | "blur"
+            | "keydown"
+            | "keyup"
+            | "keybind"
     )
 }
 
@@ -679,5 +717,94 @@ mod tests {
         let switch = accessibility_for_tag("switch");
         assert_eq!(switch.role, mesh_core_elements::AccessibilityRole::Switch);
         assert!(switch.focusable);
+    }
+
+    #[test]
+    fn shared_value_change_handlers_are_normalized() {
+        let attrs = vec![
+            Attribute {
+                name: "oninput".into(),
+                value: AttributeValue::EventHandler("onInput".into()),
+            },
+            Attribute {
+                name: "onchange".into(),
+                value: AttributeValue::EventHandler("onChange".into()),
+            },
+            Attribute {
+                name: "onselect".into(),
+                value: AttributeValue::EventHandler("onSelect".into()),
+            },
+            Attribute {
+                name: "onactivate".into(),
+                value: AttributeValue::EventHandler("onActivate".into()),
+            },
+            Attribute {
+                name: "onopenchange".into(),
+                value: AttributeValue::EventHandler("onOpenChange".into()),
+            },
+        ];
+
+        let (_, _, _, handlers) = parse_attributes(&attrs, None);
+
+        assert_eq!(handlers.get("input"), Some(&"onInput".to_string()));
+        assert_eq!(handlers.get("change"), Some(&"onChange".to_string()));
+        assert_eq!(handlers.get("select"), Some(&"onSelect".to_string()));
+        assert_eq!(handlers.get("activate"), Some(&"onActivate".to_string()));
+        assert_eq!(
+            handlers.get("openchange"),
+            Some(&"onOpenChange".to_string())
+        );
+    }
+
+    #[test]
+    fn two_way_value_binding_still_resolves_attribute_value() {
+        let attrs = vec![Attribute {
+            name: "value".into(),
+            value: AttributeValue::TwoWayBinding("current_value".into()),
+        }];
+
+        let (_, _, resolved, _) = parse_attributes(&attrs, None);
+
+        assert_eq!(resolved.get("value"), Some(&String::new()));
+    }
+
+    #[test]
+    fn frontend_element_diagnostics_collect_unsupported_attribute() {
+        let element = ElementNode {
+            tag: "button".into(),
+            tag_kind: SourceTag::Button,
+            attributes: vec![Attribute {
+                name: "browser-form-action".into(),
+                value: AttributeValue::Static("submit".into()),
+            }],
+            children: vec![],
+        };
+
+        let diagnostics = collect_element_diagnostics(&element);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].tag, "button");
+        assert_eq!(diagnostics[0].name, "browser-form-action");
+    }
+
+    #[test]
+    fn frontend_element_diagnostics_preserve_shipped_pass_through_attributes() {
+        let element = ElementNode {
+            tag: "button".into(),
+            tag_kind: SourceTag::Button,
+            attributes: vec![
+                Attribute {
+                    name: "data-test-id".into(),
+                    value: AttributeValue::Static("ok".into()),
+                },
+                Attribute {
+                    name: "aria-label".into(),
+                    value: AttributeValue::Static("OK".into()),
+                },
+            ],
+            children: vec![],
+        };
+
+        assert!(collect_element_diagnostics(&element).is_empty());
     }
 }

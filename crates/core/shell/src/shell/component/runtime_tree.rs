@@ -326,7 +326,14 @@ fn state_fingerprint(state: ElementState) -> u64 {
     state.focused.hash(&mut hasher);
     state.focus_visible.hash(&mut hasher);
     state.disabled.hash(&mut hasher);
+    state.read_only.hash(&mut hasher);
+    state.required.hash(&mut hasher);
+    state.selected.hash(&mut hasher);
     state.checked.hash(&mut hasher);
+    state.expanded.hash(&mut hasher);
+    state.pressed.hash(&mut hasher);
+    state.invalid.hash(&mut hasher);
+    state.value.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -504,6 +511,7 @@ pub(super) fn annotate_runtime_tree(
         active: active_key.as_deref() == Some(key_str),
         disabled,
         checked,
+        ..ElementState::default()
     };
     if node.state.hovered {
         tracing::trace!(

@@ -9,6 +9,7 @@ primitives.
 ## Renderer Contract
 
 Renderer migration rules for plugin-authored UI live in [the .mesh renderer contract](renderer-contract.md).
+The broader [Native element model](elements.md) defines built-in element families, common attributes, state, events, diagnostics, accessibility expectations, and the relationship to HTML, Qt, and Flutter.
 
 ## File structure
 

@@ -22,9 +22,13 @@ pub use accessibility::{
     AccessibilityTreeNode,
 };
 pub use element::{
-    BASE_ELEMENT_FIELDS, ELEMENT_TYPE_DEFS, ElementFieldDef, ElementFieldType, ElementKind,
-    ElementRect, ElementSnapshot, ElementStateSnapshot, ElementTypeDef, element_snapshot,
-    element_snapshot_json, element_type_for_tag,
+    BASE_ELEMENT_FIELDS, ELEMENT_CONTRACT_DEFS, ELEMENT_TYPE_DEFS, ElementAttributeDef,
+    ElementAttributeType, ElementCompatibilityRef, ElementContractDef, ElementDiagnostic,
+    ElementDiagnosticKind, ElementEventDef, ElementFamily, ElementFieldDef, ElementFieldType,
+    ElementKind, ElementRect, ElementSnapshot, ElementStateFlag, ElementStateSnapshot,
+    ElementTypeDef, common_state_flags, element_contract_for_tag, element_contract_tags,
+    element_snapshot, element_snapshot_json, element_type_for_tag, validate_element_attribute,
+    validate_element_event,
 };
 pub use events::{EventDispatcher, InputState, Modifiers, RawInputEvent, UiEvent};
 pub use layout::{IntrinsicLayoutCache, LayoutEngine, LayoutRect, TextMeasurer};
