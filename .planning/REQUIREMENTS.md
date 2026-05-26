@@ -32,17 +32,17 @@
 
 ### Action Controls
 
-- [ ] **ELEMACTION-01**: Action controls include `button`, `icon-button`, `toggle-button`, `command-button`, and `link-button`.
-- [ ] **ELEMACTION-02**: Action controls expose pressed, disabled, default, destructive, busy, and keybind-aware states.
-- [ ] **ELEMACTION-03**: Action controls support pointer activation, keyboard activation, accessibility roles, and Luau handlers.
+- [x] **ELEMACTION-01**: Action controls include `button`, `icon-button`, `toggle-button`, `command-button`, and `link-button`.
+- [x] **ELEMACTION-02**: Action controls expose pressed, disabled, default, destructive, busy, and keybind-aware states.
+- [x] **ELEMACTION-03**: Action controls support pointer activation, keyboard activation, accessibility roles, and Luau handlers.
 
 ### Text And Numeric Input Controls
 
-- [ ] **ELEMTEXT-01**: Text inputs include `input`, `textarea`, `search`, and `password` variants.
-- [ ] **ELEMTEXT-02**: Numeric inputs include `number-input` and `stepper` with min/max/step behavior.
-- [ ] **ELEMTEXT-03**: Text and numeric controls support value, placeholder, disabled, read-only, required, invalid, and input/change events.
-- [ ] **ELEMTEXT-04**: Text selection, clipboard, focus, traversal, and accessibility behavior remain coherent with existing shell input rules.
-- [ ] **ELEMTEXT-05**: Text and numeric input diagnostics catch invalid values, missing labels, and unsupported configurations.
+- [x] **ELEMTEXT-01**: Text inputs include `input`, `textarea`, `search`, and `password` variants.
+- [x] **ELEMTEXT-02**: Numeric inputs include `number-input` and `stepper` with min/max/step behavior.
+- [x] **ELEMTEXT-03**: Text and numeric controls support value, placeholder, disabled, read-only, required, invalid, and input/change events.
+- [x] **ELEMTEXT-04**: Text selection, clipboard, focus, traversal, and accessibility behavior remain coherent with existing shell input rules.
+- [x] **ELEMTEXT-05**: Text and numeric input diagnostics catch invalid values, missing labels, and unsupported configurations.
 
 ### Choice Controls
 
@@ -126,14 +126,14 @@
 | ELEMDISPLAY-03 | Phase 87 | Complete |
 | ELEMDISPLAY-04 | Phase 87 | Complete |
 | ELEMDISPLAY-05 | Phase 87 | Complete |
-| ELEMACTION-01 | Phase 88 | Pending |
-| ELEMACTION-02 | Phase 88 | Pending |
-| ELEMACTION-03 | Phase 88 | Pending |
-| ELEMTEXT-01 | Phase 88 | Pending |
-| ELEMTEXT-02 | Phase 88 | Pending |
-| ELEMTEXT-03 | Phase 88 | Pending |
-| ELEMTEXT-04 | Phase 88 | Pending |
-| ELEMTEXT-05 | Phase 88 | Pending |
+| ELEMACTION-01 | Phase 88 | Complete |
+| ELEMACTION-02 | Phase 88 | Complete |
+| ELEMACTION-03 | Phase 88 | Complete |
+| ELEMTEXT-01 | Phase 88 | Complete |
+| ELEMTEXT-02 | Phase 88 | Complete |
+| ELEMTEXT-03 | Phase 88 | Complete |
+| ELEMTEXT-04 | Phase 88 | Complete |
+| ELEMTEXT-05 | Phase 88 | Complete |
 | ELEMCHOICE-01 | Phase 89 | Pending |
 | ELEMCHOICE-02 | Phase 89 | Pending |
 | ELEMCHOICE-03 | Phase 89 | Pending |
