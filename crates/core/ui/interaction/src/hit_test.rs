@@ -67,6 +67,20 @@ fn find_node_path_at_offset(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<Vec<String>> {
+    let mut reversed = find_node_path_reversed(node, x, y, offset_x, offset_y)?;
+    reversed.reverse();
+    Some(reversed)
+}
+
+/// Collects the hit path in deepest-first order. The caller reverses once
+/// at the top, avoiding O(n) `Vec::insert(0, ...)` at every ancestor.
+fn find_node_path_reversed(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<Vec<String>> {
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
     let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
     if !inside && node_clips_children(node) {
@@ -75,9 +89,9 @@ fn find_node_path_at_offset(
 
     let (child_ox, child_oy) = child_offsets_with_scroll(node, offset_x, offset_y);
     for child in node.children.iter().rev() {
-        if let Some(mut path) = find_node_path_at_offset(child, x, y, child_ox, child_oy) {
+        if let Some(mut path) = find_node_path_reversed(child, x, y, child_ox, child_oy) {
             if let Some(key) = node.attributes.get("_mesh_key") {
-                path.insert(0, key.clone());
+                path.push(key.clone());
             }
             return Some(path);
         }

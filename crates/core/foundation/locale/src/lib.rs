@@ -80,12 +80,36 @@ impl LocaleEngine {
     }
 
     /// Translate with interpolation. Placeholders use `{name}` syntax.
+    ///
+    /// Walks the template once instead of doing `String::replace` per
+    /// placeholder, so cost is O(template_len) regardless of how many
+    /// args are supplied.
     pub fn translate_with(&self, key: &str, args: &HashMap<String, String>) -> Option<String> {
         let template = self.translate(key)?;
-        let mut result = template.to_string();
-        for (name, value) in args {
-            result = result.replace(&format!("{{{name}}}"), value);
+        let mut result = String::with_capacity(template.len());
+        let mut remaining = template;
+        while let Some(open) = remaining.find('{') {
+            result.push_str(&remaining[..open]);
+            let after_open = &remaining[open + 1..];
+            if let Some(close) = after_open.find('}') {
+                let name = &after_open[..close];
+                match args.get(name) {
+                    Some(value) => result.push_str(value),
+                    None => {
+                        // Unknown placeholder: preserve the literal `{name}`.
+                        result.push('{');
+                        result.push_str(name);
+                        result.push('}');
+                    }
+                }
+                remaining = &after_open[close + 1..];
+            } else {
+                // Unmatched `{` — emit the rest literally and stop scanning.
+                result.push_str(&remaining[open..]);
+                return Some(result);
+            }
         }
+        result.push_str(remaining);
         Some(result)
     }
 

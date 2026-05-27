@@ -2,17 +2,19 @@ use super::PixelBuffer;
 use super::glyph::{GlyphAxes, draw_font_glyph};
 use super::profiling;
 use image::imageops::FilterType;
+use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget, resolve_icon_result};
-use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
-static IMAGE_CACHE: OnceLock<Mutex<ImageCache>> = OnceLock::new();
-static RASTER_CACHE: OnceLock<Mutex<RasterVariantCache>> = OnceLock::new();
-static SOURCE_IDENTITY_CACHE: OnceLock<Mutex<SourceIdentityCache>> = OnceLock::new();
-static SVG_CACHEABILITY_CACHE: OnceLock<Mutex<SvgCacheabilityCache>> = OnceLock::new();
+static IMAGE_CACHE: OnceLock<Mutex<LruCache<PathBuf, CachedImage>>> = OnceLock::new();
+static RASTER_CACHE: OnceLock<Mutex<LruCache<RasterCacheKey, RasterVariant>>> = OnceLock::new();
+static SOURCE_IDENTITY_CACHE: OnceLock<Mutex<LruCache<PathBuf, CachedSourceIdentity>>> =
+    OnceLock::new();
+static SVG_CACHEABILITY_CACHE: OnceLock<Mutex<LruCache<PathBuf, CachedSvgCacheability>>> =
+    OnceLock::new();
 const RASTER_CACHE_CAPACITY: usize = 256;
 const IMAGE_CACHE_CAPACITY: usize = 256;
 const SOURCE_IDENTITY_CACHE_CAPACITY: usize = 1024;
@@ -43,44 +45,6 @@ struct CachedImage {
     image: Arc<image::RgbaImage>,
 }
 
-#[derive(Debug, Default)]
-struct ImageCache {
-    entries: HashMap<PathBuf, CachedImage>,
-    order: VecDeque<PathBuf>,
-}
-
-impl ImageCache {
-    fn get(&mut self, path: &Path, freshness: FileFreshness) -> Option<Arc<image::RgbaImage>> {
-        let image = self
-            .entries
-            .get(path)
-            .filter(|cached| cached.freshness == freshness)
-            .map(|cached| Arc::clone(&cached.image));
-        if image.is_some() {
-            self.order.retain(|existing| existing != path);
-            self.order.push_back(path.to_path_buf());
-        }
-        image
-    }
-
-    fn insert(&mut self, path: PathBuf, value: CachedImage) {
-        self.order.retain(|existing| existing != &path);
-        self.order.push_back(path.clone());
-        self.entries.insert(path, value);
-        while self.entries.len() > IMAGE_CACHE_CAPACITY {
-            let Some(evicted) = self.order.pop_front() else {
-                break;
-            };
-            self.entries.remove(&evicted);
-        }
-    }
-
-    fn clear(&mut self) {
-        self.entries.clear();
-        self.order.clear();
-    }
-}
-
 #[derive(Debug, Clone)]
 struct CachedSourceIdentity {
     freshness: Option<FileFreshness>,
@@ -91,72 +55,6 @@ struct CachedSourceIdentity {
 struct CachedSvgCacheability {
     freshness: FileFreshness,
     cacheable: bool,
-}
-
-#[derive(Debug, Default)]
-struct SourceIdentityCache {
-    entries: HashMap<PathBuf, CachedSourceIdentity>,
-    order: VecDeque<PathBuf>,
-}
-
-impl SourceIdentityCache {
-    fn get(&mut self, path: &Path, freshness: Option<FileFreshness>) -> Option<PathBuf> {
-        let identity = self
-            .entries
-            .get(path)
-            .filter(|cached| cached.freshness == freshness)
-            .map(|cached| cached.identity.clone());
-        if identity.is_some() {
-            self.order.retain(|existing| existing != path);
-            self.order.push_back(path.to_path_buf());
-        }
-        identity
-    }
-
-    fn insert(&mut self, path: PathBuf, value: CachedSourceIdentity) {
-        self.order.retain(|existing| existing != &path);
-        self.order.push_back(path.clone());
-        self.entries.insert(path, value);
-        while self.entries.len() > SOURCE_IDENTITY_CACHE_CAPACITY {
-            let Some(evicted) = self.order.pop_front() else {
-                break;
-            };
-            self.entries.remove(&evicted);
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-struct SvgCacheabilityCache {
-    entries: HashMap<PathBuf, CachedSvgCacheability>,
-    order: VecDeque<PathBuf>,
-}
-
-impl SvgCacheabilityCache {
-    fn get(&mut self, path: &Path, freshness: FileFreshness) -> Option<bool> {
-        let cacheable = self
-            .entries
-            .get(path)
-            .filter(|cached| cached.freshness == freshness)
-            .map(|cached| cached.cacheable);
-        if cacheable.is_some() {
-            self.order.retain(|existing| existing != path);
-            self.order.push_back(path.to_path_buf());
-        }
-        cacheable
-    }
-
-    fn insert(&mut self, path: PathBuf, value: CachedSvgCacheability) {
-        self.order.retain(|existing| existing != &path);
-        self.order.push_back(path.clone());
-        self.entries.insert(path, value);
-        while self.entries.len() > SVG_CACHEABILITY_CACHE_CAPACITY {
-            let Some(evicted) = self.order.pop_front() else {
-                break;
-            };
-            self.entries.remove(&evicted);
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -179,41 +77,20 @@ struct RasterVariant {
     fully_opaque: bool,
 }
 
-#[derive(Debug, Default)]
-struct RasterVariantCache {
-    entries: HashMap<RasterCacheKey, RasterVariant>,
-    order: VecDeque<RasterCacheKey>,
+fn image_cache() -> &'static Mutex<LruCache<PathBuf, CachedImage>> {
+    IMAGE_CACHE.get_or_init(|| Mutex::new(LruCache::new(IMAGE_CACHE_CAPACITY)))
 }
 
-impl RasterVariantCache {
-    fn get(&mut self, key: &RasterCacheKey) -> Option<RasterVariant> {
-        let variant = self.entries.get(key).cloned();
-        if variant.is_some() {
-            self.order.retain(|existing| existing != key);
-            self.order.push_back(key.clone());
-        }
-        variant
-    }
-
-    fn insert(&mut self, key: RasterCacheKey, variant: RasterVariant) {
-        self.order.retain(|existing| existing != &key);
-        self.order.push_back(key.clone());
-        self.entries.insert(key, variant);
-        while self.entries.len() > RASTER_CACHE_CAPACITY {
-            let Some(evicted) = self.order.pop_front() else {
-                break;
-            };
-            self.entries.remove(&evicted);
-        }
-    }
+fn raster_cache() -> &'static Mutex<LruCache<RasterCacheKey, RasterVariant>> {
+    RASTER_CACHE.get_or_init(|| Mutex::new(LruCache::new(RASTER_CACHE_CAPACITY)))
 }
 
-fn image_cache() -> &'static Mutex<ImageCache> {
-    IMAGE_CACHE.get_or_init(|| Mutex::new(ImageCache::default()))
+fn source_identity_cache() -> &'static Mutex<LruCache<PathBuf, CachedSourceIdentity>> {
+    SOURCE_IDENTITY_CACHE.get_or_init(|| Mutex::new(LruCache::new(SOURCE_IDENTITY_CACHE_CAPACITY)))
 }
 
-fn raster_cache() -> &'static Mutex<RasterVariantCache> {
-    RASTER_CACHE.get_or_init(|| Mutex::new(RasterVariantCache::default()))
+fn svg_cacheability_cache() -> &'static Mutex<LruCache<PathBuf, CachedSvgCacheability>> {
+    SVG_CACHEABILITY_CACHE.get_or_init(|| Mutex::new(LruCache::new(SVG_CACHEABILITY_CACHE_CAPACITY)))
 }
 
 fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
@@ -222,10 +99,12 @@ fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
             .ok()
             .map(|image| Arc::new(image.to_rgba8()));
     };
-    if let Ok(mut guard) = image_cache().lock()
-        && let Some(image) = guard.get(path, freshness)
-    {
-        return Some(image);
+    if let Ok(mut guard) = image_cache().lock() {
+        if let Some(cached) = guard.get(path) {
+            if cached.freshness == freshness {
+                return Some(Arc::clone(&cached.image));
+            }
+        }
     }
     let img = Arc::new(image::open(path).ok()?.to_rgba8());
     if let Ok(mut guard) = image_cache().lock() {
@@ -262,11 +141,13 @@ fn file_freshness(path: &Path) -> Option<FileFreshness> {
 }
 
 fn source_identity(path: &Path, freshness: Option<FileFreshness>) -> PathBuf {
-    let cache = SOURCE_IDENTITY_CACHE.get_or_init(|| Mutex::new(SourceIdentityCache::default()));
-    if let Ok(mut guard) = cache.lock()
-        && let Some(identity) = guard.get(path, freshness)
-    {
-        return identity;
+    let cache = source_identity_cache();
+    if let Ok(mut guard) = cache.lock() {
+        if let Some(cached) = guard.get(path) {
+            if cached.freshness == freshness {
+                return cached.identity.clone();
+            }
+        }
     }
 
     let identity = match std::fs::canonicalize(path) {
@@ -314,11 +195,13 @@ fn svg_file_is_cacheable(path: &Path) -> bool {
     let Some(freshness) = file_freshness(path) else {
         return false;
     };
-    let cache = SVG_CACHEABILITY_CACHE.get_or_init(|| Mutex::new(SvgCacheabilityCache::default()));
-    if let Ok(mut guard) = cache.lock()
-        && let Some(cacheable) = guard.get(path, freshness)
-    {
-        return cacheable;
+    let cache = svg_cacheability_cache();
+    if let Ok(mut guard) = cache.lock() {
+        if let Some(cached) = guard.get(path) {
+            if cached.freshness == freshness {
+                return cached.cacheable;
+            }
+        }
     }
 
     let Ok(svg_data) = std::fs::read_to_string(path) else {
@@ -394,7 +277,7 @@ fn missing_icon_key(width: u32, height: u32, tint: Color) -> RasterCacheKey {
 }
 
 fn cached_variant(key: &RasterCacheKey) -> Option<RasterVariant> {
-    raster_cache().lock().ok()?.get(key)
+    raster_cache().lock().ok()?.get(key).cloned()
 }
 
 pub(crate) fn cached_file_resource_opacity(
@@ -907,9 +790,7 @@ mod tests {
 
     fn clear_icon_caches() {
         if let Some(cache) = RASTER_CACHE.get() {
-            let mut cache = cache.lock().unwrap();
-            cache.entries.clear();
-            cache.order.clear();
+            cache.lock().unwrap().clear();
         }
         if let Some(cache) = IMAGE_CACHE.get() {
             cache.lock().unwrap().clear();

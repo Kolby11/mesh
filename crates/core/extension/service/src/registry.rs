@@ -31,7 +31,7 @@ pub struct ServiceEntry {
 #[derive(Default)]
 pub struct ServiceRegistry {
     services: RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
-    entries: RwLock<Vec<ServiceEntry>>,
+    entries: RwLock<HashMap<String, ServiceEntry>>,
 }
 
 impl ServiceRegistry {
@@ -68,12 +68,14 @@ impl ServiceRegistry {
         self.services.write().unwrap().insert(type_id, boxed);
 
         let mut entries = self.entries.write().unwrap();
-        entries.retain(|e| e.service_type != service_type);
-        entries.push(ServiceEntry {
-            service_type: service_type.to_string(),
-            backend_id: backend_id.to_string(),
-            module_id: module_id.to_string(),
-        });
+        entries.insert(
+            service_type.to_string(),
+            ServiceEntry {
+                service_type: service_type.to_string(),
+                backend_id: backend_id.to_string(),
+                module_id: module_id.to_string(),
+            },
+        );
     }
 
     /// Look up the active backend for a service type.
@@ -99,7 +101,7 @@ impl ServiceRegistry {
 
     /// List all registered service entries.
     pub fn list(&self) -> Vec<ServiceEntry> {
-        self.entries.read().unwrap().clone()
+        self.entries.read().unwrap().values().cloned().collect()
     }
 
     /// Check if a service type has a registered backend.
