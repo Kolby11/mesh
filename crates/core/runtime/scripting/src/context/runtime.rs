@@ -53,6 +53,10 @@ pub struct ScriptContext {
     tracked_storage_keys: Arc<Mutex<HashSet<String>>>,
     changed_storage_keys: Arc<Mutex<HashSet<String>>>,
     tracking_storage_reads: Arc<Mutex<bool>>,
+    /// `state.snapshot_generation()` at the time of the last `refresh_module_object` call.
+    /// When this matches the current generation (and no proxies exist), the Lua
+    /// `module.state` table is already up to date and the rebuild can be skipped.
+    last_module_refresh_gen: u64,
 }
 
 impl ScriptContext {
@@ -105,6 +109,7 @@ impl ScriptContext {
             tracked_storage_keys: Arc::new(Mutex::new(HashSet::new())),
             changed_storage_keys: Arc::new(Mutex::new(HashSet::new())),
             tracking_storage_reads: Arc::new(Mutex::new(false)),
+            last_module_refresh_gen: u64::MAX,
         })
     }
 
@@ -1033,13 +1038,22 @@ impl ScriptContext {
         }
     }
 
-    fn refresh_module_object(&self) {
+    fn refresh_module_object(&mut self) {
+        // Skip the expensive full-state re-serialization when nothing has changed.
+        // Proxy getters are external and can change without going through set(),
+        // so we must always rebuild when proxies are present.
+        let current_gen = self.state.snapshot_generation();
+        if !self.state.has_proxies() && self.last_module_refresh_gen == current_gen {
+            return;
+        }
+
         let Ok(module_table) = self.lua.globals().get::<Table>("module") else {
             return;
         };
         if let Ok(state_value) = self.lua.to_value(&self.state.snapshot()) {
             let _ = module_table.set("state", state_value);
         }
+        self.last_module_refresh_gen = current_gen;
     }
 }
 

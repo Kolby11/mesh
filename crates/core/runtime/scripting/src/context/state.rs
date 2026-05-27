@@ -16,6 +16,10 @@ pub struct ScriptState {
     // same namespace). The getter is invoked on reads; the setter, if
     // provided, is invoked on writes from scripts.
     proxies: HashMap<String, Proxy>,
+    /// Monotonically increasing counter — incremented whenever a variable
+    /// actually changes. Used by callers to skip expensive re-serialization
+    /// when state is provably unchanged since the last flush.
+    snapshot_generation: u64,
 }
 
 impl ScriptState {
@@ -24,7 +28,22 @@ impl ScriptState {
             variables: HashMap::new(),
             dirty: false,
             proxies: HashMap::new(),
+            snapshot_generation: 0,
         }
+    }
+
+    /// Returns a value that advances whenever any variable changes. Callers
+    /// can cache this and skip work when it matches the last seen value.
+    pub fn snapshot_generation(&self) -> u64 {
+        self.snapshot_generation
+    }
+
+    /// Returns true if any proxy is registered on this state. Proxy getters
+    /// are called by external sources and can change without going through
+    /// `set()`, so callers that use `snapshot_generation` for skip logic must
+    /// also check this and always refresh when proxies are present.
+    pub fn has_proxies(&self) -> bool {
+        !self.proxies.is_empty()
     }
 
     /// Set a variable and mark state as dirty.
@@ -49,6 +68,7 @@ impl ScriptState {
         }
         self.variables.insert(name, value);
         self.dirty = true;
+        self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
     }
 
     /// Set a host-maintained variable without requesting a component rebuild.
@@ -147,6 +167,7 @@ impl Clone for ScriptState {
             variables: self.variables.clone(),
             dirty: self.dirty,
             proxies: HashMap::new(), // proxies are host-registered and not cloned
+            snapshot_generation: self.snapshot_generation,
         }
     }
 }

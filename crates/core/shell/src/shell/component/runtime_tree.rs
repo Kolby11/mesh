@@ -83,11 +83,15 @@ pub(super) struct RetainedWidgetTree {
     node_keys: HashMap<NodeId, RetainedNodeKey>,
     dirty: SecondaryMap<RetainedNodeKey, RetainedNodeDirtyFlags>,
     last_dirty: RetainedTreeDirtySummary,
+    // Scratch map reused each frame to avoid per-frame allocation.
+    next_nodes_scratch: HashMap<NodeId, RetainedNodeSnapshot>,
 }
 
 impl RetainedWidgetTree {
     pub(super) fn update(&mut self, root: &WidgetNode) -> RetainedTreeDirtySummary {
-        let mut next_nodes = HashMap::new();
+        // Take the scratch map out so we can freely mutate other fields while holding it.
+        let mut next_nodes = std::mem::take(&mut self.next_nodes_scratch);
+        next_nodes.clear();
         collect_retained_snapshots(root, &mut next_nodes);
 
         let mut dirty = RetainedTreeDirtySummary::default();
@@ -122,17 +126,17 @@ impl RetainedWidgetTree {
             }
         }
 
-        let removed_ids: Vec<_> = self
-            .node_keys
-            .keys()
-            .copied()
-            .filter(|id| !next_nodes.contains_key(id))
-            .collect();
-        for node_id in removed_ids {
-            if let Some(key) = self.node_keys.remove(&node_id) {
-                self.nodes.remove(key);
+        // Remove nodes no longer in the tree — retain avoids the intermediate Vec.
+        {
+            let RetainedWidgetTree { ref mut nodes, ref mut node_keys, .. } = *self;
+            node_keys.retain(|id, key| {
+                if next_nodes.contains_key(id) {
+                    return true;
+                }
+                nodes.remove(*key);
                 dirty.removed += 1;
-            }
+                false
+            });
         }
 
         if dirty.any() {
@@ -140,6 +144,9 @@ impl RetainedWidgetTree {
         }
         self.dirty = next_dirty;
         self.last_dirty = dirty;
+
+        // Return the scratch map, preserving its backing allocation for the next frame.
+        self.next_nodes_scratch = next_nodes;
         dirty
     }
 

@@ -291,7 +291,7 @@ pub(super) struct FrontendSurfaceComponent {
     dirty_types: ComponentDirtyFlags,
     last_dirty_types: ComponentDirtyFlags,
     last_service_update: Option<String>,
-    cached_service_payloads: HashMap<String, serde_json::Value>,
+    cached_service_payloads: HashMap<String, std::sync::Arc<serde_json::Value>>,
     focused_key: Option<String>,
     focus_visible_key: Option<String>,
     pointer_down_key: Option<String>,
