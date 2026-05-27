@@ -173,6 +173,7 @@ impl Shell {
         event: &ServiceEvent,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
+        let is_state_update = matches!(event, ServiceEvent::Updated { .. });
         for runtime in &mut self.components {
             requests.extend(
                 runtime
@@ -180,6 +181,9 @@ impl Shell {
                     .handle_service_event(event)
                     .map_err(ShellRunError::Component)?,
             );
+            if is_state_update && runtime.component.wants_render() {
+                runtime.force_full_present = true;
+            }
         }
         Ok(requests)
     }

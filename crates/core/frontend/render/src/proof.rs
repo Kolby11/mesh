@@ -130,7 +130,7 @@ pub fn build_focused_proof_snapshot(
     root: &WidgetNode,
     render_dirty: RenderObjectDirtySummary,
     display_metrics: DisplayListMetrics,
-    selected_paint: &SelectedDisplayListPaint,
+    selected_paint: &SelectedDisplayListPaint<'_>,
 ) -> FocusedProofSnapshot {
     let mut snapshot = FocusedProofSnapshot {
         dirty: render_dirty.into(),
@@ -141,7 +141,6 @@ pub fn build_focused_proof_snapshot(
 
     collect_focused_nodes(root, &mut snapshot);
     snapshot.paint = selected_paint
-        .commands()
         .iter()
         .map(|cmd| focused_paint_evidence(cmd, &mut snapshot.diagnostics))
         .collect();
@@ -312,7 +311,7 @@ mod tests {
         node
     }
 
-    fn selected_paint(root: &WidgetNode) -> (DisplayListMetrics, SelectedDisplayListPaint) {
+    fn proof_snapshot(root: &WidgetNode, dirty: RenderObjectDirtySummary) -> FocusedProofSnapshot {
         let mut list = RetainedDisplayList::default();
         let metrics = list.update(root, 200, 100, true, true);
         let selected = list.select_paint_commands(
@@ -324,7 +323,7 @@ mod tests {
             }),
             DisplayListRepaintPolicy::FullSurface,
         );
-        (metrics, selected)
+        build_focused_proof_snapshot(root, dirty, metrics, &selected)
     }
 
     #[test]
@@ -340,14 +339,7 @@ mod tests {
             },
         );
         root.computed_style.background_color = Color::WHITE;
-        let (metrics, selected) = selected_paint(&root);
-
-        let snapshot = build_focused_proof_snapshot(
-            &root,
-            RenderObjectDirtySummary::default(),
-            metrics,
-            &selected,
-        );
+        let snapshot = proof_snapshot(&root, RenderObjectDirtySummary::default());
 
         assert_eq!(snapshot.nodes[0].node_id, 42);
         assert_eq!(snapshot.nodes[0].stable_node_id, "42");
@@ -370,14 +362,7 @@ mod tests {
             },
         );
         root.computed_style.background_color = Color::WHITE;
-        let (metrics, selected) = selected_paint(&root);
-
-        let snapshot = build_focused_proof_snapshot(
-            &root,
-            RenderObjectDirtySummary::default(),
-            metrics,
-            &selected,
-        );
+        let snapshot = proof_snapshot(&root, RenderObjectDirtySummary::default());
 
         assert!(!snapshot.paint.is_empty());
         assert!(
@@ -400,14 +385,7 @@ mod tests {
             },
         );
         root.computed_style.background_color = Color::WHITE;
-        let (metrics, selected) = selected_paint(&root);
-
-        let snapshot = build_focused_proof_snapshot(
-            &root,
-            RenderObjectDirtySummary::default(),
-            metrics,
-            &selected,
-        );
+        let snapshot = proof_snapshot(&root, RenderObjectDirtySummary::default());
 
         assert!(!snapshot.paint.is_empty());
         assert!(
@@ -428,7 +406,6 @@ mod tests {
                 height: 20.0,
             },
         );
-        let (metrics, selected) = selected_paint(&root);
         let dirty = RenderObjectDirtySummary {
             geometry: 1,
             material: 2,
@@ -437,7 +414,7 @@ mod tests {
             ..RenderObjectDirtySummary::default()
         };
 
-        let snapshot = build_focused_proof_snapshot(&root, dirty, metrics, &selected);
+        let snapshot = proof_snapshot(&root, dirty);
 
         assert_eq!(snapshot.dirty.geometry, 1);
         assert_eq!(snapshot.dirty.material, 2);
@@ -457,14 +434,7 @@ mod tests {
                 height: 20.0,
             },
         );
-        let (metrics, selected) = selected_paint(&root);
-
-        let snapshot = build_focused_proof_snapshot(
-            &root,
-            RenderObjectDirtySummary::default(),
-            metrics,
-            &selected,
-        );
+        let snapshot = proof_snapshot(&root, RenderObjectDirtySummary::default());
 
         assert_eq!(snapshot.accessibility[0].node_id, 99);
         assert_eq!(snapshot.accessibility[0].stable_node_id, "99");
@@ -500,14 +470,7 @@ mod tests {
             .insert("_mesh_selection_focus_x".into(), "8.0".into());
         text.attributes
             .insert("_mesh_selection_focus_y".into(), "9.0".into());
-        let (metrics, selected) = selected_paint(&text);
-
-        let snapshot = build_focused_proof_snapshot(
-            &text,
-            RenderObjectDirtySummary::default(),
-            metrics,
-            &selected,
-        );
+        let snapshot = proof_snapshot(&text, RenderObjectDirtySummary::default());
         let proof_text = snapshot.nodes[0]
             .parley_text
             .as_ref()
@@ -555,13 +518,7 @@ mod tests {
                 height: 20.0,
             },
         ));
-        let (metrics, selected) = selected_paint(&root);
-        let snapshot = build_focused_proof_snapshot(
-            &root,
-            RenderObjectDirtySummary::default(),
-            metrics,
-            &selected,
-        );
+        let snapshot = proof_snapshot(&root, RenderObjectDirtySummary::default());
 
         let update = build_accesskit_update(&snapshot);
 

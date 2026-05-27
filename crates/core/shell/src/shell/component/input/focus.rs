@@ -12,6 +12,7 @@ impl FrontendSurfaceComponent {
         let mut requests = Vec::new();
 
         if previous_key != next_key {
+            self.keyboard_button_press_activations.clear();
             if let Some(previous_key) = previous_key.as_deref() {
                 requests.extend(self.call_node_handler(tree, previous_key, "blur", &[])?);
             }

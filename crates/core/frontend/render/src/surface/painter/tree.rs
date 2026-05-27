@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::display_list::{
     DisplayListClip, DisplayPaintCommand, DisplayPaintCommandKind, DisplayPaintContent,
-    DisplayPaintNode,
+    DisplayPaintNode, SelectedDisplayListPaint,
 };
 use mesh_core_elements::style::Edges;
 
@@ -138,31 +138,143 @@ impl FrontendRenderEngine {
             })
             .unwrap_or(surface_clip);
 
+        let mut batched_commands = Vec::new();
         for command in commands {
-            if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
+            if self.try_append_display_self_paint_batch(
+                command,
+                scale,
+                paint_clip,
+                paint_nodes,
+                &mut batched_commands,
+            ) {
                 continue;
             }
-            let command_clip = scaled_display_clip(command.clip, scale);
-            let clip = intersect_clip(paint_clip, command_clip);
-            if clip.width <= 0 || clip.height <= 0 {
+            if !batched_commands.is_empty() {
+                self.execute_painter_commands(buffer, &batched_commands);
+                batched_commands.clear();
+            }
+            self.render_display_command(command, buffer, scale, paint_clip, paint_nodes, module_id);
+        }
+        if !batched_commands.is_empty() {
+            self.execute_painter_commands(buffer, &batched_commands);
+        }
+    }
+
+    pub fn render_selected_display_list_for_module(
+        &self,
+        commands: &SelectedDisplayListPaint<'_>,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        clip: Option<(u32, u32, u32, u32)>,
+        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
+        module_id: Option<&str>,
+    ) {
+        let surface_clip = ClipRect {
+            x: 0,
+            y: 0,
+            width: buffer.width as i32,
+            height: buffer.height as i32,
+        };
+        let paint_clip = clip
+            .map(|clip| {
+                intersect_clip(
+                    surface_clip,
+                    ClipRect {
+                        x: clip.0 as i32,
+                        y: clip.1 as i32,
+                        width: clip.2 as i32,
+                        height: clip.3 as i32,
+                    },
+                )
+            })
+            .unwrap_or(surface_clip);
+
+        let mut batched_commands = Vec::new();
+        for command in commands.iter() {
+            if self.try_append_display_self_paint_batch(
+                command,
+                scale,
+                paint_clip,
+                paint_nodes,
+                &mut batched_commands,
+            ) {
                 continue;
             }
-            match command.kind {
-                DisplayPaintCommandKind::Node => {
-                    let node_bounds = scaled_display_node_bounds(&command.node, scale);
-                    self.render_display_node_self(
-                        &command.node,
-                        buffer,
-                        scale,
-                        node_bounds,
-                        clip,
-                        module_id,
-                    );
-                }
-                DisplayPaintCommandKind::Scrollbars => {
-                    let bounds = scaled_display_node_bounds(&command.node, scale);
-                    self.render_display_scrollbars(&command.node, buffer, scale, bounds, clip);
-                }
+            if !batched_commands.is_empty() {
+                self.execute_painter_commands(buffer, &batched_commands);
+                batched_commands.clear();
+            }
+            self.render_display_command(command, buffer, scale, paint_clip, paint_nodes, module_id);
+        }
+        if !batched_commands.is_empty() {
+            self.execute_painter_commands(buffer, &batched_commands);
+        }
+    }
+
+    fn try_append_display_self_paint_batch(
+        &self,
+        command: &DisplayPaintCommand,
+        scale: f32,
+        paint_clip: ClipRect,
+        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
+        batched_commands: &mut Vec<PainterCommand>,
+    ) -> bool {
+        if command.kind != DisplayPaintCommandKind::Node {
+            return false;
+        }
+        if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
+            return false;
+        }
+        if !matches!(command.node.content, DisplayPaintContent::None) {
+            return false;
+        }
+        let command_clip = scaled_display_clip(command.clip, scale);
+        let clip = intersect_clip(paint_clip, command_clip);
+        if clip.width <= 0 || clip.height <= 0 {
+            return false;
+        }
+        let node_bounds = scaled_display_node_bounds(&command.node, scale);
+        append_display_node_self_paint_commands(
+            &command.node,
+            scale,
+            node_bounds,
+            clip,
+            batched_commands,
+        )
+    }
+
+    fn render_display_command(
+        &self,
+        command: &DisplayPaintCommand,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        paint_clip: ClipRect,
+        paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
+        module_id: Option<&str>,
+    ) {
+        if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
+            return;
+        }
+        let command_clip = scaled_display_clip(command.clip, scale);
+        let clip = intersect_clip(paint_clip, command_clip);
+        if clip.width <= 0 || clip.height <= 0 {
+            return;
+        }
+        match command.kind {
+            DisplayPaintCommandKind::Node => {
+                let node_bounds = scaled_display_node_bounds(&command.node, scale);
+                self.render_display_node_self(
+                    &command.node,
+                    buffer,
+                    scale,
+                    node_bounds,
+                    clip,
+                    module_id,
+                );
+            }
+            DisplayPaintCommandKind::Scrollbars => {
+                let bounds = scaled_display_node_bounds(&command.node, scale);
+                self.render_display_scrollbars(&command.node, buffer, scale, bounds, clip);
             }
         }
     }
@@ -399,15 +511,16 @@ impl FrontendRenderEngine {
         let w = bounds.width;
         let h = bounds.height;
 
-        self.draw_box_shadow(
-            buffer,
+        let mut commands = Vec::with_capacity(5);
+        push_box_shadow_command(
+            &mut commands,
             bounds,
             style.border_radius * scale,
             style.box_shadow,
             clip,
         );
-        self.apply_backdrop_filter(
-            buffer,
+        push_backdrop_filter_command(
+            &mut commands,
             bounds,
             style.border_radius * scale,
             style.backdrop_filter,
@@ -421,35 +534,25 @@ impl FrontendRenderEngine {
             } else {
                 clip
             };
-            if radius > 0.5 {
-                self.fill_rounded_rect_clipped_with_filter(
-                    buffer,
-                    bounds,
-                    radius,
-                    style.background_color,
-                    paint_clip,
-                    style.filter,
-                );
-            } else {
-                self.fill_rect_clipped_with_filter(
-                    buffer,
-                    bounds,
-                    style.background_color,
-                    paint_clip,
-                    style.filter,
-                );
-            }
+            push_fill_shape_command(
+                &mut commands,
+                bounds,
+                radius,
+                style.background_color,
+                paint_clip,
+                style.filter,
+            );
         }
-        self.draw_background_paint(
-            buffer,
+        push_background_paint_command(
+            &mut commands,
             &style.background_paint,
             bounds,
             style.border_radius * scale,
             node_clip,
         );
 
-        self.draw_border_clipped(
-            buffer,
+        push_border_commands(
+            &mut commands,
             bounds,
             &style.border_width,
             style.border_radius * scale,
@@ -457,6 +560,8 @@ impl FrontendRenderEngine {
             scale,
             node_clip,
         );
+
+        self.execute_painter_commands(buffer, &commands);
 
         match &node.content {
             DisplayPaintContent::Text(text) => {
@@ -542,6 +647,180 @@ impl FrontendRenderEngine {
             clip,
         );
     }
+}
+
+fn append_display_node_self_paint_commands(
+    node: &DisplayPaintNode,
+    scale: f32,
+    bounds: ClipRect,
+    clip: ClipRect,
+    commands: &mut Vec<PainterCommand>,
+) -> bool {
+    let style = &node.style;
+    let node_clip = intersect_clip(clip, bounds);
+    if node_clip.width <= 0 || node_clip.height <= 0 {
+        return false;
+    }
+
+    let start_len = commands.len();
+    push_box_shadow_command(
+        commands,
+        bounds,
+        style.border_radius * scale,
+        style.box_shadow,
+        clip,
+    );
+    push_backdrop_filter_command(
+        commands,
+        bounds,
+        style.border_radius * scale,
+        style.backdrop_filter,
+        node_clip,
+    );
+
+    if style.background_color.a > 0 {
+        let radius = style.border_radius * scale;
+        let paint_clip = if style.filter.is_none() {
+            node_clip
+        } else {
+            clip
+        };
+        push_fill_shape_command(
+            commands,
+            bounds,
+            radius,
+            style.background_color,
+            paint_clip,
+            style.filter,
+        );
+    }
+    push_background_paint_command(
+        commands,
+        &style.background_paint,
+        bounds,
+        style.border_radius * scale,
+        node_clip,
+    );
+
+    push_border_commands(
+        commands,
+        bounds,
+        &style.border_width,
+        style.border_radius * scale,
+        style.border_color,
+        scale,
+        node_clip,
+    );
+    commands.len() > start_len
+}
+
+fn push_box_shadow_command(
+    commands: &mut Vec<PainterCommand>,
+    rect: ClipRect,
+    radius: f32,
+    shadow: BoxShadow,
+    clip: ClipRect,
+) {
+    if shadow.is_none() || shadow.inset {
+        return;
+    }
+    commands.push(PainterCommand::DrawShadow {
+        rect,
+        radius,
+        shadow,
+        clip,
+    });
+}
+
+fn push_backdrop_filter_command(
+    commands: &mut Vec<PainterCommand>,
+    rect: ClipRect,
+    radius: f32,
+    filter: VisualFilter,
+    clip: ClipRect,
+) {
+    if filter.is_none() {
+        return;
+    }
+    commands.push(PainterCommand::ApplyFilter {
+        rect,
+        radius,
+        filter: PainterFilter::Backdrop(filter),
+        clip,
+    });
+}
+
+fn push_fill_shape_command(
+    commands: &mut Vec<PainterCommand>,
+    rect: ClipRect,
+    radius: f32,
+    color: Color,
+    clip: ClipRect,
+    filter: VisualFilter,
+) {
+    let paint = PainterPaint::fill(color).with_filter(filter);
+    if radius > 0.5 {
+        commands.push(PainterCommand::DrawRoundedRect {
+            rect,
+            radius,
+            paint,
+            clip,
+        });
+    } else {
+        commands.push(PainterCommand::DrawRect { rect, paint, clip });
+    }
+}
+
+fn push_background_paint_command(
+    commands: &mut Vec<PainterCommand>,
+    paint: &BackgroundPaint,
+    rect: ClipRect,
+    radius: f32,
+    clip: ClipRect,
+) {
+    match paint {
+        BackgroundPaint::None => {}
+        BackgroundPaint::Image(source) => commands.push(PainterCommand::DrawImage {
+            image: PainterImage {
+                source: PainterImageSource::Path(source.path.clone()),
+            },
+            rect,
+            paint: PainterPaint::fill(Color::WHITE),
+            clip,
+        }),
+        BackgroundPaint::LinearGradient(gradient) => {
+            commands.push(PainterCommand::DrawLinearGradient {
+                gradient: PainterLinearGradient {
+                    from: gradient.from,
+                    to: gradient.to,
+                },
+                rect,
+                radius,
+                clip,
+            });
+        }
+    }
+}
+
+fn push_border_commands(
+    commands: &mut Vec<PainterCommand>,
+    bounds: ClipRect,
+    border_widths: &Edges,
+    radius: f32,
+    color: Color,
+    scale: f32,
+    clip: ClipRect,
+) {
+    if border_widths.top <= 0.0 || color.a == 0 {
+        return;
+    }
+    let border_width = (border_widths.top * scale).max(1.0) as f32;
+    commands.push(PainterCommand::DrawRoundedRect {
+        rect: bounds,
+        radius,
+        paint: PainterPaint::stroke(color, border_width),
+        clip,
+    });
 }
 
 fn scaled_display_node_bounds(node: &DisplayPaintNode, scale: f32) -> ClipRect {

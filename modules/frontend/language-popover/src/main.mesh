@@ -1,0 +1,156 @@
+<template>
+  <popover class="language-popover-shell" aria-label="{t('language.choose')}">
+    <column class="language-popover">
+      <button
+        class="{english_button_class}"
+        onclick={onSelectEnglish}
+        aria-label="{t('language.english')}"
+      >
+        <text class="language-option-text">{t('language.english')}</text>
+      </button>
+      <button
+        class="{slovak_button_class}"
+        onclick={onSelectSlovak}
+        aria-label="{t('language.slovak')}"
+      >
+        <text class="language-option-text">{t('language.slovak')}</text>
+      </button>
+    </column>
+  </popover>
+</template>
+
+<script lang="luau">
+english_button_class = "language-option language-option-selected"
+slovak_button_class = "language-option"
+
+local function locale_is_slovak(locale)
+    return locale == "sk" or string.find(locale or "", "sk-", 1, true) == 1
+end
+
+local function current_locale()
+    local locale = mesh.locale.current()
+    if type(locale) ~= "string" or locale == "" then
+        return "en"
+    end
+    return locale
+end
+
+local function stored_locale()
+    local locale = self.storage.language
+    if locale == "en" or locale == "sk" then
+        return locale
+    end
+    return nil
+end
+
+local function apply_selection(locale)
+    if locale_is_slovak(locale) then
+        english_button_class = "language-option"
+        slovak_button_class = "language-option language-option-selected"
+    else
+        english_button_class = "language-option language-option-selected"
+        slovak_button_class = "language-option"
+    end
+end
+
+local function select_locale(locale)
+    self.storage.language = locale
+    mesh.locale.set(locale)
+    apply_selection(locale)
+    mesh.popover.hide("@mesh/language-popover")
+end
+
+function init(self)
+    local locale = stored_locale()
+    if locale ~= nil then
+        mesh.locale.set(locale)
+    end
+end
+
+function render(self)
+    apply_selection(stored_locale() or current_locale())
+end
+
+function onSelectEnglish()
+    select_locale("en")
+end
+
+function onSelectSlovak()
+    select_locale("sk")
+end
+</script>
+
+<style>
+.language-popover-shell {
+    width: 100%;
+    height: 100%;
+    padding: 0 token(spacing.sm) token(spacing.sm) token(spacing.sm);
+    background: transparent;
+    opacity: 1;
+    transition: opacity token(animation.duration.short) token(animation.curves.bezier.standard);
+}
+
+.language-popover-shell.mesh-surface-exiting {
+    opacity: 0;
+}
+
+.language-popover {
+    width: 100%;
+    flex-direction: column;
+    max-width: 260px;
+    gap: token(spacing.sm);
+    padding: token(spacing.sm);
+    border-radius: token(radius.lg);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+}
+
+.language-option {
+    width: 100%;
+    height: 36px;
+    min-height: 36px;
+    flex-shrink: 0;
+    justify-content: start;
+    align-items: center;
+    padding: 0 token(spacing.md);
+    border-radius: token(radius.md);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+    border-width: 2px;
+    border-style: solid;
+    border-color: transparent;
+    text-wrap: none;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
+}
+
+.language-option:hover {
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
+    border-radius: token(radius.md);
+}
+
+.language-option:focus,
+.language-option:focus-visible {
+    background: token(color.tertiary-container);
+    color: token(color.on-tertiary-container);
+    border-radius: token(radius.md);
+}
+
+.language-option:active,
+.language-option-selected {
+    background: token(color.primary);
+    color: token(color.on-primary);
+    border-color: token(color.primary);
+    border-radius: token(radius.full);
+}
+
+.language-option-text {
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+    color: inherit;
+    text-wrap: none;
+}
+</style>

@@ -1,11 +1,16 @@
 -- PipeWire audio backend.
--- Polls volume via wpctl and responds to audio service commands.
+--
+-- Reads volume via wpctl. Reacts to external volume changes (hardware keys,
+-- other clients) through `pw-mon`, streamed via mesh.exec_stream. A fast poll
+-- remains enabled so held hardware keys still repaint if monitor output stalls.
 
 local SOUNDS_ROOT = "/usr/share/mesh/sounds/"
 
 state = { available = false, percent = 0, muted = false }
 local last_availability = nil
 local last_state_snapshot = nil
+local last_emitted_percent = nil
+local last_emitted_muted = nil
 
 local function debug_info(message)
     mesh.log.info("[pipewire-audio] " .. message)
@@ -16,8 +21,24 @@ local function debug_warn(message)
 end
 
 function start(self)
-    mesh.service.set_poll_interval(500)
-    debug_info("initialized with 500ms poll interval")
+    -- Keep a fast safety-net poll even when pw-mon is available. Some
+    -- compositor/audio-stack combinations delay or batch monitor output while
+    -- a hardware volume key is held, then flush on release. Polling keeps the
+    -- visible slider moving during the hold instead of waiting for that flush.
+    mesh.service.set_poll_interval(100)
+
+    -- Event-driven path: every PipeWire object change emits a `changed:`
+    -- line. Most volume changes produce a `changed:` block within a few
+    -- milliseconds of the actual change.
+    local started = mesh.exec_stream(
+        "pw-mon",
+        { "--hide-props", "--hide-params", "--print-separator" }
+    )
+    if started then
+        debug_info("subscribed to pw-mon for live volume events")
+    else
+        debug_warn("pw-mon stream unavailable; falling back to 100ms poll")
+    end
 end
 
 local function resolve_sink_id()
@@ -46,12 +67,10 @@ local function resolve_sink_id()
 end
 
 local function read_state()
-    local sink_id = resolve_sink_id()
-    if sink_id == nil then
-        return nil
-    end
-
-    local result = mesh.exec("wpctl", { "get-volume", sink_id })
+    -- @DEFAULT_AUDIO_SINK@ resolves server-side, avoiding a second wpctl
+    -- status call. Each saved wpctl invocation is ~20ms, which matters at
+    -- key-repeat rates (~30Hz) where every refresh is on the hot path.
+    local result = mesh.exec("wpctl", { "get-volume", "@DEFAULT_AUDIO_SINK@" })
     if not result.success then
         return nil
     end
@@ -131,6 +150,33 @@ end
 
 function on_poll(self)
     refresh_state()
+end
+
+local function maybe_emit_volume_changed(self)
+    if not state.available then
+        return
+    end
+    if last_emitted_percent == state.percent and last_emitted_muted == state.muted then
+        return
+    end
+    last_emitted_percent = state.percent
+    last_emitted_muted = state.muted
+    emit_volume_changed(self)
+end
+
+function on_stream_batch(self, program, lines)
+    -- pw-mon emits one multi-line block per changed PipeWire object: a
+    -- `changed:` header plus indented property continuations, optionally
+    -- followed by `added:`/`removed:` blocks. The runtime hands us the
+    -- whole batch for one wakeup, so we re-read state once regardless of
+    -- which lines arrived. `maybe_emit_volume_changed` dedupes identical
+    -- (percent, muted) snapshots so unrelated PipeWire activity (e.g. a
+    -- client connecting) does not generate frontend traffic.
+    if program ~= "pw-mon" then
+        return
+    end
+    refresh_state()
+    maybe_emit_volume_changed(self)
 end
 
 function on_command_volume_up(self)

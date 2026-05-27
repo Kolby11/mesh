@@ -380,6 +380,24 @@ impl FrontendSurfaceComponent {
                         }
                     }
 
+                    if find_node_by_key(&tree, &focused_key)
+                        .is_some_and(|node| node.tag == "button")
+                        && Self::key_matches_any_binding(
+                            &key,
+                            &keyboard_settings.button_activation_keys,
+                        )
+                    {
+                        self.clear_selection();
+                        self.keyboard_button_press_activations
+                            .insert((focused_key.clone(), key.clone()));
+                        requests.extend(self.dispatch_keyboard_button_activation(
+                            &tree,
+                            &focused_key,
+                            &key,
+                        )?);
+                        return Ok(requests);
+                    }
+
                     if matches!(key.as_str(), "ArrowDown" | "ArrowUp")
                         && let Some(next_key) =
                             self.rove_focus_within_parent(&tree, &focused_key, key == "ArrowUp")
@@ -415,6 +433,12 @@ impl FrontendSurfaceComponent {
                         )
                     {
                         self.clear_selection();
+                        if self
+                            .keyboard_button_press_activations
+                            .remove(&(focused_key.clone(), key.clone()))
+                        {
+                            return Ok(requests);
+                        }
                         requests.extend(self.dispatch_keyboard_button_activation(
                             &tree,
                             &focused_key,

@@ -516,7 +516,7 @@ end
 }
 
 #[test]
-fn keyboard_activation_button_and_toggle_fire_on_key_release() {
+fn keyboard_activation_button_fires_on_key_press_without_duplicate_release() {
     let mut component = test_frontend_component(
         r#"
 <template><box /></template>
@@ -564,13 +564,29 @@ end
             &theme,
             240,
             160,
-            ComponentInput::KeyReleased {
+            ComponentInput::KeyPressed {
                 key: "Enter".into(),
                 modifiers: KeyModifiers::default(),
             },
         )
         .unwrap();
     assert_eq!(runtime_number(&component, "button_count"), 1.0);
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        runtime_number(&component, "button_count"),
+        1.0,
+        "button release should not duplicate the keypress activation"
+    );
 
     component.focused_key = Some("root/1".into());
     component

@@ -2776,6 +2776,104 @@ fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
 }
 
 #[test]
+fn audio_popover_volume_button_repeats_on_key_press_without_waiting_for_release() {
+    let mut component =
+        real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 220);
+    component.paint(&theme, 320, 220, &mut buffer).unwrap();
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered audio popover");
+    let volume_up_key = first_node_with_click_handler(tree, "onVolumeUp")
+        .and_then(|button| button.attributes.get("_mesh_key"))
+        .expect("volume up button key")
+        .clone();
+    component.focused_key = Some(volume_up_key);
+
+    let first_requests = component
+        .handle_input(
+            &theme,
+            320,
+            220,
+            ComponentInput::KeyPressed {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_volume_command(&first_requests, 0.55);
+
+    let second_requests = component
+        .handle_input(
+            &theme,
+            320,
+            220,
+            ComponentInput::KeyPressed {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_volume_command(&second_requests, 0.60);
+
+    let release_requests = component
+        .handle_input(
+            &theme,
+            320,
+            220,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert!(
+        !release_requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ServiceCommand { command, .. } if command == "set_volume"
+        )),
+        "release should not send an extra volume command after keypress activation"
+    );
+}
+
+fn assert_volume_command(requests: &[CoreRequest], expected_volume: f64) {
+    match requests {
+        [
+            CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+                ..
+            },
+        ] => {
+            assert_eq!(interface, "mesh.audio");
+            assert_eq!(command, "set_volume");
+            assert_eq!(payload["device_id"], serde_json::json!("default"));
+            let volume = payload["volume"].as_f64().expect("numeric volume payload");
+            assert!(
+                (volume - expected_volume).abs() < 0.001,
+                "expected volume command near {expected_volume}, got {volume}"
+            );
+        }
+        other => panic!("expected one audio set_volume request, got {other:?}"),
+    }
+}
+
+#[test]
 fn audio_popover_access_key_toggles_mute_on_real_surface() {
     let mut component =
         real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());

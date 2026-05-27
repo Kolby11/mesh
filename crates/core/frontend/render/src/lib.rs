@@ -34,10 +34,11 @@ pub use render_object::{RenderObjectDirtySummary, RenderObjectTree};
 pub use surface::{
     DebugOverlay, FrontendRenderEngine, GlyphAxes, PaintProfilingMetrics, PainterBackendSnapshot,
     PainterCapabilitySnapshot, PainterDiagnosticSnapshot, PixelBuffer, RasterMetrics,
-    SharedTextMeasurer, TextCacheMetrics, TextRenderer,
+    SharedTextMeasurer, TextCacheMetrics, TextRenderer, TooltipPaintColors,
     paint_display_list_for_module_with_profiling_metrics, paint_frontend_tree,
     paint_frontend_tree_at, paint_frontend_tree_at_for_module,
     paint_frontend_tree_at_for_module_with_text_metrics,
     paint_frontend_tree_at_for_module_with_text_metrics_clipped,
     paint_frontend_tree_at_for_module_with_text_metrics_clipped_filtered,
+    paint_selected_display_list_for_module_with_profiling_metrics, set_tooltip_paint_colors,
 };

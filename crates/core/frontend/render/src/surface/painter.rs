@@ -4,6 +4,7 @@ mod text;
 mod tree;
 mod widgets;
 
+use std::cell::Cell;
 use std::sync::Mutex;
 
 use super::PixelBuffer;
@@ -51,10 +52,41 @@ pub struct PainterDiagnosticSnapshot {
     pub property: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TooltipPaintColors {
+    pub background: Color,
+    pub border: Color,
+    pub foreground: Color,
+}
+
+impl TooltipPaintColors {
+    pub const DEFAULT_DARK: Self = Self {
+        background: Color {
+            r: 0x32,
+            g: 0x30,
+            b: 0x2f,
+            a: 0xff,
+        },
+        border: Color {
+            r: 0x50,
+            g: 0x49,
+            b: 0x45,
+            a: 0xff,
+        },
+        foreground: Color {
+            r: 0xeb,
+            g: 0xdb,
+            b: 0xb2,
+            a: 0xff,
+        },
+    };
+}
+
 pub struct FrontendRenderEngine {
     paint_backend: Box<dyn PaintBackend>,
     painter_diagnostics: Mutex<Vec<PainterDiagnostic>>,
     text_renderer: TextRenderer,
+    tooltip_colors: Cell<TooltipPaintColors>,
 }
 
 impl FrontendRenderEngine {
@@ -63,6 +95,7 @@ impl FrontendRenderEngine {
             paint_backend: Box::<SkiaPaintBackend>::default(),
             painter_diagnostics: Mutex::new(Vec::new()),
             text_renderer: TextRenderer::new(),
+            tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
         }
     }
 
@@ -72,7 +105,16 @@ impl FrontendRenderEngine {
             paint_backend,
             painter_diagnostics: Mutex::new(Vec::new()),
             text_renderer: TextRenderer::new(),
+            tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
         }
+    }
+
+    pub fn set_tooltip_colors(&self, colors: TooltipPaintColors) {
+        self.tooltip_colors.set(colors);
+    }
+
+    pub(super) fn tooltip_colors(&self) -> TooltipPaintColors {
+        self.tooltip_colors.get()
     }
 
     pub fn paint_backend_id(&self) -> &'static str {

@@ -1,6 +1,6 @@
 {
   "theme": {
-    "active": "mesh-default-dark"
+    "active": "gruvbox-dark"
   },
   "i18n": {
     "locale": "en",

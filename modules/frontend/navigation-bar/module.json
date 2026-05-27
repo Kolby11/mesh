@@ -10,6 +10,7 @@
         "shell.surface",
         "service.audio.read",
         "service.audio.control",
+        "service.power.read",
         "theme.read",
         "locale.read",
         "locale.write"
@@ -24,7 +25,8 @@
     },
     "dependencies": {
       "modules": {
-        "@mesh/audio-popover": ">=0.1.0"
+        "@mesh/audio-popover": ">=0.1.0",
+        "@mesh/language-popover": ">=0.1.0"
       },
       "icons": {
         "@mesh/icons-default": "*"

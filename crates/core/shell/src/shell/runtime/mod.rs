@@ -9,6 +9,8 @@ mod service_state;
 mod theme;
 mod wayland;
 
+const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
+
 impl Shell {
     pub fn run(&mut self) -> Result<(), ShellRunError> {
         self.discover_modules();
@@ -54,7 +56,14 @@ impl Shell {
             self.reload_frontend_components_if_changed()?;
             self.dispatch_wayland()?;
 
-            while let Ok(message) = rx.try_recv() {
+            let mut shell_messages = Vec::new();
+            for _ in 0..MAX_SHELL_MESSAGE_DRAIN_PER_FRAME {
+                let Ok(message) = rx.try_recv() else {
+                    break;
+                };
+                push_coalesced_shell_message(&mut shell_messages, message);
+            }
+            for message in shell_messages {
                 self.handle_shell_message(&mut pending, message)?;
             }
 
@@ -152,4 +161,28 @@ impl Shell {
         }
         Ok(())
     }
+}
+
+fn push_coalesced_shell_message(messages: &mut Vec<ShellMessage>, message: ShellMessage) {
+    if let ShellMessage::BackendServiceUpdate {
+        interface,
+        provider_id,
+        ..
+    } = &message
+        && let Some(existing) = messages.iter_mut().find(|existing| {
+            matches!(
+                existing,
+                ShellMessage::BackendServiceUpdate {
+                    interface: existing_interface,
+                    provider_id: existing_provider,
+                    ..
+                } if existing_interface == interface && existing_provider == provider_id
+            )
+        })
+    {
+        *existing = message;
+        return;
+    }
+
+    messages.push(message);
 }

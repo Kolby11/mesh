@@ -8,10 +8,13 @@
     "kind": "backend",
     "capabilities": {
       "required": [
-        "exec.wpctl"
+        "exec.wpctl",
+        "service.audio.read",
+        "service.audio.control"
       ],
       "optional": [
-        "exec.aplay"
+        "exec.aplay",
+        "exec.pw-mon"
       ]
     },
     "i18n": {
@@ -27,6 +30,16 @@
             "debian": "wireplumber",
             "arch": "wireplumber",
             "fedora": "wireplumber"
+          }
+        },
+        {
+          "name": "pw-mon",
+          "reason": "Live subscription to PipeWire object changes for event-driven volume updates.",
+          "optional": true,
+          "packages": {
+            "debian": "pipewire-bin",
+            "arch": "pipewire",
+            "fedora": "pipewire"
           }
         },
         {

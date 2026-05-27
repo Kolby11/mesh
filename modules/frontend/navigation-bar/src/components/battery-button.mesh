@@ -10,7 +10,7 @@
 </template>
 
 <script lang="luau">
-local power_ok, power = pcall(require, "@mesh/power@>=1.0")
+local power_ok, power = pcall(require, "mesh.power@>=1.0")
 if not power_ok then power = nil end
 
 battery_icon_name = "battery-empty"
@@ -89,7 +89,7 @@ function render(self)
     battery_label = string.format("%d%%", percent_value)
     battery_tooltip_key = status_key
     battery_tooltip_value = string.format(
-        " %d%%. %s: %s. %s: %s.",
+        " %d%%. %s. %s. %s.",
         percent_value,
         remaining_label,
         format_watts(power.power_draw_watts),

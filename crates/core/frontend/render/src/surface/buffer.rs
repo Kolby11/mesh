@@ -47,12 +47,50 @@ impl PixelBuffer {
             return;
         }
 
+        if self.clear_rect_direct(x, y, end_x, end_y, color) {
+            return;
+        }
+
         let rect = Rect::from_xywh(x as f32, y as f32, (end_x - x) as f32, (end_y - y) as f32);
         self.with_skia_canvas(|canvas| {
             let mut paint = src_paint(color);
             paint.set_style(PaintStyle::Fill);
             canvas.draw_rect(rect, &paint);
         });
+    }
+
+    fn clear_rect_direct(&mut self, x: u32, y: u32, end_x: u32, end_y: u32, color: Color) -> bool {
+        if self.stride != self.width.saturating_mul(4) {
+            return false;
+        }
+        let row_bytes = (end_x - x) as usize * 4;
+        if row_bytes == 0 {
+            return true;
+        }
+        if color.a == 0 && color.r == 0 && color.g == 0 && color.b == 0 {
+            for py in y..end_y {
+                let start = (py * self.stride + x * 4) as usize;
+                let end = start + row_bytes;
+                if end > self.data.len() {
+                    return false;
+                }
+                self.data[start..end].fill(0);
+            }
+            return true;
+        }
+        let mut row = Vec::with_capacity(row_bytes);
+        for _ in x..end_x {
+            row.extend_from_slice(&[color.b, color.g, color.r, color.a]);
+        }
+        for py in y..end_y {
+            let start = (py * self.stride + x * 4) as usize;
+            let end = start + row_bytes;
+            if end > self.data.len() {
+                return false;
+            }
+            self.data[start..end].copy_from_slice(&row);
+        }
+        true
     }
 
     /// Set a single pixel. Coordinates are bounds-checked.

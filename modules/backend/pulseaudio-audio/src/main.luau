@@ -1,11 +1,14 @@
 -- PulseAudio audio backend.
--- Polls volume via pactl and responds to audio service commands.
+-- Reads volume via pactl. Reacts to external volume changes (hardware keys,
+-- other clients) through `pactl subscribe`, with polling as a fallback.
 
 local SOUNDS_ROOT = "/usr/share/mesh/sounds/"
 
 state = { available = false, percent = 0, muted = false }
 local last_availability = nil
 local last_state_snapshot = nil
+local last_emitted_percent = nil
+local last_emitted_muted = nil
 
 local function debug_info(message)
     mesh.log.info("[pulseaudio-audio] " .. message)
@@ -16,8 +19,17 @@ local function debug_warn(message)
 end
 
 function start(self)
-    mesh.service.set_poll_interval(500)
-    debug_info("initialized with 500ms poll interval")
+    -- Keep polling as a low-latency fallback even when pactl subscribe starts.
+    -- Some audio stacks batch subscription output while a hardware volume key
+    -- is held and only flush on release; the poll path prevents that from
+    -- delaying the visible slider/value.
+    mesh.service.set_poll_interval(100)
+    local subscribed = mesh.exec_stream("pactl", { "subscribe" })
+    if subscribed then
+        debug_info("subscribed to pactl for live volume events")
+    else
+        debug_warn("pactl subscribe unavailable; falling back to 100ms poll")
+    end
 end
 
 local function read_state()
@@ -102,6 +114,36 @@ end
 
 function on_poll(self)
     refresh_state()
+end
+
+local function maybe_emit_volume_changed(self)
+    if not state.available then
+        return
+    end
+    if last_emitted_percent == state.percent and last_emitted_muted == state.muted then
+        return
+    end
+    last_emitted_percent = state.percent
+    last_emitted_muted = state.muted
+    emit_volume_changed(self)
+end
+
+function on_stream_batch(self, program, lines)
+    if program ~= "pactl" then
+        return
+    end
+    local relevant = false
+    for _, line in ipairs(lines) do
+        if line:match("sink") or line:match("server") then
+            relevant = true
+            break
+        end
+    end
+    if not relevant then
+        return
+    end
+    refresh_state()
+    maybe_emit_volume_changed(self)
 end
 
 function on_command_volume_up(self)

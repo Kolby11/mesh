@@ -1,0 +1,55 @@
+# Core state fields that every power provider must emit.
+# Readable through the service proxy as plain field access
+# (e.g. `power.level`, `power.charging`).
+
+[[state_fields]]
+name = "available"
+type = "boolean"
+description = "Whether the power service is reachable and a battery is present"
+
+[[state_fields]]
+name = "level"
+type = "float"
+description = "Battery charge as a percentage (0.0-100.0)"
+
+[[state_fields]]
+name = "charging"
+type = "boolean"
+description = "Whether the battery is currently charging"
+
+[[state_fields]]
+name = "time_remaining_minutes"
+type = "float"
+description = "Estimated minutes of remaining runtime on battery (0 if unknown/charging)"
+
+[[state_fields]]
+name = "time_to_full_minutes"
+type = "float"
+description = "Estimated minutes until full charge while charging (0 if unknown/discharging)"
+
+[[state_fields]]
+name = "power_draw_watts"
+type = "float"
+description = "Instantaneous power draw or charge rate in watts"
+
+[[state_fields]]
+name = "energy_now_watt_hours"
+type = "float"
+description = "Current stored energy in watt-hours"
+
+[[state_fields]]
+name = "energy_full_watt_hours"
+type = "float"
+description = "Full-charge energy capacity in watt-hours"
+
+[[state_fields]]
+name = "source_module"
+type = "string"
+description = "Backend module ID that emitted this state (runtime-additive)"
+
+[[events]]
+name = "BatteryChanged"
+payload = "{ level: float, charging: boolean }"
+
+[capabilities]
+required = ["service.power.read"]

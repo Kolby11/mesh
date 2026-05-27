@@ -96,6 +96,7 @@ impl Shell {
             debug_overlay: DebugOverlay::new(),
             active_key_modifiers: KeyModifiers::default(),
             keyboard_focus_surface: None,
+            pending_wayland_events: VecDeque::new(),
             transfer_owned_keyboard_modes: HashMap::new(),
             service_handlers: HashMap::new(),
             backend_runtimes: HashMap::new(),

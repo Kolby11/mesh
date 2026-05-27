@@ -1,41 +1,20 @@
 <template>
-  <row class="language-control">
-    <select
-      class="nav-button language-select"
-      value="{language_locale}"
-      onchange={onLanguageChange}
-      title="{t('nav.language_menu')}"
-      aria-label="{t('nav.language_menu')}"
-    >
-      <row class="language-button-content">
-        <icon class="nav-button-glyph" name="language" size="18" />
-        <text class="language-code">{language_code}</text>
-      </row>
-      <option
-        class="{english_option_class}"
-        value="en"
-        title="{t('nav.language_english')}"
-        aria-label="{t('nav.language_english')}"
-      >
-        <text class="language-option-text">{t('nav.language_english')}</text>
-      </option>
-      <option
-        class="{slovak_option_class}"
-        value="sk"
-        title="{t('nav.language_slovak')}"
-        aria-label="{t('nav.language_slovak')}"
-      >
-        <text class="language-option-text">{t('nav.language_slovak')}</text>
-      </option>
-    </select>
-  </row>
+  <button
+    ref="language-button"
+    class="nav-button"
+    onclick={onActivate}
+    title="{t('nav.language_menu')}"
+    aria-label="{t('nav.language_menu')}"
+  >
+    <row class="language-button-content">
+      <icon class="nav-button-glyph" name="language" size="18" />
+      <text class="language-code">{language_code}</text>
+    </row>
+  </button>
 </template>
 
 <script lang="luau">
 language_code = "EN"
-language_locale = "en"
-english_option_class = "language-option language-option-selected"
-slovak_option_class = "language-option"
 
 local function locale_is_slovak(locale)
     return locale == "sk" or string.find(locale or "", "sk-", 1, true) == 1
@@ -67,36 +46,14 @@ end
 function render(self)
     local locale = stored_locale() or current_locale()
     if locale_is_slovak(locale) then
-        language_locale = "sk"
         language_code = "SK"
-        english_option_class = "language-option"
-        slovak_option_class = "language-option language-option-selected"
     else
-        language_locale = "en"
         language_code = "EN"
-        english_option_class = "language-option language-option-selected"
-        slovak_option_class = "language-option"
     end
-end
-
-function onLanguageChange(locale)
-    if locale ~= "sk" then
-        locale = "en"
-    end
-    self.storage.language = locale
-    mesh.locale.set(locale)
 end
 </script>
 
 <style>
-.language-control {
-    height: 40px;
-    align-items: center;
-    gap: 2px;
-    padding-inline: 1px;
-    padding-block: 0;
-}
-
 .nav-button {
     min-width: 52px;
     height: 40px;
@@ -119,8 +76,7 @@ end
                 transform token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
 }
 
-.nav-button:hover,
-.language-option:hover {
+.nav-button:hover {
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
     border-radius: token(radius.md);
@@ -128,18 +84,14 @@ end
 }
 
 .nav-button:focus,
-.nav-button:focus-visible,
-.language-option:focus,
-.language-option:focus-visible {
+.nav-button:focus-visible {
     background: token(color.tertiary-container);
     color: token(color.on-tertiary-container);
     border-radius: token(radius.md);
     transform: translateY(-1px) scale(1.03);
 }
 
-.nav-button:active,
-.language-option:active,
-.language-option-selected {
+.nav-button:active {
     background: token(color.primary);
     color: token(color.on-primary);
     border-color: token(color.primary);
@@ -173,47 +125,10 @@ end
     text-wrap: none;
 }
 
-.language-select {
-    gap: 2px;
-    overflow: visible;
-}
-
-.language-option {
-    display: none;
-    height: 32px;
-    flex-shrink: 0;
-    justify-content: center;
-    align-items: center;
-    padding-inline: token(spacing.sm);
-    border-radius: token(radius.md);
-    background: token(color.surface-container);
-    color: token(color.on-surface);
-    border-width: 2px;
-    border-style: solid;
-    border-color: transparent;
-    text-wrap: none;
-    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                color token(animation.duration.short) token(animation.curves.bezier.standard),
-                border-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate),
-                transform token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
-}
-
-.language-option-text {
-    color: inherit;
-    font-size: 12px;
-    font-weight: 700;
-    text-wrap: none;
-}
-
 @container (max-width: 720px) {
     .nav-button {
         min-width: 48px;
         padding: token(spacing.xs);
-    }
-
-    .language-option {
-        padding-inline: token(spacing.xs);
     }
 }
 </style>

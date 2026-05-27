@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::Path;
+use std::sync::Arc;
 
 use mesh_core_elements::style::{
     BackgroundPaint, Color, Display, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
@@ -170,7 +171,7 @@ impl DisplayBatchBarrier {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RetainedDisplayList {
     generation: u64,
     retained_tree_generation: Option<u64>,
@@ -179,8 +180,24 @@ pub struct RetainedDisplayList {
     entries: HashMap<DisplayListKey, DisplayListEntry>,
     subtrees: HashMap<NodeId, RetainedPaintSubtree>,
     command_spans: Vec<RetainedCommandSpan>,
-    paint_commands: Vec<DisplayPaintCommand>,
+    paint_commands: Arc<[DisplayPaintCommand]>,
     last_metrics: DisplayListMetrics,
+}
+
+impl Default for RetainedDisplayList {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            retained_tree_generation: None,
+            root_id: None,
+            surface_size: None,
+            entries: HashMap::new(),
+            subtrees: HashMap::new(),
+            command_spans: Vec::new(),
+            paint_commands: Vec::new().into(),
+            last_metrics: DisplayListMetrics::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -227,7 +244,7 @@ pub struct DisplayPaintStyle {
     pub icon_optical_size: Option<f32>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DisplayPaintContent {
     None,
     Text(DisplayTextPaint),
@@ -236,13 +253,13 @@ pub enum DisplayPaintContent {
     Icon(DisplayIconPaint),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DisplayTextPaint {
     pub text: String,
     pub selection: Option<DisplayTextSelectionPaint>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DisplayTextSelectionPaint {
     pub background: Color,
     pub foreground: Color,
@@ -254,7 +271,7 @@ pub struct DisplayTextSelectionPaint {
     pub text_y: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DisplayInputPaint {
     pub value: String,
     pub placeholder: String,
@@ -262,7 +279,7 @@ pub struct DisplayInputPaint {
     pub focused: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DisplaySliderPaint {
     pub min: f32,
     pub max: f32,
@@ -270,7 +287,7 @@ pub struct DisplaySliderPaint {
     pub vertical: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DisplayIconPaint {
     pub src: Option<String>,
     pub name: Option<String>,
@@ -302,14 +319,97 @@ pub struct DisplayListClip {
 }
 
 #[derive(Debug, Clone)]
-pub struct SelectedDisplayListPaint {
-    commands: Vec<DisplayPaintCommand>,
+pub struct SelectedDisplayListPaint<'a> {
+    commands: &'a [DisplayPaintCommand],
+    selection: SelectedDisplayListSelection,
     metrics: DisplayListMetrics,
 }
 
-impl SelectedDisplayListPaint {
-    pub fn commands(&self) -> &[DisplayPaintCommand] {
-        &self.commands
+#[derive(Debug, Clone)]
+enum SelectedDisplayListSelection {
+    All,
+    None,
+    Spans {
+        spans: Vec<SelectedCommandSpan>,
+        command_count: usize,
+    },
+}
+
+pub struct SelectedDisplayListPaintIter<'a> {
+    commands: &'a [DisplayPaintCommand],
+    state: SelectedDisplayListPaintIterState<'a>,
+}
+
+enum SelectedDisplayListPaintIterState<'a> {
+    All(std::slice::Iter<'a, DisplayPaintCommand>),
+    None,
+    Spans {
+        spans: &'a [SelectedCommandSpan],
+        span_index: usize,
+        command_index: usize,
+    },
+}
+
+impl<'a> Iterator for SelectedDisplayListPaintIter<'a> {
+    type Item = &'a DisplayPaintCommand;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.state {
+            SelectedDisplayListPaintIterState::All(iter) => iter.next(),
+            SelectedDisplayListPaintIterState::None => None,
+            SelectedDisplayListPaintIterState::Spans {
+                spans,
+                span_index,
+                command_index,
+            } => loop {
+                let span = spans.get(*span_index)?;
+                if *command_index < span.start || *command_index >= span.end {
+                    *command_index = span.start;
+                }
+                if *command_index < span.end {
+                    let index = *command_index;
+                    *command_index = (*command_index).saturating_add(1);
+                    if let Some(command) = self.commands.get(index) {
+                        return Some(command);
+                    }
+                } else {
+                    *span_index = span_index.saturating_add(1);
+                }
+            },
+        }
+    }
+}
+
+impl<'a> SelectedDisplayListPaint<'a> {
+    pub fn iter(&self) -> SelectedDisplayListPaintIter<'_> {
+        SelectedDisplayListPaintIter {
+            commands: self.commands,
+            state: match &self.selection {
+                SelectedDisplayListSelection::All => {
+                    SelectedDisplayListPaintIterState::All(self.commands.iter())
+                }
+                SelectedDisplayListSelection::None => SelectedDisplayListPaintIterState::None,
+                SelectedDisplayListSelection::Spans { spans, .. } => {
+                    SelectedDisplayListPaintIterState::Spans {
+                        spans,
+                        span_index: 0,
+                        command_index: 0,
+                    }
+                }
+            },
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match &self.selection {
+            SelectedDisplayListSelection::All => self.commands.len(),
+            SelectedDisplayListSelection::None => 0,
+            SelectedDisplayListSelection::Spans { command_count, .. } => *command_count,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn metrics(&self) -> DisplayListMetrics {
@@ -317,10 +417,34 @@ impl SelectedDisplayListPaint {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct RetainedPaintSubtree {
+    commands: Arc<[DisplayPaintCommand]>,
+    pruning: PruningMetrics,
+}
+
+impl Default for RetainedPaintSubtree {
+    fn default() -> Self {
+        Self {
+            commands: Vec::new().into(),
+            pruning: PruningMetrics::default(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct PaintSubtreeBuilder {
     commands: Vec<DisplayPaintCommand>,
     pruning: PruningMetrics,
+}
+
+impl PaintSubtreeBuilder {
+    fn into_retained(self) -> RetainedPaintSubtree {
+        RetainedPaintSubtree {
+            commands: self.commands.into(),
+            pruning: self.pruning,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,6 +455,12 @@ struct RetainedCommandSpan {
     bounds: DamageRect,
     command_count: usize,
     includes_scrollbars: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SelectedCommandSpan {
+    start: usize,
+    end: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -478,16 +608,6 @@ impl RetainedDisplayList {
                 )
             }
             LocalReuseDecision::FallbackFull { .. } => {
-                let mut paint_commands = Vec::new();
-                let mut pruning = PruningMetrics::default();
-                collect_paint_commands(
-                    root,
-                    0.0,
-                    0.0,
-                    surface_clip(surface),
-                    &mut paint_commands,
-                    &mut pruning,
-                );
                 let mut next_subtrees = HashMap::new();
                 let mut local_metrics = LocalReuseMetrics::default();
                 let subtree = build_paint_subtree(
@@ -502,8 +622,12 @@ impl RetainedDisplayList {
                     &mut next_subtrees,
                     &mut local_metrics,
                 );
-                debug_assert_eq!(paint_commands.len(), subtree.commands.len());
-                (paint_commands, pruning, next_subtrees, local_metrics)
+                (
+                    subtree.commands,
+                    subtree.pruning,
+                    next_subtrees,
+                    local_metrics,
+                )
             }
         };
 
@@ -548,8 +672,8 @@ impl RetainedDisplayList {
             0
         };
         let batch_metrics = compute_batch_metrics(&ordered_entries);
-        let command_spans = build_command_spans(root, &paint_commands);
-        let effect_overflow_count = count_effect_overflow_commands(&paint_commands);
+        let command_spans = build_command_spans(root, paint_commands.as_ref());
+        let effect_overflow_count = count_effect_overflow_commands(paint_commands.as_ref());
 
         if rebuilt > 0 || removed > 0 || force_full_damage {
             self.generation = self.generation.saturating_add(1);
@@ -628,7 +752,7 @@ impl RetainedDisplayList {
         } else {
             0
         };
-        let effect_overflow_count = count_effect_overflow_commands(&self.paint_commands);
+        let effect_overflow_count = count_effect_overflow_commands(self.paint_commands.as_ref());
         self.last_metrics = DisplayListMetrics {
             retained_generation: self.generation,
             entries_total: self.entries.len() as u64,
@@ -673,14 +797,14 @@ impl RetainedDisplayList {
     }
 
     pub fn paint_commands(&self) -> &[DisplayPaintCommand] {
-        &self.paint_commands
+        self.paint_commands.as_ref()
     }
 
     pub fn select_paint_commands(
         &self,
         damage: Option<DamageRect>,
         policy: DisplayListRepaintPolicy,
-    ) -> SelectedDisplayListPaint {
+    ) -> SelectedDisplayListPaint<'_> {
         let mut metrics = self.last_metrics;
         metrics.repaint_policy = policy;
         metrics.filtered_span_count = 0;
@@ -693,7 +817,8 @@ impl RetainedDisplayList {
             metrics.repaint_policy = DisplayListRepaintPolicy::MinimalDamage;
             metrics.filtered_commands_skipped = full_commands;
             return SelectedDisplayListPaint {
-                commands: Vec::new(),
+                commands: self.paint_commands.as_ref(),
+                selection: SelectedDisplayListSelection::None,
                 metrics,
             };
         };
@@ -703,40 +828,55 @@ impl RetainedDisplayList {
             metrics.filtered_command_count = full_commands;
             metrics.filtered_fallback_count = u64::from(!self.paint_commands.is_empty());
             return SelectedDisplayListPaint {
-                commands: self.paint_commands.clone(),
+                commands: self.paint_commands.as_ref(),
+                selection: SelectedDisplayListSelection::All,
                 metrics,
             };
         }
 
-        let mut selected_indices = Vec::new();
+        let mut selected_spans = Vec::new();
         let mut matched_spans = 0u64;
         for span in &self.command_spans {
             if span.bounds.intersects(damage) {
                 matched_spans = matched_spans.saturating_add(1);
-                for index in span.start..span.end {
-                    if index < self.paint_commands.len() {
-                        selected_indices.push(index);
-                    }
-                }
+                insert_selected_command_span(
+                    &mut selected_spans,
+                    SelectedCommandSpan {
+                        start: span.start,
+                        end: span.end,
+                    },
+                );
             }
         }
         for (index, command) in self.paint_commands.iter().enumerate() {
             if command_bounds(command).intersects(damage) {
-                selected_indices.push(index);
+                insert_selected_command_span(
+                    &mut selected_spans,
+                    SelectedCommandSpan {
+                        start: index,
+                        end: index.saturating_add(1),
+                    },
+                );
             }
         }
-        selected_indices.sort_unstable();
-        selected_indices.dedup();
-
-        let commands: Vec<_> = selected_indices
+        let selected_command_count = selected_spans
             .iter()
-            .filter_map(|index| self.paint_commands.get(*index).cloned())
-            .collect();
-        metrics.filtered_span_count = matched_spans;
-        metrics.filtered_command_count = commands.len() as u64;
-        metrics.filtered_commands_skipped = full_commands.saturating_sub(commands.len() as u64);
+            .map(|span| span.end.saturating_sub(span.start))
+            .sum::<usize>();
 
-        SelectedDisplayListPaint { commands, metrics }
+        metrics.filtered_span_count = matched_spans;
+        metrics.filtered_command_count = selected_command_count as u64;
+        metrics.filtered_commands_skipped =
+            full_commands.saturating_sub(selected_command_count as u64);
+
+        SelectedDisplayListPaint {
+            commands: self.paint_commands.as_ref(),
+            selection: SelectedDisplayListSelection::Spans {
+                spans: selected_spans,
+                command_count: selected_command_count,
+            },
+            metrics,
+        }
     }
 
     fn local_reuse_decision(
@@ -892,111 +1032,6 @@ fn collect_display_entries(
     }
 }
 
-fn collect_paint_commands(
-    node: &WidgetNode,
-    offset_x: f32,
-    offset_y: f32,
-    clip: DisplayListClip,
-    out: &mut Vec<DisplayPaintCommand>,
-    pruning: &mut PruningMetrics,
-) {
-    if node_is_explicitly_hidden(node) {
-        pruning.record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, true), false);
-        return;
-    }
-
-    let style = &node.computed_style;
-    let transform = style.transform;
-    let offset_x = offset_x + transform.translate_x;
-    let offset_y = offset_y + transform.translate_y;
-    let paint_node = build_paint_node(node, offset_x, offset_y);
-
-    let bounds = node_clip_for(&paint_node);
-    let visual_bounds = visual_clip_for(&paint_node);
-    let node_clip = intersect_display_clip(clip, visual_bounds);
-    if node_clip.width <= 0 || node_clip.height <= 0 {
-        pruning.record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, false), true);
-        return;
-    }
-
-    out.push(DisplayPaintCommand {
-        node: paint_node.clone(),
-        clip: node_clip,
-        kind: DisplayPaintCommandKind::Node,
-    });
-
-    let scroll_x = node
-        .attributes
-        .get("_mesh_scroll_x")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
-    let scroll_y = node
-        .attributes
-        .get("_mesh_scroll_y")
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0);
-    let child_offset_x = offset_x - scroll_x;
-    let child_offset_y = offset_y - scroll_y;
-    let child_clip = if node.computed_style.overflow_x.clips_contents()
-        || node.computed_style.overflow_y.clips_contents()
-    {
-        intersect_display_clip(clip, bounds)
-    } else {
-        clip
-    };
-
-    let needs_sort = node
-        .children
-        .windows(2)
-        .any(|pair| pair[0].computed_style.z_index != pair[1].computed_style.z_index);
-    if needs_sort {
-        let mut child_order: Vec<usize> = (0..node.children.len()).collect();
-        child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
-        for index in child_order {
-            let child = &node.children[index];
-            if should_preclip_child_subtree(child, child_offset_x, child_offset_y, child_clip) {
-                pruning.record_omitted_subtree(
-                    count_pruned_subtree(child, child_offset_x, child_offset_y, false),
-                    true,
-                );
-                continue;
-            }
-            collect_paint_commands(
-                child,
-                child_offset_x,
-                child_offset_y,
-                child_clip,
-                out,
-                pruning,
-            );
-        }
-    } else {
-        for child in &node.children {
-            if should_preclip_child_subtree(child, child_offset_x, child_offset_y, child_clip) {
-                pruning.record_omitted_subtree(
-                    count_pruned_subtree(child, child_offset_x, child_offset_y, false),
-                    true,
-                );
-                continue;
-            }
-            collect_paint_commands(
-                child,
-                child_offset_x,
-                child_offset_y,
-                child_clip,
-                out,
-                pruning,
-            );
-        }
-    }
-
-    out.push(DisplayPaintCommand {
-        node: paint_node,
-        clip: node_clip,
-        kind: DisplayPaintCommandKind::Scrollbars,
-    });
-}
-
 fn collect_dirty_ancestor_ids(
     root: &WidgetNode,
     dirty_node_ids: &HashSet<NodeId>,
@@ -1080,7 +1115,7 @@ fn build_paint_subtree(
         return subtree;
     }
 
-    let mut subtree = RetainedPaintSubtree::default();
+    let mut subtree = PaintSubtreeBuilder::default();
     subtree.commands.push(DisplayPaintCommand {
         node: paint_node.clone(),
         clip: node_clip,
@@ -1111,48 +1146,40 @@ fn build_paint_subtree(
         .children
         .windows(2)
         .any(|pair| pair[0].computed_style.z_index != pair[1].computed_style.z_index);
-    let mut child_order: Vec<usize> = (0..node.children.len()).collect();
     if needs_sort {
+        let mut child_order: Vec<usize> = (0..node.children.len()).collect();
         child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
-    }
-    for index in child_order {
-        let child = &node.children[index];
-        if should_preclip_child_subtree(child, child_offset_x, child_offset_y, child_clip) {
-            subtree.pruning.record_omitted_subtree(
-                count_pruned_subtree(child, child_offset_x, child_offset_y, false),
-                true,
+        for index in child_order {
+            append_child_paint_subtree(
+                &mut subtree,
+                &node.children[index],
+                child_offset_x,
+                child_offset_y,
+                child_clip,
+                force_rebuild || node_is_dirty,
+                dirty_node_ids,
+                dirty_ancestors,
+                previous_subtrees,
+                next_subtrees,
+                metrics,
             );
-            continue;
         }
-        let child_subtree = build_paint_subtree(
-            child,
-            child_offset_x,
-            child_offset_y,
-            child_clip,
-            force_rebuild || node_is_dirty,
-            dirty_node_ids,
-            dirty_ancestors,
-            previous_subtrees,
-            next_subtrees,
-            metrics,
-        );
-        subtree.commands.extend(child_subtree.commands);
-        subtree.pruning.omitted_subtrees = subtree
-            .pruning
-            .omitted_subtrees
-            .saturating_add(child_subtree.pruning.omitted_subtrees);
-        subtree.pruning.omitted_nodes = subtree
-            .pruning
-            .omitted_nodes
-            .saturating_add(child_subtree.pruning.omitted_nodes);
-        subtree.pruning.omitted_commands = subtree
-            .pruning
-            .omitted_commands
-            .saturating_add(child_subtree.pruning.omitted_commands);
-        subtree.pruning.preclipped_descendants = subtree
-            .pruning
-            .preclipped_descendants
-            .saturating_add(child_subtree.pruning.preclipped_descendants);
+    } else {
+        for child in &node.children {
+            append_child_paint_subtree(
+                &mut subtree,
+                child,
+                child_offset_x,
+                child_offset_y,
+                child_clip,
+                force_rebuild || node_is_dirty,
+                dirty_node_ids,
+                dirty_ancestors,
+                previous_subtrees,
+                next_subtrees,
+                metrics,
+            );
+        }
     }
 
     subtree.commands.push(DisplayPaintCommand {
@@ -1161,8 +1188,64 @@ fn build_paint_subtree(
         kind: DisplayPaintCommandKind::Scrollbars,
     });
     metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+    let subtree = subtree.into_retained();
     next_subtrees.insert(node.id, subtree.clone());
     subtree
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_child_paint_subtree(
+    subtree: &mut PaintSubtreeBuilder,
+    child: &WidgetNode,
+    child_offset_x: f32,
+    child_offset_y: f32,
+    child_clip: DisplayListClip,
+    force_rebuild: bool,
+    dirty_node_ids: &HashSet<NodeId>,
+    dirty_ancestors: &HashSet<NodeId>,
+    previous_subtrees: &HashMap<NodeId, RetainedPaintSubtree>,
+    next_subtrees: &mut HashMap<NodeId, RetainedPaintSubtree>,
+    metrics: &mut LocalReuseMetrics,
+) {
+    if should_preclip_child_subtree(child, child_offset_x, child_offset_y, child_clip) {
+        subtree.pruning.record_omitted_subtree(
+            count_pruned_subtree(child, child_offset_x, child_offset_y, false),
+            true,
+        );
+        return;
+    }
+    let child_subtree = build_paint_subtree(
+        child,
+        child_offset_x,
+        child_offset_y,
+        child_clip,
+        force_rebuild,
+        dirty_node_ids,
+        dirty_ancestors,
+        previous_subtrees,
+        next_subtrees,
+        metrics,
+    );
+    subtree.commands.reserve(child_subtree.commands.len());
+    subtree
+        .commands
+        .extend_from_slice(&child_subtree.commands);
+    subtree.pruning.omitted_subtrees = subtree
+        .pruning
+        .omitted_subtrees
+        .saturating_add(child_subtree.pruning.omitted_subtrees);
+    subtree.pruning.omitted_nodes = subtree
+        .pruning
+        .omitted_nodes
+        .saturating_add(child_subtree.pruning.omitted_nodes);
+    subtree.pruning.omitted_commands = subtree
+        .pruning
+        .omitted_commands
+        .saturating_add(child_subtree.pruning.omitted_commands);
+    subtree.pruning.preclipped_descendants = subtree
+        .pruning
+        .preclipped_descendants
+        .saturating_add(child_subtree.pruning.preclipped_descendants);
 }
 
 fn node_is_explicitly_hidden(node: &WidgetNode) -> bool {
@@ -1450,6 +1533,23 @@ fn collect_command_spans(
     }
 
     indices
+}
+
+fn insert_selected_command_span(spans: &mut Vec<SelectedCommandSpan>, mut next: SelectedCommandSpan) {
+    if next.start >= next.end {
+        return;
+    }
+    let index = spans.partition_point(|span| span.end < next.start);
+    while index < spans.len() {
+        let span = spans[index];
+        if span.start > next.end {
+            break;
+        }
+        next.start = next.start.min(span.start);
+        next.end = next.end.max(span.end);
+        spans.remove(index);
+    }
+    spans.insert(index, next);
 }
 
 fn build_paint_node(node: &WidgetNode, offset_x: f32, offset_y: f32) -> DisplayPaintNode {
@@ -2138,10 +2238,7 @@ mod tests {
         );
 
         assert!(
-            selected
-                .commands()
-                .iter()
-                .any(|command| command.node.id == 1),
+            selected.iter().any(|command| command.node.id == 1),
             "blurred visual bounds should participate in sparse repaint selection"
         );
     }
@@ -2171,12 +2268,7 @@ mod tests {
             DisplayListRepaintPolicy::MinimalDamage,
         );
 
-        assert!(
-            selected
-                .commands()
-                .iter()
-                .any(|command| command.node.id == 1)
-        );
+        assert!(selected.iter().any(|command| command.node.id == 1));
     }
 
     #[test]
@@ -2236,10 +2328,7 @@ mod tests {
         );
 
         assert!(
-            selected
-                .commands()
-                .iter()
-                .any(|command| command.node.id == 1),
+            selected.iter().any(|command| command.node.id == 1),
             "box-shadow visual bounds should participate in sparse repaint selection"
         );
     }
@@ -2618,7 +2707,6 @@ mod tests {
             DisplayListRepaintPolicy::MinimalDamage,
         );
         let filtered_order: Vec<_> = selected
-            .commands()
             .iter()
             .map(|command| (command.node.id, command.kind))
             .collect();
@@ -2655,11 +2743,7 @@ mod tests {
             }),
             DisplayListRepaintPolicy::MinimalDamage,
         );
-        let ids: Vec<_> = selected
-            .commands()
-            .iter()
-            .map(|command| command.node.id)
-            .collect();
+        let ids: Vec<_> = selected.iter().map(|command| command.node.id).collect();
 
         assert!(
             ids.contains(&1),
@@ -2686,7 +2770,7 @@ mod tests {
             DisplayListRepaintPolicy::FullSurface,
         );
 
-        assert_eq!(selected.commands().len(), list.paint_commands().len());
+        assert_eq!(selected.len(), list.paint_commands().len());
         assert_eq!(
             selected.metrics().repaint_policy,
             DisplayListRepaintPolicy::FullSurface

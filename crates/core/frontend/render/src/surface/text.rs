@@ -235,20 +235,48 @@ impl TextRenderer {
                     let draw_y = base_y + glyph_y;
 
                     let (r, g, b, a) = glyph_color.as_rgba_tuple();
-                    let draw_color = Color { r, g, b, a };
+                    if a == 0 || glyph_w == 0 || glyph_h == 0 {
+                        return;
+                    }
 
-                    for off_y in 0..glyph_h {
-                        for off_x in 0..glyph_w {
-                            let px = draw_x + off_x as i32;
-                            let py = draw_y + off_y as i32;
-                            if px < clip_x as i32
-                                || py < clip_y as i32
-                                || px >= clip_right as i32
-                                || py >= clip_bottom as i32
-                            {
-                                continue;
+                    let start_x = (clip_x as i32 - draw_x).max(0) as u32;
+                    let start_y = (clip_y as i32 - draw_y).max(0) as u32;
+                    let end_x = (clip_right as i32 - draw_x).min(glyph_w as i32).max(0) as u32;
+                    let end_y = (clip_bottom as i32 - draw_y).min(glyph_h as i32).max(0) as u32;
+                    if start_x >= end_x || start_y >= end_y {
+                        return;
+                    }
+
+                    let src_alpha = u16::from(a);
+                    let inv_alpha = 255u16.saturating_sub(src_alpha);
+                    let src_b = u16::from(b) * src_alpha;
+                    let src_g = u16::from(g) * src_alpha;
+                    let src_r = u16::from(r) * src_alpha;
+                    for off_y in start_y..end_y {
+                        let py = draw_y + off_y as i32;
+                        let px = draw_x + start_x as i32;
+                        let mut offset = (py as u32 * buffer.stride + px as u32 * 4) as usize;
+                        for _ in start_x..end_x {
+                            if offset + 3 >= buffer.data.len() {
+                                break;
                             }
-                            buffer.blend_pixel(px as u32, py as u32, draw_color, 255);
+                            if src_alpha == 255 {
+                                buffer.data[offset] = b;
+                                buffer.data[offset + 1] = g;
+                                buffer.data[offset + 2] = r;
+                                buffer.data[offset + 3] = 255;
+                            } else {
+                                let dst_b = u16::from(buffer.data[offset]);
+                                let dst_g = u16::from(buffer.data[offset + 1]);
+                                let dst_r = u16::from(buffer.data[offset + 2]);
+                                let dst_a = u16::from(buffer.data[offset + 3]);
+                                buffer.data[offset] = ((src_b + dst_b * inv_alpha) / 255) as u8;
+                                buffer.data[offset + 1] = ((src_g + dst_g * inv_alpha) / 255) as u8;
+                                buffer.data[offset + 2] = ((src_r + dst_r * inv_alpha) / 255) as u8;
+                                buffer.data[offset + 3] =
+                                    (src_alpha + ((dst_a * inv_alpha) / 255)).min(255) as u8;
+                            }
+                            offset += 4;
                         }
                     }
                 },

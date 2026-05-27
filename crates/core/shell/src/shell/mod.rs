@@ -378,6 +378,7 @@ pub struct Shell {
     debug_overlay: DebugOverlay,
     active_key_modifiers: KeyModifiers,
     keyboard_focus_surface: Option<SurfaceId>,
+    pending_wayland_events: VecDeque<WindowEvent>,
     transfer_owned_keyboard_modes: HashMap<SurfaceId, mesh_core_wayland::KeyboardMode>,
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,

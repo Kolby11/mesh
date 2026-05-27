@@ -1,5 +1,6 @@
 use super::command::{BackendCommandOutcome, command_error_result, command_result_from_lua};
 use super::exec::{exec_denied_to_lua, missing_exec_capability, run_exec};
+use super::exec_stream::{StreamState, spawn_stream};
 use super::logging::log_message;
 use super::{BackendScriptError, MIN_POLL_INTERVAL_MS};
 use crate::storage::{ScopedStorage, StorageManager, StorageScope, create_lua_storage_table};
@@ -29,6 +30,7 @@ pub struct BackendScriptContext {
     runtime: Arc<Mutex<BackendRuntime>>,
     builtin_globals: HashSet<String>,
     storage: Arc<Mutex<ScopedStorage>>,
+    streams: Arc<StreamState>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -126,6 +128,7 @@ impl BackendScriptContext {
             runtime,
             builtin_globals: HashSet::new(),
             storage: Arc::new(Mutex::new(storage)),
+            streams: StreamState::new(),
         };
         ctx.install_host_api()
             .expect("backend host API setup should succeed");
@@ -191,6 +194,7 @@ impl BackendScriptContext {
 
     /// Call the backend script's optional `stop(self)` lifecycle hook.
     pub fn call_stop(&mut self) -> Result<(), BackendScriptError> {
+        self.kill_streams();
         self.reset_for_call(JsonValue::Null);
         let globals = self.lua.globals();
         let stop = match globals.get::<Function>("stop") {
@@ -213,6 +217,80 @@ impl BackendScriptContext {
             })?;
         self.flush_storage();
         Ok(())
+    }
+
+    /// Shared subprocess-stream state. The backend service loop awaits on
+    /// `stream_state().wait_for_event()` to react to lines from
+    /// `mesh.exec_stream` subprocesses.
+    pub fn stream_state(&self) -> Arc<StreamState> {
+        Arc::clone(&self.streams)
+    }
+
+    /// Dispatch one wakeup's worth of subprocess lines to the script.
+    ///
+    /// If the script defines `on_stream_batch(self, program, lines)`, it is
+    /// called once with the full ordered batch — scripts that only need a
+    /// "something changed" signal can ignore `lines` entirely. Otherwise the
+    /// legacy `on_stream_line(self, program, line)` hook is called once per
+    /// line, preserving the documented per-line semantics. Returns the state
+    /// snapshot taken after the whole batch is processed.
+    pub fn run_stream_batch(
+        &mut self,
+        program: &str,
+        lines: &[String],
+    ) -> Result<Option<JsonValue>, BackendScriptError> {
+        if lines.is_empty() {
+            return Ok(None);
+        }
+        self.reset_for_call(JsonValue::Null);
+        let globals = self.lua.globals();
+        if let Ok(batch_handler) = globals.get::<Function>("on_stream_batch") {
+            let current_self =
+                self.current_self_table()
+                    .map_err(|err| BackendScriptError::Runtime {
+                        module_id: self.module_id.clone(),
+                        message: err.to_string(),
+                    })?;
+            let lines_table = self
+                .lua
+                .create_sequence_from(lines.iter().cloned())
+                .map_err(|err| BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: err.to_string(),
+                })?;
+            batch_handler
+                .call::<()>((current_self, program.to_string(), lines_table))
+                .map_err(|err| BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: err.to_string(),
+                })?;
+            return self.take_service_state_snapshot();
+        }
+        let line_handler = match globals.get::<Function>("on_stream_line") {
+            Ok(handler) => handler,
+            Err(_) => return Ok(None),
+        };
+        for line in lines {
+            let current_self =
+                self.current_self_table()
+                    .map_err(|err| BackendScriptError::Runtime {
+                        module_id: self.module_id.clone(),
+                        message: err.to_string(),
+                    })?;
+            line_handler
+                .call::<()>((current_self, program.to_string(), line.clone()))
+                .map_err(|err| BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: err.to_string(),
+                })?;
+        }
+        self.take_service_state_snapshot()
+    }
+
+    /// Kill every active `mesh.exec_stream` subprocess. Idempotent; safe to
+    /// call from `Drop` and from `stop(self)` lifecycle.
+    pub fn kill_streams(&self) {
+        self.streams.kill_all();
     }
 
     /// Call `on_poll()` if it exists. Returns any exported service state.
@@ -506,6 +584,36 @@ impl BackendScriptContext {
                     }
 
                     run_exec(lua, &program, &args)
+                })?,
+        )?;
+
+        let capabilities = self.capabilities.clone();
+        let module_id = self.module_id.clone();
+        let streams = Arc::clone(&self.streams);
+        mesh.set(
+            "exec_stream",
+            self.lua
+                .create_function(move |_lua, (program, args): (String, Vec<String>)| {
+                    if let Some(required) = missing_exec_capability(&capabilities, &program) {
+                        tracing::warn!(
+                            module_id = %module_id,
+                            program = %program,
+                            required_capability = %required,
+                            "denied backend exec_stream"
+                        );
+                        return Ok(false);
+                    }
+                    match spawn_stream(&streams, program.clone(), args) {
+                        Ok(()) => Ok(true),
+                        Err(err) => {
+                            tracing::warn!(
+                                module_id = %module_id,
+                                program = %program,
+                                "exec_stream failed to spawn: {err}"
+                            );
+                            Ok(false)
+                        }
+                    }
                 })?,
         )?;
 

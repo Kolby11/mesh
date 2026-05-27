@@ -6,7 +6,7 @@ use mesh_core_elements::style::Color;
 use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget, resolve_icon_result};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
 static IMAGE_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedImage>>> = OnceLock::new();
@@ -35,7 +35,7 @@ struct FileFreshness {
 #[derive(Debug, Clone)]
 struct CachedImage {
     freshness: FileFreshness,
-    image: image::RgbaImage,
+    image: Arc<image::RgbaImage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -53,7 +53,8 @@ struct RasterCacheKey {
 struct RasterVariant {
     width: u32,
     height: u32,
-    pixels: Vec<u8>,
+    /// BGRA pixels matching `PixelBuffer` memory order.
+    pixels: Arc<[u8]>,
     fully_opaque: bool,
 }
 
@@ -90,29 +91,31 @@ fn raster_cache() -> &'static Mutex<RasterVariantCache> {
     RASTER_CACHE.get_or_init(|| Mutex::new(RasterVariantCache::default()))
 }
 
-fn get_or_load(path: &Path) -> Option<image::RgbaImage> {
+fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
     let Some(freshness) = file_freshness(path) else {
-        return image::open(path).ok().map(|image| image.to_rgba8());
+        return image::open(path)
+            .ok()
+            .map(|image| Arc::new(image.to_rgba8()));
     };
     let mut guard = image_cache().lock().unwrap();
     if let Some(cached) = guard.get(path)
         && cached.freshness == freshness
     {
-        return Some(cached.image.clone());
+        return Some(Arc::clone(&cached.image));
     }
-    let img = image::open(path).ok()?.to_rgba8();
+    let img = Arc::new(image::open(path).ok()?.to_rgba8());
     guard.insert(
         path.to_path_buf(),
         CachedImage {
             freshness,
-            image: img.clone(),
+            image: Arc::clone(&img),
         },
     );
     Some(img)
 }
 
 pub(crate) fn load_image_rgba(path: &Path) -> Option<image::RgbaImage> {
-    get_or_load(path)
+    get_or_load(path).map(|image| image.as_ref().clone())
 }
 
 fn encode_tint(color: Color) -> u32 {
@@ -267,35 +270,79 @@ fn store_variant(key: RasterCacheKey, variant: RasterVariant) {
 }
 
 fn blit_variant(buffer: &mut PixelBuffer, variant: &RasterVariant, dest_x: i32, dest_y: i32) {
-    for y in 0..variant.height {
-        for x in 0..variant.width {
-            let idx = ((y * variant.width + x) * 4) as usize;
-            let alpha = variant.pixels[idx + 3];
-            if alpha == 0 {
+    let src_x = (-dest_x).max(0) as u32;
+    let src_y = (-dest_y).max(0) as u32;
+    let dst_x = dest_x.max(0) as u32;
+    let dst_y = dest_y.max(0) as u32;
+    if src_x >= variant.width
+        || src_y >= variant.height
+        || dst_x >= buffer.width
+        || dst_y >= buffer.height
+    {
+        return;
+    }
+
+    let copy_w = (variant.width - src_x).min(buffer.width - dst_x);
+    let copy_h = (variant.height - src_y).min(buffer.height - dst_y);
+    if copy_w == 0 || copy_h == 0 {
+        return;
+    }
+
+    let src_stride = variant.width as usize * 4;
+    let row_bytes = copy_w as usize * 4;
+    let src_x_offset = src_x as usize * 4;
+    let dst_x_offset = dst_x as usize * 4;
+    if variant.fully_opaque {
+        for row in 0..copy_h as usize {
+            let src_start = (src_y as usize + row) * src_stride + src_x_offset;
+            let dst_start = (dst_y as usize + row) * buffer.stride as usize + dst_x_offset;
+            let src_end = src_start + row_bytes;
+            let dst_end = dst_start + row_bytes;
+            if src_end <= variant.pixels.len() && dst_end <= buffer.data.len() {
+                buffer.data[dst_start..dst_end]
+                    .copy_from_slice(&variant.pixels[src_start..src_end]);
+            }
+        }
+        return;
+    }
+
+    let dst_stride = buffer.stride as usize;
+    for row in 0..copy_h as usize {
+        let src_row_start = (src_y as usize + row) * src_stride + src_x_offset;
+        let dst_row_start = (dst_y as usize + row) * dst_stride + dst_x_offset;
+        let src_row_end = src_row_start + row_bytes;
+        let dst_row_end = dst_row_start + row_bytes;
+        if src_row_end > variant.pixels.len() || dst_row_end > buffer.data.len() {
+            continue;
+        }
+
+        let src_row = &variant.pixels[src_row_start..src_row_end];
+        let dst_row = &mut buffer.data[dst_row_start..dst_row_end];
+        for (src_px, dst_px) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
+            let src_alpha = u16::from(src_px[3]);
+            if src_alpha == 0 {
                 continue;
             }
-            let color = Color {
-                r: variant.pixels[idx],
-                g: variant.pixels[idx + 1],
-                b: variant.pixels[idx + 2],
-                a: alpha,
-            };
-            blend_icon_pixel(
-                buffer,
-                dest_x.saturating_add(x as i32),
-                dest_y.saturating_add(y as i32),
-                color,
-            );
+            let inv_alpha = 255u16.saturating_sub(src_alpha);
+            let dst_b = u16::from(dst_px[0]);
+            let dst_g = u16::from(dst_px[1]);
+            let dst_r = u16::from(dst_px[2]);
+            let dst_a = u16::from(dst_px[3]);
+
+            dst_px[0] = ((u16::from(src_px[0]) * src_alpha + dst_b * inv_alpha) / 255) as u8;
+            dst_px[1] = ((u16::from(src_px[1]) * src_alpha + dst_g * inv_alpha) / 255) as u8;
+            dst_px[2] = ((u16::from(src_px[2]) * src_alpha + dst_r * inv_alpha) / 255) as u8;
+            dst_px[3] = (src_alpha + ((dst_a * inv_alpha) / 255)).min(255) as u8;
         }
     }
 }
 
-fn variant_from_rgba(width: u32, height: u32, pixels: Vec<u8>) -> RasterVariant {
+fn variant_from_bgra(width: u32, height: u32, pixels: Vec<u8>) -> RasterVariant {
     let fully_opaque = pixels.chunks_exact(4).all(|pixel| pixel[3] == 255);
     RasterVariant {
         width,
         height,
-        pixels,
+        pixels: Arc::from(pixels.into_boxed_slice()),
         fully_opaque,
     }
 }
@@ -308,19 +355,19 @@ fn raster_bitmap_variant(
     multicolor: bool,
 ) -> Option<RasterVariant> {
     let img = get_or_load(path)?;
-    let scaled = image::imageops::resize(&img, width, height, FilterType::Lanczos3);
+    let scaled = image::imageops::resize(img.as_ref(), width, height, FilterType::Lanczos3);
     let mut pixels = Vec::with_capacity((width * height * 4) as usize);
     for y in 0..height {
         for x in 0..width {
             let p = scaled.get_pixel(x, y);
             if multicolor {
-                pixels.extend_from_slice(&[p[0], p[1], p[2], p[3]]);
+                pixels.extend_from_slice(&[p[2], p[1], p[0], p[3]]);
             } else {
-                pixels.extend_from_slice(&[tint.r, tint.g, tint.b, p[3]]);
+                pixels.extend_from_slice(&[tint.b, tint.g, tint.r, p[3]]);
             }
         }
     }
-    Some(variant_from_rgba(width, height, pixels))
+    Some(variant_from_bgra(width, height, pixels))
 }
 
 fn raster_svg_variant(
@@ -377,13 +424,13 @@ fn variant_from_pixmap(
         for px in 0..width {
             let idx = (py * width + px) as usize * 4;
             if multicolor {
-                pixels.extend_from_slice(&[data[idx], data[idx + 1], data[idx + 2], data[idx + 3]]);
+                pixels.extend_from_slice(&[data[idx + 2], data[idx + 1], data[idx], data[idx + 3]]);
             } else {
-                pixels.extend_from_slice(&[tint.r, tint.g, tint.b, data[idx + 3]]);
+                pixels.extend_from_slice(&[tint.b, tint.g, tint.r, data[idx + 3]]);
             }
         }
     }
-    variant_from_rgba(width, height, pixels)
+    variant_from_bgra(width, height, pixels)
 }
 
 pub fn draw_icon_from_path(
@@ -466,13 +513,6 @@ pub fn draw_icon_from_path_with_options(
             store_variant(key, variant);
         }
     }
-}
-
-fn blend_icon_pixel(buffer: &mut PixelBuffer, x: i32, y: i32, color: Color) {
-    if x < 0 || y < 0 {
-        return;
-    }
-    buffer.blend_pixel(x as u32, y as u32, color, 255);
 }
 
 /// Draw the built-in "missing icon" glyph. Rasterizes the embedded SVG via

@@ -149,6 +149,7 @@ pub async fn spawn_backend_service(
     let mut tick = make_interval(interval_ms, true);
     let mut last_payload: Option<serde_json::Value> = None;
     let mut consecutive_poll_failures = 0;
+    let stream_state = ctx.stream_state();
 
     if let Some(payload) = init_payload {
         if !publish_changed_update(&tx, &service_name, &module_id, &mut last_payload, payload) {
@@ -159,6 +160,79 @@ pub async fn spawn_backend_service(
 
     loop {
         tokio::select! {
+            _ = stream_state.wait_for_event() => {
+                // Group lines by program in arrival order and hand each group
+                // to the script in a single dispatch via `on_stream_batch`
+                // (falling back to `on_stream_line` per line). Multi-line
+                // event formats like pw-mon emit a header plus property
+                // continuations per change; collapsing to a single line per
+                // batch silently dropped the headers scripts filter on.
+                let lines = stream_state.drain_lines();
+                if lines.is_empty() {
+                    continue;
+                }
+                let mut lines_per_program: std::collections::HashMap<String, Vec<String>> =
+                    std::collections::HashMap::new();
+                let mut program_order: Vec<String> = Vec::new();
+                for entry in lines {
+                    let bucket = lines_per_program
+                        .entry(entry.program.clone())
+                        .or_insert_with(|| {
+                            program_order.push(entry.program.clone());
+                            Vec::new()
+                        });
+                    bucket.push(entry.line);
+                }
+                let mut stop = false;
+                for program in program_order {
+                    let Some(batch) = lines_per_program.remove(&program) else {
+                        continue;
+                    };
+                    match ctx.run_stream_batch(&program, &batch) {
+                        Ok(Some(payload)) => {
+                            if !publish_changed_update(
+                                &tx,
+                                &service_name,
+                                &module_id,
+                                &mut last_payload,
+                                payload,
+                            ) {
+                                stop = true;
+                                break;
+                            }
+                            if !publish_script_events(
+                                &tx,
+                                &service_name,
+                                &module_id,
+                                ctx.drain_events(),
+                            ) {
+                                stop = true;
+                                break;
+                            }
+                        }
+                        Ok(None) => {
+                            if !publish_script_events(
+                                &tx,
+                                &service_name,
+                                &module_id,
+                                ctx.drain_events(),
+                            ) {
+                                stop = true;
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            let _ = tx.send(BackendServiceEvent::Failed {
+                                service: service_name.clone(),
+                                source_module: module_id.clone(),
+                                stage: "stream".to_string(),
+                                message: err.to_string(),
+                            });
+                        }
+                    }
+                }
+                if stop { break; }
+            }
             _ = tick.tick() => {
                 let payload = match ctx.run_poll() {
                     Ok(payload) => {

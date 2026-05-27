@@ -231,9 +231,10 @@ impl FrontendRenderEngine {
             height: buffer.height as i32,
         };
 
-        let bg = Color::from_hex("#1c1822").unwrap_or(Color::BLACK);
-        let border = Color::from_hex("#3d3648").unwrap_or(Color::WHITE);
-        let text_color = Color::from_hex("#e2d9f0").unwrap_or(Color::WHITE);
+        let colors = self.tooltip_colors();
+        let bg = colors.background;
+        let border = colors.border;
+        let text_color = colors.foreground;
         let radius = (6.0 * scale).max(3.0);
 
         self.fill_rounded_rect_clipped(
@@ -297,11 +298,16 @@ pub(super) fn truncate_with_ellipsis(
     );
     let target = (max_width - ellipsis_width).max(0.0);
 
-    let chars: Vec<char> = text.chars().collect();
-    for len in (0..=chars.len()).rev() {
-        let truncated: String = chars[..len].iter().collect();
+    let mut boundaries: Vec<usize> = text.char_indices().map(|(index, _)| index).collect();
+    boundaries.push(text.len());
+
+    let mut low = 0usize;
+    let mut high = boundaries.len();
+    while low < high {
+        let mid = (low + high) / 2;
+        let truncated = &text[..boundaries[mid]];
         let (width, _) = renderer.measure_styled(
-            &truncated,
+            truncated,
             font_family,
             font_size,
             font_weight,
@@ -309,10 +315,14 @@ pub(super) fn truncate_with_ellipsis(
             None,
         );
         if width <= target {
-            return format!("{truncated}{ELLIPSIS}");
+            low = mid + 1;
+        } else {
+            high = mid;
         }
     }
-    ELLIPSIS.to_string()
+
+    let best = low.saturating_sub(1);
+    format!("{}{}", &text[..boundaries[best]], ELLIPSIS)
 }
 
 pub(super) fn selection_geometry(

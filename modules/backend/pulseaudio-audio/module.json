@@ -7,7 +7,9 @@
     "kind": "backend",
     "capabilities": {
       "required": [
-        "exec.pactl"
+        "exec.pactl",
+        "service.audio.read",
+        "service.audio.control"
       ],
       "optional": [
         "exec.aplay"
@@ -20,7 +22,7 @@
       "binaries": [
         {
           "name": "pactl",
-          "reason": "PulseAudio volume and mute control.",
+          "reason": "PulseAudio volume, mute control, and live subscription to sink events.",
           "packages": {
             "debian": "pulseaudio-utils",
             "arch": "libpulse",

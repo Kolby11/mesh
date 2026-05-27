@@ -400,6 +400,21 @@ impl ShellComponent for FrontendSurfaceComponent {
         } else {
             effective_damage.rect
         };
+        if self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured {
+            let surface_layout_manifest = self.compiled.manifest.surface_layout.as_ref();
+            let measured_size = measure_content_size(
+                &tree,
+                content_width,
+                content_height,
+                surface_layout_manifest,
+            );
+            if self.measured_size != Some(measured_size) {
+                self.measured_size = Some(measured_size);
+                self.invalidate_surface_config_only();
+            }
+        }
+        self.publish_element_metrics(&tree);
+
         let selected_paint = self
             .retained_display_list
             .select_paint_commands(paint_damage, effective_damage.policy);
@@ -440,20 +455,6 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.retained_render_objects.generation(),
             render_object_dirty
         );
-        if self.surface_layout.size_policy == SurfaceSizePolicy::ContentMeasured {
-            let surface_layout_manifest = self.compiled.manifest.surface_layout.as_ref();
-            let measured_size = measure_content_size(
-                &tree,
-                content_width,
-                content_height,
-                surface_layout_manifest,
-            );
-            if self.measured_size != Some(measured_size) {
-                self.measured_size = Some(measured_size);
-                self.invalidate_surface_config_only();
-            }
-        }
-        self.publish_element_metrics(&tree);
 
         let paint_started = std::time::Instant::now();
         let paint_metrics = if paint_damage.is_none() {
@@ -471,8 +472,11 @@ impl ShellComponent for FrontendSurfaceComponent {
                     mesh_core_elements::style::Color::TRANSPARENT,
                 );
             }
-            paint_display_list_for_module_with_profiling_metrics(
-                selected_paint.commands(),
+            if tooltip.is_some() {
+                mesh_core_render::set_tooltip_paint_colors(resolve_tooltip_colors(theme));
+            }
+            mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+                &selected_paint,
                 buffer,
                 1.0,
                 (!effective_damage.full_surface).then_some((
@@ -824,6 +828,29 @@ impl FrontendSurfaceComponent {
     ) -> Option<&mesh_core_render::FocusedProofSnapshot> {
         self.focused_proof_snapshot.as_ref()
     }
+}
+
+fn resolve_tooltip_colors(theme: &Theme) -> mesh_core_render::TooltipPaintColors {
+    let fallback = mesh_core_render::TooltipPaintColors::DEFAULT_DARK;
+    mesh_core_render::TooltipPaintColors {
+        background: token_color(theme, "color.surface-container", fallback.background),
+        border: token_color(theme, "color.surface-container-high", fallback.border),
+        foreground: token_color(theme, "color.on-surface", fallback.foreground),
+    }
+}
+
+fn token_color(
+    theme: &Theme,
+    key: &str,
+    fallback: mesh_core_elements::style::Color,
+) -> mesh_core_elements::style::Color {
+    theme
+        .token(key)
+        .and_then(|value| match value {
+            mesh_core_theme::TokenValue::String(s) => mesh_core_elements::style::Color::from_hex(s),
+            _ => None,
+        })
+        .unwrap_or(fallback)
 }
 
 fn select_effective_damage(

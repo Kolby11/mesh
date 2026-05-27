@@ -1,21 +1,15 @@
 <template>
   <stack class="nav-root">
     <row class="nav-shell">
-      <column class="status-cluster">
-        <row class="status-head">
-          <text ref="status-primary" class="status-primary">{t(primary_status_key)}</text>
-          <box class="status-accent">
-            <MetaPill />
-          </box>
-        </row>
-        <column class="status-copy">
-          <row ref="status-secondary" class="status-secondary-row">
-            <MetaLabel />
-            <text class="status-secondary">{t(secondary_status_key) .. secondary_status_value}</text>
-            <BatteryButton />
-          </row>
-        </column>
-      </column>
+      <row ref="status-cluster" class="status-cluster">
+        <text ref="status-primary" class="status-primary">{t(primary_status_key)}</text>
+        <box class="status-accent">
+          <MetaPill />
+        </box>
+        <MetaLabel />
+        <text ref="status-secondary" class="status-secondary">{t(secondary_status_key) .. secondary_status_value}</text>
+        <BatteryButton />
+      </row>
       <spacer class="nav-spacer" />
       <row ref="control-cluster" class="control-cluster">
         <row class="control-button-cell">
@@ -28,7 +22,7 @@
           <ThemeButton />
         </row>
         <row class="control-button-cell">
-          <LanguageButton />
+          <LanguageButton onActivate={onToggleLanguageSurface} />
         </row>
         <row class="control-button-cell">
           <SettingsButton />
@@ -36,11 +30,13 @@
       </row>
     </row>
     <AudioPopover hidden={audio_surface_hidden} />
+    <LanguagePopover hidden={language_surface_hidden} />
   </stack>
 </template>
 
 <script lang="luau">
 local AudioPopover = require("@mesh/audio-popover")
+local LanguagePopover = require("@mesh/language-popover")
 local BatteryButton = require("./components/battery-button.mesh")
 local MetaLabel = require("./components/meta-label.mesh")
 local MetaPill = require("./components/meta-pill.mesh")
@@ -54,6 +50,8 @@ if not audio_ok then audio = nil end
 
 audio_surface_id = "@mesh/audio-popover"
 audio_surface_hidden = true
+language_surface_id = "@mesh/language-popover"
+language_surface_hidden = true
 primary_status_key = "nav.surface_active"
 secondary_status_key = "nav.audio_offline"
 secondary_status_value = ""
@@ -116,6 +114,26 @@ function onToggleAudioSurface(event)
     end
 end
 
+function onToggleLanguageSurface(event)
+    local position = event.current_target.position or {}
+    local margin_left = tonumber(position.margin_left) or 0
+    local margin_top = 0
+
+    if language_surface_hidden then
+        language_surface_hidden = false
+        mesh.events.publish("shell.position-surface", {
+            surface_id = language_surface_id,
+            margin_top = margin_top,
+            margin_left = margin_left
+        })
+        local should_focus = event.trigger ~= nil and event.trigger.type == "keyboard"
+        mesh.popover.activate(language_surface_id, event, { focus = should_focus })
+    else
+        language_surface_hidden = true
+        mesh.popover.hide(language_surface_id)
+    end
+end
+
 function onMuteShortcut()
     if audio_ok and audio and audio.available ~= false then
         local next_muted = not (audio.muted or false)
@@ -142,6 +160,8 @@ end
     align-items: center;
     gap: token(spacing.lg);
     padding-inline: token(spacing.lg);
+    overflow-x: hidden;
+    overflow-y: hidden;
     background: token(color.surface);
     color: token(color.on-surface);
     transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
@@ -150,17 +170,11 @@ end
 }
 
 .status-cluster {
-    justify-content: center;
-    gap: 2px;
-}
-
-.status-copy {
-    gap: 2px;
-}
-
-.status-head {
     align-items: center;
     gap: token(spacing.sm);
+    min-width: 0;
+    flex-shrink: 1;
+    transition: gap token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
 .nav-spacer {
@@ -172,13 +186,6 @@ end
     font-size: token(typography.size.md);
     font-weight: 700;
     text-wrap: none;
-}
-
-.status-secondary-row {
-    align-items: center;
-    gap: token(spacing.xs);
-    min-width: 0;
-    transition: gap token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
 .status-secondary {

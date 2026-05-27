@@ -58,7 +58,6 @@ use std::time::Duration;
 use mesh_core_render::{
     DamageRect, DisplayListMetrics, DisplayListRepaintPolicy, PixelBuffer, RenderObjectTree,
     RetainedDisplayList, SharedTextMeasurer, TextCacheMetrics, TextRenderer,
-    paint_display_list_for_module_with_profiling_metrics,
 };
 
 const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
@@ -282,6 +281,7 @@ pub(super) struct FrontendSurfaceComponent {
     pointer_down_key: Option<String>,
     pointer_down_bounds: Option<(f32, f32, f32, f32)>,
     active_slider_key: Option<String>,
+    keyboard_button_press_activations: HashSet<(String, String)>,
     /// When a surface with keyboard interactivity transitions visible→true,
     /// this flag tells the next paint to seed focus on the first tabbable
     /// element. Lets a popover work with keyboard immediately after opening
@@ -393,6 +393,7 @@ impl FrontendSurfaceComponent {
             pointer_down_key: None,
             pointer_down_bounds: None,
             active_slider_key: None,
+            keyboard_button_press_activations: HashSet::new(),
             pending_auto_focus: settings_state.layout.visible_on_start
                 && settings_state.layout.keyboard_mode != KeyboardMode::None,
             return_focus: None,

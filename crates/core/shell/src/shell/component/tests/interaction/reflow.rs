@@ -98,7 +98,7 @@ end
             &theme,
             240,
             160,
-            ComponentInput::KeyReleased {
+            ComponentInput::KeyPressed {
                 key: "Enter".into(),
                 modifiers: KeyModifiers::default(),
             },

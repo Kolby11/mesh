@@ -11,14 +11,14 @@ use std::collections::HashSet;
 
 use mesh_core_elements::NodeId;
 
-use crate::display_list::DisplayPaintCommand;
+use crate::display_list::{DisplayPaintCommand, SelectedDisplayListPaint};
 
 pub use buffer::PixelBuffer;
 pub use debug_overlay::DebugOverlay;
 pub use glyph::GlyphAxes;
 pub use painter::{
     FrontendRenderEngine, PainterBackendSnapshot, PainterCapabilitySnapshot,
-    PainterDiagnosticSnapshot,
+    PainterDiagnosticSnapshot, TooltipPaintColors,
 };
 pub use profiling::RasterMetrics;
 pub use text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer};
@@ -37,6 +37,15 @@ pub struct PaintProfilingMetrics {
 
 thread_local! {
     static FRONTEND_RENDERER: RefCell<FrontendRenderEngine> = RefCell::new(FrontendRenderEngine::new());
+}
+
+/// Set the colors used by the next tooltip paint on this thread's renderer.
+/// The shell calls this from its paint path so tooltip surfaces reflect the
+/// active theme tokens instead of hardcoded defaults.
+pub fn set_tooltip_paint_colors(colors: TooltipPaintColors) {
+    FRONTEND_RENDERER.with(|engine| {
+        engine.borrow().set_tooltip_colors(colors);
+    });
 }
 
 pub fn paint_frontend_tree(
@@ -173,6 +182,49 @@ pub fn paint_display_list_for_module_with_profiling_metrics(
         engine.reset_text_cache_metrics();
         let traversal_started = std::time::Instant::now();
         engine.render_display_list_for_module(
+            commands,
+            buffer,
+            scale,
+            clip,
+            paint_nodes,
+            module_id,
+        );
+        let traversal_micros = traversal_started
+            .elapsed()
+            .as_micros()
+            .min(u128::from(u64::MAX)) as u64;
+        if let Some((tooltip_text, x, y)) = tooltip {
+            engine.render_tooltip(tooltip_text, x, y, buffer, scale);
+        }
+        let raster = profiling::raster_metrics();
+        PaintProfilingMetrics {
+            text: engine.text_cache_metrics(),
+            traversal_micros,
+            icon_image_raster_micros: raster.icon_image_raster_micros,
+            raster_cache_hits: raster.raster_cache_hits,
+            raster_cache_misses: raster.raster_cache_misses,
+            raster_cache_bypasses: raster.raster_cache_bypasses,
+            raster_cache_opaque_hits: raster.raster_cache_opaque_hits,
+            raster_cache_translucent_hits: raster.raster_cache_translucent_hits,
+        }
+    })
+}
+
+pub fn paint_selected_display_list_for_module_with_profiling_metrics(
+    commands: &SelectedDisplayListPaint<'_>,
+    buffer: &mut PixelBuffer,
+    scale: f32,
+    clip: Option<(u32, u32, u32, u32)>,
+    paint_nodes: Option<&HashSet<NodeId>>,
+    tooltip: Option<(&str, f32, f32)>,
+    module_id: Option<&str>,
+) -> PaintProfilingMetrics {
+    FRONTEND_RENDERER.with(|engine| {
+        let engine = engine.borrow();
+        profiling::reset_raster_metrics();
+        engine.reset_text_cache_metrics();
+        let traversal_started = std::time::Instant::now();
+        engine.render_selected_display_list_for_module(
             commands,
             buffer,
             scale,

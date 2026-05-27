@@ -56,7 +56,7 @@ impl FrontendRenderEngine {
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
         let inner_height =
             ((node.layout.height - style.padding.vertical()) * scale).max(0.0) as i32;
-        let (_text_width, text_height) = self.text_renderer.measure_styled(
+        let (text_width, text_height) = self.text_renderer.measure_styled(
             text,
             &style.font_family,
             style.font_size * scale,
@@ -85,14 +85,6 @@ impl FrontendRenderEngine {
         );
 
         if focused {
-            let (text_width, _) = self.text_renderer.measure_styled(
-                text,
-                &style.font_family,
-                style.font_size * scale,
-                style.font_weight,
-                style.line_height,
-                None,
-            );
             let caret_x = tx + text_width.round() as u32;
             self.fill_rect_clipped(
                 buffer,
@@ -138,7 +130,7 @@ impl FrontendRenderEngine {
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
         let inner_height =
             ((node.layout.height - style.padding.vertical()) * scale).max(0.0) as i32;
-        let (_text_width, text_height) = self.text_renderer.measure_styled(
+        let (text_width, text_height) = self.text_renderer.measure_styled(
             text,
             &style.font_family,
             style.font_size * scale,
@@ -167,14 +159,6 @@ impl FrontendRenderEngine {
         );
 
         if input.focused {
-            let (text_width, _) = self.text_renderer.measure_styled(
-                text,
-                &style.font_family,
-                style.font_size * scale,
-                style.font_weight,
-                style.line_height,
-                None,
-            );
             let caret_x = tx + text_width.round() as u32;
             self.fill_rect_clipped(
                 buffer,

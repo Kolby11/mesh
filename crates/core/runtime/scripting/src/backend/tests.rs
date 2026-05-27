@@ -1288,3 +1288,109 @@ fn reference_media_provider_command_updates_state() {
         "next command must advance to a different track"
     );
 }
+
+#[test]
+fn run_stream_batch_invokes_on_stream_batch_once_with_full_ordered_batch() {
+    let mut ctx = BackendScriptContext::new("@test/stream-batch");
+    ctx.load_script(
+        "state = { calls = 0, last_program = nil, last_lines = {} }\n\
+         function start() end\n\
+         function on_stream_batch(self, program, lines)\n\
+           state = { calls = state.calls + 1, last_program = program, last_lines = lines }\n\
+         end",
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    let lines = vec![
+        "changed:".to_string(),
+        "\tid: 47".to_string(),
+        "\tobject.serial = \"3\"".to_string(),
+    ];
+    let snapshot = ctx
+        .run_stream_batch("pw-mon", &lines)
+        .unwrap()
+        .expect("batch should produce a state snapshot");
+    assert_eq!(snapshot.get("calls").and_then(|v| v.as_u64()), Some(1));
+    assert_eq!(
+        snapshot.get("last_program").and_then(|v| v.as_str()),
+        Some("pw-mon")
+    );
+    let received: Vec<String> = snapshot
+        .get("last_lines")
+        .and_then(|v| v.as_array())
+        .expect("lines must be exported as an array")
+        .iter()
+        .map(|v| v.as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(received, lines);
+}
+
+#[test]
+fn run_stream_batch_falls_back_to_on_stream_line_per_line() {
+    let mut ctx = BackendScriptContext::new("@test/stream-line-fallback");
+    ctx.load_script(
+        "state = { call_count = 0, lines = {} }\n\
+         function start() end\n\
+         function on_stream_line(self, program, line)\n\
+           state = { call_count = state.call_count + 1, lines = state.lines }\n\
+           table.insert(state.lines, line)\n\
+         end",
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    let lines = vec!["changed:".to_string(), "added:".to_string()];
+    let snapshot = ctx
+        .run_stream_batch("pw-mon", &lines)
+        .unwrap()
+        .expect("legacy hook should still produce a snapshot");
+    assert_eq!(snapshot.get("call_count").and_then(|v| v.as_u64()), Some(2));
+    let received: Vec<String> = snapshot
+        .get("lines")
+        .and_then(|v| v.as_array())
+        .expect("lines should be exported as an array")
+        .iter()
+        .map(|v| v.as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(received, lines);
+}
+
+#[test]
+fn run_stream_batch_with_empty_batch_does_not_invoke_handler() {
+    let mut ctx = BackendScriptContext::new("@test/stream-empty");
+    ctx.load_script(
+        "state = { calls = 0 }\n\
+         function start() end\n\
+         function on_stream_batch(self, program, lines)\n\
+           state = { calls = state.calls + 1 }\n\
+         end",
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    let snapshot = ctx.run_stream_batch("pw-mon", &[]).unwrap();
+    assert!(
+        snapshot.is_none(),
+        "empty batch should short-circuit before snapshot"
+    );
+}
+
+#[test]
+fn run_stream_batch_without_any_hook_is_a_noop() {
+    let mut ctx = BackendScriptContext::new("@test/stream-no-hook");
+    ctx.load_script(
+        "state = { value = 0 }\n\
+         function start() end",
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    let snapshot = ctx
+        .run_stream_batch("pw-mon", &["changed:".to_string()])
+        .unwrap();
+    assert!(
+        snapshot.is_none(),
+        "missing batch and line hooks should produce no snapshot"
+    );
+}

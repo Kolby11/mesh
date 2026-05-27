@@ -148,6 +148,7 @@ impl PaintBackend for TestPaintBackend {
 #[derive(Clone, Default)]
 struct RecordingPaintBackend {
     commands: Arc<Mutex<Vec<PainterCommand>>>,
+    execute_call_sizes: Arc<Mutex<Vec<usize>>>,
 }
 
 impl RecordingPaintBackend {
@@ -155,6 +156,13 @@ impl RecordingPaintBackend {
         self.commands
             .lock()
             .map(|commands| commands.clone())
+            .unwrap_or_default()
+    }
+
+    fn execute_call_sizes(&self) -> Vec<usize> {
+        self.execute_call_sizes
+            .lock()
+            .map(|sizes| sizes.clone())
             .unwrap_or_default()
     }
 }
@@ -206,6 +214,7 @@ impl PaintBackend for RecordingPaintBackend {
         commands: &[PainterCommand],
         _diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
+        self.execute_call_sizes.lock().unwrap().push(commands.len());
         self.commands.lock().unwrap().extend_from_slice(commands);
     }
 }
@@ -432,8 +441,8 @@ fn display_list_primitive_direct_and_retained_box_emit_same_command_classes() {
     let retained_recorded = retained_backend.clone();
     let retained_engine = FrontendRenderEngine::with_paint_backend(Box::new(retained_backend));
     let mut retained_buffer = PixelBuffer::new(32, 32);
-    retained_engine.render_display_list_for_module(
-        selected.commands(),
+    retained_engine.render_selected_display_list_for_module(
+        &selected,
         &mut retained_buffer,
         1.0,
         None,
@@ -652,8 +661,8 @@ fn painter_primitive_controls_input_direct_and_retained_emit_same_classes() {
     let retained_recorded = retained_backend.clone();
     let retained_engine = FrontendRenderEngine::with_paint_backend(Box::new(retained_backend));
     let mut retained_buffer = PixelBuffer::new(140, 48);
-    retained_engine.render_display_list_for_module(
-        selected.commands(),
+    retained_engine.render_selected_display_list_for_module(
+        &selected,
         &mut retained_buffer,
         1.0,
         None,
@@ -706,8 +715,8 @@ fn painter_primitive_controls_slider_direct_and_retained_emit_same_classes() {
     let retained_recorded = retained_backend.clone();
     let retained_engine = FrontendRenderEngine::with_paint_backend(Box::new(retained_backend));
     let mut retained_buffer = PixelBuffer::new(150, 48);
-    retained_engine.render_display_list_for_module(
-        selected.commands(),
+    retained_engine.render_selected_display_list_for_module(
+        &selected,
         &mut retained_buffer,
         1.0,
         None,
@@ -762,8 +771,8 @@ fn painter_effect_lowering_direct_and_retained_image_emit_same_command_classes()
     let retained_recorded = retained_backend.clone();
     let retained_engine = FrontendRenderEngine::with_paint_backend(Box::new(retained_backend));
     let mut retained_buffer = PixelBuffer::new(80, 48);
-    retained_engine.render_display_list_for_module(
-        selected.commands(),
+    retained_engine.render_selected_display_list_for_module(
+        &selected,
         &mut retained_buffer,
         1.0,
         None,
@@ -816,8 +825,8 @@ fn painter_effect_lowering_direct_and_retained_gradient_emit_same_command_classe
     let retained_recorded = retained_backend.clone();
     let retained_engine = FrontendRenderEngine::with_paint_backend(Box::new(retained_backend));
     let mut retained_buffer = PixelBuffer::new(80, 48);
-    retained_engine.render_display_list_for_module(
-        selected.commands(),
+    retained_engine.render_selected_display_list_for_module(
+        &selected,
         &mut retained_buffer,
         1.0,
         None,
@@ -2044,8 +2053,8 @@ fn retained_display_list_paints_opacity_through_skia_path() {
     );
 
     let mut buffer = PixelBuffer::new(24, 24);
-    FrontendRenderEngine::new().render_display_list_for_module(
-        selected.commands(),
+    FrontendRenderEngine::new().render_selected_display_list_for_module(
+        &selected,
         &mut buffer,
         1.0,
         None,
@@ -2250,8 +2259,8 @@ fn phase44_selection_paint_and_proof_use_theme_colors() {
     );
 
     let mut buffer = PixelBuffer::new(180, 80);
-    FrontendRenderEngine::new().render_display_list_for_module(
-        selected.commands(),
+    FrontendRenderEngine::new().render_selected_display_list_for_module(
+        &selected,
         &mut buffer,
         1.0,
         None,
@@ -2377,5 +2386,97 @@ fn selection_fixture_preview_tree_paints_nonempty_surface() {
     assert!(
         has_visible_pixels,
         "proof fixture should paint visible output"
+    );
+}
+
+#[test]
+fn retained_replay_batches_adjacent_non_content_nodes() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 80.0,
+            height: 40.0,
+        },
+        Color::TRANSPARENT,
+    );
+    root.children = vec![
+        node(
+            "box",
+            LayoutRect {
+                x: 2.0,
+                y: 2.0,
+                width: 18.0,
+                height: 18.0,
+            },
+            Color::from_hex("#224466").unwrap(),
+        ),
+        node(
+            "box",
+            LayoutRect {
+                x: 24.0,
+                y: 2.0,
+                width: 18.0,
+                height: 18.0,
+            },
+            Color::from_hex("#446622").unwrap(),
+        ),
+        text_node(
+            "content boundary",
+            2.0,
+            24.0,
+            72.0,
+            12.0,
+            Color::from_hex("#f0f0f0").unwrap(),
+        ),
+    ];
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 80, 40, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 40,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+    let replay_commands: Vec<_> = selected
+        .iter()
+        .filter(|command| {
+            command.kind == DisplayPaintCommandKind::Node
+                && matches!(command.node.content, DisplayPaintContent::None)
+        })
+        .cloned()
+        .collect();
+    assert!(
+        replay_commands.len() >= 2,
+        "expected at least two adjacent non-content node commands to replay"
+    );
+
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let mut buffer = PixelBuffer::new(80, 40);
+    engine.render_display_list_for_module(
+        &replay_commands,
+        &mut buffer,
+        1.0,
+        None,
+        None,
+        None,
+    );
+
+    let call_sizes = recorded.execute_call_sizes();
+    assert!(
+        call_sizes.iter().any(|size| *size >= 2),
+        "expected one backend execute call containing multiple commands, got {call_sizes:?}"
+    );
+    assert!(
+        call_sizes.len() < replay_commands.len(),
+        "expected fewer backend execute calls than replay commands, got calls={call_sizes:?} commands={}",
+        replay_commands.len()
     );
 }

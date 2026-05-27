@@ -1,0 +1,47 @@
+{
+  "name": "@mesh/upower-power",
+  "version": "0.1.0",
+  "description": "Power/battery backend reading state via the upower CLI.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "capabilities": {
+      "required": [
+        "exec.upower",
+        "service.power.read"
+      ]
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en"]
+    },
+    "dependencies": {
+      "binaries": [
+        {
+          "name": "upower",
+          "reason": "Battery state, charge level, and rate.",
+          "packages": {
+            "debian": "upower",
+            "arch": "upower",
+            "fedora": "upower",
+            "nixos": "upower"
+          }
+        }
+      ]
+    },
+    "entrypoints": {
+      "main": "src/main.luau"
+    },
+    "implements": [
+      {
+        "interface": "mesh.power",
+        "version": "1.0",
+        "baseModule": "@mesh/power-interface",
+        "provider": "upower",
+        "label": "UPower",
+        "priority": 100
+      }
+    ]
+  }
+}

@@ -1,9 +1,17 @@
 use super::super::*;
 
+const MAX_WAYLAND_EVENTS_PER_FRAME: usize = 4;
+
 impl Shell {
     pub(in crate::shell) fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
         let events = coalesce_pointer_moves(self.presentation_engine.poll_events());
-        for event in events {
+        self.pending_wayland_events.extend(events);
+
+        for _ in 0..MAX_WAYLAND_EVENTS_PER_FRAME {
+            let Some(event) = self.pending_wayland_events.pop_front() else {
+                break;
+            };
+
             let input_started = self.profiling_enabled().then(std::time::Instant::now);
             let trigger_kind = profiling_trigger_for_event(&event);
             tracing::trace!(

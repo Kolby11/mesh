@@ -12,9 +12,19 @@
       "path": "frontend/audio-popover",
       "enabled": true
     },
+    "@mesh/language-popover": {
+      "kind": "frontend",
+      "path": "frontend/language-popover",
+      "enabled": true
+    },
     "@mesh/audio-interface": {
       "kind": "interface",
       "path": "interfaces/audio",
+      "enabled": true
+    },
+    "@mesh/power-interface": {
+      "kind": "interface",
+      "path": "interfaces/power",
       "enabled": true
     },
     "@mesh/icons-default": {
@@ -36,10 +46,16 @@
       "kind": "backend",
       "path": "backend/pulseaudio-audio",
       "enabled": true
+    },
+    "@mesh/upower-power": {
+      "kind": "backend",
+      "path": "backend/upower-power",
+      "enabled": true
     }
   },
   "providers": {
-    "mesh.audio": "@mesh/pipewire-audio"
+    "mesh.audio": "@mesh/pipewire-audio",
+    "mesh.power": "@mesh/upower-power"
   },
   "layout": {
     "entrypoint": "@mesh/navigation-bar:main"
