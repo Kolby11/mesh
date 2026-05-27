@@ -109,24 +109,28 @@ fn find_node_path_reversed(
 
 /// Extract tooltip text from a node's attributes and accessibility metadata.
 pub fn node_tooltip_text(node: &WidgetNode) -> Option<String> {
-    let text = node
-        .attributes
-        .get("title")
-        .cloned()
-        .or_else(|| node.attributes.get("tooltip").cloned())
-        .or_else(|| node.attributes.get("aria-label").cloned())
-        .or_else(|| node.attributes.get("description").cloned())
-        .or_else(|| node.attributes.get("aria-description").cloned())
-        .or_else(|| node.accessibility.label.clone())
-        .or_else(|| node.accessibility.description.clone());
+    node_tooltip_text_ref(node).map(str::to_owned)
+}
 
-    text.and_then(|value| {
-        if value.trim().is_empty() {
-            None
-        } else {
-            Some(value)
+fn node_tooltip_text_ref(node: &WidgetNode) -> Option<&str> {
+    for key in [
+        "title",
+        "tooltip",
+        "aria-label",
+        "description",
+        "aria-description",
+    ] {
+        if let Some(value) = non_empty_tooltip_text(node.attributes.get(key).map(String::as_str)) {
+            return Some(value);
         }
-    })
+    }
+
+    non_empty_tooltip_text(node.accessibility.label.as_deref())
+        .or_else(|| non_empty_tooltip_text(node.accessibility.description.as_deref()))
+}
+
+fn non_empty_tooltip_text(value: Option<&str>) -> Option<&str> {
+    value.filter(|value| !value.trim().is_empty())
 }
 
 /// Find tooltip text for a specific node key in the tree.
@@ -142,14 +146,15 @@ pub fn find_tooltip_by_key(node: &WidgetNode, key: &str) -> Option<(String, Stri
 fn find_tooltip_by_key_with_inherited(
     node: &WidgetNode,
     key: &str,
-    inherited: Option<(String, String)>,
+    inherited: Option<&(String, String)>,
 ) -> Option<Option<(String, String)>> {
-    let inherited = node_tooltip_owner_text(node).or(inherited);
+    let owner_text = node_tooltip_owner_text(node);
+    let inherited = owner_text.as_ref().or(inherited);
     if node.attributes.get("_mesh_key").is_some_and(|k| k == key) {
-        return Some(inherited);
+        return Some(inherited.cloned());
     }
     for child in &node.children {
-        if let Some(text) = find_tooltip_by_key_with_inherited(child, key, inherited.clone()) {
+        if let Some(text) = find_tooltip_by_key_with_inherited(child, key, inherited) {
             return Some(text);
         }
     }

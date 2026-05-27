@@ -1,15 +1,40 @@
 use super::*;
 use crate::surface::icon;
-use crate::surface::painter::geometry::rounded_rect_coverage;
 use mesh_core_elements::{BoxShadow, VisualFilter};
 use skia_safe::{
-    BlurStyle, Color4f, Data, ImageInfo, MaskFilter, PaintStyle, Path as SkiaPath, PathBuilder,
-    Point, RRect, Rect, TileMode, canvas::SaveLayerRec, gradient as skia_gradient, image_filters,
-    images,
+    BlurStyle, Canvas, Color4f, Data, ImageInfo, MaskFilter, PaintStyle, Path as SkiaPath,
+    PathBuilder, Point, RRect, Rect, TileMode, canvas::SaveLayerRec, gradient as skia_gradient,
+    image_filters, images,
 };
 
 pub(crate) const MAX_EFFECT_BLUR_RADIUS: f32 = 96.0;
+use mesh_core_elements::lru::LruCache;
 use skia_safe::SamplingOptions;
+use std::cell::RefCell;
+use std::sync::Arc;
+
+const SKIA_IMAGE_CACHE_CAPACITY: usize = 128;
+const GRADIENT_SHADER_CACHE_CAPACITY: usize = 64;
+type GradientShaderCacheKey = (u32, u32, i32, i32, i32, i32);
+
+// Cached Skia image keyed by the raw pointer of the underlying
+// `Arc<RgbaImage>` allocation. Holds a strong `Arc` reference in the value so
+// the heap allocation cannot be freed and reallocated at the same address
+// while the cache entry is live (which would silently return the wrong image).
+struct CachedSkiaImage {
+    _keep_alive: Arc<image::RgbaImage>,
+    image: skia_safe::Image,
+}
+
+thread_local! {
+    static SKIA_IMAGE_CACHE: RefCell<LruCache<usize, CachedSkiaImage>> =
+        RefCell::new(LruCache::new(SKIA_IMAGE_CACHE_CAPACITY));
+
+    // Cache for linear-gradient shaders keyed by (from_rgba, to_rgba, x, y, w, h).
+    // A panel with a static background gradient reuses the same shader every frame.
+    static GRADIENT_SHADER_CACHE: RefCell<LruCache<GradientShaderCacheKey, skia_safe::Shader>> =
+        RefCell::new(LruCache::new(GRADIENT_SHADER_CACHE_CAPACITY));
+}
 
 #[allow(dead_code)]
 pub(crate) trait PaintBackend: Send + Sync {
@@ -312,18 +337,13 @@ pub(crate) struct PainterLinearGradient {
     pub to: Color,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[allow(dead_code)]
 pub(crate) enum PainterFilter {
+    #[default]
     None,
     Blur(VisualFilter),
     Backdrop(VisualFilter),
-}
-
-impl Default for PainterFilter {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -406,8 +426,21 @@ impl PaintBackend for SkiaPaintBackend {
         commands: &[PainterCommand],
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
-        let mut clip_stack: Vec<ClipRect> = Vec::with_capacity(commands.len().min(8));
-        let mut layer_stack: Vec<PainterLayer> = Vec::with_capacity(commands.len().min(4));
+        let _ = buffer.with_skia_canvas(|canvas| {
+            self.execute_commands_on_canvas(canvas, commands, diagnostics);
+        });
+    }
+}
+
+impl SkiaPaintBackend {
+    fn execute_commands_on_canvas(
+        &self,
+        canvas: &Canvas,
+        commands: &[PainterCommand],
+        diagnostics: &mut Vec<PainterDiagnostic>,
+    ) {
+        let mut clip_stack: Vec<ClipRect> = Vec::with_capacity(commands.len().min(32));
+        let mut layer_stack: Vec<PainterLayer> = Vec::with_capacity(commands.len().min(8));
         for command in commands {
             match command {
                 PainterCommand::PushClip(clip) => {
@@ -451,7 +484,7 @@ impl PaintBackend for SkiaPaintBackend {
                     let paint = layer_paint(*paint, &layer_stack);
                     self.diagnose_unsupported_paint(paint, diagnostics);
                     self.draw_rect_command(
-                        buffer,
+                        canvas,
                         *rect,
                         paint,
                         effective_clip(*clip, &clip_stack),
@@ -466,7 +499,7 @@ impl PaintBackend for SkiaPaintBackend {
                     let paint = layer_paint(*paint, &layer_stack);
                     self.diagnose_unsupported_paint(paint, diagnostics);
                     self.draw_rounded_rect_command(
-                        buffer,
+                        canvas,
                         *rect,
                         *radius,
                         paint,
@@ -476,7 +509,7 @@ impl PaintBackend for SkiaPaintBackend {
                 PainterCommand::DrawPath { path, paint, clip } => {
                     let paint = layer_paint(*paint, &layer_stack);
                     self.diagnose_unsupported_paint(paint, diagnostics);
-                    self.draw_path_command(buffer, path, paint, effective_clip(*clip, &clip_stack));
+                    self.draw_path_command(canvas, path, paint, effective_clip(*clip, &clip_stack));
                 }
                 PainterCommand::DrawText { .. } => diagnostics.push(PainterDiagnostic {
                     backend_id: self.id(),
@@ -494,7 +527,7 @@ impl PaintBackend for SkiaPaintBackend {
                 } => {
                     let paint = layer_paint(*paint, &layer_stack);
                     self.draw_image_command(
-                        buffer,
+                        canvas,
                         image,
                         *rect,
                         paint,
@@ -509,7 +542,7 @@ impl PaintBackend for SkiaPaintBackend {
                     clip,
                 } => {
                     self.draw_linear_gradient_command(
-                        buffer,
+                        canvas,
                         *gradient,
                         *rect,
                         *radius,
@@ -531,7 +564,7 @@ impl PaintBackend for SkiaPaintBackend {
                         continue;
                     }
                     self.draw_box_shadow_impl(
-                        buffer,
+                        canvas,
                         *rect,
                         *radius,
                         *shadow,
@@ -562,7 +595,7 @@ impl PaintBackend for SkiaPaintBackend {
                             continue;
                         }
                         self.apply_backdrop_filter_impl(
-                            buffer,
+                            canvas,
                             *rect,
                             *radius,
                             *filter,
@@ -573,9 +606,7 @@ impl PaintBackend for SkiaPaintBackend {
             }
         }
     }
-}
 
-impl SkiaPaintBackend {
     fn diagnose_unsupported_paint(
         &self,
         paint: PainterPaint,
@@ -612,45 +643,37 @@ impl SkiaPaintBackend {
         true
     }
 
-    fn fill_rect_impl(
-        &self,
-        buffer: &mut PixelBuffer,
-        rect: ClipRect,
-        color: Color,
-        clip: ClipRect,
-    ) {
+    fn fill_rect_impl(&self, canvas: &Canvas, rect: ClipRect, color: Color, clip: ClipRect) {
         let clipped = intersect_clip(rect, clip);
         if clipped.width <= 0 || clipped.height <= 0 {
             return;
         }
-        buffer.with_skia_canvas(|canvas| {
-            let save_count = canvas.save();
-            canvas.clip_rect(
-                Rect::from_xywh(
-                    clipped.x as f32,
-                    clipped.y as f32,
-                    clipped.width as f32,
-                    clipped.height as f32,
-                ),
-                None,
-                false,
-            );
-            let rect = Rect::from_xywh(
-                rect.x as f32,
-                rect.y as f32,
-                rect.width as f32,
-                rect.height as f32,
-            );
-            let mut paint = skia_paint(color, false);
-            paint.set_style(PaintStyle::Fill);
-            canvas.draw_rect(rect, &paint);
-            canvas.restore_to_count(save_count);
-        });
+        let save_count = canvas.save();
+        canvas.clip_rect(
+            Rect::from_xywh(
+                clipped.x as f32,
+                clipped.y as f32,
+                clipped.width as f32,
+                clipped.height as f32,
+            ),
+            None,
+            false,
+        );
+        let rect = Rect::from_xywh(
+            rect.x as f32,
+            rect.y as f32,
+            rect.width as f32,
+            rect.height as f32,
+        );
+        let mut paint = skia_paint(color, false);
+        paint.set_style(PaintStyle::Fill);
+        canvas.draw_rect(rect, &paint);
+        canvas.restore_to_count(save_count);
     }
 
     fn fill_rounded_rect_impl(
         &self,
-        buffer: &mut PixelBuffer,
+        canvas: &Canvas,
         rect: ClipRect,
         radius: f32,
         color: Color,
@@ -666,75 +689,96 @@ impl SkiaPaintBackend {
         let radius = radius.max(0.0).min(half_w).min(half_h);
 
         if radius < 0.5 {
-            self.fill_rect_impl(buffer, rect, color, clip);
+            self.fill_rect_impl(canvas, rect, color, clip);
             return;
         }
 
-        if buffer.fill_rounded_rect_clipped(
-            rect.x,
-            rect.y,
-            rect.width,
-            rect.height,
-            radius,
-            color,
-            (clipped.x, clipped.y, clipped.width, clipped.height),
-        ) {
-            return;
-        }
-
-        for py in clipped.y..clipped.y + clipped.height {
-            for px in clipped.x..clipped.x + clipped.width {
-                let coverage =
-                    rounded_rect_coverage(rect, radius, px as f32 + 0.5, py as f32 + 0.5);
-                if coverage <= 0.0 {
-                    continue;
-                }
-                buffer.blend_pixel_f32(px as u32, py as u32, color, coverage);
-            }
-        }
+        let save_count = canvas.save();
+        canvas.clip_rect(
+            Rect::from_xywh(
+                clipped.x as f32,
+                clipped.y as f32,
+                clipped.width as f32,
+                clipped.height as f32,
+            ),
+            None,
+            false,
+        );
+        let rect = Rect::from_xywh(
+            rect.x as f32,
+            rect.y as f32,
+            rect.width as f32,
+            rect.height as f32,
+        );
+        let mut paint = skia_paint(color, true);
+        paint.set_style(PaintStyle::Fill);
+        canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+        canvas.restore_to_count(save_count);
     }
 
     fn stroke_rounded_rect_impl(
         &self,
-        buffer: &mut PixelBuffer,
+        canvas: &Canvas,
         rect: ClipRect,
         radius: f32,
         stroke_width: i32,
         color: Color,
         clip: ClipRect,
-    ) -> bool {
+    ) {
         if stroke_width <= 0 {
-            return false;
+            return;
         }
 
         let clipped = intersect_clip(rect, clip);
         if clipped.width <= 0 || clipped.height <= 0 {
-            return true;
+            return;
         }
 
         let half_w = (rect.width.max(0) as f32) * 0.5;
         let half_h = (rect.height.max(0) as f32) * 0.5;
         let radius = radius.max(0.0).min(half_w).min(half_h);
         if radius < 0.5 {
-            self.stroke_rect_impl(buffer, rect, stroke_width, color, clip);
-            return true;
+            self.stroke_rect_impl(canvas, rect, stroke_width, color, clip);
+            return;
         }
 
-        buffer.stroke_rounded_rect_clipped(
-            rect.x,
-            rect.y,
-            rect.width,
-            rect.height,
-            radius,
-            stroke_width as f32,
-            color,
-            (clipped.x, clipped.y, clipped.width, clipped.height),
-        )
+        let stroke_width = stroke_width as f32;
+        let save_count = canvas.save();
+        canvas.clip_rect(
+            Rect::from_xywh(
+                clipped.x as f32,
+                clipped.y as f32,
+                clipped.width as f32,
+                clipped.height as f32,
+            ),
+            None,
+            false,
+        );
+        let inset = stroke_width * 0.5;
+        let stroke_w = (rect.width as f32 - stroke_width).max(0.0);
+        let stroke_h = (rect.height as f32 - stroke_width).max(0.0);
+        if stroke_w > 0.0 && stroke_h > 0.0 {
+            let rect = Rect::from_xywh(
+                rect.x as f32 + inset,
+                rect.y as f32 + inset,
+                stroke_w,
+                stroke_h,
+            );
+            let radius = (radius - inset)
+                .max(0.0)
+                .min(stroke_w * 0.5)
+                .min(stroke_h * 0.5);
+            let mut paint = skia_paint(color, true);
+            paint.set_style(PaintStyle::Stroke);
+            paint.set_stroke_width(stroke_width);
+            canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+        }
+        canvas.restore_to_count(save_count);
     }
 
     fn draw_box_shadow_impl(
         &self,
-        buffer: &mut PixelBuffer,
+        canvas: &Canvas,
         rect: ClipRect,
         radius: f32,
         shadow: BoxShadow,
@@ -771,25 +815,13 @@ impl SkiaPaintBackend {
         }
 
         if shadow.blur_radius <= 0.0 && radius <= 0.5 {
-            buffer.clear_rect(
-                clipped.x.max(0) as u32,
-                clipped.y.max(0) as u32,
-                clipped.width as u32,
-                clipped.height as u32,
-                shadow.color,
-            );
-            return;
-        }
-
-        let skia_clip = (clipped.x, clipped.y, clipped.width, clipped.height);
-        buffer.with_skia_canvas(|canvas| {
             let save_count = canvas.save();
             canvas.clip_rect(
                 Rect::from_xywh(
-                    skia_clip.0 as f32,
-                    skia_clip.1 as f32,
-                    skia_clip.2 as f32,
-                    skia_clip.3 as f32,
+                    clipped.x as f32,
+                    clipped.y as f32,
+                    clipped.width as f32,
+                    clipped.height as f32,
                 ),
                 None,
                 false,
@@ -800,28 +832,52 @@ impl SkiaPaintBackend {
                 shadow_rect.width as f32,
                 shadow_rect.height as f32,
             );
-            let mut paint = skia_paint(shadow.color, true);
+            let mut paint = skia_paint(shadow.color, false);
             paint.set_style(PaintStyle::Fill);
-            if shadow.blur_radius > 0.0 {
-                paint.set_mask_filter(MaskFilter::blur(
-                    BlurStyle::Normal,
-                    blur_radius_to_sigma(shadow.blur_radius),
-                    Some(false),
-                ));
-            }
-            let radius = (radius + shadow.spread_radius).max(0.0);
-            if radius > 0.5 {
-                canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
-            } else {
-                canvas.draw_rect(rect, &paint);
-            }
+            canvas.draw_rect(rect, &paint);
             canvas.restore_to_count(save_count);
-        });
+            return;
+        }
+
+        let skia_clip = (clipped.x, clipped.y, clipped.width, clipped.height);
+        let save_count = canvas.save();
+        canvas.clip_rect(
+            Rect::from_xywh(
+                skia_clip.0 as f32,
+                skia_clip.1 as f32,
+                skia_clip.2 as f32,
+                skia_clip.3 as f32,
+            ),
+            None,
+            false,
+        );
+        let rect = Rect::from_xywh(
+            shadow_rect.x as f32,
+            shadow_rect.y as f32,
+            shadow_rect.width as f32,
+            shadow_rect.height as f32,
+        );
+        let mut paint = skia_paint(shadow.color, true);
+        paint.set_style(PaintStyle::Fill);
+        if shadow.blur_radius > 0.0 {
+            paint.set_mask_filter(MaskFilter::blur(
+                BlurStyle::Normal,
+                blur_radius_to_sigma(shadow.blur_radius),
+                Some(false),
+            ));
+        }
+        let radius = (radius + shadow.spread_radius).max(0.0);
+        if radius > 0.5 {
+            canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+        } else {
+            canvas.draw_rect(rect, &paint);
+        }
+        canvas.restore_to_count(save_count);
     }
 
     fn apply_backdrop_filter_impl(
         &self,
-        buffer: &mut PixelBuffer,
+        canvas: &Canvas,
         rect: ClipRect,
         radius: f32,
         filter: VisualFilter,
@@ -852,55 +908,53 @@ impl SkiaPaintBackend {
         ) else {
             return;
         };
-        buffer.with_skia_canvas(|canvas| {
-            let save_count = canvas.save();
-            let rect = Rect::from_xywh(
-                rect.x as f32,
-                rect.y as f32,
-                rect.width as f32,
-                rect.height as f32,
-            );
-            if radius > 0.5 {
-                canvas.clip_rrect(RRect::new_rect_xy(rect, radius, radius), None, true);
-            } else {
-                canvas.clip_rect(rect, None, false);
-            }
-            let layer_bounds = Rect::from_xywh(
-                clipped.x as f32,
-                clipped.y as f32,
-                clipped.width as f32,
-                clipped.height as f32,
-            );
-            let rec = SaveLayerRec::default()
-                .bounds(&layer_bounds)
-                .backdrop(&backdrop)
-                .backdrop_tile_mode(TileMode::Decal);
-            let layer_count = canvas.save_layer(&rec);
-            canvas.restore_to_count(layer_count);
-            canvas.restore_to_count(save_count);
-        });
+        let save_count = canvas.save();
+        let rect = Rect::from_xywh(
+            rect.x as f32,
+            rect.y as f32,
+            rect.width as f32,
+            rect.height as f32,
+        );
+        if radius > 0.5 {
+            canvas.clip_rrect(RRect::new_rect_xy(rect, radius, radius), None, true);
+        } else {
+            canvas.clip_rect(rect, None, false);
+        }
+        let layer_bounds = Rect::from_xywh(
+            clipped.x as f32,
+            clipped.y as f32,
+            clipped.width as f32,
+            clipped.height as f32,
+        );
+        let rec = SaveLayerRec::default()
+            .bounds(&layer_bounds)
+            .backdrop(&backdrop)
+            .backdrop_tile_mode(TileMode::Decal);
+        let layer_count = canvas.save_layer(&rec);
+        canvas.restore_to_count(layer_count);
+        canvas.restore_to_count(save_count);
     }
 
     fn draw_rect_command(
         &self,
-        buffer: &mut PixelBuffer,
+        canvas: &Canvas,
         rect: ClipRect,
         paint: PainterPaint,
         clip: ClipRect,
     ) {
         match paint.style {
             PainterPaintStyle::Fill => {
-                self.fill_shape(buffer, rect, 0.0, paint.color, clip, paint.filter)
+                self.fill_shape(canvas, rect, 0.0, paint.color, clip, paint.filter)
             }
             PainterPaintStyle::Stroke(stroke) => {
-                self.stroke_rect_impl(buffer, rect, stroke.width.round() as i32, paint.color, clip);
+                self.stroke_rect_impl(canvas, rect, stroke.width.round() as i32, paint.color, clip);
             }
         }
     }
 
     fn draw_rounded_rect_command(
         &self,
-        buffer: &mut PixelBuffer,
+        canvas: &Canvas,
         rect: ClipRect,
         radius: f32,
         paint: PainterPaint,
@@ -908,11 +962,11 @@ impl SkiaPaintBackend {
     ) {
         match paint.style {
             PainterPaintStyle::Fill => {
-                self.fill_shape(buffer, rect, radius, paint.color, clip, paint.filter)
+                self.fill_shape(canvas, rect, radius, paint.color, clip, paint.filter)
             }
             PainterPaintStyle::Stroke(stroke) => {
                 self.stroke_rounded_rect_impl(
-                    buffer,
+                    canvas,
                     rect,
                     radius,
                     stroke.width.round() as i32,
@@ -925,7 +979,7 @@ impl SkiaPaintBackend {
 
     fn draw_path_command(
         &self,
-        buffer: &mut PixelBuffer,
+        canvas: &Canvas,
         path: &PainterPath,
         paint: PainterPaint,
         clip: ClipRect,
@@ -936,36 +990,34 @@ impl SkiaPaintBackend {
         if clip.width <= 0 || clip.height <= 0 {
             return;
         }
-        buffer.with_skia_canvas(|canvas| {
-            let save_count = canvas.save();
-            canvas.clip_rect(
-                Rect::from_xywh(
-                    clip.x as f32,
-                    clip.y as f32,
-                    clip.width as f32,
-                    clip.height as f32,
-                ),
-                None,
-                true,
-            );
-            let mut skia_paint = skia_paint(paint.color, true);
-            match paint.style {
-                PainterPaintStyle::Fill => {
-                    skia_paint.set_style(PaintStyle::Fill);
-                }
-                PainterPaintStyle::Stroke(stroke) => {
-                    skia_paint.set_style(PaintStyle::Stroke);
-                    skia_paint.set_stroke_width(stroke.width.max(0.0));
-                }
+        let save_count = canvas.save();
+        canvas.clip_rect(
+            Rect::from_xywh(
+                clip.x as f32,
+                clip.y as f32,
+                clip.width as f32,
+                clip.height as f32,
+            ),
+            None,
+            true,
+        );
+        let mut skia_paint = skia_paint(paint.color, true);
+        match paint.style {
+            PainterPaintStyle::Fill => {
+                skia_paint.set_style(PaintStyle::Fill);
             }
-            canvas.draw_path(&path, &skia_paint);
-            canvas.restore_to_count(save_count);
-        });
+            PainterPaintStyle::Stroke(stroke) => {
+                skia_paint.set_style(PaintStyle::Stroke);
+                skia_paint.set_stroke_width(stroke.width.max(0.0));
+            }
+        }
+        canvas.draw_path(&path, &skia_paint);
+        canvas.restore_to_count(save_count);
     }
 
     fn draw_linear_gradient_command(
         &self,
-        buffer: &mut PixelBuffer,
+        canvas: &Canvas,
         gradient: PainterLinearGradient,
         rect: ClipRect,
         radius: f32,
@@ -975,24 +1027,37 @@ impl SkiaPaintBackend {
         if clipped.width <= 0 || clipped.height <= 0 {
             return;
         }
-        buffer.with_skia_canvas(|canvas| {
-            let save_count = canvas.save();
-            canvas.clip_rect(
-                Rect::from_xywh(
-                    clipped.x as f32,
-                    clipped.y as f32,
-                    clipped.width as f32,
-                    clipped.height as f32,
-                ),
-                None,
-                false,
-            );
-            let rect = Rect::from_xywh(
-                rect.x as f32,
-                rect.y as f32,
-                rect.width as f32,
-                rect.height as f32,
-            );
+        let from_rgba = u32::from_be_bytes([
+            gradient.from.r,
+            gradient.from.g,
+            gradient.from.b,
+            gradient.from.a,
+        ]);
+        let to_rgba =
+            u32::from_be_bytes([gradient.to.r, gradient.to.g, gradient.to.b, gradient.to.a]);
+        let grad_cache_key = (from_rgba, to_rgba, rect.x, rect.y, rect.width, rect.height);
+        let save_count = canvas.save();
+        canvas.clip_rect(
+            Rect::from_xywh(
+                clipped.x as f32,
+                clipped.y as f32,
+                clipped.width as f32,
+                clipped.height as f32,
+            ),
+            None,
+            false,
+        );
+        let rect = Rect::from_xywh(
+            rect.x as f32,
+            rect.y as f32,
+            rect.width as f32,
+            rect.height as f32,
+        );
+        let cache_key = grad_cache_key;
+        let cached_shader = GRADIENT_SHADER_CACHE.with(|c| c.borrow_mut().get(&cache_key).cloned());
+        let shader = if let Some(s) = cached_shader {
+            s
+        } else {
             let colors = [
                 Color4f::from(crate::surface::buffer::skia_color(gradient.from)),
                 Color4f::from(crate::surface::buffer::skia_color(gradient.to)),
@@ -1003,7 +1068,7 @@ impl SkiaPaintBackend {
                 gradient_colors,
                 skia_gradient::Interpolation::default(),
             );
-            let Some(shader) = skia_gradient::shaders::linear_gradient(
+            let Some(new_shader) = skia_gradient::shaders::linear_gradient(
                 (
                     Point::new(rect.left(), rect.top()),
                     Point::new(rect.left(), rect.bottom()),
@@ -1014,21 +1079,23 @@ impl SkiaPaintBackend {
                 canvas.restore_to_count(save_count);
                 return;
             };
-            let mut paint = skia_safe::Paint::default();
-            paint.set_anti_alias(true);
-            paint.set_shader(shader);
-            if radius > 0.5 {
-                canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
-            } else {
-                canvas.draw_rect(rect, &paint);
-            }
-            canvas.restore_to_count(save_count);
-        });
+            GRADIENT_SHADER_CACHE.with(|c| c.borrow_mut().insert(cache_key, new_shader.clone()));
+            new_shader
+        };
+        let mut paint = skia_safe::Paint::default();
+        paint.set_anti_alias(true);
+        paint.set_shader(shader);
+        if radius > 0.5 {
+            canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+        } else {
+            canvas.draw_rect(rect, &paint);
+        }
+        canvas.restore_to_count(save_count);
     }
 
     fn draw_image_command(
         &self,
-        buffer: &mut PixelBuffer,
+        canvas: &Canvas,
         image: &PainterImage,
         rect: ClipRect,
         paint: PainterPaint,
@@ -1049,15 +1116,34 @@ impl SkiaPaintBackend {
             });
             return;
         };
-        let info = ImageInfo::new(
-            (rgba.width() as i32, rgba.height() as i32),
-            skia_safe::ColorType::RGBA8888,
-            skia_safe::AlphaType::Unpremul,
-            None,
-        );
-        let data = Data::new_copy(rgba.as_raw());
-        let Some(skia_image) = images::raster_from_data(&info, data, (rgba.width() * 4) as usize)
-        else {
+        // Use the Arc pointer as cache key: same allocation == same pixel data,
+        // so we can skip `Data::new_copy` and re-use the cached Skia image.
+        // The cache value holds a strong Arc reference so the heap allocation
+        // cannot be freed and re-used at the same address while cached.
+        let arc_ptr = Arc::as_ptr(&rgba) as usize;
+        let skia_image = SKIA_IMAGE_CACHE.with(|cache| {
+            let mut map = cache.borrow_mut();
+            if let Some(entry) = map.get(&arc_ptr) {
+                return Some(entry.image.clone());
+            }
+            let info = ImageInfo::new(
+                (rgba.width() as i32, rgba.height() as i32),
+                skia_safe::ColorType::RGBA8888,
+                skia_safe::AlphaType::Unpremul,
+                None,
+            );
+            let data = Data::new_copy(rgba.as_raw());
+            let img = images::raster_from_data(&info, data, (rgba.width() * 4) as usize)?;
+            map.insert(
+                arc_ptr,
+                CachedSkiaImage {
+                    _keep_alive: Arc::clone(&rgba),
+                    image: img.clone(),
+                },
+            );
+            Some(img)
+        });
+        let Some(skia_image) = skia_image else {
             diagnostics.push(PainterDiagnostic {
                 backend_id: self.id(),
                 feature: UnsupportedPainterFeature::Image,
@@ -1066,40 +1152,38 @@ impl SkiaPaintBackend {
             });
             return;
         };
-        buffer.with_skia_canvas(|canvas| {
-            let save_count = canvas.save();
-            canvas.clip_rect(
-                Rect::from_xywh(
-                    clipped.x as f32,
-                    clipped.y as f32,
-                    clipped.width as f32,
-                    clipped.height as f32,
-                ),
-                None,
-                false,
-            );
-            let mut skia_paint = skia_paint(paint.color, true);
-            skia_paint.set_alpha(paint.color.a);
-            let dst = Rect::from_xywh(
-                rect.x as f32,
-                rect.y as f32,
-                rect.width as f32,
-                rect.height as f32,
-            );
-            canvas.draw_image_rect_with_sampling_options(
-                skia_image,
-                None,
-                dst,
-                SamplingOptions::default(),
-                &skia_paint,
-            );
-            canvas.restore_to_count(save_count);
-        });
+        let save_count = canvas.save();
+        canvas.clip_rect(
+            Rect::from_xywh(
+                clipped.x as f32,
+                clipped.y as f32,
+                clipped.width as f32,
+                clipped.height as f32,
+            ),
+            None,
+            false,
+        );
+        let mut skia_paint = skia_paint(paint.color, true);
+        skia_paint.set_alpha(paint.color.a);
+        let dst = Rect::from_xywh(
+            rect.x as f32,
+            rect.y as f32,
+            rect.width as f32,
+            rect.height as f32,
+        );
+        canvas.draw_image_rect_with_sampling_options(
+            skia_image,
+            None,
+            dst,
+            SamplingOptions::default(),
+            &skia_paint,
+        );
+        canvas.restore_to_count(save_count);
     }
 
     fn stroke_rect_impl(
         &self,
-        buffer: &mut PixelBuffer,
+        canvas: &Canvas,
         rect: ClipRect,
         stroke_width: i32,
         color: Color,
@@ -1114,35 +1198,33 @@ impl SkiaPaintBackend {
         }
         let stroke_width = stroke_width.min(rect.width.max(0)).min(rect.height.max(0)) as f32;
         let inset = stroke_width * 0.5;
-        buffer.with_skia_canvas(|canvas| {
-            let save_count = canvas.save();
-            canvas.clip_rect(
-                Rect::from_xywh(
-                    clipped.x as f32,
-                    clipped.y as f32,
-                    clipped.width as f32,
-                    clipped.height as f32,
-                ),
-                None,
-                false,
-            );
-            let rect = Rect::from_xywh(
-                rect.x as f32 + inset,
-                rect.y as f32 + inset,
-                (rect.width as f32 - stroke_width).max(0.0),
-                (rect.height as f32 - stroke_width).max(0.0),
-            );
-            let mut paint = skia_paint(color, false);
-            paint.set_style(PaintStyle::Stroke);
-            paint.set_stroke_width(stroke_width);
-            canvas.draw_rect(rect, &paint);
-            canvas.restore_to_count(save_count);
-        });
+        let save_count = canvas.save();
+        canvas.clip_rect(
+            Rect::from_xywh(
+                clipped.x as f32,
+                clipped.y as f32,
+                clipped.width as f32,
+                clipped.height as f32,
+            ),
+            None,
+            false,
+        );
+        let rect = Rect::from_xywh(
+            rect.x as f32 + inset,
+            rect.y as f32 + inset,
+            (rect.width as f32 - stroke_width).max(0.0),
+            (rect.height as f32 - stroke_width).max(0.0),
+        );
+        let mut paint = skia_paint(color, false);
+        paint.set_style(PaintStyle::Stroke);
+        paint.set_stroke_width(stroke_width);
+        canvas.draw_rect(rect, &paint);
+        canvas.restore_to_count(save_count);
     }
 
     fn fill_shape(
         &self,
-        buffer: &mut PixelBuffer,
+        canvas: &Canvas,
         rect: ClipRect,
         radius: f32,
         color: Color,
@@ -1151,9 +1233,9 @@ impl SkiaPaintBackend {
     ) {
         if filter.is_none() {
             if radius > 0.5 {
-                self.fill_rounded_rect_impl(buffer, rect, radius, color, clip);
+                self.fill_rounded_rect_impl(canvas, rect, radius, color, clip);
             } else {
-                self.fill_rect_impl(buffer, rect, color, clip);
+                self.fill_rect_impl(canvas, rect, color, clip);
             }
             return;
         }
@@ -1169,38 +1251,36 @@ impl SkiaPaintBackend {
         if clipped.width <= 0 || clipped.height <= 0 {
             return;
         }
-        buffer.with_skia_canvas(|canvas| {
-            let save_count = canvas.save();
-            canvas.clip_rect(
-                Rect::from_xywh(
-                    clipped.x as f32,
-                    clipped.y as f32,
-                    clipped.width as f32,
-                    clipped.height as f32,
-                ),
-                None,
-                false,
-            );
-            let mut paint = skia_paint(color, true);
-            paint.set_style(PaintStyle::Fill);
-            paint.set_mask_filter(MaskFilter::blur(
-                BlurStyle::Normal,
-                blur_radius_to_sigma(filter.blur_radius),
-                Some(false),
-            ));
-            let rect = Rect::from_xywh(
-                rect.x as f32,
-                rect.y as f32,
-                rect.width as f32,
-                rect.height as f32,
-            );
-            if radius > 0.5 {
-                canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
-            } else {
-                canvas.draw_rect(rect, &paint);
-            }
-            canvas.restore_to_count(save_count);
-        });
+        let save_count = canvas.save();
+        canvas.clip_rect(
+            Rect::from_xywh(
+                clipped.x as f32,
+                clipped.y as f32,
+                clipped.width as f32,
+                clipped.height as f32,
+            ),
+            None,
+            false,
+        );
+        let mut paint = skia_paint(color, true);
+        paint.set_style(PaintStyle::Fill);
+        paint.set_mask_filter(MaskFilter::blur(
+            BlurStyle::Normal,
+            blur_radius_to_sigma(filter.blur_radius),
+            Some(false),
+        ));
+        let rect = Rect::from_xywh(
+            rect.x as f32,
+            rect.y as f32,
+            rect.width as f32,
+            rect.height as f32,
+        );
+        if radius > 0.5 {
+            canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+        } else {
+            canvas.draw_rect(rect, &paint);
+        }
+        canvas.restore_to_count(save_count);
     }
 }
 

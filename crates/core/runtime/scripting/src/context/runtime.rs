@@ -24,6 +24,12 @@ pub struct BoundInstanceCall {
     pub args: Vec<Value>,
 }
 
+#[derive(Debug, Default)]
+struct SharedInterfaceBindings {
+    bindings: HashMap<String, InterfaceResolution>,
+    generation: u64,
+}
+
 /// A script execution context for one component instance.
 ///
 /// Owns frontend script state, capability metadata, and the mlua runtime.
@@ -38,10 +44,15 @@ pub struct ScriptContext {
     lua: Lua,
     interface_catalog: InterfaceCatalog,
     pub(super) interface_bindings: HashMap<String, InterfaceResolution>,
-    shared_interface_bindings: Arc<Mutex<HashMap<String, InterfaceResolution>>>,
+    shared_interface_bindings: Arc<Mutex<SharedInterfaceBindings>>,
+    interface_bindings_generation: u64,
     /// Global names present before user script execution (stdlib + host API).
     /// Sync skips these so only user-defined globals become reactive state.
     builtin_globals: HashSet<String>,
+    /// Keys discovered in the first full globals walk after `load_script`.
+    /// Subsequent `sync_state_from_lua` calls use targeted `get` lookups
+    /// instead of iterating the entire globals table.
+    user_global_keys: Vec<String>,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     published_events: Vec<PublishedEvent>,
     shared_published_events: Arc<Mutex<Vec<PublishedEvent>>>,
@@ -96,8 +107,10 @@ impl ScriptContext {
             lua: Lua::new(),
             interface_catalog: InterfaceCatalog::default(),
             interface_bindings: HashMap::new(),
-            shared_interface_bindings: Arc::new(Mutex::new(HashMap::new())),
+            shared_interface_bindings: Arc::new(Mutex::new(SharedInterfaceBindings::default())),
+            interface_bindings_generation: 0,
             builtin_globals: HashSet::new(),
+            user_global_keys: Vec::new(),
             tracked_service_fields: Arc::new(Mutex::new(HashMap::new())),
             published_events: Vec::new(),
             shared_published_events: Arc::new(Mutex::new(Vec::new())),
@@ -130,7 +143,14 @@ impl ScriptContext {
         imports: &[ScriptInterfaceImport],
     ) -> Result<(), ScriptError> {
         self.interface_bindings.clear();
-        self.shared_interface_bindings.lock().unwrap().clear();
+        self.user_global_keys.clear();
+        {
+            let mut shared_interface_bindings = self.shared_interface_bindings.lock().unwrap();
+            shared_interface_bindings.bindings.clear();
+            shared_interface_bindings.generation =
+                shared_interface_bindings.generation.wrapping_add(1);
+            self.interface_bindings_generation = shared_interface_bindings.generation;
+        }
         self.shared_published_events.lock().unwrap().clear();
         self.shared_diagnostics.lock().unwrap().clear();
         self.shared_bound_instance_calls.lock().unwrap().clear();
@@ -215,6 +235,23 @@ impl ScriptContext {
             .get(service)
             .cloned()
             .unwrap_or_default()
+    }
+
+    pub fn tracked_service_fields_changed(
+        &self,
+        service: &str,
+        previous: Option<&Value>,
+        next: &Value,
+    ) -> bool {
+        let tracked_service_fields = self.tracked_service_fields.lock().unwrap();
+        let Some(tracked_fields) = tracked_service_fields.get(service) else {
+            return false;
+        };
+        tracked_fields.iter().any(|field| {
+            let previous_value = previous.and_then(|value| value.get(field));
+            let next_value = next.get(field);
+            previous_value != next_value
+        })
     }
 
     pub fn clear_tracked_service_fields(&self) {
@@ -935,10 +972,14 @@ impl ScriptContext {
                 )));
             }
 
-            self.shared_interface_bindings
-                .lock()
-                .unwrap()
-                .insert(import.alias.clone(), resolution.clone());
+            {
+                let mut shared_interface_bindings = self.shared_interface_bindings.lock().unwrap();
+                shared_interface_bindings
+                    .bindings
+                    .insert(import.alias.clone(), resolution.clone());
+                shared_interface_bindings.generation =
+                    shared_interface_bindings.generation.wrapping_add(1);
+            }
             let proxy = create_interface_proxy(
                 &self.lua,
                 resolution,
@@ -960,20 +1001,35 @@ impl ScriptContext {
     /// not prefixed with `__`, and not a function) is reactive state and gets
     /// synced to the template. Local variables are never synced.
     pub(super) fn sync_state_from_lua(&mut self) {
-        let user_globals: Vec<(String, LuaValue)> = self
-            .lua
-            .globals()
-            .pairs::<String, LuaValue>()
-            .filter_map(|result| result.ok())
-            .filter(|(key, value)| {
-                !key.starts_with("__")
-                    && !self.builtin_globals.contains(key)
-                    && !matches!(value, LuaValue::Function(_))
-            })
-            .collect();
-        for (name, lua_value) in user_globals {
-            if let Ok(value) = self.lua.from_value::<Value>(lua_value) {
-                self.state.set(name, value);
+        if self.user_global_keys.is_empty() {
+            // Full scan: discover all user globals (runs once per load_script).
+            let user_globals: Vec<(String, LuaValue)> = self
+                .lua
+                .globals()
+                .pairs::<String, LuaValue>()
+                .filter_map(|result| result.ok())
+                .filter(|(key, value)| {
+                    !key.starts_with("__")
+                        && !self.builtin_globals.contains(key)
+                        && !matches!(value, LuaValue::Function(_))
+                })
+                .collect();
+            for (name, lua_value) in user_globals {
+                if let Ok(value) = self.lua.from_value::<Value>(lua_value) {
+                    self.state.set(name.clone(), value);
+                    self.user_global_keys.push(name);
+                }
+            }
+        } else {
+            // Fast path: only check known user global keys.
+            for key in &self.user_global_keys {
+                if let Ok(lua_value) = self.lua.globals().get::<LuaValue>(key.as_str()) {
+                    if !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_)) {
+                        if let Ok(value) = self.lua.from_value::<Value>(lua_value) {
+                            self.state.set(key.clone(), value);
+                        }
+                    }
+                }
             }
         }
 
@@ -1023,7 +1079,11 @@ impl ScriptContext {
                 self.state.dirty = true;
             }
         }
-        self.interface_bindings = self.shared_interface_bindings.lock().unwrap().clone();
+        let shared_interface_bindings = self.shared_interface_bindings.lock().unwrap();
+        if self.interface_bindings_generation != shared_interface_bindings.generation {
+            self.interface_bindings = shared_interface_bindings.bindings.clone();
+            self.interface_bindings_generation = shared_interface_bindings.generation;
+        }
     }
 
     fn sync_module_exports_from_lua(&mut self) {

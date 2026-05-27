@@ -1,6 +1,14 @@
 use super::BackendScriptError;
 use mlua::{Lua, LuaSerdeExt, Value as LuaValue};
 use serde_json::Value as JsonValue;
+use std::sync::OnceLock;
+
+fn ok_command_result() -> JsonValue {
+    static OK_RESULT: OnceLock<JsonValue> = OnceLock::new();
+    OK_RESULT
+        .get_or_init(|| serde_json::json!({ "ok": true }))
+        .clone()
+}
 
 #[derive(Debug, Clone)]
 pub struct BackendCommandOutcome {
@@ -15,7 +23,7 @@ pub(super) fn command_result_from_lua(
     value: LuaValue,
 ) -> Result<JsonValue, BackendScriptError> {
     if matches!(value, LuaValue::Nil) {
-        return Ok(serde_json::json!({ "ok": true }));
+        return Ok(ok_command_result());
     }
 
     lua.from_value::<JsonValue>(value).map_err(|err| {
@@ -27,8 +35,8 @@ pub(super) fn command_result_from_lua(
 }
 
 pub(super) fn command_error_result(message: impl Into<String>) -> JsonValue {
-    serde_json::json!({
-        "ok": false,
-        "error": message.into(),
-    })
+    let mut result = serde_json::Map::with_capacity(2);
+    result.insert("ok".to_string(), JsonValue::Bool(false));
+    result.insert("error".to_string(), JsonValue::String(message.into()));
+    JsonValue::Object(result)
 }

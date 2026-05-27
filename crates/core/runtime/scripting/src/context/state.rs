@@ -1,6 +1,7 @@
 use mesh_core_elements::VariableStore;
 use mesh_core_locale::LocaleEngine;
-use serde_json::Value;
+use serde_json::{Map, Value};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -20,6 +21,7 @@ pub struct ScriptState {
     /// actually changes. Used by callers to skip expensive re-serialization
     /// when state is provably unchanged since the last flush.
     snapshot_generation: u64,
+    cached_snapshot: RefCell<Option<(u64, Value)>>,
 }
 
 impl ScriptState {
@@ -29,6 +31,7 @@ impl ScriptState {
             dirty: false,
             proxies: HashMap::new(),
             snapshot_generation: 0,
+            cached_snapshot: RefCell::new(None),
         }
     }
 
@@ -69,6 +72,7 @@ impl ScriptState {
         self.variables.insert(name, value);
         self.dirty = true;
         self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
+        self.cached_snapshot.get_mut().take();
     }
 
     /// Set a host-maintained variable without requesting a component rebuild.
@@ -76,7 +80,16 @@ impl ScriptState {
     /// Used for render-derived values, such as element layout metrics, that
     /// should be visible to scripts but should not themselves cause a repaint.
     pub fn set_host_value(&mut self, name: impl Into<String>, value: Value) {
-        self.variables.insert(name.into(), value);
+        let name = name.into();
+        if self
+            .variables
+            .get(&name)
+            .is_some_and(|previous| reactive_values_equal(previous, &value))
+        {
+            return;
+        }
+        self.variables.insert(name, value);
+        self.cached_snapshot.get_mut().take();
     }
 
     /// Check if any variable changed since last tree build.
@@ -98,11 +111,16 @@ impl ScriptState {
     ) {
         let name = name.into();
         self.proxies.insert(name, Proxy { getter, setter });
+        self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
+        self.cached_snapshot.get_mut().take();
     }
 
     /// Remove a previously-registered proxy.
     pub fn unregister_proxy(&mut self, name: &str) {
-        self.proxies.remove(name);
+        if self.proxies.remove(name).is_some() {
+            self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
+            self.cached_snapshot.get_mut().take();
+        }
     }
 
     /// Check if a proxy exists for the given name.
@@ -112,11 +130,32 @@ impl ScriptState {
 
     /// Return a JSON object snapshot of all visible state variables.
     pub fn snapshot(&self) -> Value {
-        let object = self
-            .keys()
-            .into_iter()
-            .filter_map(|key| self.get(&key).map(|value| (key, value)))
-            .collect();
+        if self.proxies.is_empty() {
+            let generation = self.snapshot_generation;
+            if let Some((cached_generation, cached_snapshot)) =
+                self.cached_snapshot.borrow().as_ref()
+                && *cached_generation == generation
+            {
+                return cached_snapshot.clone();
+            }
+
+            let snapshot = Value::Object(
+                self.variables
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            );
+            *self.cached_snapshot.borrow_mut() = Some((generation, snapshot.clone()));
+            return snapshot;
+        }
+
+        let mut object = Map::with_capacity(self.variables.len() + self.proxies.len());
+        for (key, value) in &self.variables {
+            object.insert(key.clone(), value.clone());
+        }
+        for (key, proxy) in &self.proxies {
+            object.insert(key.clone(), (proxy.getter)());
+        }
         Value::Object(object)
     }
 }
@@ -168,6 +207,7 @@ impl Clone for ScriptState {
             dirty: self.dirty,
             proxies: HashMap::new(), // proxies are host-registered and not cloned
             snapshot_generation: self.snapshot_generation,
+            cached_snapshot: RefCell::new(None),
         }
     }
 }

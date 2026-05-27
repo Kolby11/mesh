@@ -47,8 +47,7 @@ impl Shell {
         if self.backend_runtimes.get(&interface).is_some_and(|slot| {
             slot.provider_id != source_module && !shell_authoritative_theme_update
         }) || self
-            .backend_runtime_statuses
-            .get(&(interface.clone(), source_module.clone()))
+            .backend_runtime_status(&interface, &source_module)
             .is_some_and(|entry| {
                 matches!(
                     entry.status,
@@ -104,8 +103,7 @@ impl Shell {
                 return false;
             }
         } else if self
-            .backend_runtime_statuses
-            .get(&(interface.clone(), source_module.clone()))
+            .backend_runtime_status(&interface, source_module)
             .is_some_and(|entry| {
                 matches!(
                     entry.status,
@@ -122,21 +120,16 @@ impl Shell {
             );
             return false;
         }
-        if self
-            .latest_service_state
-            .get(&interface)
-            .is_some_and(|latest| latest.provider_id == *source_module && latest.state.eq(payload))
+        if let Some(latest) = self.latest_service_state.get(&interface)
+            && latest.provider_id == *source_module
+            && latest.state.eq(payload)
         {
             return false;
         }
         self.validate_service_state_shape(&interface, source_module, &payload);
         self.latest_service_state.insert(
             interface.clone(),
-            LatestServiceState {
-                interface,
-                provider_id: source_module.clone(),
-                state: payload.clone(),
-            },
+            LatestServiceState::new(interface, source_module.clone(), payload.clone()),
         );
         true
     }
@@ -162,11 +155,7 @@ impl Shell {
         payload["muted"] = serde_json::json!(muted);
         self.latest_service_state.insert(
             interface.clone(),
-            LatestServiceState {
-                interface: interface.clone(),
-                provider_id: provider_id.clone(),
-                state: payload.clone(),
-            },
+            LatestServiceState::new(interface.clone(), provider_id.clone(), payload.clone()),
         );
         let _ = self.deliver_service_event(&ServiceEvent::Updated {
             service: interface,
@@ -292,18 +281,20 @@ impl Shell {
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
-        let events = self
-            .latest_service_state
-            .values()
-            .map(|latest| ServiceEvent::Updated {
-                service: latest.interface.clone(),
-                source_module: latest.provider_id.clone(),
-                payload: latest.state.clone(),
-            })
-            .collect::<Vec<_>>();
-        for event in events {
-            requests.extend(self.broadcast_service_event(event)?);
-        }
+        let latest_service_state = std::mem::take(&mut self.latest_service_state);
+        let replay_result: Result<(), ShellRunError> = (|| {
+            for latest in latest_service_state.values() {
+                let event = ServiceEvent::Updated {
+                    service: latest.interface.clone(),
+                    source_module: latest.provider_id.clone(),
+                    payload: latest.state.clone(),
+                };
+                requests.extend(self.deliver_service_event(&event)?);
+            }
+            Ok(())
+        })();
+        self.latest_service_state = latest_service_state;
+        replay_result?;
         Ok(requests)
     }
 }

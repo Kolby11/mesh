@@ -369,6 +369,7 @@ pub struct Shell {
     module_dirs: Vec<PathBuf>,
     core: ShellCoreState,
     components: Vec<ComponentRuntime>,
+    components_want_render: bool,
     component_by_surface: HashMap<SurfaceId, usize>,
     surfaces: HashMap<SurfaceId, StubSurface>,
     clipboard: Box<dyn ClipboardWriter>,
@@ -387,12 +388,14 @@ pub struct Shell {
     transfer_owned_keyboard_modes: HashMap<SurfaceId, mesh_core_wayland::KeyboardMode>,
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,
-    backend_runtime_statuses: HashMap<(String, String), BackendRuntimeStatusEntry>,
+    backend_runtime_statuses: BackendRuntimeStatusMap,
     latest_service_state: HashMap<String, LatestServiceState>,
     pending_audio_muted: Option<bool>,
     command_throttle: HashMap<(String, String), CommandThrottleState>,
     profiling: runtime::profiling::ProfilingRuntimeState,
 }
+
+type BackendRuntimeStatusMap = HashMap<String, HashMap<String, BackendRuntimeStatusEntry>>;
 
 #[derive(Debug, Clone)]
 struct BackendRuntimeSlot {

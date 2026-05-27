@@ -1,4 +1,4 @@
-use mesh_core_elements::style::{Display, FlexDirection};
+use mesh_core_elements::style::{AlignSelf, Display, FlexDirection};
 use mesh_core_elements::{ComputedStyle, Dimension, StyleContext};
 
 #[derive(Clone, Copy, Default)]
@@ -113,10 +113,18 @@ fn resolve_dimension_for_context(dimension: Dimension, available: f32) -> f32 {
 pub fn merge_missing_defaults(tag: &str, style: &mut ComputedStyle) {
     let defaults = default_leaf_style(tag);
 
-    if tag == "icon" {
-        style.background_color = mesh_core_elements::Color::TRANSPARENT;
-        style.border_radius = mesh_core_elements::Corners::zero();
-        style.padding = mesh_core_elements::Edges::zero();
+    match tag {
+        "icon" => {
+            style.background_color = mesh_core_elements::Color::TRANSPARENT;
+            style.border_radius = mesh_core_elements::Corners::zero();
+            style.padding = mesh_core_elements::Edges::zero();
+        }
+        "span" => {
+            style.background_color = mesh_core_elements::Color::TRANSPARENT;
+            style.padding = mesh_core_elements::Edges::zero();
+            style.align_self = AlignSelf::Start;
+        }
+        _ => {}
     }
 
     if style.background_color.a == 0 && defaults.background_color.a > 0 {
@@ -147,8 +155,11 @@ pub fn merge_missing_defaults(tag: &str, style: &mut ComputedStyle) {
     if style.font_size == ComputedStyle::default().font_size {
         style.font_size = defaults.font_size;
     }
-    if (tag == "column" || tag == "row") && style.direction != defaults.direction {
-        style.direction = defaults.direction;
+    match tag {
+        "column" | "row" if style.direction != defaults.direction => {
+            style.direction = defaults.direction;
+        }
+        _ => {}
     }
 }
 
@@ -255,6 +266,15 @@ fn default_leaf_style(tag: &str) -> ComputedStyle {
             style
         }
         "text" => text_style(),
+        "span" => {
+            let mut style = ComputedStyle::default();
+            style.background_color = mesh_core_elements::Color::TRANSPARENT;
+            style.align_self = AlignSelf::Start;
+            style.direction = FlexDirection::Row;
+            style.padding = mesh_core_elements::Edges::zero();
+            style.gap = 0.0;
+            style
+        }
         _ => container_style("column"),
     };
 

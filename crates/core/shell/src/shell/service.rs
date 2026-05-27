@@ -1,6 +1,7 @@
 use super::types::CoreRequest;
 use mesh_core_capability::Capability;
 use mesh_core_scripting::{PublishedEvent, ScriptState};
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -69,7 +70,7 @@ pub(super) fn apply_service_update(
     has_read: bool,
     service: &str,
     source_module: &str,
-    payload: serde_json::Value,
+    payload: impl Borrow<serde_json::Value>,
 ) {
     let service_name = service_name_from_interface(service);
     if has_read {
@@ -77,7 +78,7 @@ pub(super) fn apply_service_update(
             "last_service_update",
             serde_json::json!({ "name": service_name, "source_module": source_module }),
         );
-        state.set(service_name, payload);
+        state.set(service_name, payload.borrow().clone());
     }
 }
 

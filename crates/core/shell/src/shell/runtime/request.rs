@@ -255,8 +255,7 @@ impl Shell {
                         true
                     })
                     .unwrap_or(false);
-                let target_runtime_found =
-                    self.component_index_for_surface(&surface_id).is_some();
+                let target_runtime_found = self.component_index_for_surface(&surface_id).is_some();
                 tracing::info!(
                     "apply_request ActivatePopover trigger_runtime_found={trigger_runtime_found} target_runtime_found={target_runtime_found}"
                 );

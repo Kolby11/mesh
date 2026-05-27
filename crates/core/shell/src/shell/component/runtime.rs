@@ -177,7 +177,7 @@ impl FrontendSurfaceComponent {
                 true,
                 "mesh.locale",
                 "@mesh/shell",
-                payload.clone(),
+                &payload,
             );
             script_ctx.apply_service_payload("locale", &payload);
         }

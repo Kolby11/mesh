@@ -27,6 +27,7 @@
 /// mesh.log.error(msg)
 /// ```
 use mesh_core_capability::{Capability, CapabilitySet};
+use std::collections::HashSet;
 // The runtime is interface-first now; mesh.services remains only as a
 // compatibility alias for older scripts.
 
@@ -48,23 +49,20 @@ impl HostApiManifest {
         let has_locale_read = caps.is_granted(&Capability::new("locale.read"));
         let has_locale_write = caps.is_granted(&Capability::new("locale.write"));
 
-        // Collect service capabilities (anything matching service.*.read or service.*.control).
-        let service_capabilities: Vec<String> = caps
-            .granted()
-            .iter()
-            .filter(|c| c.id().starts_with("service."))
-            .map(|c| c.id().to_string())
-            .collect();
-        let interface_capabilities = service_capabilities
-            .iter()
-            .map(|capability| {
-                capability
-                    .strip_prefix("service.")
-                    .and_then(|value| value.split('.').next())
-                    .map(|name| format!("mesh.{name}"))
-                    .unwrap_or_else(|| capability.clone())
-            })
-            .collect();
+        // Collect service capabilities and their docs-era interface aliases in one pass.
+        let mut service_capabilities = Vec::new();
+        let mut interface_capabilities = Vec::new();
+        let mut seen_interfaces = HashSet::new();
+        for cap in caps.granted() {
+            let id = cap.id();
+            let Some(service_name) = service_name_from_capability(id) else {
+                continue;
+            };
+            service_capabilities.push(id.to_string());
+            if seen_interfaces.insert(service_name.to_string()) {
+                interface_capabilities.push(format!("mesh.{service_name}"));
+            }
+        }
 
         Self {
             has_theme_read,
@@ -90,15 +88,12 @@ impl InterfaceProxy {
     /// E.g., if the module has `service.audio.read`, this returns `["mesh.audio"]`.
     pub fn available_interfaces(caps: &CapabilitySet) -> Vec<String> {
         let mut interfaces = Vec::new();
+        let mut seen = HashSet::new();
         for cap in caps.granted() {
-            let id = cap.id();
-            if let Some(rest) = id.strip_prefix("service.") {
-                if let Some(service_name) = rest.split('.').next() {
-                    let interface = format!("mesh.{service_name}");
-                    if !interfaces.contains(&interface) {
-                        interfaces.push(interface);
-                    }
-                }
+            if let Some(service_name) = service_name_from_capability(cap.id())
+                && seen.insert(service_name.to_string())
+            {
+                interfaces.push(format!("mesh.{service_name}"));
             }
         }
         interfaces
@@ -129,10 +124,32 @@ impl InterfaceProxy {
                     .split('.')
                     .next_back()
                     .unwrap_or(other);
-                caps.is_granted(&Capability::new(format!("service.{short}.read")))
-                    || caps.is_granted(&Capability::new(format!("service.{short}.control")))
+                has_service_capability(caps, short, "read")
+                    || has_service_capability(caps, short, "control")
                     || !other.starts_with("mesh.")
             }
         }
     }
+}
+
+fn service_name_from_capability(capability: &str) -> Option<&str> {
+    let rest = capability.strip_prefix("service.")?;
+    let (service_name, action) = rest.rsplit_once('.')?;
+    matches!(action, "read" | "control").then_some(service_name)
+}
+
+fn has_service_capability(caps: &CapabilitySet, service_name: &str, action: &str) -> bool {
+    caps.granted()
+        .iter()
+        .any(|cap| service_capability_matches(cap.id(), service_name, action))
+}
+
+fn service_capability_matches(capability: &str, service_name: &str, action: &str) -> bool {
+    let Some(rest) = capability.strip_prefix("service.") else {
+        return false;
+    };
+    let Some((candidate_service, candidate_action)) = rest.rsplit_once('.') else {
+        return false;
+    };
+    candidate_service == service_name && candidate_action == action
 }

@@ -58,6 +58,7 @@ pub struct LayerShellBackend {
 }
 
 const SHM_BUFFER_POOL_DEPTH: usize = 2;
+const SHM_BUFFER_POOL_MAX: usize = 3;
 
 #[derive(Debug)]
 pub(super) struct SurfaceShmBuffer {
@@ -191,6 +192,13 @@ impl SurfaceEntry {
                 // stale pixels outside `frame_damage`.
                 return Ok((index, copy_damage));
             }
+        }
+
+        if self.shm_buffers.len() >= SHM_BUFFER_POOL_MAX {
+            return Err(PresentationError::BufferAlloc(format!(
+                "all {SHM_BUFFER_POOL_MAX} SHM buffers are busy for {}x{} surface",
+                width, height
+            )));
         }
 
         let index = self.shm_buffers.len();

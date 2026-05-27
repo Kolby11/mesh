@@ -225,12 +225,7 @@ impl FrontendSurfaceComponent {
             // invalidation layout-stable unless a caller explicitly requests
             // layout.
             if preserve_surface_root {
-                resolver.restyle_subtree_children_cached(
-                    tree,
-                    restyle_rules,
-                    context,
-                    index_cache,
-                );
+                resolver.restyle_subtree_children_cached(tree, restyle_rules, context, index_cache);
             } else {
                 resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
             }
@@ -238,12 +233,7 @@ impl FrontendSurfaceComponent {
             reused_retained_layout = !dirty_types.contains(ComponentDirtyFlags::LAYOUT);
         } else {
             if preserve_surface_root {
-                resolver.restyle_subtree_children_cached(
-                    tree,
-                    restyle_rules,
-                    context,
-                    index_cache,
-                );
+                resolver.restyle_subtree_children_cached(tree, restyle_rules, context, index_cache);
             } else {
                 resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
             }

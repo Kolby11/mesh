@@ -4935,8 +4935,7 @@ fn backend_lifecycle_replacement_records_stopped_after_transient_poll_failure() 
 
     assert_eq!(
         shell
-            .backend_runtime_statuses
-            .get(&("mesh.audio".to_string(), "@mesh/old-audio".to_string()))
+            .backend_runtime_status("mesh.audio", "@mesh/old-audio")
             .map(|entry| entry.status.as_str()),
         Some("stopped")
     );
@@ -4961,8 +4960,7 @@ fn backend_lifecycle_init_failure_removes_command_handler() {
     assert!(!shell.backend_runtimes.contains_key("mesh.audio"));
     assert_eq!(
         shell
-            .backend_runtime_statuses
-            .get(&("mesh.audio".to_string(), "@mesh/pipewire-audio".to_string()))
+            .backend_runtime_status("mesh.audio", "@mesh/pipewire-audio")
             .map(|entry| entry.status.as_str()),
         Some("init_failed")
     );
@@ -4996,8 +4994,7 @@ fn stale_backend_lifecycle_event_does_not_stop_current_provider() {
     );
     assert_eq!(
         shell
-            .backend_runtime_statuses
-            .get(&("mesh.audio".to_string(), "@mesh/old-audio".to_string()))
+            .backend_runtime_status("mesh.audio", "@mesh/old-audio")
             .map(|entry| entry.status.as_str()),
         Some("failed")
     );
@@ -5027,8 +5024,7 @@ fn backend_lifecycle_failed_runtime_does_not_start_fallback_provider() {
     );
     assert_eq!(
         shell
-            .backend_runtime_statuses
-            .get(&("mesh.audio".to_string(), "@mesh/pipewire-audio".to_string()))
+            .backend_runtime_status("mesh.audio", "@mesh/pipewire-audio")
             .map(|entry| entry.status.as_str()),
         Some("failed")
     );
@@ -5104,13 +5100,8 @@ fn backend_runtime_status_records_provider_identity_for_failures() {
     );
 
     // The runtime status map must record both provider identity and status.
-    let key = (
-        "mesh.network".to_string(),
-        "@mesh/networkmanager-network".to_string(),
-    );
     let entry = shell
-        .backend_runtime_statuses
-        .get(&key)
+        .backend_runtime_status("mesh.network", "@mesh/networkmanager-network")
         .expect("runtime status must be recorded for the failed provider");
     assert_eq!(
         entry.provider_id, "@mesh/networkmanager-network",
@@ -5141,7 +5132,9 @@ fn backend_runtime_status_records_provider_identity_for_failures() {
         BackendRuntimeStatus::InitFailed,
         "still failing".to_string(),
     );
-    let entry = shell.backend_runtime_statuses.get(&key).unwrap();
+    let entry = shell
+        .backend_runtime_status("mesh.network", "@mesh/networkmanager-network")
+        .unwrap();
     assert_eq!(
         entry.failure_count, 2,
         "repeated failure must increment failure_count"

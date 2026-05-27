@@ -335,7 +335,10 @@ fn detect_supported_axes(font_path: &Path) -> SupportedAxes {
     if let Some(freshness) = freshness {
         let cache = SUPPORTED_AXES_CACHE.get_or_init(|| Mutex::new(SupportedAxesCache::default()));
         if let Ok(mut guard) = cache.lock() {
-            guard.insert(font_path.to_path_buf(), CachedSupportedAxes { freshness, axes });
+            guard.insert(
+                font_path.to_path_buf(),
+                CachedSupportedAxes { freshness, axes },
+            );
         }
     }
     axes

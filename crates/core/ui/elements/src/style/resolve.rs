@@ -3,12 +3,21 @@ use super::*;
 use crate::tree::ElementState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use mesh_core_theme::{Theme, TokenValue};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 fn empty_variables() -> &'static HashMap<String, StyleValue> {
     static EMPTY: OnceLock<HashMap<String, StyleValue>> = OnceLock::new();
     EMPTY.get_or_init(HashMap::new)
+}
+
+// Reusable scratch HashMap for CSS custom-property variable resolution.
+// Cleared at the start of each resolve call to avoid per-node allocations
+// while retaining allocated capacity across calls on the same thread.
+thread_local! {
+    static VARIABLE_SCRATCH: RefCell<HashMap<String, StyleValue>> =
+        RefCell::new(HashMap::new());
 }
 
 /// Resolves style values against a theme's design tokens.
@@ -24,6 +33,7 @@ pub struct StyleNodeAttrs {
     key: Option<String>,
     module_id: Option<String>,
     state: ElementState,
+    state_mask: u32,
 }
 
 impl StyleNodeAttrs {
@@ -41,6 +51,7 @@ impl StyleNodeAttrs {
             key: None,
             module_id: None,
             state,
+            state_mask: active_state_mask(state),
         }
     }
 
@@ -57,6 +68,7 @@ impl StyleNodeAttrs {
             key: node.attributes.get("_mesh_key").cloned(),
             module_id: node.attributes.get("_mesh_module_id").cloned(),
             state: node.state,
+            state_mask: active_state_mask(node.state),
         }
     }
 
@@ -85,7 +97,7 @@ pub struct StyleRuleIndex {
     tag: HashMap<String, Vec<usize>>,
     class: HashMap<String, Vec<usize>>,
     id: HashMap<String, Vec<usize>>,
-    state: HashMap<String, Vec<usize>>,
+    state: Vec<(u32, Vec<usize>)>,
     fallback: Vec<usize>,
 }
 
@@ -97,7 +109,7 @@ impl StyleRuleIndex {
             tag: HashMap::new(),
             class: HashMap::new(),
             id: HashMap::new(),
-            state: HashMap::new(),
+            state: Vec::new(),
             fallback: Vec::new(),
         };
         for (idx, rule) in rules.iter().enumerate() {
@@ -132,8 +144,8 @@ impl StyleRuleIndex {
                 ids.extend_from_slice(id_ids);
             }
         }
-        for state_name in active_state_names(attrs.state) {
-            if let Some(state_ids) = self.state.get(state_name) {
+        for (state_bit, state_ids) in &self.state {
+            if attrs.state_mask & *state_bit != 0 {
                 ids.extend_from_slice(state_ids);
             }
         }
@@ -150,13 +162,24 @@ impl StyleRuleIndex {
             Some(SelectorIndexKey::Class(class)) => {
                 self.class.entry(class.to_string()).or_default().push(idx)
             }
-            Some(SelectorIndexKey::Id(id)) => {
-                self.id.entry(id.to_string()).or_default().push(idx)
-            }
-            Some(SelectorIndexKey::State(state)) => {
-                self.state.entry(state.to_string()).or_default().push(idx)
-            }
+            Some(SelectorIndexKey::Id(id)) => self.id.entry(id.to_string()).or_default().push(idx),
+            Some(SelectorIndexKey::State(state)) => self.index_state_selector(idx, state),
             None => self.fallback.push(idx),
+        }
+    }
+
+    fn index_state_selector(&mut self, idx: usize, state: &str) {
+        let Some(state_bit) = state_name_bit(state) else {
+            return;
+        };
+        if let Some((_, ids)) = self
+            .state
+            .iter_mut()
+            .find(|(existing_bit, _)| *existing_bit == state_bit)
+        {
+            ids.push(idx);
+        } else {
+            self.state.push((state_bit, vec![idx]));
         }
     }
 }
@@ -297,8 +320,8 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
         state: ElementState,
     ) -> ComputedStyle {
-        self.resolve_node_style_with_diagnostics(rules, tag, classes, id, context, state)
-            .0
+        let attrs = StyleNodeAttrs::new(tag, classes, id, state);
+        self.resolve_node_style_with_attrs_no_diagnostics(rules, &attrs, context)
     }
 
     pub fn resolve_node_style_for_module(
@@ -311,10 +334,9 @@ impl<'a> StyleResolver<'a> {
         state: ElementState,
         module_id: Option<&str>,
     ) -> ComputedStyle {
-        self.resolve_node_style_with_diagnostics_for_module(
-            rules, tag, classes, id, context, state, module_id,
-        )
-        .0
+        let mut attrs = StyleNodeAttrs::new(tag, classes, id, state);
+        attrs.module_id = module_id.map(str::to_string);
+        self.resolve_node_style_with_attrs_no_diagnostics(rules, &attrs, context)
     }
 
     pub fn resolve_node_style_with_diagnostics(
@@ -354,6 +376,52 @@ impl<'a> StyleResolver<'a> {
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
         let index = StyleRuleIndex::new(rules);
         self.resolve_node_style_with_attrs_indexed(rules, &index, attrs, context)
+    }
+
+    fn resolve_node_style_with_attrs_no_diagnostics(
+        &self,
+        rules: &[StyleRule],
+        attrs: &StyleNodeAttrs,
+        context: StyleContext,
+    ) -> ComputedStyle {
+        let index = StyleRuleIndex::new(rules);
+        self.resolve_node_style_with_attrs_indexed_no_diagnostics(rules, &index, attrs, context)
+    }
+
+    fn resolve_node_style_with_attrs_indexed_no_diagnostics(
+        &self,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
+        attrs: &StyleNodeAttrs,
+        context: StyleContext,
+    ) -> ComputedStyle {
+        let mut style = ComputedStyle::default();
+
+        if attrs.tag == "column" {
+            style.direction = FlexDirection::Column;
+        }
+
+        VARIABLE_SCRATCH.with(|scratch| {
+            let mut variables = scratch.borrow_mut();
+            variables.clear();
+
+            self.apply_theme_component_defaults_no_diagnostics(
+                &mut style,
+                &attrs.tag,
+                attrs.module_id(),
+                &mut variables,
+            );
+
+            for rule in index.candidate_rules(rules, attrs) {
+                if rule_matches_attrs(rule, attrs, context) {
+                    for decl in &rule.declarations {
+                        self.apply_declaration_no_diagnostics(&mut style, decl, &mut variables);
+                    }
+                }
+            }
+        });
+
+        style
     }
 
     fn resolve_node_style_with_attrs_indexed(
@@ -480,8 +548,7 @@ impl<'a> StyleResolver<'a> {
     ) {
         let attrs = StyleNodeAttrs::from_node(node);
         node.computed_style = self
-            .resolve_node_style_with_attrs_indexed(rules, index, &attrs, context)
-            .0;
+            .resolve_node_style_with_attrs_indexed_no_diagnostics(rules, index, &attrs, context);
         if let Some(parent_style) = parent_style {
             inherit_retained_text_style(&mut node.computed_style, parent_style);
         }
@@ -503,6 +570,18 @@ impl<'a> StyleResolver<'a> {
         self.restyle_subtree_for_keys_with_index(node, rules, &index, context, target_keys);
     }
 
+    pub fn restyle_subtree_for_keys_cached(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        context: StyleContext,
+        index: &mut Option<StyleRuleIndex>,
+        target_keys: &std::collections::HashSet<String>,
+    ) {
+        let idx = ensure_index(rules, index);
+        self.restyle_subtree_for_keys_with_index(node, rules, idx, context, target_keys);
+    }
+
     fn restyle_subtree_for_keys_with_index(
         &self,
         node: &mut crate::tree::WidgetNode,
@@ -517,9 +596,9 @@ impl<'a> StyleResolver<'a> {
             .is_some_and(|key| target_keys.contains(key))
         {
             let attrs = StyleNodeAttrs::from_node(node);
-            node.computed_style = self
-                .resolve_node_style_with_attrs_indexed(rules, index, &attrs, context)
-                .0;
+            node.computed_style = self.resolve_node_style_with_attrs_indexed_no_diagnostics(
+                rules, index, &attrs, context,
+            );
         }
 
         for child in &mut node.children {
@@ -551,6 +630,29 @@ impl<'a> StyleResolver<'a> {
         }
     }
 
+    fn apply_theme_component_defaults_no_diagnostics(
+        &self,
+        style: &mut ComputedStyle,
+        tag: &str,
+        module_id: Option<&str>,
+        variables: &mut HashMap<String, StyleValue>,
+    ) {
+        if let Some(defaults) = self.theme.component_defaults("base") {
+            self.apply_theme_defaults_map_no_diagnostics(style, defaults, variables);
+        }
+        if let Some(defaults) = self.theme.component_defaults(tag) {
+            self.apply_theme_defaults_map_no_diagnostics(style, defaults, variables);
+        }
+        if let Some(module_id) = module_id {
+            if let Some(defaults) = self.theme.module_component_defaults(module_id, "base") {
+                self.apply_theme_defaults_map_no_diagnostics(style, defaults, variables);
+            }
+            if let Some(defaults) = self.theme.module_component_defaults(module_id, tag) {
+                self.apply_theme_defaults_map_no_diagnostics(style, defaults, variables);
+            }
+        }
+    }
+
     fn apply_theme_defaults_map(
         &self,
         style: &mut ComputedStyle,
@@ -572,6 +674,55 @@ impl<'a> StyleResolver<'a> {
                 variables,
             );
         }
+    }
+
+    fn apply_theme_defaults_map_no_diagnostics(
+        &self,
+        style: &mut ComputedStyle,
+        defaults: &mesh_core_theme::ComponentDefaults,
+        variables: &mut HashMap<String, StyleValue>,
+    ) {
+        for (property, value) in defaults {
+            let declaration = Declaration {
+                property: property.clone(),
+                value: classify_theme_style_value(value),
+            };
+            self.apply_declaration_no_diagnostics(style, &declaration, variables);
+        }
+    }
+
+    fn apply_declaration_no_diagnostics(
+        &self,
+        style: &mut ComputedStyle,
+        decl: &Declaration,
+        variables: &mut HashMap<String, StyleValue>,
+    ) {
+        if decl.property.starts_with("--") {
+            variables.insert(decl.property.clone(), decl.value.clone());
+            return;
+        }
+        if let Some(status) = style_profile_status(&decl.property)
+            && !matches!(status, StyleProfileStatus::Implemented)
+        {
+            return;
+        }
+        if !is_supported_css_property(&decl.property) {
+            return;
+        }
+        if is_strict_animation_property(&decl.property)
+            && self
+                .validate_animation_value_with_variables(&decl.value, variables)
+                .is_err()
+        {
+            return;
+        }
+        if decl.property == "background-image" {
+            let resolved = self.resolve_value_with_variables(&decl.value, variables);
+            if !is_supported_background_image(&resolved) {
+                return;
+            }
+        }
+        apply_declaration(style, &decl.property, &decl.value, self, variables);
     }
 
     fn apply_declaration_with_diagnostics(
@@ -772,26 +923,81 @@ fn selector_index_key(selector: &Selector) -> Option<SelectorIndexKey<'_>> {
     }
 }
 
-fn active_state_names(state: ElementState) -> impl Iterator<Item = &'static str> {
-    [
-        (state.hovered, "hover"),
-        (state.hovered, "hovered"),
-        (state.focused, "focus"),
-        (state.focused, "focused"),
-        (state.active, "active"),
-        (state.disabled, "disabled"),
-        (state.read_only, "readonly"),
-        (state.required, "required"),
-        (state.selected, "selected"),
-        (state.checked, "checked"),
-        (state.expanded, "expanded"),
-        (state.pressed, "pressed"),
-        (state.invalid, "invalid"),
-        (state.value, "value"),
-        (state.focus_visible, "focus-visible"),
-    ]
-    .into_iter()
-    .filter_map(|(active, name)| active.then_some(name))
+const STATE_HOVERED: u32 = 1 << 0;
+const STATE_FOCUSED: u32 = 1 << 1;
+const STATE_ACTIVE: u32 = 1 << 2;
+const STATE_DISABLED: u32 = 1 << 3;
+const STATE_READ_ONLY: u32 = 1 << 4;
+const STATE_REQUIRED: u32 = 1 << 5;
+const STATE_SELECTED: u32 = 1 << 6;
+const STATE_CHECKED: u32 = 1 << 7;
+const STATE_EXPANDED: u32 = 1 << 8;
+const STATE_PRESSED: u32 = 1 << 9;
+const STATE_INVALID: u32 = 1 << 10;
+const STATE_VALUE: u32 = 1 << 11;
+const STATE_FOCUS_VISIBLE: u32 = 1 << 12;
+
+fn active_state_mask(state: ElementState) -> u32 {
+    let mut mask = 0;
+    if state.hovered {
+        mask |= STATE_HOVERED;
+    }
+    if state.focused {
+        mask |= STATE_FOCUSED;
+    }
+    if state.active {
+        mask |= STATE_ACTIVE;
+    }
+    if state.disabled {
+        mask |= STATE_DISABLED;
+    }
+    if state.read_only {
+        mask |= STATE_READ_ONLY;
+    }
+    if state.required {
+        mask |= STATE_REQUIRED;
+    }
+    if state.selected {
+        mask |= STATE_SELECTED;
+    }
+    if state.checked {
+        mask |= STATE_CHECKED;
+    }
+    if state.expanded {
+        mask |= STATE_EXPANDED;
+    }
+    if state.pressed {
+        mask |= STATE_PRESSED;
+    }
+    if state.invalid {
+        mask |= STATE_INVALID;
+    }
+    if state.value {
+        mask |= STATE_VALUE;
+    }
+    if state.focus_visible {
+        mask |= STATE_FOCUS_VISIBLE;
+    }
+    mask
+}
+
+fn state_name_bit(state: &str) -> Option<u32> {
+    match state {
+        "hover" | "hovered" => Some(STATE_HOVERED),
+        "focus" | "focused" => Some(STATE_FOCUSED),
+        "active" => Some(STATE_ACTIVE),
+        "disabled" => Some(STATE_DISABLED),
+        "readonly" => Some(STATE_READ_ONLY),
+        "required" => Some(STATE_REQUIRED),
+        "selected" => Some(STATE_SELECTED),
+        "checked" => Some(STATE_CHECKED),
+        "expanded" => Some(STATE_EXPANDED),
+        "pressed" => Some(STATE_PRESSED),
+        "invalid" => Some(STATE_INVALID),
+        "value" => Some(STATE_VALUE),
+        "focus-visible" => Some(STATE_FOCUS_VISIBLE),
+        _ => None,
+    }
 }
 
 fn apply_declaration(

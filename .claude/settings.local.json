@@ -79,7 +79,11 @@
       "Bash(PKG_CONFIG_PATH=/nix/store/nxm1hyyqqf5f5h075q3v8hs3sxv3ny7z-libxkbcommon-1.8.1-dev/lib/pkgconfig cargo test -p mesh-core-shell --lib --no-run)",
       "Bash(PKG_CONFIG_PATH=/nix/store/nxm1hyyqqf5f5h075q3v8hs3sxv3ny7z-libxkbcommon-1.8.1-dev/lib/pkgconfig cargo check -p mesh-core-shell --tests)",
       "Bash(gsd-sdk query *)",
-      "Skill(gsd-plan-phase)"
+      "Skill(gsd-plan-phase)",
+      "Bash(~/.cargo/bin/cargo build *)",
+      "Bash(~/.cargo/bin/cargo test *)",
+      "Bash(/nix/store/3fvrcs8lvbd95yxbm91ivh9g80n4qxq9-auditable-rust-default-1.95.0/bin/cargo build *)",
+      "Bash(/nix/store/3fvrcs8lvbd95yxbm91ivh9g80n4qxq9-auditable-rust-default-1.95.0/bin/cargo test *)"
     ]
   }
 }

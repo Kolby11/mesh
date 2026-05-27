@@ -31,27 +31,6 @@ pub(super) fn clip_to_tuple(clip: ClipRect) -> (u32, u32, u32, u32) {
     )
 }
 
-pub(super) fn rounded_rect_coverage(rect: ClipRect, radius: f32, px: f32, py: f32) -> f32 {
-    let half_w = rect.width.max(0) as f32 * 0.5;
-    let half_h = rect.height.max(0) as f32 * 0.5;
-    let radius = radius.min(half_w).min(half_h).max(0.0);
-
-    let center_x = rect.x as f32 + half_w;
-    let center_y = rect.y as f32 + half_h;
-    let local_x = (px - center_x).abs();
-    let local_y = (py - center_y).abs();
-
-    let qx = local_x - (half_w - radius);
-    let qy = local_y - (half_h - radius);
-    let outside_x = qx.max(0.0);
-    let outside_y = qy.max(0.0);
-    let outside_dist = (outside_x * outside_x + outside_y * outside_y).sqrt();
-    let inside_dist = qx.max(qy).min(0.0);
-    let signed_distance = outside_dist + inside_dist - radius;
-
-    (0.5 - signed_distance).clamp(0.0, 1.0)
-}
-
 pub(super) fn dim_color(color: Color, factor: f32) -> Color {
     Color {
         r: ((color.r as f32) * factor).round().clamp(0.0, 255.0) as u8,

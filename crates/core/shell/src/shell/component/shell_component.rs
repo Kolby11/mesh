@@ -132,44 +132,48 @@ impl ShellComponent for FrontendSurfaceComponent {
         let caps = crate::shell::service::service_capabilities(service);
         let service_name = &caps.service_name;
         self.cached_service_payloads
-            .insert(service_name.clone(), payload.clone());
+            .insert(service_name.clone(), payload.clone().into());
         let mut needs_rebuild = false;
-        {
+        let mut runtimes = {
             let mut runtimes = self.runtimes.lock().unwrap();
-            for runtime in runtimes.values_mut() {
-                let capabilities = &runtime.script_ctx.capabilities;
-                let has_read = capabilities.is_granted(&caps.read)
-                    || caps
-                        .theme
-                        .as_ref()
-                        .is_some_and(|capability| capabilities.is_granted(capability))
-                    || caps
-                        .locale
-                        .as_ref()
-                        .is_some_and(|capability| capabilities.is_granted(capability));
-                if !has_read {
-                    continue;
-                }
-                let previous = runtime.script_ctx.state().get(service_name);
-                let tracked_fields = runtime.script_ctx.tracked_fields_for_service(service_name);
-                apply_service_update(
-                    runtime.script_ctx.state_mut(),
-                    has_read,
-                    service,
-                    source_module,
-                    payload.clone(),
-                );
-                let state_changed = runtime.script_ctx.state().is_dirty();
-                runtime
-                    .script_ctx
-                    .apply_service_payload(service_name, payload);
-                let tracked_fields_changed =
-                    tracked_service_fields_changed(previous.as_ref(), payload, &tracked_fields);
-                if state_changed || tracked_fields_changed {
-                    needs_rebuild = true;
-                }
+            std::mem::take(&mut *runtimes)
+        };
+        for runtime in runtimes.values_mut() {
+            let capabilities = &runtime.script_ctx.capabilities;
+            let has_read = capabilities.is_granted(&caps.read)
+                || caps
+                    .theme
+                    .as_ref()
+                    .is_some_and(|capability| capabilities.is_granted(capability))
+                || caps
+                    .locale
+                    .as_ref()
+                    .is_some_and(|capability| capabilities.is_granted(capability));
+            if !has_read {
+                continue;
+            }
+            let previous = runtime.script_ctx.state().get(service_name);
+            apply_service_update(
+                runtime.script_ctx.state_mut(),
+                has_read,
+                service,
+                source_module,
+                payload,
+            );
+            let state_changed = runtime.script_ctx.state().is_dirty();
+            runtime
+                .script_ctx
+                .apply_service_payload(service_name, payload);
+            let tracked_fields_changed = runtime.script_ctx.tracked_service_fields_changed(
+                service_name,
+                previous.as_ref(),
+                payload,
+            );
+            if state_changed || tracked_fields_changed {
+                needs_rebuild = true;
             }
         }
+        *self.runtimes.lock().unwrap() = runtimes;
         if needs_rebuild {
             self.render_hooks_pending = true;
             self.invalidate_script_state();
@@ -221,6 +225,7 @@ impl ShellComponent for FrontendSurfaceComponent {
 
         // Emit Show/HideSurface requests for surface portals whose desired visibility changed.
         let pending = std::mem::take(&mut *self.pending_surface_states.borrow_mut());
+        self.last_surface_states.reserve(pending.len());
         let mut requests = Vec::new();
         for (surface_id, visible) in pending {
             let was_visible = self.last_surface_states.get(&surface_id).copied();
@@ -393,45 +398,42 @@ impl ShellComponent for FrontendSurfaceComponent {
         );
         let current_tooltip_damage =
             tooltip_damage_rect(tooltip.as_ref(), content_width, content_height);
-        let tooltip_damage_rects = damage_rects_from_options(
+        let mut tooltip_damage_rects = std::mem::take(&mut self.tooltip_damage_scratch);
+        damage_rects_from_options_into(
             [current_tooltip_damage, self.last_tooltip_damage],
             surface_damage,
+            &mut tooltip_damage_rects,
         );
-        let dirty_node_visual_damage_rects = damage_rects_for_node_ids(
+        let mut dirty_node_visual_damage_rects =
+            std::mem::take(&mut self.dirty_node_visual_damage_scratch);
+        damage_rects_for_node_ids_into(
             &tree,
             self.retained_render_objects.dirty_node_ids(),
             &self.last_visual_damage,
             surface_damage,
+            &mut dirty_node_visual_damage_rects,
         );
-        let animated_visual_damage_rects = if render_object_dirty.transform > 0
+        let mut visual_damage_rects = std::mem::take(&mut self.visual_damage_scratch);
+        visual_damage_rects.clear();
+        if render_object_dirty.reordered > 0
+            || render_object_dirty.transform > 0
             || render_object_dirty.opacity > 0
             || render_object_dirty.material > 0
         {
-            dirty_node_visual_damage_rects.clone()
-        } else {
-            Vec::new()
-        };
-        let mut visual_damage_rects = if render_object_dirty.reordered > 0 {
-            damage_rects_for_node_ids(
-                &tree,
-                self.retained_render_objects.dirty_node_ids(),
-                &self.last_visual_damage,
+            merge_damage_rects(
+                &mut visual_damage_rects,
+                dirty_node_visual_damage_rects.iter().copied(),
                 surface_damage,
-            )
-        } else {
-            Vec::new()
-        };
-        merge_damage_rects(
-            &mut visual_damage_rects,
-            animated_visual_damage_rects,
-            surface_damage,
-        );
-        let effective_damage = select_effective_damage_rects(
+            );
+        }
+        let effective_damage_rects = std::mem::take(&mut self.effective_damage_scratch);
+        let mut effective_damage = select_effective_damage_rects(
             display_list_metrics,
             surface_damage,
             requires_tree_rebuild,
-            visual_damage_rects,
-            tooltip_damage_rects,
+            &visual_damage_rects,
+            &tooltip_damage_rects,
+            effective_damage_rects,
         );
         let paint_damage = if effective_damage.full_surface {
             Some(surface_damage)
@@ -650,6 +652,10 @@ impl ShellComponent for FrontendSurfaceComponent {
                 trigger_kind: Some("rebuild".to_string()),
             });
         }
+        self.tooltip_damage_scratch = tooltip_damage_rects;
+        self.dirty_node_visual_damage_scratch = dirty_node_visual_damage_rects;
+        self.visual_damage_scratch = visual_damage_rects;
+        self.effective_damage_scratch = std::mem::take(&mut effective_damage.rects);
         self.last_tree = Some(tree);
         self.last_tooltip_damage = current_tooltip_damage;
         self.surface_pixels_invalid = false;
@@ -870,11 +876,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         return_focus: Option<(String, String)>,
         close_on_focus_leave: bool,
     ) {
-        if let Some(traversal) = self
-            .last_tree
-            .as_ref()
-            .map(collect_focus_traversal)
-        {
+        if let Some(traversal) = self.last_tree.as_ref().map(collect_focus_traversal) {
             self.apply_focus_transfer_from_traversal(
                 &traversal,
                 target,
@@ -928,8 +930,11 @@ impl FrontendSurfaceComponent {
         };
         let service_name = crate::shell::service::service_name_from_interface(service);
         let mut needs_rebuild = false;
-        {
+        let mut runtimes = {
             let mut runtimes = self.runtimes.lock().unwrap();
+            std::mem::take(&mut *runtimes)
+        };
+        let emit_result: Result<(), ComponentError> = (|| {
             for runtime in runtimes.values_mut() {
                 if !script_has_service_read(&runtime.script_ctx, service, &service_name) {
                     continue;
@@ -945,7 +950,10 @@ impl FrontendSurfaceComponent {
                     needs_rebuild = true;
                 }
             }
-        }
+            Ok(())
+        })();
+        *self.runtimes.lock().unwrap() = runtimes;
+        emit_result?;
         if needs_rebuild {
             self.render_hooks_pending = true;
             self.invalidate_script_state();
@@ -992,12 +1000,15 @@ fn select_effective_damage(
     reorder_damage: Option<DamageRect>,
     tooltip_damage: Option<DamageRect>,
 ) -> EffectiveDamage {
+    let extra_damage = reorder_damage.into_iter().collect::<Vec<_>>();
+    let tooltip_damage = tooltip_damage.into_iter().collect::<Vec<_>>();
     select_effective_damage_rects(
         metrics,
         surface,
         requires_tree_rebuild,
-        reorder_damage.into_iter().collect(),
-        tooltip_damage.into_iter().collect(),
+        &extra_damage,
+        &tooltip_damage,
+        Vec::new(),
     )
 }
 
@@ -1005,13 +1016,16 @@ fn select_effective_damage_rects(
     metrics: DisplayListMetrics,
     surface: DamageRect,
     requires_tree_rebuild: bool,
-    extra_damage: Vec<DamageRect>,
-    tooltip_damage: Vec<DamageRect>,
+    extra_damage: &[DamageRect],
+    tooltip_damage: &[DamageRect],
+    mut rects: Vec<DamageRect>,
 ) -> EffectiveDamage {
+    rects.clear();
     if metrics.full_surface_damage {
+        rects.push(surface);
         return EffectiveDamage {
             rect: Some(surface),
-            rects: vec![surface],
+            rects,
             full_surface: true,
             policy: DisplayListRepaintPolicy::FullSurface,
         };
@@ -1019,12 +1033,11 @@ fn select_effective_damage_rects(
 
     let base_damage = (metrics.damage_area > 0).then_some(metrics.damage_rect);
     let has_extra_damage_sources = !extra_damage.is_empty() || !tooltip_damage.is_empty();
-    let mut rects = Vec::new();
     if let Some(base) = base_damage {
         push_damage_rect(&mut rects, base, surface);
     }
-    merge_damage_rects(&mut rects, extra_damage, surface);
-    merge_damage_rects(&mut rects, tooltip_damage, surface);
+    merge_damage_rects(&mut rects, extra_damage.iter().copied(), surface);
+    merge_damage_rects(&mut rects, tooltip_damage.iter().copied(), surface);
 
     let Some(damage) = bounding_damage_rect(&rects, surface) else {
         return EffectiveDamage::none();
@@ -1046,12 +1059,16 @@ fn select_effective_damage_rects(
                 policy,
             }
         }
-        DisplayListRepaintPolicy::FullSurface => EffectiveDamage {
-            rect: Some(surface),
-            rects: vec![surface],
-            full_surface: true,
-            policy,
-        },
+        DisplayListRepaintPolicy::FullSurface => {
+            rects.clear();
+            rects.push(surface);
+            EffectiveDamage {
+                rect: Some(surface),
+                rects,
+                full_surface: true,
+                policy,
+            }
+        }
     }
 }
 
@@ -1123,24 +1140,37 @@ fn damage_rect_for_node_ids(
     )
 }
 
+#[cfg(test)]
 fn damage_rects_for_node_ids(
     node: &WidgetNode,
     node_ids: &HashSet<mesh_core_elements::NodeId>,
     last_visual_damage: &HashMap<mesh_core_elements::NodeId, DamageRect>,
     surface: DamageRect,
 ) -> Vec<DamageRect> {
+    let mut damage = Vec::with_capacity(node_ids.len().min(MAX_DAMAGE_RECTS));
+    damage_rects_for_node_ids_into(node, node_ids, last_visual_damage, surface, &mut damage);
+    damage
+}
+
+fn damage_rects_for_node_ids_into(
+    node: &WidgetNode,
+    node_ids: &HashSet<mesh_core_elements::NodeId>,
+    last_visual_damage: &HashMap<mesh_core_elements::NodeId, DamageRect>,
+    surface: DamageRect,
+    damage: &mut Vec<DamageRect>,
+) {
+    damage.clear();
     if node_ids.is_empty() {
-        return Vec::new();
+        return;
     }
 
-    let mut damage = Vec::with_capacity(node_ids.len().min(MAX_DAMAGE_RECTS));
+    damage.reserve(node_ids.len().min(MAX_DAMAGE_RECTS));
     for node_id in node_ids {
         if let Some(previous) = last_visual_damage.get(node_id).copied() {
-            push_damage_rect(&mut damage, previous, surface);
+            push_damage_rect(damage, previous, surface);
         }
     }
-    collect_damage_rects_for_node_ids(node, node_ids, surface, &mut damage);
-    damage
+    collect_damage_rects_for_node_ids(node, node_ids, surface, damage);
 }
 
 fn collect_damage_rects_for_node_ids(
@@ -1262,15 +1292,16 @@ fn merge_optional_damage(
     }
 }
 
-fn damage_rects_from_options(
+fn damage_rects_from_options_into(
     rects: impl IntoIterator<Item = Option<DamageRect>>,
     surface: DamageRect,
-) -> Vec<DamageRect> {
-    let mut damage = Vec::with_capacity(2);
+    damage: &mut Vec<DamageRect>,
+) {
+    damage.clear();
+    damage.reserve(2);
     for rect in rects.into_iter().flatten() {
-        push_damage_rect(&mut damage, rect, surface);
+        push_damage_rect(damage, rect, surface);
     }
-    damage
 }
 
 fn merge_damage_rects(
@@ -1612,8 +1643,9 @@ mod tests {
             metrics,
             surface(100, 100),
             false,
-            vec![left, right],
-            vec![],
+            &[left, right],
+            &[],
+            Vec::new(),
         );
 
         assert_eq!(effective.rects, vec![left, right]);

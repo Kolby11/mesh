@@ -366,6 +366,10 @@ pub(super) struct FrontendSurfaceComponent {
     focused_proof_snapshot: Option<mesh_core_render::FocusedProofSnapshot>,
     last_present_damage: Option<DamageRect>,
     last_visual_damage: HashMap<NodeId, DamageRect>,
+    tooltip_damage_scratch: Vec<DamageRect>,
+    dirty_node_visual_damage_scratch: Vec<DamageRect>,
+    visual_damage_scratch: Vec<DamageRect>,
+    effective_damage_scratch: Vec<DamageRect>,
     /// Cached aggregate of restyle rules collected from `compiled.component`
     /// and every entry in `compiled.local_components`. Populated lazily on the
     /// first restyle and invalidated whenever the compiled module is replaced
@@ -393,6 +397,7 @@ impl FrontendSurfaceComponent {
         let module_settings_file = module_dir.join("config/settings.json");
         let settings_state =
             load_frontend_module_settings(&module_settings_file, &compiled.manifest);
+        let service_payload_capacity = service_payload_cache_capacity(&compiled.manifest);
         Self {
             compiled,
             module_dir,
@@ -408,7 +413,7 @@ impl FrontendSurfaceComponent {
             dirty_types: ComponentDirtyFlags::TREE_REBUILD | ComponentDirtyFlags::SURFACE_CONFIG,
             last_dirty_types: ComponentDirtyFlags::empty(),
             last_service_update: None,
-            cached_service_payloads: HashMap::new(),
+            cached_service_payloads: HashMap::with_capacity(service_payload_capacity),
             focused_key: None,
             focus_visible_key: None,
             pointer_down_key: None,
@@ -460,6 +465,10 @@ impl FrontendSurfaceComponent {
             focused_proof_snapshot: None,
             last_present_damage: None,
             last_visual_damage: HashMap::new(),
+            tooltip_damage_scratch: Vec::new(),
+            dirty_node_visual_damage_scratch: Vec::new(),
+            visual_damage_scratch: Vec::new(),
+            effective_damage_scratch: Vec::new(),
             cached_restyle_rules: None,
             cached_style_rule_index: None,
         }
@@ -536,17 +545,18 @@ impl FrontendSurfaceComponent {
 }
 
 fn invalidation_requires_pixel_repaint(flags: ComponentDirtyFlags) -> bool {
+    // Accessibility and metrics changes update metadata/measurements but do not
+    // change the rendered pixels, so they are excluded from the repaint gate.
     flags.intersects(
         ComponentDirtyFlags::STATE
             | ComponentDirtyFlags::STYLE
             | ComponentDirtyFlags::LAYOUT
             | ComponentDirtyFlags::PAINT
-            | ComponentDirtyFlags::TEXT
-            | ComponentDirtyFlags::ACCESSIBILITY
-            | ComponentDirtyFlags::METRICS,
+            | ComponentDirtyFlags::TEXT,
     )
 }
 
+#[cfg(test)]
 fn tracked_service_fields_changed(
     previous: Option<&serde_json::Value>,
     next: &serde_json::Value,
@@ -557,6 +567,25 @@ fn tracked_service_fields_changed(
         let next_value = next.get(field);
         previous_value != next_value
     })
+}
+
+fn service_payload_cache_capacity(manifest: &mesh_core_module::Manifest) -> usize {
+    manifest
+        .capabilities
+        .required
+        .iter()
+        .chain(manifest.capabilities.optional.iter())
+        .filter(|capability| capability_caches_service_payload(capability))
+        .count()
+}
+
+fn capability_caches_service_payload(capability: &str) -> bool {
+    capability == "theme.read"
+        || capability == "locale.read"
+        || capability
+            .strip_prefix("service.")
+            .and_then(|capability| capability.strip_suffix(".read"))
+            .is_some_and(|service| !service.is_empty())
 }
 
 pub(super) fn grant_capabilities_from_manifest(

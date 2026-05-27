@@ -8,6 +8,10 @@ use mesh_core_service::{
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_storage_root(name: &str) -> PathBuf {
@@ -981,6 +985,48 @@ fn host_value_update_does_not_mark_dirty() {
 }
 
 #[test]
+fn host_value_update_refreshes_snapshot_without_dirty_generation() {
+    let mut state = ScriptState::new();
+    assert_eq!(state.snapshot(), serde_json::json!({}));
+    let initial_generation = state.snapshot_generation();
+
+    state.set_host_value("elements", serde_json::json!({ "root": true }));
+
+    assert_eq!(state.snapshot_generation(), initial_generation);
+    assert_eq!(
+        state.snapshot(),
+        serde_json::json!({ "elements": { "root": true } })
+    );
+    assert!(!state.is_dirty());
+}
+
+#[test]
+fn snapshot_updates_after_cached_read() {
+    let mut state = ScriptState::new();
+    state.set("count", serde_json::json!(1));
+    assert_eq!(state.snapshot(), serde_json::json!({ "count": 1 }));
+
+    state.set("count", serde_json::json!(2));
+    assert_eq!(state.snapshot(), serde_json::json!({ "count": 2 }));
+}
+
+#[test]
+fn snapshot_reads_fresh_proxy_values() {
+    let value = Arc::new(AtomicUsize::new(1));
+    let proxy_value = Arc::clone(&value);
+    let mut state = ScriptState::new();
+    state.register_proxy(
+        "count",
+        Box::new(move || serde_json::json!(proxy_value.load(Ordering::SeqCst))),
+        None,
+    );
+
+    assert_eq!(state.snapshot(), serde_json::json!({ "count": 1 }));
+    value.store(2, Ordering::SeqCst);
+    assert_eq!(state.snapshot(), serde_json::json!({ "count": 2 }));
+}
+
+#[test]
 fn mesh_request_redraw_marks_dirty_without_global_change() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@test/redraw", caps).unwrap();
@@ -1073,6 +1119,16 @@ end
     let tracked = ctx.tracked_fields_for_service("audio");
     assert!(tracked.contains("percent"));
     assert!(tracked.contains("muted"));
+    assert!(!ctx.tracked_service_fields_changed(
+        "audio",
+        Some(&serde_json::json!({ "percent": 65, "muted": false })),
+        &serde_json::json!({ "percent": 65, "muted": false }),
+    ));
+    assert!(ctx.tracked_service_fields_changed(
+        "audio",
+        Some(&serde_json::json!({ "percent": 65, "muted": false })),
+        &serde_json::json!({ "percent": 66, "muted": false }),
+    ));
 }
 
 #[test]

@@ -2,6 +2,16 @@ use super::super::*;
 use super::{BackendRuntimeStatus, BackendRuntimeStatusEntry};
 
 impl Shell {
+    pub(in crate::shell) fn backend_runtime_status(
+        &self,
+        interface: &str,
+        provider_id: &str,
+    ) -> Option<&BackendRuntimeStatusEntry> {
+        self.backend_runtime_statuses
+            .get(interface)
+            .and_then(|providers| providers.get(provider_id))
+    }
+
     pub(in crate::shell) fn record_backend_runtime_status(
         &mut self,
         interface: String,
@@ -25,10 +35,8 @@ impl Shell {
                 message.clone(),
             );
         }
-        let key = (interface.clone(), provider_id.clone());
         let prev_failure_count = self
-            .backend_runtime_statuses
-            .get(&key)
+            .backend_runtime_status(&interface, &provider_id)
             .map(|entry| entry.failure_count)
             .unwrap_or(0);
         let failure_count = if is_failure {
@@ -36,26 +44,27 @@ impl Shell {
         } else {
             prev_failure_count
         };
-        self.backend_runtime_statuses.insert(
-            key,
-            BackendRuntimeStatusEntry {
-                interface,
-                provider_id,
-                status,
-                message,
-                failure_count,
-            },
-        );
+        self.backend_runtime_statuses
+            .entry(interface.clone())
+            .or_default()
+            .insert(
+                provider_id.clone(),
+                BackendRuntimeStatusEntry {
+                    interface,
+                    provider_id,
+                    status,
+                    message,
+                    failure_count,
+                },
+            );
     }
 
     pub(in crate::shell) fn stop_backend_runtime(&mut self, interface: &str) {
         self.service_handlers.remove(interface);
         if let Some(slot) = self.backend_runtimes.remove(interface) {
             slot.task.abort();
-            let key = (slot.interface.clone(), slot.provider_id.clone());
             let terminal_failure_already_recorded = self
-                .backend_runtime_statuses
-                .get(&key)
+                .backend_runtime_status(&slot.interface, &slot.provider_id)
                 .map(|entry| {
                     matches!(
                         entry.status,
@@ -139,11 +148,11 @@ impl Shell {
         };
         self.latest_service_state.insert(
             interface.to_string(),
-            LatestServiceState {
-                interface: interface.to_string(),
-                provider_id: provider_id.to_string(),
-                state: unavailable_payload,
-            },
+            LatestServiceState::new(
+                interface.to_string(),
+                provider_id.to_string(),
+                unavailable_payload,
+            ),
         );
         tracing::debug!(
             interface,

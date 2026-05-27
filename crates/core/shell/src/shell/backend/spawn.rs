@@ -103,8 +103,8 @@ impl Shell {
                                 interface: bridge_interface.clone(),
                                 provider_id: bridge_provider_id.clone(),
                                 event: ServiceEvent::Updated {
-                                    service: update.service,
-                                    source_module: update.source_module,
+                                    service: update.service.to_string(),
+                                    source_module: update.source_module.to_string(),
                                     payload: update.payload,
                                 },
                             })
@@ -114,34 +114,38 @@ impl Shell {
                         }
                     }
                     BackendServiceEvent::CommandResult(result) => {
+                        let command = result.command;
+                        let payload = result.result;
+                        tracing::debug!(
+                            interface = bridge_interface.as_str(),
+                            provider_id = bridge_provider_id.as_str(),
+                            command = command.as_str(),
+                            result = %payload,
+                            "backend command result"
+                        );
                         let _ = shell_tx.send(ShellMessage::BackendCommandResult {
                             interface: bridge_interface.clone(),
                             provider_id: bridge_provider_id.clone(),
-                            command: result.command.clone(),
-                            result: result.result.clone(),
+                            command,
+                            result: payload,
                         });
+                    }
+                    BackendServiceEvent::InterfaceEvent(event) => {
+                        let name = event.name;
+                        let payload = event.payload;
                         tracing::debug!(
                             interface = bridge_interface.as_str(),
                             provider_id = bridge_provider_id.as_str(),
-                            command = result.command.as_str(),
-                            result = %result.result,
-                            "backend command result"
+                            event = name.as_str(),
+                            payload = %payload,
+                            "backend interface event"
                         );
-                    }
-                    BackendServiceEvent::InterfaceEvent(event) => {
                         let _ = shell_tx.send(ShellMessage::BackendInterfaceEvent {
                             interface: bridge_interface.clone(),
                             provider_id: bridge_provider_id.clone(),
-                            name: event.name.clone(),
-                            payload: event.payload.clone(),
+                            name,
+                            payload,
                         });
-                        tracing::debug!(
-                            interface = bridge_interface.as_str(),
-                            provider_id = bridge_provider_id.as_str(),
-                            event = event.name.as_str(),
-                            payload = %event.payload,
-                            "backend interface event"
-                        );
                     }
                     BackendServiceEvent::Started { .. } => {
                         let _ = shell_tx.send(ShellMessage::BackendLifecycle {

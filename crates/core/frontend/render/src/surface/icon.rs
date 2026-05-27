@@ -90,7 +90,8 @@ fn source_identity_cache() -> &'static Mutex<LruCache<PathBuf, CachedSourceIdent
 }
 
 fn svg_cacheability_cache() -> &'static Mutex<LruCache<PathBuf, CachedSvgCacheability>> {
-    SVG_CACHEABILITY_CACHE.get_or_init(|| Mutex::new(LruCache::new(SVG_CACHEABILITY_CACHE_CAPACITY)))
+    SVG_CACHEABILITY_CACHE
+        .get_or_init(|| Mutex::new(LruCache::new(SVG_CACHEABILITY_CACHE_CAPACITY)))
 }
 
 fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
@@ -180,7 +181,20 @@ fn raster_file_key(
     multicolor: bool,
 ) -> Option<RasterCacheKey> {
     let freshness = file_freshness(path)?;
-    Some(RasterCacheKey {
+    Some(raster_file_key_with_freshness(
+        path, width, height, tint, multicolor, freshness,
+    ))
+}
+
+fn raster_file_key_with_freshness(
+    path: &Path,
+    width: u32,
+    height: u32,
+    tint: Color,
+    multicolor: bool,
+    freshness: FileFreshness,
+) -> RasterCacheKey {
+    RasterCacheKey {
         source_kind: RasterSourceKind::File,
         source_identity: source_identity(path, Some(freshness)),
         width,
@@ -188,24 +202,24 @@ fn raster_file_key(
         tint: encode_tint(tint),
         multicolor,
         freshness: Some(freshness),
-    })
+    }
 }
 
-fn svg_file_is_cacheable(path: &Path) -> bool {
+fn svg_file_cacheability(path: &Path) -> Option<(bool, FileFreshness)> {
     let Some(freshness) = file_freshness(path) else {
-        return false;
+        return None;
     };
     let cache = svg_cacheability_cache();
     if let Ok(mut guard) = cache.lock() {
         if let Some(cached) = guard.get(path) {
             if cached.freshness == freshness {
-                return cached.cacheable;
+                return Some((cached.cacheable, freshness));
             }
         }
     }
 
     let Ok(svg_data) = std::fs::read_to_string(path) else {
-        return false;
+        return None;
     };
     let cacheable = !svg_has_external_resource_reference(&svg_data);
     if let Ok(mut guard) = cache.lock() {
@@ -217,7 +231,7 @@ fn svg_file_is_cacheable(path: &Path) -> bool {
             },
         );
     }
-    cacheable
+    Some((cacheable, freshness))
 }
 
 fn svg_has_external_resource_reference(svg_data: &str) -> bool {
@@ -291,16 +305,20 @@ pub(crate) fn cached_file_resource_opacity(
         return CachedResourceOpacity::Unknown;
     };
     let ext = ext.to_ascii_lowercase();
-    let cacheable = match ext.as_str() {
-        "svg" => svg_file_is_cacheable(path),
-        "png" | "jpg" | "jpeg" | "bmp" => true,
-        _ => false,
-    };
-    if !cacheable {
-        return CachedResourceOpacity::Unknown;
-    }
-    let Some(key) = raster_file_key(path, width, height, tint, multicolor) else {
-        return CachedResourceOpacity::Unknown;
+    let key = match ext.as_str() {
+        "svg" => {
+            let Some((true, freshness)) = svg_file_cacheability(path) else {
+                return CachedResourceOpacity::Unknown;
+            };
+            raster_file_key_with_freshness(path, width, height, tint, multicolor, freshness)
+        }
+        "png" | "jpg" | "jpeg" | "bmp" => {
+            let Some(freshness) = file_freshness(path) else {
+                return CachedResourceOpacity::Unknown;
+            };
+            raster_file_key_with_freshness(path, width, height, tint, multicolor, freshness)
+        }
+        _ => return CachedResourceOpacity::Unknown,
     };
     let Some(variant) = cached_variant(&key) else {
         return CachedResourceOpacity::Unknown;
@@ -504,10 +522,6 @@ pub fn draw_icon_from_path_with_options(
     tint: Color,
     multicolor: bool,
 ) {
-    if !path.exists() {
-        return;
-    }
-
     let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
         return;
     };
@@ -515,10 +529,18 @@ pub fn draw_icon_from_path_with_options(
     let height = dest_h.max(1) as u32;
     let ext = ext.to_ascii_lowercase();
     let key = match ext.as_str() {
-        "svg" if svg_file_is_cacheable(path) => {
-            raster_file_key(path, width, height, tint, multicolor)
+        "svg" => {
+            let Some((cacheable, freshness)) = svg_file_cacheability(path) else {
+                return;
+            };
+            if cacheable {
+                Some(raster_file_key_with_freshness(
+                    path, width, height, tint, multicolor, freshness,
+                ))
+            } else {
+                None
+            }
         }
-        "svg" => None,
         "png" | "jpg" | "jpeg" | "bmp" => raster_file_key(path, width, height, tint, multicolor),
         _ => None,
     };

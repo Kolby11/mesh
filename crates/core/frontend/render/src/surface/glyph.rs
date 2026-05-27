@@ -61,8 +61,7 @@ struct CachedGlyph {
 }
 
 static FONT_BYTES: OnceLock<Mutex<LruCache<PathBuf, Arc<[u8]>>>> = OnceLock::new();
-static GLYPH_CACHE: OnceLock<Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>>> =
-    OnceLock::new();
+static GLYPH_CACHE: OnceLock<Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>>> = OnceLock::new();
 const FONT_BYTES_CACHE_CAPACITY: usize = 32;
 const GLYPH_CACHE_CAPACITY: usize = 1024;
 

@@ -102,6 +102,28 @@ where
         self.tail = None;
     }
 
+    /// Remove the entry under `key` and return its value, if any.
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        let idx = self.map.remove(key)?;
+        self.detach(idx);
+        let node = self.nodes[idx].take()?;
+        self.free.push(idx);
+        Some(node.value)
+    }
+
+    /// Return true if `key` is present, without updating recency.
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.map.contains_key(key)
+    }
+
     fn alloc_node(&mut self, key: K, value: V) -> usize {
         let node = Node {
             key,

@@ -89,6 +89,7 @@ impl Shell {
             module_dirs,
             core: ShellCoreState::default(),
             components: Vec::new(),
+            components_want_render: false,
             component_by_surface: HashMap::new(),
             surfaces: HashMap::new(),
             clipboard: Box::new(WaylandClipboard::default()),
@@ -116,13 +117,15 @@ impl Shell {
     }
 
     pub fn discover_modules(&mut self) {
-        for dir in self.module_dirs.clone() {
+        let module_dirs = std::mem::take(&mut self.module_dirs);
+        for dir in &module_dirs {
             if !dir.exists() {
                 tracing::debug!("module directory does not exist: {}", dir.display());
                 continue;
             }
-            self.scan_module_dir(&dir);
+            self.scan_module_dir(dir);
         }
+        self.module_dirs = module_dirs;
         self.register_installed_graph_interfaces();
         tracing::info!("discovered {} modules", self.modules.len());
     }
@@ -388,7 +391,8 @@ impl Shell {
         self.surfaces.entry(surface_id.clone()).or_default();
         let component_index = self.components.len();
         self.components.push(ComponentRuntime::new(component));
-        self.component_by_surface.insert(surface_id, component_index);
+        self.component_by_surface
+            .insert(surface_id, component_index);
     }
 
     pub(super) fn mount_components(&mut self) -> Result<VecDeque<CoreRequest>, ShellRunError> {

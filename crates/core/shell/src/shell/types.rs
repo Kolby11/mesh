@@ -74,6 +74,16 @@ pub(super) struct LatestServiceState {
     pub(super) state: serde_json::Value,
 }
 
+impl LatestServiceState {
+    pub(super) fn new(interface: String, provider_id: String, state: serde_json::Value) -> Self {
+        Self {
+            interface,
+            provider_id,
+            state,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct ThemeWatchState {
     pub(super) path: PathBuf,

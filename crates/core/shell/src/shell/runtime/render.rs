@@ -9,6 +9,7 @@ impl Shell {
             self.drain_requests(&mut debug_requests)?;
         }
 
+        let mut components_want_render_after_frame = false;
         for index in 0..self.components.len() {
             let surface_id = self.components[index].surface_id.clone();
             if !self.components[index].component.wants_render() {
@@ -261,7 +262,9 @@ impl Shell {
                     Some("present"),
                 );
             }
+            components_want_render_after_frame |= self.components[index].component.wants_render();
         }
+        self.components_want_render = components_want_render_after_frame;
         Ok(())
     }
 

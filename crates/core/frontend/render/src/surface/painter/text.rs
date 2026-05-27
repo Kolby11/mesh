@@ -1,24 +1,64 @@
 use crate::display_list::{DisplayPaintNode, DisplayTextPaint};
 use mesh_core_elements::lru::LruCache;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
 use super::*;
 
-static ELLIPSIS_CACHE: OnceLock<Mutex<LruCache<EllipsisCacheKey, String>>> = OnceLock::new();
+static ELLIPSIS_CACHE: OnceLock<Mutex<LruCache<u64, EllipsisCacheEntry>>> = OnceLock::new();
 const ELLIPSIS_CACHE_CAPACITY: usize = 512;
 
-fn ellipsis_cache() -> &'static Mutex<LruCache<EllipsisCacheKey, String>> {
+fn ellipsis_cache() -> &'static Mutex<LruCache<u64, EllipsisCacheEntry>> {
     ELLIPSIS_CACHE.get_or_init(|| Mutex::new(LruCache::new(ELLIPSIS_CACHE_CAPACITY)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct EllipsisCacheKey {
+struct EllipsisCacheEntry {
     text: String,
     font_family: String,
     font_size: u32,
     font_weight: u16,
     line_height: u32,
     max_width: u32,
+    value: String,
+}
+
+impl EllipsisCacheEntry {
+    fn matches(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: u32,
+        font_weight: u16,
+        line_height: u32,
+        max_width: u32,
+    ) -> bool {
+        self.text == text
+            && self.font_family == font_family
+            && self.font_size == font_size
+            && self.font_weight == font_weight
+            && self.line_height == line_height
+            && self.max_width == max_width
+    }
+}
+
+fn ellipsis_cache_key(
+    text: &str,
+    font_family: &str,
+    font_size: u32,
+    font_weight: u16,
+    line_height: u32,
+    max_width: u32,
+) -> u64 {
+    let mut state = DefaultHasher::new();
+    text.hash(&mut state);
+    font_family.hash(&mut state);
+    font_size.hash(&mut state);
+    font_weight.hash(&mut state);
+    line_height.hash(&mut state);
+    max_width.hash(&mut state);
+    state.finish()
 }
 
 impl FrontendRenderEngine {
@@ -306,19 +346,30 @@ pub(super) fn truncate_with_ellipsis(
     line_height: f32,
     max_width: f32,
 ) -> String {
-    let cache_key = EllipsisCacheKey {
-        text: text.to_string(),
-        font_family: font_family.to_string(),
-        font_size: font_size.to_bits(),
+    let font_size_bits = font_size.to_bits();
+    let line_height_bits = line_height.to_bits();
+    let max_width_bits = max_width.to_bits();
+    let cache_key = ellipsis_cache_key(
+        text,
+        font_family,
+        font_size_bits,
         font_weight,
-        line_height: line_height.to_bits(),
-        max_width: max_width.to_bits(),
-    };
+        line_height_bits,
+        max_width_bits,
+    );
     let cache = ellipsis_cache();
     if let Ok(mut guard) = cache.lock()
         && let Some(cached) = guard.get(&cache_key)
+        && cached.matches(
+            text,
+            font_family,
+            font_size_bits,
+            font_weight,
+            line_height_bits,
+            max_width_bits,
+        )
     {
-        return cached.clone();
+        return cached.value.clone();
     }
 
     const ELLIPSIS: &str = "…";
@@ -366,7 +417,18 @@ pub(super) fn truncate_with_ellipsis(
     output.push_str(&text[..split]);
     output.push_str(ELLIPSIS);
     if let Ok(mut guard) = cache.lock() {
-        guard.insert(cache_key, output.clone());
+        guard.insert(
+            cache_key,
+            EllipsisCacheEntry {
+                text: text.to_string(),
+                font_family: font_family.to_string(),
+                font_size: font_size_bits,
+                font_weight,
+                line_height: line_height_bits,
+                max_width: max_width_bits,
+                value: output.clone(),
+            },
+        );
     }
     output
 }

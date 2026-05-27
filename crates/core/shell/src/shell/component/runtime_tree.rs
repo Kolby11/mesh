@@ -128,7 +128,11 @@ impl RetainedWidgetTree {
 
         // Remove nodes no longer in the tree — retain avoids the intermediate Vec.
         {
-            let RetainedWidgetTree { ref mut nodes, ref mut node_keys, .. } = *self;
+            let RetainedWidgetTree {
+                ref mut nodes,
+                ref mut node_keys,
+                ..
+            } = *self;
             node_keys.retain(|id, key| {
                 if next_nodes.contains_key(id) {
                     return true;

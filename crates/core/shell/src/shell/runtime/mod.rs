@@ -47,10 +47,7 @@ impl Shell {
     fn next_runtime_sleep(&self, shell_message_backlog_likely: bool) -> Duration {
         if shell_message_backlog_likely
             || !self.pending_wayland_events.is_empty()
-            || self
-                .components
-                .iter()
-                .any(|runtime| runtime.component.wants_render())
+            || self.components_want_render
         {
             return Duration::ZERO;
         }
@@ -94,7 +91,9 @@ impl Shell {
             next_deadline = next_deadline.min(closing_until);
         }
 
-        let sleep_for = next_deadline.saturating_duration_since(now).min(MAX_IDLE_SLEEP);
+        let sleep_for = next_deadline
+            .saturating_duration_since(now)
+            .min(MAX_IDLE_SLEEP);
         if sleep_for < MIN_RUNTIME_SLEEP {
             Duration::ZERO
         } else {
@@ -263,7 +262,7 @@ impl Shell {
 #[derive(Default)]
 struct CoalescedShellMessages {
     messages: Vec<ShellMessage>,
-    backend_update_index: HashMap<(String, String), usize>,
+    backend_update_index: HashMap<String, HashMap<String, usize>>,
 }
 
 impl CoalescedShellMessages {
@@ -274,12 +273,19 @@ impl CoalescedShellMessages {
             ..
         } = &message
         {
-            let key = (interface.clone(), provider_id.clone());
-            if let Some(index) = self.backend_update_index.get(&key).copied() {
+            if let Some(index) = self
+                .backend_update_index
+                .get(interface.as_str())
+                .and_then(|providers| providers.get(provider_id.as_str()))
+                .copied()
+            {
                 self.messages[index] = message;
                 return;
             }
-            self.backend_update_index.insert(key, self.messages.len());
+            self.backend_update_index
+                .entry(interface.clone())
+                .or_default()
+                .insert(provider_id.clone(), self.messages.len());
         }
 
         self.messages.push(message);
@@ -287,5 +293,43 @@ impl CoalescedShellMessages {
 
     fn into_vec(self) -> Vec<ShellMessage> {
         self.messages
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn backend_update(interface: &str, provider_id: &str, value: i64) -> ShellMessage {
+        ShellMessage::BackendServiceUpdate {
+            interface: interface.to_string(),
+            provider_id: provider_id.to_string(),
+            event: ServiceEvent::Updated {
+                service: interface.to_string(),
+                source_module: provider_id.to_string(),
+                payload: serde_json::json!({ "value": value }),
+            },
+        }
+    }
+
+    #[test]
+    fn coalesced_shell_messages_keep_latest_backend_update_per_provider() {
+        let mut coalesced = CoalescedShellMessages::default();
+        coalesced.push(backend_update("mesh.audio", "@mesh/pipewire-audio", 1));
+        coalesced.push(backend_update("mesh.audio", "@mesh/pipewire-audio", 2));
+        coalesced.push(backend_update("mesh.audio", "@mesh/pulseaudio-audio", 3));
+
+        let messages = coalesced.into_vec();
+        assert_eq!(messages.len(), 2);
+        let ShellMessage::BackendServiceUpdate { event, .. } = &messages[0] else {
+            panic!("expected backend service update");
+        };
+        let ServiceEvent::Updated { payload, .. } = event else {
+            panic!("expected service update event");
+        };
+        assert_eq!(
+            payload.get("value").and_then(|value| value.as_i64()),
+            Some(2)
+        );
     }
 }

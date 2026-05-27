@@ -1,6 +1,7 @@
 use mesh_core_scripting::{BackendScriptContext, BackendScriptError};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -21,11 +22,14 @@ pub struct BackendServiceCommand {
 /// command marked `coalesce` when a later same-named instance is also present.
 /// Non-coalescable commands and commands that appear only once pass through
 /// unchanged, preserving original order.
-fn coalesce_command_batch(batch: Vec<BackendServiceCommand>) -> Vec<BackendServiceCommand> {
+fn coalesce_command_batch(
+    batch: Vec<BackendServiceCommand>,
+    latest_index: &mut HashMap<String, usize>,
+) -> Vec<BackendServiceCommand> {
     if batch.len() < 2 {
         return batch;
     }
-    let mut latest_index: HashMap<String, usize> = HashMap::new();
+    latest_index.clear();
     for (index, msg) in batch.iter().enumerate() {
         if msg.coalesce {
             latest_index.insert(msg.command.clone(), index);
@@ -46,23 +50,23 @@ fn coalesce_command_batch(batch: Vec<BackendServiceCommand>) -> Vec<BackendServi
 
 #[derive(Debug, Clone)]
 pub struct BackendServiceUpdate {
-    pub service: String,
-    pub source_module: String,
+    pub service: Arc<str>,
+    pub source_module: Arc<str>,
     pub payload: serde_json::Value,
 }
 
 #[derive(Debug, Clone)]
 pub struct BackendCommandResult {
-    pub service: String,
-    pub source_module: String,
+    pub service: Arc<str>,
+    pub source_module: Arc<str>,
     pub command: String,
     pub result: serde_json::Value,
 }
 
 #[derive(Debug, Clone)]
 pub struct BackendInterfaceEvent {
-    pub service: String,
-    pub source_module: String,
+    pub service: Arc<str>,
+    pub source_module: Arc<str>,
     pub name: String,
     pub payload: serde_json::Value,
 }
@@ -70,32 +74,32 @@ pub struct BackendInterfaceEvent {
 #[derive(Debug, Clone)]
 pub enum BackendServiceEvent {
     Started {
-        service: String,
-        source_module: String,
+        service: Arc<str>,
+        source_module: Arc<str>,
     },
     Update(BackendServiceUpdate),
     InitFailed {
-        service: String,
-        source_module: String,
+        service: Arc<str>,
+        source_module: Arc<str>,
         message: String,
     },
     PollFailed {
-        service: String,
-        source_module: String,
+        service: Arc<str>,
+        source_module: Arc<str>,
         count: u32,
         message: String,
     },
     Failed {
-        service: String,
-        source_module: String,
+        service: Arc<str>,
+        source_module: Arc<str>,
         stage: String,
         message: String,
     },
     CommandResult(BackendCommandResult),
     InterfaceEvent(BackendInterfaceEvent),
     Stopped {
-        service: String,
-        source_module: String,
+        service: Arc<str>,
+        source_module: Arc<str>,
     },
 }
 
@@ -112,13 +116,15 @@ pub async fn spawn_backend_service(
     tx: mpsc::UnboundedSender<BackendServiceEvent>,
     mut cmd_rx: mpsc::UnboundedReceiver<BackendServiceCommand>,
 ) {
+    let module_id: Arc<str> = Arc::from(module_id);
+    let service_name: Arc<str> = Arc::from(service_name);
     let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
-        &module_id,
+        module_id.as_ref(),
         settings,
         capabilities,
     );
     if let Err(e) = ctx.load_script(&script_source) {
-        tracing::error!("{module_id} failed to load backend script: {e}");
+        tracing::error!("{} failed to load backend script: {e}", module_id.as_ref());
         let _ = tx.send(BackendServiceEvent::Failed {
             service: service_name,
             source_module: module_id,
@@ -130,7 +136,10 @@ pub async fn spawn_backend_service(
     let init_payload = match ctx.call_init() {
         Ok(payload) => payload,
         Err(e) => {
-            tracing::error!("{module_id} failed to initialize backend script: {e}");
+            tracing::error!(
+                "{} failed to initialize backend script: {e}",
+                module_id.as_ref()
+            );
             let _ = tx.send(BackendServiceEvent::InitFailed {
                 service: service_name,
                 source_module: module_id,
@@ -150,6 +159,7 @@ pub async fn spawn_backend_service(
     let mut last_payload: Option<serde_json::Value> = None;
     let mut consecutive_poll_failures = 0;
     let stream_state = ctx.stream_state();
+    let mut coalesced_command_index = HashMap::new();
 
     if let Some(payload) = init_payload {
         if !publish_changed_update(&tx, &service_name, &module_id, &mut last_payload, payload) {
@@ -285,7 +295,7 @@ pub async fn spawn_backend_service(
                 while let Ok(next) = cmd_rx.try_recv() {
                     batch.push(next);
                 }
-                let batch = coalesce_command_batch(batch);
+                let batch = coalesce_command_batch(batch, &mut coalesced_command_index);
                 let mut stop = false;
                 for msg in batch {
                     match ctx.run_command_with_result(&msg.command, &msg.payload) {
@@ -367,15 +377,15 @@ pub async fn spawn_backend_service(
 
 fn publish_script_events(
     tx: &mpsc::UnboundedSender<BackendServiceEvent>,
-    service_name: &str,
-    module_id: &str,
+    service_name: &Arc<str>,
+    module_id: &Arc<str>,
     events: Vec<mesh_core_scripting::BackendScriptEvent>,
 ) -> bool {
     for event in events {
         if tx
             .send(BackendServiceEvent::InterfaceEvent(BackendInterfaceEvent {
-                service: service_name.to_string(),
-                source_module: module_id.to_string(),
+                service: Arc::clone(service_name),
+                source_module: Arc::clone(module_id),
                 name: event.name,
                 payload: event.payload,
             }))
@@ -389,8 +399,8 @@ fn publish_script_events(
 
 fn publish_changed_update(
     tx: &mpsc::UnboundedSender<BackendServiceEvent>,
-    service_name: &str,
-    module_id: &str,
+    service_name: &Arc<str>,
+    module_id: &Arc<str>,
     last_payload: &mut Option<serde_json::Value>,
     payload: serde_json::Value,
 ) -> bool {
@@ -399,8 +409,8 @@ fn publish_changed_update(
     }
     last_payload.replace(payload.clone());
     tx.send(BackendServiceEvent::Update(BackendServiceUpdate {
-        service: service_name.to_string(),
-        source_module: module_id.to_string(),
+        service: Arc::clone(service_name),
+        source_module: Arc::clone(module_id),
         payload,
     }))
     .is_ok()
@@ -446,6 +456,11 @@ mod tests {
         }
     }
 
+    fn coalesce_for_test(batch: Vec<BackendServiceCommand>) -> Vec<BackendServiceCommand> {
+        let mut latest_index = HashMap::new();
+        coalesce_command_batch(batch, &mut latest_index)
+    }
+
     #[test]
     fn coalesce_drops_earlier_duplicates_keeps_latest_payload() {
         let batch = vec![
@@ -453,7 +468,7 @@ mod tests {
             cmd("set_volume", 20, true),
             cmd("set_volume", 30, true),
         ];
-        let out = coalesce_command_batch(batch);
+        let out = coalesce_for_test(batch);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].command, "set_volume");
         assert_eq!(out[0].payload, serde_json::json!({ "v": 30 }));
@@ -466,7 +481,7 @@ mod tests {
             cmd("volume_up", 0, false),
             cmd("volume_up", 0, false),
         ];
-        let out = coalesce_command_batch(batch);
+        let out = coalesce_for_test(batch);
         assert_eq!(out.len(), 3);
     }
 
@@ -478,7 +493,7 @@ mod tests {
             cmd("set_volume", 20, true),
             cmd("set_volume", 30, true),
         ];
-        let out = coalesce_command_batch(batch);
+        let out = coalesce_for_test(batch);
         let names: Vec<_> = out.iter().map(|c| c.command.as_str()).collect();
         assert_eq!(names, vec!["toggle_mute", "set_volume"]);
         assert_eq!(out[1].payload, serde_json::json!({ "v": 30 }));
@@ -487,7 +502,7 @@ mod tests {
     #[test]
     fn coalesce_does_not_collapse_distinct_coalescable_commands() {
         let batch = vec![cmd("set_volume", 50, true), cmd("set_muted", 1, true)];
-        let out = coalesce_command_batch(batch);
+        let out = coalesce_for_test(batch);
         assert_eq!(out.len(), 2);
     }
 
@@ -562,8 +577,8 @@ mod tests {
         ));
 
         let update = next_update(&mut update_rx, "backend should emit initial payload").await;
-        assert_eq!(update.service, "settings");
-        assert_eq!(update.source_module, "@test/settings");
+        assert_eq!(update.service.as_ref(), "settings");
+        assert_eq!(update.source_module.as_ref(), "@test/settings");
         assert_eq!(
             update.payload.get("label").and_then(|v| v.as_str()),
             Some("demo")
@@ -602,8 +617,8 @@ mod tests {
         ));
 
         let update = next_update(&mut update_rx, "init should publish exported state").await;
-        assert_eq!(update.service, "audio");
-        assert_eq!(update.source_module, "@test/exported-init");
+        assert_eq!(update.service.as_ref(), "audio");
+        assert_eq!(update.source_module.as_ref(), "@test/exported-init");
         assert_eq!(
             update.payload.get("available").and_then(|v| v.as_bool()),
             Some(true)
@@ -652,8 +667,8 @@ mod tests {
 
         let event =
             next_interface_event(&mut update_rx, "command should publish interface event").await;
-        assert_eq!(event.service, "audio");
-        assert_eq!(event.source_module, "@test/audio");
+        assert_eq!(event.service.as_ref(), "audio");
+        assert_eq!(event.source_module.as_ref(), "@test/audio");
         assert_eq!(event.name, "VolumeChanged");
         assert_eq!(
             event.payload,
@@ -960,8 +975,8 @@ mod tests {
             "set_volume command should emit normalized payload",
         )
         .await;
-        assert_eq!(update.service, "audio");
-        assert_eq!(update.source_module, "@test/audio");
+        assert_eq!(update.service.as_ref(), "audio");
+        assert_eq!(update.source_module.as_ref(), "@test/audio");
         assert_eq!(
             update.payload.get("device_id").and_then(|v| v.as_str()),
             Some("default")
@@ -1008,8 +1023,8 @@ mod tests {
             "command failure should emit a caller-visible result",
         )
         .await;
-        assert_eq!(result.service, "audio");
-        assert_eq!(result.source_module, "@test/command-error");
+        assert_eq!(result.service.as_ref(), "audio");
+        assert_eq!(result.source_module.as_ref(), "@test/command-error");
         assert_eq!(result.command, "fail");
         assert_eq!(
             result.result.get("ok").and_then(|v| v.as_bool()),
@@ -1082,8 +1097,8 @@ mod tests {
             "bundled provider command should return a result table",
         )
         .await;
-        assert_eq!(result.service, "audio");
-        assert_eq!(result.source_module, "@mesh/pipewire-audio");
+        assert_eq!(result.service.as_ref(), "audio");
+        assert_eq!(result.source_module.as_ref(), "@mesh/pipewire-audio");
         assert_eq!(result.command, "play-sound");
         assert_eq!(
             result.result.get("ok").and_then(|v| v.as_bool()),
@@ -1190,8 +1205,8 @@ mod tests {
             "unsupported command should emit a generic error CommandResult",
         )
         .await;
-        assert_eq!(result.service, "audio");
-        assert_eq!(result.source_module, "@test/no-handler");
+        assert_eq!(result.service.as_ref(), "audio");
+        assert_eq!(result.source_module.as_ref(), "@test/no-handler");
         assert_eq!(result.command, "nonexistent-command");
         assert_eq!(
             result.result.get("ok").and_then(|v| v.as_bool()),
@@ -1453,8 +1468,8 @@ mod tests {
         )
         .await;
 
-        assert_eq!(update.service, "media");
-        assert_eq!(update.source_module, "@mesh/reference-media");
+        assert_eq!(update.service.as_ref(), "media");
+        assert_eq!(update.source_module.as_ref(), "@mesh/reference-media");
         assert_eq!(
             update.payload.get("available").and_then(|v| v.as_bool()),
             Some(true),
@@ -1521,8 +1536,8 @@ mod tests {
         // Collect CommandResult
         let result =
             next_command_result(&mut event_rx, "play command should emit a CommandResult").await;
-        assert_eq!(result.service, "media");
-        assert_eq!(result.source_module, "@mesh/reference-media");
+        assert_eq!(result.service.as_ref(), "media");
+        assert_eq!(result.source_module.as_ref(), "@mesh/reference-media");
         assert_eq!(result.command, "play");
         assert_eq!(
             result.result.get("ok").and_then(|v| v.as_bool()),
@@ -1612,10 +1627,11 @@ mod tests {
 
         // Provider id must be attributable in the result
         assert_eq!(
-            result.source_module, "@mesh/reference-media",
+            result.source_module.as_ref(),
+            "@mesh/reference-media",
             "CommandResult source_module must identify the provider"
         );
-        assert_eq!(result.service, "media");
+        assert_eq!(result.service.as_ref(), "media");
         // The pause command when not playing returns ok=false
         assert_eq!(
             result.result.get("ok").and_then(|v| v.as_bool()),

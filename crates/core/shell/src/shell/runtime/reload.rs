@@ -19,8 +19,8 @@ impl Shell {
                 continue;
             }
 
-            let mut changed_path: Option<std::path::PathBuf> = None;
-            for (path, last_mtime) in &runtime.source_paths {
+            let mut changed_path_index: Option<usize> = None;
+            for (index, (path, last_mtime)) in runtime.source_paths.iter().enumerate() {
                 let Ok(metadata) = std::fs::metadata(path) else {
                     continue;
                 };
@@ -28,14 +28,15 @@ impl Shell {
                     continue;
                 };
                 if *last_mtime != Some(modified_at) {
-                    changed_path = Some(path.clone());
+                    changed_path_index = Some(index);
                     break;
                 }
             }
 
-            let Some(trigger) = changed_path else {
+            let Some(trigger_index) = changed_path_index else {
                 continue;
             };
+            let trigger_display = runtime.source_paths[trigger_index].0.display().to_string();
 
             let reloaded = runtime
                 .component
@@ -61,7 +62,7 @@ impl Shell {
                 tracing::info!(
                     "recompiled frontend component '{}' (triggered by change in {})",
                     runtime.component.id(),
-                    trigger.display()
+                    trigger_display
                 );
             }
         }
@@ -79,16 +80,13 @@ impl Shell {
         self.next_module_settings_reload_check = now + MODULE_SETTINGS_RELOAD_POLL_INTERVAL;
 
         for runtime in &mut self.components {
-            let current_settings_path = runtime.component.module_settings_path().map(PathBuf::from);
-            if runtime.module_settings_path != current_settings_path {
-                runtime.module_settings_path = current_settings_path.clone();
+            let current_settings_path = runtime.component.module_settings_path();
+            if runtime.module_settings_path.as_deref() != current_settings_path {
+                runtime.module_settings_path = current_settings_path.map(PathBuf::from);
                 runtime.module_settings_modified_at = None;
             }
 
-            let Some(settings_path) = current_settings_path
-                .as_ref()
-                .or(runtime.module_settings_path.as_ref())
-            else {
+            let Some(settings_path) = runtime.module_settings_path.as_ref() else {
                 continue;
             };
 

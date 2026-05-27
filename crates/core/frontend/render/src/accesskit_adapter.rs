@@ -102,7 +102,11 @@ fn collect_node(
     });
     if !node.children.is_empty() {
         let mut children = Vec::with_capacity(node.children.len());
-        children.extend(node.children.iter().map(|child| accesskit_node_id(child.id)));
+        children.extend(
+            node.children
+                .iter()
+                .map(|child| accesskit_node_id(child.id)),
+        );
         accesskit_node.set_children(children);
     }
 

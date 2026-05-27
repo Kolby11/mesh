@@ -73,6 +73,7 @@ impl Shell {
         let mut backend_runtimes: Vec<BackendRuntimeEntry> = self
             .backend_runtime_statuses
             .values()
+            .flat_map(|providers| providers.values())
             .map(|entry| BackendRuntimeEntry {
                 interface: entry.interface.clone(),
                 provider_id: entry.provider_id.clone(),
@@ -131,11 +132,11 @@ impl Shell {
     fn record_debug_snapshot_state(&mut self, snapshot: &DebugSnapshot) {
         self.latest_service_state.insert(
             mesh_core_debug::DEBUG_INTERFACE.to_string(),
-            LatestServiceState {
-                interface: mesh_core_debug::DEBUG_INTERFACE.to_string(),
-                provider_id: mesh_core_debug::DEBUG_SOURCE_MODULE_ID.to_string(),
-                state: debug_service_payload(&self.debug, snapshot),
-            },
+            LatestServiceState::new(
+                mesh_core_debug::DEBUG_INTERFACE.to_string(),
+                mesh_core_debug::DEBUG_SOURCE_MODULE_ID.to_string(),
+                debug_service_payload(&self.debug, snapshot),
+            ),
         );
     }
 
@@ -227,8 +228,7 @@ impl Shell {
                     .get(&interface)
                     .is_some_and(|slot| slot.provider_id == provider.provider_module);
                 let lifecycle = self
-                    .backend_runtime_statuses
-                    .get(&(interface.clone(), provider.provider_module.clone()))
+                    .backend_runtime_status(&interface, &provider.provider_module)
                     .map(|status| status.status.as_str().to_string())
                     .unwrap_or_else(|| "registered".to_string());
                 entries.push(mesh_core_debug::ModuleObjectEntry {

@@ -1,26 +1,32 @@
 use super::*;
 
 pub(super) fn parse_edges_shorthand(value: &str) -> Edges {
-    let values = shorthand_numbers(value);
-    match values.as_slice() {
-        [all] => Edges::all(*all),
-        [vertical, horizontal] => Edges {
-            top: *vertical,
-            right: *horizontal,
-            bottom: *vertical,
-            left: *horizontal,
+    let mut values = [0.0; 4];
+    let mut len = 0;
+    for token in value.split_whitespace().take(4) {
+        values[len] = parse_px(token);
+        len += 1;
+    }
+
+    match len {
+        1 => Edges::all(values[0]),
+        2 => Edges {
+            top: values[0],
+            right: values[1],
+            bottom: values[0],
+            left: values[1],
         },
-        [top, horizontal, bottom] => Edges {
-            top: *top,
-            right: *horizontal,
-            bottom: *bottom,
-            left: *horizontal,
+        3 => Edges {
+            top: values[0],
+            right: values[1],
+            bottom: values[2],
+            left: values[1],
         },
-        [top, right, bottom, left] => Edges {
-            top: *top,
-            right: *right,
-            bottom: *bottom,
-            left: *left,
+        4 => Edges {
+            top: values[0],
+            right: values[1],
+            bottom: values[2],
+            left: values[3],
         },
         _ => Edges::zero(),
     }
@@ -45,52 +51,58 @@ pub(super) fn parse_transform(value: &str) -> Transform2D {
             break;
         };
         let args_str = &after_open[..close];
-        let args: Vec<f32> = args_str
+        let mut args = [0.0; 2];
+        let mut args_len = 0;
+        let mut angle_arg = None;
+        for token in args_str
             .split(|c: char| c == ',' || c.is_whitespace())
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .map(parse_transform_length)
-            .collect();
-        let angle_arg: Option<f32> = args_str
-            .split(|c: char| c == ',' || c.is_whitespace())
-            .map(str::trim)
-            .find(|s| !s.is_empty())
-            .map(parse_transform_angle);
+        {
+            if angle_arg.is_none() {
+                angle_arg = Some(parse_transform_angle(token));
+            }
+            if args_len < args.len() {
+                args[args_len] = parse_transform_length(token);
+                args_len += 1;
+            }
+        }
 
         match name {
             "translate" => {
-                if let Some(&x) = args.first() {
-                    transform.translate_x += x;
+                if args_len > 0 {
+                    transform.translate_x += args[0];
                 }
-                if let Some(&y) = args.get(1) {
-                    transform.translate_y += y;
+                if args_len > 1 {
+                    transform.translate_y += args[1];
                 }
             }
             "translateX" => {
-                if let Some(&x) = args.first() {
-                    transform.translate_x += x;
+                if args_len > 0 {
+                    transform.translate_x += args[0];
                 }
             }
             "translateY" => {
-                if let Some(&y) = args.first() {
-                    transform.translate_y += y;
+                if args_len > 0 {
+                    transform.translate_y += args[0];
                 }
             }
             "scale" => {
-                if let Some(&sx) = args.first() {
+                if args_len > 0 {
+                    let sx = args[0];
                     transform.scale_x *= sx;
-                    let sy = args.get(1).copied().unwrap_or(sx);
+                    let sy = if args_len > 1 { args[1] } else { sx };
                     transform.scale_y *= sy;
                 }
             }
             "scaleX" => {
-                if let Some(&sx) = args.first() {
-                    transform.scale_x *= sx;
+                if args_len > 0 {
+                    transform.scale_x *= args[0];
                 }
             }
             "scaleY" => {
-                if let Some(&sy) = args.first() {
-                    transform.scale_y *= sy;
+                if args_len > 0 {
+                    transform.scale_y *= args[0];
                 }
             }
             "rotate" => {
@@ -686,12 +698,4 @@ pub(super) fn parse_dimension(s: &str) -> Dimension {
         _ if s.ends_with('%') => Dimension::Percent(s.trim_end_matches('%').parse().unwrap_or(0.0)),
         _ => Dimension::Px(parse_px(s)),
     }
-}
-
-fn shorthand_numbers(value: &str) -> Vec<f32> {
-    value
-        .split_whitespace()
-        .take(4)
-        .map(parse_px)
-        .collect::<Vec<_>>()
 }
