@@ -2,7 +2,7 @@
 ///
 /// Computes `LayoutRect` for every node in a widget tree. Supports row/column
 /// direction, flex-grow/shrink, gap, padding, and margin.
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::style::{
     AlignItems, AlignSelf, Dimension, Display, Edges, FlexDirection, JustifyContent, Overflow,
@@ -79,8 +79,59 @@ fn record_taffy_diagnostic(
     });
 }
 
+const INTRINSIC_TEXT_CACHE_CAPACITY: usize = 512;
+
 #[derive(Debug, Default)]
-pub struct IntrinsicLayoutCache;
+pub struct IntrinsicLayoutCache {
+    text_measurements: HashMap<TextMeasureKey, (f32, f32)>,
+    text_order: VecDeque<TextMeasureKey>,
+}
+
+impl IntrinsicLayoutCache {
+    fn get_text_measurement(&mut self, key: &TextMeasureKey) -> Option<(f32, f32)> {
+        let value = self.text_measurements.get(key).copied();
+        if value.is_some() {
+            self.text_order.retain(|existing| existing != key);
+            self.text_order.push_back(key.clone());
+        }
+        value
+    }
+
+    fn insert_text_measurement(&mut self, key: TextMeasureKey, value: (f32, f32)) {
+        self.text_order.retain(|existing| existing != &key);
+        self.text_order.push_back(key.clone());
+        self.text_measurements.insert(key, value);
+        while self.text_measurements.len() > INTRINSIC_TEXT_CACHE_CAPACITY {
+            let Some(evicted) = self.text_order.pop_front() else {
+                break;
+            };
+            self.text_measurements.remove(&evicted);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TextMeasureKey {
+    content: String,
+    font_family: String,
+    font_size: u32,
+    font_weight: u16,
+    line_height: u32,
+    max_width: Option<u32>,
+}
+
+impl TextMeasureKey {
+    fn new(text: &TextMeasureData, max_width: Option<f32>) -> Self {
+        Self {
+            content: text.content.clone(),
+            font_family: text.font_family.clone(),
+            font_size: text.font_size.to_bits(),
+            font_weight: text.font_weight,
+            line_height: text.line_height.to_bits(),
+            max_width: max_width.map(f32::to_bits),
+        }
+    }
+}
 
 /// The layout engine. Stateless — call `compute` on a widget tree.
 pub struct LayoutEngine;
@@ -123,8 +174,13 @@ impl LayoutEngine {
         intrinsic_cache: &mut IntrinsicLayoutCache,
         measurer: Option<&dyn TextMeasurer>,
     ) {
-        let _ = intrinsic_cache;
-        Self::compute_taffy_layout(root, available_width, available_height, measurer);
+        Self::compute_taffy_layout_with_cache(
+            root,
+            available_width,
+            available_height,
+            intrinsic_cache,
+            measurer,
+        );
     }
 
     /// Compute layout through Taffy and write the resulting rectangles back onto
@@ -133,6 +189,23 @@ impl LayoutEngine {
         root: &mut WidgetNode,
         available_width: f32,
         available_height: f32,
+        measurer: Option<&dyn TextMeasurer>,
+    ) {
+        let mut intrinsic_cache = IntrinsicLayoutCache::default();
+        Self::compute_taffy_layout_with_cache(
+            root,
+            available_width,
+            available_height,
+            &mut intrinsic_cache,
+            measurer,
+        );
+    }
+
+    fn compute_taffy_layout_with_cache(
+        root: &mut WidgetNode,
+        available_width: f32,
+        available_height: f32,
+        intrinsic_cache: &mut IntrinsicLayoutCache,
         measurer: Option<&dyn TextMeasurer>,
     ) {
         let mut report = TaffyLayoutReport::default();
@@ -156,6 +229,7 @@ impl LayoutEngine {
                             available_space,
                             context.map(|node_id| *node_id),
                             &text_nodes,
+                            intrinsic_cache,
                             measurer,
                         )
                     },
@@ -365,13 +439,7 @@ fn build_taffy_tree(
     report: &mut TaffyLayoutReport,
 ) -> Result<TaffyNodeId, taffy::TaffyError> {
     let style = taffy_style_for_node(node, report);
-    let children = node
-        .children
-        .iter()
-        .map(|child| build_taffy_tree(child, tree, node_map, text_nodes, report))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let taffy_node = if children.is_empty() {
+    let taffy_node = if node.children.is_empty() {
         if node.tag == "text" {
             text_nodes.insert(
                 node.id,
@@ -390,6 +458,11 @@ fn build_taffy_tree(
         }
         tree.new_leaf_with_context(style, node.id)?
     } else {
+        let children = node
+            .children
+            .iter()
+            .map(|child| build_taffy_tree(child, tree, node_map, text_nodes, report))
+            .collect::<Result<Vec<_>, _>>()?;
         tree.new_with_children(style, &children)?
     };
 
@@ -402,6 +475,7 @@ fn measure_taffy_node(
     available_space: TaffySize<TaffyAvailableSpace>,
     node_id: Option<NodeId>,
     text_nodes: &HashMap<NodeId, TextMeasureData>,
+    intrinsic_cache: &mut IntrinsicLayoutCache,
     measurer: Option<&dyn TextMeasurer>,
 ) -> TaffySize<f32> {
     let Some(node_id) = node_id else {
@@ -420,14 +494,22 @@ fn measure_taffy_node(
     let max_width = known_dimensions
         .width
         .or_else(|| available_space_to_option(available_space.width));
-    let (measured_width, measured_height) = measurer.measure_text(
-        &text.content,
-        &text.font_family,
-        text.font_size,
-        text.font_weight,
-        text.line_height,
-        max_width,
-    );
+    let measure_key = TextMeasureKey::new(text, max_width);
+    let (measured_width, measured_height) =
+        if let Some(measured) = intrinsic_cache.get_text_measurement(&measure_key) {
+            measured
+        } else {
+            let measured = measurer.measure_text(
+                &text.content,
+                &text.font_family,
+                text.font_size,
+                text.font_weight,
+                text.line_height,
+                max_width,
+            );
+            intrinsic_cache.insert_text_measurement(measure_key, measured);
+            measured
+        };
 
     TaffySize {
         width: known_dimensions.width.unwrap_or(measured_width),

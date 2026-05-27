@@ -78,17 +78,14 @@ impl PixelBuffer {
             }
             return true;
         }
-        let mut row = Vec::with_capacity(row_bytes);
-        for _ in x..end_x {
-            row.extend_from_slice(&[color.b, color.g, color.r, color.a]);
-        }
+        let pixel = [color.b, color.g, color.r, color.a];
         for py in y..end_y {
             let start = (py * self.stride + x * 4) as usize;
             let end = start + row_bytes;
             if end > self.data.len() {
                 return false;
             }
-            self.data[start..end].copy_from_slice(&row);
+            fill_bgra_row(&mut self.data[start..end], &pixel);
         }
         true
     }
@@ -253,6 +250,26 @@ impl PixelBuffer {
         };
         draw(surface.canvas());
         true
+    }
+}
+
+fn fill_bgra_row(dst: &mut [u8], pixel: &[u8; 4]) {
+    if dst.is_empty() {
+        return;
+    }
+
+    dst[..4].copy_from_slice(pixel);
+    let mut width = 4usize;
+    while width <= dst.len() / 2 {
+        let (head, tail) = dst.split_at_mut(width);
+        let (tail_half, _) = tail.split_at_mut(width);
+        tail_half.copy_from_slice(head);
+        width *= 2;
+    }
+    let remainder = dst.len() - width;
+    if remainder > 0 {
+        let (head, tail) = dst.split_at_mut(width);
+        tail[..remainder].copy_from_slice(&head[..remainder]);
     }
 }
 

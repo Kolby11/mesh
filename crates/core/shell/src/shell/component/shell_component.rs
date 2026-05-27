@@ -130,19 +130,27 @@ impl ShellComponent for FrontendSurfaceComponent {
         };
         self.last_service_update = Some(format!("{service}:{source_module}"));
         let service_name = crate::shell::service::service_name_from_interface(service);
+        let service_read_capability = Capability::new(format!("service.{service_name}.read"));
+        let theme_read_capability = (service == "mesh.theme").then(|| Capability::new("theme.read"));
+        let locale_read_capability =
+            (service == "mesh.locale").then(|| Capability::new("locale.read"));
         self.cached_service_payloads
             .insert(service_name.clone(), payload.clone());
         let mut needs_rebuild = false;
         {
             let mut runtimes = self.runtimes.lock().unwrap();
             for runtime in runtimes.values_mut() {
-                let required = format!("service.{service_name}.read");
                 let capabilities = &runtime.script_ctx.capabilities;
-                let has_read = capabilities.is_granted(&Capability::new(&required))
-                    || (service == "mesh.theme"
-                        && capabilities.is_granted(&Capability::new("theme.read")))
-                    || (service == "mesh.locale"
-                        && capabilities.is_granted(&Capability::new("locale.read")));
+                let has_read = capabilities.is_granted(&service_read_capability)
+                    || theme_read_capability
+                        .as_ref()
+                        .is_some_and(|capability| capabilities.is_granted(capability))
+                    || locale_read_capability
+                        .as_ref()
+                        .is_some_and(|capability| capabilities.is_granted(capability));
+                if !has_read {
+                    continue;
+                }
                 let previous = runtime.script_ctx.state().get(&service_name);
                 let tracked_fields = runtime.script_ctx.tracked_fields_for_service(&service_name);
                 apply_service_update(
@@ -153,13 +161,11 @@ impl ShellComponent for FrontendSurfaceComponent {
                     payload.clone(),
                 );
                 let state_changed = runtime.script_ctx.state().is_dirty();
-                if has_read {
-                    runtime
-                        .script_ctx
-                        .apply_service_payload(&service_name, payload);
-                }
-                let tracked_fields_changed = has_read
-                    && tracked_service_fields_changed(previous.as_ref(), payload, &tracked_fields);
+                runtime
+                    .script_ctx
+                    .apply_service_payload(&service_name, payload);
+                let tracked_fields_changed =
+                    tracked_service_fields_changed(previous.as_ref(), payload, &tracked_fields);
                 if state_changed || tracked_fields_changed {
                     needs_rebuild = true;
                 }
@@ -172,11 +178,49 @@ impl ShellComponent for FrontendSurfaceComponent {
         Ok(Vec::new())
     }
 
+    fn observes_service_event(&self, event: &ServiceEvent) -> bool {
+        let service = match event {
+            ServiceEvent::Updated { service, .. }
+            | ServiceEvent::InterfaceEvent { service, .. } => service,
+        };
+        let service_name = crate::shell::service::service_name_from_interface(service);
+        let service_read_capability = Capability::new(format!("service.{service_name}.read"));
+        let theme_read_capability = (service == "mesh.theme").then(|| Capability::new("theme.read"));
+        let locale_read_capability =
+            (service == "mesh.locale").then(|| Capability::new("locale.read"));
+        let Ok(runtimes) = self.runtimes.lock() else {
+            return true;
+        };
+        if runtimes.is_empty() {
+            return true;
+        }
+        runtimes
+            .values()
+            .any(|runtime| {
+                let capabilities = &runtime.script_ctx.capabilities;
+                capabilities.is_granted(&service_read_capability)
+                    || theme_read_capability
+                        .as_ref()
+                        .is_some_and(|capability| capabilities.is_granted(capability))
+                    || locale_read_capability
+                        .as_ref()
+                        .is_some_and(|capability| capabilities.is_granted(capability))
+            })
+    }
+
+    fn wants_tick(&self) -> bool {
+        self.hover_start.is_some() && !self.tooltip_visible
+            || !self.pending_surface_states.borrow().is_empty()
+    }
+
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
         // Trigger a repaint once the tooltip delay has elapsed so the tooltip appears.
         if let Some(start) = self.hover_start {
-            if start.elapsed() >= TOOLTIP_DELAY && !self.dirty && !self.style_only_dirty {
-                self.invalidate_paint();
+            if start.elapsed() >= TOOLTIP_DELAY && !self.tooltip_visible {
+                self.tooltip_visible = true;
+                if !self.dirty && !self.style_only_dirty {
+                    self.invalidate_paint();
+                }
             }
         }
 
@@ -306,17 +350,14 @@ impl ShellComponent for FrontendSurfaceComponent {
             Some("rebuild"),
         );
 
-        let tooltip = if let (Some(start), Some(hovered_key)) =
-            (self.hover_start, self.hovered_key.as_ref())
-        {
-            if start.elapsed() >= TOOLTIP_DELAY {
-                find_tooltip_text_by_key(&tree, hovered_key).map(|text| {
+        let tooltip = if self.tooltip_visible {
+            self.hovered_key
+                .as_ref()
+                .and_then(|hovered_key| find_tooltip_text_by_key(&tree, hovered_key))
+                .map(|text| {
                     let (cx, cy) = self.hovered_pos;
                     (text, cx, cy)
                 })
-            } else {
-                None
-            }
         } else {
             None
         };
@@ -357,43 +398,45 @@ impl ShellComponent for FrontendSurfaceComponent {
         );
         let current_tooltip_damage =
             tooltip_damage_rect(tooltip.as_ref(), content_width, content_height);
-        let tooltip_damage = merge_optional_damage(
-            current_tooltip_damage,
-            self.last_tooltip_damage,
+        let tooltip_damage_rects = damage_rects_from_options(
+            [current_tooltip_damage, self.last_tooltip_damage],
             surface_damage,
         );
-        let dirty_node_visual_damage = damage_rect_for_node_ids(
+        let dirty_node_visual_damage_rects = damage_rects_for_node_ids(
             &tree,
             self.retained_render_objects.dirty_node_ids(),
             &self.last_visual_damage,
             surface_damage,
         );
-        let animated_visual_damage = if render_object_dirty.transform > 0
+        let animated_visual_damage_rects = if render_object_dirty.transform > 0
             || render_object_dirty.opacity > 0
             || render_object_dirty.material > 0
         {
-            dirty_node_visual_damage
+            dirty_node_visual_damage_rects.clone()
         } else {
-            None
+            Vec::new()
         };
-        let reorder_damage = if render_object_dirty.reordered > 0 {
-            damage_rect_for_node_ids(
+        let mut visual_damage_rects = if render_object_dirty.reordered > 0 {
+            damage_rects_for_node_ids(
                 &tree,
                 self.retained_render_objects.dirty_node_ids(),
                 &self.last_visual_damage,
                 surface_damage,
             )
         } else {
-            None
+            Vec::new()
         };
-        let visual_damage =
-            merge_optional_damage(reorder_damage, animated_visual_damage, surface_damage);
-        let effective_damage = select_effective_damage(
+        merge_damage_rects(
+            &mut visual_damage_rects,
+            animated_visual_damage_rects,
+            surface_damage,
+        );
+        let effective_damage = select_effective_damage_rects(
             display_list_metrics,
             surface_damage,
             requires_tree_rebuild,
-            visual_damage,
-            tooltip_damage,
+            visual_damage_rects,
+            tooltip_damage_rects,
         );
         let paint_damage = if effective_damage.full_surface {
             Some(surface_damage)
@@ -415,9 +458,22 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         self.publish_element_metrics(&tree);
 
-        let selected_paint = self
-            .retained_display_list
-            .select_paint_commands(paint_damage, effective_damage.policy);
+        let effective_damage_area = effective_damage.damage_area(display_list_metrics.surface_area);
+        let paint_bounding_rect = matches!(
+            effective_damage.policy,
+            DisplayListRepaintPolicy::BoundingRect
+        ) && effective_damage.rects.len() > 1
+            && effective_damage.rect.is_some_and(|damage| {
+                effective_damage_area > 0
+                    && damage.area() <= effective_damage_area.saturating_mul(3)
+            });
+        let selected_paint = if paint_bounding_rect {
+            self.retained_display_list
+                .select_paint_commands(effective_damage.rect, effective_damage.policy)
+        } else {
+            self.retained_display_list
+                .select_paint_commands_for_rects(&effective_damage.rects, effective_damage.policy)
+        };
         let focused_proof_snapshot = mesh_core_render::build_focused_proof_snapshot(
             &tree,
             render_object_dirty,
@@ -434,7 +490,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             retained_generation: self.retained_tree.generation(),
             component: dirty_types.to_debug_counts(),
             retained: retained_dirty.to_debug_counts(),
-            paint: retained_paint_snapshot(selected_paint.metrics(), effective_damage),
+            paint: retained_paint_snapshot(selected_paint.metrics(), &effective_damage),
             text: mesh_core_debug::TextCacheSnapshot::default(),
         });
         tracing::trace!(
@@ -457,40 +513,108 @@ impl ShellComponent for FrontendSurfaceComponent {
         );
 
         let paint_started = std::time::Instant::now();
-        let paint_metrics = if paint_damage.is_none() {
+        let paint_metrics = if effective_damage.rects.is_empty() {
             mesh_core_render::PaintProfilingMetrics::default()
         } else {
-            let damage = paint_damage.expect("present damage is available when paint runs");
             if effective_damage.full_surface {
                 buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
+                if tooltip.is_some() {
+                    mesh_core_render::set_tooltip_paint_colors(resolve_tooltip_colors(theme));
+                }
+                mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+                    &selected_paint,
+                    buffer,
+                    1.0,
+                    None,
+                    None,
+                    tooltip
+                        .as_ref()
+                        .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
+                    Some(self.compiled.manifest.package.id.as_str()),
+                )
             } else {
-                buffer.clear_rect(
-                    damage.x,
-                    damage.y,
-                    damage.width,
-                    damage.height,
-                    mesh_core_elements::style::Color::TRANSPARENT,
-                );
+                if tooltip.is_some() {
+                    mesh_core_render::set_tooltip_paint_colors(resolve_tooltip_colors(theme));
+                }
+                if paint_bounding_rect {
+                    if let Some(damage) = effective_damage.rect {
+                        buffer.clear_rect(
+                            damage.x,
+                            damage.y,
+                            damage.width,
+                            damage.height,
+                            mesh_core_elements::style::Color::TRANSPARENT,
+                        );
+                        let tooltip_for_damage = tooltip.as_ref().and_then(|(text, cx, cy)| {
+                            current_tooltip_damage
+                                .filter(|tooltip_rect| tooltip_rect.intersects(damage))
+                                .map(|_| (text.as_str(), *cx, *cy))
+                        });
+                        mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+                            &selected_paint,
+                            buffer,
+                            1.0,
+                            Some((damage.x, damage.y, damage.width, damage.height)),
+                            None,
+                            tooltip_for_damage,
+                            Some(self.compiled.manifest.package.id.as_str()),
+                        )
+                    } else {
+                        mesh_core_render::PaintProfilingMetrics::default()
+                    }
+                } else if effective_damage.rects.len() == 1 {
+                    let damage = effective_damage.rects[0];
+                    buffer.clear_rect(
+                        damage.x,
+                        damage.y,
+                        damage.width,
+                        damage.height,
+                        mesh_core_elements::style::Color::TRANSPARENT,
+                    );
+                    let tooltip_for_damage = tooltip.as_ref().and_then(|(text, cx, cy)| {
+                        current_tooltip_damage
+                            .filter(|tooltip_rect| tooltip_rect.intersects(damage))
+                            .map(|_| (text.as_str(), *cx, *cy))
+                    });
+                    mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+                        &selected_paint,
+                        buffer,
+                        1.0,
+                        Some((damage.x, damage.y, damage.width, damage.height)),
+                        None,
+                        tooltip_for_damage,
+                        Some(self.compiled.manifest.package.id.as_str()),
+                    )
+                } else {
+                    let mut paint_metrics = mesh_core_render::PaintProfilingMetrics::default();
+                    for damage in &effective_damage.rects {
+                        buffer.clear_rect(
+                            damage.x,
+                            damage.y,
+                            damage.width,
+                            damage.height,
+                            mesh_core_elements::style::Color::TRANSPARENT,
+                        );
+                        let tooltip_for_damage = tooltip.as_ref().and_then(|(text, cx, cy)| {
+                            current_tooltip_damage
+                                .filter(|tooltip_rect| tooltip_rect.intersects(*damage))
+                                .map(|_| (text.as_str(), *cx, *cy))
+                        });
+                        let damage_metrics =
+                            mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+                                &selected_paint,
+                                buffer,
+                                1.0,
+                                Some((damage.x, damage.y, damage.width, damage.height)),
+                                None,
+                                tooltip_for_damage,
+                                Some(self.compiled.manifest.package.id.as_str()),
+                            );
+                        merge_paint_metrics(&mut paint_metrics, damage_metrics);
+                    }
+                    paint_metrics
+                }
             }
-            if tooltip.is_some() {
-                mesh_core_render::set_tooltip_paint_colors(resolve_tooltip_colors(theme));
-            }
-            mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
-                &selected_paint,
-                buffer,
-                1.0,
-                (!effective_damage.full_surface).then_some((
-                    damage.x,
-                    damage.y,
-                    damage.width,
-                    damage.height,
-                )),
-                None,
-                tooltip
-                    .as_ref()
-                    .map(|(text, cx, cy)| (text.as_str(), *cx, *cy)),
-                Some(self.compiled.manifest.package.id.as_str()),
-            )
         };
         self.last_present_damage =
             merge_optional_damage(self.last_present_damage, paint_damage, surface_damage);
@@ -748,8 +872,17 @@ impl ShellComponent for FrontendSurfaceComponent {
         return_focus: Option<(String, String)>,
         close_on_focus_leave: bool,
     ) {
-        if let Some(tree) = self.last_tree.clone() {
-            self.apply_focus_transfer(&tree, target, return_focus, close_on_focus_leave);
+        if let Some(traversal) = self
+            .last_tree
+            .as_ref()
+            .map(collect_focus_traversal)
+        {
+            self.apply_focus_transfer_from_traversal(
+                &traversal,
+                target,
+                return_focus,
+                close_on_focus_leave,
+            );
         } else {
             // No tree yet — defer via pending_auto_focus and keep return target.
             self.pending_auto_focus = true;
@@ -853,6 +986,7 @@ fn token_color(
         .unwrap_or(fallback)
 }
 
+#[cfg(test)]
 fn select_effective_damage(
     metrics: DisplayListMetrics,
     surface: DamageRect,
@@ -860,40 +994,63 @@ fn select_effective_damage(
     reorder_damage: Option<DamageRect>,
     tooltip_damage: Option<DamageRect>,
 ) -> EffectiveDamage {
+    select_effective_damage_rects(
+        metrics,
+        surface,
+        requires_tree_rebuild,
+        reorder_damage.into_iter().collect(),
+        tooltip_damage.into_iter().collect(),
+    )
+}
+
+fn select_effective_damage_rects(
+    metrics: DisplayListMetrics,
+    surface: DamageRect,
+    requires_tree_rebuild: bool,
+    extra_damage: Vec<DamageRect>,
+    tooltip_damage: Vec<DamageRect>,
+) -> EffectiveDamage {
     if metrics.full_surface_damage {
         return EffectiveDamage {
             rect: Some(surface),
+            rects: vec![surface],
             full_surface: true,
             policy: DisplayListRepaintPolicy::FullSurface,
         };
     }
 
     let base_damage = (metrics.damage_area > 0).then_some(metrics.damage_rect);
-    let combined_damage = merge_optional_damage(
-        merge_optional_damage(base_damage, reorder_damage, surface),
-        tooltip_damage,
-        surface,
-    );
-    let Some(damage) = combined_damage else {
+    let has_extra_damage_sources = !extra_damage.is_empty() || !tooltip_damage.is_empty();
+    let mut rects = Vec::new();
+    if let Some(base) = base_damage {
+        push_damage_rect(&mut rects, base, surface);
+    }
+    merge_damage_rects(&mut rects, extra_damage, surface);
+    merge_damage_rects(&mut rects, tooltip_damage, surface);
+
+    let Some(damage) = bounding_damage_rect(&rects, surface) else {
         return EffectiveDamage::none();
     };
 
+    let damage_area = damage_rects_area(&rects);
     let policy = select_damage_policy(
         metrics,
         requires_tree_rebuild,
-        reorder_damage.is_some() || tooltip_damage.is_some(),
-        damage.area(),
+        has_extra_damage_sources,
+        damage_area,
     );
     match policy {
         DisplayListRepaintPolicy::MinimalDamage | DisplayListRepaintPolicy::BoundingRect => {
             EffectiveDamage {
                 rect: Some(damage),
+                rects,
                 full_surface: false,
                 policy,
             }
         }
         DisplayListRepaintPolicy::FullSurface => EffectiveDamage {
             rect: Some(surface),
+            rects: vec![surface],
             full_surface: true,
             policy,
         },
@@ -955,42 +1112,56 @@ fn tooltip_damage_rect(
     })
 }
 
+#[cfg(test)]
 fn damage_rect_for_node_ids(
     node: &WidgetNode,
     node_ids: &HashSet<mesh_core_elements::NodeId>,
     last_visual_damage: &HashMap<mesh_core_elements::NodeId, DamageRect>,
     surface: DamageRect,
 ) -> Option<DamageRect> {
-    let mut damage = None;
-    for node_id in node_ids {
-        if let Some(previous) = last_visual_damage.get(node_id).copied() {
-            damage = Some(match damage {
-                Some(current) => union_damage(current, previous),
-                None => previous,
-            });
-        }
-    }
-    collect_damage_rect_for_node_ids(node, node_ids, surface, &mut damage);
-    clip_damage(damage?, surface)
+    bounding_damage_rect(
+        &damage_rects_for_node_ids(node, node_ids, last_visual_damage, surface),
+        surface,
+    )
 }
 
-fn collect_damage_rect_for_node_ids(
+fn damage_rects_for_node_ids(
+    node: &WidgetNode,
+    node_ids: &HashSet<mesh_core_elements::NodeId>,
+    last_visual_damage: &HashMap<mesh_core_elements::NodeId, DamageRect>,
+    surface: DamageRect,
+) -> Vec<DamageRect> {
+    if node_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let mut damage = Vec::with_capacity(node_ids.len().min(MAX_DAMAGE_RECTS));
+    for node_id in node_ids {
+        if let Some(previous) = last_visual_damage.get(node_id).copied() {
+            push_damage_rect(&mut damage, previous, surface);
+        }
+    }
+    collect_damage_rects_for_node_ids(node, node_ids, surface, &mut damage);
+    damage
+}
+
+fn collect_damage_rects_for_node_ids(
     node: &WidgetNode,
     node_ids: &HashSet<mesh_core_elements::NodeId>,
     surface: DamageRect,
-    damage: &mut Option<DamageRect>,
+    damage: &mut Vec<DamageRect>,
 ) {
+    if node_ids.is_empty() {
+        return;
+    }
     if node_ids.contains(&node.id)
         && let Some(bounds) = damage_rect_for_widget_node(node, surface)
     {
-        *damage = Some(match *damage {
-            Some(current) => union_damage(current, bounds),
-            None => bounds,
-        });
+        push_damage_rect(damage, bounds, surface);
     }
 
     for child in &node.children {
-        collect_damage_rect_for_node_ids(child, node_ids, surface, damage);
+        collect_damage_rects_for_node_ids(child, node_ids, surface, damage);
     }
 }
 
@@ -1091,6 +1262,108 @@ fn merge_optional_damage(
         (None, Some(next)) => clip_damage(next, surface),
         (None, None) => None,
     }
+}
+
+fn damage_rects_from_options(
+    rects: impl IntoIterator<Item = Option<DamageRect>>,
+    surface: DamageRect,
+) -> Vec<DamageRect> {
+    let mut damage = Vec::with_capacity(2);
+    for rect in rects.into_iter().flatten() {
+        push_damage_rect(&mut damage, rect, surface);
+    }
+    damage
+}
+
+fn merge_damage_rects(
+    current: &mut Vec<DamageRect>,
+    next: impl IntoIterator<Item = DamageRect>,
+    surface: DamageRect,
+) {
+    for rect in next {
+        push_damage_rect(current, rect, surface);
+    }
+}
+
+fn push_damage_rect(rects: &mut Vec<DamageRect>, rect: DamageRect, surface: DamageRect) {
+    let Some(rect) = clip_damage(rect, surface) else {
+        return;
+    };
+    if let Some(index) = rects.iter().position(|existing| existing.intersects(rect)) {
+        let merged = union_damage(rects[index], rect);
+        rects.remove(index);
+        push_damage_rect(rects, merged, surface);
+        return;
+    }
+    if rects.len() < MAX_DAMAGE_RECTS {
+        rects.push(rect);
+        return;
+    }
+
+    let (merge_index, _) = rects
+        .iter()
+        .enumerate()
+        .map(|(index, existing)| {
+            let merged = union_damage(*existing, rect);
+            let growth = merged.area().saturating_sub(existing.area());
+            (index, growth)
+        })
+        .min_by_key(|(_, growth)| *growth)
+        .unwrap_or((0, 0));
+    let merged = union_damage(rects[merge_index], rect);
+    rects.remove(merge_index);
+    push_damage_rect(rects, merged, surface);
+}
+
+fn bounding_damage_rect(rects: &[DamageRect], surface: DamageRect) -> Option<DamageRect> {
+    let mut iter = rects.iter().copied();
+    let first = iter.next()?;
+    let bounds = iter.fold(first, union_damage);
+    clip_damage(bounds, surface)
+}
+
+fn damage_rects_area(rects: &[DamageRect]) -> u64 {
+    rects.iter().map(|rect| rect.area()).sum()
+}
+
+fn merge_paint_metrics(
+    total: &mut mesh_core_render::PaintProfilingMetrics,
+    next: mesh_core_render::PaintProfilingMetrics,
+) {
+    total.text.layout_hits = total.text.layout_hits.saturating_add(next.text.layout_hits);
+    total.text.layout_misses = total
+        .text
+        .layout_misses
+        .saturating_add(next.text.layout_misses);
+    total.text.layout_invalidations = total
+        .text
+        .layout_invalidations
+        .saturating_add(next.text.layout_invalidations);
+    total.text.shaped_entries = total.text.shaped_entries.max(next.text.shaped_entries);
+    total.text.glyph_cache_active |= next.text.glyph_cache_active;
+    total.text.shaping_micros = total
+        .text
+        .shaping_micros
+        .saturating_add(next.text.shaping_micros);
+    total.traversal_micros = total.traversal_micros.saturating_add(next.traversal_micros);
+    total.icon_image_raster_micros = total
+        .icon_image_raster_micros
+        .saturating_add(next.icon_image_raster_micros);
+    total.raster_cache_hits = total
+        .raster_cache_hits
+        .saturating_add(next.raster_cache_hits);
+    total.raster_cache_misses = total
+        .raster_cache_misses
+        .saturating_add(next.raster_cache_misses);
+    total.raster_cache_bypasses = total
+        .raster_cache_bypasses
+        .saturating_add(next.raster_cache_bypasses);
+    total.raster_cache_opaque_hits = total
+        .raster_cache_opaque_hits
+        .saturating_add(next.raster_cache_opaque_hits);
+    total.raster_cache_translucent_hits = total
+        .raster_cache_translucent_hits
+        .saturating_add(next.raster_cache_translucent_hits);
 }
 
 fn union_damage(current: DamageRect, next: DamageRect) -> DamageRect {
@@ -1319,6 +1592,92 @@ mod tests {
         );
         assert!(!effective.full_surface);
         assert_eq!(effective.policy, DisplayListRepaintPolicy::BoundingRect);
+    }
+
+    #[test]
+    fn policy_keeps_distant_extra_damage_as_multiple_rects() {
+        let metrics = metrics(10_000);
+        let left = DamageRect {
+            x: 5,
+            y: 5,
+            width: 10,
+            height: 10,
+        };
+        let right = DamageRect {
+            x: 80,
+            y: 80,
+            width: 10,
+            height: 10,
+        };
+
+        let effective = select_effective_damage_rects(
+            metrics,
+            surface(100, 100),
+            false,
+            vec![left, right],
+            vec![],
+        );
+
+        assert_eq!(effective.rects, vec![left, right]);
+        assert_eq!(
+            effective.rect,
+            Some(DamageRect {
+                x: 5,
+                y: 5,
+                width: 85,
+                height: 85,
+            })
+        );
+        assert_eq!(effective.damage_area(10_000), 200);
+        assert_eq!(effective.damage_rect_count(), 2);
+        assert!(!effective.full_surface);
+        assert_eq!(effective.policy, DisplayListRepaintPolicy::BoundingRect);
+    }
+
+    #[test]
+    fn damage_rect_limit_recoalesces_after_forced_merge() {
+        let surface = surface(100, 100);
+        let top_left = DamageRect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+        };
+        let bottom_left = DamageRect {
+            x: 0,
+            y: 20,
+            width: 10,
+            height: 10,
+        };
+        let far_top = DamageRect {
+            x: 70,
+            y: 0,
+            width: 10,
+            height: 10,
+        };
+        let far_bottom = DamageRect {
+            x: 70,
+            y: 20,
+            width: 10,
+            height: 10,
+        };
+        let bridge = DamageRect {
+            x: 20,
+            y: 0,
+            width: 10,
+            height: 30,
+        };
+        let mut rects = vec![top_left, bottom_left, far_top, far_bottom];
+
+        push_damage_rect(&mut rects, bridge, surface);
+
+        assert_eq!(rects.len(), 3);
+        assert!(rects.contains(&DamageRect {
+            x: 0,
+            y: 0,
+            width: 30,
+            height: 30,
+        }));
     }
 
     #[test]

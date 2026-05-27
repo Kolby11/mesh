@@ -10,7 +10,8 @@ use mesh_core_presentation::LayerSurfaceSizePolicy;
 /// flushed on the next tick after the interval elapses. The slider's
 /// visual position is rendered from cursor state independently of this
 /// throttle, so dragging stays smooth.
-const COMMAND_THROTTLE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
+pub(in crate::shell) const COMMAND_THROTTLE_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(16);
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 
 impl Shell {
@@ -35,11 +36,8 @@ impl Shell {
         if let Some(surface) = self.surfaces.get_mut(surface_id) {
             surface.keyboard_mode = previous_mode;
         }
-        if let Some(runtime) = self
-            .components
-            .iter_mut()
-            .find(|runtime| runtime.surface_id == surface_id)
-        {
+        if let Some(index) = self.component_index_for_surface(surface_id) {
+            let runtime = &mut self.components[index];
             runtime.component.set_keyboard_mode_override(None);
         }
         Some(previous_mode)
@@ -50,6 +48,16 @@ impl Shell {
         surface_id: &str,
         keyboard_mode: mesh_core_wayland::KeyboardMode,
     ) {
+        let size_policy = self
+            .component_index_for_surface(surface_id)
+            .and_then(|index| {
+                self.components[index]
+                    .component
+                    .allows_shrink_to_fit()
+                    .then_some(LayerSurfaceSizePolicy::Flexible)
+            })
+            .unwrap_or(LayerSurfaceSizePolicy::Fixed);
+
         let (surface, visible) = match self.surfaces.get(surface_id) {
             Some(surface) => {
                 let visible = self
@@ -62,18 +70,6 @@ impl Shell {
             }
             None => return,
         };
-
-        let size_policy = self
-            .components
-            .iter()
-            .find(|runtime| runtime.surface_id == surface_id)
-            .and_then(|runtime| {
-                runtime
-                    .component
-                    .allows_shrink_to_fit()
-                    .then_some(LayerSurfaceSizePolicy::Flexible)
-            })
-            .unwrap_or(LayerSurfaceSizePolicy::Fixed);
 
         let cfg = if visible {
             LayerSurfaceConfig {
@@ -107,7 +103,10 @@ impl Shell {
             }
         };
 
-        self.presentation_engine.configure(surface_id, cfg);
+        self.presentation_engine.configure(surface_id, cfg.clone());
+        if let Some(index) = self.component_index_for_surface(surface_id) {
+            self.components[index].last_surface_config = Some(cfg);
+        }
     }
 
     pub(in crate::shell) fn claim_keyboard_focus_for_surface(&mut self, surface_id: &str) {
@@ -245,10 +244,9 @@ impl Shell {
                     "apply_request ActivatePopover surface_id={surface_id} trigger_surface={trigger_surface} trigger_key={trigger_key} focus={focus}"
                 );
                 let trigger_runtime_found = self
-                    .components
-                    .iter_mut()
-                    .find(|r| r.surface_id == trigger_surface)
-                    .map(|runtime| {
+                    .component_index_for_surface(&trigger_surface)
+                    .map(|index| {
+                        let runtime = &mut self.components[index];
                         if !trigger_key.is_empty() {
                             runtime
                                 .component
@@ -258,7 +256,7 @@ impl Shell {
                     })
                     .unwrap_or(false);
                 let target_runtime_found =
-                    self.components.iter().any(|r| r.surface_id == surface_id);
+                    self.component_index_for_surface(&surface_id).is_some();
                 tracing::info!(
                     "apply_request ActivatePopover trigger_runtime_found={trigger_runtime_found} target_runtime_found={target_runtime_found}"
                 );
@@ -612,23 +610,10 @@ impl Shell {
         tracing::info!(
             "apply_transfer_tab_focus from={from_surface} to={to_surface} return_target={return_target:?} target_closes_on_leave={target_closes_on_leave} close_source={close_source:?}"
         );
-        if self
-            .components
-            .iter_mut()
-            .any(|runtime| runtime.surface_id == from_surface)
-        {
-            if let Some(runtime) = self
-                .components
-                .iter_mut()
-                .find(|runtime| runtime.surface_id == from_surface)
+        if let Some(index) = self.component_index_for_surface(from_surface) {
             {
+                let runtime = &mut self.components[index];
                 runtime.component.release_focus_for_transfer();
-            }
-            if let Some(runtime) = self
-                .components
-                .iter_mut()
-                .find(|runtime| runtime.surface_id == from_surface)
-            {
                 runtime
                     .component
                     .set_keyboard_mode_override(Some(mesh_core_wayland::KeyboardMode::None));
@@ -651,11 +636,8 @@ impl Shell {
                     .map(|surface| surface.keyboard_mode)
             });
 
-        let target_found = if let Some(runtime) = self
-            .components
-            .iter_mut()
-            .find(|r| r.surface_id == to_surface)
-        {
+        let target_found = if let Some(index) = self.component_index_for_surface(to_surface) {
+            let runtime = &mut self.components[index];
             runtime.component.receive_focus_transfer(
                 &target,
                 return_target,

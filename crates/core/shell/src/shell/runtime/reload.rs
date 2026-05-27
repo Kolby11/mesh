@@ -1,9 +1,19 @@
 use super::super::*;
 
+const FRONTEND_RELOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+const MODULE_SETTINGS_RELOAD_POLL_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(500);
+
 impl Shell {
     pub(in crate::shell) fn reload_frontend_components_if_changed(
         &mut self,
     ) -> Result<(), ShellRunError> {
+        let now = std::time::Instant::now();
+        if now < self.next_frontend_reload_check {
+            return Ok(());
+        }
+        self.next_frontend_reload_check = now + FRONTEND_RELOAD_POLL_INTERVAL;
+
         for runtime in &mut self.components {
             if runtime.source_paths.is_empty() {
                 continue;
@@ -62,6 +72,12 @@ impl Shell {
     pub(in crate::shell) fn reload_module_settings_if_changed(
         &mut self,
     ) -> Result<(), ShellRunError> {
+        let now = std::time::Instant::now();
+        if now < self.next_module_settings_reload_check {
+            return Ok(());
+        }
+        self.next_module_settings_reload_check = now + MODULE_SETTINGS_RELOAD_POLL_INTERVAL;
+
         for runtime in &mut self.components {
             let current_settings_path = runtime.component.module_settings_path().map(PathBuf::from);
             if runtime.module_settings_path != current_settings_path {
@@ -109,6 +125,9 @@ impl Shell {
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
         for runtime in &mut self.components {
+            if !runtime.component.wants_tick() {
+                continue;
+            }
             requests.extend(runtime.component.tick().map_err(ShellRunError::Component)?);
         }
         Ok(requests)

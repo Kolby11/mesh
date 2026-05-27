@@ -3,7 +3,7 @@ use super::*;
 use crate::tree::ElementState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use mesh_core_theme::{Theme, TokenValue};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Resolves style values against a theme's design tokens.
 pub struct StyleResolver<'a> {
@@ -14,7 +14,6 @@ pub struct StyleResolver<'a> {
 pub struct StyleNodeAttrs {
     tag: String,
     classes: Vec<String>,
-    class_set: HashSet<String>,
     id: Option<String>,
     key: Option<String>,
     module_id: Option<String>,
@@ -29,11 +28,9 @@ impl StyleNodeAttrs {
             .filter(|class| !class.is_empty())
             .map(str::to_owned)
             .collect();
-        let class_set = classes.iter().cloned().collect();
         Self {
             tag: tag.to_string(),
             classes,
-            class_set,
             id: id.map(str::to_string),
             key: None,
             module_id: None,
@@ -47,19 +44,18 @@ impl StyleNodeAttrs {
             .get("class")
             .map(|s| s.split_whitespace().map(str::to_owned).collect())
             .unwrap_or_default();
-        let mut attrs = Self::new(
-            &node.tag,
-            &classes,
-            node.attributes.get("id").map(String::as_str),
-            node.state,
-        );
-        attrs.key = node.attributes.get("_mesh_key").cloned();
-        attrs.module_id = node.attributes.get("_mesh_module_id").cloned();
-        attrs
+        Self {
+            tag: node.tag.clone(),
+            classes,
+            id: node.attributes.get("id").cloned(),
+            key: node.attributes.get("_mesh_key").cloned(),
+            module_id: node.attributes.get("_mesh_module_id").cloned(),
+            state: node.state,
+        }
     }
 
     fn has_class(&self, class: &str) -> bool {
-        self.class_set.contains(class)
+        self.classes.iter().any(|candidate| candidate == class)
     }
 
     fn id(&self) -> Option<&str> {
@@ -98,37 +94,29 @@ impl<'a> StyleRuleIndex<'a> {
     }
 
     pub fn candidate_rules(&self, attrs: &StyleNodeAttrs) -> Vec<&'a StyleRule> {
-        let mut ids = Vec::new();
-        let mut seen = HashSet::new();
-        self.push_all(&mut ids, &mut seen, &self.fallback);
+        let mut ids = Vec::with_capacity(self.fallback.len().saturating_add(8));
+        ids.extend_from_slice(&self.fallback);
         if let Some(tag) = self.tag.get(attrs.tag.as_str()) {
-            self.push_all(&mut ids, &mut seen, tag);
+            ids.extend_from_slice(tag);
         }
         for class in &attrs.classes {
             if let Some(class_ids) = self.class.get(class.as_str()) {
-                self.push_all(&mut ids, &mut seen, class_ids);
+                ids.extend_from_slice(class_ids);
             }
         }
         if let Some(id) = attrs.id() {
             if let Some(id_ids) = self.id.get(id) {
-                self.push_all(&mut ids, &mut seen, id_ids);
+                ids.extend_from_slice(id_ids);
             }
         }
         for state_name in active_state_names(attrs.state) {
             if let Some(state_ids) = self.state.get(state_name) {
-                self.push_all(&mut ids, &mut seen, state_ids);
+                ids.extend_from_slice(state_ids);
             }
         }
         ids.sort_unstable();
+        ids.dedup();
         ids.into_iter().map(|idx| &self.rules[idx]).collect()
-    }
-
-    fn push_all(&self, out: &mut Vec<usize>, seen: &mut HashSet<usize>, values: &[usize]) {
-        for &value in values {
-            if seen.insert(value) {
-                out.push(value);
-            }
-        }
     }
 
     fn index_selector(&mut self, idx: usize, selector: &'a Selector) {
@@ -425,13 +413,10 @@ impl<'a> StyleResolver<'a> {
             inherit_retained_text_style(&mut node.computed_style, parent_style);
         }
 
-        let children = std::mem::take(&mut node.children);
-        let mut restyled = children;
         let parent_style = node.computed_style.clone();
-        for child in &mut restyled {
+        for child in &mut node.children {
             self.restyle_subtree_with_index(child, index, context, Some(&parent_style));
         }
-        node.children = restyled;
     }
 
     pub fn restyle_subtree_for_keys(

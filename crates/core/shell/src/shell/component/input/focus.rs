@@ -152,6 +152,21 @@ impl FrontendSurfaceComponent {
         close_on_focus_leave: bool,
     ) {
         let traversal = collect_focus_traversal(tree);
+        self.apply_focus_transfer_from_traversal(
+            &traversal,
+            target,
+            return_focus,
+            close_on_focus_leave,
+        );
+    }
+
+    pub(in crate::shell::component) fn apply_focus_transfer_from_traversal(
+        &mut self,
+        traversal: &[String],
+        target: &super::super::TabFocusTarget,
+        return_focus: Option<(String, String)>,
+        close_on_focus_leave: bool,
+    ) {
         let new_key = match target {
             super::super::TabFocusTarget::First => traversal.first().cloned(),
             super::super::TabFocusTarget::Last => traversal.last().cloned(),

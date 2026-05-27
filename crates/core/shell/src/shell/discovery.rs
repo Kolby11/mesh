@@ -74,6 +74,8 @@ impl Shell {
             priority: 200,
         });
 
+        let now = std::time::Instant::now();
+
         Self {
             config,
             settings,
@@ -87,11 +89,16 @@ impl Shell {
             module_dirs,
             core: ShellCoreState::default(),
             components: Vec::new(),
+            component_by_surface: HashMap::new(),
             surfaces: HashMap::new(),
             clipboard: Box::new(WaylandClipboard::default()),
             presentation_engine: PresentationEngine::select(),
             theme_watch,
             settings_watch,
+            next_theme_reload_check: now,
+            next_shell_settings_reload_check: now,
+            next_frontend_reload_check: now,
+            next_module_settings_reload_check: now,
             debug: DebugOverlayState::default(),
             debug_overlay: DebugOverlay::new(),
             active_key_modifiers: KeyModifiers::default(),
@@ -379,7 +386,9 @@ impl Shell {
                 closing_until: None,
             });
         self.surfaces.entry(surface_id.clone()).or_default();
+        let component_index = self.components.len();
         self.components.push(ComponentRuntime::new(component));
+        self.component_by_surface.insert(surface_id, component_index);
     }
 
     pub(super) fn mount_components(&mut self) -> Result<VecDeque<CoreRequest>, ShellRunError> {

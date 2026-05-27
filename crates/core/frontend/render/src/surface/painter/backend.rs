@@ -406,12 +406,17 @@ impl PaintBackend for SkiaPaintBackend {
         commands: &[PainterCommand],
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
-        let mut clip_stack: Vec<PainterClip> = Vec::new();
-        let mut layer_stack: Vec<PainterLayer> = Vec::new();
+        let mut clip_stack: Vec<ClipRect> = Vec::with_capacity(commands.len().min(8));
+        let mut layer_stack: Vec<PainterLayer> = Vec::with_capacity(commands.len().min(4));
         for command in commands {
             match command {
                 PainterCommand::PushClip(clip) => {
-                    clip_stack.push(*clip);
+                    let effective = clip_stack
+                        .last()
+                        .copied()
+                        .map(|current| intersect_clip(current, clip.rect))
+                        .unwrap_or(clip.rect);
+                    clip_stack.push(effective);
                 }
                 PainterCommand::PopClip => {
                     clip_stack.pop();
@@ -430,7 +435,14 @@ impl PaintBackend for SkiaPaintBackend {
                     {
                         continue;
                     }
-                    layer_stack.push(*layer);
+                    let mut effective = *layer;
+                    if let Some(parent) = layer_stack.last() {
+                        effective.opacity = (parent.opacity * layer.opacity).clamp(0.0, 1.0);
+                        if !matches!(parent.filter, PainterFilter::None) {
+                            effective.filter = parent.filter;
+                        }
+                    }
+                    layer_stack.push(effective);
                 }
                 PainterCommand::PopLayer => {
                     layer_stack.pop();
@@ -1192,14 +1204,16 @@ impl SkiaPaintBackend {
     }
 }
 
-fn effective_clip(clip: ClipRect, clip_stack: &[PainterClip]) -> ClipRect {
+fn effective_clip(clip: ClipRect, clip_stack: &[ClipRect]) -> ClipRect {
     clip_stack
-        .iter()
-        .fold(clip, |clip, pushed| intersect_clip(clip, pushed.rect))
+        .last()
+        .copied()
+        .map(|current| intersect_clip(clip, current))
+        .unwrap_or(clip)
 }
 
 fn layer_paint(mut paint: PainterPaint, layer_stack: &[PainterLayer]) -> PainterPaint {
-    for layer in layer_stack {
+    if let Some(layer) = layer_stack.last() {
         let alpha = ((paint.color.a as f32) * layer.opacity.clamp(0.0, 1.0))
             .round()
             .clamp(0.0, 255.0) as u8;

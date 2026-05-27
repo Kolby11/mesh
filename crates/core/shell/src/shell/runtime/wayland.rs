@@ -1,6 +1,6 @@
 use super::super::*;
 
-const MAX_WAYLAND_EVENTS_PER_FRAME: usize = 4;
+const MAX_WAYLAND_EVENTS_PER_FRAME: usize = 32;
 
 impl Shell {
     pub(in crate::shell) fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
@@ -22,30 +22,28 @@ impl Shell {
             let is_keyboard_event =
                 matches!(&event, WindowEvent::Key { .. } | WindowEvent::Char { .. });
             let route_surface_id = if is_keyboard_event {
-                self.keyboard_focus_surface
-                    .as_ref()
-                    .filter(|surface_id| {
-                        self.core
-                            .surfaces
-                            .get(*surface_id)
-                            .map(|state| state.visible)
-                            .unwrap_or(true)
-                            && self
-                                .components
-                                .iter()
-                                .any(|runtime| runtime.surface_id == **surface_id)
-                    })
-                    .cloned()
-                    .unwrap_or_else(|| physical_surface_id.clone())
+                if let Some(surface_id) = self.keyboard_focus_surface.clone() {
+                    let focused_surface_visible = self
+                        .core
+                        .surfaces
+                        .get(&surface_id)
+                        .map(|state| state.visible)
+                        .unwrap_or(true);
+                    if focused_surface_visible
+                        && self.component_index_for_surface(&surface_id).is_some()
+                    {
+                        surface_id
+                    } else {
+                        physical_surface_id.clone()
+                    }
+                } else {
+                    physical_surface_id.clone()
+                }
             } else {
                 physical_surface_id
             };
 
-            let Some(index) = self
-                .components
-                .iter()
-                .position(|runtime| runtime.surface_id == route_surface_id)
-            else {
+            let Some(index) = self.component_index_for_surface(&route_surface_id) else {
                 continue;
             };
 
@@ -164,6 +162,10 @@ impl Shell {
     }
 
     pub(in crate::shell) fn flush_wayland(&mut self) -> Result<(), ShellRunError> {
+        if !tracing::enabled!(tracing::Level::TRACE) {
+            return Ok(());
+        }
+
         for runtime in &self.components {
             let surface = self
                 .surfaces

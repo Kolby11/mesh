@@ -221,9 +221,11 @@ impl FrontendSurfaceComponent {
                     if same_tooltip_owner {
                         if self.hover_start.is_none() {
                             self.hover_start = Some(std::time::Instant::now());
+                            self.tooltip_visible = false;
                         }
                     } else {
                         self.hover_start = next_tooltip.map(|_| std::time::Instant::now());
+                        self.tooltip_visible = false;
                     }
                     // Hover changes don't mutate script state — flag the surface
                     // for a style-only repaint so paint() can reuse the cached
@@ -239,6 +241,7 @@ impl FrontendSurfaceComponent {
                     self.hovered_key = None;
                     self.hovered_path.clear();
                     self.hover_start = None;
+                    self.tooltip_visible = false;
                     self.invalidate_interaction_restyle();
                 }
             }

@@ -122,6 +122,13 @@ impl Shell {
             );
             return false;
         }
+        if self
+            .latest_service_state
+            .get(&interface)
+            .is_some_and(|latest| latest.provider_id == *source_module && latest.state.eq(payload))
+        {
+            return false;
+        }
         self.validate_service_state_shape(&interface, source_module, &payload);
         self.latest_service_state.insert(
             interface.clone(),
@@ -173,17 +180,16 @@ impl Shell {
         event: &ServiceEvent,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
-        let is_state_update = matches!(event, ServiceEvent::Updated { .. });
         for runtime in &mut self.components {
+            if !runtime.component.observes_service_event(event) {
+                continue;
+            }
             requests.extend(
                 runtime
                     .component
                     .handle_service_event(event)
                     .map_err(ShellRunError::Component)?,
             );
-            if is_state_update && runtime.component.wants_render() {
-                runtime.force_full_present = true;
-            }
         }
         Ok(requests)
     }

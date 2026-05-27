@@ -2,7 +2,7 @@ use crate::bindings::{FrontendIconBindings, IconPackBindings, parse_target};
 use crate::config::{IconConfig, IconPackRoot};
 use crate::xdg;
 use anyhow::{Result, bail};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 /// Result of resolving a logical icon name through the binding chain.
@@ -60,8 +60,21 @@ pub struct IconRegistry {
     /// Shell-wide default icon-pack module id.
     shell_default_pack_module: Option<String>,
     generation: u64,
-    cache: HashMap<(u64, String, u32), IconResolution>,
+    cache: HashMap<IconCacheKey, IconResolution>,
+    cache_order: VecDeque<IconCacheKey>,
     warned_misses: HashSet<(String, String)>,
+    warned_miss_order: VecDeque<(String, String)>,
+}
+
+const ICON_REGISTRY_CACHE_CAPACITY: usize = 2048;
+const ICON_WARNED_MISS_CAPACITY: usize = 2048;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct IconCacheKey {
+    generation: u64,
+    module_id: String,
+    semantic_name: String,
+    size: u32,
 }
 
 impl IconRegistry {
@@ -75,7 +88,9 @@ impl IconRegistry {
             shell_default_pack_module: None,
             generation: 0,
             cache: HashMap::new(),
+            cache_order: VecDeque::new(),
             warned_misses: HashSet::new(),
+            warned_miss_order: VecDeque::new(),
         })
     }
 
@@ -166,7 +181,9 @@ impl IconRegistry {
     fn bump_generation(&mut self) {
         self.generation = self.generation.saturating_add(1);
         self.cache.clear();
+        self.cache_order.clear();
         self.warned_misses.clear();
+        self.warned_miss_order.clear();
     }
 
     /// Legacy compat path — resolves a name with no module context. Used
@@ -185,22 +202,31 @@ impl IconRegistry {
         semantic_name: &str,
         size: u32,
     ) -> IconResolution {
-        let cache_key = (
-            self.generation,
-            format!("{module_id}::{semantic_name}"),
+        let cache_key = IconCacheKey {
+            generation: self.generation,
+            module_id: module_id.to_string(),
+            semantic_name: semantic_name.to_string(),
             size,
-        );
-        if let Some(cached) = self.cache.get(&cache_key) {
-            return cached.clone();
+        };
+        if let Some(cached) = self.cache.get(&cache_key).cloned() {
+            self.cache_order.retain(|existing| existing != &cache_key);
+            self.cache_order.push_back(cache_key);
+            return cached;
         }
 
         let resolution = self.resolve_uncached(module_id, semantic_name, size);
+        self.cache_order.retain(|existing| existing != &cache_key);
+        self.cache_order.push_back(cache_key.clone());
         self.cache.insert(cache_key, resolution.clone());
+        while self.cache.len() > ICON_REGISTRY_CACHE_CAPACITY {
+            let Some(evicted) = self.cache_order.pop_front() else {
+                break;
+            };
+            self.cache.remove(&evicted);
+        }
 
         if matches!(resolution, IconResolution::Missing { .. })
-            && self
-                .warned_misses
-                .insert((module_id.to_string(), semantic_name.to_string()))
+            && self.record_warned_miss((module_id.to_string(), semantic_name.to_string()))
         {
             let frontend = self.frontends.get(module_id);
             let chain = frontend
@@ -226,6 +252,20 @@ impl IconRegistry {
         }
 
         resolution
+    }
+
+    fn record_warned_miss(&mut self, key: (String, String)) -> bool {
+        if !self.warned_misses.insert(key.clone()) {
+            return false;
+        }
+        self.warned_miss_order.push_back(key);
+        while self.warned_misses.len() > ICON_WARNED_MISS_CAPACITY {
+            let Some(evicted) = self.warned_miss_order.pop_front() else {
+                break;
+            };
+            self.warned_misses.remove(&evicted);
+        }
+        true
     }
 
     fn resolve_uncached(&self, module_id: &str, semantic_name: &str, size: u32) -> IconResolution {

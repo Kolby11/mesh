@@ -13,9 +13,10 @@ use mesh_core_elements::{AccessibilityRole, NodeId, WidgetNode};
 
 pub fn build_accesskit_runtime_update(root: &WidgetNode) -> TreeUpdate {
     let root_id = accesskit_node_id(root.id);
-    let mut nodes = Vec::new();
-    collect_node(root, &mut nodes);
-    let focus = focused_node(root).map(accesskit_node_id).unwrap_or(root_id);
+    let mut nodes = Vec::with_capacity(node_count(root));
+    let mut focus = None;
+    collect_node(root, &mut nodes, &mut focus);
+    let focus = focus.map(accesskit_node_id).unwrap_or(root_id);
 
     TreeUpdate {
         nodes,
@@ -25,9 +26,16 @@ pub fn build_accesskit_runtime_update(root: &WidgetNode) -> TreeUpdate {
     }
 }
 
-fn collect_node(node: &WidgetNode, out: &mut Vec<(AccessKitNodeId, Node)>) {
+fn collect_node(
+    node: &WidgetNode,
+    out: &mut Vec<(AccessKitNodeId, Node)>,
+    focus: &mut Option<NodeId>,
+) {
     let accesskit_id = accesskit_node_id(node.id);
     let mut accesskit_node = Node::new(role_for(&node.accessibility.role));
+    if node.accessibility.focused && focus.is_none() {
+        *focus = Some(node.id);
+    }
 
     if let Some(label) = accessible_label(node) {
         accesskit_node.set_label(label);
@@ -92,16 +100,15 @@ fn collect_node(node: &WidgetNode, out: &mut Vec<(AccessKitNodeId, Node)>) {
         x1: (node.layout.x + node.layout.width) as f64,
         y1: (node.layout.y + node.layout.height) as f64,
     });
-    accesskit_node.set_children(
-        node.children
-            .iter()
-            .map(|child| accesskit_node_id(child.id))
-            .collect::<Vec<_>>(),
-    );
+    if !node.children.is_empty() {
+        let mut children = Vec::with_capacity(node.children.len());
+        children.extend(node.children.iter().map(|child| accesskit_node_id(child.id)));
+        accesskit_node.set_children(children);
+    }
 
     out.push((accesskit_id, accesskit_node));
     for child in &node.children {
-        collect_node(child, out);
+        collect_node(child, out, focus);
     }
 }
 
@@ -109,11 +116,8 @@ fn accesskit_node_id(node_id: NodeId) -> AccessKitNodeId {
     AccessKitNodeId(node_id)
 }
 
-fn focused_node(node: &WidgetNode) -> Option<NodeId> {
-    if node.accessibility.focused {
-        return Some(node.id);
-    }
-    node.children.iter().find_map(focused_node)
+fn node_count(node: &WidgetNode) -> usize {
+    1 + node.children.iter().map(node_count).sum::<usize>()
 }
 
 fn accessible_label(node: &WidgetNode) -> Option<String> {

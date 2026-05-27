@@ -9,9 +9,9 @@ use super::PixelBuffer;
 use super::profiling;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::SupportedAxes;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use swash::scale::image::Content;
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::Format;
@@ -57,22 +57,87 @@ struct CachedGlyph {
     width: u32,
     height: u32,
     placement_left: i32,
-    pixels: Vec<u8>,
+    pixels: Arc<[u8]>,
 }
 
-static FONT_BYTES: OnceLock<Mutex<HashMap<PathBuf, Vec<u8>>>> = OnceLock::new();
-static GLYPH_CACHE: OnceLock<Mutex<HashMap<GlyphCacheKey, Option<CachedGlyph>>>> = OnceLock::new();
+static FONT_BYTES: OnceLock<Mutex<FontBytesCache>> = OnceLock::new();
+static GLYPH_CACHE: OnceLock<Mutex<GlyphCache>> = OnceLock::new();
+const FONT_BYTES_CACHE_CAPACITY: usize = 32;
+const GLYPH_CACHE_CAPACITY: usize = 1024;
 
-fn font_bytes(path: &Path) -> Option<Vec<u8>> {
-    let cache = FONT_BYTES.get_or_init(Default::default);
-    if let Ok(guard) = cache.lock() {
-        if let Some(bytes) = guard.get(path) {
-            return Some(bytes.clone());
+#[derive(Debug, Default)]
+struct FontBytesCache {
+    entries: HashMap<PathBuf, Arc<[u8]>>,
+    order: VecDeque<PathBuf>,
+}
+
+impl FontBytesCache {
+    fn get(&mut self, path: &Path) -> Option<Arc<[u8]>> {
+        let bytes = self.entries.get(path).map(Arc::clone);
+        if bytes.is_some() {
+            self.order.retain(|existing| existing != path);
+            self.order.push_back(path.to_path_buf());
+        }
+        bytes
+    }
+
+    fn insert(&mut self, path: PathBuf, bytes: Arc<[u8]>) {
+        self.order.retain(|existing| existing != &path);
+        self.order.push_back(path.clone());
+        self.entries.insert(path, bytes);
+        while self.entries.len() > FONT_BYTES_CACHE_CAPACITY {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&evicted);
         }
     }
-    let bytes = std::fs::read(path).ok()?;
+}
+
+#[derive(Debug, Default)]
+struct GlyphCache {
+    entries: HashMap<GlyphCacheKey, Option<CachedGlyph>>,
+    order: VecDeque<GlyphCacheKey>,
+}
+
+impl GlyphCache {
+    fn get(&mut self, key: &GlyphCacheKey) -> Option<Option<CachedGlyph>> {
+        let value = self.entries.get(key).cloned();
+        if value.is_some() {
+            self.order.retain(|existing| existing != key);
+            self.order.push_back(*key);
+        }
+        value
+    }
+
+    fn insert(&mut self, key: GlyphCacheKey, value: Option<CachedGlyph>) {
+        self.order.retain(|existing| *existing != key);
+        self.order.push_back(key);
+        self.entries.insert(key, value);
+        while self.entries.len() > GLYPH_CACHE_CAPACITY {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&evicted);
+        }
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+    }
+}
+
+fn font_bytes(path: &Path) -> Option<Arc<[u8]>> {
+    let cache = FONT_BYTES.get_or_init(|| Mutex::new(FontBytesCache::default()));
     if let Ok(mut guard) = cache.lock() {
-        guard.insert(path.to_path_buf(), bytes.clone());
+        if let Some(bytes) = guard.get(path) {
+            return Some(bytes);
+        }
+    }
+    let bytes: Arc<[u8]> = std::fs::read(path).ok()?.into();
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(path.to_path_buf(), Arc::clone(&bytes));
     }
     Some(bytes)
 }
@@ -85,7 +150,7 @@ fn rasterize(
     supported: SupportedAxes,
 ) -> Option<CachedGlyph> {
     let bytes = font_bytes(font_path)?;
-    let font = FontRef::from_index(&bytes, 0)?;
+    let font = FontRef::from_index(bytes.as_ref(), 0)?;
     let glyph_id = font.charmap().map(char::from_u32(codepoint)?);
     if glyph_id == 0 {
         return None;
@@ -134,17 +199,17 @@ fn rasterize(
         width: image.placement.width,
         height: image.placement.height,
         placement_left: image.placement.left,
-        pixels: image.data,
+        pixels: image.data.into(),
     })
 }
 
 fn cache_lookup(key: GlyphCacheKey) -> Option<Option<CachedGlyph>> {
-    let cache = GLYPH_CACHE.get_or_init(Default::default);
-    cache.lock().ok()?.get(&key).cloned()
+    let cache = GLYPH_CACHE.get_or_init(|| Mutex::new(GlyphCache::default()));
+    cache.lock().ok()?.get(&key)
 }
 
 fn cache_store(key: GlyphCacheKey, value: Option<CachedGlyph>) {
-    let cache = GLYPH_CACHE.get_or_init(Default::default);
+    let cache = GLYPH_CACHE.get_or_init(|| Mutex::new(GlyphCache::default()));
     if let Ok(mut guard) = cache.lock() {
         guard.insert(key, value);
     }

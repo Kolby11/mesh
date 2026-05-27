@@ -1,9 +1,19 @@
 use super::super::*;
 
+const THEME_RELOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+const SHELL_SETTINGS_RELOAD_POLL_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(500);
+
 impl Shell {
     pub(in crate::shell) fn reload_theme_if_changed(
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let now = std::time::Instant::now();
+        if now < self.next_theme_reload_check {
+            return Ok(VecDeque::new());
+        }
+        self.next_theme_reload_check = now + THEME_RELOAD_POLL_INTERVAL;
+
         let Ok(metadata) = std::fs::metadata(&self.theme_watch.path) else {
             return Ok(VecDeque::new());
         };
@@ -106,6 +116,12 @@ impl Shell {
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
+        let now = std::time::Instant::now();
+        if now < self.next_shell_settings_reload_check {
+            return Ok(requests);
+        }
+        self.next_shell_settings_reload_check = now + SHELL_SETTINGS_RELOAD_POLL_INTERVAL;
+
         let Ok(metadata) = std::fs::metadata(&self.settings_watch.path) else {
             return Ok(requests);
         };

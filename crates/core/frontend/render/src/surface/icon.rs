@@ -9,9 +9,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
-static IMAGE_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedImage>>> = OnceLock::new();
+static IMAGE_CACHE: OnceLock<Mutex<ImageCache>> = OnceLock::new();
 static RASTER_CACHE: OnceLock<Mutex<RasterVariantCache>> = OnceLock::new();
+static SOURCE_IDENTITY_CACHE: OnceLock<Mutex<SourceIdentityCache>> = OnceLock::new();
+static SVG_CACHEABILITY_CACHE: OnceLock<Mutex<SvgCacheabilityCache>> = OnceLock::new();
 const RASTER_CACHE_CAPACITY: usize = 256;
+const IMAGE_CACHE_CAPACITY: usize = 256;
+const SOURCE_IDENTITY_CACHE_CAPACITY: usize = 1024;
+const SVG_CACHEABILITY_CACHE_CAPACITY: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CachedResourceOpacity {
@@ -36,6 +41,117 @@ struct FileFreshness {
 struct CachedImage {
     freshness: FileFreshness,
     image: Arc<image::RgbaImage>,
+}
+
+#[derive(Debug, Default)]
+struct ImageCache {
+    entries: HashMap<PathBuf, CachedImage>,
+    order: VecDeque<PathBuf>,
+}
+
+impl ImageCache {
+    fn get(&mut self, path: &Path, freshness: FileFreshness) -> Option<Arc<image::RgbaImage>> {
+        let image = self
+            .entries
+            .get(path)
+            .filter(|cached| cached.freshness == freshness)
+            .map(|cached| Arc::clone(&cached.image));
+        if image.is_some() {
+            self.order.retain(|existing| existing != path);
+            self.order.push_back(path.to_path_buf());
+        }
+        image
+    }
+
+    fn insert(&mut self, path: PathBuf, value: CachedImage) {
+        self.order.retain(|existing| existing != &path);
+        self.order.push_back(path.clone());
+        self.entries.insert(path, value);
+        while self.entries.len() > IMAGE_CACHE_CAPACITY {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&evicted);
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CachedSourceIdentity {
+    freshness: Option<FileFreshness>,
+    identity: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CachedSvgCacheability {
+    freshness: FileFreshness,
+    cacheable: bool,
+}
+
+#[derive(Debug, Default)]
+struct SourceIdentityCache {
+    entries: HashMap<PathBuf, CachedSourceIdentity>,
+    order: VecDeque<PathBuf>,
+}
+
+impl SourceIdentityCache {
+    fn get(&mut self, path: &Path, freshness: Option<FileFreshness>) -> Option<PathBuf> {
+        let identity = self
+            .entries
+            .get(path)
+            .filter(|cached| cached.freshness == freshness)
+            .map(|cached| cached.identity.clone());
+        if identity.is_some() {
+            self.order.retain(|existing| existing != path);
+            self.order.push_back(path.to_path_buf());
+        }
+        identity
+    }
+
+    fn insert(&mut self, path: PathBuf, value: CachedSourceIdentity) {
+        self.order.retain(|existing| existing != &path);
+        self.order.push_back(path.clone());
+        self.entries.insert(path, value);
+        while self.entries.len() > SOURCE_IDENTITY_CACHE_CAPACITY {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&evicted);
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct SvgCacheabilityCache {
+    entries: HashMap<PathBuf, CachedSvgCacheability>,
+    order: VecDeque<PathBuf>,
+}
+
+impl SvgCacheabilityCache {
+    fn get(&mut self, path: &Path, freshness: FileFreshness) -> Option<bool> {
+        let cacheable = self
+            .entries
+            .get(path)
+            .filter(|cached| cached.freshness == freshness)
+            .map(|cached| cached.cacheable);
+        if cacheable.is_some() {
+            self.order.retain(|existing| existing != path);
+            self.order.push_back(path.to_path_buf());
+        }
+        cacheable
+    }
+
+    fn insert(&mut self, path: PathBuf, value: CachedSvgCacheability) {
+        self.order.retain(|existing| existing != &path);
+        self.order.push_back(path.clone());
+        self.entries.insert(path, value);
+        while self.entries.len() > SVG_CACHEABILITY_CACHE_CAPACITY {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&evicted);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -66,13 +182,17 @@ struct RasterVariantCache {
 
 impl RasterVariantCache {
     fn get(&mut self, key: &RasterCacheKey) -> Option<RasterVariant> {
-        self.entries.get(key).cloned()
+        let variant = self.entries.get(key).cloned();
+        if variant.is_some() {
+            self.order.retain(|existing| existing != key);
+            self.order.push_back(key.clone());
+        }
+        variant
     }
 
     fn insert(&mut self, key: RasterCacheKey, variant: RasterVariant) {
-        if !self.entries.contains_key(&key) {
-            self.order.push_back(key.clone());
-        }
+        self.order.retain(|existing| existing != &key);
+        self.order.push_back(key.clone());
         self.entries.insert(key, variant);
         while self.entries.len() > RASTER_CACHE_CAPACITY {
             let Some(evicted) = self.order.pop_front() else {
@@ -83,8 +203,8 @@ impl RasterVariantCache {
     }
 }
 
-fn image_cache() -> &'static Mutex<HashMap<PathBuf, CachedImage>> {
-    IMAGE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn image_cache() -> &'static Mutex<ImageCache> {
+    IMAGE_CACHE.get_or_init(|| Mutex::new(ImageCache::default()))
 }
 
 fn raster_cache() -> &'static Mutex<RasterVariantCache> {
@@ -97,25 +217,26 @@ fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
             .ok()
             .map(|image| Arc::new(image.to_rgba8()));
     };
-    let mut guard = image_cache().lock().unwrap();
-    if let Some(cached) = guard.get(path)
-        && cached.freshness == freshness
+    if let Ok(mut guard) = image_cache().lock()
+        && let Some(image) = guard.get(path, freshness)
     {
-        return Some(Arc::clone(&cached.image));
+        return Some(image);
     }
     let img = Arc::new(image::open(path).ok()?.to_rgba8());
-    guard.insert(
-        path.to_path_buf(),
-        CachedImage {
-            freshness,
-            image: Arc::clone(&img),
-        },
-    );
+    if let Ok(mut guard) = image_cache().lock() {
+        guard.insert(
+            path.to_path_buf(),
+            CachedImage {
+                freshness,
+                image: Arc::clone(&img),
+            },
+        );
+    }
     Some(img)
 }
 
-pub(crate) fn load_image_rgba(path: &Path) -> Option<image::RgbaImage> {
-    get_or_load(path).map(|image| image.as_ref().clone())
+pub(crate) fn load_image_rgba(path: &Path) -> Option<Arc<image::RgbaImage>> {
+    get_or_load(path)
 }
 
 fn encode_tint(color: Color) -> u32 {
@@ -135,15 +256,34 @@ fn file_freshness(path: &Path) -> Option<FileFreshness> {
     })
 }
 
-fn source_identity(path: &Path) -> PathBuf {
-    match std::fs::canonicalize(path) {
+fn source_identity(path: &Path, freshness: Option<FileFreshness>) -> PathBuf {
+    let cache = SOURCE_IDENTITY_CACHE.get_or_init(|| Mutex::new(SourceIdentityCache::default()));
+    if let Ok(mut guard) = cache.lock()
+        && let Some(identity) = guard.get(path, freshness)
+    {
+        return identity;
+    }
+
+    let identity = match std::fs::canonicalize(path) {
         Ok(canonical) => canonical,
         Err(_) if path.is_absolute() => path.to_path_buf(),
         Err(_) => std::env::current_dir()
             .ok()
             .map(|cwd| cwd.join(path))
             .unwrap_or_else(|| path.to_path_buf()),
+    };
+
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(
+            path.to_path_buf(),
+            CachedSourceIdentity {
+                freshness,
+                identity: identity.clone(),
+            },
+        );
     }
+
+    identity
 }
 
 fn raster_file_key(
@@ -155,7 +295,7 @@ fn raster_file_key(
 ) -> Option<RasterCacheKey> {
     Some(RasterCacheKey {
         source_kind: RasterSourceKind::File,
-        source_identity: source_identity(path),
+        source_identity: source_identity(path, freshness),
         width,
         height,
         tint: encode_tint(tint),
@@ -165,10 +305,30 @@ fn raster_file_key(
 }
 
 fn svg_file_is_cacheable(path: &Path) -> bool {
+    let Some(freshness) = file_freshness(path) else {
+        return false;
+    };
+    let cache = SVG_CACHEABILITY_CACHE.get_or_init(|| Mutex::new(SvgCacheabilityCache::default()));
+    if let Ok(mut guard) = cache.lock()
+        && let Some(cacheable) = guard.get(path, freshness)
+    {
+        return cacheable;
+    }
+
     let Ok(svg_data) = std::fs::read_to_string(path) else {
         return false;
     };
-    !svg_has_external_resource_reference(&svg_data)
+    let cacheable = !svg_has_external_resource_reference(&svg_data);
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(
+            path.to_path_buf(),
+            CachedSvgCacheability {
+                freshness,
+                cacheable,
+            },
+        );
+    }
+    cacheable
 }
 
 fn svg_has_external_resource_reference(svg_data: &str) -> bool {

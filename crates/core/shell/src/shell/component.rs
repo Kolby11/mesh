@@ -134,9 +134,12 @@ impl ComponentDirtyFlags {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+const MAX_DAMAGE_RECTS: usize = 4;
+
+#[derive(Debug, Clone)]
 struct EffectiveDamage {
     rect: Option<DamageRect>,
+    rects: Vec<DamageRect>,
     full_surface: bool,
     policy: DisplayListRepaintPolicy,
 }
@@ -145,21 +148,34 @@ impl EffectiveDamage {
     fn none() -> Self {
         Self {
             rect: None,
+            rects: Vec::new(),
             full_surface: false,
             policy: DisplayListRepaintPolicy::MinimalDamage,
+        }
+    }
+
+    fn damage_area(&self, surface_area: u64) -> u64 {
+        if self.full_surface {
+            surface_area
+        } else {
+            self.rects.iter().map(|rect| rect.area()).sum()
+        }
+    }
+
+    fn damage_rect_count(&self) -> u64 {
+        if self.full_surface {
+            u64::from(self.rect.is_some())
+        } else {
+            self.rects.len() as u64
         }
     }
 }
 
 fn retained_paint_snapshot(
     metrics: DisplayListMetrics,
-    effective_damage: EffectiveDamage,
+    effective_damage: &EffectiveDamage,
 ) -> mesh_core_debug::RetainedPaintSnapshot {
-    let damage_area = if effective_damage.full_surface {
-        metrics.surface_area
-    } else {
-        effective_damage.rect.map(|rect| rect.area()).unwrap_or(0)
-    };
+    let damage_area = effective_damage.damage_area(metrics.surface_area);
     mesh_core_debug::RetainedPaintSnapshot {
         retained_generation: metrics.retained_generation,
         entries_total: metrics.entries_total,
@@ -175,7 +191,7 @@ fn retained_paint_snapshot(
         fallback_promotion_count: metrics.fallback_promotion_count,
         full_fallback_count: metrics.full_fallback_count,
         broad_dirty_fallback_count: metrics.broad_dirty_fallback_count,
-        damage_rect_count: u64::from(effective_damage.rect.is_some()),
+        damage_rect_count: effective_damage.damage_rect_count(),
         damage_area,
         surface_area: metrics.surface_area,
         full_surface_damage: effective_damage.full_surface,
@@ -314,6 +330,7 @@ pub(super) struct FrontendSurfaceComponent {
     hovered_path: Vec<String>,
     hovered_pos: (f32, f32),
     hover_start: Option<std::time::Instant>,
+    tooltip_visible: bool,
     last_tooltip_damage: Option<DamageRect>,
     runtimes: Arc<Mutex<HashMap<String, EmbeddedFrontendRuntime>>>,
     render_stack: RefCell<Vec<String>>,
@@ -410,6 +427,7 @@ impl FrontendSurfaceComponent {
             hovered_path: Vec::new(),
             hovered_pos: (0.0, 0.0),
             hover_start: None,
+            tooltip_visible: false,
             last_tooltip_damage: None,
             runtimes: Arc::new(Mutex::new(HashMap::new())),
             render_stack: RefCell::new(Vec::new()),

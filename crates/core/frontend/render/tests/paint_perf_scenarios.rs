@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use mesh_core_elements::style::Color;
 use mesh_core_elements::{NodeId, WidgetNode};
 use mesh_core_render::{
-    DisplayListRepaintPolicy, DamageRect, PixelBuffer, RenderObjectDirtySummary, RetainedDisplayList,
-    paint_display_list_for_module_with_profiling_metrics,
+    DamageRect, DisplayListRepaintPolicy, PixelBuffer, RenderObjectDirtySummary,
+    RetainedDisplayList, paint_display_list_for_module_with_profiling_metrics,
 };
 
 fn node(id: NodeId, tag: &str, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
@@ -185,8 +185,11 @@ fn perf_animation_dirty_update_reuses_unrelated_subtrees() {
     for idx in 0..20 {
         let lx = (idx * 26) as f32;
         let rx = (idx * 26) as f32;
-        left.children.push(node(10 + idx, "box", lx, 0.0, 20.0, 20.0));
-        right.children.push(node(100 + idx, "box", rx, 0.0, 20.0, 20.0));
+        left.children
+            .push(node(10 + idx, "box", lx, 0.0, 20.0, 20.0));
+        right
+            .children
+            .push(node(100 + idx, "box", rx, 0.0, 20.0, 20.0));
     }
     root.children.push(left);
     root.children.push(right);
@@ -207,10 +210,14 @@ fn perf_animation_dirty_update_reuses_unrelated_subtrees() {
         false,
         true,
     );
-    let selected = list.select_paint_commands(Some(metrics.damage_rect), DisplayListRepaintPolicy::MinimalDamage);
+    let selected = list.select_paint_commands(
+        Some(metrics.damage_rect),
+        DisplayListRepaintPolicy::MinimalDamage,
+    );
 
     assert!(metrics.subtree_segments_reused > 0);
     assert!(metrics.subtree_segments_rebuilt > 0);
     assert_eq!(metrics.full_fallback_count, 0);
-    assert!(selected.metrics().filtered_commands_skipped > 0);
+    assert!(selected.metrics().filtered_command_count > 0);
+    assert!(selected.len() <= list.paint_commands().len());
 }

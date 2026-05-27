@@ -140,7 +140,8 @@ pub fn coalesce_pointer_moves(events: Vec<WindowEvent>) -> Vec<WindowEvent> {
     }
 
     let mut output = Vec::with_capacity(events.len());
-    let mut pending_moves: HashMap<String, WindowEvent> = HashMap::new();
+    let mut pending_moves: HashMap<String, WindowEvent> =
+        HashMap::with_capacity(events.len().min(8));
 
     for event in events {
         match event {

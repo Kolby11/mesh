@@ -1,6 +1,50 @@
 use crate::display_list::{DisplayPaintNode, DisplayTextPaint};
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Mutex, OnceLock};
 
 use super::*;
+
+static ELLIPSIS_CACHE: OnceLock<Mutex<EllipsisCache>> = OnceLock::new();
+const ELLIPSIS_CACHE_CAPACITY: usize = 512;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct EllipsisCacheKey {
+    text: String,
+    font_family: String,
+    font_size: u32,
+    font_weight: u16,
+    line_height: u32,
+    max_width: u32,
+}
+
+#[derive(Debug, Default)]
+struct EllipsisCache {
+    entries: HashMap<EllipsisCacheKey, String>,
+    order: VecDeque<EllipsisCacheKey>,
+}
+
+impl EllipsisCache {
+    fn get(&mut self, key: &EllipsisCacheKey) -> Option<String> {
+        let value = self.entries.get(key).cloned();
+        if value.is_some() {
+            self.order.retain(|existing| existing != key);
+            self.order.push_back(key.clone());
+        }
+        value
+    }
+
+    fn insert(&mut self, key: EllipsisCacheKey, value: String) {
+        self.order.retain(|existing| existing != &key);
+        self.order.push_back(key.clone());
+        self.entries.insert(key, value);
+        while self.entries.len() > ELLIPSIS_CACHE_CAPACITY {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&evicted);
+        }
+    }
+}
 
 impl FrontendRenderEngine {
     pub(super) fn render_text_node(
@@ -287,6 +331,21 @@ pub(super) fn truncate_with_ellipsis(
     line_height: f32,
     max_width: f32,
 ) -> String {
+    let cache_key = EllipsisCacheKey {
+        text: text.to_string(),
+        font_family: font_family.to_string(),
+        font_size: font_size.to_bits(),
+        font_weight,
+        line_height: line_height.to_bits(),
+        max_width: max_width.to_bits(),
+    };
+    let cache = ELLIPSIS_CACHE.get_or_init(|| Mutex::new(EllipsisCache::default()));
+    if let Ok(mut guard) = cache.lock()
+        && let Some(cached) = guard.get(&cache_key)
+    {
+        return cached;
+    }
+
     const ELLIPSIS: &str = "…";
     let (ellipsis_width, _) = renderer.measure_styled(
         ELLIPSIS,
@@ -297,15 +356,20 @@ pub(super) fn truncate_with_ellipsis(
         None,
     );
     let target = (max_width - ellipsis_width).max(0.0);
+    let char_count = text.chars().count();
 
-    let mut boundaries: Vec<usize> = text.char_indices().map(|(index, _)| index).collect();
-    boundaries.push(text.len());
+    if char_count == 0 {
+        return ELLIPSIS.to_string();
+    }
 
     let mut low = 0usize;
-    let mut high = boundaries.len();
+    let mut high = char_count;
+    let mut boundaries: Vec<usize> = text.char_indices().map(|(index, _)| index).collect();
+    boundaries.push(text.len());
     while low < high {
         let mid = (low + high) / 2;
-        let truncated = &text[..boundaries[mid]];
+        let split = boundaries[mid];
+        let truncated = &text[..split];
         let (width, _) = renderer.measure_styled(
             truncated,
             font_family,
@@ -322,7 +386,14 @@ pub(super) fn truncate_with_ellipsis(
     }
 
     let best = low.saturating_sub(1);
-    format!("{}{}", &text[..boundaries[best]], ELLIPSIS)
+    let split = boundaries[best];
+    let mut output = String::with_capacity(split + ELLIPSIS.len());
+    output.push_str(&text[..split]);
+    output.push_str(ELLIPSIS);
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(cache_key, output.clone());
+    }
+    output
 }
 
 pub(super) fn selection_geometry(
@@ -494,6 +565,54 @@ pub(super) fn render_selection_highlights(
             clip_to_tuple(highlight_clip),
             Some(inner_width),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_with_ellipsis_appends_ellipsis_for_short_space() {
+        let renderer = TextRenderer::new();
+        let text = "hello world";
+        let (char_width, _) = renderer.measure_styled("h", "Inter", 14.0, 400, 1.4, None);
+        let (ellipsis_width, _) = renderer.measure_styled("…", "Inter", 14.0, 400, 1.4, None);
+        let max_width = char_width + ellipsis_width;
+
+        let truncated = truncate_with_ellipsis(&renderer, text, "Inter", 14.0, 400, 1.4, max_width);
+
+        let prefix = truncated
+            .strip_suffix("…")
+            .expect("truncated text should include ellipsis");
+        assert!(!prefix.is_empty());
+        assert!(text.starts_with(prefix));
+        let (truncated_width, _) =
+            renderer.measure_styled(&truncated, "Inter", 14.0, 400, 1.4, None);
+        assert!(truncated_width <= max_width);
+    }
+
+    #[test]
+    fn truncate_with_ellipsis_handles_non_ascii_boundaries() {
+        let renderer = TextRenderer::new();
+        let text = "😊😊😊";
+        let (char_width, _) = renderer.measure_styled("😊", "Inter", 14.0, 400, 1.4, None);
+        let (ellipsis_width, _) = renderer.measure_styled("…", "Inter", 14.0, 400, 1.4, None);
+        let max_width = char_width + ellipsis_width;
+
+        let truncated = truncate_with_ellipsis(&renderer, text, "Inter", 14.0, 400, 1.4, max_width);
+
+        assert_eq!(truncated, "😊…");
+        let (truncated_width, _) =
+            renderer.measure_styled(&truncated, "Inter", 14.0, 400, 1.4, None);
+        assert!(truncated_width <= max_width);
+    }
+
+    #[test]
+    fn truncate_with_ellipsis_empty_text_returns_ellipsis() {
+        let renderer = TextRenderer::new();
+        let truncated = truncate_with_ellipsis(&renderer, "", "Inter", 14.0, 400, 1.4, 20.0);
+        assert_eq!(truncated, "…");
     }
 }
 

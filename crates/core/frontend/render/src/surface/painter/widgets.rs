@@ -3,6 +3,7 @@ use crate::display_list::{
 };
 
 use super::*;
+use std::borrow::Cow;
 
 fn scrollbar_thumb_extent(raw_extent: f32, track_extent: i32, scale: f32) -> i32 {
     let track_extent = track_extent.max(1);
@@ -21,7 +22,11 @@ impl FrontendRenderEngine {
         clip: ClipRect,
     ) {
         let style = &node.computed_style;
-        let value = node.attributes.get("value").cloned().unwrap_or_default();
+        let value = node
+            .attributes
+            .get("value")
+            .map(String::as_str)
+            .unwrap_or("");
         let input_type = node
             .attributes
             .get("type")
@@ -30,21 +35,21 @@ impl FrontendRenderEngine {
         let placeholder = node
             .attributes
             .get("placeholder")
-            .cloned()
-            .unwrap_or_default();
+            .map(String::as_str)
+            .unwrap_or("");
         let focused = node
             .attributes
             .get("_mesh_focused")
             .is_some_and(|value| value == "true");
-        let display_value = if input_type == "password" && !value.is_empty() {
-            "*".repeat(value.chars().count())
+        let display_value: Cow<'_, str> = if input_type == "password" && !value.is_empty() {
+            Cow::Owned("*".repeat(value.chars().count()))
         } else {
-            value.clone()
+            Cow::Borrowed(value)
         };
         let text = if display_value.is_empty() {
-            placeholder.as_str()
+            placeholder
         } else {
-            display_value.as_str()
+            display_value.as_ref()
         };
         let style_color = opacity_color(style.color, style.opacity);
         let text_color = if display_value.is_empty() {
@@ -111,15 +116,15 @@ impl FrontendRenderEngine {
         clip: ClipRect,
     ) {
         let style = &node.style;
-        let display_value = if input.mask_text && !input.value.is_empty() {
-            "*".repeat(input.value.chars().count())
+        let display_value: Cow<'_, str> = if input.mask_text && !input.value.is_empty() {
+            Cow::Owned("*".repeat(input.value.chars().count()))
         } else {
-            input.value.clone()
+            Cow::Borrowed(input.value.as_str())
         };
         let text = if display_value.is_empty() {
             input.placeholder.as_str()
         } else {
-            display_value.as_str()
+            display_value.as_ref()
         };
         let text_color = if display_value.is_empty() {
             dim_color(style.color, 0.6)

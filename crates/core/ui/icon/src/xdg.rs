@@ -1,8 +1,96 @@
 use crate::config::{IconPackKind, IconPackRoot};
 use crate::registry::{ResolvedTarget, SupportedAxes};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
+
+static SUPPORTED_AXES_CACHE: OnceLock<Mutex<SupportedAxesCache>> = OnceLock::new();
+static XDG_ICON_LOOKUP_CACHE: OnceLock<Mutex<XdgIconLookupCache>> = OnceLock::new();
+const SUPPORTED_AXES_CACHE_CAPACITY: usize = 128;
+const XDG_ICON_LOOKUP_CACHE_CAPACITY: usize = 2048;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FontFreshness {
+    len: u64,
+    modified_nanos: u128,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CachedSupportedAxes {
+    freshness: FontFreshness,
+    axes: SupportedAxes,
+}
+
+#[derive(Debug, Default)]
+struct SupportedAxesCache {
+    entries: HashMap<PathBuf, CachedSupportedAxes>,
+    order: VecDeque<PathBuf>,
+}
+
+impl SupportedAxesCache {
+    fn get(&mut self, path: &Path, freshness: FontFreshness) -> Option<SupportedAxes> {
+        let axes = self
+            .entries
+            .get(path)
+            .filter(|cached| cached.freshness == freshness)
+            .map(|cached| cached.axes);
+        if axes.is_some() {
+            self.order.retain(|existing| existing != path);
+            self.order.push_back(path.to_path_buf());
+        }
+        axes
+    }
+
+    fn insert(&mut self, path: PathBuf, value: CachedSupportedAxes) {
+        self.order.retain(|existing| existing != &path);
+        self.order.push_back(path.clone());
+        self.entries.insert(path, value);
+        while self.entries.len() > SUPPORTED_AXES_CACHE_CAPACITY {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&evicted);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct XdgIconLookupKey {
+    root: Option<PathBuf>,
+    theme: String,
+    asset_name: String,
+    size: u32,
+}
+
+#[derive(Debug, Default)]
+struct XdgIconLookupCache {
+    entries: HashMap<XdgIconLookupKey, Option<PathBuf>>,
+    order: VecDeque<XdgIconLookupKey>,
+}
+
+impl XdgIconLookupCache {
+    fn get(&mut self, key: &XdgIconLookupKey) -> Option<Option<PathBuf>> {
+        let value = self.entries.get(key).cloned();
+        if value.is_some() {
+            self.order.retain(|existing| existing != key);
+            self.order.push_back(key.clone());
+        }
+        value
+    }
+
+    fn insert(&mut self, key: XdgIconLookupKey, value: Option<PathBuf>) {
+        self.order.retain(|existing| existing != &key);
+        self.order.push_back(key.clone());
+        self.entries.insert(key, value);
+        while self.entries.len() > XDG_ICON_LOOKUP_CACHE_CAPACITY {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&evicted);
+        }
+    }
+}
 
 pub fn find_icon_in_pack(
     pack: &IconPackRoot,
@@ -17,32 +105,72 @@ pub fn find_icon_in_pack(
         return resolve_font_glyph(pack, font_file, glyph_map, asset_name);
     }
 
+    let path = lookup_xdg_icon_in_pack(pack, asset_name, size)?;
+
+    Some(ResolvedTarget::File(path))
+}
+
+fn lookup_xdg_icon_in_pack(pack: &IconPackRoot, asset_name: &str, size: u32) -> Option<PathBuf> {
+    let key = XdgIconLookupKey {
+        root: pack.root.clone(),
+        theme: theme_name(pack).to_string(),
+        asset_name: asset_name.to_string(),
+        size: size.max(1),
+    };
+    let cache = XDG_ICON_LOOKUP_CACHE.get_or_init(|| Mutex::new(XdgIconLookupCache::default()));
+    if let Ok(mut guard) = cache.lock()
+        && let Some(cached) = guard.get(&key)
+    {
+        return cached;
+    }
+
     let path = search_for_pack(pack)
         .search()
         .icons()
-        .find_icon(asset_name, size.max(1), 1, theme_name(pack))
+        .find_icon(asset_name, key.size, 1, &key.theme)
         .map(|icon| icon.path().to_path_buf())
-        .or_else(|| find_direct_file(pack, asset_name))?;
+        .or_else(|| find_direct_file(pack, asset_name));
 
-    Some(ResolvedTarget::File(path))
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(key, path.clone());
+    }
+    path
 }
 
 /// Look up a glyph codepoint by name from a font pack's codepoints file.
 /// Used by the binding resolver when a mapping target points at a font
 /// alias declared in `mesh.icon_pack.requires.fonts`.
 pub fn lookup_glyph_codepoint(glyph_map_path: &Path, glyph_name: &str) -> Option<u32> {
-    load_codepoints(glyph_map_path)?.get(glyph_name).copied()
+    lookup_codepoint(glyph_map_path, glyph_name)
 }
 
 /// Look up an icon in any installed theme on the system XDG search path.
 /// Used as a last-resort fallback when neither module bindings nor the
 /// active profile produce a hit.
 pub fn find_icon_in_theme(theme: &str, asset_name: &str, size: u32) -> Option<PathBuf> {
-    icon::IconSearch::new()
+    let key = XdgIconLookupKey {
+        root: None,
+        theme: theme.to_string(),
+        asset_name: asset_name.to_string(),
+        size: size.max(1),
+    };
+    let cache = XDG_ICON_LOOKUP_CACHE.get_or_init(|| Mutex::new(XdgIconLookupCache::default()));
+    if let Ok(mut guard) = cache.lock()
+        && let Some(cached) = guard.get(&key)
+    {
+        return cached;
+    }
+
+    let path = icon::IconSearch::new()
         .search()
         .icons()
-        .find_icon(asset_name, size.max(1), 1, theme)
-        .map(|icon| icon.path().to_path_buf())
+        .find_icon(asset_name, key.size, 1, &key.theme)
+        .map(|icon| icon.path().to_path_buf());
+
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(key, path.clone());
+    }
+    path
 }
 
 fn resolve_font_glyph(
@@ -57,7 +185,7 @@ fn resolve_font_glyph(
     if !font_path.is_file() {
         return None;
     }
-    let codepoint = load_codepoints(&glyph_map_path)?.get(asset_name).copied()?;
+    let codepoint = lookup_codepoint(&glyph_map_path, asset_name)?;
     let supported_axes = detect_supported_axes(&font_path);
     Some(ResolvedTarget::Glyph {
         font_path,
@@ -82,21 +210,55 @@ fn resolve_pack_path(root: &Path, declared: &str) -> PathBuf {
     root.join(candidate)
 }
 
-static CODEPOINTS_CACHE: OnceLock<Mutex<HashMap<PathBuf, HashMap<String, u32>>>> = OnceLock::new();
+static CODEPOINTS_CACHE: OnceLock<Mutex<CodepointsCache>> = OnceLock::new();
+const CODEPOINTS_CACHE_CAPACITY: usize = 128;
 
-fn load_codepoints(path: &Path) -> Option<HashMap<String, u32>> {
-    let cache = CODEPOINTS_CACHE.get_or_init(Default::default);
+#[derive(Debug, Default)]
+struct CodepointsCache {
+    entries: HashMap<PathBuf, HashMap<String, u32>>,
+    order: VecDeque<PathBuf>,
+}
+
+impl CodepointsCache {
+    fn get(&mut self, path: &Path, glyph_name: &str) -> Option<Option<u32>> {
+        let value = self
+            .entries
+            .get(path)
+            .map(|codepoints| codepoints.get(glyph_name).copied());
+        if value.is_some() {
+            self.order.retain(|existing| existing != path);
+            self.order.push_back(path.to_path_buf());
+        }
+        value
+    }
+
+    fn insert(&mut self, path: PathBuf, value: HashMap<String, u32>) {
+        self.order.retain(|existing| existing != &path);
+        self.order.push_back(path.clone());
+        self.entries.insert(path, value);
+        while self.entries.len() > CODEPOINTS_CACHE_CAPACITY {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&evicted);
+        }
+    }
+}
+
+fn lookup_codepoint(path: &Path, glyph_name: &str) -> Option<u32> {
+    let cache = CODEPOINTS_CACHE.get_or_init(|| Mutex::new(CodepointsCache::default()));
     {
-        let guard = cache.lock().ok()?;
-        if let Some(map) = guard.get(path) {
-            return Some(map.clone());
+        let mut guard = cache.lock().ok()?;
+        if let Some(codepoint) = guard.get(path, glyph_name) {
+            return codepoint;
         }
     }
     let parsed = parse_codepoints_file(path)?;
+    let codepoint = parsed.get(glyph_name).copied();
     if let Ok(mut guard) = cache.lock() {
-        guard.insert(path.to_path_buf(), parsed.clone());
+        guard.insert(path.to_path_buf(), parsed);
     }
-    Some(parsed)
+    codepoint
 }
 
 fn parse_codepoints_file(path: &Path) -> Option<HashMap<String, u32>> {
@@ -141,6 +303,16 @@ fn parse_codepoints_file(path: &Path) -> Option<HashMap<String, u32>> {
 /// when the font can't be parsed; the painter then silently ignores
 /// CSS `--icon-*` properties that don't match.
 fn detect_supported_axes(font_path: &Path) -> SupportedAxes {
+    let freshness = font_freshness(font_path);
+    if let Some(freshness) = freshness {
+        let cache = SUPPORTED_AXES_CACHE.get_or_init(|| Mutex::new(SupportedAxesCache::default()));
+        if let Ok(mut guard) = cache.lock()
+            && let Some(axes) = guard.get(font_path, freshness)
+        {
+            return axes;
+        }
+    }
+
     let bytes = match std::fs::read(font_path) {
         Ok(bytes) => bytes,
         Err(_) => return SupportedAxes::default(),
@@ -160,7 +332,26 @@ fn detect_supported_axes(font_path: &Path) -> SupportedAxes {
             _ => {}
         }
     }
+    if let Some(freshness) = freshness {
+        let cache = SUPPORTED_AXES_CACHE.get_or_init(|| Mutex::new(SupportedAxesCache::default()));
+        if let Ok(mut guard) = cache.lock() {
+            guard.insert(font_path.to_path_buf(), CachedSupportedAxes { freshness, axes });
+        }
+    }
     axes
+}
+
+fn font_freshness(path: &Path) -> Option<FontFreshness> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?;
+    let modified_nanos = modified
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(FontFreshness {
+        len: metadata.len(),
+        modified_nanos,
+    })
 }
 
 fn search_for_pack(pack: &IconPackRoot) -> icon::IconSearch {

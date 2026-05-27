@@ -214,6 +214,12 @@ pub trait ShellComponent: Send {
         &mut self,
         event: &ServiceEvent,
     ) -> Result<Vec<CoreRequest>, ComponentError>;
+    fn observes_service_event(&self, _event: &ServiceEvent) -> bool {
+        true
+    }
+    fn wants_tick(&self) -> bool {
+        true
+    }
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError>;
     fn wants_render(&self) -> bool;
     fn surface_size_changed(&mut self, _width: u32, _height: u32) -> bool {

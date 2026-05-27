@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
-use mesh_core_elements::style::{BackgroundPaint, Color, ComputedStyle, Edges, Transform2D};
-use mesh_core_elements::{NodeId, WidgetNode};
+use mesh_core_elements::style::{
+    BackgroundPaint, Color, ComputedStyle, Display, Edges, Transform2D,
+};
+use mesh_core_elements::{AccessibilityRole, NodeId, WidgetNode};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RenderObjectDirtySummary {
@@ -69,8 +71,9 @@ impl RenderObjectTree {
         retained_tree_generation: Option<u64>,
     ) -> RenderObjectDirtySummary {
         let mut dirty = RenderObjectDirtySummary::default();
-        let mut dirty_nodes = HashSet::new();
-        let mut visited = HashSet::new();
+        let retained_len = self.objects.len();
+        let mut dirty_nodes = HashSet::with_capacity(retained_len.min(1024));
+        let mut visited = HashSet::with_capacity(retained_len);
 
         update_retained_render_objects(
             root,
@@ -168,7 +171,13 @@ struct RenderObjectPaintData {
 type TransformSlot = (u32, u32, u32, u32, u32);
 type GeometrySlot = (u32, u32, u32, u32, u32, u32, u32, u32, u32, u32);
 type ClipSlot = (bool, u32, u32, u32, u32);
-type AccessibilitySlot = (String, Option<String>, bool, bool);
+type AccessibilitySlot = (AccessibilityRoleSlot, Option<String>, bool, bool);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AccessibilityRoleSlot {
+    Builtin(u8),
+    Custom(String),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TextSlot {
@@ -214,17 +223,28 @@ fn update_retained_render_objects(
 }
 
 fn render_object_paint_data(node: &WidgetNode, parent: Option<NodeId>) -> RenderObjectPaintData {
+    let geometry = geometry_slot(node);
     RenderObjectPaintData {
         parent,
-        child_ids: node.children.iter().map(|child| child.id).collect(),
+        child_ids: child_id_slot(node),
         transform: transform_slot(node.computed_style.transform),
-        clip: clip_slot(node),
+        clip: clip_slot(node, geometry),
         opacity: node.computed_style.opacity.to_bits(),
-        geometry: geometry_slot(node),
+        geometry,
         material: material_hash(&node.computed_style),
         primitive: primitive_hash(node),
         text: text_slot(node),
         accessibility: accessibility_slot(node),
+    }
+}
+
+fn child_id_slot(node: &WidgetNode) -> Vec<NodeId> {
+    if node.children.is_empty() {
+        Vec::new()
+    } else {
+        let mut child_ids = Vec::with_capacity(node.children.len());
+        child_ids.extend(node.children.iter().map(|child| child.id));
+        child_ids
     }
 }
 
@@ -238,10 +258,9 @@ fn transform_slot(transform: Transform2D) -> TransformSlot {
     )
 }
 
-fn clip_slot(node: &WidgetNode) -> ClipSlot {
+fn clip_slot(node: &WidgetNode, geometry: GeometrySlot) -> ClipSlot {
     let clips = node.computed_style.overflow_x.clips_contents()
         || node.computed_style.overflow_y.clips_contents();
-    let geometry = geometry_slot(node);
     (clips, geometry.0, geometry.1, geometry.2, geometry.3)
 }
 
@@ -274,11 +293,40 @@ fn text_slot(node: &WidgetNode) -> TextSlot {
 
 fn accessibility_slot(node: &WidgetNode) -> AccessibilitySlot {
     (
-        node.accessibility.role.to_string(),
+        accessibility_role_slot(&node.accessibility.role),
         node.accessibility.label.clone(),
         node.accessibility.focusable,
         node.accessibility.focused,
     )
+}
+
+fn accessibility_role_slot(role: &AccessibilityRole) -> AccessibilityRoleSlot {
+    let slot = match role {
+        AccessibilityRole::Button => 0,
+        AccessibilityRole::Slider => 1,
+        AccessibilityRole::Label => 2,
+        AccessibilityRole::TextInput => 3,
+        AccessibilityRole::Checkbox => 4,
+        AccessibilityRole::Switch => 5,
+        AccessibilityRole::Region => 6,
+        AccessibilityRole::List => 7,
+        AccessibilityRole::ListItem => 8,
+        AccessibilityRole::Image => 9,
+        AccessibilityRole::Toolbar => 10,
+        AccessibilityRole::Menu => 11,
+        AccessibilityRole::MenuItem => 12,
+        AccessibilityRole::Dialog => 13,
+        AccessibilityRole::Alert => 14,
+        AccessibilityRole::Status => 15,
+        AccessibilityRole::ProgressBar => 16,
+        AccessibilityRole::Tab => 17,
+        AccessibilityRole::TabPanel => 18,
+        AccessibilityRole::Separator => 19,
+        AccessibilityRole::Custom(value) => {
+            return AccessibilityRoleSlot::Custom(value.clone());
+        }
+    };
+    AccessibilityRoleSlot::Builtin(slot)
 }
 
 fn material_hash(style: &ComputedStyle) -> u64 {
@@ -303,7 +351,7 @@ fn material_hash(style: &ComputedStyle) -> u64 {
     style.border_radius.top_right.to_bits().hash(&mut hasher);
     style.border_radius.bottom_right.to_bits().hash(&mut hasher);
     style.border_radius.bottom_left.to_bits().hash(&mut hasher);
-    format!("{:?}", style.display).hash(&mut hasher);
+    display_slot(style.display).hash(&mut hasher);
     style.z_index.hash(&mut hasher);
     style.box_shadow.offset_x.to_bits().hash(&mut hasher);
     style.box_shadow.offset_y.to_bits().hash(&mut hasher);
@@ -357,6 +405,13 @@ fn hash_edges(edges: Edges, hasher: &mut impl Hasher) {
     edges.right.to_bits().hash(hasher);
     edges.bottom.to_bits().hash(hasher);
     edges.left.to_bits().hash(hasher);
+}
+
+fn display_slot(display: Display) -> u8 {
+    match display {
+        Display::Flex => 0,
+        Display::None => 1,
+    }
 }
 
 fn color_slot(color: Color) -> ColorSlot {

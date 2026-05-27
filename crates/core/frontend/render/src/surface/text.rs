@@ -9,11 +9,11 @@ use mesh_core_elements::Color;
 use mesh_core_elements::style::TextAlign;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 
-const TEXT_LAYOUT_CACHE_CAPACITY: usize = 128;
+const TEXT_LAYOUT_CACHE_CAPACITY: usize = 512;
 
 pub struct TextRenderer {
     engine: Mutex<TextEngine>,
@@ -23,6 +23,7 @@ struct TextEngine {
     font_system: FontSystem,
     swash_cache: SwashCache,
     layout_cache: HashMap<TextLayoutKey, Buffer>,
+    layout_cache_order: VecDeque<TextLayoutKey>,
     metrics: TextCacheMetrics,
 }
 
@@ -115,6 +116,7 @@ impl TextRenderer {
                 font_system: FontSystem::new(),
                 swash_cache: SwashCache::new(),
                 layout_cache: HashMap::new(),
+                layout_cache_order: VecDeque::new(),
                 metrics: TextCacheMetrics {
                     glyph_cache_active: true,
                     ..Default::default()
@@ -411,6 +413,8 @@ impl TextEngine {
         align: Align,
     ) -> Buffer {
         if let Some(cosmic) = self.layout_cache.remove(key) {
+            self.layout_cache_order
+                .retain(|existing| existing != key);
             self.metrics.layout_hits = self.metrics.layout_hits.saturating_add(1);
             return cosmic;
         }
@@ -442,13 +446,16 @@ impl TextEngine {
     }
 
     fn store_layout(&mut self, key: TextLayoutKey, cosmic: Buffer) {
+        self.layout_cache_order
+            .retain(|existing| existing != &key);
         if self.layout_cache.len() >= TEXT_LAYOUT_CACHE_CAPACITY
             && !self.layout_cache.contains_key(&key)
-            && let Some(evicted) = self.layout_cache.keys().next().cloned()
+            && let Some(evicted) = self.layout_cache_order.pop_front()
         {
             self.layout_cache.remove(&evicted);
             self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
         }
+        self.layout_cache_order.push_back(key.clone());
         self.layout_cache.insert(key, cosmic);
         self.metrics.shaped_entries = self.layout_cache.len() as u64;
     }

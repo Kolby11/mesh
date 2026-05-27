@@ -138,25 +138,34 @@ impl FrontendRenderEngine {
             })
             .unwrap_or(surface_clip);
 
-        let mut batched_commands = Vec::new();
+        let mut scratch = self.render_scratch.borrow_mut();
+        scratch.prepare(commands.len());
         for command in commands {
             if self.try_append_display_self_paint_batch(
                 command,
                 scale,
                 paint_clip,
                 paint_nodes,
-                &mut batched_commands,
+                &mut scratch.batched_commands,
             ) {
                 continue;
             }
-            if !batched_commands.is_empty() {
-                self.execute_painter_commands(buffer, &batched_commands);
-                batched_commands.clear();
+            if !scratch.batched_commands.is_empty() {
+                self.execute_painter_commands(buffer, &scratch.batched_commands);
+                scratch.batched_commands.clear();
             }
-            self.render_display_command(command, buffer, scale, paint_clip, paint_nodes, module_id);
+            self.render_display_command(
+                command,
+                buffer,
+                scale,
+                paint_clip,
+                paint_nodes,
+                module_id,
+                &mut scratch.node_commands,
+            );
         }
-        if !batched_commands.is_empty() {
-            self.execute_painter_commands(buffer, &batched_commands);
+        if !scratch.batched_commands.is_empty() {
+            self.execute_painter_commands(buffer, &scratch.batched_commands);
         }
     }
 
@@ -189,25 +198,34 @@ impl FrontendRenderEngine {
             })
             .unwrap_or(surface_clip);
 
-        let mut batched_commands = Vec::new();
+        let mut scratch = self.render_scratch.borrow_mut();
+        scratch.prepare(commands.len());
         for command in commands.iter() {
             if self.try_append_display_self_paint_batch(
                 command,
                 scale,
                 paint_clip,
                 paint_nodes,
-                &mut batched_commands,
+                &mut scratch.batched_commands,
             ) {
                 continue;
             }
-            if !batched_commands.is_empty() {
-                self.execute_painter_commands(buffer, &batched_commands);
-                batched_commands.clear();
+            if !scratch.batched_commands.is_empty() {
+                self.execute_painter_commands(buffer, &scratch.batched_commands);
+                scratch.batched_commands.clear();
             }
-            self.render_display_command(command, buffer, scale, paint_clip, paint_nodes, module_id);
+            self.render_display_command(
+                command,
+                buffer,
+                scale,
+                paint_clip,
+                paint_nodes,
+                module_id,
+                &mut scratch.node_commands,
+            );
         }
-        if !batched_commands.is_empty() {
-            self.execute_painter_commands(buffer, &batched_commands);
+        if !scratch.batched_commands.is_empty() {
+            self.execute_painter_commands(buffer, &scratch.batched_commands);
         }
     }
 
@@ -251,6 +269,7 @@ impl FrontendRenderEngine {
         paint_clip: ClipRect,
         paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
         module_id: Option<&str>,
+        node_commands: &mut Vec<PainterCommand>,
     ) {
         if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
             return;
@@ -269,6 +288,7 @@ impl FrontendRenderEngine {
                     scale,
                     node_bounds,
                     clip,
+                    node_commands,
                     module_id,
                 );
             }
@@ -358,10 +378,20 @@ impl FrontendRenderEngine {
             clip
         };
 
-        let needs_sort = node
+        let mut needs_sort = false;
+        let mut previous_z_index = node
             .children
-            .windows(2)
-            .any(|pair| pair[0].computed_style.z_index != pair[1].computed_style.z_index);
+            .first()
+            .map(|child| child.computed_style.z_index);
+        for child in node.children.iter().skip(1) {
+            if let Some(previous) = previous_z_index {
+                if previous > child.computed_style.z_index {
+                    needs_sort = true;
+                    break;
+                }
+            }
+            previous_z_index = Some(child.computed_style.z_index);
+        }
 
         if needs_sort {
             let mut child_order: Vec<usize> = (0..node.children.len()).collect();
@@ -498,6 +528,7 @@ impl FrontendRenderEngine {
         scale: f32,
         bounds: ClipRect,
         clip: ClipRect,
+        node_commands: &mut Vec<PainterCommand>,
         module_id: Option<&str>,
     ) {
         let style = &node.style;
@@ -511,16 +542,17 @@ impl FrontendRenderEngine {
         let w = bounds.width;
         let h = bounds.height;
 
-        let mut commands = Vec::with_capacity(5);
+        node_commands.clear();
+
         push_box_shadow_command(
-            &mut commands,
+            node_commands,
             bounds,
             style.border_radius * scale,
             style.box_shadow,
             clip,
         );
         push_backdrop_filter_command(
-            &mut commands,
+            node_commands,
             bounds,
             style.border_radius * scale,
             style.backdrop_filter,
@@ -535,7 +567,7 @@ impl FrontendRenderEngine {
                 clip
             };
             push_fill_shape_command(
-                &mut commands,
+                node_commands,
                 bounds,
                 radius,
                 style.background_color,
@@ -544,7 +576,7 @@ impl FrontendRenderEngine {
             );
         }
         push_background_paint_command(
-            &mut commands,
+            node_commands,
             &style.background_paint,
             bounds,
             style.border_radius * scale,
@@ -552,7 +584,7 @@ impl FrontendRenderEngine {
         );
 
         push_border_commands(
-            &mut commands,
+            node_commands,
             bounds,
             &style.border_width,
             style.border_radius * scale,
@@ -560,8 +592,8 @@ impl FrontendRenderEngine {
             scale,
             node_clip,
         );
-
-        self.execute_painter_commands(buffer, &commands);
+        self.execute_painter_commands(buffer, node_commands);
+        node_commands.clear();
 
         match &node.content {
             DisplayPaintContent::Text(text) => {

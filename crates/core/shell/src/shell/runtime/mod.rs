@@ -10,8 +10,98 @@ mod theme;
 mod wayland;
 
 const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
+const MAX_IDLE_SLEEP: Duration = Duration::from_millis(16);
+const MIN_RUNTIME_SLEEP: Duration = Duration::from_millis(1);
 
 impl Shell {
+    pub(in crate::shell) fn rebuild_component_surface_index(&mut self) {
+        self.component_by_surface.clear();
+        self.component_by_surface.reserve(self.components.len());
+        for (index, runtime) in self.components.iter().enumerate() {
+            self.component_by_surface
+                .insert(runtime.surface_id.clone(), index);
+        }
+    }
+
+    pub(in crate::shell) fn component_index_for_surface(
+        &mut self,
+        surface_id: &str,
+    ) -> Option<usize> {
+        if self.component_by_surface.len() != self.components.len() {
+            self.rebuild_component_surface_index();
+        }
+
+        if let Some(index) = self.component_by_surface.get(surface_id).copied()
+            && self
+                .components
+                .get(index)
+                .is_some_and(|runtime| runtime.surface_id == surface_id)
+        {
+            return Some(index);
+        }
+
+        self.rebuild_component_surface_index();
+        self.component_by_surface.get(surface_id).copied()
+    }
+
+    fn next_runtime_sleep(&self, shell_message_backlog_likely: bool) -> Duration {
+        if shell_message_backlog_likely
+            || !self.pending_wayland_events.is_empty()
+            || self
+                .components
+                .iter()
+                .any(|runtime| runtime.component.wants_render())
+        {
+            return Duration::ZERO;
+        }
+
+        let now = std::time::Instant::now();
+        if now >= self.next_frontend_reload_check
+            || now >= self.next_module_settings_reload_check
+            || now >= self.next_theme_reload_check
+            || now >= self.next_shell_settings_reload_check
+        {
+            return Duration::ZERO;
+        }
+
+        let mut next_deadline = self
+            .next_frontend_reload_check
+            .min(self.next_module_settings_reload_check)
+            .min(self.next_theme_reload_check)
+            .min(self.next_shell_settings_reload_check);
+
+        for state in self.command_throttle.values() {
+            if state.pending.is_none() {
+                continue;
+            }
+            let command_due_at = state
+                .last_send
+                .checked_add(request::COMMAND_THROTTLE_INTERVAL)
+                .unwrap_or(now);
+            if command_due_at <= now {
+                return Duration::ZERO;
+            }
+            next_deadline = next_deadline.min(command_due_at);
+        }
+
+        for surface in self.core.surfaces.values() {
+            let Some(closing_until) = surface.closing_until else {
+                continue;
+            };
+            if closing_until <= now {
+                return Duration::ZERO;
+            }
+            next_deadline = next_deadline.min(closing_until);
+        }
+
+        let sleep_for = next_deadline.saturating_duration_since(now).min(MAX_IDLE_SLEEP);
+        if sleep_for < MIN_RUNTIME_SLEEP {
+            Duration::ZERO
+        } else {
+            sleep_for
+        }
+    }
+
     pub fn run(&mut self) -> Result<(), ShellRunError> {
         self.discover_modules();
         for theme in mesh_core_theme::load_themes_from_dir(&mesh_core_theme::theme_dir_path()) {
@@ -56,14 +146,18 @@ impl Shell {
             self.reload_frontend_components_if_changed()?;
             self.dispatch_wayland()?;
 
-            let mut shell_messages = Vec::new();
+            let mut shell_messages = CoalescedShellMessages::default();
+            let mut drained_shell_message_count = 0;
             for _ in 0..MAX_SHELL_MESSAGE_DRAIN_PER_FRAME {
                 let Ok(message) = rx.try_recv() else {
                     break;
                 };
-                push_coalesced_shell_message(&mut shell_messages, message);
+                drained_shell_message_count += 1;
+                shell_messages.push(message);
             }
-            for message in shell_messages {
+            let shell_message_backlog_likely =
+                drained_shell_message_count == MAX_SHELL_MESSAGE_DRAIN_PER_FRAME;
+            for message in shell_messages.into_vec() {
                 self.handle_shell_message(&mut pending, message)?;
             }
 
@@ -75,7 +169,10 @@ impl Shell {
             self.flush_wayland()?;
             self.presentation_engine.pump();
 
-            std::thread::sleep(Duration::from_millis(16));
+            let sleep_for = self.next_runtime_sleep(shell_message_backlog_likely);
+            if !sleep_for.is_zero() {
+                std::thread::sleep(sleep_for);
+            }
         }
 
         let mut shutdown_requests = self.broadcast_core_event(CoreEvent::ShuttingDown)?;
@@ -163,26 +260,32 @@ impl Shell {
     }
 }
 
-fn push_coalesced_shell_message(messages: &mut Vec<ShellMessage>, message: ShellMessage) {
-    if let ShellMessage::BackendServiceUpdate {
-        interface,
-        provider_id,
-        ..
-    } = &message
-        && let Some(existing) = messages.iter_mut().find(|existing| {
-            matches!(
-                existing,
-                ShellMessage::BackendServiceUpdate {
-                    interface: existing_interface,
-                    provider_id: existing_provider,
-                    ..
-                } if existing_interface == interface && existing_provider == provider_id
-            )
-        })
-    {
-        *existing = message;
-        return;
+#[derive(Default)]
+struct CoalescedShellMessages {
+    messages: Vec<ShellMessage>,
+    backend_update_index: HashMap<(String, String), usize>,
+}
+
+impl CoalescedShellMessages {
+    fn push(&mut self, message: ShellMessage) {
+        if let ShellMessage::BackendServiceUpdate {
+            interface,
+            provider_id,
+            ..
+        } = &message
+        {
+            let key = (interface.clone(), provider_id.clone());
+            if let Some(index) = self.backend_update_index.get(&key).copied() {
+                self.messages[index] = message;
+                return;
+            }
+            self.backend_update_index.insert(key, self.messages.len());
+        }
+
+        self.messages.push(message);
     }
 
-    messages.push(message);
+    fn into_vec(self) -> Vec<ShellMessage> {
+        self.messages
+    }
 }

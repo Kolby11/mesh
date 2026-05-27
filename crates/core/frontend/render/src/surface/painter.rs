@@ -4,7 +4,7 @@ mod text;
 mod tree;
 mod widgets;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::sync::Mutex;
 
 use super::PixelBuffer;
@@ -87,6 +87,40 @@ pub struct FrontendRenderEngine {
     painter_diagnostics: Mutex<Vec<PainterDiagnostic>>,
     text_renderer: TextRenderer,
     tooltip_colors: Cell<TooltipPaintColors>,
+    render_scratch: RefCell<RenderScratch>,
+}
+
+#[derive(Default)]
+struct RenderScratch {
+    batched_commands: Vec<PainterCommand>,
+    node_commands: Vec<PainterCommand>,
+}
+
+const MAX_RETAINED_BATCH_COMMANDS: usize = 4096;
+const MAX_RETAINED_NODE_COMMANDS: usize = 16;
+const DEFAULT_NODE_COMMANDS: usize = 5;
+
+impl RenderScratch {
+    fn prepare(&mut self, batch_capacity: usize) {
+        self.batched_commands.clear();
+        self.node_commands.clear();
+        if self.batched_commands.capacity() > MAX_RETAINED_BATCH_COMMANDS
+            && batch_capacity <= MAX_RETAINED_BATCH_COMMANDS
+        {
+            self.batched_commands = Vec::with_capacity(batch_capacity);
+        }
+        if self.batched_commands.capacity() < batch_capacity {
+            self.batched_commands
+                .reserve(batch_capacity - self.batched_commands.capacity());
+        }
+        if self.node_commands.capacity() > MAX_RETAINED_NODE_COMMANDS {
+            self.node_commands = Vec::with_capacity(DEFAULT_NODE_COMMANDS);
+        }
+        if self.node_commands.capacity() < DEFAULT_NODE_COMMANDS {
+            self.node_commands
+                .reserve(DEFAULT_NODE_COMMANDS - self.node_commands.capacity());
+        }
+    }
 }
 
 impl FrontendRenderEngine {
@@ -96,6 +130,7 @@ impl FrontendRenderEngine {
             painter_diagnostics: Mutex::new(Vec::new()),
             text_renderer: TextRenderer::new(),
             tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
+            render_scratch: RefCell::new(RenderScratch::default()),
         }
     }
 
@@ -106,6 +141,7 @@ impl FrontendRenderEngine {
             painter_diagnostics: Mutex::new(Vec::new()),
             text_renderer: TextRenderer::new(),
             tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
+            render_scratch: RefCell::new(RenderScratch::default()),
         }
     }
 
@@ -158,6 +194,9 @@ impl FrontendRenderEngine {
     }
 
     fn execute_painter_commands(&self, buffer: &mut PixelBuffer, commands: &[PainterCommand]) {
+        if commands.is_empty() {
+            return;
+        }
         let mut local = Vec::new();
         self.paint_backend
             .execute_commands(buffer, commands, &mut local);

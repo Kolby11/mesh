@@ -2,6 +2,7 @@ pub use mesh_core_frontend_host::{
     ComponentContext, ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent,
     CoreRequest, KeyModifiers, ServiceEvent, ShellComponent, SurfaceId, TabFocusTarget,
 };
+use mesh_core_presentation::LayerSurfaceConfig;
 use mesh_core_render::PixelBuffer;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,6 +20,7 @@ pub(super) struct ComponentRuntime {
     pub(super) module_settings_path: Option<PathBuf>,
     pub(super) module_settings_modified_at: Option<SystemTime>,
     pub(super) paint_buffer: Option<PixelBuffer>,
+    pub(super) last_surface_config: Option<LayerSurfaceConfig>,
     pub(super) force_full_present: bool,
     /// Last surface size resolved by shell/presentation without requiring a
     /// compositor roundtrip on every render or input event.
@@ -46,6 +48,7 @@ impl ComponentRuntime {
             module_settings_path,
             module_settings_modified_at: None,
             paint_buffer: None,
+            last_surface_config: None,
             force_full_present: false,
             known_surface_size: None,
         }

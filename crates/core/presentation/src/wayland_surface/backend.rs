@@ -8,7 +8,7 @@ pub enum LayerSurfaceSizePolicy {
     Flexible,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LayerSurfaceConfig {
     pub edge: Option<Edge>,
     pub layer: MeshLayer,

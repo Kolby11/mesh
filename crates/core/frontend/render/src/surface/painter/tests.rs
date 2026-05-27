@@ -2460,23 +2460,12 @@ fn retained_replay_batches_adjacent_non_content_nodes() {
     let recorded = backend.clone();
     let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
     let mut buffer = PixelBuffer::new(80, 40);
-    engine.render_display_list_for_module(
-        &replay_commands,
-        &mut buffer,
-        1.0,
-        None,
-        None,
-        None,
-    );
+    engine.render_display_list_for_module(&replay_commands, &mut buffer, 1.0, None, None, None);
 
     let call_sizes = recorded.execute_call_sizes();
-    assert!(
-        call_sizes.iter().any(|size| *size >= 2),
-        "expected one backend execute call containing multiple commands, got {call_sizes:?}"
-    );
-    assert!(
-        call_sizes.len() < replay_commands.len(),
-        "expected fewer backend execute calls than replay commands, got calls={call_sizes:?} commands={}",
-        replay_commands.len()
+    assert_eq!(
+        call_sizes,
+        vec![2],
+        "expected exactly one non-empty batched display command execution, got {call_sizes:?}"
     );
 }

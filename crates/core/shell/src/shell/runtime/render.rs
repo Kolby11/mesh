@@ -26,9 +26,13 @@ impl Shell {
                 }
             };
             if let Some((width, height)) = surface_size {
-                self.components[index]
-                    .component
-                    .surface_size_changed(width, height);
+                let resolved_size = (width, height);
+                if self.components[index].known_surface_size != Some(resolved_size) {
+                    self.components[index].known_surface_size = Some(resolved_size);
+                    self.components[index]
+                        .component
+                        .surface_size_changed(width, height);
+                }
             }
             let total_render_started = self.profiling_enabled().then(std::time::Instant::now);
             let profiling_enabled = self.profiling_enabled();
@@ -69,6 +73,7 @@ impl Shell {
                         runtime.paint_buffer = Some(PixelBuffer::new(1, 1));
                     }
                     runtime.known_surface_size = None;
+                    runtime.last_surface_config = None;
                     break;
                 }
 
@@ -90,7 +95,10 @@ impl Shell {
                     margin_bottom: surface.margin_bottom,
                     margin_left: surface.margin_left,
                 };
-                self.presentation_engine.configure(&surface_id, cfg);
+                if self.components[index].last_surface_config.as_ref() != Some(&cfg) {
+                    self.presentation_engine.configure(&surface_id, cfg.clone());
+                    self.components[index].last_surface_config = Some(cfg);
+                }
 
                 let requested_width = surface.width;
                 let requested_height = surface.height;
@@ -109,10 +117,13 @@ impl Shell {
                 } else {
                     requested_height.max(1)
                 };
-                self.components[index].known_surface_size = Some((width, height));
-                self.components[index]
-                    .component
-                    .surface_size_changed(width, height);
+                let resolved_size = (width, height);
+                if self.components[index].known_surface_size != Some(resolved_size) {
+                    self.components[index].known_surface_size = Some(resolved_size);
+                    self.components[index]
+                        .component
+                        .surface_size_changed(width, height);
+                }
 
                 let runtime = &mut self.components[index];
                 if runtime
@@ -123,7 +134,6 @@ impl Shell {
                 {
                     runtime.paint_buffer = Some(PixelBuffer::new(width, height));
                 }
-                runtime.component.set_profiling_enabled(profiling_enabled);
                 runtime
                     .component
                     .paint(
