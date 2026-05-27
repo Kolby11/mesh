@@ -7,9 +7,9 @@
 
 use super::PixelBuffer;
 use super::profiling;
+use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::SupportedAxes;
-use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use swash::scale::image::Content;
@@ -60,79 +60,25 @@ struct CachedGlyph {
     pixels: Arc<[u8]>,
 }
 
-static FONT_BYTES: OnceLock<Mutex<FontBytesCache>> = OnceLock::new();
-static GLYPH_CACHE: OnceLock<Mutex<GlyphCache>> = OnceLock::new();
+static FONT_BYTES: OnceLock<Mutex<LruCache<PathBuf, Arc<[u8]>>>> = OnceLock::new();
+static GLYPH_CACHE: OnceLock<Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>>> =
+    OnceLock::new();
 const FONT_BYTES_CACHE_CAPACITY: usize = 32;
 const GLYPH_CACHE_CAPACITY: usize = 1024;
 
-#[derive(Debug, Default)]
-struct FontBytesCache {
-    entries: HashMap<PathBuf, Arc<[u8]>>,
-    order: VecDeque<PathBuf>,
+fn font_bytes_cache() -> &'static Mutex<LruCache<PathBuf, Arc<[u8]>>> {
+    FONT_BYTES.get_or_init(|| Mutex::new(LruCache::new(FONT_BYTES_CACHE_CAPACITY)))
 }
 
-impl FontBytesCache {
-    fn get(&mut self, path: &Path) -> Option<Arc<[u8]>> {
-        let bytes = self.entries.get(path).map(Arc::clone);
-        if bytes.is_some() {
-            self.order.retain(|existing| existing != path);
-            self.order.push_back(path.to_path_buf());
-        }
-        bytes
-    }
-
-    fn insert(&mut self, path: PathBuf, bytes: Arc<[u8]>) {
-        self.order.retain(|existing| existing != &path);
-        self.order.push_back(path.clone());
-        self.entries.insert(path, bytes);
-        while self.entries.len() > FONT_BYTES_CACHE_CAPACITY {
-            let Some(evicted) = self.order.pop_front() else {
-                break;
-            };
-            self.entries.remove(&evicted);
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-struct GlyphCache {
-    entries: HashMap<GlyphCacheKey, Option<CachedGlyph>>,
-    order: VecDeque<GlyphCacheKey>,
-}
-
-impl GlyphCache {
-    fn get(&mut self, key: &GlyphCacheKey) -> Option<Option<CachedGlyph>> {
-        let value = self.entries.get(key).cloned();
-        if value.is_some() {
-            self.order.retain(|existing| existing != key);
-            self.order.push_back(*key);
-        }
-        value
-    }
-
-    fn insert(&mut self, key: GlyphCacheKey, value: Option<CachedGlyph>) {
-        self.order.retain(|existing| *existing != key);
-        self.order.push_back(key);
-        self.entries.insert(key, value);
-        while self.entries.len() > GLYPH_CACHE_CAPACITY {
-            let Some(evicted) = self.order.pop_front() else {
-                break;
-            };
-            self.entries.remove(&evicted);
-        }
-    }
-
-    fn clear(&mut self) {
-        self.entries.clear();
-        self.order.clear();
-    }
+fn glyph_cache() -> &'static Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>> {
+    GLYPH_CACHE.get_or_init(|| Mutex::new(LruCache::new(GLYPH_CACHE_CAPACITY)))
 }
 
 fn font_bytes(path: &Path) -> Option<Arc<[u8]>> {
-    let cache = FONT_BYTES.get_or_init(|| Mutex::new(FontBytesCache::default()));
+    let cache = font_bytes_cache();
     if let Ok(mut guard) = cache.lock() {
         if let Some(bytes) = guard.get(path) {
-            return Some(bytes);
+            return Some(Arc::clone(bytes));
         }
     }
     let bytes: Arc<[u8]> = std::fs::read(path).ok()?.into();
@@ -204,12 +150,12 @@ fn rasterize(
 }
 
 fn cache_lookup(key: GlyphCacheKey) -> Option<Option<CachedGlyph>> {
-    let cache = GLYPH_CACHE.get_or_init(|| Mutex::new(GlyphCache::default()));
-    cache.lock().ok()?.get(&key)
+    let cache = glyph_cache();
+    cache.lock().ok()?.get(&key).cloned()
 }
 
 fn cache_store(key: GlyphCacheKey, value: Option<CachedGlyph>) {
-    let cache = GLYPH_CACHE.get_or_init(|| Mutex::new(GlyphCache::default()));
+    let cache = glyph_cache();
     if let Ok(mut guard) = cache.lock() {
         guard.insert(key, value);
     }
@@ -396,7 +342,7 @@ mod tests {
                 width: 2,
                 height: 2,
                 placement_left: 0,
-                pixels: vec![255, 128, 64, 255],
+                pixels: vec![255, 128, 64, 255].into(),
             }),
         );
 

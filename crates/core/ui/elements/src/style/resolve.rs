@@ -4,6 +4,12 @@ use crate::tree::ElementState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use mesh_core_theme::{Theme, TokenValue};
 use std::collections::HashMap;
+use std::sync::OnceLock;
+
+fn empty_variables() -> &'static HashMap<String, StyleValue> {
+    static EMPTY: OnceLock<HashMap<String, StyleValue>> = OnceLock::new();
+    EMPTY.get_or_init(HashMap::new)
+}
 
 /// Resolves style values against a theme's design tokens.
 pub struct StyleResolver<'a> {
@@ -67,20 +73,27 @@ impl StyleNodeAttrs {
     }
 }
 
+/// Bucketed view of style rules for candidate filtering.
+///
+/// The index owns its keys, so it can be cached across restyle passes — the
+/// caller provides the rules slice it was built from for each lookup and the
+/// index validates identity through `is_for()`.
 #[derive(Debug, Clone)]
-pub struct StyleRuleIndex<'a> {
-    rules: &'a [StyleRule],
-    tag: HashMap<&'a str, Vec<usize>>,
-    class: HashMap<&'a str, Vec<usize>>,
-    id: HashMap<&'a str, Vec<usize>>,
-    state: HashMap<&'a str, Vec<usize>>,
+pub struct StyleRuleIndex {
+    rules_ptr: usize,
+    rules_len: usize,
+    tag: HashMap<String, Vec<usize>>,
+    class: HashMap<String, Vec<usize>>,
+    id: HashMap<String, Vec<usize>>,
+    state: HashMap<String, Vec<usize>>,
     fallback: Vec<usize>,
 }
 
-impl<'a> StyleRuleIndex<'a> {
-    pub fn new(rules: &'a [StyleRule]) -> Self {
+impl StyleRuleIndex {
+    pub fn new(rules: &[StyleRule]) -> Self {
         let mut index = Self {
-            rules,
+            rules_ptr: rules.as_ptr() as usize,
+            rules_len: rules.len(),
             tag: HashMap::new(),
             class: HashMap::new(),
             id: HashMap::new(),
@@ -93,7 +106,17 @@ impl<'a> StyleRuleIndex<'a> {
         index
     }
 
-    pub fn candidate_rules(&self, attrs: &StyleNodeAttrs) -> Vec<&'a StyleRule> {
+    /// Returns true when this index was built from the given rules slice
+    /// (same memory + length). Use to decide whether to reuse or rebuild.
+    pub fn is_for(&self, rules: &[StyleRule]) -> bool {
+        self.rules_ptr == rules.as_ptr() as usize && self.rules_len == rules.len()
+    }
+
+    pub fn candidate_rules<'a>(
+        &self,
+        rules: &'a [StyleRule],
+        attrs: &StyleNodeAttrs,
+    ) -> Vec<&'a StyleRule> {
         let mut ids = Vec::with_capacity(self.fallback.len().saturating_add(8));
         ids.extend_from_slice(&self.fallback);
         if let Some(tag) = self.tag.get(attrs.tag.as_str()) {
@@ -116,15 +139,23 @@ impl<'a> StyleRuleIndex<'a> {
         }
         ids.sort_unstable();
         ids.dedup();
-        ids.into_iter().map(|idx| &self.rules[idx]).collect()
+        ids.into_iter().map(|idx| &rules[idx]).collect()
     }
 
-    fn index_selector(&mut self, idx: usize, selector: &'a Selector) {
+    fn index_selector(&mut self, idx: usize, selector: &Selector) {
         match selector_index_key(selector) {
-            Some(SelectorIndexKey::Tag(tag)) => self.tag.entry(tag).or_default().push(idx),
-            Some(SelectorIndexKey::Class(class)) => self.class.entry(class).or_default().push(idx),
-            Some(SelectorIndexKey::Id(id)) => self.id.entry(id).or_default().push(idx),
-            Some(SelectorIndexKey::State(state)) => self.state.entry(state).or_default().push(idx),
+            Some(SelectorIndexKey::Tag(tag)) => {
+                self.tag.entry(tag.to_string()).or_default().push(idx)
+            }
+            Some(SelectorIndexKey::Class(class)) => {
+                self.class.entry(class.to_string()).or_default().push(idx)
+            }
+            Some(SelectorIndexKey::Id(id)) => {
+                self.id.entry(id.to_string()).or_default().push(idx)
+            }
+            Some(SelectorIndexKey::State(state)) => {
+                self.state.entry(state.to_string()).or_default().push(idx)
+            }
             None => self.fallback.push(idx),
         }
     }
@@ -137,13 +168,24 @@ enum SelectorIndexKey<'a> {
     State(&'a str),
 }
 
+fn ensure_index<'cache>(
+    rules: &[StyleRule],
+    cache: &'cache mut Option<StyleRuleIndex>,
+) -> &'cache StyleRuleIndex {
+    let needs_rebuild = !cache.as_ref().is_some_and(|index| index.is_for(rules));
+    if needs_rebuild {
+        *cache = Some(StyleRuleIndex::new(rules));
+    }
+    cache.as_ref().expect("index populated above")
+}
+
 impl<'a> StyleResolver<'a> {
     pub fn new(theme: &'a Theme) -> Self {
         Self { theme }
     }
 
     pub fn resolve_value(&self, value: &StyleValue) -> String {
-        self.resolve_value_with_variables(value, &HashMap::new())
+        self.resolve_value_with_variables(value, empty_variables())
     }
 
     fn resolve_value_with_variables(
@@ -311,12 +353,13 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
         let index = StyleRuleIndex::new(rules);
-        self.resolve_node_style_with_attrs_indexed(&index, attrs, context)
+        self.resolve_node_style_with_attrs_indexed(rules, &index, attrs, context)
     }
 
     fn resolve_node_style_with_attrs_indexed(
         &self,
-        index: &StyleRuleIndex<'_>,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
         attrs: &StyleNodeAttrs,
         context: StyleContext,
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
@@ -336,7 +379,7 @@ impl<'a> StyleResolver<'a> {
             &mut variables,
         );
 
-        for rule in index.candidate_rules(attrs) {
+        for rule in index.candidate_rules(rules, attrs) {
             if rule_matches_attrs(rule, attrs, context) {
                 for decl in &rule.declarations {
                     self.apply_declaration_with_diagnostics(
@@ -382,7 +425,21 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
     ) {
         let index = StyleRuleIndex::new(rules);
-        self.restyle_subtree_with_index(node, &index, context, None);
+        self.restyle_subtree_with_index(node, rules, &index, context, None);
+    }
+
+    /// Like `restyle_subtree` but reuses a caller-provided index. The index
+    /// must have been built from the same `rules` slice; this is verified
+    /// with `is_for()` and the index is rebuilt in place if not.
+    pub fn restyle_subtree_cached(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        context: StyleContext,
+        index_cache: &mut Option<StyleRuleIndex>,
+    ) {
+        let index = ensure_index(rules, index_cache);
+        self.restyle_subtree_with_index(node, rules, index, context, None);
     }
 
     pub fn restyle_subtree_children(
@@ -394,20 +451,36 @@ impl<'a> StyleResolver<'a> {
         let index = StyleRuleIndex::new(rules);
         let parent_style = node.computed_style.clone();
         for child in &mut node.children {
-            self.restyle_subtree_with_index(child, &index, context, Some(&parent_style));
+            self.restyle_subtree_with_index(child, rules, &index, context, Some(&parent_style));
+        }
+    }
+
+    /// Like `restyle_subtree_children` but reuses a caller-provided index.
+    pub fn restyle_subtree_children_cached(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        context: StyleContext,
+        index_cache: &mut Option<StyleRuleIndex>,
+    ) {
+        let index = ensure_index(rules, index_cache);
+        let parent_style = node.computed_style.clone();
+        for child in &mut node.children {
+            self.restyle_subtree_with_index(child, rules, index, context, Some(&parent_style));
         }
     }
 
     fn restyle_subtree_with_index(
         &self,
         node: &mut crate::tree::WidgetNode,
-        index: &StyleRuleIndex<'_>,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
         context: StyleContext,
         parent_style: Option<&ComputedStyle>,
     ) {
         let attrs = StyleNodeAttrs::from_node(node);
         node.computed_style = self
-            .resolve_node_style_with_attrs_indexed(index, &attrs, context)
+            .resolve_node_style_with_attrs_indexed(rules, index, &attrs, context)
             .0;
         if let Some(parent_style) = parent_style {
             inherit_retained_text_style(&mut node.computed_style, parent_style);
@@ -415,7 +488,7 @@ impl<'a> StyleResolver<'a> {
 
         let parent_style = node.computed_style.clone();
         for child in &mut node.children {
-            self.restyle_subtree_with_index(child, index, context, Some(&parent_style));
+            self.restyle_subtree_with_index(child, rules, index, context, Some(&parent_style));
         }
     }
 
@@ -427,13 +500,14 @@ impl<'a> StyleResolver<'a> {
         target_keys: &std::collections::HashSet<String>,
     ) {
         let index = StyleRuleIndex::new(rules);
-        self.restyle_subtree_for_keys_with_index(node, &index, context, target_keys);
+        self.restyle_subtree_for_keys_with_index(node, rules, &index, context, target_keys);
     }
 
     fn restyle_subtree_for_keys_with_index(
         &self,
         node: &mut crate::tree::WidgetNode,
-        index: &StyleRuleIndex<'_>,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
         context: StyleContext,
         target_keys: &std::collections::HashSet<String>,
     ) {
@@ -444,12 +518,12 @@ impl<'a> StyleResolver<'a> {
         {
             let attrs = StyleNodeAttrs::from_node(node);
             node.computed_style = self
-                .resolve_node_style_with_attrs_indexed(index, &attrs, context)
+                .resolve_node_style_with_attrs_indexed(rules, index, &attrs, context)
                 .0;
         }
 
         for child in &mut node.children {
-            self.restyle_subtree_for_keys_with_index(child, index, context, target_keys);
+            self.restyle_subtree_for_keys_with_index(child, rules, index, context, target_keys);
         }
     }
 

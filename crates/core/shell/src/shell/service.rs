@@ -1,6 +1,54 @@
 use super::types::CoreRequest;
 use mesh_core_capability::Capability;
 use mesh_core_scripting::{PublishedEvent, ScriptState};
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock, RwLock};
+
+/// Bundle of interned capability values derived from an interface name.
+///
+/// The shell does a per-service-event capability check on every component
+/// runtime. Constructing the three `Capability` values from formatted
+/// strings showed up in profiling as a hot allocation. This struct lets the
+/// caller compute them once per interface and pass borrowed refs through
+/// the inner loop.
+pub(super) struct ServiceCapabilities {
+    pub service_name: String,
+    pub read: Capability,
+    pub theme: Option<Capability>,
+    pub locale: Option<Capability>,
+}
+
+/// Get (or build) the interned capability bundle for a given interface.
+///
+/// Returns `Arc<ServiceCapabilities>` so the lock is released before the
+/// caller iterates over runtimes. The set of interfaces is bounded and
+/// stable in steady state, so the cache does not need eviction.
+pub(super) fn service_capabilities(interface: &str) -> Arc<ServiceCapabilities> {
+    static CACHE: OnceLock<RwLock<HashMap<String, Arc<ServiceCapabilities>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+
+    if let Ok(guard) = cache.read() {
+        if let Some(entry) = guard.get(interface) {
+            return Arc::clone(entry);
+        }
+    }
+
+    let service_name = service_name_from_interface(interface);
+    let entry = Arc::new(ServiceCapabilities {
+        read: Capability::new(format!("service.{service_name}.read")),
+        theme: (interface == "mesh.theme").then(|| Capability::new("theme.read")),
+        locale: (interface == "mesh.locale").then(|| Capability::new("locale.read")),
+        service_name,
+    });
+
+    if let Ok(mut guard) = cache.write() {
+        guard
+            .entry(interface.to_string())
+            .or_insert_with(|| Arc::clone(&entry));
+    }
+
+    entry
+}
 
 /// Seed a component's script state with default values before the first
 /// service update arrives. This prevents template crashes on first render.

@@ -129,11 +129,8 @@ impl ShellComponent for FrontendSurfaceComponent {
             return self.handle_interface_event(event);
         };
         self.last_service_update = Some(format!("{service}:{source_module}"));
-        let service_name = crate::shell::service::service_name_from_interface(service);
-        let service_read_capability = Capability::new(format!("service.{service_name}.read"));
-        let theme_read_capability = (service == "mesh.theme").then(|| Capability::new("theme.read"));
-        let locale_read_capability =
-            (service == "mesh.locale").then(|| Capability::new("locale.read"));
+        let caps = crate::shell::service::service_capabilities(service);
+        let service_name = &caps.service_name;
         self.cached_service_payloads
             .insert(service_name.clone(), payload.clone());
         let mut needs_rebuild = false;
@@ -141,18 +138,20 @@ impl ShellComponent for FrontendSurfaceComponent {
             let mut runtimes = self.runtimes.lock().unwrap();
             for runtime in runtimes.values_mut() {
                 let capabilities = &runtime.script_ctx.capabilities;
-                let has_read = capabilities.is_granted(&service_read_capability)
-                    || theme_read_capability
+                let has_read = capabilities.is_granted(&caps.read)
+                    || caps
+                        .theme
                         .as_ref()
                         .is_some_and(|capability| capabilities.is_granted(capability))
-                    || locale_read_capability
+                    || caps
+                        .locale
                         .as_ref()
                         .is_some_and(|capability| capabilities.is_granted(capability));
                 if !has_read {
                     continue;
                 }
-                let previous = runtime.script_ctx.state().get(&service_name);
-                let tracked_fields = runtime.script_ctx.tracked_fields_for_service(&service_name);
+                let previous = runtime.script_ctx.state().get(service_name);
+                let tracked_fields = runtime.script_ctx.tracked_fields_for_service(service_name);
                 apply_service_update(
                     runtime.script_ctx.state_mut(),
                     has_read,
@@ -163,7 +162,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 let state_changed = runtime.script_ctx.state().is_dirty();
                 runtime
                     .script_ctx
-                    .apply_service_payload(&service_name, payload);
+                    .apply_service_payload(service_name, payload);
                 let tracked_fields_changed =
                     tracked_service_fields_changed(previous.as_ref(), payload, &tracked_fields);
                 if state_changed || tracked_fields_changed {
@@ -183,29 +182,25 @@ impl ShellComponent for FrontendSurfaceComponent {
             ServiceEvent::Updated { service, .. }
             | ServiceEvent::InterfaceEvent { service, .. } => service,
         };
-        let service_name = crate::shell::service::service_name_from_interface(service);
-        let service_read_capability = Capability::new(format!("service.{service_name}.read"));
-        let theme_read_capability = (service == "mesh.theme").then(|| Capability::new("theme.read"));
-        let locale_read_capability =
-            (service == "mesh.locale").then(|| Capability::new("locale.read"));
+        let caps = crate::shell::service::service_capabilities(service);
         let Ok(runtimes) = self.runtimes.lock() else {
             return true;
         };
         if runtimes.is_empty() {
             return true;
         }
-        runtimes
-            .values()
-            .any(|runtime| {
-                let capabilities = &runtime.script_ctx.capabilities;
-                capabilities.is_granted(&service_read_capability)
-                    || theme_read_capability
-                        .as_ref()
-                        .is_some_and(|capability| capabilities.is_granted(capability))
-                    || locale_read_capability
-                        .as_ref()
-                        .is_some_and(|capability| capabilities.is_granted(capability))
-            })
+        runtimes.values().any(|runtime| {
+            let capabilities = &runtime.script_ctx.capabilities;
+            capabilities.is_granted(&caps.read)
+                || caps
+                    .theme
+                    .as_ref()
+                    .is_some_and(|capability| capabilities.is_granted(capability))
+                || caps
+                    .locale
+                    .as_ref()
+                    .is_some_and(|capability| capabilities.is_granted(capability))
+        })
     }
 
     fn wants_tick(&self) -> bool {
@@ -671,6 +666,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         tracing::debug!("theme_changed for component '{}'", self.id());
         self.last_tree = None;
         self.cached_restyle_rules = None;
+        self.cached_style_rule_index = None;
         self.intrinsic_layout_cache = IntrinsicLayoutCache::default();
         self.retained_tree = RetainedWidgetTree::default();
         self.retained_render_objects = RenderObjectTree::default();
@@ -696,6 +692,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.init_root_runtime()?;
         self.last_tree = None;
         self.cached_restyle_rules = None;
+        self.cached_style_rule_index = None;
         self.intrinsic_layout_cache = IntrinsicLayoutCache::default();
         self.retained_tree = RetainedWidgetTree::default();
         self.retained_render_objects = RenderObjectTree::default();
@@ -789,6 +786,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.invalidate_script_state();
         // Style rules may have changed in the recompiled module.
         self.cached_restyle_rules = None;
+        self.cached_style_rule_index = None;
         self.focused_proof_snapshot = None;
         self.last_visual_damage.clear();
         Ok(true)

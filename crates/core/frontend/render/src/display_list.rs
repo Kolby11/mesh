@@ -938,22 +938,6 @@ impl RetainedDisplayList {
             };
         }
 
-        if let Some(surface_size) = self.surface_size
-            && damages
-                .iter()
-                .any(|damage| damage_covers_surface(*damage, surface_size))
-        {
-            metrics.repaint_policy = DisplayListRepaintPolicy::FullSurface;
-            metrics.filtered_span_count = self.command_spans.len() as u64;
-            metrics.filtered_command_count = full_commands;
-            metrics.filtered_fallback_count = u64::from(!self.paint_commands.is_empty());
-            return SelectedDisplayListPaint {
-                commands: self.paint_commands.as_ref(),
-                selection: SelectedDisplayListSelection::All,
-                metrics,
-            };
-        }
-
         let mut selected_spans = Vec::with_capacity(self.command_spans.len().min(32));
         let mut matched_spans = 0u64;
         for span in &self.command_spans {

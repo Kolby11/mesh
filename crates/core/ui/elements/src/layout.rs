@@ -2,8 +2,9 @@
 ///
 /// Computes `LayoutRect` for every node in a widget tree. Supports row/column
 /// direction, flex-grow/shrink, gap, padding, and margin.
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
+use crate::lru::LruCache;
 use crate::style::{
     AlignItems, AlignSelf, Dimension, Display, Edges, FlexDirection, JustifyContent, Overflow,
     Position, TextDirection,
@@ -81,32 +82,26 @@ fn record_taffy_diagnostic(
 
 const INTRINSIC_TEXT_CACHE_CAPACITY: usize = 512;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct IntrinsicLayoutCache {
-    text_measurements: HashMap<TextMeasureKey, (f32, f32)>,
-    text_order: VecDeque<TextMeasureKey>,
+    text_measurements: LruCache<TextMeasureKey, (f32, f32)>,
+}
+
+impl Default for IntrinsicLayoutCache {
+    fn default() -> Self {
+        Self {
+            text_measurements: LruCache::new(INTRINSIC_TEXT_CACHE_CAPACITY),
+        }
+    }
 }
 
 impl IntrinsicLayoutCache {
     fn get_text_measurement(&mut self, key: &TextMeasureKey) -> Option<(f32, f32)> {
-        let value = self.text_measurements.get(key).copied();
-        if value.is_some() {
-            self.text_order.retain(|existing| existing != key);
-            self.text_order.push_back(key.clone());
-        }
-        value
+        self.text_measurements.get(key).copied()
     }
 
     fn insert_text_measurement(&mut self, key: TextMeasureKey, value: (f32, f32)) {
-        self.text_order.retain(|existing| existing != &key);
-        self.text_order.push_back(key.clone());
         self.text_measurements.insert(key, value);
-        while self.text_measurements.len() > INTRINSIC_TEXT_CACHE_CAPACITY {
-            let Some(evicted) = self.text_order.pop_front() else {
-                break;
-            };
-            self.text_measurements.remove(&evicted);
-        }
     }
 }
 

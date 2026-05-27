@@ -371,6 +371,10 @@ pub(super) struct FrontendSurfaceComponent {
     /// first restyle and invalidated whenever the compiled module is replaced
     /// (source reload). Avoids allocating + cloning every StyleRule per paint.
     cached_restyle_rules: Option<Vec<mesh_core_component::style::StyleRule>>,
+    /// Cached `StyleRuleIndex` built from `cached_restyle_rules`. Reused
+    /// across restyle passes; `is_for()` verifies identity against the rules
+    /// slice before each restyle so a rules rebuild forces a rebuild here too.
+    cached_style_rule_index: Option<mesh_core_elements::style::StyleRuleIndex>,
 }
 
 #[derive(Debug)]
@@ -457,6 +461,7 @@ impl FrontendSurfaceComponent {
             last_present_damage: None,
             last_visual_damage: HashMap::new(),
             cached_restyle_rules: None,
+            cached_style_rule_index: None,
         }
     }
 

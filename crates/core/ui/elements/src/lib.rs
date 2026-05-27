@@ -2,6 +2,7 @@ pub mod accessibility;
 pub mod element;
 pub mod events;
 pub mod layout;
+pub mod lru;
 pub mod style;
 /// Element model and UI algorithms for MESH.
 ///

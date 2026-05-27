@@ -74,6 +74,11 @@ impl ImageCache {
             self.entries.remove(&evicted);
         }
     }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -293,14 +298,15 @@ fn raster_file_key(
     tint: Color,
     multicolor: bool,
 ) -> Option<RasterCacheKey> {
+    let freshness = file_freshness(path)?;
     Some(RasterCacheKey {
         source_kind: RasterSourceKind::File,
-        source_identity: source_identity(path, freshness),
+        source_identity: source_identity(path, Some(freshness)),
         width,
         height,
         tint: encode_tint(tint),
         multicolor,
-        freshness: Some(file_freshness(path)?),
+        freshness: Some(freshness),
     })
 }
 

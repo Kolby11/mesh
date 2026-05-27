@@ -211,6 +211,7 @@ impl FrontendSurfaceComponent {
             .cached_restyle_rules
             .as_deref()
             .expect("cache populated above");
+        let index_cache = &mut self.cached_style_rule_index;
         let targeted_interaction_restyle = trigger_kind == "restyle"
             && dirty_types.contains(ComponentDirtyFlags::STATE)
             && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
@@ -224,17 +225,27 @@ impl FrontendSurfaceComponent {
             // invalidation layout-stable unless a caller explicitly requests
             // layout.
             if preserve_surface_root {
-                resolver.restyle_subtree_children(tree, restyle_rules, context);
+                resolver.restyle_subtree_children_cached(
+                    tree,
+                    restyle_rules,
+                    context,
+                    index_cache,
+                );
             } else {
-                resolver.restyle_subtree(tree, restyle_rules, context);
+                resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
             }
             merge_runtime_primitive_defaults(tree);
             reused_retained_layout = !dirty_types.contains(ComponentDirtyFlags::LAYOUT);
         } else {
             if preserve_surface_root {
-                resolver.restyle_subtree_children(tree, restyle_rules, context);
+                resolver.restyle_subtree_children_cached(
+                    tree,
+                    restyle_rules,
+                    context,
+                    index_cache,
+                );
             } else {
-                resolver.restyle_subtree(tree, restyle_rules, context);
+                resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
             }
             merge_runtime_primitive_defaults(tree);
         }

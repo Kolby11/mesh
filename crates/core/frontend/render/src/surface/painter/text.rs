@@ -1,11 +1,15 @@
 use crate::display_list::{DisplayPaintNode, DisplayTextPaint};
-use std::collections::{HashMap, VecDeque};
+use mesh_core_elements::lru::LruCache;
 use std::sync::{Mutex, OnceLock};
 
 use super::*;
 
-static ELLIPSIS_CACHE: OnceLock<Mutex<EllipsisCache>> = OnceLock::new();
+static ELLIPSIS_CACHE: OnceLock<Mutex<LruCache<EllipsisCacheKey, String>>> = OnceLock::new();
 const ELLIPSIS_CACHE_CAPACITY: usize = 512;
+
+fn ellipsis_cache() -> &'static Mutex<LruCache<EllipsisCacheKey, String>> {
+    ELLIPSIS_CACHE.get_or_init(|| Mutex::new(LruCache::new(ELLIPSIS_CACHE_CAPACITY)))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct EllipsisCacheKey {
@@ -15,35 +19,6 @@ struct EllipsisCacheKey {
     font_weight: u16,
     line_height: u32,
     max_width: u32,
-}
-
-#[derive(Debug, Default)]
-struct EllipsisCache {
-    entries: HashMap<EllipsisCacheKey, String>,
-    order: VecDeque<EllipsisCacheKey>,
-}
-
-impl EllipsisCache {
-    fn get(&mut self, key: &EllipsisCacheKey) -> Option<String> {
-        let value = self.entries.get(key).cloned();
-        if value.is_some() {
-            self.order.retain(|existing| existing != key);
-            self.order.push_back(key.clone());
-        }
-        value
-    }
-
-    fn insert(&mut self, key: EllipsisCacheKey, value: String) {
-        self.order.retain(|existing| existing != &key);
-        self.order.push_back(key.clone());
-        self.entries.insert(key, value);
-        while self.entries.len() > ELLIPSIS_CACHE_CAPACITY {
-            let Some(evicted) = self.order.pop_front() else {
-                break;
-            };
-            self.entries.remove(&evicted);
-        }
-    }
 }
 
 impl FrontendRenderEngine {
@@ -339,11 +314,11 @@ pub(super) fn truncate_with_ellipsis(
         line_height: line_height.to_bits(),
         max_width: max_width.to_bits(),
     };
-    let cache = ELLIPSIS_CACHE.get_or_init(|| Mutex::new(EllipsisCache::default()));
+    let cache = ellipsis_cache();
     if let Ok(mut guard) = cache.lock()
         && let Some(cached) = guard.get(&cache_key)
     {
-        return cached;
+        return cached.clone();
     }
 
     const ELLIPSIS: &str = "…";

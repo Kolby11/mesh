@@ -122,6 +122,104 @@ P2 - larger architecture options:
 
 See `docs/performance-roadmap.md` for the durable roadmap.
 
+# Additional audit findings - 2026-05-27 (codebase scan)
+
+The items below were discovered by a follow-up scan after the original audit above. They are deliberately separated so the original ordering stays intact. Each entry: `file:line` — issue — why it costs — fix direction.
+
+P0 - scripting hot path (highest impact):
+
+- [ ] One `mlua::Lua` VM per script context. `crates/core/runtime/scripting/src/context/runtime.rs:92` allocates `Lua::new()` per `ScriptContext`. Each component instance pays the full stdlib + metatable cost; scales linearly with component count. Move to a per-thread VM pool or a single VM with environment isolation (`_ENV` per script), and lazy-init for inactive components.
+- [ ] Full global table walk on every state sync. `runtime/scripting/src/context/runtime.rs:957-973` (`sync_state_from_lua`) iterates `lua.globals().pairs()` after every handler call, filtering and serializing each user global. Use a dirty-tracking proxy table or a sentinel `__public` table so only mutated keys are scanned.
+- [ ] Full snapshot re-serialize per render. `runtime/scripting/src/context/runtime.rs:1036-1042` (`refresh_module_object`) serializes the whole `state.snapshot()` and `lua.to_value()`s it every render, even when nothing changed. Hash or version the snapshot and skip refresh when unchanged; on change push only diffed keys into the Lua module table.
+- [ ] `ScriptState::snapshot()` rebuilds the JSON map every call. `runtime/scripting/src/context/state.rs:94-100` iterates `.keys()` and `.get()` per key per render. Cache the last snapshot and invalidate on `set`/`remove` only.
+- [ ] Tracked-fields and side-channel maps cloned per state sync. `runtime/scripting/src/context/runtime.rs:202-203, 1021` clones whole `HashMap<String, InterfaceResolution>` and `HashMap<String, HashSet<String>>`. Wrap in `Arc` and use copy-on-write, or return borrowed references.
+- [ ] Bound instance proxy clones the full snapshot Value into Lua tables. `runtime/scripting/src/context/runtime.rs:284` (`install_bound_instance_proxy`) deep-clones the JSON state per component mount. Use a Lua userdata view backed by `Arc<Value>` or install a metatable proxy that reads on demand.
+
+P1 - shell runtime and service routing (medium-high):
+
+- [ ] Service payload cloned twice per event. `crates/core/shell/src/shell/component/shell_component.rs:138` clones into `cached_service_payloads`, then line 161 clones again into `apply_service_update`. Store an `Arc<Value>` in the cache and pass the same Arc into the apply path.
+- [ ] `service_name_from_interface` called per runtime per event. `component/shell_component.rs:132` (and again in `observes_service_event` at ~line 186) recomputes the canonical service name. Cache one mapping `interface -> service_name` on the shell and pass the precomputed name to each component.
+- [ ] `Capability::new(format!("service.{name}.read"))` rebuilt per event. `component/shell_component.rs:135-139` formats three capability strings per event. Intern them in a `OnceLock<HashMap<&str, Capability>>` keyed by service name.
+- [ ] Service-event runtimes mutex held across the entire fan-out. `component/shell_component.rs:141-172` holds `self.runtimes.lock()` while doing capability checks, state diffs, payload clones, and tracked-field comparison for every runtime. Split into (a) collect target runtimes under lock, (b) drop lock, (c) apply in parallel or sequentially without contention.
+- [ ] Service state equality uses full `serde_json::Value::eq`. `runtime/service_state.rs:128` deep-compares whole payloads to detect changes. Add a fast-path content hash on insert and short-circuit equality by comparing hashes before recursing into Value::eq.
+- [ ] `wants_render` scan over all components every frame. `runtime/mod.rs:53` walks `components.iter().any(|r| r.component.wants_render())` per loop iteration. Maintain a dirty-bit counter incremented on `mark_render_needed` and decremented on render so the scheduler can read one atomic.
+- [ ] Coalesced shell message map allocates tuple keys per event. `runtime/mod.rs:277` builds `(interface.clone(), provider_id.clone())` for each entry. Intern interface/provider IDs as `Arc<str>` or `Symbol`, store a `(Symbol, Symbol)` 16-byte key instead of two heap strings.
+- [ ] Service state lookups clone keys before `.get()`. `runtime/service_state.rs:51, 108` does `.get(&(interface.clone(), source_module.clone()))`. Use the borrow-aware `RawEntry` API or change the map to nest `HashMap<Arc<str>, HashMap<Arc<str>, _>>`.
+- [ ] Replay materializes events into a Vec before iteration. `runtime/service_state.rs:295-308` does `.collect::<Vec<_>>()` then loops. Iterate `.values()` directly.
+- [ ] Module dirs cloned per discovery iteration. `shell/discovery.rs:119` does `for dir in self.module_dirs.clone()`. Iterate over `&self.module_dirs`.
+- [ ] Hot-reload PathBuf clones per check. `runtime/reload.rs:31, 84` clones `PathBuf` on every mtime mismatch. Borrow the path, or canonicalize once at registration.
+
+P1 - retained tree and runtime tree (medium):
+
+- [ ] `runtime_tree` next-nodes HashMap allocated every paint. `component/runtime_tree.rs:90` does `let mut next_nodes = HashMap::new()` per update even when the tree shape is unchanged. Reuse a scratch HashMap on the runtime struct; `clear()` between frames keeps capacity.
+- [ ] Removed-id collection allocates intermediate Vec. `component/runtime_tree.rs:125-130` collects keys-to-remove into a Vec, then loops to remove. Use `HashMap::retain(|k, _| ...)`.
+- [ ] Snapshot cloned even when dirty flags are empty. `component/runtime_tree.rs:106-107` writes `*slot = next.clone()` on every visit. Compare first, clone only if a diff exists, or store snapshots behind `Arc` so cloning is cheap.
+- [ ] `cached_service_payloads` not pre-sized. `component/shell_component.rs:233` (`last_surface_states.insert` in a loop) and the payload cache do per-insert resizing. Reserve capacity from the manifest service list at runtime construction.
+- [ ] Damage rect helpers re-allocate `Vec<DamageRect>` per call. `component/rendering.rs` (`damage_rects_from_options`, `push_damage_rect`). Thread-local scratch or per-component reusable buffer.
+
+P1 - style and layout hot paths:
+
+- [ ] `StyleRuleIndex` rebuilt for every restyle entry point. `crates/core/ui/elements/src/style/resolve.rs:313, 384, 394, 429` each call `StyleRuleIndex::new(rules)` per restyle. Cache by `(theme_generation, module_id)` and reuse across hover/focus/layout restyles. Already noted at the index level in the original audit; this lists the four call sites that need to share one cache.
+- [ ] `IntrinsicLayoutCache` LRU uses O(n) `VecDeque::retain` per access. `crates/core/ui/elements/src/layout.rs:94, 101` does `text_order.retain(|e| e != key)` on every hit and insert. Replace with `LinkedHashMap` or `lru::LruCache` (or a hand-rolled indexed map) for O(1) recency updates. Same anti-pattern as the glyph cache flagged in the original audit, but in the layout cache.
+- [ ] `EllipsisCache` LRU has the same O(n) retain. `crates/core/frontend/render/src/surface/painter/text.rs:27-31, 37-38, 394` mirrors the issue. Apply the same fix.
+- [ ] `FontBytesCache` and `GlyphCache` retain pattern. `crates/core/frontend/render/src/surface/glyph.rs:78, 85, 107, 114` — even after the LRU caps were added, the recency update is O(n). Switch to an indexed LRU.
+- [ ] `resolve_value` allocates an empty HashMap per call. `style/resolve.rs:146` calls `resolve_value_with_variables(value, &HashMap::new())` every invocation. Use a `static EMPTY: OnceLock<HashMap<...>> = ...` or change the signature to accept `Option<&HashMap<...>>`.
+- [ ] Variable map rebuilt per node in `resolve_node_style_with_attrs_indexed`. `style/resolve.rs:325, 363` reseeds `HashMap::new()` for every node. Accumulate variables once per style pass and pass by `&`; only the nodes that declare new variables need to fork a child map.
+- [ ] `selector_to_diagnostic_string` allocated in the hot rule-matching loop. `style/resolve.rs:345, 1172-1185` uses `format!()`/`join("")` per matched rule even though the string is only consumed by diagnostics. Gate behind `cfg(debug_assertions)` or skip unless `diagnostics_enabled`.
+- [ ] `decl.property.clone()` repeated per matched declaration. `style/resolve.rs:520, 531, 542, 555, 565, 578, 589` clones the property name into diagnostics seven separate places inside `apply_declaration`. Hoist diagnostics out of the apply path or borrow the property name.
+- [ ] `active_state_names` iterator rebuilt per node. `style/resolve.rs:112, 648` iterates state names for each candidate-rules call. Precompute a `u32` state mask once on `StyleNodeAttrs` and match rules against the mask.
+- [ ] `StyleNodeAttrs::from_node` re-splits class strings per restyle. `style/resolve.rs:42-54` reparses `attributes.get("class")` and allocates a `Vec<String>` per node, per frame. Cache the split classes on the retained `WidgetNode` (invalidated only when the `class` attribute changes).
+- [ ] `parse_edges_shorthand` allocates a Vec per call. `style/parse.rs:4, 691-696` does `split().map().collect()` for every margin/padding/border parse. Bound to 4 values with a fixed `[Option<f32>; 4]` and parse in place.
+- [ ] `parse_transform` splits the args string twice. `style/parse.rs:29-107` splits whitespace for both function arg detection and per-function parsing. Single split + slice.
+- [ ] Container query check inside per-rule loop. `crates/core/frontend/compiler/src/style.rs:46-48` invokes `rule.container_query.matches()` per rule per node in `inherited_style_mask`. Partition rules into `(non_container, container_keyed)` once per style pass.
+- [ ] `inherited_style_mask` rebuilt per child. `frontend/compiler/src/style.rs:35-66` recomputes the mask per descendant though the mask bits depend only on the parent. Compute once at the parent and pass down.
+- [ ] `selector_matches` for Compound selectors does not short-circuit. `frontend/compiler/src/style.rs:68-86` evaluates all parts even when an early one fails. Use `parts.iter().all(...)` over a manual loop, or restructure so cheap predicates run first.
+- [ ] `merge_missing_defaults` does inline string `==` matching on tag. `frontend/compiler/src/style.rs:114-152` compares `tag == "icon"`, `tag == "column" || tag == "row"`. After interning tags, use a `match` on `TagId`.
+
+P1 - renderer hot paths (additional):
+
+- [ ] Per-pixel software rounded-rect fallback. `crates/core/frontend/render/src/surface/painter/backend.rs:685-694` runs a nested `for py / for px` loop calling `rounded_rect_coverage(...)` with a `sqrt` per pixel. For a 1920×48 panel this is ~92k sqrt calls per rounded background per frame. Route this through `tiny_skia::PixmapMut` (already a transitive dep) or precompute coverage for the four corner tiles once and stamp them.
+- [ ] Linear-gradient shader rebuilt per draw. `surface/painter/backend.rs:973-1026` constructs a new Skia shader on every `DrawLinearGradient`. Cache by `(stops, direction, bounds_hash)` for repeated panel/background gradients.
+- [ ] Layer paint alpha recomputed per command. `surface/painter/backend.rs:451` recomputes `layer_paint()` alpha from opacity per draw inside the layer. Store the resolved `SkPaint` on the active layer stack entry.
+- [ ] Diagnostics Vec sized to `min(8)`. `surface/painter/backend.rs:409-410` pre-allocates `Vec::with_capacity(commands.len().min(8))`, but typical command batches are larger and force regrowth. Bump the floor to ~32 or move to a thread-local.
+- [ ] Skia `Data::new_copy` per image draw. `surface/painter/backend.rs:1058` (`draw_image_command`) copies full RGBA bytes into a Skia `Data` every frame the icon appears. Cache the `SkImage` keyed on `(path, generation)` — the original audit notes the underlying byte cache; this is the next layer (decoded Skia image cache).
+- [ ] Text renderer mutex around measure/render. Repeated in `surface/text.rs` and `surface/painter/text.rs`. The thread-local renderer still wraps `TextEngine` in a `Mutex`, but the paint thread is single-threaded; use `RefCell` or drop the lock for the local path.
+- [ ] Cache keys built from `to_string()` + `.to_bits()` per call. `surface/painter/text.rs:335, 336, 340, 362` rebuilds the ellipsis cache key on every label render. Compute once outside the measure/render pair, or key by `(font_id, content_hash, width_bits)` to avoid string clones.
+- [ ] Text layout cache key construction clones strings on lookup. `surface/text.rs:68-69` and `surface/painter/text.rs:335-336` clone `text` and `font_family` for every cache lookup. Switch to a hashed-key map (`HashMap<u64, ...>`) with a separate verifier, or use `Cow<'static, str>` plus interning.
+- [ ] Icon raster lookup calls `file_freshness` twice on miss. `surface/icon.rs:298, 303` stats the path twice. Pass the freshness from the first stat into key construction.
+- [ ] `PathBuf` allocations in icon cache insertions. `surface/text.rs:79`, `surface/icon.rs:61, 68, 106, 139, 146` call `to_path_buf()` on insert and lookup. Store keys as `Arc<Path>` so cache hits are pointer compares.
+- [ ] SVG cacheability parser scans the file each cache miss. `surface/icon.rs:334-356, 358-373` searches for `href=` / `url(` substrings per miss. Store the parsed cacheability flag alongside the file's freshness key so misses become a single load.
+- [ ] Display-list iteration indirect borrow. `surface/painter/tree.rs:203` iterates with `commands.iter()` + match on `command.kind`. Flatten into a separate `Vec<CommandKind>` so the hot loop is cache-friendly.
+
+P1 - presentation, foundation, registry:
+
+- [ ] Lua exec / interface proxy dedup is O(N²). `crates/core/runtime/scripting/src/host_api.rs:91-105` (`InterfaceProxy::available_interfaces`) does `.contains()` on a `Vec<String>` per capability. Use a `HashSet<&str>` then collect.
+- [ ] `InterfaceProxy::can_read` formats capability strings per check. `runtime/scripting/src/host_api.rs:121-137` builds `format!("service.{name}.read")` on every read attempt. Intern per-service capability values once at script start.
+- [ ] `HostApiManifest::from_capabilities` double-iterates with extra format!(). `runtime/scripting/src/host_api.rs:52-67`. Collect once with `strip_prefix` + `split` in a single pass.
+- [ ] Backend `coalesce_command_batch` builds a fresh `HashMap` per batch. `crates/core/runtime/backend/src/lib.rs:28-33, 179-181`. Reuse a `HashMap` on the backend service with `clear()`.
+- [ ] Backend events clone `service_name` and `module_id` per emission. `runtime/backend/src/lib.rs:144-159`. Use `Arc<str>` for both fields; emission becomes pointer copies.
+- [ ] Static command results re-emit `serde_json::json!()`. `runtime/scripting/src/backend/command.rs:18, 30` rebuilds the ok/error JSON shells per call. Define `static OK_RESULT: Lazy<Value>` / `ERR_RESULT` and clone the Value (cheap for Null/small objects).
+- [ ] `EventBus::subscribe` locks Mutex and allocates per subscriber. `crates/core/foundation/events/src/lib.rs:36-42` calls `.entry().or_insert_with(broadcast::channel(...))` under Mutex. Switch to `RwLock` + sharded channels keyed by topic, or pre-create the known interface channels at boot.
+- [ ] `EventBus::publish` always takes the Mutex even on miss. `foundation/events/src/lib.rs:46-51`. Add a fast path: read-only check, drop lock, then `send` on the cached sender.
+- [ ] `Theme::token` walks nested HashMaps per access. `crates/core/foundation/theme/src/lib.rs:62-69` chains `.get()` over module → group → name. Flatten into a single `HashMap<TokenKey, Value>` where `TokenKey` is `(Symbol, Symbol, Symbol)`, or precompute a flat lookup at theme load.
+- [ ] `LocaleEngine::translate_with` chains `.replace()` per placeholder. `crates/core/foundation/locale/src/lib.rs:83-90` allocates a new String per placeholder. Use a single-pass formatter that walks the template once.
+- [ ] `ServiceRegistry::register` uses `Vec::retain` to dedup. `crates/core/extension/service/src/registry.rs:70-76` is O(N). Index by service ID in a `HashMap` instead.
+- [ ] SHM buffer pool double-iterates per present. `crates/core/presentation/src/wayland_surface/backend.rs:159-175` (`copy_into_shm_buffer`) walks the pool for size match and again for damage unions. Cache pool config validity by generation; revalidate only on resize.
+- [ ] `SurfaceEntry::needs_reconfigure` does field-by-field equality. `presentation/src/wayland_surface/backend.rs:102-114`. Hash the config once at apply time and compare the hash.
+- [ ] Pointer-move coalescing iterates events twice (insert + drain). `presentation/src/lib.rs:142-144` builds a HashMap then drains; for sparse motion this is more overhead than benefit. Maintain a single `last_move_per_surface` slot updated in place during the drain.
+
+P1 - interaction / hit-test:
+
+- [ ] `find_node_path_at` uses `Vec::insert(0, ...)` during recursion. `crates/core/ui/interaction/src/hit_test.rs:78, 80`. Each ancestor insert is O(n). Build the path bottom-up and `reverse()` once, or use a `VecDeque::push_front`.
+- [ ] `node_tooltip_text` does up to 5 attribute lookups + clones. `ui/interaction/src/hit_test.rs:98-107`. Walk the fallback chain once with early `if let Some(v) = ...` returns; borrow instead of clone for the returned `&str`.
+- [ ] `find_tooltip_by_key_with_inherited` clones inherited tuple per child. `ui/interaction/src/hit_test.rs:138`. Pass by reference.
+
+P2 - architecture / measurement:
+
+- [ ] Introduce interned string types (`Symbol`, `TagId`) before further string-key fixes. Almost every "clone string" finding above resolves cleanly once tags, classes, attribute names, interface names, service names, and module IDs share a single global interner (`lasso` or hand-rolled).
+- [ ] Add an allocator-level profile mode that counts allocations per render pass, so the LRU/clone/format issues above can be ranked by actual frame cost rather than guessed impact.
+- [ ] Consider replacing the per-component `Lua` VM with a single VM that uses environment isolation (`setfenv` / `_ENV`) — saves the largest per-component cost and unblocks shared compiled chunks.
+
 Current retained-rendering status:
 
 - Stable runtime node IDs are implemented from `_mesh_key`.
