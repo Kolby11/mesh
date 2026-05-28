@@ -390,7 +390,7 @@ impl FrontendRenderEngine {
         &self,
         node: &DisplayPaintNode,
         text: &DisplayTextPaint,
-        buffer: &mut PixelBuffer,
+        session: &mut PixelCanvasSession<'_>,
         scale: f32,
         x: i32,
         y: i32,
@@ -447,37 +447,46 @@ impl FrontendRenderEngine {
             inner_width,
             scale,
         ) {
-            render_display_selection_highlights(
-                self,
-                &self.text_renderer,
-                buffer,
-                tx as i32,
-                ty as i32,
-                clip,
-                node,
-                &display_text,
-                effective_align,
-                inner_width,
-                scale,
-                selection,
-            );
+            // Selection rendering still uses the buffer path (rare edge
+            // case). The session ensures the active surface is reused
+            // across the highlight fills and re-acquired for the text.
+            session.with_buffer(|buffer| {
+                render_display_selection_highlights(
+                    self,
+                    &self.text_renderer,
+                    buffer,
+                    tx as i32,
+                    ty as i32,
+                    clip,
+                    node,
+                    &display_text,
+                    effective_align,
+                    inner_width,
+                    scale,
+                    selection,
+                );
+            });
             return;
         }
 
-        self.text_renderer.render_clipped(
-            &display_text,
-            &style.font_family,
-            style.font_size * scale,
-            style.font_weight,
-            style.line_height,
-            effective_align,
-            style.color,
-            buffer,
-            tx,
-            ty,
-            clip_to_tuple(clip),
-            Some(inner_width),
-        );
+        // Hot path: text only. Routes glyph draws through the active
+        // session canvas via the Skia glyph atlas.
+        session.with_canvas(|canvas| {
+            self.text_renderer.render_clipped_on_canvas(
+                &display_text,
+                &style.font_family,
+                style.font_size * scale,
+                style.font_weight,
+                style.line_height,
+                effective_align,
+                style.color,
+                canvas,
+                tx,
+                ty,
+                clip_to_tuple(clip),
+                Some(inner_width),
+            );
+        });
     }
 
     pub fn render_tooltip(

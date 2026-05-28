@@ -109,7 +109,7 @@ impl FrontendRenderEngine {
         &self,
         node: &DisplayPaintNode,
         input: &DisplayInputPaint,
-        buffer: &mut PixelBuffer,
+        session: &mut PixelCanvasSession<'_>,
         scale: f32,
         x: i32,
         y: i32,
@@ -148,33 +148,38 @@ impl FrontendRenderEngine {
             (y + (style.padding.top * scale) as i32 + ((inner_height - glyph_height) / 2).max(0))
                 .max(0) as u32;
 
-        self.text_renderer.render_clipped(
-            text,
-            &style.font_family,
-            style.font_size * scale,
-            style.font_weight,
-            style.line_height,
-            style.text_align,
-            text_color,
-            buffer,
-            tx,
-            ty,
-            clip_to_tuple(clip),
-            None,
-        );
+        session.with_canvas(|canvas| {
+            self.text_renderer.render_clipped_on_canvas(
+                text,
+                &style.font_family,
+                style.font_size * scale,
+                style.font_weight,
+                style.line_height,
+                style.text_align,
+                text_color,
+                canvas,
+                tx,
+                ty,
+                clip_to_tuple(clip),
+                None,
+            );
+        });
 
         if input.focused {
             let caret_x = tx + text_width.round() as u32;
-            self.fill_rect_clipped(
-                buffer,
-                ClipRect {
-                    x: caret_x as i32,
-                    y: ty as i32,
-                    width: 2,
-                    height: glyph_height,
-                },
-                style.color,
-                clip,
+            let caret_rect = ClipRect {
+                x: caret_x as i32,
+                y: ty as i32,
+                width: 2,
+                height: glyph_height,
+            };
+            self.execute_painter_commands_in_session(
+                session,
+                &[PainterCommand::DrawRect {
+                    rect: caret_rect,
+                    paint: PainterPaint::fill(style.color),
+                    clip,
+                }],
             );
         }
     }
@@ -469,7 +474,7 @@ impl FrontendRenderEngine {
         &self,
         node: &DisplayPaintNode,
         icon_paint: &DisplayIconPaint,
-        buffer: &mut PixelBuffer,
+        session: &mut PixelCanvasSession<'_>,
         x: i32,
         y: i32,
         w: i32,
@@ -486,11 +491,19 @@ impl FrontendRenderEngine {
         };
 
         if let Some(src) = &icon_paint.src {
-            icon::draw_icon_from_path(buffer, std::path::Path::new(src), x, y, w, h, style.color);
+            icon::draw_icon_from_path_in_session(
+                session,
+                std::path::Path::new(src),
+                x,
+                y,
+                w,
+                h,
+                style.color,
+            );
         } else if let Some(name) = &icon_paint.name {
             match module_id {
-                Some(id) => icon::draw_named_icon_for_module(
-                    buffer,
+                Some(id) => icon::draw_named_icon_for_module_in_session(
+                    session,
                     id,
                     name,
                     size,
@@ -501,7 +514,16 @@ impl FrontendRenderEngine {
                     style.color,
                     axes,
                 ),
-                None => icon::draw_named_icon(buffer, name, size, x, y, w, h, style.color),
+                None => icon::draw_named_icon_in_session(
+                    session,
+                    name,
+                    size,
+                    x,
+                    y,
+                    w,
+                    h,
+                    style.color,
+                ),
             }
         }
     }

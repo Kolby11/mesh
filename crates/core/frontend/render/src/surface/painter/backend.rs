@@ -49,6 +49,21 @@ pub(crate) trait PaintBackend: Send + Sync {
         diagnostics: &mut Vec<PainterDiagnostic>,
     );
 
+    /// Execute commands within an open canvas session so multiple
+    /// invocations within a single paint pass can share one
+    /// `surfaces::wrap_pixels`. Default implementation falls back to
+    /// `execute_commands` against the raw buffer (one wrap per call).
+    fn execute_commands_in_session(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        commands: &[PainterCommand],
+        diagnostics: &mut Vec<PainterDiagnostic>,
+    ) {
+        session.with_buffer(|buffer| {
+            self.execute_commands(buffer, commands, diagnostics);
+        });
+    }
+
     fn fill_rect(&self, buffer: &mut PixelBuffer, rect: ClipRect, color: Color, clip: ClipRect) {
         let mut diagnostics = Vec::new();
         self.execute_commands(
@@ -433,6 +448,17 @@ impl PaintBackend for SkiaPaintBackend {
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
         let _ = buffer.with_skia_canvas(|canvas| {
+            self.execute_commands_on_canvas(canvas, commands, diagnostics);
+        });
+    }
+
+    fn execute_commands_in_session(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        commands: &[PainterCommand],
+        diagnostics: &mut Vec<PainterDiagnostic>,
+    ) {
+        let _ = session.with_canvas(|canvas| {
             self.execute_commands_on_canvas(canvas, commands, diagnostics);
         });
     }

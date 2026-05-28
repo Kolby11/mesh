@@ -7,7 +7,7 @@ mod widgets;
 use std::cell::{Cell, RefCell};
 use std::sync::Mutex;
 
-use super::PixelBuffer;
+use super::{PixelBuffer, PixelCanvasSession};
 use super::icon;
 use super::text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer, TextSelectionGeometry};
 #[allow(unused_imports)]
@@ -200,6 +200,24 @@ impl FrontendRenderEngine {
         let mut local = Vec::new();
         self.paint_backend
             .execute_commands(buffer, commands, &mut local);
+        if !local.is_empty()
+            && let Ok(mut diagnostics) = self.painter_diagnostics.lock()
+        {
+            diagnostics.extend(local);
+        }
+    }
+
+    pub(super) fn execute_painter_commands_in_session(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        commands: &[PainterCommand],
+    ) {
+        if commands.is_empty() {
+            return;
+        }
+        let mut local = Vec::new();
+        self.paint_backend
+            .execute_commands_in_session(session, commands, &mut local);
         if !local.is_empty()
             && let Ok(mut diagnostics) = self.painter_diagnostics.lock()
         {

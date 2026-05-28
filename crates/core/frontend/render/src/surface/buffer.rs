@@ -1,7 +1,8 @@
 /// Pixel buffer for software rendering.
 use mesh_core_elements::style::Color;
 use skia_safe::{
-    AlphaType, BlendMode, Canvas, ColorType, ImageInfo, Paint, PaintStyle, RRect, Rect, surfaces,
+    AlphaType, BlendMode, Canvas, ColorType, ImageInfo, Paint, PaintStyle, RRect, Rect, Surface,
+    surfaces,
 };
 
 /// A BGRA8888 pixel buffer.
@@ -176,6 +177,76 @@ impl PixelBuffer {
         };
         draw(surface.canvas());
         true
+    }
+}
+
+/// A Skia surface kept alive across multiple draws so a paint pass shares
+/// one `surfaces::wrap_pixels`. Code paths that mutate `PixelBuffer::data`
+/// directly (text glyph blending, icon blits) access raw bytes through
+/// `with_buffer`. The active Skia surface internally holds a pointer into
+/// the same backing memory, so writes through either path are visible to
+/// subsequent Skia draws.
+///
+/// The buffer's `data` Vec must not be reallocated while a session is live.
+pub struct PixelCanvasSession<'a> {
+    buffer: &'a mut PixelBuffer,
+    surface: Option<Surface>,
+}
+
+impl<'a> PixelCanvasSession<'a> {
+    pub fn new(buffer: &'a mut PixelBuffer) -> Self {
+        Self {
+            buffer,
+            surface: None,
+        }
+    }
+
+    /// Run `f` against a Skia canvas wrapping the buffer. The wrapping
+    /// surface is created on the first call and reused for subsequent
+    /// calls until the session is dropped. Returns `None` if the buffer
+    /// has zero extent or Skia could not wrap it.
+    pub fn with_canvas<R>(&mut self, f: impl FnOnce(&Canvas) -> R) -> Option<R> {
+        if self.surface.is_none() {
+            if self.buffer.width == 0 || self.buffer.height == 0 || self.buffer.stride == 0 {
+                return None;
+            }
+            let info = ImageInfo::new(
+                (self.buffer.width as i32, self.buffer.height as i32),
+                ColorType::BGRA8888,
+                AlphaType::Unpremul,
+                None,
+            );
+            let borrows = surfaces::wrap_pixels(
+                &info,
+                self.buffer.data.as_mut_slice(),
+                Some(self.buffer.stride as usize),
+                None,
+            );
+            // SAFETY: skia-safe's `wrap_pixels` returns `Borrows<'_, Surface>`
+            // so the surface cannot outlive the slice borrow at the type
+            // level. We shed that borrow with `release()` so the same
+            // buffer can also be mutated through `with_buffer` without
+            // dropping the surface. The surface stays valid because:
+            //   - `self.buffer` (an `&'a mut PixelBuffer`) outlives the
+            //     session, keeping the `Vec<u8>` allocation alive.
+            //   - The session does not resize `buffer.data`, so Skia's
+            //     internal pixel pointer remains stable.
+            self.surface = borrows.map(|b| unsafe { b.release() });
+        }
+        self.surface.as_mut().map(|surface| f(surface.canvas()))
+    }
+
+    /// Run `f` with raw access to the underlying `PixelBuffer`. Safe to
+    /// interleave with `with_canvas`; the active Skia surface (if any)
+    /// reads from and writes to the same backing memory.
+    pub fn with_buffer<R>(&mut self, f: impl FnOnce(&mut PixelBuffer) -> R) -> R {
+        // Tell Skia that pixel content may be modified externally so it
+        // invalidates any cached snapshots. For raw raster surfaces this
+        // is effectively a no-op, but it is the documented contract.
+        if let Some(surface) = self.surface.as_mut() {
+            surface.notify_content_will_change(skia_safe::surface::ContentChangeMode::Retain);
+        }
+        f(self.buffer)
     }
 }
 

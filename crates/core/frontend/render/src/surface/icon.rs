@@ -1,10 +1,14 @@
-use super::PixelBuffer;
 use super::glyph::{GlyphAxes, draw_font_glyph};
 use super::profiling;
+use super::{PixelBuffer, PixelCanvasSession};
 use image::imageops::FilterType;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget, resolve_icon_result};
+use skia_safe::{
+    AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
+};
+use std::cell::RefCell;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
@@ -332,6 +336,84 @@ fn store_variant(key: RasterCacheKey, variant: RasterVariant) {
     }
 }
 
+const ICON_SKIA_CACHE_CAPACITY: usize = 256;
+
+struct CachedIconImage {
+    _keep_alive: Arc<[u8]>,
+    image: skia_safe::Image,
+}
+
+thread_local! {
+    /// Skia images derived from cached `RasterVariant::pixels`. Keyed by
+    /// the raw pointer of the `Arc<[u8]>` so distinct cache misses on the
+    /// same logical icon (same variant Arc) share one Skia upload. Hits
+    /// reuse the Image; the cache holds a strong `Arc` reference so the
+    /// underlying allocation cannot be freed while the Image is live.
+    static ICON_SKIA_CACHE: RefCell<LruCache<usize, CachedIconImage>> =
+        RefCell::new(LruCache::new(ICON_SKIA_CACHE_CAPACITY));
+}
+
+fn cached_skia_image_for_variant(variant: &RasterVariant) -> Option<skia_safe::Image> {
+    if variant.width == 0 || variant.height == 0 || variant.pixels.is_empty() {
+        return None;
+    }
+    let key = variant.pixels.as_ptr() as usize;
+    ICON_SKIA_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        if let Some(entry) = cache.get(&key) {
+            return Some(entry.image.clone());
+        }
+        let info = ImageInfo::new(
+            (variant.width as i32, variant.height as i32),
+            ColorType::BGRA8888,
+            AlphaType::Unpremul,
+            None,
+        );
+        let row_bytes = (variant.width as usize) * 4;
+        // SAFETY of the Arc keep-alive: skia-safe's `images::raster_from_data`
+        // takes an owned `Data`. Below we build it from the Arc's bytes
+        // via `Data::new_copy`, so Skia owns its own copy and the Arc
+        // strong reference in the cache is just for cache identity
+        // (pointer key stability).
+        let data = Data::new_copy(variant.pixels.as_ref());
+        let image = images::raster_from_data(&info, data, row_bytes)?;
+        cache.insert(
+            key,
+            CachedIconImage {
+                _keep_alive: Arc::clone(&variant.pixels),
+                image: image.clone(),
+            },
+        );
+        Some(image)
+    })
+}
+
+fn blit_variant_on_canvas(
+    canvas: &Canvas,
+    variant: &RasterVariant,
+    dest_x: i32,
+    dest_y: i32,
+) {
+    let Some(image) = cached_skia_image_for_variant(variant) else {
+        return;
+    };
+    let dest = Rect::from_xywh(
+        dest_x as f32,
+        dest_y as f32,
+        variant.width as f32,
+        variant.height as f32,
+    );
+    let mut paint = Paint::default();
+    paint.set_anti_alias(false);
+    canvas.draw_image_rect_with_sampling_options(
+        &image,
+        None,
+        dest,
+        SamplingOptions::default(),
+        &paint,
+    );
+}
+
 fn blit_variant(buffer: &mut PixelBuffer, variant: &RasterVariant, dest_x: i32, dest_y: i32) {
     let src_x = (-dest_x).max(0) as u32;
     let src_y = (-dest_y).max(0) as u32;
@@ -520,17 +602,43 @@ pub fn draw_icon_from_path_with_options(
     tint: Color,
     multicolor: bool,
 ) {
-    let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
-        return;
-    };
+    if let Some(variant) = resolve_file_variant(path, dest_w, dest_h, tint, multicolor) {
+        blit_variant(buffer, &variant, dest_x, dest_y);
+    }
+}
+
+pub fn draw_icon_from_path_with_options_on_canvas(
+    canvas: &Canvas,
+    path: &Path,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+    multicolor: bool,
+) {
+    if let Some(variant) = resolve_file_variant(path, dest_w, dest_h, tint, multicolor) {
+        blit_variant_on_canvas(canvas, &variant, dest_x, dest_y);
+    }
+}
+
+/// Resolve a file-backed icon to a (possibly cached) `RasterVariant`,
+/// recording cache hit/miss/bypass metrics. Used by both the buffer and
+/// canvas blit paths so they share one rasterizer and cache.
+fn resolve_file_variant(
+    path: &Path,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+    multicolor: bool,
+) -> Option<RasterVariant> {
+    let ext = path.extension().and_then(|e| e.to_str())?;
     let width = dest_w.max(1) as u32;
     let height = dest_h.max(1) as u32;
     let ext = ext.to_ascii_lowercase();
     let key = match ext.as_str() {
         "svg" => {
-            let Some((cacheable, freshness)) = svg_file_cacheability(path) else {
-                return;
-            };
+            let (cacheable, freshness) = svg_file_cacheability(path)?;
             if cacheable {
                 Some(raster_file_key_with_freshness(
                     path, width, height, tint, multicolor, freshness,
@@ -546,8 +654,7 @@ pub fn draw_icon_from_path_with_options(
         && let Some(variant) = cached_variant(key)
     {
         profiling::record_raster_cache_hit(variant.fully_opaque);
-        blit_variant(buffer, &variant, dest_x, dest_y);
-        return;
+        return Some(variant);
     }
 
     let variant = match ext.as_str() {
@@ -574,14 +681,12 @@ pub fn draw_icon_from_path_with_options(
             variant
         }
         _ => None,
-    };
+    }?;
 
-    if let Some(variant) = variant {
-        blit_variant(buffer, &variant, dest_x, dest_y);
-        if let Some(key) = key {
-            store_variant(key, variant);
-        }
+    if let Some(key) = key {
+        store_variant(key, variant.clone());
     }
+    Some(variant)
 }
 
 /// Draw the built-in "missing icon" glyph. Rasterizes the embedded SVG via
@@ -595,24 +700,40 @@ pub fn draw_missing_icon_fallback(
     dest_h: i32,
     tint: Color,
 ) {
+    if let Some(variant) = resolve_missing_icon_variant(dest_w, dest_h, tint) {
+        blit_variant(buffer, &variant, dest_x, dest_y);
+    }
+}
+
+pub fn draw_missing_icon_fallback_on_canvas(
+    canvas: &Canvas,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+) {
+    if let Some(variant) = resolve_missing_icon_variant(dest_w, dest_h, tint) {
+        blit_variant_on_canvas(canvas, &variant, dest_x, dest_y);
+    }
+}
+
+fn resolve_missing_icon_variant(dest_w: i32, dest_h: i32, tint: Color) -> Option<RasterVariant> {
     let width = dest_w.max(1) as u32;
     let height = dest_h.max(1) as u32;
     let key = missing_icon_key(width, height, tint);
     if let Some(variant) = cached_variant(&key) {
         profiling::record_raster_cache_hit(variant.fully_opaque);
-        blit_variant(buffer, &variant, dest_x, dest_y);
-        return;
+        return Some(variant);
     }
 
     profiling::record_raster_cache_miss();
     let raster_started = std::time::Instant::now();
-    let variant = raster_missing_icon_variant(width, height, tint);
+    let variant = raster_missing_icon_variant(width, height, tint)?;
     profiling::record_icon_image_raster(raster_started.elapsed());
 
-    if let Some(variant) = variant {
-        blit_variant(buffer, &variant, dest_x, dest_y);
-        store_variant(key, variant);
-    }
+    store_variant(key, variant.clone());
+    Some(variant)
 }
 
 pub fn draw_named_icon(
@@ -663,6 +784,138 @@ pub fn draw_named_icon_for_module(
         tint,
         axes,
     );
+}
+
+/// Session-aware variant of [`draw_icon_from_path`]. File-backed icons
+/// route through the active canvas; the session is unchanged for callers
+/// that interleave further Skia draws.
+pub fn draw_icon_from_path_in_session(
+    session: &mut PixelCanvasSession<'_>,
+    path: &Path,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+) {
+    session.with_canvas(|canvas| {
+        draw_icon_from_path_with_options_on_canvas(
+            canvas, path, dest_x, dest_y, dest_w, dest_h, tint, false,
+        );
+    });
+}
+
+/// Session-aware variant of [`draw_named_icon`]. File-backed targets use
+/// the canvas; font-glyph targets fall back to raw buffer access since
+/// the icon-font glyph path still mutates pixels directly.
+pub fn draw_named_icon_in_session(
+    session: &mut PixelCanvasSession<'_>,
+    name: &str,
+    size: u32,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+) {
+    draw_icon_resolution_with_axes_in_session(
+        session,
+        resolve_icon_result(name, size),
+        dest_x,
+        dest_y,
+        dest_w,
+        dest_h,
+        tint,
+        GlyphAxes::default(),
+    );
+}
+
+pub fn draw_named_icon_for_module_in_session(
+    session: &mut PixelCanvasSession<'_>,
+    module_id: &str,
+    name: &str,
+    size: u32,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+    axes: GlyphAxes,
+) {
+    draw_icon_resolution_with_axes_in_session(
+        session,
+        mesh_core_icon::resolve_icon_for_module(module_id, name, size),
+        dest_x,
+        dest_y,
+        dest_w,
+        dest_h,
+        tint,
+        axes,
+    );
+}
+
+fn draw_icon_resolution_with_axes_in_session(
+    session: &mut PixelCanvasSession<'_>,
+    resolution: IconResolution,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+    axes: GlyphAxes,
+) {
+    match resolution {
+        IconResolution::Found {
+            target: ResolvedTarget::File(path),
+            multicolor,
+            ..
+        } => {
+            session.with_canvas(|canvas| {
+                draw_icon_from_path_with_options_on_canvas(
+                    canvas, &path, dest_x, dest_y, dest_w, dest_h, tint, multicolor,
+                );
+            });
+        }
+        IconResolution::Found {
+            target:
+                ResolvedTarget::Glyph {
+                    font_path,
+                    codepoint,
+                    supported_axes,
+                },
+            ..
+        } => {
+            // Icon-font glyph rendering still writes pixels directly; the
+            // session keeps the active surface alive across this so a
+            // follow-on canvas draw reuses the same wrap.
+            let drew = session.with_buffer(|buffer| {
+                draw_font_glyph(
+                    buffer,
+                    &font_path,
+                    codepoint,
+                    supported_axes,
+                    axes,
+                    dest_x,
+                    dest_y,
+                    dest_w,
+                    dest_h,
+                    tint,
+                )
+            });
+            if !drew {
+                session.with_canvas(|canvas| {
+                    draw_missing_icon_fallback_on_canvas(
+                        canvas, dest_x, dest_y, dest_w, dest_h, tint,
+                    );
+                });
+            }
+        }
+        IconResolution::Missing { .. } => {
+            session.with_canvas(|canvas| {
+                draw_missing_icon_fallback_on_canvas(canvas, dest_x, dest_y, dest_w, dest_h, tint);
+            });
+        }
+    }
 }
 
 #[cfg(test)]

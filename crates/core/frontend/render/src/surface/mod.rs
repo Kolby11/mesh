@@ -13,7 +13,7 @@ use mesh_core_elements::NodeId;
 
 use crate::display_list::{DisplayPaintCommand, SelectedDisplayListPaint};
 
-pub use buffer::PixelBuffer;
+pub use buffer::{PixelBuffer, PixelCanvasSession};
 pub use debug_overlay::DebugOverlay;
 pub use glyph::GlyphAxes;
 pub use painter::{

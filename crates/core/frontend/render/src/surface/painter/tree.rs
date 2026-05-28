@@ -140,6 +140,7 @@ impl FrontendRenderEngine {
 
         let mut scratch = self.render_scratch.borrow_mut();
         scratch.prepare(commands.len());
+        let mut session = PixelCanvasSession::new(buffer);
         for command in commands {
             let kind = command.kind;
             if self.try_append_display_self_paint_batch(
@@ -153,13 +154,16 @@ impl FrontendRenderEngine {
                 continue;
             }
             if !scratch.batched_commands.is_empty() {
-                self.execute_painter_commands(buffer, &scratch.batched_commands);
+                self.execute_painter_commands_in_session(
+                    &mut session,
+                    &scratch.batched_commands,
+                );
                 scratch.batched_commands.clear();
             }
             self.render_display_command(
                 command,
                 kind,
-                buffer,
+                &mut session,
                 scale,
                 paint_clip,
                 paint_nodes,
@@ -168,7 +172,7 @@ impl FrontendRenderEngine {
             );
         }
         if !scratch.batched_commands.is_empty() {
-            self.execute_painter_commands(buffer, &scratch.batched_commands);
+            self.execute_painter_commands_in_session(&mut session, &scratch.batched_commands);
         }
     }
 
@@ -203,6 +207,7 @@ impl FrontendRenderEngine {
 
         let mut scratch = self.render_scratch.borrow_mut();
         scratch.prepare(commands.len());
+        let mut session = PixelCanvasSession::new(buffer);
         for (command, kind) in commands.iter_with_kinds() {
             if self.try_append_display_self_paint_batch(
                 command,
@@ -215,13 +220,16 @@ impl FrontendRenderEngine {
                 continue;
             }
             if !scratch.batched_commands.is_empty() {
-                self.execute_painter_commands(buffer, &scratch.batched_commands);
+                self.execute_painter_commands_in_session(
+                    &mut session,
+                    &scratch.batched_commands,
+                );
                 scratch.batched_commands.clear();
             }
             self.render_display_command(
                 command,
                 kind,
-                buffer,
+                &mut session,
                 scale,
                 paint_clip,
                 paint_nodes,
@@ -230,7 +238,7 @@ impl FrontendRenderEngine {
             );
         }
         if !scratch.batched_commands.is_empty() {
-            self.execute_painter_commands(buffer, &scratch.batched_commands);
+            self.execute_painter_commands_in_session(&mut session, &scratch.batched_commands);
         }
     }
 
@@ -271,7 +279,7 @@ impl FrontendRenderEngine {
         &self,
         command: &DisplayPaintCommand,
         kind: DisplayPaintCommandKind,
-        buffer: &mut PixelBuffer,
+        session: &mut PixelCanvasSession<'_>,
         scale: f32,
         paint_clip: ClipRect,
         paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
@@ -291,7 +299,7 @@ impl FrontendRenderEngine {
                 let node_bounds = scaled_display_node_bounds(&command.node, scale);
                 self.render_display_node_self(
                     &command.node,
-                    buffer,
+                    session,
                     scale,
                     node_bounds,
                     clip,
@@ -301,7 +309,10 @@ impl FrontendRenderEngine {
             }
             DisplayPaintCommandKind::Scrollbars => {
                 let bounds = scaled_display_node_bounds(&command.node, scale);
-                self.render_display_scrollbars(&command.node, buffer, scale, bounds, clip);
+                let node = &command.node;
+                session.with_buffer(|buffer| {
+                    self.render_display_scrollbars(node, buffer, scale, bounds, clip);
+                });
             }
         }
     }
@@ -531,7 +542,7 @@ impl FrontendRenderEngine {
     fn render_display_node_self(
         &self,
         node: &DisplayPaintNode,
-        buffer: &mut PixelBuffer,
+        session: &mut PixelCanvasSession<'_>,
         scale: f32,
         bounds: ClipRect,
         clip: ClipRect,
@@ -599,21 +610,25 @@ impl FrontendRenderEngine {
             scale,
             node_clip,
         );
-        self.execute_painter_commands(buffer, node_commands);
+        self.execute_painter_commands_in_session(session, node_commands);
         node_commands.clear();
 
         match &node.content {
             DisplayPaintContent::Text(text) => {
-                self.render_display_text_node(node, text, buffer, scale, x, y, node_clip);
+                self.render_display_text_node(node, text, session, scale, x, y, node_clip);
             }
             DisplayPaintContent::Input(input) => {
-                self.render_display_input_node(node, input, buffer, scale, x, y, node_clip);
+                self.render_display_input_node(node, input, session, scale, x, y, node_clip);
             }
             DisplayPaintContent::Slider(slider) => {
-                self.render_display_slider_node(node, slider, buffer, scale, x, y, w, h, node_clip);
+                session.with_buffer(|buffer| {
+                    self.render_display_slider_node(
+                        node, slider, buffer, scale, x, y, w, h, node_clip,
+                    );
+                });
             }
             DisplayPaintContent::Icon(icon) => {
-                self.render_display_icon_node(node, icon, buffer, x, y, w, h, module_id);
+                self.render_display_icon_node(node, icon, session, x, y, w, h, module_id);
             }
             DisplayPaintContent::None => {}
         }

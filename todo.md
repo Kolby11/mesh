@@ -395,4 +395,51 @@ Low Impact
 
 - Several hot-path APIs still pass many scalar arguments for text, icon, and widget drawing. Group stable paint parameters into compact structs to reduce call-site churn and make batching compatibility easier to reason about.
 - `todo.md` contains older notes that now conflict with implemented retained rendering and SHM reuse. Archive stale historical discussion into a dated notes document so the active backlog stays executable.
-                                             
+
+# Skia canvas / glyph atlas pass — 2026-05-28
+
+Completed in this pass:
+
+- [x] One `surfaces::wrap_pixels` per paint pass instead of per command batch. Added `PixelCanvasSession<'a>` in `crates/core/frontend/render/src/surface/buffer.rs` that lazily creates one Skia surface (via `Borrows::release()` to shed the slice borrow) and reuses it across `with_canvas` / `with_buffer` calls. `PaintBackend::execute_commands_in_session` lets `SkiaPaintBackend` replay batched commands against the shared canvas; default impl falls back to per-call wrap for test backends. `render_display_list_for_module` and `render_selected_display_list_for_module` thread the session through `render_display_command` and `render_display_node_self`.
+- [x] Text glyph paint via Skia + glyph atlas. New thread-local `GLYPH_ATLAS` in `surface/text.rs` keyed by cosmic-text `CacheKey` (already encodes font, glyph id, size, weight, subpixel bin). Custom `SkiaGlyphRenderer` impl of `cosmic_text::Renderer` looks up each shaped glyph, builds an A8 (or RGBA8888 for color emoji) Skia `Image` from the swash mask on miss, and draws via `canvas.draw_image_rect_with_sampling_options` with the glyph color as the paint tint. Replaces the per-pixel byte blender in `render_clipped`. `render_clipped_on_canvas` is the new hot-path entry; legacy `render_clipped(buffer)` wraps a one-shot session and delegates.
+- [x] Icon blits via Skia. New thread-local `ICON_SKIA_CACHE` in `surface/icon.rs` keyed by `Arc<[u8]>` pointer of the `RasterVariant.pixels`. `blit_variant_on_canvas` replaces the per-pixel SrcOver loop with `canvas.draw_image_rect`. `resolve_file_variant` and `resolve_missing_icon_variant` extracted so buffer and canvas paths share cache lookup. Session-aware dispatchers `draw_icon_from_path_in_session`, `draw_named_icon_in_session`, `draw_named_icon_for_module_in_session` branch by `IconResolution`: file targets and the missing-icon fallback go through the canvas; font-glyph targets still use `session.with_buffer` (icon-font path remains buffer-based for now).
+- [x] Display-list dispatch threads session into text/input/icon content paint. `render_display_text_node`, `render_display_input_node`, and `render_display_icon_node` now take `&mut PixelCanvasSession`. `tree.rs::render_display_node_self` calls them without `with_buffer` wrappers. Slider content still uses `with_buffer` because slider helpers paint multiple shapes through `fill_rect_clipped` which currently re-wraps.
+
+Remaining work — ordered by expected impact for shell lag on a normal monitor:
+
+P0 - finish the canvas pipeline:
+
+- [ ] Route slider content paint through the active canvas. `render_display_slider_node` and `render_slider_node` still call `fill_rect_clipped` / `fill_rounded_rect_clipped` which take `&mut PixelBuffer` and re-wrap. Add `_in_session` variants (or pass the session) so the slider's 2-3 shape commands replay on the shared canvas. Same fix pattern as the input caret already uses (`execute_painter_commands_in_session`).
+- [ ] Route icon-font glyph rendering through the glyph atlas. `surface/glyph.rs::draw_font_glyph` is the same per-pixel-blender pattern that text had before this pass. Reuse the `GLYPH_ATLAS` (or add a sibling icon-glyph atlas keyed by `(font_path, codepoint, size, axes)`) and draw via `canvas.draw_image_rect`. Lets `draw_icon_resolution_with_axes_in_session` route font-glyph icons through the canvas branch instead of `session.with_buffer`.
+- [ ] Convert painter convenience methods (`fill_rect_clipped`, `fill_rounded_rect_clipped`, `draw_box_shadow`, `apply_backdrop_filter`, `draw_background_paint`, `stroke_rounded_rect_clipped`) to also accept a `&mut PixelCanvasSession` and use `execute_painter_commands_in_session`. Today widgets/painter helpers still call the buffer-based versions which re-wrap. Touchpoints: `crates/core/frontend/render/src/surface/painter.rs:210-378`, callers in `surface/painter/widgets.rs` and `surface/painter/tree.rs::draw_border_clipped`.
+- [ ] Selection-highlight rendering on canvas. `render_display_selection_highlights` currently falls back to `session.with_buffer` because it interleaves `fill_rect_clipped(buffer, ...)` with `render_clipped(buffer, ...)`. Once both have canvas variants, convert the whole function to canvas so text selection follows the fast path.
+
+P0 - compositor offload (largest "free" wins on supported compositors):
+
+- [ ] Send `wl_surface::set_opaque_region` from the present path. Compute the union of fully-opaque background rects from the retained display list per surface, lifetime-tracked via the existing damage/region machinery. Lets the compositor skip alpha-blending under us where possible. Small change in `crates/core/presentation/src/wayland_surface/backend.rs`; the data is already known by the display list.
+- [ ] Wire `wp_blur_v1` and `org_kde_kwin_blur_v1` from the Wayland surface backend. When the active backdrop-filter blur radius is non-zero on an otherwise-translucent region, request compositor blur for that region instead of doing Skia's `image_filters::blur` on the CPU. Add interface bindings to `smithay-client-toolkit` usage; gracefully no-op on compositors that do not advertise the protocol.
+- [ ] Surface-level scale handling for HiDPI compositors. Today the painter assumes scale=1.0 from the shell side; on a 200% display we end up upscaling at the compositor. Plumb `wl_output::scale` / `wp_fractional_scale_v1` to the surface and render at the native scale; pair with `wp_viewporter` for non-integer ratios.
+
+P1 - invalidation scope:
+
+- [ ] Selector-dependency-based restyle. `component/rendering.rs` still restyles the entire retained tree on `:hover`/`:focus`/`:active` because relationship selectors may affect descendants. Build a per-rule selector-dependency set at style-rule-index construction time (which classes/states/ids does each rule depend on). For interaction-state changes, restyle only the nodes whose dependency set intersects the changed state — full subtree only for descendant/sibling selectors. Touchpoints: `crates/core/ui/elements/src/style/resolve.rs`, `crates/core/shell/src/shell/component/rendering.rs`. Already flagged at P0 line 69 of the original audit.
+- [ ] Narrow script/service invalidation below "tree rebuild + pixel repaint." `FrontendSurfaceComponent::invalidate_script_state` flags `TREE_REBUILD` and `surface_pixels_invalid` for any script state change. Add typed state dependencies (which script slot drives which node/style/layout/paint slot) so simple text/value changes dirty only the dependent leaves. Original audit P0 line 67.
+- [ ] Service event routing by tracked-field set. `Shell::handle_service_event` still fans out to every component whose script declared a capability. Restrict by the fields actually read by `on_change` handlers in each runtime. Original audit P0 line 62.
+
+P1 - script runtime:
+
+- [ ] Single shared `mlua::Lua` VM with per-component `_ENV`. `runtime/scripting/src/context/runtime.rs:92` still calls `Lua::new()` per `ScriptContext`. Move to one VM per thread with environment isolation; lazy-init for inactive components. Cuts the largest per-component cost and unblocks shared compiled chunks across runtimes.
+- [ ] Retain shaped Taffy node state across layout passes. `IntrinsicLayoutCache` is now real for text measurements but `crates/core/ui/elements/src/layout.rs::build_taffy_tree` still allocates a fresh Taffy `TaffyTree` and rebuilds child-id maps every layout. Keep a retained Taffy tree per surface, mutate in place when the widget tree's retained generation indicates a structural change. Original audit P0 line 76.
+
+P2 - retained rendering polish:
+
+- [ ] Reuse retained display-list subtree command spans. `RetainedDisplayList::update` still copies child command slices into parent vectors on each update. Move to segment/rope-style storage so unchanged subtrees are referenced, not copied. Original audit P1 line 83.
+- [ ] Track damage as multiple rects deeper through the renderer. Presentation accepts region damage but the retained display list often collapses node changes to a union rect. Keep separate dirty rects longer to reduce overdraw. Original audit P1 line 114.
+- [ ] Cap effective damage at small motion-only deltas. Many "full surface" repaints today come from `surface_pixels_invalid` being set by theme/locale/script reload paths; once typed dependencies are in place, gate the flag finer-grained.
+
+P2 - architecture / measurement:
+
+- [ ] Introduce interned `Symbol` / `TagId` types before further string-key cleanups. Almost every "clone string" finding in the original audit collapses once tags, classes, attribute names, interface names, service names, and module IDs share a single global interner.
+- [ ] Allocator-level profile mode that counts allocations per render pass. Many remaining costs are allocation/string/hash driven and do not surface in wall-time-only stage metrics.
+- [ ] Don't add a GPU backend yet. Skia raster + glyph atlas + planned compositor offload should handle the shell workload at 60 Hz on a normal monitor. Revisit after the items above ship.
+

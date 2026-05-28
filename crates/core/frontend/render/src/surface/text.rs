@@ -1,18 +1,38 @@
 //! Text measurement and rendering for the frontend render engine.
 
-use super::PixelBuffer;
+use super::{PixelBuffer, PixelCanvasSession};
 use cosmic_text::{
-    Align, Attrs, Buffer, Cursor, Family, FontSystem, Metrics, Shaping, Style as CosmicStyle,
-    SwashCache, Weight, Wrap,
+    Align, Attrs, Buffer, CacheKey, Cursor, Family, FontSystem, Metrics, PhysicalGlyph, Renderer,
+    Shaping, Style as CosmicStyle, SwashCache, SwashContent, Weight, Wrap,
 };
 use mesh_core_elements::Color;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::TextAlign;
+use skia_safe::{
+    AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
+};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 512;
+const GLYPH_ATLAS_CAPACITY: usize = 2048;
+
+struct GlyphAtlasEntry {
+    image: skia_safe::Image,
+    placement_left: i32,
+    placement_top: i32,
+    is_color: bool,
+}
+
+thread_local! {
+    /// Cached Skia images for rasterized glyph masks. Keyed by cosmic-text's
+    /// `CacheKey` which already encodes font, glyph id, size, weight, and
+    /// subpixel bin. `Option` lets us cache "this glyph rasterizes to
+    /// nothing" (e.g. spaces) so we skip the swash lookup next time.
+    static GLYPH_ATLAS: RefCell<LruCache<CacheKey, Option<GlyphAtlasEntry>>> =
+        RefCell::new(LruCache::new(GLYPH_ATLAS_CAPACITY));
+}
 
 pub struct TextRenderer {
     engine: RefCell<TextEngine>,
@@ -259,6 +279,45 @@ impl TextRenderer {
         clip: (u32, u32, u32, u32),
         max_width: Option<f32>,
     ) {
+        // Legacy callers pass a raw buffer. Wrap it in a one-shot canvas
+        // session and route through the Skia glyph path. Hot-path callers
+        // (display-list paint) should use `render_clipped_on_canvas`
+        // directly so the surface wrap is shared with surrounding draws.
+        let mut session = PixelCanvasSession::new(buffer);
+        let _ = session.with_canvas(|canvas| {
+            self.render_clipped_on_canvas(
+                text,
+                font_family,
+                font_size,
+                font_weight,
+                line_height,
+                align,
+                color,
+                canvas,
+                x,
+                y,
+                clip,
+                max_width,
+            );
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_clipped_on_canvas(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
         let mut engine = self.engine.borrow_mut();
         let (_, metrics, width, text_align) = text_config(
             font_family,
@@ -277,76 +336,40 @@ impl TextRenderer {
             max_width,
             align,
         );
-        let mut cosmic = engine.take_layout(&params, metrics, width, text_align);
+        let cosmic = engine.take_layout(&params, metrics, width, text_align);
 
         let base_x = x as i32;
         let base_y = y as i32;
         let (clip_x, clip_y, clip_w, clip_h) = clip;
-        let clip_right = clip_x.saturating_add(clip_w);
-        let clip_bottom = clip_y.saturating_add(clip_h);
+        let clip_rect = Rect::from_xywh(
+            clip_x as f32,
+            clip_y as f32,
+            clip_w as f32,
+            clip_h as f32,
+        );
 
+        let save_count = canvas.save();
+        canvas.clip_rect(clip_rect, None, false);
         {
             let TextEngine {
                 font_system,
                 swash_cache,
                 ..
             } = &mut *engine;
-            let mut cosmic_borrow = cosmic.borrow_with(font_system);
-            cosmic_borrow.draw(
-                swash_cache,
-                cosmic_color(color),
-                |glyph_x, glyph_y, glyph_w, glyph_h, glyph_color| {
-                    let draw_x = base_x + glyph_x;
-                    let draw_y = base_y + glyph_y;
-
-                    let (r, g, b, a) = glyph_color.as_rgba_tuple();
-                    if a == 0 || glyph_w == 0 || glyph_h == 0 {
-                        return;
-                    }
-
-                    let start_x = (clip_x as i32 - draw_x).max(0) as u32;
-                    let start_y = (clip_y as i32 - draw_y).max(0) as u32;
-                    let end_x = (clip_right as i32 - draw_x).min(glyph_w as i32).max(0) as u32;
-                    let end_y = (clip_bottom as i32 - draw_y).min(glyph_h as i32).max(0) as u32;
-                    if start_x >= end_x || start_y >= end_y {
-                        return;
-                    }
-
-                    let src_alpha = u16::from(a);
-                    let inv_alpha = 255u16.saturating_sub(src_alpha);
-                    let src_b = u16::from(b) * src_alpha;
-                    let src_g = u16::from(g) * src_alpha;
-                    let src_r = u16::from(r) * src_alpha;
-                    for off_y in start_y..end_y {
-                        let py = draw_y + off_y as i32;
-                        let px = draw_x + start_x as i32;
-                        let mut offset = (py as u32 * buffer.stride + px as u32 * 4) as usize;
-                        for _ in start_x..end_x {
-                            if offset + 3 >= buffer.data.len() {
-                                break;
-                            }
-                            if src_alpha == 255 {
-                                buffer.data[offset] = b;
-                                buffer.data[offset + 1] = g;
-                                buffer.data[offset + 2] = r;
-                                buffer.data[offset + 3] = 255;
-                            } else {
-                                let dst_b = u16::from(buffer.data[offset]);
-                                let dst_g = u16::from(buffer.data[offset + 1]);
-                                let dst_r = u16::from(buffer.data[offset + 2]);
-                                let dst_a = u16::from(buffer.data[offset + 3]);
-                                buffer.data[offset] = ((src_b + dst_b * inv_alpha) / 255) as u8;
-                                buffer.data[offset + 1] = ((src_g + dst_g * inv_alpha) / 255) as u8;
-                                buffer.data[offset + 2] = ((src_r + dst_r * inv_alpha) / 255) as u8;
-                                buffer.data[offset + 3] =
-                                    (src_alpha + ((dst_a * inv_alpha) / 255)).min(255) as u8;
-                            }
-                            offset += 4;
-                        }
-                    }
-                },
-            );
+            GLYPH_ATLAS.with(|atlas_cell| {
+                let mut atlas = atlas_cell.borrow_mut();
+                let mut renderer = SkiaGlyphRenderer {
+                    font_system,
+                    swash_cache,
+                    atlas: &mut atlas,
+                    canvas,
+                    base_x,
+                    base_y,
+                };
+                cosmic.render(&mut renderer, cosmic_color(color));
+            });
         }
+        canvas.restore_to_count(save_count);
         engine.store_layout(&params, cosmic);
     }
 
@@ -465,6 +488,123 @@ impl TextRenderer {
         engine.store_layout(&params, cosmic);
         result
     }
+}
+
+/// Cosmic-text `Renderer` impl that draws each shaped glyph onto a Skia
+/// canvas via the thread-local glyph atlas. Misses pay one swash
+/// rasterization plus one `images::raster_from_data` to upload an A8 (or
+/// RGBA8888 for color emoji) mask; hits reuse the cached Skia image and
+/// only emit a `draw_image_rect` call.
+struct SkiaGlyphRenderer<'a> {
+    font_system: &'a mut FontSystem,
+    swash_cache: &'a mut SwashCache,
+    atlas: &'a mut LruCache<CacheKey, Option<GlyphAtlasEntry>>,
+    canvas: &'a Canvas,
+    base_x: i32,
+    base_y: i32,
+}
+
+impl Renderer for SkiaGlyphRenderer<'_> {
+    fn rectangle(&mut self, x: i32, y: i32, w: u32, h: u32, color: cosmic_text::Color) {
+        let (r, g, b, a) = color.as_rgba_tuple();
+        if a == 0 || w == 0 || h == 0 {
+            return;
+        }
+        let mut paint = Paint::default();
+        paint.set_anti_alias(false);
+        paint.set_argb(a, r, g, b);
+        let rect = Rect::from_xywh(
+            (self.base_x + x) as f32,
+            (self.base_y + y) as f32,
+            w as f32,
+            h as f32,
+        );
+        self.canvas.draw_rect(rect, &paint);
+    }
+
+    fn glyph(&mut self, physical_glyph: PhysicalGlyph, color: cosmic_text::Color) {
+        let (r, g, b, a) = color.as_rgba_tuple();
+        if a == 0 {
+            return;
+        }
+        let cache_key = physical_glyph.cache_key;
+        let needs_build = self.atlas.get(&cache_key).is_none();
+        if needs_build {
+            let entry = build_glyph_atlas_entry(self.font_system, self.swash_cache, cache_key);
+            self.atlas.insert(cache_key, entry);
+        }
+        let Some(Some(entry)) = self.atlas.get(&cache_key) else {
+            return;
+        };
+        let dest_x = (self.base_x + physical_glyph.x + entry.placement_left) as f32;
+        // SwashImage placement.top is the distance from baseline up to the
+        // top of the bitmap; cosmic-text already includes baseline in
+        // physical_glyph.y, so subtract the placement.
+        let dest_y = (self.base_y + physical_glyph.y - entry.placement_top) as f32;
+        let (img_w, img_h) = (entry.image.width() as f32, entry.image.height() as f32);
+        let dest = Rect::from_xywh(dest_x, dest_y, img_w, img_h);
+
+        let mut paint = Paint::default();
+        paint.set_anti_alias(false);
+        if entry.is_color {
+            // Color emoji: image carries its own RGB. Modulate alpha only.
+            paint.set_argb(a, 0xff, 0xff, 0xff);
+        } else {
+            // Monochrome mask: paint color becomes the glyph color; the
+            // image's A8 alpha modulates it.
+            paint.set_argb(a, r, g, b);
+        }
+        self.canvas
+            .draw_image_rect_with_sampling_options(
+                &entry.image,
+                None,
+                dest,
+                SamplingOptions::default(),
+                &paint,
+            );
+    }
+}
+
+fn build_glyph_atlas_entry(
+    font_system: &mut FontSystem,
+    swash_cache: &mut SwashCache,
+    cache_key: CacheKey,
+) -> Option<GlyphAtlasEntry> {
+    let image = swash_cache.get_image(font_system, cache_key).as_ref()?;
+    let width = image.placement.width;
+    let height = image.placement.height;
+    if width == 0 || height == 0 || image.data.is_empty() {
+        return None;
+    }
+    let (info, row_bytes) = match image.content {
+        SwashContent::Mask => (
+            ImageInfo::new(
+                (width as i32, height as i32),
+                ColorType::Alpha8,
+                AlphaType::Premul,
+                None,
+            ),
+            width as usize,
+        ),
+        SwashContent::Color => (
+            ImageInfo::new(
+                (width as i32, height as i32),
+                ColorType::RGBA8888,
+                AlphaType::Premul,
+                None,
+            ),
+            (width as usize) * 4,
+        ),
+        SwashContent::SubpixelMask => return None,
+    };
+    let data = Data::new_copy(image.data.as_slice());
+    let sk_image = images::raster_from_data(&info, data, row_bytes)?;
+    Some(GlyphAtlasEntry {
+        image: sk_image,
+        placement_left: image.placement.left,
+        placement_top: image.placement.top,
+        is_color: matches!(image.content, SwashContent::Color),
+    })
 }
 
 impl TextEngine {
@@ -637,6 +777,40 @@ impl SharedTextMeasurer {
                 align,
                 color,
                 buffer,
+                x,
+                y,
+                clip,
+                max_width,
+            );
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_clipped_on_canvas(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        RENDERER.with(|renderer| {
+            renderer.borrow().render_clipped_on_canvas(
+                text,
+                font_family,
+                font_size,
+                font_weight,
+                line_height,
+                align,
+                color,
+                canvas,
                 x,
                 y,
                 clip,
