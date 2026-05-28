@@ -18,6 +18,7 @@ fn empty_variables() -> &'static HashMap<String, StyleValue> {
 thread_local! {
     static VARIABLE_SCRATCH: RefCell<HashMap<String, StyleValue>> =
         RefCell::new(HashMap::new());
+    static CANDIDATE_RULE_SCRATCH: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Resolves style values against a theme's design tokens.
@@ -129,29 +130,47 @@ impl StyleRuleIndex {
         rules: &'a [StyleRule],
         attrs: &StyleNodeAttrs,
     ) -> Vec<&'a StyleRule> {
-        let mut ids = Vec::with_capacity(self.fallback.len().saturating_add(8));
-        ids.extend_from_slice(&self.fallback);
-        if let Some(tag) = self.tag.get(attrs.tag.as_str()) {
-            ids.extend_from_slice(tag);
-        }
-        for class in &attrs.classes {
-            if let Some(class_ids) = self.class.get(class.as_str()) {
-                ids.extend_from_slice(class_ids);
+        let mut candidates = Vec::with_capacity(self.fallback.len().saturating_add(8));
+        self.for_each_candidate_rule(rules, attrs, |rule| candidates.push(rule));
+        candidates
+    }
+
+    pub fn for_each_candidate_rule<'a>(
+        &self,
+        rules: &'a [StyleRule],
+        attrs: &StyleNodeAttrs,
+        mut visit: impl FnMut(&'a StyleRule),
+    ) {
+        CANDIDATE_RULE_SCRATCH.with(|scratch| {
+            let mut ids = scratch.borrow_mut();
+            ids.clear();
+            ids.extend_from_slice(&self.fallback);
+            if let Some(tag) = self.tag.get(attrs.tag.as_str()) {
+                ids.extend_from_slice(tag);
             }
-        }
-        if let Some(id) = attrs.id() {
-            if let Some(id_ids) = self.id.get(id) {
+            for class in &attrs.classes {
+                if let Some(class_ids) = self.class.get(class.as_str()) {
+                    ids.extend_from_slice(class_ids);
+                }
+            }
+            if let Some(id) = attrs.id()
+                && let Some(id_ids) = self.id.get(id)
+            {
                 ids.extend_from_slice(id_ids);
             }
-        }
-        for (state_bit, state_ids) in &self.state {
-            if attrs.state_mask & *state_bit != 0 {
-                ids.extend_from_slice(state_ids);
+            for (state_bit, state_ids) in &self.state {
+                if attrs.state_mask & *state_bit != 0 {
+                    ids.extend_from_slice(state_ids);
+                }
             }
-        }
-        ids.sort_unstable();
-        ids.dedup();
-        ids.into_iter().map(|idx| &rules[idx]).collect()
+            ids.sort_unstable();
+            ids.dedup();
+            for &idx in ids.iter() {
+                if let Some(rule) = rules.get(idx) {
+                    visit(rule);
+                }
+            }
+        });
     }
 
     fn index_selector(&mut self, idx: usize, selector: &Selector) {
@@ -412,13 +431,13 @@ impl<'a> StyleResolver<'a> {
                 &mut variables,
             );
 
-            for rule in index.candidate_rules(rules, attrs) {
+            index.for_each_candidate_rule(rules, attrs, |rule| {
                 if rule_matches_attrs(rule, attrs, context) {
                     for decl in &rule.declarations {
                         self.apply_declaration_no_diagnostics(&mut style, decl, &mut variables);
                     }
                 }
-            }
+            });
         });
 
         style
@@ -447,7 +466,7 @@ impl<'a> StyleResolver<'a> {
             &mut variables,
         );
 
-        for rule in index.candidate_rules(rules, attrs) {
+        index.for_each_candidate_rule(rules, attrs, |rule| {
             if rule_matches_attrs(rule, attrs, context) {
                 for decl in &rule.declarations {
                     self.apply_declaration_with_diagnostics(
@@ -459,7 +478,7 @@ impl<'a> StyleResolver<'a> {
                     );
                 }
             }
-        }
+        });
 
         (style, diagnostics)
     }

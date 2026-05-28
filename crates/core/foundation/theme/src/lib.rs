@@ -55,24 +55,20 @@ pub struct Theme {
     pub defaults: ThemeDefaults,
     #[serde(default)]
     pub modules: HashMap<String, ThemeModule>,
-    #[serde(skip)]
-    flat_tokens: HashMap<String, TokenValue>,
 }
 
 impl Theme {
     /// Look up a single token by dotted name (e.g. "color.primary").
     pub fn token(&self, name: &str) -> Option<&TokenValue> {
-        if !self.flat_tokens.is_empty() {
-            return self.flat_tokens.get(name);
-        }
-
-        match split_explicit_module_token(name) {
-            Some((module_id, token_name)) => self
-                .modules
-                .get(module_id)
-                .and_then(|module| module.tokens.get(token_name)),
-            None => self.tokens.get(name),
-        }
+        self.tokens
+            .get(name)
+            .or_else(|| match split_explicit_module_token(name) {
+                Some((module_id, token_name)) => self
+                    .modules
+                    .get(module_id)
+                    .and_then(|module| module.tokens.get(token_name)),
+                None => None,
+            })
     }
 
     /// Return all tokens in a group (e.g. "color" returns "color.primary", "color.surface", etc.).
@@ -152,11 +148,11 @@ impl From<RawTheme> for Theme {
         if !base_defaults.is_empty() {
             defaults.components.insert("base".into(), base_defaults);
         }
+        flatten_module_tokens_into(&mut tokens, &raw.modules);
 
         Self {
             id: raw.id,
             name: raw.name,
-            flat_tokens: flatten_tokens(&tokens, &raw.modules),
             tokens,
             defaults,
             modules: raw.modules,
@@ -164,26 +160,15 @@ impl From<RawTheme> for Theme {
     }
 }
 
-fn flatten_tokens(
-    tokens: &HashMap<String, TokenValue>,
+fn flatten_module_tokens_into(
+    tokens: &mut HashMap<String, TokenValue>,
     modules: &HashMap<String, ThemeModule>,
-) -> HashMap<String, TokenValue> {
-    let module_token_count = modules
-        .values()
-        .map(|module| module.tokens.len())
-        .sum::<usize>();
-    let mut flat = HashMap::with_capacity(tokens.len().saturating_add(module_token_count));
-    flat.extend(
-        tokens
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone())),
-    );
+) {
     for (module_id, module) in modules {
         for (token_name, value) in &module.tokens {
-            flat.insert(format!("{module_id}.{token_name}"), value.clone());
+            tokens.insert(format!("{module_id}.{token_name}"), value.clone());
         }
     }
-    flat
 }
 
 /// The theme engine manages the active theme and notifies listeners on change.
