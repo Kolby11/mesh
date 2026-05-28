@@ -1,6 +1,5 @@
 use crate::display_list::{DisplayPaintNode, DisplayTextPaint};
 use mesh_core_elements::lru::LruCache;
-use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
@@ -246,6 +245,27 @@ impl EllipsisCacheEntry {
     }
 }
 
+struct EllipsisHasher(u64);
+
+impl Default for EllipsisHasher {
+    fn default() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+}
+
+impl Hasher for EllipsisHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+}
+
 fn ellipsis_cache_key(
     text: &str,
     font_family: &str,
@@ -254,7 +274,7 @@ fn ellipsis_cache_key(
     line_height: u32,
     max_width: u32,
 ) -> u64 {
-    let mut state = DefaultHasher::new();
+    let mut state = EllipsisHasher::default();
     text.hash(&mut state);
     font_family.hash(&mut state);
     font_size.hash(&mut state);

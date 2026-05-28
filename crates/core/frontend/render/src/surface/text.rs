@@ -10,7 +10,6 @@ use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::TextAlign;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 512;
@@ -51,6 +50,27 @@ struct TextLayoutEntry {
     max_width: Option<u32>,
     align: TextAlign,
     buffer: Buffer,
+}
+
+struct TextLayoutHasher(u64);
+
+impl Default for TextLayoutHasher {
+    fn default() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+}
+
+impl Hasher for TextLayoutHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -121,7 +141,7 @@ fn text_layout_cache_key(
     max_width: Option<u32>,
     align: TextAlign,
 ) -> u64 {
-    let mut state = DefaultHasher::new();
+    let mut state = TextLayoutHasher::default();
     text.hash(&mut state);
     font_family.hash(&mut state);
     font_size.hash(&mut state);
