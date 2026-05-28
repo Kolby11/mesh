@@ -7,6 +7,9 @@ use mesh_core_elements::{ElementState, LayoutRect, NodeId, WidgetNode, element_s
 use mesh_core_interaction::{ScrollOffsetState, node_is_source, source_element_tag};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct RetainedTreeDirtySummary {
     pub(super) inserted: usize,
@@ -210,14 +213,32 @@ impl RetainedNodeSnapshot {
     }
 }
 
+struct RuntimeTreeHasher(u64);
+
+impl Default for RuntimeTreeHasher {
+    fn default() -> Self {
+        Self(FNV_OFFSET)
+    }
+}
+
+impl Hasher for RuntimeTreeHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(FNV_PRIME);
+        }
+    }
+}
+
 /// Deterministic runtime node id derived from the stable runtime key assigned
 /// during annotation. This keeps node ids stable across full rebuilds when the
 /// logical path is unchanged, which is the minimum identity contract needed for
 /// a retained tree/render-object cache.
 pub(super) fn stable_runtime_node_id(key: &str) -> NodeId {
-    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
     let mut hash = FNV_OFFSET;
     for byte in key.as_bytes() {
         hash ^= u64::from(*byte);
@@ -259,7 +280,7 @@ fn layout_fingerprint(layout: LayoutRect) -> LayoutFingerprint {
 }
 
 fn style_fingerprint(style: &ComputedStyle) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut hasher = RuntimeTreeHasher::default();
     hash_dimension(style.width, &mut hasher);
     hash_dimension(style.height, &mut hasher);
     hash_option_f32(style.min_width, &mut hasher);
@@ -313,7 +334,7 @@ fn style_fingerprint(style: &ComputedStyle) -> u64 {
 }
 
 fn attributes_fingerprint(node: &WidgetNode) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut hasher = RuntimeTreeHasher::default();
     node.tag.hash(&mut hasher);
     let mut attributes: Vec<_> = node.attributes.iter().collect();
     attributes.sort_by(|(left, _), (right, _)| left.cmp(right));
@@ -331,7 +352,7 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
 }
 
 fn state_fingerprint(state: ElementState) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut hasher = RuntimeTreeHasher::default();
     state.hovered.hash(&mut hasher);
     state.active.hash(&mut hasher);
     state.focused.hash(&mut hasher);
