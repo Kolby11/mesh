@@ -3,6 +3,7 @@ use super::*;
 use crate::tree::ElementState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use mesh_core_theme::{Theme, TokenValue};
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -27,28 +28,33 @@ pub struct StyleResolver<'a> {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct StyleNodeAttrs {
-    tag: String,
-    classes: Vec<String>,
-    id: Option<String>,
-    key: Option<String>,
-    module_id: Option<String>,
+pub struct StyleNodeAttrs<'a> {
+    tag: Cow<'a, str>,
+    classes: Vec<Cow<'a, str>>,
+    id: Option<Cow<'a, str>>,
+    key: Option<Cow<'a, str>>,
+    module_id: Option<Cow<'a, str>>,
     state: ElementState,
     state_mask: u32,
 }
 
-impl StyleNodeAttrs {
-    pub fn new(tag: &str, classes: &[String], id: Option<&str>, state: ElementState) -> Self {
-        let classes: Vec<String> = classes
+impl<'a> StyleNodeAttrs<'a> {
+    pub fn new(
+        tag: &'a str,
+        classes: &'a [String],
+        id: Option<&'a str>,
+        state: ElementState,
+    ) -> Self {
+        let classes: Vec<Cow<'a, str>> = classes
             .iter()
             .flat_map(|class| class.split_whitespace())
             .filter(|class| !class.is_empty())
-            .map(str::to_owned)
+            .map(Cow::Borrowed)
             .collect();
         Self {
-            tag: tag.to_string(),
+            tag: Cow::Borrowed(tag),
             classes,
-            id: id.map(str::to_string),
+            id: id.map(Cow::Borrowed),
             key: None,
             module_id: None,
             state,
@@ -56,25 +62,36 @@ impl StyleNodeAttrs {
         }
     }
 
-    pub fn from_node(node: &crate::tree::WidgetNode) -> Self {
-        let classes: Vec<String> = node
+    pub fn from_node(node: &'a crate::tree::WidgetNode) -> Self {
+        let classes: Vec<Cow<'a, str>> = node
             .attributes
             .get("class")
-            .map(|s| s.split_whitespace().map(str::to_owned).collect())
+            .map(|s| s.split_whitespace().map(Cow::Borrowed).collect())
             .unwrap_or_default();
         Self {
-            tag: node.tag.clone(),
+            tag: Cow::Borrowed(node.tag.as_str()),
             classes,
-            id: node.attributes.get("id").cloned(),
-            key: node.attributes.get("_mesh_key").cloned(),
-            module_id: node.attributes.get("_mesh_module_id").cloned(),
+            id: node
+                .attributes
+                .get("id")
+                .map(|value| Cow::Borrowed(value.as_str())),
+            key: node
+                .attributes
+                .get("_mesh_key")
+                .map(|value| Cow::Borrowed(value.as_str())),
+            module_id: node
+                .attributes
+                .get("_mesh_module_id")
+                .map(|value| Cow::Borrowed(value.as_str())),
             state: node.state,
             state_mask: active_state_mask(node.state),
         }
     }
 
     fn has_class(&self, class: &str) -> bool {
-        self.classes.iter().any(|candidate| candidate == class)
+        self.classes
+            .iter()
+            .any(|candidate| candidate.as_ref() == class)
     }
 
     fn id(&self) -> Option<&str> {
@@ -145,11 +162,11 @@ impl StyleRuleIndex {
             let mut ids = scratch.borrow_mut();
             ids.clear();
             ids.extend_from_slice(&self.fallback);
-            if let Some(tag) = self.tag.get(attrs.tag.as_str()) {
+            if let Some(tag) = self.tag.get(attrs.tag.as_ref()) {
                 ids.extend_from_slice(tag);
             }
             for class in &attrs.classes {
-                if let Some(class_ids) = self.class.get(class.as_str()) {
+                if let Some(class_ids) = self.class.get(class.as_ref()) {
                     ids.extend_from_slice(class_ids);
                 }
             }
@@ -355,7 +372,7 @@ impl<'a> StyleResolver<'a> {
         module_id: Option<&str>,
     ) -> ComputedStyle {
         let mut attrs = StyleNodeAttrs::new(tag, classes, id, state);
-        attrs.module_id = module_id.map(str::to_string);
+        attrs.module_id = module_id.map(Cow::Borrowed);
         self.resolve_node_style_with_attrs_no_diagnostics(rules, &attrs, context)
     }
 
@@ -385,7 +402,7 @@ impl<'a> StyleResolver<'a> {
         module_id: Option<&str>,
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
         let mut attrs = StyleNodeAttrs::new(tag, classes, id, state);
-        attrs.module_id = module_id.map(str::to_string);
+        attrs.module_id = module_id.map(Cow::Borrowed);
         self.resolve_node_style_with_attrs(rules, &attrs, context)
     }
 
@@ -418,7 +435,7 @@ impl<'a> StyleResolver<'a> {
     ) -> ComputedStyle {
         let mut style = ComputedStyle::default();
 
-        if attrs.tag == "column" {
+        if attrs.tag.as_ref() == "column" {
             style.direction = FlexDirection::Column;
         }
 
@@ -428,7 +445,7 @@ impl<'a> StyleResolver<'a> {
 
             self.apply_theme_component_defaults_no_diagnostics(
                 &mut style,
-                &attrs.tag,
+                attrs.tag.as_ref(),
                 attrs.module_id(),
                 &mut variables,
             );
@@ -456,13 +473,13 @@ impl<'a> StyleResolver<'a> {
         let mut diagnostics = Vec::new();
         let mut variables = HashMap::new();
 
-        if attrs.tag == "column" {
+        if attrs.tag.as_ref() == "column" {
             style.direction = FlexDirection::Column;
         }
 
         self.apply_theme_component_defaults(
             &mut style,
-            &attrs.tag,
+            attrs.tag.as_ref(),
             attrs.module_id(),
             &mut diagnostics,
             &mut variables,
@@ -870,11 +887,11 @@ fn classify_theme_style_value(value: &str) -> StyleValue {
 fn selector_matches_attrs(selector: &Selector, attrs: &StyleNodeAttrs) -> bool {
     match selector {
         Selector::Universal => true,
-        Selector::Tag(t) => t == &attrs.tag,
+        Selector::Tag(t) => t == attrs.tag.as_ref(),
         Selector::Class(c) => attrs.has_class(c),
         Selector::Id(i) => attrs.id() == Some(i.as_str()),
         Selector::State(t, pseudo) => {
-            let tag_matches = t == "*" || t == &attrs.tag;
+            let tag_matches = t == "*" || t == attrs.tag.as_ref();
             let state_matches = match pseudo.as_str() {
                 "hover" | "hovered" => attrs.state.hovered,
                 "focus" | "focused" => attrs.state.focused,
