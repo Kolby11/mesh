@@ -47,6 +47,27 @@ pub struct RenderObjectTree {
     dirty_nodes: HashSet<NodeId>,
 }
 
+struct RenderObjectHasher(u64);
+
+impl Default for RenderObjectHasher {
+    fn default() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+}
+
+impl Hasher for RenderObjectHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+}
+
 impl RenderObjectTree {
     pub fn update(&mut self, root: &WidgetNode) -> RenderObjectDirtySummary {
         self.update_inner(root, None)
@@ -330,7 +351,7 @@ fn accessibility_role_slot(role: &AccessibilityRole) -> AccessibilityRoleSlot {
 }
 
 fn material_hash(style: &ComputedStyle) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut hasher = RenderObjectHasher::default();
     color_slot(style.background_color).hash(&mut hasher);
     match &style.background_paint {
         BackgroundPaint::None => 0_u8.hash(&mut hasher),
@@ -369,7 +390,7 @@ fn material_hash(style: &ComputedStyle) -> u64 {
 }
 
 fn primitive_hash(node: &WidgetNode) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut hasher = RenderObjectHasher::default();
     node.tag.hash(&mut hasher);
     match node.tag.as_str() {
         "input" => {
