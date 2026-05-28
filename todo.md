@@ -189,7 +189,7 @@ P1 - renderer hot paths (additional):
 - [x] Icon raster lookup calls `file_freshness` twice on miss. `surface/icon.rs:298, 303` now threads SVG cacheability freshness into raster key construction and avoids the extra `path.exists()` stat in the draw path.
 - [x] `PathBuf` allocations in icon/font cache insertions. `surface/icon.rs` image/source/SVG cache keys and `surface/glyph.rs` font-byte cache keys now store `Arc<Path>` and borrow `&Path` on lookup, avoiding repeated owned path allocation on hot cache hits. `resvg` resource-dir setup still keeps its required one-off owned path during SVG rasterization.
 - [x] SVG cacheability parser scans the file each cache miss. `surface/icon.rs:334-356, 358-373` stores the parsed cacheability flag with the file freshness key in the existing SVG cacheability LRU.
-- [ ] Display-list iteration indirect borrow. `surface/painter/tree.rs:203` iterates with `commands.iter()` + match on `command.kind`. Flatten into a separate `Vec<CommandKind>` so the hot loop is cache-friendly.
+- [x] Display-list iteration indirect borrow. Retained display lists now keep a parallel compact `DisplayPaintCommandKind` stream, and sparse selected replay iterates `(command, kind)` through `SelectedDisplayListPaint::iter_with_kinds()` so the hot repaint loop no longer reloads the discriminant through each full command struct.
 
 P1 - presentation, foundation, registry:
 

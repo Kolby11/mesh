@@ -181,6 +181,7 @@ pub struct RetainedDisplayList {
     subtrees: HashMap<NodeId, RetainedPaintSubtree>,
     command_spans: Vec<RetainedCommandSpan>,
     paint_commands: Arc<[DisplayPaintCommand]>,
+    command_kinds: Arc<[DisplayPaintCommandKind]>,
     last_metrics: DisplayListMetrics,
 }
 
@@ -195,6 +196,7 @@ impl Default for RetainedDisplayList {
             subtrees: HashMap::new(),
             command_spans: Vec::new(),
             paint_commands: Vec::new().into(),
+            command_kinds: Vec::new().into(),
             last_metrics: DisplayListMetrics::default(),
         }
     }
@@ -321,6 +323,7 @@ pub struct DisplayListClip {
 #[derive(Debug, Clone)]
 pub struct SelectedDisplayListPaint<'a> {
     commands: &'a [DisplayPaintCommand],
+    kinds: &'a [DisplayPaintCommandKind],
     selection: SelectedDisplayListSelection,
     metrics: DisplayListMetrics,
 }
@@ -340,8 +343,26 @@ pub struct SelectedDisplayListPaintIter<'a> {
     state: SelectedDisplayListPaintIterState<'a>,
 }
 
+pub struct SelectedDisplayListPaintKindIter<'a> {
+    commands: &'a [DisplayPaintCommand],
+    kinds: &'a [DisplayPaintCommandKind],
+    state: SelectedDisplayListPaintKindIterState<'a>,
+}
+
 enum SelectedDisplayListPaintIterState<'a> {
     All(std::slice::Iter<'a, DisplayPaintCommand>),
+    None,
+    Spans {
+        spans: &'a [SelectedCommandSpan],
+        span_index: usize,
+        command_index: usize,
+    },
+}
+
+enum SelectedDisplayListPaintKindIterState<'a> {
+    All {
+        index: usize,
+    },
     None,
     Spans {
         spans: &'a [SelectedCommandSpan],
@@ -380,6 +401,45 @@ impl<'a> Iterator for SelectedDisplayListPaintIter<'a> {
     }
 }
 
+impl<'a> Iterator for SelectedDisplayListPaintKindIter<'a> {
+    type Item = (&'a DisplayPaintCommand, DisplayPaintCommandKind);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.state {
+            SelectedDisplayListPaintKindIterState::All { index } => {
+                let command_index = *index;
+                *index = index.saturating_add(1);
+                Some((
+                    self.commands.get(command_index)?,
+                    *self.kinds.get(command_index)?,
+                ))
+            }
+            SelectedDisplayListPaintKindIterState::None => None,
+            SelectedDisplayListPaintKindIterState::Spans {
+                spans,
+                span_index,
+                command_index,
+            } => loop {
+                let span = spans.get(*span_index)?;
+                if *command_index >= span.end {
+                    *span_index = span_index.saturating_add(1);
+                    continue;
+                }
+                if *command_index < span.start {
+                    *command_index = span.start;
+                }
+                let index = *command_index;
+                *command_index = (*command_index).saturating_add(1);
+                if let (Some(command), Some(kind)) =
+                    (self.commands.get(index), self.kinds.get(index))
+                {
+                    return Some((command, *kind));
+                }
+            },
+        }
+    }
+}
+
 impl<'a> SelectedDisplayListPaint<'a> {
     pub fn iter(&self) -> SelectedDisplayListPaintIter<'_> {
         SelectedDisplayListPaintIter {
@@ -391,6 +451,26 @@ impl<'a> SelectedDisplayListPaint<'a> {
                 SelectedDisplayListSelection::None => SelectedDisplayListPaintIterState::None,
                 SelectedDisplayListSelection::Spans { spans, .. } => {
                     SelectedDisplayListPaintIterState::Spans {
+                        spans,
+                        span_index: 0,
+                        command_index: 0,
+                    }
+                }
+            },
+        }
+    }
+
+    pub fn iter_with_kinds(&self) -> SelectedDisplayListPaintKindIter<'_> {
+        SelectedDisplayListPaintKindIter {
+            commands: self.commands,
+            kinds: self.kinds,
+            state: match &self.selection {
+                SelectedDisplayListSelection::All => {
+                    SelectedDisplayListPaintKindIterState::All { index: 0 }
+                }
+                SelectedDisplayListSelection::None => SelectedDisplayListPaintKindIterState::None,
+                SelectedDisplayListSelection::Spans { spans, .. } => {
+                    SelectedDisplayListPaintKindIterState::Spans {
                         spans,
                         span_index: 0,
                         command_index: 0,
@@ -420,6 +500,7 @@ impl<'a> SelectedDisplayListPaint<'a> {
 #[derive(Debug, Clone)]
 struct RetainedPaintSubtree {
     commands: Arc<[DisplayPaintCommand]>,
+    kinds: Arc<[DisplayPaintCommandKind]>,
     pruning: PruningMetrics,
     command_span: Option<RetainedSubtreeSpan>,
     child_order: Option<Arc<[usize]>>,
@@ -429,6 +510,7 @@ impl Default for RetainedPaintSubtree {
     fn default() -> Self {
         Self {
             commands: Vec::new().into(),
+            kinds: Vec::new().into(),
             pruning: PruningMetrics::default(),
             command_span: None,
             child_order: None,
@@ -447,6 +529,7 @@ struct RetainedSubtreeSpan {
 #[derive(Debug, Default)]
 struct PaintSubtreeBuilder {
     commands: Vec<DisplayPaintCommand>,
+    kinds: Vec<DisplayPaintCommandKind>,
     pruning: PruningMetrics,
     bounds: DamageRect,
     local_bounds: DamageRect,
@@ -457,6 +540,7 @@ struct PaintSubtreeBuilder {
 
 impl PaintSubtreeBuilder {
     fn push_command(&mut self, command: DisplayPaintCommand) {
+        let kind = command.kind;
         let bounds = command_bounds(&command);
         self.bounds = if self.bounds.width == 0 || self.bounds.height == 0 {
             bounds
@@ -471,6 +555,7 @@ impl PaintSubtreeBuilder {
         self.includes_scrollbars |= matches!(command.kind, DisplayPaintCommandKind::Scrollbars);
         self.local_command_count = self.local_command_count.saturating_add(1);
         self.commands.push(command);
+        self.kinds.push(kind);
     }
 
     fn append_child(&mut self, child_subtree: &RetainedPaintSubtree) {
@@ -485,6 +570,8 @@ impl PaintSubtreeBuilder {
 
         self.commands.reserve(child_subtree.commands.len());
         self.commands.extend_from_slice(&child_subtree.commands);
+        self.kinds.reserve(child_subtree.kinds.len());
+        self.kinds.extend_from_slice(&child_subtree.kinds);
     }
 
     fn append_pruning(&mut self, child_subtree: &RetainedPaintSubtree) {
@@ -520,6 +607,7 @@ impl PaintSubtreeBuilder {
         };
         RetainedPaintSubtree {
             commands: self.commands.into(),
+            kinds: self.kinds.into(),
             pruning: self.pruning,
             command_span,
             child_order: self.child_order,
@@ -663,7 +751,7 @@ impl RetainedDisplayList {
             surface.width,
             surface.height,
         );
-        let (paint_commands, pruning, subtrees, local_metrics) = match decision {
+        let (paint_commands, command_kinds, pruning, subtrees, local_metrics) = match decision {
             LocalReuseDecision::RebuildDirtySubtrees => {
                 let rebuild_ancestors = collect_dirty_ancestor_ids(root, dirty_node_ids);
                 let mut next_subtrees = HashMap::new();
@@ -682,6 +770,7 @@ impl RetainedDisplayList {
                 );
                 (
                     subtree.commands,
+                    subtree.kinds,
                     subtree.pruning,
                     next_subtrees,
                     local_metrics,
@@ -704,6 +793,7 @@ impl RetainedDisplayList {
                 );
                 (
                     subtree.commands,
+                    subtree.kinds,
                     subtree.pruning,
                     next_subtrees,
                     local_metrics,
@@ -762,6 +852,7 @@ impl RetainedDisplayList {
         self.subtrees = subtrees;
         self.command_spans = command_spans;
         self.paint_commands = paint_commands;
+        self.command_kinds = command_kinds;
         self.root_id = Some(root.id);
         self.retained_tree_generation = retained_tree_generation;
         self.surface_size = Some((surface.width, surface.height));
@@ -880,6 +971,10 @@ impl RetainedDisplayList {
         self.paint_commands.as_ref()
     }
 
+    pub fn paint_command_kinds(&self) -> &[DisplayPaintCommandKind] {
+        self.command_kinds.as_ref()
+    }
+
     pub fn select_paint_commands(
         &self,
         damage: Option<DamageRect>,
@@ -897,6 +992,7 @@ impl RetainedDisplayList {
             metrics.filtered_commands_skipped = 0;
             return SelectedDisplayListPaint {
                 commands: self.paint_commands.as_ref(),
+                kinds: self.command_kinds.as_ref(),
                 selection: SelectedDisplayListSelection::None,
                 metrics,
             };
@@ -907,6 +1003,7 @@ impl RetainedDisplayList {
             metrics.filtered_commands_skipped = full_commands;
             return SelectedDisplayListPaint {
                 commands: self.paint_commands.as_ref(),
+                kinds: self.command_kinds.as_ref(),
                 selection: SelectedDisplayListSelection::None,
                 metrics,
             };
@@ -918,6 +1015,7 @@ impl RetainedDisplayList {
             metrics.filtered_fallback_count = u64::from(!self.paint_commands.is_empty());
             return SelectedDisplayListPaint {
                 commands: self.paint_commands.as_ref(),
+                kinds: self.command_kinds.as_ref(),
                 selection: SelectedDisplayListSelection::All,
                 metrics,
             };
@@ -933,6 +1031,7 @@ impl RetainedDisplayList {
             metrics.filtered_fallback_count = u64::from(!self.paint_commands.is_empty());
             return SelectedDisplayListPaint {
                 commands: self.paint_commands.as_ref(),
+                kinds: self.command_kinds.as_ref(),
                 selection: SelectedDisplayListSelection::All,
                 metrics,
             };
@@ -977,6 +1076,7 @@ impl RetainedDisplayList {
 
         SelectedDisplayListPaint {
             commands: self.paint_commands.as_ref(),
+            kinds: self.command_kinds.as_ref(),
             selection: SelectedDisplayListSelection::Spans {
                 spans: selected_spans,
                 command_count: selected_command_count,
@@ -1011,6 +1111,7 @@ impl RetainedDisplayList {
             metrics.filtered_commands_skipped = 0;
             return SelectedDisplayListPaint {
                 commands: self.paint_commands.as_ref(),
+                kinds: self.command_kinds.as_ref(),
                 selection: SelectedDisplayListSelection::None,
                 metrics,
             };
@@ -1021,6 +1122,7 @@ impl RetainedDisplayList {
             metrics.filtered_commands_skipped = full_commands;
             return SelectedDisplayListPaint {
                 commands: self.paint_commands.as_ref(),
+                kinds: self.command_kinds.as_ref(),
                 selection: SelectedDisplayListSelection::None,
                 metrics,
             };
@@ -1032,6 +1134,7 @@ impl RetainedDisplayList {
             metrics.filtered_fallback_count = u64::from(!self.paint_commands.is_empty());
             return SelectedDisplayListPaint {
                 commands: self.paint_commands.as_ref(),
+                kinds: self.command_kinds.as_ref(),
                 selection: SelectedDisplayListSelection::All,
                 metrics,
             };
@@ -1079,6 +1182,7 @@ impl RetainedDisplayList {
 
         SelectedDisplayListPaint {
             commands: self.paint_commands.as_ref(),
+            kinds: self.command_kinds.as_ref(),
             selection: SelectedDisplayListSelection::Spans {
                 spans: selected_spans,
                 command_count: selected_command_count,

@@ -141,8 +141,10 @@ impl FrontendRenderEngine {
         let mut scratch = self.render_scratch.borrow_mut();
         scratch.prepare(commands.len());
         for command in commands {
+            let kind = command.kind;
             if self.try_append_display_self_paint_batch(
                 command,
+                kind,
                 scale,
                 paint_clip,
                 paint_nodes,
@@ -156,6 +158,7 @@ impl FrontendRenderEngine {
             }
             self.render_display_command(
                 command,
+                kind,
                 buffer,
                 scale,
                 paint_clip,
@@ -200,9 +203,10 @@ impl FrontendRenderEngine {
 
         let mut scratch = self.render_scratch.borrow_mut();
         scratch.prepare(commands.len());
-        for command in commands.iter() {
+        for (command, kind) in commands.iter_with_kinds() {
             if self.try_append_display_self_paint_batch(
                 command,
+                kind,
                 scale,
                 paint_clip,
                 paint_nodes,
@@ -216,6 +220,7 @@ impl FrontendRenderEngine {
             }
             self.render_display_command(
                 command,
+                kind,
                 buffer,
                 scale,
                 paint_clip,
@@ -232,12 +237,13 @@ impl FrontendRenderEngine {
     fn try_append_display_self_paint_batch(
         &self,
         command: &DisplayPaintCommand,
+        kind: DisplayPaintCommandKind,
         scale: f32,
         paint_clip: ClipRect,
         paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
         batched_commands: &mut Vec<PainterCommand>,
     ) -> bool {
-        if command.kind != DisplayPaintCommandKind::Node {
+        if kind != DisplayPaintCommandKind::Node {
             return false;
         }
         if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
@@ -264,6 +270,7 @@ impl FrontendRenderEngine {
     fn render_display_command(
         &self,
         command: &DisplayPaintCommand,
+        kind: DisplayPaintCommandKind,
         buffer: &mut PixelBuffer,
         scale: f32,
         paint_clip: ClipRect,
@@ -279,7 +286,7 @@ impl FrontendRenderEngine {
         if clip.width <= 0 || clip.height <= 0 {
             return;
         }
-        match command.kind {
+        match kind {
             DisplayPaintCommandKind::Node => {
                 let node_bounds = scaled_display_node_bounds(&command.node, scale);
                 self.render_display_node_self(
