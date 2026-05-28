@@ -204,9 +204,9 @@ P1 - presentation, foundation, registry:
 - [ ] `Theme::token` walks nested HashMaps per access. `crates/core/foundation/theme/src/lib.rs:62-69` chains `.get()` over module → group → name. Flatten into a single `HashMap<TokenKey, Value>` where `TokenKey` is `(Symbol, Symbol, Symbol)`, or precompute a flat lookup at theme load.
 - [x] `LocaleEngine::translate_with` chains `.replace()` per placeholder. `crates/core/foundation/locale/src/lib.rs:83-90` now uses a single-pass formatter over the template and preserves unknown placeholders literally.
 - [x] `ServiceRegistry::register` uses `Vec::retain` to dedup. `crates/core/extension/service/src/registry.rs:70-76` now stores entries in a `HashMap<String, ServiceEntry>` keyed by service type and replaces directly.
-- [ ] SHM buffer pool double-iterates per present. `crates/core/presentation/src/wayland_surface/backend.rs:159-175` (`copy_into_shm_buffer`) walks the pool for size match and again for damage unions. Cache pool config validity by generation; revalidate only on resize.
-- [ ] `SurfaceEntry::needs_reconfigure` does field-by-field equality. `presentation/src/wayland_surface/backend.rs:102-114`. Hash the config once at apply time and compare the hash.
-- [ ] Pointer-move coalescing iterates events twice (insert + drain). `presentation/src/lib.rs:142-144` builds a HashMap then drains; for sparse motion this is more overhead than benefit. Maintain a single `last_move_per_surface` slot updated in place during the drain.
+- [x] SHM buffer pool double-iterates per present. `SurfaceEntry` now caches the active SHM pool geometry and clears/rebuilds the pool only when the requested width/height/stride changes, avoiding the per-present validation scan.
+- [x] `SurfaceEntry::needs_reconfigure` does field-by-field equality. Presentation now stores a compact surface configuration fingerprint and compares it on configure, with keyboard-mode reapply paths keeping the fingerprint in sync.
+- [x] Pointer-move coalescing iterates events twice (insert + drain). `coalesce_pointer_moves` now keeps the common single-surface pending move in one slot and promotes to a `HashMap` only when multiple surfaces have concurrent pending moves.
 
 P1 - interaction / hit-test:
 

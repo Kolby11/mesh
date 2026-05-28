@@ -1,5 +1,7 @@
 use super::*;
 use mesh_core_render::DamageRect;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 /// Configuration passed from the shell before each present.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,12 +62,16 @@ pub struct LayerShellBackend {
 const SHM_BUFFER_POOL_DEPTH: usize = 2;
 const SHM_BUFFER_POOL_MAX: usize = 3;
 
-#[derive(Debug)]
-pub(super) struct SurfaceShmBuffer {
-    buffer: Buffer,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ShmPoolConfig {
     width: u32,
     height: u32,
     stride: i32,
+}
+
+#[derive(Debug)]
+pub(super) struct SurfaceShmBuffer {
+    buffer: Buffer,
     pending_damage: Option<DamageRect>,
 }
 
@@ -76,7 +82,9 @@ pub(super) struct SurfaceEntry {
     pub(super) width: u32,
     pub(super) height: u32,
     pub(super) configured: bool,
+    pub(super) config_fingerprint: u64,
     shm_buffers: Vec<SurfaceShmBuffer>,
+    shm_pool_config: Option<ShmPoolConfig>,
     next_shm_buffer: usize,
     pub(super) frame_pending: bool,
 }
@@ -91,27 +99,20 @@ impl SurfaceEntry {
             layer_surface,
             width: cfg.width.max(1),
             height: cfg.height.max(1),
+            config_fingerprint: surface_config_fingerprint(&cfg, applied_keyboard_mode),
             cfg,
             applied_keyboard_mode,
             configured: false,
             shm_buffers: Vec::new(),
+            shm_pool_config: None,
             next_shm_buffer: 0,
             frame_pending: false,
         }
     }
 
     fn needs_reconfigure(&self, cfg: &LayerSurfaceConfig, keyboard_mode: KeyboardMode) -> bool {
-        self.cfg.edge != cfg.edge
-            || self.cfg.layer != cfg.layer
-            || self.cfg.exclusive_zone != cfg.exclusive_zone
-            || self.applied_keyboard_mode != keyboard_mode
-            || self.cfg.width != cfg.width
-            || self.cfg.height != cfg.height
-            || self.cfg.margin_top != cfg.margin_top
-            || self.cfg.margin_right != cfg.margin_right
-            || self.cfg.margin_bottom != cfg.margin_bottom
-            || self.cfg.margin_left != cfg.margin_left
-            || !self.configured
+        !self.configured
+            || self.config_fingerprint != surface_config_fingerprint(cfg, keyboard_mode)
     }
 
     fn apply_config(&mut self, cfg: LayerSurfaceConfig, keyboard_mode: KeyboardMode) {
@@ -120,6 +121,7 @@ impl SurfaceEntry {
         let effective_cfg = cfg.with_keyboard_mode(keyboard_mode);
         apply_config(&self.layer_surface, &effective_cfg);
         self.layer_surface.commit();
+        self.config_fingerprint = surface_config_fingerprint(&cfg, keyboard_mode);
         self.cfg = cfg;
         self.applied_keyboard_mode = keyboard_mode;
         // Geometry/layout reconfiguration can require a fresh layer-shell
@@ -157,13 +159,15 @@ impl SurfaceEntry {
         let frame_damage = damage
             .and_then(|rect| clip_damage(rect, full))
             .unwrap_or(full);
-        if self
-            .shm_buffers
-            .iter()
-            .any(|slot| slot.width != width || slot.height != height || slot.stride != stride)
-        {
+        let pool_config = ShmPoolConfig {
+            width,
+            height,
+            stride,
+        };
+        if self.shm_pool_config != Some(pool_config) {
             self.shm_buffers.clear();
             self.next_shm_buffer = 0;
+            self.shm_pool_config = Some(pool_config);
         }
 
         while self.shm_buffers.len() < SHM_BUFFER_POOL_DEPTH {
@@ -213,9 +217,6 @@ impl SurfaceEntry {
         copy_bgra_to_canvas(src, canvas, width, height);
         self.shm_buffers.push(SurfaceShmBuffer {
             buffer: wl_buffer,
-            width,
-            height,
-            stride,
             pending_damage: None,
         });
         self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
@@ -244,6 +245,51 @@ impl SurfaceEntry {
         self.layer_surface.commit();
         self.width = width;
         self.height = height;
+    }
+}
+
+pub(super) fn surface_config_fingerprint(
+    cfg: &LayerSurfaceConfig,
+    keyboard_mode: KeyboardMode,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    surface_edge_slot(cfg.edge).hash(&mut hasher);
+    surface_layer_slot(cfg.layer).hash(&mut hasher);
+    cfg.exclusive_zone.hash(&mut hasher);
+    keyboard_mode_slot(keyboard_mode).hash(&mut hasher);
+    cfg.width.hash(&mut hasher);
+    cfg.height.hash(&mut hasher);
+    cfg.margin_top.hash(&mut hasher);
+    cfg.margin_right.hash(&mut hasher);
+    cfg.margin_bottom.hash(&mut hasher);
+    cfg.margin_left.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn surface_edge_slot(edge: Option<Edge>) -> u8 {
+    match edge {
+        Some(Edge::Top) => 1,
+        Some(Edge::Bottom) => 2,
+        Some(Edge::Left) => 3,
+        Some(Edge::Right) => 4,
+        None => 0,
+    }
+}
+
+fn surface_layer_slot(layer: MeshLayer) -> u8 {
+    match layer {
+        MeshLayer::Background => 1,
+        MeshLayer::Bottom => 2,
+        MeshLayer::Top => 3,
+        MeshLayer::Overlay => 4,
+    }
+}
+
+fn keyboard_mode_slot(mode: KeyboardMode) -> u8 {
+    match mode {
+        KeyboardMode::None => 0,
+        KeyboardMode::Exclusive => 1,
+        KeyboardMode::OnDemand => 2,
     }
 }
 
@@ -306,9 +352,6 @@ fn create_surface_shm_buffer(
         .map_err(|e| PresentationError::BufferAlloc(format!("create_buffer: {e}")))?;
     Ok(SurfaceShmBuffer {
         buffer,
-        width,
-        height,
-        stride,
         pending_damage: Some(full_damage(width, height)),
     })
 }

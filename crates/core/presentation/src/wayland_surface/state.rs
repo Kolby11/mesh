@@ -1,4 +1,4 @@
-use super::backend::{SurfaceEntry, apply_config};
+use super::backend::{SurfaceEntry, apply_config, surface_config_fingerprint};
 use super::*;
 
 const MAX_REPEAT_EVENTS_PER_POLL: usize = 64;
@@ -138,6 +138,7 @@ impl State {
         apply_config(&entry.layer_surface, &effective_cfg);
         entry.layer_surface.commit();
         entry.applied_keyboard_mode = effective_keyboard_mode;
+        entry.config_fingerprint = surface_config_fingerprint(&entry.cfg, effective_keyboard_mode);
     }
 
     pub(super) fn request_surface_focus(&mut self, surface_id: &str, event: &PointerEvent) {

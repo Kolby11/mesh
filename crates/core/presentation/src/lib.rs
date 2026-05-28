@@ -140,24 +140,24 @@ pub fn coalesce_pointer_moves(events: Vec<WindowEvent>) -> Vec<WindowEvent> {
     }
 
     let mut output = Vec::with_capacity(events.len());
-    let mut pending_moves: HashMap<String, WindowEvent> =
-        HashMap::with_capacity(events.len().min(8));
+    let mut pending_move: Option<WindowEvent> = None;
+    let mut pending_moves: Option<HashMap<String, WindowEvent>> = None;
 
     for event in events {
         match event {
             WindowEvent::PointerMove { surface_id, x, y } => {
-                pending_moves.insert(
-                    surface_id.clone(),
-                    WindowEvent::PointerMove { surface_id, x, y },
-                );
+                let next_move = WindowEvent::PointerMove { surface_id, x, y };
+                push_pending_pointer_move(next_move, &mut pending_move, &mut pending_moves);
             }
             WindowEvent::PointerLeave { surface_id } => {
-                pending_moves.remove(&surface_id);
+                remove_pending_pointer_move(&surface_id, &mut pending_move, &mut pending_moves);
                 output.push(WindowEvent::PointerLeave { surface_id });
             }
             event => {
-                let surface_id = event_surface_id(&event).to_string();
-                if let Some(pointer_move) = pending_moves.remove(&surface_id) {
+                let surface_id = event_surface_id(&event);
+                if let Some(pointer_move) =
+                    remove_pending_pointer_move(surface_id, &mut pending_move, &mut pending_moves)
+                {
                     output.push(pointer_move);
                 }
                 output.push(event);
@@ -165,8 +165,60 @@ pub fn coalesce_pointer_moves(events: Vec<WindowEvent>) -> Vec<WindowEvent> {
         }
     }
 
-    output.extend(pending_moves.into_values());
+    if let Some(pointer_move) = pending_move {
+        output.push(pointer_move);
+    }
+    if let Some(pending_moves) = pending_moves {
+        output.extend(pending_moves.into_values());
+    }
     output
+}
+
+fn push_pending_pointer_move(
+    event: WindowEvent,
+    pending_move: &mut Option<WindowEvent>,
+    pending_moves: &mut Option<HashMap<String, WindowEvent>>,
+) {
+    let WindowEvent::PointerMove { surface_id, .. } = &event else {
+        return;
+    };
+    if let Some(map) = pending_moves.as_mut() {
+        map.insert(surface_id.clone(), event);
+        return;
+    }
+    match pending_move {
+        Some(existing) if event_surface_id(existing) == surface_id => {
+            *existing = event;
+        }
+        Some(existing) => {
+            let mut map = HashMap::with_capacity(4);
+            map.insert(
+                event_surface_id(existing).to_string(),
+                pending_move.take().unwrap(),
+            );
+            map.insert(surface_id.clone(), event);
+            *pending_moves = Some(map);
+        }
+        None => {
+            *pending_move = Some(event);
+        }
+    }
+}
+
+fn remove_pending_pointer_move(
+    surface_id: &str,
+    pending_move: &mut Option<WindowEvent>,
+    pending_moves: &mut Option<HashMap<String, WindowEvent>>,
+) -> Option<WindowEvent> {
+    if pending_move
+        .as_ref()
+        .is_some_and(|event| event_surface_id(event) == surface_id)
+    {
+        return pending_move.take();
+    }
+    pending_moves
+        .as_mut()
+        .and_then(|map| map.remove(surface_id))
 }
 
 pub fn event_surface_id(event: &WindowEvent) -> &str {
@@ -177,5 +229,72 @@ pub fn event_surface_id(event: &WindowEvent) -> &str {
         | WindowEvent::Scroll { surface_id, .. }
         | WindowEvent::Key { surface_id, .. }
         | WindowEvent::Char { surface_id, .. } => surface_id,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pointer_move(surface_id: &str, x: f32, y: f32) -> WindowEvent {
+        WindowEvent::PointerMove {
+            surface_id: surface_id.to_string(),
+            x,
+            y,
+        }
+    }
+
+    #[test]
+    fn coalesces_single_surface_pointer_moves_without_losing_latest_position() {
+        let events = coalesce_pointer_moves(vec![
+            pointer_move("panel", 1.0, 2.0),
+            pointer_move("panel", 3.0, 4.0),
+            WindowEvent::PointerButton {
+                surface_id: "panel".to_string(),
+                x: 3.0,
+                y: 4.0,
+                pressed: true,
+            },
+        ]);
+
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            WindowEvent::PointerMove { surface_id, x, y } => {
+                assert_eq!(surface_id, "panel");
+                assert_eq!((*x, *y), (3.0, 4.0));
+            }
+            event => panic!("expected pointer move, got {event:?}"),
+        }
+    }
+
+    #[test]
+    fn coalesces_multiple_surfaces_only_until_surface_specific_event() {
+        let events = coalesce_pointer_moves(vec![
+            pointer_move("panel", 1.0, 1.0),
+            pointer_move("popover", 2.0, 2.0),
+            pointer_move("panel", 3.0, 3.0),
+            WindowEvent::Scroll {
+                surface_id: "panel".to_string(),
+                x: 3.0,
+                y: 3.0,
+                dx: 0.0,
+                dy: 1.0,
+            },
+        ]);
+
+        assert_eq!(events.len(), 3);
+        match &events[0] {
+            WindowEvent::PointerMove { surface_id, x, y } => {
+                assert_eq!(surface_id, "panel");
+                assert_eq!((*x, *y), (3.0, 3.0));
+            }
+            event => panic!("expected panel pointer move, got {event:?}"),
+        }
+        assert!(matches!(events[1], WindowEvent::Scroll { .. }));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, WindowEvent::PointerMove { surface_id, x, y } if surface_id == "popover" && (*x, *y) == (2.0, 2.0)))
+        );
     }
 }
