@@ -1,6 +1,5 @@
 use super::*;
 use mesh_core_render::DamageRect;
-use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 /// Configuration passed from the shell before each present.
@@ -89,6 +88,27 @@ pub(super) struct SurfaceEntry {
     next_shm_buffer: usize,
     pub(super) frame_pending: bool,
     pub(super) frame_pending_since: Option<Instant>,
+}
+
+struct SurfaceConfigHasher(u64);
+
+impl Default for SurfaceConfigHasher {
+    fn default() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+}
+
+impl Hasher for SurfaceConfigHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
 }
 
 impl SurfaceEntry {
@@ -264,7 +284,7 @@ pub(super) fn surface_config_fingerprint(
     cfg: &LayerSurfaceConfig,
     keyboard_mode: KeyboardMode,
 ) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = SurfaceConfigHasher::default();
     surface_edge_slot(cfg.edge).hash(&mut hasher);
     surface_layer_slot(cfg.layer).hash(&mut hasher);
     cfg.exclusive_zone.hash(&mut hasher);
