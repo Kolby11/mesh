@@ -15,6 +15,25 @@ impl Shell {
             if !self.components[index].component.wants_render() {
                 continue;
             }
+            let visible = self
+                .core
+                .surfaces
+                .get(&surface_id)
+                .map(|state| state.visible)
+                .unwrap_or_else(|| {
+                    self.surfaces
+                        .get(&surface_id)
+                        .map(|surface| surface.visible)
+                        .unwrap_or(true)
+                });
+            if visible
+                && self
+                    .presentation_engine
+                    .surface_waiting_for_frame_callback(&surface_id)
+            {
+                components_want_render_after_frame = true;
+                continue;
+            }
             let surface_size = {
                 let surface = self
                     .surfaces

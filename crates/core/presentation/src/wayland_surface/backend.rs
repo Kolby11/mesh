@@ -61,6 +61,7 @@ pub struct LayerShellBackend {
 
 const SHM_BUFFER_POOL_DEPTH: usize = 2;
 const SHM_BUFFER_POOL_MAX: usize = 3;
+const MAX_FRAME_CALLBACK_WAIT: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ShmPoolConfig {
@@ -87,6 +88,7 @@ pub(super) struct SurfaceEntry {
     shm_pool_config: Option<ShmPoolConfig>,
     next_shm_buffer: usize,
     pub(super) frame_pending: bool,
+    pub(super) frame_pending_since: Option<Instant>,
 }
 
 impl SurfaceEntry {
@@ -107,6 +109,7 @@ impl SurfaceEntry {
             shm_pool_config: None,
             next_shm_buffer: 0,
             frame_pending: false,
+            frame_pending_since: None,
         }
     }
 
@@ -137,6 +140,7 @@ impl SurfaceEntry {
 
     fn hide(&mut self) {
         self.frame_pending = false;
+        self.frame_pending_since = None;
         let wl_surface = self.layer_surface.wl_surface();
         wl_surface.attach(None, 0, 0);
         self.layer_surface.commit();
@@ -242,9 +246,17 @@ impl SurfaceEntry {
         buffer.attach_to(wl_surface).ok();
         wl_surface.frame(qh, wl_surface.clone());
         self.frame_pending = true;
+        self.frame_pending_since = Some(Instant::now());
         self.layer_surface.commit();
         self.width = width;
         self.height = height;
+    }
+
+    pub(super) fn waiting_for_frame_callback(&self) -> bool {
+        self.frame_pending
+            && self
+                .frame_pending_since
+                .is_some_and(|since| since.elapsed() < MAX_FRAME_CALLBACK_WAIT)
     }
 }
 
@@ -549,13 +561,8 @@ impl LayerShellBackend {
         let max_width = output_width.max(1);
         let max_height = output_height.max(1);
 
-        if cfg.size_policy == LayerSurfaceSizePolicy::Flexible {
-            cfg.width = cfg.width.min(max_width);
-            cfg.height = cfg.height.min(max_height);
-        } else {
-            cfg.width = cfg.width.min(max_width);
-            cfg.height = cfg.height.min(max_height);
-        }
+        cfg.width = cfg.width.min(max_width);
+        cfg.height = cfg.height.min(max_height);
 
         match cfg.edge {
             Some(Edge::Left) | None => {
@@ -597,7 +604,7 @@ impl LayerShellBackend {
                         info.modes
                             .iter()
                             .find(|mode| mode.current)
-                            .map(|mode| (mode.dimensions.0 as i32, mode.dimensions.1 as i32))
+                            .map(|mode| (mode.dimensions.0, mode.dimensions.1))
                     })
                     .and_then(|(width, height)| {
                         let width = u32::try_from(width).ok()?;
@@ -621,10 +628,10 @@ impl LayerShellBackend {
             // surface. Before the first configure event the surface has no buffer attached
             // and is already invisible; committing a null buffer before configure arrives
             // triggers a Wayland protocol error.
-            if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
-                if entry.configured {
-                    entry.hide();
-                }
+            if let Some(entry) = self.state.surfaces.get_mut(surface_id)
+                && entry.configured
+            {
+                entry.hide();
             }
             self.dispatch_pending()?;
             return Ok(());
@@ -688,6 +695,13 @@ impl LayerShellBackend {
             .get(surface_id)
             .filter(|entry| entry.configured)
             .map(|entry| resolved_surface_size(entry, self.output_logical_size()))
+    }
+
+    pub fn surface_waiting_for_frame_callback(&self, surface_id: &str) -> bool {
+        self.state
+            .surfaces
+            .get(surface_id)
+            .is_some_and(SurfaceEntry::waiting_for_frame_callback)
     }
 
     pub fn pump(&mut self) {

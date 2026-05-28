@@ -146,17 +146,17 @@ impl DevWindowBackend {
                 surface.last_left_down = current_left_down;
             }
 
-            if let Some((dx, dy)) = surface.window.get_scroll_wheel() {
-                if dx.abs() > f32::EPSILON || dy.abs() > f32::EPSILON {
-                    let (x, y) = current_mouse_pos.unwrap_or((0.0, 0.0));
-                    events.push(DevWindowEvent::Scroll {
-                        surface_id: surface_id.clone(),
-                        x,
-                        y,
-                        dx,
-                        dy,
-                    });
-                }
+            if let Some((dx, dy)) = surface.window.get_scroll_wheel()
+                && (dx.abs() > f32::EPSILON || dy.abs() > f32::EPSILON)
+            {
+                let (x, y) = current_mouse_pos.unwrap_or((0.0, 0.0));
+                events.push(DevWindowEvent::Scroll {
+                    surface_id: surface_id.clone(),
+                    x,
+                    y,
+                    dx,
+                    dy,
+                });
             }
 
             let mods = KeyMods {

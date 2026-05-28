@@ -47,7 +47,7 @@ impl Shell {
     fn next_runtime_sleep(&self, shell_message_backlog_likely: bool) -> Duration {
         if shell_message_backlog_likely
             || !self.pending_wayland_events.is_empty()
-            || self.components_want_render
+            || self.components_have_ready_render_work()
         {
             return Duration::ZERO;
         }
@@ -99,6 +99,27 @@ impl Shell {
         } else {
             sleep_for
         }
+    }
+
+    fn components_have_ready_render_work(&self) -> bool {
+        self.components.iter().any(|runtime| {
+            if !runtime.component.wants_render() {
+                return false;
+            }
+            let surface_id = runtime.surface_id.as_str();
+            let visible = self
+                .core
+                .surfaces
+                .get(surface_id)
+                .map(|state| state.visible)
+                .or_else(|| self.surfaces.get(surface_id).map(|surface| surface.visible))
+                .unwrap_or(true);
+
+            !visible
+                || !self
+                    .presentation_engine
+                    .surface_waiting_for_frame_callback(surface_id)
+        })
     }
 
     pub fn run(&mut self) -> Result<(), ShellRunError> {

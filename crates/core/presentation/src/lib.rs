@@ -31,7 +31,7 @@ pub struct PresentationEngine {
 }
 
 enum Backend {
-    WaylandSurface(LayerShellBackend),
+    WaylandSurface(Box<LayerShellBackend>),
     DevWindow(DevWindowBackend),
 }
 
@@ -46,7 +46,7 @@ impl PresentationEngine {
             match LayerShellBackend::new() {
                 Ok(bridge) => {
                     tracing::info!("using wayland surface bridge");
-                    Backend::WaylandSurface(bridge)
+                    Backend::WaylandSurface(Box::new(bridge))
                 }
                 Err(err) => {
                     tracing::warn!(
@@ -110,6 +110,15 @@ impl PresentationEngine {
         match &self.backend {
             Backend::WaylandSurface(bridge) => bridge.surface_size_if_known(surface_id),
             Backend::DevWindow(_) => None,
+        }
+    }
+
+    pub fn surface_waiting_for_frame_callback(&self, surface_id: &str) -> bool {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => {
+                bridge.surface_waiting_for_frame_callback(surface_id)
+            }
+            Backend::DevWindow(_) => false,
         }
     }
 

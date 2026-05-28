@@ -32,6 +32,7 @@ impl CompositorHandler for State {
             .find(|entry| entry.layer_surface.wl_surface() == surface)
         {
             entry.frame_pending = false;
+            entry.frame_pending_since = None;
         }
     }
 
@@ -147,10 +148,11 @@ impl SeatHandler for State {
                 self.pointer = Some(ptr);
             }
         }
-        if capability == SeatCapability::Keyboard && self.keyboard.is_none() {
-            if let Ok(kbd) = self.seat_state.get_keyboard(qh, &seat, None) {
-                self.keyboard = Some(kbd);
-            }
+        if capability == SeatCapability::Keyboard
+            && self.keyboard.is_none()
+            && let Ok(kbd) = self.seat_state.get_keyboard(qh, &seat, None)
+        {
+            self.keyboard = Some(kbd);
         }
     }
 
@@ -164,10 +166,10 @@ impl SeatHandler for State {
         if capability == SeatCapability::Pointer {
             let _ = self.pointer.take();
         }
-        if capability == SeatCapability::Keyboard {
-            if let Some(keyboard) = self.keyboard.take() {
-                keyboard.release();
-            }
+        if capability == SeatCapability::Keyboard
+            && let Some(keyboard) = self.keyboard.take()
+        {
+            keyboard.release();
         }
     }
 
@@ -195,12 +197,12 @@ impl PointerHandler for State {
                 PointerEventKind::Enter { .. } => {
                     tracing::debug!("[hover] layer_shell: pointer enter surface_id={surface_id}");
                     self.pointer_focus = Some(surface_id.clone());
-                    if let Some(pointer) = self.pointer.as_ref() {
-                        if let Err(error) = pointer.set_cursor(conn, CursorIcon::Default) {
-                            tracing::debug!(
-                                "[hover] layer_shell: failed to set default cursor on enter: {error}"
-                            );
-                        }
+                    if let Some(pointer) = self.pointer.as_ref()
+                        && let Err(error) = pointer.set_cursor(conn, CursorIcon::Default)
+                    {
+                        tracing::debug!(
+                            "[hover] layer_shell: failed to set default cursor on enter: {error}"
+                        );
                     }
                 }
                 PointerEventKind::Leave { .. } => {
