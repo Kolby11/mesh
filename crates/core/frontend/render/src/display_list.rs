@@ -2716,6 +2716,7 @@ mod tests {
     #[test]
     fn display_list_skips_rebuild_when_retained_generation_is_unchanged() {
         let mut root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
+        root.computed_style.overflow_y = Overflow::Scroll;
         let mut list = RetainedDisplayList::default();
 
         let first = list.update_for_retained_generation(
@@ -2734,7 +2735,9 @@ mod tests {
         assert_eq!(first.entries_rebuilt, 1);
         assert_eq!(list.paint_commands().len(), 2);
 
-        root.children.push(node(2, "text", 10.0, 0.0, 20.0, 10.0));
+        let mut child = node(2, "text", 10.0, 0.0, 20.0, 10.0);
+        child.computed_style.overflow_y = Overflow::Scroll;
+        root.children.push(child);
         let skipped = list.update_for_retained_generation(
             &root,
             1,
@@ -2897,6 +2900,7 @@ mod tests {
     fn display_list_records_span_metadata_and_policy_labels() {
         let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
         let mut left = node(2, "box", 0.0, 0.0, 40.0, 40.0);
+        left.computed_style.overflow_y = Overflow::Scroll;
         left.children.push(node(3, "text", 4.0, 4.0, 20.0, 12.0));
         let mut right = node(4, "box", 70.0, 0.0, 40.0, 40.0);
         right.children.push(node(5, "text", 4.0, 4.0, 20.0, 12.0));
@@ -2940,7 +2944,9 @@ mod tests {
     #[test]
     fn display_list_filters_sparse_damage_without_reordering_commands() {
         let mut root = node(1, "row", 0.0, 0.0, 160.0, 40.0);
-        root.children.push(node(2, "box", 0.0, 0.0, 40.0, 40.0));
+        let mut left = node(2, "box", 0.0, 0.0, 40.0, 40.0);
+        left.computed_style.overflow_y = Overflow::Scroll;
+        root.children.push(left);
         root.children.push(node(3, "box", 80.0, 0.0, 40.0, 40.0));
 
         let mut list = RetainedDisplayList::default();

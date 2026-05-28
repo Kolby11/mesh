@@ -187,7 +187,7 @@ P1 - renderer hot paths (additional):
 - [x] Cache keys built from `to_string()` + `.to_bits()` per call. `surface/painter/text.rs:335, 336, 340, 362` now hashes borrowed text/font inputs for ellipsis lookup and stores owned verifier fields only on cache insert.
 - [x] Text layout cache key construction clones strings on lookup. `surface/text.rs:68-69` and `surface/painter/text.rs:335-336` now use borrowed hashed lookup keys with owned verifier fields stored only on cache insert.
 - [x] Icon raster lookup calls `file_freshness` twice on miss. `surface/icon.rs:298, 303` now threads SVG cacheability freshness into raster key construction and avoids the extra `path.exists()` stat in the draw path.
-- [ ] `PathBuf` allocations in icon cache insertions. `surface/text.rs:79`, `surface/icon.rs:61, 68, 106, 139, 146` call `to_path_buf()` on insert and lookup. Store keys as `Arc<Path>` so cache hits are pointer compares.
+- [x] `PathBuf` allocations in icon/font cache insertions. `surface/icon.rs` image/source/SVG cache keys and `surface/glyph.rs` font-byte cache keys now store `Arc<Path>` and borrow `&Path` on lookup, avoiding repeated owned path allocation on hot cache hits. `resvg` resource-dir setup still keeps its required one-off owned path during SVG rasterization.
 - [x] SVG cacheability parser scans the file each cache miss. `surface/icon.rs:334-356, 358-373` stores the parsed cacheability flag with the file freshness key in the existing SVG cacheability LRU.
 - [ ] Display-list iteration indirect borrow. `surface/painter/tree.rs:203` iterates with `commands.iter()` + match on `command.kind`. Flatten into a separate `Vec<CommandKind>` so the hot loop is cache-friendly.
 

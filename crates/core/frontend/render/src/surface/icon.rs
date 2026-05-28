@@ -5,15 +5,15 @@ use image::imageops::FilterType;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget, resolve_icon_result};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
-static IMAGE_CACHE: OnceLock<Mutex<LruCache<PathBuf, CachedImage>>> = OnceLock::new();
+static IMAGE_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedImage>>> = OnceLock::new();
 static RASTER_CACHE: OnceLock<Mutex<LruCache<RasterCacheKey, RasterVariant>>> = OnceLock::new();
-static SOURCE_IDENTITY_CACHE: OnceLock<Mutex<LruCache<PathBuf, CachedSourceIdentity>>> =
+static SOURCE_IDENTITY_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedSourceIdentity>>> =
     OnceLock::new();
-static SVG_CACHEABILITY_CACHE: OnceLock<Mutex<LruCache<PathBuf, CachedSvgCacheability>>> =
+static SVG_CACHEABILITY_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedSvgCacheability>>> =
     OnceLock::new();
 const RASTER_CACHE_CAPACITY: usize = 256;
 const IMAGE_CACHE_CAPACITY: usize = 256;
@@ -48,7 +48,7 @@ struct CachedImage {
 #[derive(Debug, Clone)]
 struct CachedSourceIdentity {
     freshness: Option<FileFreshness>,
-    identity: PathBuf,
+    identity: Arc<Path>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -60,7 +60,7 @@ struct CachedSvgCacheability {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RasterCacheKey {
     source_kind: RasterSourceKind,
-    source_identity: PathBuf,
+    source_identity: Arc<Path>,
     width: u32,
     height: u32,
     tint: u32,
@@ -77,7 +77,7 @@ struct RasterVariant {
     fully_opaque: bool,
 }
 
-fn image_cache() -> &'static Mutex<LruCache<PathBuf, CachedImage>> {
+fn image_cache() -> &'static Mutex<LruCache<Arc<Path>, CachedImage>> {
     IMAGE_CACHE.get_or_init(|| Mutex::new(LruCache::new(IMAGE_CACHE_CAPACITY)))
 }
 
@@ -85,11 +85,11 @@ fn raster_cache() -> &'static Mutex<LruCache<RasterCacheKey, RasterVariant>> {
     RASTER_CACHE.get_or_init(|| Mutex::new(LruCache::new(RASTER_CACHE_CAPACITY)))
 }
 
-fn source_identity_cache() -> &'static Mutex<LruCache<PathBuf, CachedSourceIdentity>> {
+fn source_identity_cache() -> &'static Mutex<LruCache<Arc<Path>, CachedSourceIdentity>> {
     SOURCE_IDENTITY_CACHE.get_or_init(|| Mutex::new(LruCache::new(SOURCE_IDENTITY_CACHE_CAPACITY)))
 }
 
-fn svg_cacheability_cache() -> &'static Mutex<LruCache<PathBuf, CachedSvgCacheability>> {
+fn svg_cacheability_cache() -> &'static Mutex<LruCache<Arc<Path>, CachedSvgCacheability>> {
     SVG_CACHEABILITY_CACHE
         .get_or_init(|| Mutex::new(LruCache::new(SVG_CACHEABILITY_CACHE_CAPACITY)))
 }
@@ -110,7 +110,7 @@ fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
     let img = Arc::new(image::open(path).ok()?.to_rgba8());
     if let Ok(mut guard) = image_cache().lock() {
         guard.insert(
-            path.to_path_buf(),
+            Arc::from(path),
             CachedImage {
                 freshness,
                 image: Arc::clone(&img),
@@ -141,31 +141,32 @@ fn file_freshness(path: &Path) -> Option<FileFreshness> {
     })
 }
 
-fn source_identity(path: &Path, freshness: Option<FileFreshness>) -> PathBuf {
+fn source_identity(path: &Path, freshness: Option<FileFreshness>) -> Arc<Path> {
     let cache = source_identity_cache();
     if let Ok(mut guard) = cache.lock() {
         if let Some(cached) = guard.get(path) {
             if cached.freshness == freshness {
-                return cached.identity.clone();
+                return Arc::clone(&cached.identity);
             }
         }
     }
 
-    let identity = match std::fs::canonicalize(path) {
+    let identity: Arc<Path> = match std::fs::canonicalize(path) {
         Ok(canonical) => canonical,
         Err(_) if path.is_absolute() => path.to_path_buf(),
         Err(_) => std::env::current_dir()
             .ok()
             .map(|cwd| cwd.join(path))
             .unwrap_or_else(|| path.to_path_buf()),
-    };
+    }
+    .into();
 
     if let Ok(mut guard) = cache.lock() {
         guard.insert(
-            path.to_path_buf(),
+            Arc::from(path),
             CachedSourceIdentity {
                 freshness,
-                identity: identity.clone(),
+                identity: Arc::clone(&identity),
             },
         );
     }
@@ -224,7 +225,7 @@ fn svg_file_cacheability(path: &Path) -> Option<(bool, FileFreshness)> {
     let cacheable = !svg_has_external_resource_reference(&svg_data);
     if let Ok(mut guard) = cache.lock() {
         guard.insert(
-            path.to_path_buf(),
+            Arc::from(path),
             CachedSvgCacheability {
                 freshness,
                 cacheable,
@@ -281,7 +282,7 @@ fn svg_has_external_resource_reference(svg_data: &str) -> bool {
 fn missing_icon_key(width: u32, height: u32, tint: Color) -> RasterCacheKey {
     RasterCacheKey {
         source_kind: RasterSourceKind::MissingIcon,
-        source_identity: PathBuf::from("builtin:missing-icon"),
+        source_identity: Arc::from(Path::new("builtin:missing-icon")),
         width,
         height,
         tint: encode_tint(tint),

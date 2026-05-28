@@ -10,7 +10,7 @@ use super::profiling;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::SupportedAxes;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use swash::scale::image::Content;
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
@@ -60,12 +60,12 @@ struct CachedGlyph {
     pixels: Arc<[u8]>,
 }
 
-static FONT_BYTES: OnceLock<Mutex<LruCache<PathBuf, Arc<[u8]>>>> = OnceLock::new();
+static FONT_BYTES: OnceLock<Mutex<LruCache<Arc<Path>, Arc<[u8]>>>> = OnceLock::new();
 static GLYPH_CACHE: OnceLock<Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>>> = OnceLock::new();
 const FONT_BYTES_CACHE_CAPACITY: usize = 32;
 const GLYPH_CACHE_CAPACITY: usize = 1024;
 
-fn font_bytes_cache() -> &'static Mutex<LruCache<PathBuf, Arc<[u8]>>> {
+fn font_bytes_cache() -> &'static Mutex<LruCache<Arc<Path>, Arc<[u8]>>> {
     FONT_BYTES.get_or_init(|| Mutex::new(LruCache::new(FONT_BYTES_CACHE_CAPACITY)))
 }
 
@@ -82,7 +82,7 @@ fn font_bytes(path: &Path) -> Option<Arc<[u8]>> {
     }
     let bytes: Arc<[u8]> = std::fs::read(path).ok()?.into();
     if let Ok(mut guard) = cache.lock() {
-        guard.insert(path.to_path_buf(), Arc::clone(&bytes));
+        guard.insert(Arc::from(path), Arc::clone(&bytes));
     }
     Some(bytes)
 }
