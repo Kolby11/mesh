@@ -172,8 +172,8 @@ P1 - style and layout hot paths:
 - [ ] `StyleNodeAttrs::from_node` re-splits class strings per restyle. `style/resolve.rs:42-54` reparses `attributes.get("class")` and allocates a `Vec<String>` per node, per frame. Cache the split classes on the retained `WidgetNode` (invalidated only when the `class` attribute changes).
 - [x] `parse_edges_shorthand` allocates a Vec per call. `style/parse.rs:4, 691-696` does `split().map().collect()` for every margin/padding/border parse. Bound to 4 values with a fixed `[Option<f32>; 4]` and parse in place.
 - [x] `parse_transform` splits the args string twice. `style/parse.rs:29-107` splits whitespace for both function arg detection and per-function parsing. Single split + slice.
-- [ ] Container query check inside per-rule loop. `crates/core/frontend/compiler/src/style.rs:46-48` invokes `rule.container_query.matches()` per rule per node in `inherited_style_mask`. Partition rules into `(non_container, container_keyed)` once per style pass.
-- [ ] `inherited_style_mask` rebuilt per child. `frontend/compiler/src/style.rs:35-66` recomputes the mask per descendant though the mask bits depend only on the parent. Compute once at the parent and pass down.
+- [x] Container query check inside per-rule loop. `frontend/compiler/src/style.rs` now caches a compact inherited-style rule index and partitions inherited-property candidates into non-container and container-query buckets, so most nodes skip container-query checks entirely.
+- [x] `inherited_style_mask` rebuilt per child. The mask is still child-specific by CSS semantics, but it now reuses a thread-local rule index that stores only rules declaring inherited text properties and their precomputed mask bits, avoiding full declaration scans per element.
 - [x] `selector_matches` for Compound selectors does not short-circuit. `frontend/compiler/src/style.rs:68-86` already uses `parts.iter().all(...)`, so compound matching short-circuits.
 - [x] `merge_missing_defaults` does inline string `==` matching on tag. `frontend/compiler/src/style.rs:114-152` now groups tag checks through `match` arms, keeping the later `TagId` interning path straightforward.
 

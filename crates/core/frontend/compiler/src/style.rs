@@ -1,13 +1,62 @@
+use mesh_core_component::style::{Selector, StyleRule};
 use mesh_core_elements::style::{AlignSelf, Display, FlexDirection};
 use mesh_core_elements::{ComputedStyle, Dimension, StyleContext};
+use std::cell::RefCell;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct InheritedStyleMask {
     color: bool,
     font_family: bool,
     font_size: bool,
     font_weight: bool,
     line_height: bool,
+}
+
+#[derive(Clone, Copy)]
+struct InheritedStyleRuleCandidate {
+    index: usize,
+    mask: InheritedStyleMask,
+}
+
+#[derive(Default)]
+struct InheritedStyleRuleIndex {
+    rules_ptr: usize,
+    rules_len: usize,
+    non_container: Vec<InheritedStyleRuleCandidate>,
+    container: Vec<InheritedStyleRuleCandidate>,
+}
+
+impl InheritedStyleRuleIndex {
+    fn is_for(&self, rules: &[StyleRule]) -> bool {
+        self.rules_ptr == rules.as_ptr() as usize && self.rules_len == rules.len()
+    }
+
+    fn rebuild(&mut self, rules: &[StyleRule]) {
+        self.rules_ptr = rules.as_ptr() as usize;
+        self.rules_len = rules.len();
+        self.non_container.clear();
+        self.container.clear();
+        self.non_container.reserve(rules.len().min(16));
+        self.container.reserve(rules.len().min(8));
+
+        for (index, rule) in rules.iter().enumerate() {
+            let mask = inherited_declaration_mask(rule);
+            if mask == InheritedStyleMask::default() {
+                continue;
+            }
+            let candidate = InheritedStyleRuleCandidate { index, mask };
+            if rule.container_query.is_some() {
+                self.container.push(candidate);
+            } else {
+                self.non_container.push(candidate);
+            }
+        }
+    }
+}
+
+thread_local! {
+    static INHERITED_STYLE_RULE_INDEX: RefCell<InheritedStyleRuleIndex> =
+        RefCell::new(InheritedStyleRuleIndex::default());
 }
 
 pub(crate) fn inherit_text_style(
@@ -33,46 +82,55 @@ pub(crate) fn inherit_text_style(
 }
 
 pub(crate) fn inherited_style_mask(
-    rules: &[mesh_core_component::style::StyleRule],
+    rules: &[StyleRule],
     tag: &str,
     classes: &[String],
     id: Option<&str>,
     context: StyleContext,
 ) -> InheritedStyleMask {
-    let mut mask = InheritedStyleMask::default();
-
-    for rule in rules {
-        if !selector_matches(&rule.selector, tag, classes, id)
-            || rule.container_query.is_some_and(|query| {
-                !query.matches(context.container_width, context.container_height)
-            })
-        {
-            continue;
+    INHERITED_STYLE_RULE_INDEX.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if !cache.is_for(rules) {
+            cache.rebuild(rules);
         }
 
-        for decl in &rule.declarations {
-            match decl.property.as_str() {
-                "color" => mask.color = true,
-                "font-family" => mask.font_family = true,
-                "font-size" => mask.font_size = true,
-                "font-weight" => mask.font_weight = true,
-                "line-height" => mask.line_height = true,
-                _ => {}
+        let mut mask = InheritedStyleMask::default();
+        for candidate in &cache.non_container {
+            let rule = &rules[candidate.index];
+            if selector_matches(&rule.selector, tag, classes, id) {
+                mask |= candidate.mask;
             }
         }
-    }
+        for candidate in &cache.container {
+            let rule = &rules[candidate.index];
+            if selector_matches(&rule.selector, tag, classes, id)
+                && rule.container_query.is_none_or(|query| {
+                    query.matches(context.container_width, context.container_height)
+                })
+            {
+                mask |= candidate.mask;
+            }
+        }
+        mask
+    })
+}
 
+fn inherited_declaration_mask(rule: &StyleRule) -> InheritedStyleMask {
+    let mut mask = InheritedStyleMask::default();
+    for decl in &rule.declarations {
+        match decl.property.as_str() {
+            "color" => mask.color = true,
+            "font-family" => mask.font_family = true,
+            "font-size" => mask.font_size = true,
+            "font-weight" => mask.font_weight = true,
+            "line-height" => mask.line_height = true,
+            _ => {}
+        }
+    }
     mask
 }
 
-fn selector_matches(
-    selector: &mesh_core_component::style::Selector,
-    tag: &str,
-    classes: &[String],
-    id: Option<&str>,
-) -> bool {
-    use mesh_core_component::style::Selector;
-
+fn selector_matches(selector: &Selector, tag: &str, classes: &[String], id: Option<&str>) -> bool {
     match selector {
         Selector::Universal => true,
         Selector::Tag(tag_name) => tag_name == tag,
@@ -82,6 +140,16 @@ fn selector_matches(
         Selector::Compound(parts) => parts
             .iter()
             .all(|part| selector_matches(part, tag, classes, id)),
+    }
+}
+
+impl std::ops::BitOrAssign for InheritedStyleMask {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.color |= rhs.color;
+        self.font_family |= rhs.font_family;
+        self.font_size |= rhs.font_size;
+        self.font_weight |= rhs.font_weight;
+        self.line_height |= rhs.line_height;
     }
 }
 
