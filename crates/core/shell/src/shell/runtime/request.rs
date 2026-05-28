@@ -50,12 +50,7 @@ impl Shell {
     ) {
         let size_policy = self
             .component_index_for_surface(surface_id)
-            .and_then(|index| {
-                self.components[index]
-                    .component
-                    .allows_shrink_to_fit()
-                    .then_some(LayerSurfaceSizePolicy::Flexible)
-            })
+            .map(|index| self.components[index].surface_size_policy)
             .unwrap_or(LayerSurfaceSizePolicy::Fixed);
 
         let (surface, visible) = match self.surfaces.get(surface_id) {

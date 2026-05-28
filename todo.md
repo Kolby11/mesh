@@ -110,7 +110,7 @@ P1 - renderer hot paths:
 P1 - presentation and memory:
 
 - [x] Audit SHM buffer release behavior under sustained frame backlog. The backend keeps a two-buffer pool and now caps fallback growth at three SHM buffers per surface, returning a bounded allocation error instead of growing memory without limit when all buffers are busy.
-- [ ] Preserve and reuse surface configuration state more aggressively. The shell builds surface config on render; the presentation backend skips reconfigure when unchanged, but the shell can avoid config work unless size/title/options are dirty.
+- [ ] Preserve and reuse surface configuration state more aggressively. First pass caches each component runtime's fixed/flexible surface size policy and reuses it in render/request config construction instead of querying the component every frame; remaining work is dirty-bit tracking so unchanged size/title/options skip config construction entirely.
 - [ ] Track damage as multiple rects deeper into the retained renderer. Presentation already accepts region damage, but retained display-list damage often collapses node changes to a union rect. Keep separate dirty node rects longer to reduce overdraw.
 - [ ] Add performance profiles for canonical shell workloads: idle shell, pointer move over dense tree, text update from backend, scrolling, large icon grid, animation, theme reload, and resize. Use existing stage timings to pin budgets for build/restyle/layout/render-object/display-list/paint/present.
 

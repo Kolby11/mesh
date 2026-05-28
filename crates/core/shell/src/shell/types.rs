@@ -2,7 +2,7 @@ pub use mesh_core_frontend_host::{
     ComponentContext, ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent,
     CoreRequest, KeyModifiers, ServiceEvent, ShellComponent, SurfaceId, TabFocusTarget,
 };
-use mesh_core_presentation::LayerSurfaceConfig;
+use mesh_core_presentation::{LayerSurfaceConfig, LayerSurfaceSizePolicy};
 use mesh_core_render::PixelBuffer;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -21,6 +21,7 @@ pub(super) struct ComponentRuntime {
     pub(super) module_settings_modified_at: Option<SystemTime>,
     pub(super) paint_buffer: Option<PixelBuffer>,
     pub(super) last_surface_config: Option<LayerSurfaceConfig>,
+    pub(super) surface_size_policy: LayerSurfaceSizePolicy,
     pub(super) force_full_present: bool,
     /// Last surface size resolved by shell/presentation without requiring a
     /// compositor roundtrip on every render or input event.
@@ -30,6 +31,11 @@ pub(super) struct ComponentRuntime {
 impl ComponentRuntime {
     pub(super) fn new(component: Box<dyn ShellComponent>) -> Self {
         let surface_id = component.surface_id().to_string();
+        let surface_size_policy = if component.allows_shrink_to_fit() {
+            LayerSurfaceSizePolicy::Flexible
+        } else {
+            LayerSurfaceSizePolicy::Fixed
+        };
         let source_paths: Vec<(PathBuf, Option<SystemTime>)> = component
             .watched_source_paths()
             .into_iter()
@@ -49,6 +55,7 @@ impl ComponentRuntime {
             module_settings_modified_at: None,
             paint_buffer: None,
             last_surface_config: None,
+            surface_size_policy,
             force_full_present: false,
             known_surface_size: None,
         }

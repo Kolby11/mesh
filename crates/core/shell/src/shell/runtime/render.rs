@@ -1,5 +1,4 @@
 use super::super::*;
-use mesh_core_presentation::LayerSurfaceSizePolicy;
 use mesh_core_render::DamageRect;
 
 impl Shell {
@@ -100,11 +99,7 @@ impl Shell {
                 let cfg = LayerSurfaceConfig {
                     edge: surface.edge,
                     layer: surface.layer.unwrap_or(Layer::Top),
-                    size_policy: if self.components[index].component.allows_shrink_to_fit() {
-                        LayerSurfaceSizePolicy::Flexible
-                    } else {
-                        LayerSurfaceSizePolicy::Fixed
-                    },
+                    size_policy: self.components[index].surface_size_policy,
                     width: surface.width,
                     height: surface.height,
                     exclusive_zone: surface.exclusive_zone,
