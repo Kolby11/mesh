@@ -1,4 +1,4 @@
-use super::glyph::{GlyphAxes, draw_font_glyph};
+use super::glyph::{GlyphAxes, draw_font_glyph, draw_font_glyph_on_canvas};
 use super::profiling;
 use super::{PixelBuffer, PixelCanvasSession};
 use image::imageops::FilterType;
@@ -388,12 +388,7 @@ fn cached_skia_image_for_variant(variant: &RasterVariant) -> Option<skia_safe::I
     })
 }
 
-fn blit_variant_on_canvas(
-    canvas: &Canvas,
-    variant: &RasterVariant,
-    dest_x: i32,
-    dest_y: i32,
-) {
+fn blit_variant_on_canvas(canvas: &Canvas, variant: &RasterVariant, dest_x: i32, dest_y: i32) {
     let Some(image) = cached_skia_image_for_variant(variant) else {
         return;
     };
@@ -805,9 +800,8 @@ pub fn draw_icon_from_path_in_session(
     });
 }
 
-/// Session-aware variant of [`draw_named_icon`]. File-backed targets use
-/// the canvas; font-glyph targets fall back to raw buffer access since
-/// the icon-font glyph path still mutates pixels directly.
+/// Session-aware variant of [`draw_named_icon`]. File-backed and icon-font
+/// glyph targets both route through the active canvas.
 pub fn draw_named_icon_in_session(
     session: &mut PixelCanvasSession<'_>,
     name: &str,
@@ -885,23 +879,22 @@ fn draw_icon_resolution_with_axes_in_session(
                 },
             ..
         } => {
-            // Icon-font glyph rendering still writes pixels directly; the
-            // session keeps the active surface alive across this so a
-            // follow-on canvas draw reuses the same wrap.
-            let drew = session.with_buffer(|buffer| {
-                draw_font_glyph(
-                    buffer,
-                    &font_path,
-                    codepoint,
-                    supported_axes,
-                    axes,
-                    dest_x,
-                    dest_y,
-                    dest_w,
-                    dest_h,
-                    tint,
-                )
-            });
+            let drew = session
+                .with_canvas(|canvas| {
+                    draw_font_glyph_on_canvas(
+                        canvas,
+                        &font_path,
+                        codepoint,
+                        supported_axes,
+                        axes,
+                        dest_x,
+                        dest_y,
+                        dest_w,
+                        dest_h,
+                        tint,
+                    )
+                })
+                .unwrap_or(false);
             if !drew {
                 session.with_canvas(|canvas| {
                     draw_missing_icon_fallback_on_canvas(

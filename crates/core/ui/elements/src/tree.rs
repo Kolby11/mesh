@@ -47,6 +47,9 @@ pub struct WidgetNode {
     pub tag: String,
     /// Resolved attributes (after binding evaluation).
     pub attributes: HashMap<String, String>,
+    /// Cached split tokens for the `class` attribute.
+    cached_class_source: Option<String>,
+    cached_classes: Vec<String>,
     /// Fully resolved style (theme tokens → concrete values).
     pub computed_style: ComputedStyle,
     /// Layout rectangle computed by the layout engine.
@@ -68,6 +71,8 @@ impl WidgetNode {
             id: next_node_id(),
             tag: tag.into(),
             attributes: HashMap::new(),
+            cached_class_source: None,
+            cached_classes: Vec::new(),
             computed_style: ComputedStyle::default(),
             layout: LayoutRect::default(),
             children: Vec::new(),
@@ -106,5 +111,36 @@ impl WidgetNode {
     /// Count total nodes in this subtree.
     pub fn node_count(&self) -> usize {
         1 + self.children.iter().map(|c| c.node_count()).sum::<usize>()
+    }
+
+    /// Refresh the cached whitespace-split class tokens after mutating
+    /// `attributes["class"]`.
+    pub fn refresh_class_cache(&mut self) {
+        let Some(class_source) = self.attributes.get("class") else {
+            self.cached_class_source = None;
+            self.cached_classes.clear();
+            return;
+        };
+
+        if self.cached_class_source.as_deref() == Some(class_source.as_str()) {
+            return;
+        }
+
+        self.cached_classes.clear();
+        self.cached_classes
+            .extend(class_source.split_whitespace().map(str::to_owned));
+        self.cached_class_source = Some(class_source.clone());
+    }
+
+    /// Borrow cached class tokens when they match the current `class`
+    /// attribute. Returns `None` if direct attribute mutation left the cache
+    /// stale; callers can split the raw attribute as a correctness fallback.
+    pub fn cached_classes(&self) -> Option<&[String]> {
+        let class_source = self.attributes.get("class")?;
+        if self.cached_class_source.as_deref() == Some(class_source.as_str()) {
+            Some(&self.cached_classes)
+        } else {
+            None
+        }
     }
 }

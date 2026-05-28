@@ -447,25 +447,20 @@ impl FrontendRenderEngine {
             inner_width,
             scale,
         ) {
-            // Selection rendering still uses the buffer path (rare edge
-            // case). The session ensures the active surface is reused
-            // across the highlight fills and re-acquired for the text.
-            session.with_buffer(|buffer| {
-                render_display_selection_highlights(
-                    self,
-                    &self.text_renderer,
-                    buffer,
-                    tx as i32,
-                    ty as i32,
-                    clip,
-                    node,
-                    &display_text,
-                    effective_align,
-                    inner_width,
-                    scale,
-                    selection,
-                );
-            });
+            render_display_selection_highlights(
+                self,
+                &self.text_renderer,
+                session,
+                tx as i32,
+                ty as i32,
+                clip,
+                node,
+                &display_text,
+                effective_align,
+                inner_width,
+                scale,
+                selection,
+            );
             return;
         }
 
@@ -888,8 +883,8 @@ mod tests {
 #[allow(clippy::too_many_arguments)]
 fn render_display_selection_highlights(
     paint_engine: &FrontendRenderEngine,
-    renderer: &impl TextRenderCache,
-    buffer: &mut PixelBuffer,
+    renderer: &SharedTextMeasurer,
+    session: &mut PixelCanvasSession<'_>,
     tx: i32,
     ty: i32,
     clip: ClipRect,
@@ -903,20 +898,22 @@ fn render_display_selection_highlights(
     let style = &node.style;
     let (selection_geometry, selection_background, selection_foreground) = selection;
 
-    renderer.render_clipped(
-        display_text,
-        &style.font_family,
-        style.font_size * scale,
-        style.font_weight,
-        style.line_height,
-        align,
-        style.color,
-        buffer,
-        tx.max(0) as u32,
-        ty.max(0) as u32,
-        clip_to_tuple(clip),
-        Some(inner_width),
-    );
+    session.with_canvas(|canvas| {
+        renderer.render_clipped_on_canvas(
+            display_text,
+            &style.font_family,
+            style.font_size * scale,
+            style.font_weight,
+            style.line_height,
+            align,
+            style.color,
+            canvas,
+            tx.max(0) as u32,
+            ty.max(0) as u32,
+            clip_to_tuple(clip),
+            Some(inner_width),
+        );
+    });
 
     for highlight in &selection_geometry.highlights {
         let rect = ClipRect {
@@ -926,20 +923,29 @@ fn render_display_selection_highlights(
             height: highlight.height.ceil() as i32,
         };
         let highlight_clip = intersect_clip(clip, rect);
-        paint_engine.fill_rect_clipped(buffer, rect, selection_background, highlight_clip);
-        renderer.render_clipped(
-            display_text,
-            &style.font_family,
-            style.font_size * scale,
-            style.font_weight,
-            style.line_height,
-            align,
-            selection_foreground,
-            buffer,
-            tx.max(0) as u32,
-            ty.max(0) as u32,
-            clip_to_tuple(highlight_clip),
-            Some(inner_width),
+        paint_engine.execute_painter_commands_in_session(
+            session,
+            &[PainterCommand::DrawRect {
+                rect,
+                paint: PainterPaint::fill(selection_background),
+                clip: highlight_clip,
+            }],
         );
+        session.with_canvas(|canvas| {
+            renderer.render_clipped_on_canvas(
+                display_text,
+                &style.font_family,
+                style.font_size * scale,
+                style.font_weight,
+                style.line_height,
+                align,
+                selection_foreground,
+                canvas,
+                tx.max(0) as u32,
+                ty.max(0) as u32,
+                clip_to_tuple(highlight_clip),
+                Some(inner_width),
+            );
+        });
     }
 }

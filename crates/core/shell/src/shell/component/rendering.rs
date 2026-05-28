@@ -390,6 +390,7 @@ fn append_class(node: &mut WidgetNode, class_name: &str) {
         class.push(' ');
     }
     class.push_str(class_name);
+    node.refresh_class_cache();
 }
 
 fn annotate_selection_node(
