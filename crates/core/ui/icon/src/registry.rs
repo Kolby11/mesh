@@ -108,10 +108,10 @@ impl IconRegistry {
         if self.config.pack(&pack.id).is_some() {
             return Ok(false);
         }
-        if let Some(root) = &pack.root {
-            if root.as_os_str().is_empty() {
-                bail!("pack '{}' root must not be empty", pack.id);
-            }
+        if let Some(root) = &pack.root
+            && root.as_os_str().is_empty()
+        {
+            bail!("pack '{}' root must not be empty", pack.id);
         }
         if pack.theme.trim().is_empty() {
             bail!("pack '{}' theme must not be empty", pack.id);
@@ -274,30 +274,27 @@ impl IconRegistry {
 
         // 1. User override
         if let Some(frontend) = frontend {
-            if let Some(target) = frontend.user_overrides.get(semantic_name) {
-                if let Some(found) =
+            if let Some(target) = frontend.user_overrides.get(semantic_name)
+                && let Some(found) =
                     self.try_target(target, semantic_name, size, &mut tried, "user-override")
-                {
-                    return found;
-                }
+            {
+                return found;
             }
             // 2. Author override
-            if let Some(target) = frontend.author_overrides.get(semantic_name) {
-                if let Some(found) =
+            if let Some(target) = frontend.author_overrides.get(semantic_name)
+                && let Some(found) =
                     self.try_target(target, semantic_name, size, &mut tried, "author-override")
-                {
-                    return found;
-                }
+            {
+                return found;
             }
         }
 
         // 3. Pack-qualified template name (`<pack-id>/<logical-name>`)
-        if let Some((pack_id, inner)) = parse_target(semantic_name) {
-            if let Some(found) =
+        if let Some((pack_id, inner)) = parse_target(semantic_name)
+            && let Some(found) =
                 self.try_pack_lookup(pack_id, inner, semantic_name, size, &mut tried)
-            {
-                return found;
-            }
+        {
+            return found;
         }
 
         // 4. Effective dependency chain
@@ -381,27 +378,13 @@ impl IconRegistry {
             });
         }
 
-        let Some((asset_pack, asset_name)) = parse_target(target) else {
-            return None;
-        };
+        let (asset_pack, asset_name) = parse_target(target)?;
 
         // Asset-pack registered as a font alias inside any loaded icon-pack
         for icon_pack in self.icon_packs.values() {
-            if let Some(font_asset) = icon_pack.font_aliases.get(asset_pack) {
-                if let Some(target) = self.try_font_glyph(font_asset, asset_name, icon_pack.axes) {
-                    return Some(IconResolution::Found {
-                        semantic_name: semantic_name.into(),
-                        candidate: mapping_label,
-                        target,
-                        multicolor: false,
-                    });
-                }
-            }
-        }
-
-        // Asset-pack registered as an XDG/file pack in the IconConfig
-        if let Some(pack) = self.config.pack(asset_pack) {
-            if let Some(target) = xdg::find_icon_in_pack(pack, asset_name, size) {
+            if let Some(font_asset) = icon_pack.font_aliases.get(asset_pack)
+                && let Some(target) = self.try_font_glyph(font_asset, asset_name, icon_pack.axes)
+            {
                 return Some(IconResolution::Found {
                     semantic_name: semantic_name.into(),
                     candidate: mapping_label,
@@ -409,6 +392,18 @@ impl IconRegistry {
                     multicolor: false,
                 });
             }
+        }
+
+        // Asset-pack registered as an XDG/file pack in the IconConfig
+        if let Some(pack) = self.config.pack(asset_pack)
+            && let Some(target) = xdg::find_icon_in_pack(pack, asset_name, size)
+        {
+            return Some(IconResolution::Found {
+                semantic_name: semantic_name.into(),
+                candidate: mapping_label,
+                target,
+                multicolor: false,
+            });
         }
 
         // Asset-pack as a bare XDG theme name on the system

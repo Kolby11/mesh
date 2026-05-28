@@ -1,4 +1,4 @@
-/// Style AST — CSS-like styling with theme token references.
+//! Style AST — CSS-like styling with theme token references.
 
 /// The style block containing all rules for a component.
 #[derive(Debug, Clone)]
@@ -26,25 +26,25 @@ pub struct ContainerQuery {
 
 impl ContainerQuery {
     pub fn matches(&self, width: f32, height: f32) -> bool {
-        if let Some(min_width) = self.min_width {
-            if width < min_width {
-                return false;
-            }
+        if let Some(min_width) = self.min_width
+            && width < min_width
+        {
+            return false;
         }
-        if let Some(max_width) = self.max_width {
-            if width > max_width {
-                return false;
-            }
+        if let Some(max_width) = self.max_width
+            && width > max_width
+        {
+            return false;
         }
-        if let Some(min_height) = self.min_height {
-            if height < min_height {
-                return false;
-            }
+        if let Some(min_height) = self.min_height
+            && height < min_height
+        {
+            return false;
         }
-        if let Some(max_height) = self.max_height {
-            if height > max_height {
-                return false;
-            }
+        if let Some(max_height) = self.max_height
+            && height > max_height
+        {
+            return false;
         }
 
         true

@@ -34,9 +34,7 @@ impl PixelBuffer {
 
         if !self.with_skia_canvas(|canvas| {
             canvas.clear(skia_color(color));
-        }) {
-            return;
-        }
+        }) {}
     }
 
     /// Clear a rectangle to a solid color.

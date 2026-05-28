@@ -1202,17 +1202,12 @@ impl Default for BoxShadow {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub enum BackgroundPaint {
+    #[default]
     None,
     Image(StyleImageSource),
     LinearGradient(StyleLinearGradient),
-}
-
-impl Default for BackgroundPaint {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

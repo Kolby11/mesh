@@ -458,9 +458,9 @@ fn find_closing_brace(s: &str) -> Option<usize> {
     let mut depth = 0usize;
     let mut in_string = false;
     let mut string_char = '\0';
-    let mut chars = s.char_indices();
+    let chars = s.char_indices();
 
-    while let Some((i, ch)) = chars.next() {
+    for (i, ch) in chars {
         if in_string {
             if ch == string_char {
                 in_string = false;

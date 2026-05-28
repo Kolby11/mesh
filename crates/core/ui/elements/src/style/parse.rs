@@ -77,33 +77,23 @@ pub(super) fn parse_transform(value: &str) -> Transform2D {
                     transform.translate_y += args[1];
                 }
             }
-            "translateX" => {
-                if args_len > 0 {
-                    transform.translate_x += args[0];
-                }
+            "translateX" if args_len > 0 => {
+                transform.translate_x += args[0];
             }
-            "translateY" => {
-                if args_len > 0 {
-                    transform.translate_y += args[0];
-                }
+            "translateY" if args_len > 0 => {
+                transform.translate_y += args[0];
             }
-            "scale" => {
-                if args_len > 0 {
-                    let sx = args[0];
-                    transform.scale_x *= sx;
-                    let sy = if args_len > 1 { args[1] } else { sx };
-                    transform.scale_y *= sy;
-                }
+            "scale" if args_len > 0 => {
+                let sx = args[0];
+                transform.scale_x *= sx;
+                let sy = if args_len > 1 { args[1] } else { sx };
+                transform.scale_y *= sy;
             }
-            "scaleX" => {
-                if args_len > 0 {
-                    transform.scale_x *= args[0];
-                }
+            "scaleX" if args_len > 0 => {
+                transform.scale_x *= args[0];
             }
-            "scaleY" => {
-                if args_len > 0 {
-                    transform.scale_y *= args[0];
-                }
+            "scaleY" if args_len > 0 => {
+                transform.scale_y *= args[0];
             }
             "rotate" => {
                 if let Some(angle) = angle_arg {

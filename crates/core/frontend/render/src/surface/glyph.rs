@@ -60,12 +60,14 @@ struct CachedGlyph {
     pixels: Arc<[u8]>,
 }
 
-static FONT_BYTES: OnceLock<Mutex<LruCache<Arc<Path>, Arc<[u8]>>>> = OnceLock::new();
+type FontBytesCache = Mutex<LruCache<Arc<Path>, Arc<[u8]>>>;
+
+static FONT_BYTES: OnceLock<FontBytesCache> = OnceLock::new();
 static GLYPH_CACHE: OnceLock<Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>>> = OnceLock::new();
 const FONT_BYTES_CACHE_CAPACITY: usize = 32;
 const GLYPH_CACHE_CAPACITY: usize = 1024;
 
-fn font_bytes_cache() -> &'static Mutex<LruCache<Arc<Path>, Arc<[u8]>>> {
+fn font_bytes_cache() -> &'static FontBytesCache {
     FONT_BYTES.get_or_init(|| Mutex::new(LruCache::new(FONT_BYTES_CACHE_CAPACITY)))
 }
 
@@ -75,10 +77,10 @@ fn glyph_cache() -> &'static Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>>
 
 fn font_bytes(path: &Path) -> Option<Arc<[u8]>> {
     let cache = font_bytes_cache();
-    if let Ok(mut guard) = cache.lock() {
-        if let Some(bytes) = guard.get(path) {
-            return Some(Arc::clone(bytes));
-        }
+    if let Ok(mut guard) = cache.lock()
+        && let Some(bytes) = guard.get(path)
+    {
+        return Some(Arc::clone(bytes));
     }
     let bytes: Arc<[u8]> = std::fs::read(path).ok()?.into();
     if let Ok(mut guard) = cache.lock() {
@@ -103,25 +105,25 @@ fn rasterize(
     let mut ctx = ScaleContext::new();
     let mut builder = ctx.builder(font).size(px as f32).hint(true);
     let mut variations: Vec<(&str, f32)> = Vec::new();
-    if supported.fill {
-        if let Some(v) = axes.fill {
-            variations.push(("FILL", v.clamp(0.0, 1.0)));
-        }
+    if supported.fill
+        && let Some(v) = axes.fill
+    {
+        variations.push(("FILL", v.clamp(0.0, 1.0)));
     }
-    if supported.weight {
-        if let Some(v) = axes.weight {
-            variations.push(("wght", v.clamp(100.0, 700.0)));
-        }
+    if supported.weight
+        && let Some(v) = axes.weight
+    {
+        variations.push(("wght", v.clamp(100.0, 700.0)));
     }
-    if supported.grade {
-        if let Some(v) = axes.grade {
-            variations.push(("GRAD", v.clamp(-25.0, 200.0)));
-        }
+    if supported.grade
+        && let Some(v) = axes.grade
+    {
+        variations.push(("GRAD", v.clamp(-25.0, 200.0)));
     }
-    if supported.optical_size {
-        if let Some(v) = axes.optical_size {
-            variations.push(("opsz", v.clamp(20.0, 48.0)));
-        }
+    if supported.optical_size
+        && let Some(v) = axes.optical_size
+    {
+        variations.push(("opsz", v.clamp(20.0, 48.0)));
     }
     if !variations.is_empty() {
         builder = builder.variations(variations.iter().copied());

@@ -162,10 +162,10 @@ impl IconConfig {
             if !pack_ids.insert(pack.id.clone()) {
                 bail!("duplicate pack id '{}'", pack.id);
             }
-            if let Some(root) = &pack.root {
-                if root.as_os_str().is_empty() {
-                    bail!("pack '{}' root must not be empty", pack.id);
-                }
+            if let Some(root) = &pack.root
+                && root.as_os_str().is_empty()
+            {
+                bail!("pack '{}' root must not be empty", pack.id);
             }
             if pack.theme.trim().is_empty() {
                 bail!("pack '{}' theme must not be empty", pack.id);

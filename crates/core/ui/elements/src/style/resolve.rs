@@ -343,6 +343,7 @@ impl<'a> StyleResolver<'a> {
         self.resolve_node_style_with_attrs_no_diagnostics(rules, &attrs, context)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn resolve_node_style_for_module(
         &self,
         rules: &[StyleRule],
@@ -372,6 +373,7 @@ impl<'a> StyleResolver<'a> {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn resolve_node_style_with_diagnostics_for_module(
         &self,
         rules: &[StyleRule],
@@ -814,17 +816,16 @@ impl<'a> StyleResolver<'a> {
                 ),
             });
         }
-        if is_strict_animation_property(&decl.property) {
-            if let Err(token_name) =
+        if is_strict_animation_property(&decl.property)
+            && let Err(token_name) =
                 self.validate_animation_value_with_variables(&decl.value, variables)
-            {
-                diagnostics.push(StyleDiagnostic {
-                    property: decl.property.clone(),
-                    selector,
-                    message: format!("unresolved animation token reference '{token_name}'"),
-                });
-                return;
-            }
+        {
+            diagnostics.push(StyleDiagnostic {
+                property: decl.property.clone(),
+                selector,
+                message: format!("unresolved animation token reference '{token_name}'"),
+            });
+            return;
         }
         if decl.property == "background-image" {
             let resolved = self.resolve_value_with_variables(&decl.value, variables);

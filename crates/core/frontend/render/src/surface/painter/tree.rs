@@ -391,11 +391,11 @@ impl FrontendRenderEngine {
             .first()
             .map(|child| child.computed_style.z_index);
         for child in node.children.iter().skip(1) {
-            if let Some(previous) = previous_z_index {
-                if previous > child.computed_style.z_index {
-                    needs_sort = true;
-                    break;
-                }
+            if let Some(previous) = previous_z_index
+                && previous > child.computed_style.z_index
+            {
+                needs_sort = true;
+                break;
             }
             previous_z_index = Some(child.computed_style.z_index);
         }
@@ -853,7 +853,7 @@ fn push_border_commands(
     if border_widths.top <= 0.0 || color.a == 0 {
         return;
     }
-    let border_width = (border_widths.top * scale).max(1.0) as f32;
+    let border_width = (border_widths.top * scale).max(1.0);
     commands.push(PainterCommand::DrawRoundedRect {
         rect: bounds,
         radius,

@@ -198,10 +198,10 @@ fn resolve_font_glyph(
 /// honoring shell-style `~` expansion and absolute paths.
 fn resolve_pack_path(root: &Path, declared: &str) -> PathBuf {
     let trimmed = declared.trim();
-    if let Some(rest) = trimmed.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
+    if let Some(rest) = trimmed.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(rest);
     }
     let candidate = PathBuf::from(trimmed);
     if candidate.is_absolute() {
@@ -375,12 +375,11 @@ fn theme_name(pack: &IconPackRoot) -> &str {
     if pack.theme != "hicolor" {
         return &pack.theme;
     }
-    if let Some(root) = &pack.root {
-        if root.join("index.theme").is_file() {
-            if let Some(name) = root.file_name().and_then(|name| name.to_str()) {
-                return name;
-            }
-        }
+    if let Some(root) = &pack.root
+        && root.join("index.theme").is_file()
+        && let Some(name) = root.file_name().and_then(|name| name.to_str())
+    {
+        return name;
     }
     &pack.theme
 }

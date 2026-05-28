@@ -246,10 +246,10 @@ pub fn default_theme_path() -> PathBuf {
 }
 
 pub fn theme_dir_path() -> PathBuf {
-    if let Ok(path) = std::env::var("MESH_THEME_DIR") {
-        if !path.trim().is_empty() {
-            return PathBuf::from(path);
-        }
+    if let Ok(path) = std::env::var("MESH_THEME_DIR")
+        && !path.trim().is_empty()
+    {
+        return PathBuf::from(path);
     }
 
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -300,10 +300,10 @@ fn embedded_default_theme() -> Theme {
 }
 
 fn mesh_home_path() -> PathBuf {
-    if let Ok(path) = std::env::var("MESH_HOME") {
-        if !path.trim().is_empty() {
-            return PathBuf::from(path);
-        }
+    if let Ok(path) = std::env::var("MESH_HOME")
+        && !path.trim().is_empty()
+    {
+        return PathBuf::from(path);
     }
 
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());

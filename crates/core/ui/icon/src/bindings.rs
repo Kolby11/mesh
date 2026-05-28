@@ -66,12 +66,11 @@ impl FrontendIconBindings {
     pub fn effective_chain(&self, shell_default: Option<&str>) -> Vec<String> {
         let mut chain = Vec::new();
         let suppress_default = self.ignore_shell_default_frontend || self.ignore_shell_default_user;
-        if !suppress_default {
-            if let Some(default_id) = shell_default {
-                if !default_id.is_empty() {
-                    chain.push(default_id.to_string());
-                }
-            }
+        if !suppress_default
+            && let Some(default_id) = shell_default
+            && !default_id.is_empty()
+        {
+            chain.push(default_id.to_string());
         }
         let source = self
             .user_pack_chain

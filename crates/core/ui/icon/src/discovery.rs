@@ -45,10 +45,10 @@ pub fn discover_xdg_packs() -> Vec<IconPackRoot> {
                 }
                 continue;
             }
-            if let Some(pack) = read_implicit_xdg_pack(&path) {
-                if seen_ids.insert(pack.id.clone()) {
-                    packs.push(pack);
-                }
+            if let Some(pack) = read_implicit_xdg_pack(&path)
+                && seen_ids.insert(pack.id.clone())
+            {
+                packs.push(pack);
             }
         }
     }

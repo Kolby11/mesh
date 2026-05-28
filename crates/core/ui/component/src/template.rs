@@ -1,4 +1,4 @@
-/// Template AST — represents the markup structure of a component.
+//! Template AST — represents the markup structure of a component.
 
 /// Source-level UI tag classification.
 ///

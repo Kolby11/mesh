@@ -1567,10 +1567,10 @@ fn validate_grid_tracks(tag: &str, name: &str, value: &str) -> Option<ElementDia
         if track == "auto" {
             continue;
         }
-        if let Some(px) = track.strip_suffix("px") {
-            if px.parse::<f32>().is_ok_and(|value| value >= 0.0) {
-                continue;
-            }
+        if let Some(px) = track.strip_suffix("px")
+            && px.parse::<f32>().is_ok_and(|value| value >= 0.0)
+        {
+            continue;
         }
         return Some(invalid_attr(
             tag,

@@ -100,12 +100,11 @@ fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
             .ok()
             .map(|image| Arc::new(image.to_rgba8()));
     };
-    if let Ok(mut guard) = image_cache().lock() {
-        if let Some(cached) = guard.get(path) {
-            if cached.freshness == freshness {
-                return Some(Arc::clone(&cached.image));
-            }
-        }
+    if let Ok(mut guard) = image_cache().lock()
+        && let Some(cached) = guard.get(path)
+        && cached.freshness == freshness
+    {
+        return Some(Arc::clone(&cached.image));
     }
     let img = Arc::new(image::open(path).ok()?.to_rgba8());
     if let Ok(mut guard) = image_cache().lock() {
@@ -143,12 +142,11 @@ fn file_freshness(path: &Path) -> Option<FileFreshness> {
 
 fn source_identity(path: &Path, freshness: Option<FileFreshness>) -> Arc<Path> {
     let cache = source_identity_cache();
-    if let Ok(mut guard) = cache.lock() {
-        if let Some(cached) = guard.get(path) {
-            if cached.freshness == freshness {
-                return Arc::clone(&cached.identity);
-            }
-        }
+    if let Ok(mut guard) = cache.lock()
+        && let Some(cached) = guard.get(path)
+        && cached.freshness == freshness
+    {
+        return Arc::clone(&cached.identity);
     }
 
     let identity: Arc<Path> = match std::fs::canonicalize(path) {
@@ -207,16 +205,13 @@ fn raster_file_key_with_freshness(
 }
 
 fn svg_file_cacheability(path: &Path) -> Option<(bool, FileFreshness)> {
-    let Some(freshness) = file_freshness(path) else {
-        return None;
-    };
+    let freshness = file_freshness(path)?;
     let cache = svg_cacheability_cache();
-    if let Ok(mut guard) = cache.lock() {
-        if let Some(cached) = guard.get(path) {
-            if cached.freshness == freshness {
-                return Some((cached.cacheable, freshness));
-            }
-        }
+    if let Ok(mut guard) = cache.lock()
+        && let Some(cached) = guard.get(path)
+        && cached.freshness == freshness
+    {
+        return Some((cached.cacheable, freshness));
     }
 
     let Ok(svg_data) = std::fs::read_to_string(path) else {
@@ -446,8 +441,10 @@ fn raster_svg_variant(
     multicolor: bool,
 ) -> Option<RasterVariant> {
     let svg_data = std::fs::read_to_string(path).ok()?;
-    let mut opt = resvg::usvg::Options::default();
-    opt.resources_dir = path.parent().map(|p| p.to_path_buf());
+    let opt = resvg::usvg::Options {
+        resources_dir: path.parent().map(|p| p.to_path_buf()),
+        ..Default::default()
+    };
     let tree = resvg::usvg::Tree::from_str(&svg_data, &opt).ok()?;
     let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
     let scale_x = width as f32 / tree.size().width();
