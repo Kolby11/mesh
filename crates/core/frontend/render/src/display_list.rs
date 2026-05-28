@@ -1331,7 +1331,7 @@ fn collect_display_entries(
     let offset_y = offset_y + transform.translate_y;
 
     if let Some(bounds) = damage_rect_for_node_at(node, offset_x, offset_y) {
-        for slot in primitive_slots_for_node(node) {
+        for_each_primitive_slot(node, |slot| {
             let key = DisplayListKey {
                 node_id: node.id,
                 slot,
@@ -1344,7 +1344,7 @@ fn collect_display_entries(
             };
             out.push((key, entry));
             next.insert(key, entry);
-        }
+        });
     }
 
     let scroll_x = node
@@ -2147,10 +2147,11 @@ fn compute_batch_metrics(entries: &[(DisplayListKey, DisplayListEntry)]) -> Disp
     }
 }
 
-fn primitive_slots_for_node(node: &WidgetNode) -> Vec<DisplayPrimitiveSlot> {
-    let mut slots = Vec::new();
+fn for_each_primitive_slot(node: &WidgetNode, mut visit: impl FnMut(DisplayPrimitiveSlot)) {
+    let mut emitted = false;
     if node.computed_style.background_color.a > 0 {
-        slots.push(DisplayPrimitiveSlot::Background);
+        emitted = true;
+        visit(DisplayPrimitiveSlot::Background);
     }
     if node.computed_style.border_color.a > 0
         && (node.computed_style.border_width.top > 0.0
@@ -2158,17 +2159,23 @@ fn primitive_slots_for_node(node: &WidgetNode) -> Vec<DisplayPrimitiveSlot> {
             || node.computed_style.border_width.bottom > 0.0
             || node.computed_style.border_width.left > 0.0)
     {
-        slots.push(DisplayPrimitiveSlot::Border);
+        emitted = true;
+        visit(DisplayPrimitiveSlot::Border);
     }
     match node.tag.as_str() {
-        "text" => slots.push(DisplayPrimitiveSlot::Text),
-        "icon" => slots.push(DisplayPrimitiveSlot::Icon),
+        "text" => {
+            emitted = true;
+            visit(DisplayPrimitiveSlot::Text);
+        }
+        "icon" => {
+            emitted = true;
+            visit(DisplayPrimitiveSlot::Icon);
+        }
         _ => {}
     }
-    if slots.is_empty() {
-        slots.push(DisplayPrimitiveSlot::Generic);
+    if !emitted {
+        visit(DisplayPrimitiveSlot::Generic);
     }
-    slots
 }
 
 fn damage_rect_for_node_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Option<DamageRect> {
