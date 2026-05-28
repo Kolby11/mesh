@@ -55,11 +55,17 @@ pub struct Theme {
     pub defaults: ThemeDefaults,
     #[serde(default)]
     pub modules: HashMap<String, ThemeModule>,
+    #[serde(skip)]
+    flat_tokens: HashMap<String, TokenValue>,
 }
 
 impl Theme {
     /// Look up a single token by dotted name (e.g. "color.primary").
     pub fn token(&self, name: &str) -> Option<&TokenValue> {
+        if !self.flat_tokens.is_empty() {
+            return self.flat_tokens.get(name);
+        }
+
         match split_explicit_module_token(name) {
             Some((module_id, token_name)) => self
                 .modules
@@ -150,11 +156,34 @@ impl From<RawTheme> for Theme {
         Self {
             id: raw.id,
             name: raw.name,
+            flat_tokens: flatten_tokens(&tokens, &raw.modules),
             tokens,
             defaults,
             modules: raw.modules,
         }
     }
+}
+
+fn flatten_tokens(
+    tokens: &HashMap<String, TokenValue>,
+    modules: &HashMap<String, ThemeModule>,
+) -> HashMap<String, TokenValue> {
+    let module_token_count = modules
+        .values()
+        .map(|module| module.tokens.len())
+        .sum::<usize>();
+    let mut flat = HashMap::with_capacity(tokens.len().saturating_add(module_token_count));
+    flat.extend(
+        tokens
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
+    for (module_id, module) in modules {
+        for (token_name, value) in &module.tokens {
+            flat.insert(format!("{module_id}.{token_name}"), value.clone());
+        }
+    }
+    flat
 }
 
 /// The theme engine manages the active theme and notifies listeners on change.
