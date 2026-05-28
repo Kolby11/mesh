@@ -262,6 +262,12 @@ pub(crate) struct PainterLayer {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+struct ActivePainterLayer {
+    opacity_alpha: u16,
+    filter: PainterFilter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PainterPaint {
     pub color: Color,
     pub style: PainterPaintStyle,
@@ -440,7 +446,7 @@ impl SkiaPaintBackend {
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
         let mut clip_stack: Vec<ClipRect> = Vec::with_capacity(commands.len().min(32));
-        let mut layer_stack: Vec<PainterLayer> = Vec::with_capacity(commands.len().min(8));
+        let mut layer_stack: Vec<ActivePainterLayer> = Vec::with_capacity(commands.len().min(8));
         for command in commands {
             match command {
                 PainterCommand::PushClip(clip) => {
@@ -468,13 +474,7 @@ impl SkiaPaintBackend {
                     {
                         continue;
                     }
-                    let mut effective = *layer;
-                    if let Some(parent) = layer_stack.last() {
-                        effective.opacity = (parent.opacity * layer.opacity).clamp(0.0, 1.0);
-                        if !matches!(parent.filter, PainterFilter::None) {
-                            effective.filter = parent.filter;
-                        }
-                    }
+                    let effective = ActivePainterLayer::from_layer(*layer, layer_stack.last());
                     layer_stack.push(effective);
                 }
                 PainterCommand::PopLayer => {
@@ -1292,17 +1292,38 @@ fn effective_clip(clip: ClipRect, clip_stack: &[ClipRect]) -> ClipRect {
         .unwrap_or(clip)
 }
 
-fn layer_paint(mut paint: PainterPaint, layer_stack: &[PainterLayer]) -> PainterPaint {
-    if let Some(layer) = layer_stack.last() {
-        let alpha = ((paint.color.a as f32) * layer.opacity.clamp(0.0, 1.0))
-            .round()
-            .clamp(0.0, 255.0) as u8;
-        paint.color.a = alpha;
-        if let PainterFilter::Blur(filter) = layer.filter
+impl ActivePainterLayer {
+    fn from_layer(layer: PainterLayer, parent: Option<&ActivePainterLayer>) -> Self {
+        let parent_opacity = parent.map_or(1.0, |layer| layer.opacity_alpha as f32 / 255.0);
+        let opacity_alpha =
+            ((parent_opacity * layer.opacity.clamp(0.0, 1.0) * 255.0).round() as u16).min(255);
+        let filter = parent
+            .filter(|layer| !matches!(layer.filter, PainterFilter::None))
+            .map(|layer| layer.filter)
+            .unwrap_or(layer.filter);
+        Self {
+            opacity_alpha,
+            filter,
+        }
+    }
+
+    fn apply_to_paint(self, mut paint: PainterPaint) -> PainterPaint {
+        if self.opacity_alpha < 255 {
+            paint.color.a =
+                (((paint.color.a as u16) * self.opacity_alpha + 127) / 255).min(255) as u8;
+        }
+        if let PainterFilter::Blur(filter) = self.filter
             && paint.filter.is_none()
         {
             paint.filter = filter;
         }
+        paint
+    }
+}
+
+fn layer_paint(paint: PainterPaint, layer_stack: &[ActivePainterLayer]) -> PainterPaint {
+    if let Some(layer) = layer_stack.last() {
+        return layer.apply_to_paint(paint);
     }
     paint
 }
