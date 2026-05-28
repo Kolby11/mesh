@@ -1235,6 +1235,27 @@ struct DisplayListEntry {
     barrier: Option<DisplayBatchBarrier>,
 }
 
+struct DisplaySignatureHasher(u64);
+
+impl Default for DisplaySignatureHasher {
+    fn default() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+}
+
+impl Hasher for DisplaySignatureHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct PruningMetrics {
     omitted_subtrees: u64,
@@ -2195,7 +2216,7 @@ fn damage_rect_for_node_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> O
 }
 
 fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut hasher = DisplaySignatureHasher::default();
     slot.hash(&mut hasher);
     node.tag.hash(&mut hasher);
     hash_attribute(node, "content", &mut hasher);
@@ -2320,7 +2341,7 @@ fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
 }
 
 fn batch_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut hasher = DisplaySignatureHasher::default();
     slot.hash(&mut hasher);
     node.computed_style.background_color.r.hash(&mut hasher);
     node.computed_style.background_color.g.hash(&mut hasher);
@@ -2351,7 +2372,7 @@ fn batch_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
     hasher.finish()
 }
 
-fn hash_box_shadow(shadow: BoxShadow, hasher: &mut std::collections::hash_map::DefaultHasher) {
+fn hash_box_shadow(shadow: BoxShadow, hasher: &mut DisplaySignatureHasher) {
     shadow.offset_x.to_bits().hash(hasher);
     shadow.offset_y.to_bits().hash(hasher);
     shadow.blur_radius.to_bits().hash(hasher);
@@ -2363,10 +2384,7 @@ fn hash_box_shadow(shadow: BoxShadow, hasher: &mut std::collections::hash_map::D
     shadow.inset.hash(hasher);
 }
 
-fn hash_background_paint(
-    paint: &BackgroundPaint,
-    hasher: &mut std::collections::hash_map::DefaultHasher,
-) {
+fn hash_background_paint(paint: &BackgroundPaint, hasher: &mut DisplaySignatureHasher) {
     match paint {
         BackgroundPaint::None => 0_u8.hash(hasher),
         BackgroundPaint::Image(source) => {
@@ -2387,11 +2405,7 @@ fn hash_background_paint(
     }
 }
 
-fn hash_attribute(
-    node: &WidgetNode,
-    key: &str,
-    hasher: &mut std::collections::hash_map::DefaultHasher,
-) {
+fn hash_attribute(node: &WidgetNode, key: &str, hasher: &mut DisplaySignatureHasher) {
     key.hash(hasher);
     node.attributes.get(key).hash(hasher);
 }
