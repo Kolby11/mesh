@@ -13,6 +13,209 @@ fn ellipsis_cache() -> &'static Mutex<LruCache<u64, EllipsisCacheEntry>> {
     ELLIPSIS_CACHE.get_or_init(|| Mutex::new(LruCache::new(ELLIPSIS_CACHE_CAPACITY)))
 }
 
+pub(super) trait TextRenderCache {
+    fn measure_styled(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        max_width: Option<f32>,
+    ) -> (f32, f32);
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_clipped(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        buffer: &mut PixelBuffer,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    );
+
+    #[allow(clippy::too_many_arguments)]
+    fn selection_geometry(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        max_width: Option<f32>,
+        anchor: (f32, f32),
+        focus: (f32, f32),
+    ) -> Option<TextSelectionGeometry>;
+}
+
+impl TextRenderCache for TextRenderer {
+    fn measure_styled(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        max_width: Option<f32>,
+    ) -> (f32, f32) {
+        TextRenderer::measure_styled(
+            self,
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            max_width,
+        )
+    }
+
+    fn render_clipped(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        buffer: &mut PixelBuffer,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        TextRenderer::render_clipped(
+            self,
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            align,
+            color,
+            buffer,
+            x,
+            y,
+            clip,
+            max_width,
+        );
+    }
+
+    fn selection_geometry(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        max_width: Option<f32>,
+        anchor: (f32, f32),
+        focus: (f32, f32),
+    ) -> Option<TextSelectionGeometry> {
+        TextRenderer::selection_geometry(
+            self,
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            align,
+            max_width,
+            anchor,
+            focus,
+        )
+    }
+}
+
+impl TextRenderCache for SharedTextMeasurer {
+    fn measure_styled(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        max_width: Option<f32>,
+    ) -> (f32, f32) {
+        SharedTextMeasurer::measure_styled(
+            self,
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            max_width,
+        )
+    }
+
+    fn render_clipped(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        buffer: &mut PixelBuffer,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        SharedTextMeasurer::render_clipped(
+            self,
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            align,
+            color,
+            buffer,
+            x,
+            y,
+            clip,
+            max_width,
+        );
+    }
+
+    fn selection_geometry(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        max_width: Option<f32>,
+        anchor: (f32, f32),
+        focus: (f32, f32),
+    ) -> Option<TextSelectionGeometry> {
+        SharedTextMeasurer::selection_geometry(
+            self,
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            align,
+            max_width,
+            anchor,
+            focus,
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct EllipsisCacheEntry {
     text: String,
@@ -338,7 +541,7 @@ impl FrontendRenderEngine {
 }
 
 pub(super) fn truncate_with_ellipsis(
-    renderer: &TextRenderer,
+    renderer: &impl TextRenderCache,
     text: &str,
     font_family: &str,
     font_size: f32,
@@ -434,7 +637,7 @@ pub(super) fn truncate_with_ellipsis(
 }
 
 pub(super) fn selection_geometry(
-    renderer: &TextRenderer,
+    renderer: &impl TextRenderCache,
     node: &WidgetNode,
     style: &mesh_core_elements::style::ComputedStyle,
     display_text: &str,
@@ -501,7 +704,7 @@ pub(super) fn selection_geometry(
 }
 
 fn selection_geometry_for_display(
-    renderer: &TextRenderer,
+    renderer: &impl TextRenderCache,
     node: &DisplayPaintNode,
     display_text: &str,
     align: TextAlign,
@@ -550,7 +753,7 @@ fn selection_geometry_for_display(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_selection_highlights(
     paint_engine: &FrontendRenderEngine,
-    renderer: &TextRenderer,
+    renderer: &impl TextRenderCache,
     buffer: &mut PixelBuffer,
     tx: i32,
     ty: i32,
@@ -656,7 +859,7 @@ mod tests {
 #[allow(clippy::too_many_arguments)]
 fn render_display_selection_highlights(
     paint_engine: &FrontendRenderEngine,
-    renderer: &TextRenderer,
+    renderer: &impl TextRenderCache,
     buffer: &mut PixelBuffer,
     tx: i32,
     ty: i32,

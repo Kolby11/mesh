@@ -561,6 +561,99 @@ impl mesh_core_elements::TextMeasurer for SharedTextMeasurer {
     }
 }
 
+impl SharedTextMeasurer {
+    pub fn cache_metrics(&self) -> TextCacheMetrics {
+        RENDERER.with(|renderer| renderer.borrow().cache_metrics())
+    }
+
+    pub fn reset_cache_metrics(&self) {
+        RENDERER.with(|renderer| renderer.borrow().reset_cache_metrics());
+    }
+
+    pub fn measure_styled(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        max_width: Option<f32>,
+    ) -> (f32, f32) {
+        RENDERER.with(|renderer| {
+            renderer.borrow().measure_styled(
+                text,
+                font_family,
+                font_size,
+                font_weight,
+                line_height,
+                max_width,
+            )
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_clipped(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        buffer: &mut PixelBuffer,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        RENDERER.with(|renderer| {
+            renderer.borrow().render_clipped(
+                text,
+                font_family,
+                font_size,
+                font_weight,
+                line_height,
+                align,
+                color,
+                buffer,
+                x,
+                y,
+                clip,
+                max_width,
+            );
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn selection_geometry(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        max_width: Option<f32>,
+        anchor: (f32, f32),
+        focus: (f32, f32),
+    ) -> Option<TextSelectionGeometry> {
+        RENDERER.with(|renderer| {
+            renderer.borrow().selection_geometry(
+                text,
+                font_family,
+                font_size,
+                font_weight,
+                line_height,
+                align,
+                max_width,
+                anchor,
+                focus,
+            )
+        })
+    }
+}
+
 fn text_config(
     font_family: &str,
     font_size: f32,

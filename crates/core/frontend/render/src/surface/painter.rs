@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use super::PixelBuffer;
 use super::icon;
-use super::text::{TextCacheMetrics, TextRenderer, TextSelectionGeometry};
+use super::text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer, TextSelectionGeometry};
 #[allow(unused_imports)]
 pub(crate) use backend::{
     MAX_EFFECT_BLUR_RADIUS, PaintBackend, PainterBackendCapabilities, PainterBlendMode,
@@ -85,7 +85,7 @@ impl TooltipPaintColors {
 pub struct FrontendRenderEngine {
     paint_backend: Box<dyn PaintBackend>,
     painter_diagnostics: Mutex<Vec<PainterDiagnostic>>,
-    text_renderer: TextRenderer,
+    text_renderer: SharedTextMeasurer,
     tooltip_colors: Cell<TooltipPaintColors>,
     render_scratch: RefCell<RenderScratch>,
 }
@@ -128,7 +128,7 @@ impl FrontendRenderEngine {
         Self {
             paint_backend: Box::<SkiaPaintBackend>::default(),
             painter_diagnostics: Mutex::new(Vec::new()),
-            text_renderer: TextRenderer::new(),
+            text_renderer: SharedTextMeasurer,
             tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
             render_scratch: RefCell::new(RenderScratch::default()),
         }
@@ -139,7 +139,7 @@ impl FrontendRenderEngine {
         Self {
             paint_backend,
             painter_diagnostics: Mutex::new(Vec::new()),
-            text_renderer: TextRenderer::new(),
+            text_renderer: SharedTextMeasurer,
             tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
             render_scratch: RefCell::new(RenderScratch::default()),
         }

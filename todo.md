@@ -38,7 +38,7 @@ Remove the icon assts from the core/ui. The icons should be installed into a fol
 Baseline from this audit:
 
 - [ ] Treat the older performance notes below and `docs/performance-roadmap.md` as partially stale before executing them. The codebase already has persistent paint buffers, retained widget/render-object/display-list state, partial damage presentation, SHM buffer reuse, text/glyph/icon caches, and per-stage profiling.
-- [ ] Reconcile or archive `TEXT_RENDERING_TODO.md`. The current renderer already has shaped text rendering, layout measurement, glyph caching, and text paint paths; the remaining issues are cache sharing, eviction, and hot-path cost.
+- [x] Reconcile or archive `TEXT_RENDERING_TODO.md`. Replaced the stale placeholder-integration plan with current text-rendering performance notes covering the completed text/input/tooltip/selection paths and remaining cache/profiling work.
 
 P0 - scheduling, invalidation, and full-tree work:
 
@@ -67,14 +67,14 @@ P0 - scheduling, invalidation, and full-tree work:
 - [ ] Narrow script/service invalidation below "tree rebuild plus pixel repaint". `FrontendSurfaceComponent::invalidate_script_state` marks `TREE_REBUILD` and `surface_pixels_invalid` for every script state change. Add typed state dependencies so simple text/value changes dirty only the dependent nodes, style slots, layout slots, and paint slots.
 - [x] Split visual dirtiness from metrics/accessibility dirtiness. `invalidation_requires_pixel_repaint` treats accessibility and element metrics as repaint reasons even when pixels do not change. Fixed: removed `ACCESSIBILITY` and `METRICS` from the pixel-repaint gate in `component.rs`.
 - [ ] Avoid full-tree restyle for safe interaction changes. `component/rendering.rs` still restyles the retained tree for hover/focus/active because relationship selectors may affect descendants. Use selector dependency analysis: direct/simple selectors restyle only the affected node/path, while descendant/sibling selectors expand to the minimum affected subtree.
-- [ ] Cache `StyleRuleIndex` per module/theme/rule generation. `crates/core/ui/elements/src/style/resolve.rs` rebuilds rule indexes and allocates selector candidate sets during restyle.
+- [x] Cache `StyleRuleIndex` per module/theme/rule generation. `FrontendSurfaceComponent` now keeps `cached_restyle_rules` plus `cached_style_rule_index`, reuses the index across restyle passes, and clears both caches on source/module reload.
 - [ ] Replace per-node string/hash-heavy style matching with interned or typed node keys. `StyleNodeAttrs::from_node` splits classes and allocates strings/sets for every node during restyle.
 - [x] Reduce per-node style attr allocation. `StyleNodeAttrs::from_node` now avoids the extra `StyleNodeAttrs::new` normalization pass and no longer builds a class `HashSet`; class checks use the existing class vector.
 - [x] Remove style candidate hash-set allocation. `StyleRuleIndex::candidate_rules` now collects candidate rule ids into a vector, sorts, and deduplicates instead of hashing ids per node.
 - [x] Remove child-vector churn during restyle recursion. `ui/elements/src/style/resolve.rs` no longer `mem::take`s every node's children while restyling; it recurses over `&mut node.children` directly.
 - [ ] Make `IntrinsicLayoutCache` real and retain Taffy layout state. First pass implements a retained 512-entry LRU for intrinsic text measurements in `crates/core/ui/elements/src/layout.rs`, shared by text/style/width rather than node id. Remaining work: retain Taffy nodes/layout state instead of rebuilding a fresh tree and node maps every layout.
 - [x] Avoid empty child-vector allocation for layout leaves. `ui/elements/src/layout.rs::build_taffy_tree` now only allocates a child vector for nodes that actually have children.
-- [ ] Share text measurement/layout cache between layout and paint. Layout uses `SharedTextMeasurer` with a separate thread-local `TextRenderer`; paint uses the frontend renderer's `TextRenderer`. This can shape/measure the same text twice in one frame.
+- [x] Share text measurement/layout cache between layout and paint. `FrontendRenderEngine` now uses `SharedTextMeasurer` for paint too, so layout and paint route through the same thread-local `TextRenderer` and share shaped-layout cache entries within the render thread.
 - [x] Replace full tree cloning in focus transfer. `FrontendSurfaceComponent::receive_focus_transfer` now collects focus traversal from a borrowed retained tree and applies focus from that traversal instead of cloning `last_tree`.
 
 P1 - renderer hot paths:
