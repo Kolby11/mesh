@@ -64,23 +64,21 @@
 
 ## Traceability
 
-*Filled by roadmapper.*
-
 | REQ-ID | Phase | Notes |
 |--------|-------|-------|
-| POOL-01 | | |
-| POOL-02 | | |
-| POOL-03 | | |
-| POOL-04 | | |
-| ISO-01 | | |
-| ISO-02 | | |
-| ISO-03 | | |
-| ISO-04 | | |
-| INIT-01 | | |
-| INIT-02 | | |
-| INIT-03 | | |
-| CACHE-01 | | |
-| CACHE-02 | | |
-| CACHE-03 | | |
-| INT-01 | | |
-| INT-02 | | |
+| POOL-01 | Phase 92 | VM pool construction with sandbox initialization |
+| POOL-02 | Phase 92 | PooledVm RAII checkout/checkin |
+| POOL-03 | Phase 92 | On-demand growth with 4 VM floor |
+| POOL-04 | Phase 92 | Thread ID assertion in PooledVm drop |
+| ISO-01 | Phase 94 | Thread::sandbox() per-component _ENV |
+| ISO-02 | Phase 93 (foundation), Phase 94 (completion) | install_host_api refactor to &Table target |
+| ISO-03 | Phase 94 | Explicit env_table drop + registry key cleanup on checkin |
+| ISO-04 | Phase 93 | pool_baseline_globals snapshot at pool VM construction |
+| INIT-01 | Phase 94 | ScriptContext vm: Option<PooledVm> + env: Option<Table> + ensure_initialized() |
+| INIT-02 | Phase 94 | Zero pool slots for unmounted components |
+| INIT-03 | Phase 95 | BackendScriptContext deferred Lua::new() |
+| CACHE-01 | Phase 92 | ChunkCache process-wide FNV64-keyed source string store |
+| CACHE-02 | Phase 92 | Checkout loads cached source string |
+| CACHE-03 | Phase 94 | Hot-reload mtime watcher cache eviction (wiring in Phase 95) |
+| INT-01 | Phase 95 | FrontendSurfaceComponent::create_runtime_for_component wired to ScriptContext::new_lazy() |
+| INT-02 | Phase 95 | Shipped surface regression proof |

@@ -6,28 +6,28 @@ status: planning
 last_updated: "2026-06-02T12:05:23.237Z"
 last_activity: 2026-06-02
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
   percent: 0
 ---
 
-# State: MESH v1.16
+# State: MESH v1.17
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-26)
+See: `.planning/PROJECT.md` (updated 2026-06-02)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.16 Element Library
+**Current focus:** v1.17 Performance: Scripting VM Consolidation
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 92 — VM Pool Foundation
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-02 — Milestone v1.17 started
+Status: Not started
+Last activity: 2026-06-02 — Roadmap created for v1.17
 
 ## Decisions
 
@@ -212,8 +212,8 @@ Last activity: 2026-06-02 — Milestone v1.17 started
 
 ## Session
 
-Last session: 2026-05-24T07:33:14.534Z
-Stopped At: Phase 71 completed
+Last session: 2026-06-02T00:00:00.000Z
+Stopped At: Roadmap created for v1.17
 Resume File: None
 
 ## Accumulated Context
@@ -230,6 +230,7 @@ Resume File: None
 - v1.7 continues phase numbering after the v1.6 planned roadmap and starts at Phase 37.
 - v1.7 archived on 2026-05-18 after phases 37-41 completed.
 - v1.8 continued after v1.7 Phase 41 and was archived on 2026-05-18 after phases 42-45 completed.
+- v1.17 continues phase numbering after v1.16 and starts at Phase 92.
 
 ## Deferred Items
 
@@ -311,6 +312,8 @@ Items acknowledged and deferred at `v1.16` close on 2026-05-26:
 | Project context | `.planning/PROJECT.md` |
 | Roadmap | `.planning/ROADMAP.md` |
 | State | `.planning/STATE.md` |
+| v1.17 requirements | `.planning/REQUIREMENTS.md` |
+| v1.17 research summary | `.planning/research/SUMMARY.md` |
 | v1.5 archived requirements | `.planning/milestones/v1.5-REQUIREMENTS.md` |
 | v1.5 archived roadmap | `.planning/milestones/v1.5-ROADMAP.md` |
 | v1.5 audit | `.planning/milestones/v1.5-MILESTONE-AUDIT.md` |
@@ -337,8 +340,4 @@ Items acknowledged and deferred at `v1.16` close on 2026-05-26:
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-05-26 after milestone v1.16 archive*
-
-## Operator Next Steps
-
-- Start the next milestone with /gsd-new-milestone
+*State updated: 2026-06-02 — v1.17 roadmap created; current position is Phase 92: VM Pool Foundation*
