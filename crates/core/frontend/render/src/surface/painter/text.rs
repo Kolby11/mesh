@@ -1,5 +1,6 @@
 use crate::display_list::{DisplayPaintNode, DisplayTextPaint};
 use mesh_core_elements::lru::LruCache;
+use skia_safe::Canvas;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
@@ -34,6 +35,23 @@ pub(super) trait TextRenderCache {
         align: TextAlign,
         color: Color,
         buffer: &mut PixelBuffer,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    );
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_clipped_on_canvas(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
         x: u32,
         y: u32,
         clip: (u32, u32, u32, u32),
@@ -105,6 +123,27 @@ impl TextRenderCache for TextRenderer {
             y,
             clip,
             max_width,
+        );
+    }
+
+    fn render_clipped_on_canvas(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        TextRenderer::render_clipped_on_canvas(
+            self, text, font_family, font_size, font_weight, line_height, align, color, canvas, x,
+            y, clip, max_width,
         );
     }
 
@@ -185,6 +224,27 @@ impl TextRenderCache for SharedTextMeasurer {
             y,
             clip,
             max_width,
+        );
+    }
+
+    fn render_clipped_on_canvas(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        SharedTextMeasurer::render_clipped_on_canvas(
+            self, text, font_family, font_size, font_weight, line_height, align, color, canvas, x,
+            y, clip, max_width,
         );
     }
 
@@ -447,7 +507,7 @@ impl FrontendRenderEngine {
             inner_width,
             scale,
         ) {
-            render_display_selection_highlights(
+            render_display_selection_highlights_in_session(
                 self,
                 &self.text_renderer,
                 session,
@@ -881,9 +941,9 @@ mod tests {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_display_selection_highlights(
+fn render_display_selection_highlights_in_session(
     paint_engine: &FrontendRenderEngine,
-    renderer: &SharedTextMeasurer,
+    renderer: &impl TextRenderCache,
     session: &mut PixelCanvasSession<'_>,
     tx: i32,
     ty: i32,
@@ -923,14 +983,7 @@ fn render_display_selection_highlights(
             height: highlight.height.ceil() as i32,
         };
         let highlight_clip = intersect_clip(clip, rect);
-        paint_engine.execute_painter_commands_in_session(
-            session,
-            &[PainterCommand::DrawRect {
-                rect,
-                paint: PainterPaint::fill(selection_background),
-                clip: highlight_clip,
-            }],
-        );
+        paint_engine.fill_rect_clipped_in_session(session, rect, selection_background, highlight_clip);
         session.with_canvas(|canvas| {
             renderer.render_clipped_on_canvas(
                 display_text,

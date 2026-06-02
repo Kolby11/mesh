@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use mesh_core_elements::WidgetNode;
 use mesh_core_frontend::FrontendCompositionResolver;
@@ -12,7 +12,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         host: &mesh_core_module::Manifest,
         host_instance_key: &str,
         alias: &str,
-        props: &HashMap<String, String>,
+        props: &BTreeMap<String, String>,
         container_width: f32,
         container_height: f32,
     ) -> Option<WidgetNode> {

@@ -2,7 +2,7 @@
 use crate::accessibility::AccessibilityInfo;
 use crate::layout::LayoutRect;
 use crate::style::ComputedStyle;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Live interaction state for a single node.
@@ -46,10 +46,7 @@ pub struct WidgetNode {
     /// Tag name: `row`, `column`, `text`, `button`, `image`, `icon`, etc.
     pub tag: String,
     /// Resolved attributes (after binding evaluation).
-    pub attributes: HashMap<String, String>,
-    /// Cached split tokens for the `class` attribute.
-    cached_class_source: Option<String>,
-    cached_classes: Vec<String>,
+    pub attributes: BTreeMap<String, String>,
     /// Fully resolved style (theme tokens → concrete values).
     pub computed_style: ComputedStyle,
     /// Layout rectangle computed by the layout engine.
@@ -59,7 +56,7 @@ pub struct WidgetNode {
     /// Accessibility metadata.
     pub accessibility: AccessibilityInfo,
     /// Event handler mappings: event name → script handler name.
-    pub event_handlers: HashMap<String, String>,
+    pub event_handlers: BTreeMap<String, String>,
     /// Live interaction state (hover, focus, active, etc.).
     pub state: ElementState,
 }
@@ -70,14 +67,12 @@ impl WidgetNode {
         Self {
             id: next_node_id(),
             tag: tag.into(),
-            attributes: HashMap::new(),
-            cached_class_source: None,
-            cached_classes: Vec::new(),
+            attributes: BTreeMap::new(),
             computed_style: ComputedStyle::default(),
             layout: LayoutRect::default(),
             children: Vec::new(),
             accessibility: AccessibilityInfo::default(),
-            event_handlers: HashMap::new(),
+            event_handlers: BTreeMap::new(),
             state: ElementState::default(),
         }
     }
@@ -111,36 +106,5 @@ impl WidgetNode {
     /// Count total nodes in this subtree.
     pub fn node_count(&self) -> usize {
         1 + self.children.iter().map(|c| c.node_count()).sum::<usize>()
-    }
-
-    /// Refresh the cached whitespace-split class tokens after mutating
-    /// `attributes["class"]`.
-    pub fn refresh_class_cache(&mut self) {
-        let Some(class_source) = self.attributes.get("class") else {
-            self.cached_class_source = None;
-            self.cached_classes.clear();
-            return;
-        };
-
-        if self.cached_class_source.as_deref() == Some(class_source.as_str()) {
-            return;
-        }
-
-        self.cached_classes.clear();
-        self.cached_classes
-            .extend(class_source.split_whitespace().map(str::to_owned));
-        self.cached_class_source = Some(class_source.clone());
-    }
-
-    /// Borrow cached class tokens when they match the current `class`
-    /// attribute. Returns `None` if direct attribute mutation left the cache
-    /// stale; callers can split the raw attribute as a correctness fallback.
-    pub fn cached_classes(&self) -> Option<&[String]> {
-        let class_source = self.attributes.get("class")?;
-        if self.cached_class_source.as_deref() == Some(class_source.as_str()) {
-            Some(&self.cached_classes)
-        } else {
-            None
-        }
     }
 }

@@ -10,9 +10,7 @@ use super::profiling;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::SupportedAxes;
-use skia_safe::{
-    AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
-};
+use skia_safe::{AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images};
 use std::cell::RefCell;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -64,13 +62,6 @@ struct CachedGlyph {
     pixels: Arc<[u8]>,
 }
 
-struct GlyphAtlasEntry {
-    width: u32,
-    height: u32,
-    placement_left: i32,
-    image: skia_safe::Image,
-}
-
 type FontBytesCache = Mutex<LruCache<Arc<Path>, Arc<[u8]>>>;
 
 static FONT_BYTES: OnceLock<FontBytesCache> = OnceLock::new();
@@ -78,9 +69,12 @@ static GLYPH_CACHE: OnceLock<Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>>
 const FONT_BYTES_CACHE_CAPACITY: usize = 32;
 const GLYPH_CACHE_CAPACITY: usize = 1024;
 
+// Thread-local Skia image cache for icon-font glyph renders, keyed by GlyphCacheKey.
+// Avoids rebuilding Skia A8 images on every paint frame.
+const ICON_GLYPH_SKIA_CAPACITY: usize = 512;
 thread_local! {
-    static GLYPH_ATLAS: RefCell<LruCache<GlyphCacheKey, Option<GlyphAtlasEntry>>> =
-        RefCell::new(LruCache::new(GLYPH_CACHE_CAPACITY));
+    static ICON_GLYPH_SKIA: RefCell<LruCache<GlyphCacheKey, skia_safe::Image>> =
+        RefCell::new(LruCache::new(ICON_GLYPH_SKIA_CAPACITY));
 }
 
 fn font_bytes_cache() -> &'static FontBytesCache {
@@ -197,15 +191,24 @@ fn quantize(value: Option<f32>) -> i32 {
     }
 }
 
-fn glyph_cache_key(
+/// Render a glyph from a font pack into the buffer at the given destination
+/// rectangle, recoloring the alpha mask to `tint`. Returns `false` when the
+/// glyph couldn't be rasterized (font missing, unmapped codepoint, color
+/// glyph) so the caller can fall back to the built-in missing-icon glyph.
+pub fn draw_font_glyph(
+    buffer: &mut PixelBuffer,
     font_path: &Path,
     codepoint: u32,
-    px: u32,
-    tint: Color,
     supported_axes: SupportedAxes,
     axes: GlyphAxes,
-) -> GlyphCacheKey {
-    GlyphCacheKey {
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+) -> bool {
+    let px = dest_w.max(dest_h).max(1) as u32;
+    let key = GlyphCacheKey {
         font_path: hash_path(font_path),
         codepoint,
         px,
@@ -230,18 +233,9 @@ fn glyph_cache_key(
         } else {
             i32::MIN
         },
-    }
-}
+    };
 
-fn cached_glyph(
-    key: GlyphCacheKey,
-    font_path: &Path,
-    codepoint: u32,
-    px: u32,
-    axes: GlyphAxes,
-    supported_axes: SupportedAxes,
-) -> Option<CachedGlyph> {
-    match cache_lookup(key) {
+    let glyph = match cache_lookup(key) {
         Some(value) => value,
         None => {
             let raster_started = std::time::Instant::now();
@@ -250,47 +244,7 @@ fn cached_glyph(
             cache_store(key, value.clone());
             value
         }
-    }
-}
-
-fn glyph_atlas_entry(glyph: CachedGlyph) -> Option<GlyphAtlasEntry> {
-    if glyph.width == 0 || glyph.height == 0 || glyph.pixels.is_empty() {
-        return None;
-    }
-    let info = ImageInfo::new(
-        (glyph.width as i32, glyph.height as i32),
-        ColorType::Alpha8,
-        AlphaType::Premul,
-        None,
-    );
-    let data = Data::new_copy(glyph.pixels.as_ref());
-    Some(GlyphAtlasEntry {
-        width: glyph.width,
-        height: glyph.height,
-        placement_left: glyph.placement_left,
-        image: images::raster_from_data(&info, data, glyph.width as usize)?,
-    })
-}
-
-/// Render a glyph from a font pack into the buffer at the given destination
-/// rectangle, recoloring the alpha mask to `tint`. Returns `false` when the
-/// glyph couldn't be rasterized (font missing, unmapped codepoint, color
-/// glyph) so the caller can fall back to the built-in missing-icon glyph.
-pub fn draw_font_glyph(
-    buffer: &mut PixelBuffer,
-    font_path: &Path,
-    codepoint: u32,
-    supported_axes: SupportedAxes,
-    axes: GlyphAxes,
-    dest_x: i32,
-    dest_y: i32,
-    dest_w: i32,
-    dest_h: i32,
-    tint: Color,
-) -> bool {
-    let px = dest_w.max(dest_h).max(1) as u32;
-    let key = glyph_cache_key(font_path, codepoint, px, tint, supported_axes, axes);
-    let glyph = cached_glyph(key, font_path, codepoint, px, axes, supported_axes);
+    };
     let Some(glyph) = glyph else {
         return false;
     };
@@ -326,10 +280,9 @@ pub fn draw_font_glyph(
     true
 }
 
-/// Canvas-backed variant of [`draw_font_glyph`]. Reuses the rasterized glyph
-/// mask cache and a thread-local Skia image atlas, so icon-font targets avoid
-/// raw pixel mutation in retained display-list paint.
-#[allow(clippy::too_many_arguments)]
+/// Render a glyph from a font pack onto a Skia canvas, using a thread-local
+/// Skia image cache to avoid rebuilding the A8 image on every paint frame.
+/// Returns `false` when the glyph couldn't be rasterized.
 pub fn draw_font_glyph_on_canvas(
     canvas: &Canvas,
     font_path: &Path,
@@ -343,45 +296,90 @@ pub fn draw_font_glyph_on_canvas(
     tint: Color,
 ) -> bool {
     let px = dest_w.max(dest_h).max(1) as u32;
-    let key = glyph_cache_key(font_path, codepoint, px, tint, supported_axes, axes);
-    let has_entry = GLYPH_ATLAS.with(|atlas_cell| atlas_cell.borrow_mut().get(&key).is_some());
-    if !has_entry {
-        let entry = cached_glyph(key, font_path, codepoint, px, axes, supported_axes)
-            .and_then(glyph_atlas_entry);
-        GLYPH_ATLAS.with(|atlas_cell| {
-            atlas_cell.borrow_mut().insert(key, entry);
-        });
-    }
+    let key = GlyphCacheKey {
+        font_path: hash_path(font_path),
+        codepoint,
+        px,
+        color: encode_color(tint),
+        fill_q: if supported_axes.fill {
+            quantize(axes.fill)
+        } else {
+            i32::MIN
+        },
+        weight_q: if supported_axes.weight {
+            quantize(axes.weight)
+        } else {
+            i32::MIN
+        },
+        grade_q: if supported_axes.grade {
+            quantize(axes.grade)
+        } else {
+            i32::MIN
+        },
+        opsz_q: if supported_axes.optical_size {
+            quantize(axes.optical_size)
+        } else {
+            i32::MIN
+        },
+    };
 
-    GLYPH_ATLAS.with(|atlas_cell| {
-        let mut atlas = atlas_cell.borrow_mut();
-        let Some(Some(entry)) = atlas.get(&key) else {
-            return false;
-        };
+    let glyph = match cache_lookup(key) {
+        Some(value) => value,
+        None => {
+            let raster_started = std::time::Instant::now();
+            let value = rasterize(font_path, codepoint, px, axes, supported_axes);
+            profiling::record_icon_image_raster(raster_started.elapsed());
+            cache_store(key, value.clone());
+            value
+        }
+    };
+    let Some(glyph) = glyph else {
+        return false;
+    };
 
-        let pad_x = ((dest_w - entry.width as i32).max(0)) / 2;
-        let pad_y = ((dest_h - entry.height as i32).max(0)) / 2;
-        let origin_x = dest_x + pad_x + entry.placement_left.min(0).abs();
-        let origin_y = dest_y + pad_y;
-        let dest = Rect::from_xywh(
-            origin_x as f32,
-            origin_y as f32,
-            entry.width as f32,
-            entry.height as f32,
-        );
-
-        let mut paint = Paint::default();
-        paint.set_anti_alias(false);
-        paint.set_argb(tint.a, tint.r, tint.g, tint.b);
-        canvas.draw_image_rect_with_sampling_options(
-            &entry.image,
+    let skia_image = ICON_GLYPH_SKIA.with(|cell| {
+        let mut atlas = cell.borrow_mut();
+        if let Some(img) = atlas.get(&key) {
+            return Some(img.clone());
+        }
+        let info = ImageInfo::new(
+            (glyph.width as i32, glyph.height as i32),
+            ColorType::Alpha8,
+            AlphaType::Premul,
             None,
-            dest,
-            SamplingOptions::default(),
-            &paint,
         );
-        true
-    })
+        let row_bytes = glyph.width as usize;
+        let data = Data::new_copy(&glyph.pixels);
+        let img = images::raster_from_data(&info, data, row_bytes)?;
+        atlas.insert(key, img.clone());
+        Some(img)
+    });
+    let Some(skia_image) = skia_image else {
+        return false;
+    };
+
+    let pad_x = ((dest_w - glyph.width as i32).max(0)) / 2;
+    let pad_y = ((dest_h - glyph.height as i32).max(0)) / 2;
+    let origin_x = dest_x + pad_x + glyph.placement_left.min(0).abs();
+    let origin_y = dest_y + pad_y;
+
+    let dest_rect = Rect::from_xywh(
+        origin_x as f32,
+        origin_y as f32,
+        glyph.width as f32,
+        glyph.height as f32,
+    );
+    let mut paint = Paint::default();
+    paint.set_anti_alias(false);
+    paint.set_argb(tint.a, tint.r, tint.g, tint.b);
+    canvas.draw_image_rect_with_sampling_options(
+        &skia_image,
+        None,
+        dest_rect,
+        SamplingOptions::default(),
+        &paint,
+    );
+    true
 }
 
 #[cfg(test)]

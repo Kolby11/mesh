@@ -295,32 +295,32 @@ fn style_fingerprint(style: &ComputedStyle) -> u64 {
     hash_corners(style.border_radius, &mut hasher);
     style.opacity.to_bits().hash(&mut hasher);
     hash_transform(style.transform, &mut hasher);
-    hash_debug(&style.transition, &mut hasher);
-    hash_debug(&style.animation, &mut hasher);
-    hash_debug(&style.overflow_x, &mut hasher);
-    hash_debug(&style.overflow_y, &mut hasher);
+    style.transition.hash(&mut hasher);
+    style.animation.hash(&mut hasher);
+    style.overflow_x.hash(&mut hasher);
+    style.overflow_y.hash(&mut hasher);
     style.font_family.hash(&mut hasher);
     style.font_size.to_bits().hash(&mut hasher);
     style.font_weight.hash(&mut hasher);
     hash_color(style.color, &mut hasher);
-    hash_debug(&style.text_align, &mut hasher);
+    style.text_align.hash(&mut hasher);
     style.line_height.to_bits().hash(&mut hasher);
-    hash_debug(&style.font_style, &mut hasher);
+    style.font_style.hash(&mut hasher);
     style.letter_spacing.to_bits().hash(&mut hasher);
-    hash_debug(&style.text_overflow, &mut hasher);
-    hash_debug(&style.text_direction, &mut hasher);
-    hash_debug(&style.display, &mut hasher);
-    hash_debug(&style.direction, &mut hasher);
-    hash_debug(&style.justify_content, &mut hasher);
-    hash_debug(&style.align_items, &mut hasher);
-    hash_debug(&style.align_content, &mut hasher);
+    style.text_overflow.hash(&mut hasher);
+    style.text_direction.hash(&mut hasher);
+    style.display.hash(&mut hasher);
+    style.direction.hash(&mut hasher);
+    style.justify_content.hash(&mut hasher);
+    style.align_items.hash(&mut hasher);
+    style.align_content.hash(&mut hasher);
     style.gap.to_bits().hash(&mut hasher);
     style.flex_grow.to_bits().hash(&mut hasher);
     style.flex_shrink.to_bits().hash(&mut hasher);
     hash_dimension(style.flex_basis, &mut hasher);
-    hash_debug(&style.flex_wrap, &mut hasher);
-    hash_debug(&style.align_self, &mut hasher);
-    hash_debug(&style.position, &mut hasher);
+    style.flex_wrap.hash(&mut hasher);
+    style.align_self.hash(&mut hasher);
+    style.position.hash(&mut hasher);
     style.z_index.hash(&mut hasher);
     hash_option_f32(style.inset_top, &mut hasher);
     hash_option_f32(style.inset_right, &mut hasher);
@@ -336,15 +336,11 @@ fn style_fingerprint(style: &ComputedStyle) -> u64 {
 fn attributes_fingerprint(node: &WidgetNode) -> u64 {
     let mut hasher = RuntimeTreeHasher::default();
     node.tag.hash(&mut hasher);
-    let mut attributes: Vec<_> = node.attributes.iter().collect();
-    attributes.sort_by(|(left, _), (right, _)| left.cmp(right));
-    for (key, value) in attributes {
+    for (key, value) in &node.attributes {
         key.hash(&mut hasher);
         value.hash(&mut hasher);
     }
-    let mut handlers: Vec<_> = node.event_handlers.iter().collect();
-    handlers.sort_by(|(left, _), (right, _)| left.cmp(right));
-    for (event, handler) in handlers {
+    for (event, handler) in &node.event_handlers {
         event.hash(&mut hasher);
         handler.hash(&mut hasher);
     }
@@ -423,9 +419,6 @@ fn hash_option_f32(value: Option<f32>, hasher: &mut impl Hasher) {
     }
 }
 
-fn hash_debug(value: &impl std::fmt::Debug, hasher: &mut impl Hasher) {
-    format!("{value:?}").hash(hasher);
-}
 
 /// Collect every `_mesh_key` present in the fully built and restyled widget tree.
 /// Used by `FrontendSurfaceComponent::prune_stale_interaction_targets` to determine
@@ -594,8 +587,12 @@ pub(super) fn annotate_runtime_tree(
             } else {
                 preserved_value.unwrap_or(0.0)
             };
-            node.attributes
-                .insert("value".into(), format!("{value:.2}"));
+            {
+                use std::fmt::Write as _;
+                let entry = node.attributes.entry("value".into()).or_insert_with(String::new);
+                entry.clear();
+                let _ = write!(entry, "{:.2}", value);
+            }
         }
         "switch" | "checkbox" => {
             node.attributes.insert(
@@ -635,10 +632,15 @@ pub(super) fn annotate_runtime_tree(
     }
 
     let offset = scroll_offsets.get(&key).copied().unwrap_or_default();
-    node.attributes
-        .insert("_mesh_scroll_x".into(), format!("{:.2}", offset.x));
-    node.attributes
-        .insert("_mesh_scroll_y".into(), format!("{:.2}", offset.y));
+    {
+        use std::fmt::Write as _;
+        let ex = node.attributes.entry("_mesh_scroll_x".into()).or_insert_with(String::new);
+        ex.clear();
+        let _ = write!(ex, "{:.2}", offset.x);
+        let ey = node.attributes.entry("_mesh_scroll_y".into()).or_insert_with(String::new);
+        ey.clear();
+        let _ = write!(ey, "{:.2}", offset.y);
+    }
 
     for (index, child) in node.children.iter_mut().enumerate() {
         annotate_runtime_tree(

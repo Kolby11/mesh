@@ -96,21 +96,41 @@ impl Shell {
                     break;
                 }
 
-                let cfg = LayerSurfaceConfig {
-                    edge: surface.edge,
-                    layer: surface.layer.unwrap_or(Layer::Top),
-                    size_policy: self.components[index].surface_size_policy,
-                    width: surface.width,
-                    height: surface.height,
-                    exclusive_zone: surface.exclusive_zone,
-                    keyboard_mode: surface.keyboard_mode,
-                    namespace: surface_id.clone(),
-                    margin_top: surface.margin_top,
-                    margin_right: surface.margin_right,
-                    margin_bottom: surface.margin_bottom,
-                    margin_left: surface.margin_left,
-                };
-                if self.components[index].last_surface_config.as_ref() != Some(&cfg) {
+                // Compare all copy fields before cloning namespace (the only heap field).
+                let size_policy = self.components[index].surface_size_policy;
+                let layer = surface.layer.unwrap_or(Layer::Top);
+                let config_changed =
+                    self.components[index]
+                        .last_surface_config
+                        .as_ref()
+                        .map_or(true, |last| {
+                            last.edge != surface.edge
+                                || last.layer != layer
+                                || last.size_policy != size_policy
+                                || last.width != surface.width
+                                || last.height != surface.height
+                                || last.exclusive_zone != surface.exclusive_zone
+                                || last.keyboard_mode != surface.keyboard_mode
+                                || last.margin_top != surface.margin_top
+                                || last.margin_right != surface.margin_right
+                                || last.margin_bottom != surface.margin_bottom
+                                || last.margin_left != surface.margin_left
+                        });
+                if config_changed {
+                    let cfg = LayerSurfaceConfig {
+                        edge: surface.edge,
+                        layer,
+                        size_policy,
+                        width: surface.width,
+                        height: surface.height,
+                        exclusive_zone: surface.exclusive_zone,
+                        keyboard_mode: surface.keyboard_mode,
+                        namespace: surface_id.clone(),
+                        margin_top: surface.margin_top,
+                        margin_right: surface.margin_right,
+                        margin_bottom: surface.margin_bottom,
+                        margin_left: surface.margin_left,
+                    };
                     self.presentation_engine.configure(&surface_id, cfg.clone());
                     self.components[index].last_surface_config = Some(cfg);
                 }

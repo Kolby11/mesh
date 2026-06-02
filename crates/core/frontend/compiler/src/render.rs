@@ -17,7 +17,7 @@ use mesh_core_elements::{
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub(crate) fn collect_component_tags(nodes: &[TemplateNode], tags: &mut Vec<String>) {
     for node in nodes {
@@ -441,7 +441,7 @@ fn default_input_type(source_tag: &SourceTag) -> Option<&'static str> {
     }
 }
 
-fn apply_source_tag_defaults(source_tag: &SourceTag, attributes: &mut HashMap<String, String>) {
+fn apply_source_tag_defaults(source_tag: &SourceTag, attributes: &mut BTreeMap<String, String>) {
     match source_tag {
         SourceTag::TextArea => {
             attributes
@@ -542,13 +542,13 @@ pub(crate) fn parse_attributes(
 ) -> (
     Vec<String>,
     Option<String>,
-    HashMap<String, String>,
-    HashMap<String, String>,
+    BTreeMap<String, String>,
+    BTreeMap<String, String>,
 ) {
     let mut classes = Vec::new();
     let mut id = None;
-    let mut resolved = HashMap::new();
-    let mut event_handlers = HashMap::new();
+    let mut resolved = BTreeMap::new();
+    let mut event_handlers = BTreeMap::new();
 
     for attr in attrs {
         match &attr.value {
@@ -631,7 +631,7 @@ fn is_event_handler_attribute(name: &str) -> bool {
 fn accessibility_for_element(
     source_tag: &str,
     runtime_tag: &str,
-    attributes: &HashMap<String, String>,
+    attributes: &BTreeMap<String, String>,
 ) -> AccessibilityInfo {
     let mut info = AccessibilityInfo::default();
     if let Some(contract) = element_contract_for_tag(source_tag) {
@@ -685,10 +685,10 @@ fn accessibility_for_element(
 
 #[cfg(test)]
 fn accessibility_for_tag(tag: &str) -> AccessibilityInfo {
-    accessibility_for_element(tag, tag, &HashMap::new())
+    accessibility_for_element(tag, tag, &BTreeMap::new())
 }
 
-fn bool_attr(attributes: &HashMap<String, String>, name: &str) -> bool {
+fn bool_attr(attributes: &BTreeMap<String, String>, name: &str) -> bool {
     attributes.get(name).is_some_and(|value| bool_value(value))
 }
 
@@ -696,7 +696,7 @@ fn bool_value(value: &str) -> bool {
     matches!(value.trim(), "" | "true" | "1")
 }
 
-fn number_attr(attributes: &HashMap<String, String>, name: &str) -> Option<f32> {
+fn number_attr(attributes: &BTreeMap<String, String>, name: &str) -> Option<f32> {
     attributes.get(name)?.trim().parse::<f32>().ok()
 }
 

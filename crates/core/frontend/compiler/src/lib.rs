@@ -10,7 +10,7 @@ use mesh_core_elements::{LayoutEngine, StyleContext, StyleResolver, VariableStor
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub use accessibility::root_accessibility_role;
@@ -62,7 +62,7 @@ pub trait FrontendCompositionResolver {
         host: &Manifest,
         host_instance_key: &str,
         alias: &str,
-        props: &HashMap<String, String>,
+        props: &BTreeMap<String, String>,
         container_width: f32,
         container_height: f32,
     ) -> Option<WidgetNode>;

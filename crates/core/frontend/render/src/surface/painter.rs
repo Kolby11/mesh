@@ -242,6 +242,23 @@ impl FrontendRenderEngine {
         );
     }
 
+    pub(super) fn fill_rect_clipped_in_session(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        rect: ClipRect,
+        color: Color,
+        clip: ClipRect,
+    ) {
+        self.execute_painter_commands_in_session(
+            session,
+            &[PainterCommand::DrawRect {
+                rect,
+                paint: PainterPaint::fill(color),
+                clip,
+            }],
+        );
+    }
+
     pub(super) fn fill_rounded_rect_clipped(
         &self,
         buffer: &mut PixelBuffer,
@@ -252,6 +269,25 @@ impl FrontendRenderEngine {
     ) {
         self.execute_painter_commands(
             buffer,
+            &[PainterCommand::DrawRoundedRect {
+                rect,
+                radius,
+                paint: PainterPaint::fill(color),
+                clip,
+            }],
+        );
+    }
+
+    pub(super) fn fill_rounded_rect_clipped_in_session(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        rect: ClipRect,
+        radius: f32,
+        color: Color,
+        clip: ClipRect,
+    ) {
+        self.execute_painter_commands_in_session(
+            session,
             &[PainterCommand::DrawRoundedRect {
                 rect,
                 radius,
@@ -394,6 +430,103 @@ impl FrontendRenderEngine {
             },
         };
         self.execute_painter_commands(buffer, &[command]);
+    }
+
+    pub(super) fn stroke_rounded_rect_clipped_in_session(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        rect: ClipRect,
+        radius: f32,
+        stroke_width: i32,
+        color: Color,
+        clip: ClipRect,
+    ) -> bool {
+        let before = self.painter_diagnostics().len();
+        self.execute_painter_commands_in_session(
+            session,
+            &[PainterCommand::DrawRoundedRect {
+                rect,
+                radius,
+                paint: PainterPaint::stroke(color, stroke_width as f32),
+                clip,
+            }],
+        );
+        self.painter_diagnostics().len() == before
+    }
+
+    pub(super) fn draw_box_shadow_in_session(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        rect: ClipRect,
+        radius: f32,
+        shadow: BoxShadow,
+        clip: ClipRect,
+    ) {
+        if shadow.is_none() || shadow.inset {
+            return;
+        }
+        self.execute_painter_commands_in_session(
+            session,
+            &[PainterCommand::DrawShadow {
+                rect,
+                radius,
+                shadow,
+                clip,
+            }],
+        );
+    }
+
+    pub(super) fn apply_backdrop_filter_in_session(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        rect: ClipRect,
+        radius: f32,
+        filter: VisualFilter,
+        clip: ClipRect,
+    ) {
+        if filter.is_none() {
+            return;
+        }
+        self.execute_painter_commands_in_session(
+            session,
+            &[PainterCommand::ApplyFilter {
+                rect,
+                radius,
+                filter: PainterFilter::Backdrop(filter),
+                clip,
+            }],
+        );
+    }
+
+    pub(super) fn draw_background_paint_in_session(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        paint: &BackgroundPaint,
+        rect: ClipRect,
+        radius: f32,
+        clip: ClipRect,
+    ) {
+        let command = match paint {
+            BackgroundPaint::None => return,
+            BackgroundPaint::Image(source) => PainterCommand::DrawImage {
+                image: PainterImage {
+                    source: PainterImageSource::Path(source.path.clone()),
+                },
+                rect,
+                paint: PainterPaint::fill(Color::WHITE),
+                clip,
+            },
+            BackgroundPaint::LinearGradient(gradient) => PainterCommand::DrawLinearGradient {
+                gradient: PainterLinearGradient {
+                    from: gradient.from,
+                    to: gradient.to,
+                },
+                rect,
+                radius,
+                clip,
+            },
+        };
+        self.execute_painter_commands_in_session(session, &[command]);
     }
 
     pub fn reset_text_cache_metrics(&self) {

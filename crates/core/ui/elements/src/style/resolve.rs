@@ -5,7 +5,7 @@ use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use mesh_core_theme::{Theme, TokenValue};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 fn empty_variables() -> &'static HashMap<String, StyleValue> {
     static EMPTY: OnceLock<HashMap<String, StyleValue>> = OnceLock::new();
@@ -19,6 +19,29 @@ thread_local! {
     static VARIABLE_SCRATCH: RefCell<HashMap<String, StyleValue>> =
         RefCell::new(HashMap::new());
     static CANDIDATE_RULE_SCRATCH: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The five CSS-inherited fields from a parent node. Used instead of cloning
+/// the full `ComputedStyle` (~60 fields) when passing parent context into
+/// recursive restyle calls.
+struct ParentInheritedStyle {
+    color: Color,
+    font_family: Arc<str>,
+    font_size: f32,
+    font_weight: u16,
+    line_height: f32,
+}
+
+impl From<&ComputedStyle> for ParentInheritedStyle {
+    fn from(s: &ComputedStyle) -> Self {
+        Self {
+            color: s.color,
+            font_family: s.font_family.clone(),
+            font_size: s.font_size,
+            font_weight: s.font_weight,
+            line_height: s.line_height,
+        }
+    }
 }
 
 /// Resolves style values against a theme's design tokens.
@@ -611,9 +634,9 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
     ) {
         let index = StyleRuleIndex::new(rules);
-        let parent_style = node.computed_style.clone();
+        let parent = ParentInheritedStyle::from(&node.computed_style);
         for child in &mut node.children {
-            self.restyle_subtree_with_index(child, rules, &index, context, Some(&parent_style));
+            self.restyle_subtree_with_index(child, rules, &index, context, Some(&parent));
         }
     }
 
@@ -626,9 +649,9 @@ impl<'a> StyleResolver<'a> {
         index_cache: &mut Option<StyleRuleIndex>,
     ) {
         let index = ensure_index(rules, index_cache);
-        let parent_style = node.computed_style.clone();
+        let parent = ParentInheritedStyle::from(&node.computed_style);
         for child in &mut node.children {
-            self.restyle_subtree_with_index(child, rules, index, context, Some(&parent_style));
+            self.restyle_subtree_with_index(child, rules, index, context, Some(&parent));
         }
     }
 
@@ -638,18 +661,18 @@ impl<'a> StyleResolver<'a> {
         rules: &[StyleRule],
         index: &StyleRuleIndex,
         context: StyleContext,
-        parent_style: Option<&ComputedStyle>,
+        parent_style: Option<&ParentInheritedStyle>,
     ) {
         let attrs = StyleNodeAttrs::from_node(node);
         node.computed_style = self
             .resolve_node_style_with_attrs_indexed_no_diagnostics(rules, index, &attrs, context);
-        if let Some(parent_style) = parent_style {
-            inherit_retained_text_style(&mut node.computed_style, parent_style);
+        if let Some(parent) = parent_style {
+            inherit_retained_text_style(&mut node.computed_style, parent);
         }
 
-        let parent_style = node.computed_style.clone();
+        let parent = ParentInheritedStyle::from(&node.computed_style);
         for child in &mut node.children {
-            self.restyle_subtree_with_index(child, rules, index, context, Some(&parent_style));
+            self.restyle_subtree_with_index(child, rules, index, context, Some(&parent));
         }
     }
 
@@ -970,22 +993,22 @@ fn rule_matches_attrs(rule: &StyleRule, attrs: &StyleNodeAttrs, context: StyleCo
             .is_none_or(|query| query.matches(context.container_width, context.container_height))
 }
 
-fn inherit_retained_text_style(style: &mut ComputedStyle, parent_style: &ComputedStyle) {
+fn inherit_retained_text_style(style: &mut ComputedStyle, parent: &ParentInheritedStyle) {
     let defaults = ComputedStyle::default();
     if style.color.a == 0 {
-        style.color = parent_style.color;
+        style.color = parent.color;
     }
     if style.font_family == defaults.font_family {
-        style.font_family = parent_style.font_family.clone();
+        style.font_family = parent.font_family.clone();
     }
     if (style.font_size - defaults.font_size).abs() < f32::EPSILON {
-        style.font_size = parent_style.font_size;
+        style.font_size = parent.font_size;
     }
     if style.font_weight == defaults.font_weight {
-        style.font_weight = parent_style.font_weight;
+        style.font_weight = parent.font_weight;
     }
     if (style.line_height - defaults.line_height).abs() < f32::EPSILON {
-        style.line_height = parent_style.line_height;
+        style.line_height = parent.line_height;
     }
 }
 

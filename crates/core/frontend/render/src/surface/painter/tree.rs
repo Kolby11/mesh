@@ -621,17 +621,8 @@ impl FrontendRenderEngine {
                 self.render_display_input_node(node, input, session, scale, x, y, node_clip);
             }
             DisplayPaintContent::Slider(slider) => {
-                self.render_display_slider_node(
-                    node,
-                    slider,
-                    session,
-                    node_commands,
-                    scale,
-                    x,
-                    y,
-                    w,
-                    h,
-                    node_clip,
+                self.render_display_slider_node_in_session(
+                    node, slider, session, scale, x, y, w, h, node_clip,
                 );
             }
             DisplayPaintContent::Icon(icon) => {

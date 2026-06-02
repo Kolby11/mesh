@@ -841,7 +841,10 @@ impl RetainedDisplayList {
         } else {
             0
         };
+        #[cfg(debug_assertions)]
         let batch_metrics = compute_batch_metrics(&ordered_entries);
+        #[cfg(not(debug_assertions))]
+        let batch_metrics = DisplayListMetrics::default();
         let command_spans = build_command_spans(root, &subtrees);
         let effect_overflow_count = count_effect_overflow_commands(paint_commands.as_ref());
 
@@ -1369,6 +1372,9 @@ fn collect_dirty_ancestor_ids(
     root: &WidgetNode,
     dirty_node_ids: &HashSet<NodeId>,
 ) -> HashSet<NodeId> {
+    if dirty_node_ids.is_empty() {
+        return HashSet::new();
+    }
     let mut ancestors = HashSet::new();
     let mut path = Vec::new();
     collect_dirty_ancestor_ids_inner(root, dirty_node_ids, &mut path, &mut ancestors);

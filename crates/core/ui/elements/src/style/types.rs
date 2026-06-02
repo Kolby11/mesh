@@ -878,7 +878,7 @@ impl Corners {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Overflow {
     Visible,
     Hidden,
@@ -906,7 +906,7 @@ pub struct StyleContext {
     pub container_height: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct TransitionProperties {
     pub all: bool,
     pub border_radius: bool,
@@ -1282,7 +1282,19 @@ pub enum TransitionEasing {
     CubicBezier(f32, f32, f32, f32),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+impl std::hash::Hash for TransitionEasing {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        if let Self::CubicBezier(a, b, c, d) = self {
+            a.to_bits().hash(state);
+            b.to_bits().hash(state);
+            c.to_bits().hash(state);
+            d.to_bits().hash(state);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default, Hash)]
 pub struct TransitionStyle {
     pub duration_ms: u32,
     pub delay_ms: u32,
@@ -1290,7 +1302,7 @@ pub struct TransitionStyle {
     pub properties: TransitionProperties,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct AnimationStyle {
     pub name: Option<String>,
     pub duration_ms: u32,
@@ -1317,13 +1329,13 @@ impl Default for AnimationStyle {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnimationIterationCount {
     Number(u32),
     Infinite,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnimationDirection {
     Normal,
     Reverse,
@@ -1331,7 +1343,7 @@ pub enum AnimationDirection {
     AlternateReverse,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnimationFillMode {
     None,
     Forwards,
@@ -1339,7 +1351,7 @@ pub enum AnimationFillMode {
     Both,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnimationPlayState {
     Running,
     Paused,
@@ -1407,7 +1419,7 @@ impl Color {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Display {
     Flex,
     None,
@@ -1421,13 +1433,13 @@ pub enum Visibility {
     Collapse,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FlexDirection {
     Row,
     Column,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum JustifyContent {
     Start,
     End,
@@ -1436,7 +1448,7 @@ pub enum JustifyContent {
     SpaceAround,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AlignItems {
     Start,
     End,
@@ -1444,40 +1456,40 @@ pub enum AlignItems {
     Stretch,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextAlign {
     Left,
     Center,
     Right,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FontStyle {
     Normal,
     Italic,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub enum TextDirection {
     #[default]
     Ltr,
     Rtl,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextOverflow {
     Clip,
     Ellipsis,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FlexWrap {
     NoWrap,
     Wrap,
     WrapReverse,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AlignSelf {
     Auto,
     Start,
@@ -1487,7 +1499,7 @@ pub enum AlignSelf {
     Baseline,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub enum Position {
     #[default]
     Static,
@@ -1495,7 +1507,7 @@ pub enum Position {
     Absolute,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AlignContent {
     Start,
     End,
