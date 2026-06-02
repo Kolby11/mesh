@@ -1245,7 +1245,7 @@ mod tests {
         assert_eq!(style.font_weight, 600);
         assert_eq!(style.font_size, 16.0);
         assert_eq!(style.line_height, 1.4);
-        assert_eq!(style.font_family, "Inter");
+        assert_eq!(&*style.font_family, "Inter");
     }
 
     #[test]

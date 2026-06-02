@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use mesh_core_theme::TokenValue;
 
 /// Author-facing style diagnostic emitted while resolving supported shell CSS.
@@ -703,7 +705,7 @@ pub struct ComputedStyle {
     pub animation: AnimationStyle,
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
-    pub font_family: String,
+    pub font_family: Arc<str>,
     pub font_size: f32,
     pub font_weight: u16,
     pub color: Color,
@@ -768,7 +770,7 @@ impl Default for ComputedStyle {
             animation: AnimationStyle::default(),
             overflow_x: Overflow::Visible,
             overflow_y: Overflow::Visible,
-            font_family: "Inter".to_string(),
+            font_family: Arc::from("Inter"),
             font_size: 14.0,
             font_weight: 400,
             color: Color::WHITE,

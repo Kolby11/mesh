@@ -229,7 +229,7 @@ pub struct DisplayPaintStyle {
     pub padding: Edges,
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
-    pub font_family: String,
+    pub font_family: Arc<str>,
     pub font_size: f32,
     pub font_weight: u16,
     pub line_height: f32,
@@ -1876,8 +1876,7 @@ fn collect_command_spans(
 
     let child_start = command_start.saturating_add(1);
     let mut next_child_start = child_start;
-    let child_order = subtree.child_order.clone();
-    for_children_in_order(node, child_order.as_deref(), |child| {
+    for_children_in_order(node, subtree.child_order.as_deref(), |child| {
         next_child_start = collect_command_spans(child, subtrees, next_child_start, spans);
     });
     subtree_end

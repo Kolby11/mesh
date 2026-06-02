@@ -203,7 +203,7 @@ pub(super) fn apply_font_shorthand(style: &mut ComputedStyle, value: &str) {
     }
 
     if !family_parts.is_empty() {
-        style.font_family = family_parts.join(" ");
+        style.font_family = family_parts.join(" ").into();
     }
 }
 

@@ -3,6 +3,7 @@
 /// Computes `LayoutRect` for every node in a widget tree. Supports row/column
 /// direction, flex-grow/shrink, gap, padding, and margin.
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::lru::LruCache;
 use crate::style::{
@@ -108,7 +109,7 @@ impl IntrinsicLayoutCache {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct TextMeasureKey {
     content: String,
-    font_family: String,
+    font_family: Arc<str>,
     font_size: u32,
     font_weight: u16,
     line_height: u32,
@@ -274,7 +275,7 @@ impl LayoutEngine {
 #[derive(Clone)]
 struct TextMeasureData {
     content: String,
-    font_family: String,
+    font_family: Arc<str>,
     font_size: f32,
     font_weight: u16,
     line_height: f32,

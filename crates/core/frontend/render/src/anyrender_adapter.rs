@@ -17,6 +17,8 @@
 
 #![cfg(feature = "renderer-anyrender")]
 
+use std::sync::Arc;
+
 use anyrender::PaintScene;
 use anyrender::recording::Scene;
 use peniko::Fill;
@@ -162,7 +164,7 @@ mod tests {
             padding: Edges::zero(),
             overflow_x: Overflow::Visible,
             overflow_y: Overflow::Visible,
-            font_family: String::new(),
+            font_family: Arc::from(""),
             font_size: 14.0,
             font_weight: 400,
             line_height: 16.0,

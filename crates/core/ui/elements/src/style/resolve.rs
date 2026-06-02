@@ -1123,7 +1123,7 @@ fn apply_declaration(
             style.font_weight = resolver.resolve_number_with_variables(value, variables) as u16
         }
         "font-family" => {
-            style.font_family = resolver.resolve_value_with_variables(value, variables)
+            style.font_family = resolver.resolve_value_with_variables(value, variables).into()
         }
         "font-style" => {
             style.font_style = match resolver

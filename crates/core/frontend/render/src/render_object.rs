@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use mesh_core_elements::style::{
     BackgroundPaint, Color, ComputedStyle, Display, Edges, Transform2D,
@@ -203,7 +204,7 @@ enum AccessibilityRoleSlot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TextSlot {
     content: Option<String>,
-    family: String,
+    family: Arc<str>,
     size: u32,
     weight: u16,
     line_height: u32,
