@@ -194,29 +194,31 @@ The project now also has a class-like module object contract with:
 - Backend `mesh.service.emit_event(...)` transport through shell payload validation into frontend `proxy.events.Name` subscribers.
 - Bundled audio/navigation proof for typed `VolumeChanged` backend-to-frontend event delivery.
 
-## Last Shipped Milestone: v1.15 Persistent Storage System
-
-**Goal:** Implement `self.storage` as shell-backed, component/provider instance-scoped persistent key-value storage using atomic JSON files under the MESH/XDG data area.
-
-**Shipped features:**
-- Add a scoped JSON key-value storage subsystem with stable identity derived from `self.meta`.
-- Expose `self.storage` as a Luau table-like object where reads return persisted values, writes update in-memory state and schedule persistence, and assigning `nil` removes a key.
-- Accept only JSON-like values and reject functions, userdata, component definitions, component instances, and event channels with diagnostics.
-- Persist through temp-file write plus rename under the MESH/XDG data area, recover corrupt files non-fatally, and isolate storage by module/component/provider/runtime instance identity.
-- Seed storage before `mount/start`, flush on `unmount/stop` and orderly shell shutdown, and integrate storage reads/writes with automatic rerendering.
-
-## Current Milestone: v1.16 Element Library
+## Last Shipped Milestone: v1.16 Element Library
 
 **Goal:** Build a broad native MESH element library so module authors can
 compose meaningful shell surfaces from first-class markup primitives instead
 of bespoke component workarounds.
 
+**Shipped features:**
+- Native element taxonomy metadata, shared control state, source-tag lowering, diagnostics, and author docs.
+- Layout, structure, display, action, text input, choice/menu, container, and collection primitives with retained rendering and accessibility behavior.
+- Single native `button` behavior model with configurable state and child `<icon>` markup.
+- Native choice/menu behavior for `select`/`option`, checkbox, switch, radio groups, and menus with Luau value/change/activation events.
+- Native container and collection semantics for popover, dialog, tabs/tab, details, list/list-item, and empty-state.
+- Shipped proof across navigation language selection, audio popover, debug inspector tabs/shell, surfaces view, and backend services view.
+
+## Current Milestone: v1.17 Performance: Scripting VM Consolidation
+
+**Goal:** Eliminate the per-component `mlua::Lua` VM allocation — the
+largest per-component startup and memory cost — by introducing a per-thread
+VM pool with `_ENV`-based isolation, and reduce per-component overhead
+through lazy-init and shared compiled chunks.
+
 **Target features:**
-- Lock the shared element contract for attributes, state, style hooks, events, focus, accessibility, parser diagnostics, and runtime value propagation.
-- Add layout, display, action, text input, numeric input, choice, menu, container, collection, progress, and disclosure elements covering common shell UI use cases.
-- Make each element configurable through markup attributes, shell CSS classes/pseudo-states, and Luau value/change events where appropriate.
-- Use HTML, Qt Widgets/layouts, and Flutter widget categories as coverage references while keeping behavior MESH-native rather than browser/toolkit-compatible.
-- Prove the library on shipped shell surfaces, including replacing the horizontal navigation language selector with a native visible dropdown.
+- Replace per-`ScriptContext` `Lua::new()` with a per-thread VM pool using `_ENV`-based environment isolation so each component gets a private namespace without paying the full stdlib + metatable cost.
+- Lazy-init for inactive components; skip VM initialization until first use.
+- Share pre-compiled Lua chunks across runtimes once VM ownership is stable.
 
 ## Previous Shipped Milestone: v1.12 Module Object Contract
 
@@ -287,7 +289,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 
 ### Active
 
-- `v1.15`: Persistent storage should deliver `self.storage` as private component/provider instance-scoped JSON storage, not shared module-level storage or schema-backed settings.
+- `v1.17`: Scripting VM consolidation should use a per-thread pool with `_ENV`-based isolation, not per-component VM allocation; lazy-init and shared compiled chunks reduce startup cost without breaking the existing authoring model.
 
 ### Out of Scope
 
@@ -396,4 +398,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-24 for v1.14 milestone planning*
+*Last updated: 2026-06-02 for v1.17 milestone planning*
