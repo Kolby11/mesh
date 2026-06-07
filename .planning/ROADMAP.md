@@ -12,14 +12,14 @@
 
 ## Current Status
 
-**Active milestone: v1.17 Performance: Scripting VM Consolidation** — Phase 95 plan 02 complete; plans 01 and 03 pending.
+**Active milestone: v1.17 Performance: Scripting VM Consolidation** — Phase 95 complete; all 3 plans executed.
 
 ## Phases
 
 - [x] **Phase 92: VM Pool Foundation** — New `LuaVmPool`, `PooledVm` RAII types, and `ChunkCache`; no behavioral change to existing `ScriptContext`.
 - [x] **Phase 93: Host API Re-targeting** — Refactor `install_host_api()` to accept a `&Table` target; pass `lua.globals()` temporarily to preserve existing behavior.
 - [x] **Phase 94: _ENV Isolation + Lazy-Init** — Replace `lua: Lua` with `vm: Option<PooledVm>` + `env: Option<Table>`; wire `ensure_initialized()`; per-component `_ENV` sandboxing; explicit checkin reset.
-- [ ] **Phase 95: Integration + Validation** — Wire pool and cache into `FrontendSurfaceComponent`; `BackendScriptContext` lazy-init; hot-reload cache eviction; shipped surface regression proof.
+- [x] **Phase 95: Integration + Validation** — Wire pool and cache into `FrontendSurfaceComponent`; `BackendScriptContext` lazy-init; hot-reload cache eviction; shipped surface regression proof.
 
 ## Phase Details
 
@@ -79,7 +79,7 @@ Plans:
 Plans:
 - [x] 95-01-PLAN.md — BackendScriptContext lazy-init: defer Lua::new() to first init()/poll() (INIT-03)
 - [x] 95-02-PLAN.md — Frontend integration wiring: ScriptContext::new_lazy() + compile_and_execute in create_runtime_for_component + ChunkCache eviction in reload_source (INT-01, CACHE-03)
-- [ ] 95-03-PLAN.md — Build verification + regression proof: workspace build + test suite (INT-02)
+- [x] 95-03-PLAN.md — Build verification + regression proof: workspace build + test suite (INT-02)
 
 ## Progress Table
 
@@ -88,7 +88,7 @@ Plans:
 | 92. VM Pool Foundation | 2/2 | Complete | 2026-06-07 |
 | 93. Host API Re-targeting | 2/2 | Complete | 2026-06-07 |
 | 94. _ENV Isolation + Lazy-Init | 2/2 | Complete | 2026-06-07 |
-| 95. Integration + Validation | 2/3 | In Progress | - |
+| 95. Integration + Validation | 3/3 | Complete | 2026-06-07 |
 
 ---
 

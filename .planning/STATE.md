@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.17
 milestone_name: "Performance: Scripting VM Consolidation"
 status: in_progress
-last_updated: "2026-06-07T17:59:15Z"
+last_updated: "2026-06-07T18:15:08Z"
 last_activity: 2026-06-07
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 10
-  completed_plans: 8
-  percent: 80
+  completed_plans: 9
+  percent: 90
 ---
 
 # State: MESH v1.17
@@ -24,9 +24,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-02)
 
 ## Current Position
 
-Phase: 95 — Integration + Validation (in progress)
-Status: Phase 95 plan 02 and 01 complete; plan 03 pending
-Last activity: 2026-06-07 — Phase 95 plan 01 executed: BackendScriptContext lazy-init with ensure_lua() gate defers Lua::new() until first init()/poll invocation; registered-but-unused backends allocate no VM (INIT-03)
+Phase: 95 — Integration + Validation (complete)
+Status: Phase 95 all 3 plans executed; plan 03 verified full workspace build (zero errors) and test regression (no new failures beyond pre-existing 24) (INT-02)
+Last activity: 2026-06-07 — Phase 95 plan 03 executed: Full workspace build passes with zero errors; scripting tests 108 passed/24 pre-existing failures; backend tests 25 passed/0 failures; pool/cache integration proven end-to-end (INT-02)
 
 ## Decisions
 
@@ -221,11 +221,12 @@ Last activity: 2026-06-07 — Phase 95 plan 01 executed: BackendScriptContext la
 | Phase 94 P01 | 11min | 2 tasks | 3 files |
 | Phase 95 P01 | 5min | 2 tasks | 2 files |
 | Phase 95 P02 | 2min | 2 tasks | 3 files |
+| Phase 95 P03 | 2min | 2 tasks | 0 files |
 
 ## Session
 
-Last session: 2026-06-07T20:12:22+02:00
-Stopped At: Completed 95-01-PLAN.md
+Last session: 2026-06-07T20:15:08+02:00
+Stopped At: Completed 95-03-PLAN.md
 Resume File: None
 
 ## Accumulated Context
@@ -352,4 +353,4 @@ Items acknowledged and deferred at `v1.16` close on 2026-05-26:
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-06-07 — Phase 95 plan 01 complete: BackendScriptContext lazy-init with ensure_lua() gate, all 63 tests pass, registered-but-unused backends allocate no VM (INIT-03)*
+*State updated: 2026-06-07 — Phase 95 complete: all 3 plans executed; full workspace builds with zero errors, no new test regressions (INIT-03, INT-01, INT-02)*
