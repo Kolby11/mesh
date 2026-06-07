@@ -4,6 +4,7 @@ use super::lookup::{
 };
 use super::proxy::{create_event_channel, create_interface_proxy, interface_event_channel};
 use super::{PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport, ScriptState};
+use crate::chunk_cache::ChunkCache;
 use crate::host_api::{HostApiManifest, InterfaceProxy};
 use crate::pool;
 use crate::storage::{ScopedStorage, StorageManager, StorageScope, create_lua_storage_table};
@@ -70,6 +71,13 @@ pub struct ScriptContext {
     /// When this matches the current generation (and no proxies exist), the Lua
     /// `module.state` table is already up to date and the rebuild can be skipped.
     last_module_refresh_gen: u64,
+}
+
+impl Drop for ScriptContext {
+    fn drop(&mut self) {
+        self.flush_storage();
+        self.uninit();
+    }
 }
 
 impl ScriptContext {
@@ -228,6 +236,27 @@ impl ScriptContext {
         self.sync_state_from_lua();
         tracing::info!("loaded script for module {}", self.module_id);
         Ok(())
+    }
+
+    /// Compile and execute Luau source, caching the source string by its
+    /// FNV64 content hash so hot-reload can evict on file change (Phase 95).
+    /// Delegates to `load_script_with_interface_imports` for execution.
+    pub fn compile_and_execute(
+        &mut self,
+        source: &str,
+        imports: &[ScriptInterfaceImport],
+    ) -> Result<(), ScriptError> {
+        // Cache the source by content hash — Phase 95 mtime watcher calls
+        // ChunkCache::remove(hash) to evict on .mesh file change.
+        ChunkCache::get_or_insert(source);
+        self.load_script_with_interface_imports(source, imports)
+    }
+
+    /// Compile and execute Luau source (no interface imports). See
+    /// `compile_and_execute` for the full variant.
+    pub fn compile_and_execute_simple(&mut self, source: &str) -> Result<(), ScriptError> {
+        ChunkCache::get_or_insert(source);
+        self.load_script(source)
     }
 
     /// Copy the latest service payload into the Lua runtime for proxy reads.
