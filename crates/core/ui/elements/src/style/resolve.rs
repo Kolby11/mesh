@@ -272,6 +272,15 @@ impl StyleRuleIndex {
     }
 
     fn index_selector(&mut self, idx: usize, selector: &Selector) {
+        // Index state bits from compound selector parts so that
+        // compound rules like `button:hover` also populate state_to_rules.
+        if let Selector::Compound(parts) = selector {
+            for part in parts {
+                if let Selector::State(_, state) = part {
+                    self.index_state_selector(idx, state);
+                }
+            }
+        }
         match selector_index_key(selector) {
             Some(SelectorIndexKey::Tag(tag)) => {
                 self.tag.entry(tag.to_string()).or_default().push(idx)
@@ -300,6 +309,17 @@ impl StyleRuleIndex {
         }
         // Populate reverse index: map the individual state bit to this rule.
         self.state_to_rules.entry(state_bit).or_default().push(idx);
+    }
+
+    /// Returns the indices of all rules that depend on the given state bit.
+    ///
+    /// This is an O(1) reverse lookup — no iteration over rules needed.
+    /// Returns an empty slice if no rules reference this state bit.
+    pub fn rules_for_state_bit(&self, bit: u32) -> &[usize] {
+        self.state_to_rules
+            .get(&bit)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 }
 
