@@ -59,7 +59,11 @@
   3. On VM checkin, the component's `env_table` and all registry key handles are dropped and the thread is reset before the slot is returned — a subsequent component checkout on the same VM slot starts with a clean environment.
   4. Changing a `.mesh` source file while the shell is running invalidates its chunk cache entry so the next component activation re-reads and re-caches the updated source.
   5. The shipped `navigation-bar` and `audio-popover` surfaces continue to display correct reactive state after the isolation migration — service fields, locale, and theme tokens resolve through the new per-component `_ENV`.
-**Plans**: TBD
+ **Plans**: 2 plans
+
+Plans:
+- [ ] 94-01-PLAN.md — ScriptContext struct change: vm+env_table, ensure_initialized(), all method migration to per-component _ENV (INIT-01, INIT-02, ISO-01, ISO-02)
+- [ ] 94-02-PLAN.md — Checkin cleanup (Thread::reset in return_slot), uninit() wiring to Drop, compile_and_execute with ChunkCache (ISO-03, CACHE-03)
 
 ### Phase 95: Integration + Validation
 **Goal**: The pool and cache are live on the production path; `FrontendSurfaceComponent` and `BackendScriptContext` use them; shipped surfaces prove the full system works end-to-end with no regressions.
@@ -78,7 +82,7 @@
 |-------|----------------|--------|-----------|
 | 92. VM Pool Foundation | 2/2 | Complete | 2026-06-07 |
 | 93. Host API Re-targeting | 2/2 | Complete | 2026-06-07 |
-| 94. _ENV Isolation + Lazy-Init | 0/? | Not started | - |
+| 94. _ENV Isolation + Lazy-Init | 0/2 | Planned | - |
 | 95. Integration + Validation | 0/? | Not started | - |
 
 ---
