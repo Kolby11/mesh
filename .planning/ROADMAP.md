@@ -45,7 +45,9 @@
   1. `install_host_api()` compiles and is called with `lua.globals()` as the target — all existing host API keys (`require`, `self`, `module`, `mesh.*`, `__mesh_svc_*`, `__mesh_request_redraw`, `__mesh_locale_current`) are set on that table.
   2. A `pool_baseline_globals` snapshot is captured once at pool VM construction and is available as an immutable shared reference before any per-component host API installation runs.
   3. All existing shell surface tests and component render paths pass without modification — the refactor is purely mechanical at this stage with no observable behavior change.
-**Plans**: TBD
+**Plans**: 2 plans
+- [ ] 93-01-PLAN.md — LuaVmPool::baseline_globals + ScriptContext::install_host_api(&Table) (ISO-04, ISO-02)
+- [ ] 93-02-PLAN.md — BackendScriptContext::install_host_api(&Table) (ISO-02)
 
 ### Phase 94: _ENV Isolation + Lazy-Init
 **Goal**: Each component gets a private `_ENV` table on checkout so writes from one component are invisible to any other component sharing the same pool VM; components that are never mounted hold no pool slot.
@@ -75,7 +77,7 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 92. VM Pool Foundation | 2/2 | Complete | 2026-06-07 |
-| 93. Host API Re-targeting | 0/? | Not started | - |
+| 93. Host API Re-targeting | 0/2 | Not started | - |
 | 94. _ENV Isolation + Lazy-Init | 0/? | Not started | - |
 | 95. Integration + Validation | 0/? | Not started | - |
 
