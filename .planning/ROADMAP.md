@@ -74,7 +74,12 @@ Plans:
   2. `BackendScriptContext` defers its `Lua::new()` call until the first `init()` or poll invocation — a backend provider that is registered but never polled allocates no VM.
   3. The shipped `navigation-bar` surface renders its language selector, responds to pointer hover and keyboard traversal, and reflects audio service state correctly after the full pool migration.
   4. The shipped `audio-popover` surface shows correct volume level, responds to slider drag, and fires the mute keybind correctly after the full pool migration.
-**Plans**: TBD
+ **Plans**: 3 plans
+
+Plans:
+- [ ] 95-01-PLAN.md — BackendScriptContext lazy-init: defer Lua::new() to first init()/poll() (INIT-03)
+- [ ] 95-02-PLAN.md — Frontend integration wiring: ScriptContext::new_lazy() + compile_and_execute in create_runtime_for_component + ChunkCache eviction in reload_source (INT-01, CACHE-03)
+- [ ] 95-03-PLAN.md — Build verification + regression proof: workspace build + test suite (INT-02)
 
 ## Progress Table
 
@@ -83,7 +88,7 @@ Plans:
 | 92. VM Pool Foundation | 2/2 | Complete | 2026-06-07 |
 | 93. Host API Re-targeting | 2/2 | Complete | 2026-06-07 |
 | 94. _ENV Isolation + Lazy-Init | 2/2 | Complete | 2026-06-07 |
-| 95. Integration + Validation | 0/? | Not started | - |
+| 95. Integration + Validation | 0/3 | Planned | - |
 
 ---
 

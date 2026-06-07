@@ -76,9 +76,9 @@
 | ISO-04 | Phase 93 | pool_baseline_globals snapshot at pool VM construction |
 | INIT-01 | Phase 94 | ScriptContext vm: Option<PooledVm> + env: Option<Table> + ensure_initialized() |
 | INIT-02 | Phase 94 | Zero pool slots for unmounted components |
-| INIT-03 | Phase 95 | BackendScriptContext deferred Lua::new() |
+| INIT-03 | Phase 95 (plan 01) | BackendScriptContext deferred Lua::new() |
 | CACHE-01 | Phase 92 | ChunkCache process-wide FNV64-keyed source string store |
 | CACHE-02 | Phase 92 | Checkout loads cached source string |
-| CACHE-03 | Phase 94 | Hot-reload mtime watcher cache eviction (wiring in Phase 95) |
-| INT-01 | Phase 95 | FrontendSurfaceComponent::create_runtime_for_component wired to ScriptContext::new_lazy() |
-| INT-02 | Phase 95 | Shipped surface regression proof |
+| CACHE-03 | Phase 95 (plan 02) | Hot-reload mtime watcher cache eviction in reload_source() |
+| INT-01 | Phase 95 (plan 02) | FrontendSurfaceComponent::create_runtime_for_component wired to compile_and_execute + new_lazy() |
+| INT-02 | Phase 95 (plan 03) | Workspace build + test suite regression proof |
