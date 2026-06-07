@@ -186,7 +186,7 @@ struct RetainedNodeSnapshot {
     style_hash: u64,
     attributes_hash: u64,
     child_ids: Vec<NodeId>,
-    state_hash: u64,
+    state: ElementState,
 }
 
 type LayoutFingerprint = (u32, u32, u32, u32);
@@ -266,7 +266,7 @@ fn retained_snapshot(node: &WidgetNode) -> RetainedNodeSnapshot {
         style_hash: style_fingerprint(&node.computed_style),
         attributes_hash: attributes_fingerprint(node),
         child_ids: node.children.iter().map(|child| child.id).collect(),
-        state_hash: state_fingerprint(node.state),
+        state: node.state,
     }
 }
 
@@ -344,24 +344,6 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
         event.hash(&mut hasher);
         handler.hash(&mut hasher);
     }
-    hasher.finish()
-}
-
-fn state_fingerprint(state: ElementState) -> u64 {
-    let mut hasher = RuntimeTreeHasher::default();
-    state.hovered.hash(&mut hasher);
-    state.active.hash(&mut hasher);
-    state.focused.hash(&mut hasher);
-    state.focus_visible.hash(&mut hasher);
-    state.disabled.hash(&mut hasher);
-    state.read_only.hash(&mut hasher);
-    state.required.hash(&mut hasher);
-    state.selected.hash(&mut hasher);
-    state.checked.hash(&mut hasher);
-    state.expanded.hash(&mut hasher);
-    state.pressed.hash(&mut hasher);
-    state.invalid.hash(&mut hasher);
-    state.value.hash(&mut hasher);
     hasher.finish()
 }
 
