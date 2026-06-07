@@ -360,19 +360,45 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
 /// and are kept self-contained here to avoid a cross-crate dependency on private constants.
 fn state_bitmask(state: ElementState) -> u32 {
     let mut mask = 0u32;
-    if state.hovered      { mask |= 1 << 0; }
-    if state.focused      { mask |= 1 << 1; }
-    if state.active       { mask |= 1 << 2; }
-    if state.disabled     { mask |= 1 << 3; }
-    if state.read_only    { mask |= 1 << 4; }
-    if state.required     { mask |= 1 << 5; }
-    if state.selected     { mask |= 1 << 6; }
-    if state.checked      { mask |= 1 << 7; }
-    if state.expanded     { mask |= 1 << 8; }
-    if state.pressed      { mask |= 1 << 9; }
-    if state.invalid      { mask |= 1 << 10; }
-    if state.value        { mask |= 1 << 11; }
-    if state.focus_visible { mask |= 1 << 12; }
+    if state.hovered {
+        mask |= 1 << 0;
+    }
+    if state.focused {
+        mask |= 1 << 1;
+    }
+    if state.active {
+        mask |= 1 << 2;
+    }
+    if state.disabled {
+        mask |= 1 << 3;
+    }
+    if state.read_only {
+        mask |= 1 << 4;
+    }
+    if state.required {
+        mask |= 1 << 5;
+    }
+    if state.selected {
+        mask |= 1 << 6;
+    }
+    if state.checked {
+        mask |= 1 << 7;
+    }
+    if state.expanded {
+        mask |= 1 << 8;
+    }
+    if state.pressed {
+        mask |= 1 << 9;
+    }
+    if state.invalid {
+        mask |= 1 << 10;
+    }
+    if state.value {
+        mask |= 1 << 11;
+    }
+    if state.focus_visible {
+        mask |= 1 << 12;
+    }
     mask
 }
 
