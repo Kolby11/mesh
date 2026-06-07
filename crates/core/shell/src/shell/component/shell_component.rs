@@ -773,6 +773,19 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn reload_source(&mut self) -> Result<bool, ComponentError> {
+        // CACHE-03: evict chunk cache entries for old script sources before recompiling.
+        // The next compile_and_execute will get_or_insert the fresh source from disk.
+        use mesh_core_scripting::chunk_cache::{ChunkCache, fnv64};
+
+        if let Some(script) = &self.compiled.component.script {
+            ChunkCache::remove(fnv64(script.source.as_bytes()));
+        }
+        for component in self.compiled.local_components.values() {
+            if let Some(script) = &component.script {
+                ChunkCache::remove(fnv64(script.source.as_bytes()));
+            }
+        }
+
         let manifest = self.compiled.manifest.clone();
         let recompiled = compile_frontend_module(&manifest, &self.module_dir).map_err(|err| {
             ComponentError::Failed {
