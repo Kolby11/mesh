@@ -1,164 +1,169 @@
 # Project Research Summary
 
-**Project:** MESH v1.17 Performance: Scripting VM Consolidation
-**Domain:** Luau VM pooling, _ENV isolation, lazy-init, compiled chunk caching in a Rust/mlua shell runtime
-**Researched:** 2026-06-02
+**Project:** MESH v1.18 — Typed Dependency Tracking (Smart Invalidation)
+**Domain:** Retained-mode shell framework — pipeline optimization
+**Researched:** 2026-06-07
 **Confidence:** HIGH
 
 ## Executive Summary
 
-MESH v1.17 eliminates the primary scripting startup cost: each `ScriptContext::new()` currently calls `mlua::Lua::new()`, which initializes a full Luau VM — stdlib tables, allocator state, metatables — for every mounted component, regardless of whether that component ever executes a script. For a shell with a navigation bar, audio popover, and a handful of embedded component instances, this means 5–10 or more full VMs allocated on startup. The v1.17 goal is to replace this one-VM-per-component model with a thread-local pool of shared VMs, per-component `_ENV` table isolation, lazy initialization, and a compiled chunk cache. All required APIs (`Chunk::set_environment`, `Compiler::compile`, `Lua::sandbox`, `ChunkMode::Binary`) are present in the already-vendored `mlua 0.11` crate — no dependency changes are needed.
+MESH v1.18 replaces the coarse "tree rebuild + full repaint" invalidation pipeline with typed dependency tracking. Today, a single `audio.percent` field change triggers `TREE_REBUILD` — 500 nodes rebuilt, restyled, laid out, and repainted. A `:hover` state change on one button walks the entire component tree revalidating every CSS selector. This is correct but wasteful, and it limits the number of components per surface.
 
-The recommended implementation order builds from a stable foundation: construct the `LuaVmPool` and `PooledVm` types first, add the `ChunkCache` second, then refactor `install_host_api` to write into a per-component env table instead of `lua.globals()`, and finally wire lazy-init and `_ENV` isolation into `ScriptContext`. The single highest-risk change is the `install_host_api` refactor: every `lua.globals().set(...)` call for per-component state (`__mesh_svc_*`, `__mesh_request_redraw`, `__mesh_locale_current`, `require`, `self`, `module`, `mesh`) must move to the component's isolated `env_table` before the pool produces correct behavior. There is one significant nuance from the architecture research: mlua's safe API does not expose raw Luau bytecode bytes via `Compiler::compile()` in the expected cross-VM-sharing sense — the practical v1.17 chunk cache stores source strings keyed by content hash, not compiled bytecode. True bytecode sharing via `luau_compile`/`luau_load` C FFI is deferred to a future milestone.
+The upgrade splits into three integration points, each building on the last with no circular dependencies. Phase A adds per-rule state dependency masks to `StyleRuleIndex` so that `:hover` restyles 3 nodes instead of 500. Phase B captures per-node service field reads during expression evaluation, building a bidirectional NodeId↔(service, field) index. Phase C connects both systems into narrow invalidation: service events mark only the nodes that care, and a `>50%` fallback threshold preserves correctness when too many nodes are affected.
 
-The key risks are all implementation-level, not design-level. VM state contamination across pool slots is the highest-severity risk, but it is fully preventable by enforcing explicit reset on VM checkin and by never writing component state to `lua.globals()`. The thread-locality invariant must be enforced from day one: the shell's render loop is single-threaded today, but `mesh-core-scripting` already has the `send` feature enabled, which means a `thread_local!` pool will coexist safely while future-proofing against backend scripting paths that run on Tokio task threads.
+**No new crate dependencies are required.** All data structures and algorithms live within existing crates (`mesh-core-elements`, `mesh-core-scripting`, `mesh-core-shell`, `mesh-core-frontend`). The key risks are inherited style values not propagating on partial restyle (Phase A), co-dirtying from script+interaction destroying narrow work (Phase C), and text-measure cascades into layout (Phase C). Each has a specific prevention strategy validated against live codebase analysis. Recommended approach: build Phase A and Phase B in parallel, merge into Phase C, gate on pixel-equivalence tests against full-rebuild baselines.
 
 ## Key Findings
 
-### Recommended Stack
+### Stack Decisions
 
-No new crate dependencies are required. `mlua 0.11` already provides every needed primitive: `Chunk::set_environment()` for per-component `_ENV` redirection, `Lua::sandbox(true)` to freeze stdlib tables on pool VMs, `Lua::new_with(StdLib::BASE | STRING | TABLE | MATH, ...)` to create stripped-down pool VMs, and the `mlua::Compiler` struct for source-to-bytecode compilation. The Rust standard library supplies `thread_local!` + `RefCell<Vec<Lua>>` for the zero-overhead per-thread pool and `OnceLock<Mutex<HashMap<...>>>` for the global chunk cache.
+**No new crate dependencies.** All data structures use Rust stdlib (`HashMap`, `HashSet`, `Vec`, `u32`) already in MESH's `Cargo.toml`. `RuleDependencyMask` reuses the existing 13 `STATE_*` bit constants. `NodeServiceFieldDependencies` uses the existing `NodeId` type.
 
-**Core technologies:**
-- `mlua 0.11` (already in workspace): All four VM consolidation APIs — `Chunk::set_environment`, `Lua::sandbox`, `Compiler::compile`, `ChunkMode::Binary`; no version bump needed
-- `std::thread_local!` + `RefCell<Vec<Lua>>`: Zero-cost per-thread pool ownership; no lock contention on the single render thread; avoids the `Arc<Mutex<>>` overhead that the `send` feature would otherwise require
-- `std::sync::OnceLock<Mutex<HashMap<u64, String>>>`: Process-wide chunk cache keyed on FNV64 content hash; source strings in v1.17, upgradeable to bytecode bytes when C FFI path is taken
+**Explicitly rejected:** `fixedbitset` (adds dependency for ~15 lines of bit operations), `petgraph` (overengineered for static rule→node mapping), `salsa` (immutable database pattern incompatible with MESH's mutable widget tree), `dashmap` (all invalidation on single render thread), Luau debug hooks (instruction-level overhead prohibitive vs existing `__index` metatable).
 
-**Critical API caveat (ARCHITECTURE.md, LOW confidence):** mlua's safe Rust API does not directly expose `luau_compile` output as extractable `Vec<u8>` bytes that can be re-loaded into a different VM via `set_mode(ChunkMode::Binary)`. STACK.md treats this as available; ARCHITECTURE.md's direct source analysis rates it LOW confidence. The safe fallback — caching source strings and re-parsing per VM — is fully sufficient for v1.17 and avoids this uncertainty.
+**Modified crates:**
 
-### Expected Features
+| Crate | Change |
+|-------|--------|
+| `mesh-core-elements` | `StyleRuleIndex` extended with `RuleDependencyMask` and `state_to_rules` reverse index. `StyleResolver` gains `restyle_nodes_cached()`. |
+| `mesh-core-scripting` | `ScriptContext` gains `field_read_snapshot()` and `any_tracked_field_changed()`. |
+| `mesh-core-shell` | `RetainedNodeDirtyFlags` adds `SERVICE_STATE`. `RetainedWidgetTree` gains `mark_nodes_dirty()`, `mark_layout_ancestors_dirty()`, `nodes_with_flag()`. `FrontendSurfaceComponent` gains `node_service_deps` and `invalidate_service_nodes()`. |
+| `mesh-core-frontend` | Template expression evaluator snapshots per-node field reads during binding evaluation. |
 
-All six items below are P1 (must-have) for the milestone to be considered correct and complete.
+**New data structures:** `RuleDependencyMask` (u32 bitmask + constrained tag/class), `NodeServiceFieldDependencies` (bidirectional HashMap: NodeId↔(service, field)), `ServiceFieldReadSnapshot` (per-frame per-node HashMap).
 
-**Must have (table stakes):**
-- Thread-local VM pool replacing `Lua::new()` per component — eliminates the largest startup cost; all other improvements build on this
-- `_ENV` table isolation per component checkout — correctness requirement; without it, two components sharing a VM see each other's reactive globals
-- Host API re-injection into `env_table` on every checkout — correctness requirement; `require`, `self`, `module`, `mesh.*`, `__mesh_svc_*` must target the component's private table, not `lua.globals()`
-- Lazy-init (`Option<PooledVm>` in `ScriptContext`) — removes allocation cost for hidden surfaces; straightforward Rust ownership change
-- Compiled chunk cache keyed on content hash — amortizes parse cost for multi-instance components (e.g., two notification rows from the same `.mesh` source)
-- Explicit VM reset on checkin (`env_table` drop + registry key cleanup) — prevents stale GC objects and event channel callbacks from bleeding into the next component on the same VM
+### Feature Scope
 
-**Should have (correctness/quality):**
-- Pool size growth-on-demand with a reasonable floor (4–16 VMs) — prevents deadlock at startup when all visible surfaces initialize simultaneously
-- `pool_baseline_globals` snapshot captured at pool VM creation and shared immutably — prevents `sync_state_from_lua()` from misclassifying stdlib entries as reactive component state
-- Thread ID assertion in `PooledVm::drop` — detects accidental cross-thread pool usage early
+**Must-have (table stakes — 7 features):**
+1. Per-rule selector dependency masks at `StyleRuleIndex` (MEDIUM complexity)
+2. Per-node selective restyle for state changes (MEDIUM)
+3. Inherited style propagation on partial restyle (LOW)
+4. Per-node service field dependency tracking (MEDIUM)
+5. Narrow per-node invalidation in `handle_service_event` (HIGH — central invalidation path)
+6. Layout ancestor propagation from narrow dirty nodes (MEDIUM)
+7. Field-aware service event routing (LOW — gating logic)
 
-**Defer (v2+):**
-- True bytecode sharing via `luau_compile`/`luau_load` C FFI — safe mlua API does not expose this; not needed for v1.17
-- Backend VM pooling — backend modules are long-lived singletons; apply lazy-init only
-- Disk-persistent bytecode cache — adds invalidation complexity across mlua upgrades; in-memory is sufficient
-- Debug inspector pool metrics (hit rate, reset count) — add when pool is stable
+**Differentiators (deferred to future):**
+- Direct-mutation fast path for text/value changes (requires structural stability detection)
+- Container-query re-evaluation on size changes (few container queries today)
+- Accessibility-only dirty flag narrowing (tactical fix, not scope blocker)
 
-### Architecture Approach
+**Anti-features (explicitly excluded):**
+- Per-property dirty categories (CSS-engine complexity; shell UIs don't need it)
+- Compile-time Luau dependency analysis (Luau is dynamic; `__index` metatable covers this)
+- Full Svelte-style signal system (requires compiler or Proxy wrapping; Luau doesn't support Proxies)
 
-The change surface is narrow: `ScriptContext` in `crates/core/runtime/scripting/src/context/runtime.rs` is the only file with structural changes. Two new files are added to `mesh-core-scripting` (`pool.rs` and `chunk_cache.rs`). `FrontendSurfaceComponent` in `mesh-core-shell` gets a one-line change to pass pool and cache refs into `ScriptContext::new_lazy()`. `BackendScriptContext` gets lazy-init only, no pooling. The pool is recommended as a `thread_local!` in `mesh-core-scripting`, avoiding the need to thread ownership through every constructor call.
+### Architecture Integration
 
-**Major components:**
-1. `LuaVmPool` + `PooledVm` (`pool.rs`, new) — holds `Vec<Lua>` with checkout/checkin RAII; VMs are sandbox-initialized once at construction; per-component setup happens via `env_table` on every checkout
-2. `ChunkCache` (`chunk_cache.rs`, new) — `Arc<Mutex<HashMap<u64, String>>>` keyed on FNV64 source hash; stores source strings in v1.17; avoids repeated file reads and enables future bytecode elevation
-3. `ScriptContext` (modified) — `lua: Lua` replaced with `vm: Option<PooledVm>` + `env: Option<Table>` + `initialized: bool`; new `ensure_initialized()` entry point; `install_host_api` refactored to accept `&Table` target
+Three integration points, A and B developable in parallel, C depends on both:
 
-**Build order:**
-1. `LuaVmPool` + `PooledVm` — no external deps, testable in isolation
-2. `ChunkCache` — depends only on `std`, source-string cache first
-3. `install_host_api` refactor — change target from `lua.globals()` to `&Table`; pass `lua.globals()` temporarily to preserve existing behavior
-4. `_ENV` isolation + lazy-init — highest-risk step; replace `lua: Lua`, wire `ensure_initialized()`
-5. `BackendScriptContext` lazy-init — simpler, no pooling
-6. Wire pool/cache into `FrontendSurfaceComponent` — update `create_runtime_for_component` call site
+**Point A (mesh-core-elements):** `StyleRuleIndex` construction now computes `RuleDependencyMask` per rule (all referenced state bits + constrained tag/class for node collection). A `state_to_rules: [Vec<usize>; 13]` reverse index provides O(1) lookup from state bit → affected rules. When `:hover` changes, the engine collects only nodes matching constrained tags (~3 nodes) and restyles them. Children of restyled nodes get inherited text-style propagation via existing `inherit_retained_text_style()`.
+
+**Point B (mesh-core-scripting + mesh-core-shell):** Template expression evaluator snapshots `tracked_service_fields` before/after each node's binding evaluation. The diff reveals which (service, field) pairs this node read. Results feed into `NodeServiceFieldDependencies` — a bidirectional index: `node→fields` (forward) and `(service,field)→nodes` (reverse).
+
+**Point C (mesh-core-shell):** Service events check `affected_by_service_change()` (per-runtime gate: skip components whose scripts never read the changed fields), then `invalidate_service_nodes()` marks only affected nodes as `SERVICE_STATE` dirty. A `>50%` fallback preserves `TREE_REBUILD` behavior. The `paint()` method gains a narrow restyle path: restyle only dirty nodes, compute layout only on the ancestor chain, repaint only the damage region.
+
+**Data flow, before:** `audio.percent` change → `TREE_REBUILD` → 500 nodes rebuilt, full restyle, full layout, full repaint.
+**Data flow, after:** `audio.percent` change → `field_nodes[("audio","percent")]` → `{node_42, node_87}` → mark SERVICE_STATE dirty → restyle 2 nodes → layout ancestors only → repaint damage region.
 
 ### Critical Pitfalls
 
-1. **VM state contamination via `lua.globals()` writes** — every `lua.globals().set(...)` call in `install_host_api()` and all host API closure callbacks must be audited and redirected to `env_table`; writing `__mesh_svc_audio`, `__mesh_request_redraw`, or `__mesh_locale_current` to the pool VM's shared `_G` corrupts all other components on that VM; recovery cost is HIGH if discovered late
+| # | Pitfall | Phase | Mitigation |
+|---|---------|-------|------------|
+| 1 | **Inherited style not propagated:** Children of a restyled node keep stale inherited color/font values. | A | Walk children after restyle, re-apply `inherit_retained_text_style()`. Track 5 properties: color, font-family, font-size, font-weight, line-height. |
+| 2 | **Co-dirtying destroys narrow work:** `:hover` narrow restyle + backend service update in same frame → SCRIPT dirty triggers full `build_tree()`, discarding narrow work. | C | Respect dirty-type priority: SCRIPT > TEXT > STATE > STYLE > LAYOUT > PAINT. Only narrow when SCRIPT+TEXT are clean. Existing `requires_tree_rebuild` gate already enforces this. |
+| 3 | **Text measure cascade:** Service field changes text node content ("65%"→"66%"). Only the text node is flagged dirty, but its parent flex container must recalculate layout. | C | Propagate LAYOUT dirty to ancestors when text intrinsic size changes. |
+| 4 | **False negatives on first render:** Before first render, `tracked_service_fields` is empty. Service event arrives → component skips invalidation → stale display. | C | Fall back to `TREE_REBUILD` when tracked set is empty. Existing `invalidate_script_state()` handles this. |
 
-2. **Stale GC objects on VM checkin causing cross-component state bleed** — do not rely on GC timing; the checkin sequence must explicitly drop `env_table`, remove tracked `RegistryKey` handles, and wipe all `__mesh_*` sentinel entries; otherwise event channel callbacks from the previous component fire during the next component's execution on the same VM
-
-3. **Chunk-as-Function is VM-bound** — caching `mlua::Function` handles is undefined behavior when loaded into a different `Lua` instance; the cache must store `Vec<u8>` bytecode bytes (or source strings) with no VM affinity; enforce this via the cache type signature so it is impossible to store a `Function` in it
-
-4. **Hot-reload does not invalidate the chunk cache by default** — the existing source-path mtime watcher clears the compiled module tree but knows nothing about the bytecode/source cache; wire cache eviction to the same path-change notification; use content hash as cache key so the old entry becomes unreachable on source change
-
-5. **`sync_state_from_lua()` globals scan pollution from pool VM baseline** — the `builtin_globals` snapshot must be captured at pool VM creation time (before any per-component host API installation) and shared immutably; a snapshot taken too late will misclassify stdlib entries (`"string"`, `"math"`, `"require"`) as user-defined reactive state
+**Testing strategy:** For every benchmark scenario (hover, open/close, slider, traversal, backend-update), run narrow invalidation → capture widget tree + pixel buffer. Force `TREE_REBUILD` → capture same. Assert pixel-identical output AND widget-tree equivalence (all `computed_style` fields, all `layout` bounds).
 
 ## Implications for Roadmap
 
-Based on combined research, the milestone maps to four sequential phases that respect the build-order dependencies identified in ARCHITECTURE.md. Each phase is independently testable and ships a verifiable correctness improvement.
+### Phase 1: Selector Dependency Tracking (2-3 days)
 
-### Phase 1: VM Pool Foundation
-**Rationale:** `LuaVmPool` and `ChunkCache` are pure new types with no changes to existing behavior. They must exist before any `ScriptContext` changes are made. Building and testing them in isolation eliminates uncertainty before the high-risk migration step.
-**Delivers:** `LuaVmPool` (thread-local `Vec<Lua>` with checkout/checkin RAII), `PooledVm` (newtype with `Drop`-based return), `ChunkCache` (`Arc<Mutex<HashMap<u64, String>>>`), thread ID assertion in pool RAII guard, pool growth-on-demand policy.
-**Addresses:** Foundation for all table-stakes features; pool size policy (Pitfall 9).
-**Avoids:** Pitfall 8 (thread pool mixing) via thread ID assertion from day one.
+**Rationale:** Highest impact (interaction events at 60fps, full-tree restyle is the most measurable waste), lowest risk (extends existing `StyleRuleIndex` construction). No upstream dependencies. Unblocks Phase C interaction narrowing.
 
-### Phase 2: Host API Re-targeting
-**Rationale:** Refactoring `install_host_api` to accept a `&Table` target is the highest-risk single change but is best done as a standalone step before `_ENV` isolation is wired in. At this stage, existing behavior is preserved by passing `lua.globals()` as the target — the refactor is mechanical and validates cleanly against existing tests.
-**Delivers:** `install_host_api(lua, &Table)` signature; all per-component host API writes are target-parameterized; existing tests pass without modification.
-**Addresses:** Host API re-injection correctness; sets up the correct write target for Phase 3.
-**Avoids:** Pitfall 3 (host API closures bypassing `_ENV`) — the target switch happens here, not retrofitted later.
+**Delivers:** `RuleDependencyMask` struct, `state_to_rules` reverse index, `StyleResolver::restyle_nodes_cached()`, targeted interaction restyle in `finalize_tree()` — `:hover` restyles ~5 nodes instead of 500.
 
-### Phase 3: _ENV Isolation + Lazy-Init
-**Rationale:** The core migration: replace `lua: Lua` with `vm: Option<PooledVm>` + `env: Option<Table>`, add `ensure_initialized()`, redirect all globals reads/writes to `env_table`, and wire the pool checkout/checkin lifecycle. Gated on Phase 1 (pool exists) and Phase 2 (host API is retargetable). Highest-risk phase.
-**Delivers:** Full per-component `_ENV` isolation; lazy-init defers VM allocation until first script call; `sync_state_from_lua()` reads from `env_table.pairs()`; `pool_baseline_globals` immutable snapshot; string metatable frozen via `Lua::sandbox(true)` on pool VMs; explicit env drop + registry key cleanup on VM checkin.
-**Addresses:** Per-component state isolation, lazy-init, explicit reset on checkin.
-**Avoids:** Pitfall 2 (string metatable contamination) via `Lua::sandbox(true)` at VM construction; Pitfall 4 (stale GC objects) via explicit cleanup on checkin; Pitfall 5 (lazy-init ordering) by keeping init synchronous; Pitfall 11 (`sync_state_from_lua` pollution) via `pool_baseline_globals` snapshot.
+**Crate:** `mesh-core-elements`
 
-### Phase 4: Integration + Validation
-**Rationale:** Wire the pool and cache into `FrontendSurfaceComponent`, apply lazy-init to `BackendScriptContext`, validate hot-reload cache invalidation, and run benchmark comparison. Intentionally thin on new logic — this is an integration and measurement phase.
-**Delivers:** `ScriptContext::new_lazy(pool, cache, ...)` call site in `create_runtime_for_component`; `BackendScriptContext` defers `Lua::new()` to first poll/init; hot-reload cache eviction wired to source-path mtime notification; `cargo bench` showing per-component mount cost before vs. after.
-**Addresses:** Chunk caching (hot-reload invalidation), backend lazy-init.
-**Avoids:** Pitfall 6 (hot-reload cache staleness) by wiring eviction to the existing mtime watcher before integration is considered done.
+**Pitfalls to avoid:** #1 (inherited style propagation — walk children and re-apply), #7 (state bitmask non-orthogonality — accept as overhead), #8 (fallback bucket audit — ensure <5% of rules land in fallback).
+
+### Phase 2: Per-Node Service Field Tracking (3-4 days)
+
+**Rationale:** Builds the dependency map needed for Phase C. No upstream dependencies. Can be developed in parallel with Phase A.
+
+**Delivers:** `NodeServiceFieldDependencies` bidirectional index, `ServiceFieldReadSnapshot`, per-node snapshot diffing in template evaluator, `any_tracked_field_changed()` fast path, `field_read_snapshot()` on `ScriptContext`.
+
+**Crates:** `mesh-core-scripting`, `mesh-core-shell`
+
+**Pitfalls to avoid:** #6 (metatable overhead — cache tracked status on Lua side, profile to ensure <1% render time regression).
+
+### Phase 3: Narrow Invalidation + Field-Aware Routing (4-5 days)
+
+**Rationale:** Combines both dependency systems into the final narrow pipeline. The integration point — consumes `state_to_rules` from A and `field_nodes` from B to make routing decisions.
+
+**Delivers:** `RetainedNodeDirtyFlags::SERVICE_STATE`, `mark_nodes_dirty()` + `mark_layout_ancestors_dirty()` + `nodes_with_flag()` on `RetainedWidgetTree`, `invalidate_service_nodes()` replacing `invalidate_script_state()`, `affected_by_service_change()` gating in `observes_service_event()`, `>50%` fallback threshold, narrow paint path in `paint()`.
+
+**Crate:** `mesh-core-shell`
+
+**Pitfalls to avoid:** #2 (co-dirtying — respect priority order; only narrow when SCRIPT+TEXT clean), #3 (text measure cascade — propagate LAYOUT to ancestors), #4 (first-render false negatives — fallback to `TREE_REBUILD`), #5 (nested JSON — deferred past MVP).
 
 ### Phase Ordering Rationale
 
-- Phases 1 and 2 carry no behavioral risk to the running shell; they can be reviewed and merged independently without destabilizing any existing surface.
-- Phase 3 is the only phase where an implementation mistake produces silent correctness bugs (component state bleed) rather than compile errors; doing it after Phases 1 and 2 minimizes the change surface and ensures the new types are already tested.
-- Phase 4 must be last because it exercises the full integration path; benchmarks here confirm the optimization reduces VM allocation cost and catch any regression the unit tests missed.
-- Backend lazy-init belongs in Phase 4 rather than Phase 3 because it is a simpler isolated change and backend modules are long-lived singletons where the timing matters less.
+- Phases A and B have zero overlapping crate modifications — can be developed simultaneously with no merge conflicts.
+- Phase C is the integration point that consumes both A's and B's outputs.
+- This phased approach builds each concern separately before wiring them together, matching the research goal of "ship narrow invalidation across selector, service, and event routing."
+- All phases share a common testing baseline: pixel-equivalence against `TREE_REBUILD` output, making regression detection immediate.
 
 ### Research Flags
 
-Phases needing careful implementation attention:
-- **Phase 3:** `_ENV` isolation + lazy-init — highest-risk; add a dedicated integration test matrix (two components on one pool VM, sequential load/unload cycles, service payload isolation) before merging; if the `pool_baseline_globals` approach is unclear from ARCHITECTURE.md, consider a targeted research pass on `sync_state_from_lua` before implementation
-- **Phase 2:** `install_host_api` refactor — medium risk; grep `globals()` across `context/runtime.rs` and all closure bodies before writing the patch to ensure no call site is missed
+**Needs deeper research during planning:**
+- **Phase C (narrow invalidation):** `mark_layout_ancestors_dirty()` requires parent chain access — stored in `WidgetNode` or derived from slotmap key→parent mapping. Exact API needs validation against current `RetainedWidgetTree` structure. Taffy's support for incremental layout re-computation on ancestor chains needs verification.
+- **Phase C (co-dirtying edge cases):** Simultaneous service+interaction+script dirty states in one frame need explicit test coverage. Priority ordering must be verified against real compositor event patterns.
 
-Phases with standard patterns (skip additional research):
-- **Phase 1:** `LuaVmPool` + `ChunkCache` — standard `thread_local!` + `Arc<Mutex<HashMap>>` patterns; fully specified in STACK.md and ARCHITECTURE.md
-- **Phase 4:** Integration wiring — one call-site change and one lazy-init guard; well-specified in ARCHITECTURE.md
+**Skip research-phase (well-documented patterns):**
+- **Phase A:** Extends existing `index_state_selector()` and `restyle_subtree_cached()` patterns. Stylo (Firefox) restyle-hints approach provides validated reference architecture.
+- **Phase B:** Tactical extension of existing `tracked_service_fields` mechanism. The metatable handler doesn't change — only the Rust-side capture granularity increases.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All key APIs verified against mlua 0.11 docs via Context7 and official docs; one caveat: `Compiler::compile()` cross-VM bytecode sharing is HIGH in STACK.md but LOW in ARCHITECTURE.md's direct source analysis — source-string fallback resolves safely for v1.17 |
-| Features | HIGH | Feature set is infrastructure optimization with a clear correctness baseline; all table-stakes features are derived from first principles (isolation, lifecycle, host API continuity) rather than user surveys |
-| Architecture | HIGH | Based on direct source reads of `crates/core/runtime/scripting/src/context/runtime.rs` and `crates/core/shell/src/shell/component/runtime.rs`; component boundaries, build order, and ownership model are grounded in actual code |
-| Pitfalls | HIGH | All 11 pitfalls are grounded in codebase analysis (current `install_host_api` behavior, `send` feature in Cargo.toml) or official Luau documentation (string metatable, sandbox model); no speculative pitfalls |
+| Stack | **HIGH** | All data structures use Rust stdlib types already in MESH's `Cargo.toml`. No new crates. Every structure traced to a specific existing crate file and line number. |
+| Features | **HIGH** | All 7 table-stakes features mapped to exact code locations in the current coarse invalidation pipeline. Each feature's complexity assessed against existing code patterns. |
+| Architecture | **HIGH** | All 3 integration points have concrete before/after data flow diagrams, method signatures, and pseudo-code. Every modified struct traced to a live source file. 10+ crate files read in full. |
+| Pitfalls | **HIGH** | All 8 pitfalls identified from direct codebase analysis — no speculative hazards. Each has a concrete detection test and mitigation strategy. Cascading failure modes traced through actual render pipeline sequencing. |
 
-**Overall confidence:** HIGH
+**Overall confidence:** HIGH — this is an internal pipeline optimization on a mature codebase. Every integration point extends existing infrastructure rather than introducing new architectural concepts.
 
 ### Gaps to Address
 
-- **`Compiler::compile()` bytecode cross-VM loading**: STACK.md asserts this works via `set_mode(ChunkMode::Binary)`; ARCHITECTURE.md rates it LOW confidence. Validate at the start of Phase 1 with a minimal test: compile source on one `Lua` instance, load the bytes into a second. If it works, upgrade the chunk cache to store bytecode bytes instead of source strings. If it fails, the source-string cache is correct for v1.17 and no design change is needed.
-- **Pool VM construction cost**: The assumption is that `Lua::new_with(BASE | STRING | TABLE | MATH, ...)` + `sandbox(true)` is cheap enough to run lazily on first pool expansion without blocking a render frame. Verify with a `cargo bench` measurement before finalizing the growth policy.
-- **`BackendScriptContext` thread isolation**: Confirm in Phase 4 that `BackendScriptContext::new_*()` lazy-init does not reference the frontend `thread_local!` pool. Enforce by type — `BackendScriptContext` must have no `LuaVmPool` field.
+- **Parent chain access for `mark_layout_ancestors_dirty()`:** The `RetainedWidgetTree` stores nodes in a slotmap; parent relationships may need to be derived from `WidgetNode.parent_id` or tracked separately. Validate during Phase C planning.
+- **Template evaluator hot-path overhead:** The per-node snapshot diff adds a HashMap clone+compare per expression evaluation. Profile during Phase B to ensure <1% render time regression.
+- **Fallback threshold tuning:** The `>50%` threshold is a heuristic. Profile on real surfaces (navigation-bar: ~80 nodes, audio-popover: ~40 nodes) during Phase C to determine optimal threshold.
+- **Nested JSON field tracking:** Deferred past MVP. Flat payloads (`audio.percent`, `audio.muted`) cover current use cases. Document as a known limitation for v1.18.
 
 ## Sources
 
-### Primary (HIGH confidence)
-- `https://docs.rs/mlua/0.11.0/mlua/struct.Chunk.html` — `set_environment()`, `into_function()`, `set_mode()` signatures
-- `https://docs.rs/mlua/0.11.0/mlua/struct.Lua.html` — `new_with()`, `StdLib`, `sandbox()`, `set_globals()` caveats
-- `https://luau.org/sandbox/` — `__index`-based global table delegation, string metatable shared risk, read-only builtin strategy
-- `crates/core/runtime/scripting/src/context/runtime.rs` (direct source read) — `ScriptContext` fields, `install_host_api`, `sync_state_from_lua`, `load_script_with_interface_imports`
-- `crates/core/shell/src/shell/component/runtime.rs` (direct source read) — `EmbeddedFrontendRuntime`, `create_runtime_for_component`
+### Primary — MESH codebase (live, read in full)
+- `crates/core/ui/elements/src/style/resolve.rs` — `StyleRuleIndex` (L187-296), state bit constants (L1038-1050), `restyle_subtree_cached` (L615-623), `inherit_retained_text_style` (L992-1009), `selector_index_key` (L1011-1036)
+- `crates/core/ui/elements/src/tree.rs` — `WidgetNode` (L44-62), `NodeId` (L30), `ElementState` (L13-27)
+- `crates/core/shell/src/shell/component.rs` — `ComponentDirtyFlags` (L67-79), `TREE_REBUILD` (L83-90), invalidation methods (L477-521), `take_dirty_for_paint` (L523-543)
+- `crates/core/shell/src/shell/component/shell_component.rs` — `handle_service_event` (L119-182), `observes_service_event` (L184-208), `paint()` (L289-489)
+- `crates/core/shell/src/shell/component/rendering.rs` — `finalize_tree()` (L169-276), `build_tree()` (L109-149)
+- `crates/core/shell/src/shell/component/runtime_tree.rs` — `RetainedWidgetTree` (L83-91), `RetainedNodeDirtyFlags` (L70-79), `RetainedNodeSnapshot` (L184-190)
+- `crates/core/shell/src/shell/runtime/service_state.rs` — `broadcast_service_event` (L4-33), `deliver_service_event` (L167-184)
+- `crates/core/runtime/scripting/src/context/runtime.rs` — `ScriptContext` (L42-74), `tracked_service_fields` (L59), `tracked_service_fields_changed` (L336-351)
+- `crates/core/runtime/scripting/src/context/proxy.rs` — service proxy `__index` tracking (L152-159)
 
-### Secondary (MEDIUM confidence)
-- `https://github.com/mlua-rs/mlua/discussions/494` — per-thread VM pattern; maintainer recommendation
-- `https://github.com/mlua-rs/mlua/discussions/137` — bytecode `Vec<u8>` as cross-VM sharing unit; `ChunkMode::Binary` loading
-- `https://sleitnick.github.io/luau-api/guides/sandboxing.html` — Luau C API `luaL_sandbox` / `luaL_sandboxthread` pattern
-- `https://docs.rs/mlua/latest/mlua/struct.Thread.html` — Thread sandbox API
-- `https://docs.rs/mlua/latest/mlua/struct.Compiler.html` — Compiler struct API
-
-### Tertiary (LOW confidence)
-- Architecture research assessment of `Compiler::compile()` bytecode extractability — contradicts STACK.md; resolve with a targeted test in Phase 1
+### Secondary — reference architectures
+- Stylo (Firefox CSS engine) — restyle hints approach for pseudo-class changes
+- Svelte 5 runes — signal-based fine-grained reactivity model (conceptual influence only)
+- MESH v1.3 benchmark scenarios — hover, open/close, slider, traversal, backend-update
+- CSS cascade specification — inheritance behavior for color, font-family, font-size, font-weight, line-height
+- Luau performance notes — metatable dispatch cost ~50-100ns
 
 ---
-*Research completed: 2026-06-02*
+*Research completed: 2026-06-07*
 *Ready for roadmap: yes*
