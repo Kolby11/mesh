@@ -17,15 +17,15 @@
 
 ### _ENV Isolation
 
-- [ ] **ISO-01**: Each checked-out VM slot runs `Thread::sandbox()` per component activation, giving the component a per-component `_ENV` table where writes are local and reads fall through to the shared read-only pool VM globals.
-- [ ] **ISO-02**: All per-component host API entries (`require`, `self`, `module`, `mesh.*`, `__mesh_svc_*`, `__mesh_request_redraw`, `__mesh_locale_current`) are installed into the sandboxed `_ENV` table instead of `lua.globals()`, so no component-private state is written to the shared VM.
+- [x] **ISO-01**: Each checked-out VM slot runs `Thread::sandbox()` per component activation, giving the component a per-component `_ENV` table where writes are local and reads fall through to the shared read-only pool VM globals.
+- [x] **ISO-02**: All per-component host API entries (`require`, `self`, `module`, `mesh.*`, `__mesh_svc_*`, `__mesh_request_redraw`, `__mesh_locale_current`) are installed into the sandboxed `_ENV` table instead of `lua.globals()`, so no component-private state is written to the shared VM.
 - [ ] **ISO-03**: On VM checkin, the component's `env_table` and all registry key handles are explicitly dropped and the thread is reset via `Thread::reset()` before the slot is returned to the pool, preventing state bleed to the next component.
 - [ ] **ISO-04**: A `pool_baseline_globals` snapshot is captured once at pool VM construction and shared immutably so `sync_state_from_lua()` can distinguish stdlib entries from user-defined reactive component state.
 
 ### Lazy Initialization
 
-- [ ] **INIT-01**: `ScriptContext` replaces `lua: Lua` with `vm: Option<PooledVm>` and `env: Option<Table>`; VM pool checkout is deferred until the first script call via an `ensure_initialized()` entry point.
-- [ ] **INIT-02**: Components that are declared but never mounted or shown hold no pool slot, reducing idle memory footprint compared to the current model.
+- [x] **INIT-01**: `ScriptContext` replaces `lua: Lua` with `vm: Option<PooledVm>` and `env: Option<Table>`; VM pool checkout is deferred until the first script call via an `ensure_initialized()` entry point.
+- [x] **INIT-02**: Components that are declared but never mounted or shown hold no pool slot, reducing idle memory footprint compared to the current model.
 - [ ] **INIT-03**: `BackendScriptContext` defers `Lua::new()` to the first `init()` or poll call; backend contexts are long-lived singletons so no pooling is applied, only lazy allocation.
 
 ### Chunk Cache

@@ -8,9 +8,9 @@ last_activity: 2026-06-07
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 3
-  percent: 50
+  total_plans: 3
+  completed_plans: 4
+  percent: 62
 ---
 
 # State: MESH v1.17
@@ -24,9 +24,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-02)
 
 ## Current Position
 
-Phase: 93 — Host API Re-targeting (in progress, plan 02 complete)
-Status: Phase 93 plan 02 complete; plan 02 of 2 done
-Last activity: 2026-06-07 — Phase 93 plan 02 executed: BackendScriptContext::install_host_api refactored to accept &mlua::Table, completing ISO-02 foundation
+Phase: 94 — _ENV Isolation + Lazy-Init (plan 01 complete)
+Status: Phase 94 plan 01 complete; plan 01 of 1 done
+Last activity: 2026-06-07 — Phase 94 plan 01 executed: ScriptContext restructured with lazy-init vm: Option<PooledVm> + env_table: Option<Table>, per-component _ENV isolation with __index=globals() metatable, all globals() reads/writes migrated to env_table, closures capture env_table for reactive state
 
 ## Decisions
 
@@ -97,6 +97,10 @@ Last activity: 2026-06-07 — Phase 93 plan 02 executed: BackendScriptContext::i
 - [Phase 03]: Shell pipeline parsing for PipeWire and UPower lives in Luau provider code, not Rust core. — Preserves the no service-specific Rust command behavior rule.
 - [Phase 03]: Plan 04 locks mesh.service.set_poll_interval(ms) to a 50ms minimum with plugin-scoped warnings and post-callback runtime refresh. — Covers BHOST-05 and D-13 through D-15.
 - [Phase 93-02]: BackendScriptContext::install_host_api accepts &mlua::Table — call site passes &lua.globals() preserving identical behavior; ISO-02 foundation now complete across both frontend and backend.
+- [Phase 94-01]: ScriptContext struct restructured with vm: Option<PooledVm> + env_table: Option<Table> — no Lua allocation at construction; ensure_initialized() defers VM checkout to first entrypoint.
+- [Phase 94-01]: ensure_initialized() creates per-component _ENV table with { __index = lua.globals() } metatable, installs host API into env_table, and populates builtin_globals from env_table.pairs().
+- [Phase 94-01]: All script entrypoints gated through ensure_initialized(); all reactive state reads/writes migrated from lua.globals() to env_table; closures (request_redraw, locale.current) capture env_table.clone() for component-scoped writes.
+- [Phase 94-01]: Script chunks loaded with set_environment(env_table) so function definitions land in per-component namespace; __index fallthrough provides read-only stdlib access via sandboxed pool VMs.
 - [Phase 04]: Plan 05 derives shell-theme backend settings from ThemeEngine.active().id so provider startup and restart match the shell's resolved theme authority.
 - [Phase 04]: Plan 05 makes theme file-watch reload return pending CoreRequest queues and synchronize mesh.theme only when the resolved active theme id changes.
 - [Phase 09]: Disabled pseudo state is derived from disabled and aria-disabled attributes during runtime annotation.
@@ -209,11 +213,12 @@ Last activity: 2026-06-07 — Phase 93 plan 02 executed: BackendScriptContext::i
 | Phase 63 P01 | 24min | 3 tasks | 10 files |
 | Phase 64 P01 | 22min | 3 tasks | 3 files |
 | Phase 71 P01 | 20 min | 4 tasks | 5 files |
+| Phase 94 P01 | 11min | 2 tasks | 3 files |
 
 ## Session
 
-Last session: 2026-06-02T00:00:00.000Z
-Stopped At: Roadmap created for v1.17
+Last session: 2026-06-07T16:44:28Z
+Stopped At: Completed 94-01-PLAN.md
 Resume File: None
 
 ## Accumulated Context
@@ -340,4 +345,4 @@ Items acknowledged and deferred at `v1.16` close on 2026-05-26:
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-06-07 — Phase 93 plan 02 complete: BackendScriptContext::install_host_api refactored to accept &mlua::Table (ISO-02 foundation complete)*
+*State updated: 2026-06-07 — Phase 94 plan 01 complete: ScriptContext lazy-init pool checkout with per-component _ENV isolation, all globals() reads/writes migrated to env_table*

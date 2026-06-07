@@ -62,7 +62,7 @@
  **Plans**: 2 plans
 
 Plans:
-- [ ] 94-01-PLAN.md — ScriptContext struct change: vm+env_table, ensure_initialized(), all method migration to per-component _ENV (INIT-01, INIT-02, ISO-01, ISO-02)
+- [x] 94-01-PLAN.md — ScriptContext struct change: vm+env_table, ensure_initialized(), all method migration to per-component _ENV (INIT-01, INIT-02, ISO-01, ISO-02)
 - [ ] 94-02-PLAN.md — Checkin cleanup (Thread::reset in return_slot), uninit() wiring to Drop, compile_and_execute with ChunkCache (ISO-03, CACHE-03)
 
 ### Phase 95: Integration + Validation
@@ -82,7 +82,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 92. VM Pool Foundation | 2/2 | Complete | 2026-06-07 |
 | 93. Host API Re-targeting | 2/2 | Complete | 2026-06-07 |
-| 94. _ENV Isolation + Lazy-Init | 0/2 | Planned | - |
+| 94. _ENV Isolation + Lazy-Init | 1/2 | In Progress | - |
 | 95. Integration + Validation | 0/? | Not started | - |
 
 ---
