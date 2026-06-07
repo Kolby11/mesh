@@ -12,11 +12,11 @@
 
 ## Current Status
 
-**Active milestone: v1.17 Performance: Scripting VM Consolidation** — Phase 92 in progress.
+**Active milestone: v1.17 Performance: Scripting VM Consolidation** — Phase 92 complete, Phase 93 next.
 
 ## Phases
 
-- [ ] **Phase 92: VM Pool Foundation** — New `LuaVmPool`, `PooledVm` RAII types, and `ChunkCache`; no behavioral change to existing `ScriptContext`.
+- [x] **Phase 92: VM Pool Foundation** — New `LuaVmPool`, `PooledVm` RAII types, and `ChunkCache`; no behavioral change to existing `ScriptContext`.
 - [ ] **Phase 93: Host API Re-targeting** — Refactor `install_host_api()` to accept a `&Table` target; pass `lua.globals()` temporarily to preserve existing behavior.
 - [ ] **Phase 94: _ENV Isolation + Lazy-Init** — Replace `lua: Lua` with `vm: Option<PooledVm>` + `env: Option<Table>`; wire `ensure_initialized()`; per-component `_ENV` sandboxing; explicit checkin reset.
 - [ ] **Phase 95: Integration + Validation** — Wire pool and cache into `FrontendSurfaceComponent`; `BackendScriptContext` lazy-init; hot-reload cache eviction; shipped surface regression proof.
@@ -74,7 +74,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 92. VM Pool Foundation | 0/2 | Not started | - |
+| 92. VM Pool Foundation | 2/2 | Complete | 2026-06-07 |
 | 93. Host API Re-targeting | 0/? | Not started | - |
 | 94. _ENV Isolation + Lazy-Init | 0/? | Not started | - |
 | 95. Integration + Validation | 0/? | Not started | - |

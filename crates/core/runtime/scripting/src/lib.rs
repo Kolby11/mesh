@@ -17,6 +17,8 @@ pub mod backend;
 /// `mesh.service.bind` and `mesh.service.on`.
 pub mod context;
 pub mod host_api;
+pub mod chunk_cache;
+pub mod pool;
 pub mod storage;
 
 pub use backend::{
