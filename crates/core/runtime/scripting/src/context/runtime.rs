@@ -157,7 +157,8 @@ impl ScriptContext {
         self.changed_storage_keys.lock().unwrap().clear();
         self.clear_tracked_service_fields();
         self.clear_tracked_storage_keys();
-        self.install_host_api()?;
+        let globals = self.lua.globals();
+        self.install_host_api(&globals)?;
         self.install_interface_imports(imports)?;
         self.refresh_module_object();
         // Snapshot all pre-script globals so auto-sync excludes them.
@@ -560,8 +561,8 @@ impl ScriptContext {
         self.lua.globals().get::<Function>(name).is_ok()
     }
 
-    fn install_host_api(&mut self) -> Result<(), ScriptError> {
-        let globals = self.lua.globals();
+    fn install_host_api(&mut self, target: &mlua::Table) -> Result<(), ScriptError> {
+        let globals = target;
         globals
             .set("self", self.current_self_table()?)
             .map_err(lua_err)?;
