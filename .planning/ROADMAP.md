@@ -34,7 +34,12 @@
   2. `:focus` and `:active` pseudo-class transitions produce identical visual output to full-tree restyle on all shipped surfaces.
   3. Inherited style values (color, font-family, font-size, font-weight, line-height) propagate correctly from a partially-restyled parent to its children.
   4. Navigation bar and audio popover shipped-surface regression tests pass with selector-narrow restyle enabled.
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 96-01-PLAN.md — Add `state_to_rules` reverse index and `rules_for_state_bit()` to `StyleRuleIndex`
+- [ ] 96-02-PLAN.md — Replace `state_hash` with `ElementState` in `RetainedNodeSnapshot`, compute `changed_state_bits`
+- [ ] 96-03-PLAN.md — Fix targeted restyle inheritance and wire `finalize_tree` for narrow interaction restyle
 
 ### Phase 97: Service Field Dependency Tracking
 **Goal**: The renderer captures per-node service field reads during expression evaluation to build a bidirectional dependency index without measurable render-time overhead.
@@ -66,7 +71,7 @@
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 96. Selector Dependency Tracking | v1.18 | 0/0 | Not started | - |
+| 96. Selector Dependency Tracking | v1.18 | 0/3 | Not started | - |
 | 97. Service Field Dependency Tracking | v1.18 | 0/0 | Not started | - |
 | 98. Narrow Invalidation & Event Routing | v1.18 | 0/0 | Not started | - |
 
