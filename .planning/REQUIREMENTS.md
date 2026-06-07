@@ -36,7 +36,7 @@
 
 ### Integration
 
-- [ ] **INT-01**: `FrontendSurfaceComponent::create_runtime_for_component` passes pool and cache references into `ScriptContext::new_lazy()`, replacing the current direct `Lua::new()` constructor call.
+- [x] **INT-01**: `FrontendSurfaceComponent::create_runtime_for_component` passes pool and cache references into `ScriptContext::new_lazy()`, replacing the current direct `Lua::new()` constructor call.
 - [ ] **INT-02**: The shipped navigation bar and audio popover surfaces continue to function correctly after the pool migration — reactive state, service events, keybind dispatch, and storage behavior are unaffected.
 
 ---

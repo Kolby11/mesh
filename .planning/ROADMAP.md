@@ -12,7 +12,7 @@
 
 ## Current Status
 
-**Active milestone: v1.17 Performance: Scripting VM Consolidation** — Phase 92 complete, Phase 93 next.
+**Active milestone: v1.17 Performance: Scripting VM Consolidation** — Phase 95 plan 02 complete; plans 01 and 03 pending.
 
 ## Phases
 
@@ -78,7 +78,7 @@ Plans:
 
 Plans:
 - [ ] 95-01-PLAN.md — BackendScriptContext lazy-init: defer Lua::new() to first init()/poll() (INIT-03)
-- [ ] 95-02-PLAN.md — Frontend integration wiring: ScriptContext::new_lazy() + compile_and_execute in create_runtime_for_component + ChunkCache eviction in reload_source (INT-01, CACHE-03)
+- [x] 95-02-PLAN.md — Frontend integration wiring: ScriptContext::new_lazy() + compile_and_execute in create_runtime_for_component + ChunkCache eviction in reload_source (INT-01, CACHE-03)
 - [ ] 95-03-PLAN.md — Build verification + regression proof: workspace build + test suite (INT-02)
 
 ## Progress Table
@@ -88,7 +88,7 @@ Plans:
 | 92. VM Pool Foundation | 2/2 | Complete | 2026-06-07 |
 | 93. Host API Re-targeting | 2/2 | Complete | 2026-06-07 |
 | 94. _ENV Isolation + Lazy-Init | 2/2 | Complete | 2026-06-07 |
-| 95. Integration + Validation | 0/3 | Planned | - |
+| 95. Integration + Validation | 1/3 | In Progress | - |
 
 ---
 

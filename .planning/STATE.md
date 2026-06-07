@@ -8,9 +8,9 @@ last_activity: 2026-06-07
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
-  percent: 87
+  total_plans: 9
+  completed_plans: 7
+  percent: 78
 ---
 
 # State: MESH v1.17
@@ -24,9 +24,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-02)
 
 ## Current Position
 
-Phase: 94 — _ENV Isolation + Lazy-Init (complete)
-Status: Phase 94 plan 02 complete; all 2 plans done
-Last activity: 2026-06-07 — Phase 94 plan 02 executed: Checkin cleanup documented in return_slot (env_table-based ISO-03 isolation), ScriptContext Drop wired to uninit() for pool VM return, compile_and_execute/compile_and_execute_simple methods added with ChunkCache source caching by FNV64 content hash for Phase 95 hot-reload eviction
+Phase: 95 — Integration + Validation (in progress)
+Status: Phase 95 plan 02 complete; plan 01 and 03 pending
+Last activity: 2026-06-07 — Phase 95 plan 02 executed: ScriptContext::new_lazy() integration point added (delegating to new()), FrontendSurfaceComponent::create_runtime_for_component switched to cached compile_and_execute path, reload_source() wired with ChunkCache eviction (fnv64 hash) for main script and local components before .mesh recompile (INT-01, CACHE-03)
 
 ## Decisions
 
@@ -99,7 +99,9 @@ Last activity: 2026-06-07 — Phase 94 plan 02 executed: Checkin cleanup documen
 - [Phase 93-02]: BackendScriptContext::install_host_api accepts &mlua::Table — call site passes &lua.globals() preserving identical behavior; ISO-02 foundation now complete across both frontend and backend.
 - [Phase 94-01]: ScriptContext struct restructured with vm: Option<PooledVm> + env_table: Option<Table> — no Lua allocation at construction; ensure_initialized() defers VM checkout to first entrypoint.
 - [Phase 94-01]: ensure_initialized() creates per-component _ENV table with { __index = lua.globals() } metatable, installs host API into env_table, and populates builtin_globals from env_table.pairs().
-- [Phase 94-01]: All script entrypoints gated through ensure_initialized(); all reactive state reads/writes migrated from lua.globals() to env_table; closures (request_redraw, locale.current) capture env_table.clone() for component-scoped writes.
+- [Phase 95-02]: new_lazy() delegates to new() rather than duplicating the constructor body — both set vm: None, env_table: None, preserving the lazy-init invariant established in Phase 94.
+- [Phase 95-02]: ChunkCache eviction in reload_source() uses FNV64 content hash of old script source — astronomically low collision rate on source text (~1 in 2^64), acceptable for infrequent hot-reload paths.
+- [Phase 95-02]: use mesh_core_scripting::chunk_cache import placed inside reload_source() function body rather than module-level to scope the import to its only use site.
 - [Phase 94-01]: Script chunks loaded with set_environment(env_table) so function definitions land in per-component namespace; __index fallthrough provides read-only stdlib access via sandboxed pool VMs.
 - [Phase 04]: Plan 05 derives shell-theme backend settings from ThemeEngine.active().id so provider startup and restart match the shell's resolved theme authority.
 - [Phase 04]: Plan 05 makes theme file-watch reload return pending CoreRequest queues and synchronize mesh.theme only when the resolved active theme id changes.
@@ -214,11 +216,12 @@ Last activity: 2026-06-07 — Phase 94 plan 02 executed: Checkin cleanup documen
 | Phase 64 P01 | 22min | 3 tasks | 3 files |
 | Phase 71 P01 | 20 min | 4 tasks | 5 files |
 | Phase 94 P01 | 11min | 2 tasks | 3 files |
+| Phase 95 P02 | 2min | 2 tasks | 3 files |
 
 ## Session
 
-Last session: 2026-06-07T16:44:28Z
-Stopped At: Completed 94-01-PLAN.md
+Last session: 2026-06-07T18:08:32Z
+Stopped At: Completed 95-02-PLAN.md
 Resume File: None
 
 ## Accumulated Context
@@ -345,4 +348,4 @@ Items acknowledged and deferred at `v1.16` close on 2026-05-26:
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-06-07 — Phase 94 plan 01 complete: ScriptContext lazy-init pool checkout with per-component _ENV isolation, all globals() reads/writes migrated to env_table*
+*State updated: 2026-06-07 — Phase 95 plan 02 complete: ScriptContext::new_lazy() integration, compile_and_execute wiring in create_runtime_for_component, ChunkCache eviction in reload_source (INT-01, CACHE-03)*
