@@ -215,20 +215,14 @@ impl ScriptContext {
         self.changed_storage_keys.lock().unwrap().clear();
         self.clear_tracked_service_fields();
         self.clear_tracked_storage_keys();
-        let globals = self.lua().globals();
-        self.install_host_api(&globals)?;
+        // Host API already installed into env_table by ensure_initialized.
+        // builtin_globals already populated.
         self.install_interface_imports(imports)?;
         self.refresh_module_object();
-        // Snapshot all pre-script globals so auto-sync excludes them.
-        self.builtin_globals = self
-            .lua()
-            .globals()
-            .pairs::<String, LuaValue>()
-            .filter_map(|result| result.ok().map(|(key, _)| key))
-            .collect();
         self.lua()
             .load(source)
             .set_name(&self.module_id)
+            .set_environment(self.env().clone())
             .exec()
             .map_err(map_lua_error)?;
         self.sync_state_from_lua();
@@ -244,7 +238,7 @@ impl ScriptContext {
         let _ = self.ensure_initialized();
         let service_key = format!("__mesh_svc_{service}");
         if let Ok(lua_value) = self.lua().to_value(payload) {
-            let _ = self.lua().globals().set(service_key, lua_value);
+            let _ = self.env().set(service_key, lua_value);
         }
         if service == "locale"
             && let Some(locale) = payload
@@ -252,7 +246,7 @@ impl ScriptContext {
                 .or_else(|| payload.get("current"))
                 .and_then(|value| value.as_str())
         {
-            let _ = self.lua().globals().set("__mesh_locale_current", locale);
+            let _ = self.env().set("__mesh_locale_current", locale);
         }
         self.refresh_module_object();
     }
@@ -341,8 +335,8 @@ impl ScriptContext {
 
     pub fn public_function_names(&mut self) -> Vec<String> {
         let _ = self.ensure_initialized();
-        let globals = self.lua().globals();
-        let mut names = globals
+        let mut names = self
+            .env()
             .pairs::<String, LuaValue>()
             .filter_map(|pair| {
                 let (name, value) = pair.ok()?;
@@ -434,10 +428,7 @@ impl ScriptContext {
             }
         }
 
-        self.lua()
-            .globals()
-            .set(binding, table)
-            .map_err(map_lua_error)?;
+        self.env().set(binding, table).map_err(map_lua_error)?;
         Ok(())
     }
 
@@ -447,7 +438,7 @@ impl ScriptContext {
     /// ignores extra arguments.
     pub fn call_init(&mut self) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
-        if let Ok(init) = self.lua().globals().get::<Function>("init") {
+        if let Ok(init) = self.env().get::<Function>("init") {
             tracing::debug!("calling init() for {}", self.module_id);
             let current_self = self.current_self_table()?;
             init.call::<()>(current_self).map_err(map_lua_error)?;
@@ -460,8 +451,8 @@ impl ScriptContext {
     /// Call a named event handler.
     pub fn call_handler(&mut self, name: &str, args: &[Value]) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
-        let globals = self.lua().globals();
-        let handler = globals
+        let handler = self
+            .env()
             .get::<Function>(name)
             .map_err(|_| ScriptError::HandlerNotFound(name.to_string()))?;
         tracing::debug!("calling handler {name}() for {}", self.module_id);
@@ -625,7 +616,7 @@ impl ScriptContext {
     /// Check if a handler exists.
     pub fn has_handler(&mut self, name: &str) -> bool {
         let _ = self.ensure_initialized();
-        self.lua().globals().get::<Function>(name).is_ok()
+        self.env().get::<Function>(name).is_ok()
     }
 
     fn install_host_api(&mut self, target: &mlua::Table) -> Result<(), ScriptError> {
@@ -699,24 +690,26 @@ impl ScriptContext {
             )
             .map_err(lua_err)?;
 
+        let env_for_redraw = globals.clone();
         mesh_ui_api
             .set(
                 "request_redraw",
                 self.lua()
-                    .create_function(|lua, ()| {
-                        lua.globals().set("__mesh_request_redraw", true)?;
+                    .create_function(move |_lua, ()| {
+                        env_for_redraw.set("__mesh_request_redraw", true)?;
                         Ok(())
                     })
                     .map_err(lua_err)?,
             )
             .map_err(lua_err)?;
 
+        let env_for_locale = globals.clone();
         mesh_locale
             .set(
                 "current",
                 self.lua()
-                    .create_function(|lua, ()| {
-                        lua.globals()
+                    .create_function(move |_lua, ()| {
+                        env_for_locale
                             .get::<Option<String>>("__mesh_locale_current")
                             .map(|locale| locale.unwrap_or_else(|| "en".to_string()))
                     })
@@ -1004,7 +997,7 @@ impl ScriptContext {
         }
 
         let manifest = HostApiManifest::from_capabilities(&self.capabilities);
-        let globals = self.lua().globals();
+        let globals = self.env().clone();
         for import in imports {
             let canonical = InterfaceProxy::canonical_name(&import.interface);
             let readable = canonical == "mesh.theme" && manifest.has_theme_read
@@ -1072,8 +1065,7 @@ impl ScriptContext {
         if self.user_global_keys.is_empty() {
             // Full scan: discover all user globals (runs once per load_script).
             let user_globals: Vec<(String, LuaValue)> = self
-                .lua()
-                .globals()
+                .env()
                 .pairs::<String, LuaValue>()
                 .filter_map(|result| result.ok())
                 .filter(|(key, value)| {
@@ -1091,7 +1083,7 @@ impl ScriptContext {
         } else {
             // Fast path: only check known user global keys.
             for key in &self.user_global_keys {
-                if let Ok(lua_value) = self.lua().globals().get::<LuaValue>(key.as_str()) {
+                if let Ok(lua_value) = self.env().get::<LuaValue>(key.as_str()) {
                     if !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_)) {
                         if let Ok(value) = self.lua().from_value::<Value>(lua_value) {
                             self.state.set(key.clone(), value);
@@ -1105,13 +1097,12 @@ impl ScriptContext {
         self.refresh_module_object();
 
         if self
-            .lua()
-            .globals()
+            .env()
             .get::<bool>("__mesh_request_redraw")
             .unwrap_or(false)
         {
             self.state.dirty = true;
-            let _ = self.lua().globals().set("__mesh_request_redraw", false);
+            let _ = self.env().set("__mesh_request_redraw", false);
         }
     }
 
@@ -1155,7 +1146,7 @@ impl ScriptContext {
     }
 
     fn sync_module_exports_from_lua(&mut self) {
-        let Ok(module_table) = self.lua().globals().get::<Table>("module") else {
+        let Ok(module_table) = self.env().get::<Table>("module") else {
             return;
         };
         let Ok(exports) = module_table.get::<LuaValue>("exports") else {
@@ -1175,7 +1166,7 @@ impl ScriptContext {
             return;
         }
 
-        let Ok(module_table) = self.lua().globals().get::<Table>("module") else {
+        let Ok(module_table) = self.env().get::<Table>("module") else {
             return;
         };
         if let Ok(state_value) = self.lua().to_value(&self.state.snapshot()) {
