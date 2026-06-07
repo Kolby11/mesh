@@ -273,6 +273,49 @@ impl FrontendSurfaceComponent {
             );
         }
         self.annotate_selection_tree(tree, theme);
+
+        // Store current interaction state for next frame's targeted restyle diff.
+        self.previous_hovered_path = self.hovered_path.clone();
+        self.previous_focused_key = self.focused_key.clone();
+    }
+
+    /// Collects the set of `_mesh_key` values for all nodes whose interaction
+    /// state changed this frame plus all their descendants.
+    ///
+    /// Compares current hover/focus state against previous frame's state to
+    /// identify which nodes changed. Returns an empty HashSet if there is no
+    /// previous state to diff against (first frame), signaling fallback to full restyle.
+    fn collect_interaction_changed_keys(&self, tree: &WidgetNode) -> HashSet<String> {
+        let mut changed_keys: HashSet<String> = HashSet::new();
+
+        // Collect keys that had hover change: union of old and new hovered paths.
+        for key in &self.previous_hovered_path {
+            changed_keys.insert(key.clone());
+        }
+        for key in &self.hovered_path {
+            changed_keys.insert(key.clone());
+        }
+
+        // Collect keys that had focus change.
+        if let Some(ref prev) = self.previous_focused_key {
+            changed_keys.insert(prev.clone());
+        }
+        if let Some(ref curr) = self.focused_key {
+            changed_keys.insert(curr.clone());
+        }
+
+        if changed_keys.is_empty() {
+            return changed_keys; // first frame: no previous state
+        }
+
+        // For each changed key, add all descendant keys (entire subtree).
+        let mut all_affected: HashSet<String> = HashSet::new();
+        for changed_key in &changed_keys {
+            all_affected.insert(changed_key.clone());
+            collect_descendant_keys(tree, changed_key, &mut all_affected);
+        }
+
+        all_affected
     }
 
     pub(super) fn observe_surface_size(&mut self, width: u32, height: u32) -> bool {
@@ -365,6 +408,24 @@ fn merge_runtime_primitive_defaults(node: &mut WidgetNode) {
     }
     for child in &mut node.children {
         merge_runtime_primitive_defaults(child);
+    }
+}
+
+/// Recursively collects `_mesh_key` values of all descendants of the node
+/// identified by `target_mesh_key`.
+fn collect_descendant_keys(node: &WidgetNode, target_mesh_key: &str, out: &mut HashSet<String>) {
+    let node_key = node.attributes.get("_mesh_key").map(|s| s.as_str());
+    let found_target = node_key == Some(target_mesh_key);
+
+    if found_target {
+        // Collect all descendants of this node.
+        collect_all_keys(node, out);
+        return;
+    }
+
+    // Keep searching in children.
+    for child in &node.children {
+        collect_descendant_keys(child, target_mesh_key, out);
     }
 }
 

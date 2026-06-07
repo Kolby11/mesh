@@ -328,6 +328,12 @@ pub(super) struct FrontendSurfaceComponent {
     // Hover tracking for CSS :hover and tooltip system.
     hovered_key: Option<String>,
     hovered_path: Vec<String>,
+    /// Previous frame's hovered path — used to detect which nodes' hover state
+    /// changed between frames for targeted interaction restyle.
+    previous_hovered_path: Vec<String>,
+    /// Previous frame's focused key — used to detect which node's focus state
+    /// changed between frames for targeted interaction restyle.
+    previous_focused_key: Option<String>,
     hovered_pos: (f32, f32),
     hover_start: Option<std::time::Instant>,
     tooltip_visible: bool,
@@ -434,6 +440,8 @@ impl FrontendSurfaceComponent {
             scroll_offsets: HashMap::new(),
             hovered_key: None,
             hovered_path: Vec::new(),
+            previous_hovered_path: Vec::new(),
+            previous_focused_key: None,
             hovered_pos: (0.0, 0.0),
             hover_start: None,
             tooltip_visible: false,
