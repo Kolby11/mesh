@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 pub struct BackendScriptContext {
     module_id: String,
     capabilities: HashSet<String>,
-    pub(super) lua: Lua,
+    pub(super) lua: Option<Lua>,
     runtime: Arc<Mutex<BackendRuntime>>,
     builtin_globals: HashSet<String>,
     storage: Arc<Mutex<ScopedStorage>>,
@@ -101,7 +101,6 @@ impl BackendScriptContext {
         storage_root: impl Into<PathBuf>,
     ) -> Self {
         let module_id = module_id.into();
-        let lua = Lua::new();
         let storage = StorageManager::new(storage_root.into()).open(StorageScope::backend(
             module_id.clone(),
             module_id.clone(),
@@ -121,25 +120,32 @@ impl BackendScriptContext {
             storage_diagnostics,
         }));
 
-        let mut ctx = Self {
+        Self {
             module_id,
             capabilities: capabilities.into_iter().collect(),
-            lua,
+            lua: None,
             runtime,
             builtin_globals: HashSet::new(),
             storage: Arc::new(Mutex::new(storage)),
             streams: StreamState::new(),
-        };
-        let globals = ctx.lua.globals();
-        ctx.install_host_api(&globals)
+        }
+    }
+
+    pub(super) fn ensure_lua(&mut self) -> &Lua {
+        if let Some(ref lua) = self.lua {
+            return lua;
+        }
+        let lua = Lua::new();
+        let globals = lua.globals();
+        self.install_host_api(&globals)
             .expect("backend host API setup should succeed");
-        ctx.builtin_globals = ctx
-            .lua
+        self.builtin_globals = lua
             .globals()
             .pairs::<String, LuaValue>()
             .filter_map(|result| result.ok().map(|(key, _)| key))
             .collect();
-        ctx
+        self.lua = Some(lua);
+        self.lua.as_ref().unwrap()
     }
 
     pub fn poll_interval_ms(&self) -> u64 {
