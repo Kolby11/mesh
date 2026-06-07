@@ -3,355 +3,87 @@ gsd_state_version: 1.0
 milestone: v1.18
 milestone_name: "Performance: Smart Invalidation"
 status: planning
-last_updated: "2026-06-07T18:50:34.481Z"
+last_updated: "2026-06-07T19:00:00.000Z"
 last_activity: 2026-06-07
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
   percent: 0
 ---
 
-# State: MESH v1.17
+# State: MESH v1.18
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-06-02)
+See: `.planning/PROJECT.md` (updated 2026-06-07)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.17 Performance: Scripting VM Consolidation
+**Current focus:** v1.18 Performance: Smart Invalidation
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 96 of 3 (Selector Dependency Tracking)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-07 — Milestone v1.18 started
+Status: Ready to plan
+Last activity: 2026-06-07 — Roadmap created with 3 phases
 
-## Decisions
-
-- [v1.16]: MESH element library should provide a broad shell-native control set informed by HTML, Qt Widgets/layouts, and Flutter widget categories, but implemented through MESH retained rendering, Luau events, shell CSS, diagnostics, and accessibility rather than one-for-one framework compatibility.
-- [v1.12]: Backend services and frontend modules should be represented as class-like Luau object instances over typed Rust-managed runtime lanes.
-- [v1.12]: Durable data uses replayable `module.state.<field>` and `module.exports.<field>` snapshots; transient facts use typed `module.events.Name:subscribe(fn)` subscriptions; cross-module work uses object method calls with visible results.
-- [v1.12]: Rust shell remains responsible for module instance registration, routing, validation, capabilities, replay, lifecycle cleanup, provider selection, and diagnostics.
-- [Phase 65]: The first module object registry is exposed through `mesh.debug.module_instances`, derived from discovered modules, mounted frontend components, and registered backend providers without adding service-specific Rust branches.
-- [Phase 66]: Frontend scripts now get a Luau `module` object with shell-refreshed `module.state` and script-owned `module.exports`; frontend components cache latest service payloads so newly-created runtimes can be seeded before script execution.
-- [Phase 67]: Service proxy method dispatch and backend command results are now recorded in `mesh.debug.method_calls`, giving method acknowledgements and result/failure data a shell-visible lane beyond tracing.
-- [Phase 68]: Interface proxies and frontend module objects now expose Luau event channels with `events.Name:subscribe(fn)`, local `emit(payload)`, and unsubscribe cleanup.
-- [Phase 69]: Author docs now present modules as class-like Luau object instances over typed runtime lanes, with focused scripting proof for state, exports, and events.
-- [v1.12 gap closure]: Backend scripts now emit typed interface events with `mesh.service.emit_event(...)`; the shell validates declared event payload schemas and forwards valid backend events to frontend `proxy.events.Name` subscribers.
-- [v1.12 gap closure]: Bundled PipeWire/PulseAudio backends now emit `VolumeChanged`, and shipped navigation/audio frontends subscribe through `audio.events.VolumeChanged`.
-- [v1.13]: User-facing manifest text fields should distinguish literal strings from localized catalog lookups with a structured `{ "t": "...", "fallback": "..." }` shape.
-- [v1.13]: Raw strings remain literal for backwards compatibility; dotted-key raw strings should produce non-fatal migration diagnostics.
-- [v1.13]: Localized manifest text metadata should be preserved through installed graph records until shell runtime resolution can apply active locale, fallback locale, and required fallback text.
-- [Phase 70]: `LocalizedText` is the reusable manifest representation for localized-capable text fields, and keybind label, description, and category now parse raw literals or `{ "t": "...", "fallback": "..." }` declarations.
-- [Phase 70]: Existing keybind contribution consumers still receive fallback strings until Phase 71 preserves rich localized metadata through installed graph records.
-- [v1.13 shipped]: Localized manifest text now parses explicitly, preserves source metadata through installed graph records, resolves in shell runtime/debug keybind metadata, diagnoses missing translations non-fatally, and is proven on the shipped navigation manifest.
-- [v1.14]: Unified Luau scripting is broader than imports: it includes runtime-provided lifecycle `self`, `self.meta`, public/private member rules, frontend component definitions and bound instances, named event channels, and automatic dependency rerendering.
-- [v1.14]: New event authoring uses named channel objects such as `audio.VolumeChanged:on(fn)` and `self.Changed:fire(payload)`; existing `proxy.events.Name:subscribe`, `module.events`, `mesh.events.publish`, and `mesh.service.emit_event(...)` remain compatibility paths.
-- [v1.14]: `self.storage` persistence is intentionally deferred to v1.15. v1.14 should establish the instance identity and render-dependency foundations without implementing the storage backing store.
-- [v1.15 queued]: Persistent storage will be component/provider instance-scoped, shell-backed, JSON-like, atomic on disk under the MESH/XDG data area, lifecycle-flushed, and private to the owning module/component/provider identity.
-- [Phase 74]: Frontend and backend Luau runtimes now expose runtime-owned `self.meta` identity. Frontend supports canonical `render(self)` with legacy `onRender` fallback; backend supports `start(self)`/`stop(self)` with legacy `init()` fallback.
-- [Phase 75]: Frontend `require(...)` now resolves existing host API tables and `mesh.i18n` while preserving service/interface proxy resolution. `.mesh` parsing now discovers simple Luau-native component/interface `local Alias = require("...")` imports for later component definition semantics.
-- [Phase 76]: Public fields continue to use existing non-local reactive globals, and public functions are now inspectable while Lua locals remain private and lifecycle hooks stay reserved runtime hooks.
-- [Phase 77]: `bind:this` stores child public field snapshots and instance metadata in parent state, while parent Lua method calls on the bound object queue shell-side child public function invocation to avoid unsafe runtime lock capture.
-- [Phase 78]: Named event channels now use direct service proxy and `self` properties with `:on`/`:fire`, while `proxy.events.Name`, `module.events`, and `mesh.service.emit_event(...)` remain compatibility paths.
-- [Phase 79]: Automatic rerendering relies on tracked service fields, locale/theme rebuild invalidation, and normal parent state dirtying for bound child snapshots; `self.storage` read dependencies remain reserved for v1.15.
-- [Phase 80]: Shipped navigation/audio frontends and backend providers now demonstrate the v1.14 authoring model; compatibility paths remain tested and documented for migration.
-- [Phase 81]: Shell-owned storage foundation now provides scoped frontend/backend identities, deterministic sanitized paths, JSON document operations, temp-file plus rename persistence, scope-private documents, and non-fatal corrupt-file diagnostics.
-- [Phase 82]: Frontend and backend lifecycle `self` tables now expose `self.storage` with table reads, JSON-like assignment, nil deletion, `:snapshot()`, and non-fatal unsupported-value diagnostics.
-- [Phase 83]: Storage now loads before lifecycle code, coalesces in-memory writes until flush points, persists on frontend unmount/backend stop or explicit shutdown flush, preserves in-memory state on persistence failures, and emits non-fatal diagnostics.
-- [Phase 84]: Frontend render reads from `self.storage` are tracked by key, and storage writes mark script state dirty only when they touch a watched key; unwatched writes do not trigger rebuilds and explicit redraw remains available separately.
-- [Phase 85]: Shipped navigation language selection now uses `self.storage.language` as product proof, and author docs cover storage scope, values, lifecycle timing, diagnostics, and render dependency behavior.
-
-- Backend plugins use Luau for service logic; Rust core remains the wiring layer.
-- `require('@mesh/service')` is the frontend/backend interface.
-- Runtime correctness is in scope before LSP, distribution, or new surfaces.
-- Phase numbering reset to 1 for v1.1 after archiving v1.0 planning artifacts.
-- [v1.1]: Backend plugin MVP starts with a central package.json-like installed-plugin manifest that drives frontend/backend plugin installation, backend category/provider selection, and later runtime lifecycle.
-- [v1.1 Phase 02]: Backend startup uses explicit installed-module graph active providers before runtime launch; legacy priority discovery is compatibility fallback only when the graph cannot load.
-- [v1.1 Phase 02]: Backend runtime failures emit visible lifecycle status and diagnostics, but do not automatically switch to a fallback provider.
-- [v1.1 Phase 02]: Shell owns backend runtime slots by interface and removes service command handlers before replacement or terminal cleanup.
-- [Phase 02]: Service proxies are state-and-command surfaces only; callback-style bind/on_change APIs were removed from the public proxy path.
-- [Phase 02]: Service update invalidation is based on tracked top-level field value changes, not whole-service emissions.
-- [Phase 02]: Lookup diagnostics are recorded before InterfaceUnavailable or CapabilityDenied errors are returned, so pcall changes control flow without hiding visibility.
-- [Phase 03]: Plan 02 handler failures are reported through component diagnostics handles and return non-fatal empty request lists.
-- [Phase 03]: Plan 02 switch and checkbox state is tracked in shell input state so on_change receives a typed boolean.
-- [Phase 03]: Plan 03 proof lives in the shipped navigation-bar volume widget with a typed onchange slider and audio:set_volume command path.
-- [Phase 04]: Audio set_volume payload normalization remains in Luau providers; Rust core only verifies generic proxy publication and backend dispatch. — Preserves the Phase 4 architectural rule that service-specific command behavior stays out of Rust core.
-- [Phase 04]: Bundled audio providers preserve legacy percent payload compatibility while accepting normalized volume payloads. — Keeps existing command callers working while quick settings moves to the finalized proxy payload shape.
-- [Phase 04]: Quick settings audio uses the finalized direct proxy call `audio.set_volume("default", normalized)` for slider changes.
-- [Phase 04]: Quick settings Wi-Fi rows remain guarded and display-only when provider data lacks a non-empty network id.
-- [Phase 04]: Unavailable and permission-denied states are visible in quick settings while technical details stay in logs and diagnostics.
-- [Phase 04]: The top panel remains a compact status and entry surface; direct service controls stay in quick settings.
-- [Phase 04]: Final surface regressions use shipped panel source plus focused command snippets to prove callback-free proxy behavior.
-- [Phase 04]: Frontend docs show service mutations through named proxy methods instead of legacy service event channels.
-- [Phase 04]: Service proxy command methods require `service.<name>.control`; read capability remains state-only.
-- [Phase 04]: Shell surface transitions use `shell.toggle-surface` and `shell.hide-surface` with `surface_id`, not quick-settings-specific shell event names.
-- [Phase 03]: Plan 01 addresses BHOST-02 by removing mesh.exec_shell from the public backend MVP host API surface. — Phase 03 context explicitly overrides shell execution as non-MVP and requires structured command execution only.
-- [Phase 03]: Plan 01 locks backend process execution to strict mesh.exec(program, args); legacy single-string splitting is removed. — Prevents unintended argv tokenization and matches Phase 03 D-01/D-02.
-- [Phase 03]: Plan 03 keeps mesh.config() as the only backend config API and returns full plugin settings. — Matches D-08/D-09 and avoids premature config lookup helpers.
-- [Phase 03]: Plan 03 locks backend log public levels to debug, info, warn, and error across both call styles. — The warning level remains only as an undocumented compatibility alias.
-- [Phase 03]: Plan 03 keeps invalid backend log levels non-fatal and visible through warnings. — Matches D-11 so plugin author mistakes do not crash backend scripts.
-- [Phase 03]: Bundled providers issue system commands only through structured mesh.exec(program, args). — Keeps the Phase 03 backend host API strict and removes provider dependency on exec_shell.
-- [Phase 03]: Shell pipeline parsing for PipeWire and UPower lives in Luau provider code, not Rust core. — Preserves the no service-specific Rust command behavior rule.
-- [Phase 03]: Plan 04 locks mesh.service.set_poll_interval(ms) to a 50ms minimum with plugin-scoped warnings and post-callback runtime refresh. — Covers BHOST-05 and D-13 through D-15.
-- [Phase 93-02]: BackendScriptContext::install_host_api accepts &mlua::Table — call site passes &lua.globals() preserving identical behavior; ISO-02 foundation now complete across both frontend and backend.
-- [Phase 94-01]: ScriptContext struct restructured with vm: Option<PooledVm> + env_table: Option<Table> — no Lua allocation at construction; ensure_initialized() defers VM checkout to first entrypoint.
-- [Phase 94-01]: ensure_initialized() creates per-component _ENV table with { __index = lua.globals() } metatable, installs host API into env_table, and populates builtin_globals from env_table.pairs().
-- [Phase 95-02]: new_lazy() delegates to new() rather than duplicating the constructor body — both set vm: None, env_table: None, preserving the lazy-init invariant established in Phase 94.
-- [Phase 95-02]: ChunkCache eviction in reload_source() uses FNV64 content hash of old script source — astronomically low collision rate on source text (~1 in 2^64), acceptable for infrequent hot-reload paths.
-- [Phase 95-02]: use mesh_core_scripting::chunk_cache import placed inside reload_source() function body rather than module-level to scope the import to its only use site.
-- [Phase 95-01]: BackendScriptContext ensure_lua() stores Lua in self.lua before calling install_host_api to prevent infinite recursion (install_host_api internally chains through ensure_lua).
-- [Phase 95-01]: ensure_lua() gate pattern returns &Lua for chaining; methods changed to &mut self where they need Lua access (take_service_state_snapshot, public_function_names, current_self_table).
-- [Phase 95-01]: Field clones before ensure_lua() in run_command_with_result and current_self_table satisfy Rust borrow checker for overlapping &Lua + &self.field access.
-- [Phase 94-01]: Script chunks loaded with set_environment(env_table) so function definitions land in per-component namespace; __index fallthrough provides read-only stdlib access via sandboxed pool VMs.
-- [Phase 04]: Plan 05 derives shell-theme backend settings from ThemeEngine.active().id so provider startup and restart match the shell's resolved theme authority.
-- [Phase 04]: Plan 05 makes theme file-watch reload return pending CoreRequest queues and synchronize mesh.theme only when the resolved active theme id changes.
-- [Phase 09]: Disabled pseudo state is derived from disabled and aria-disabled attributes during runtime annotation.
-- [Phase 09]: Focus-visible remains mapped to focused state until a keyboard modality source exists.
-- [Phase 10]: The first release is explicit opt-in selectable text only, limited to a single selectable text node with wrapped-line support inside that node.
-- [Phase 10]: Interactive control labels, clipped or ellipsized text, and nested cross-node selection are deferred beyond the first Phase 10 release.
-- [Phase 10]: Selection colors are shell/theme-owned through dedicated `color.selection-background` and `color.selection-foreground` tokens.
-- [Phase 10]: Standard copy behavior routes through explicit `Ctrl+C` handling only when a Phase 10 selection exists.
-- [v1.3]: Profiling is debug-only and should extend the existing debug overlay/debug command path instead of adding end-user settings.
-- [v1.3]: Performance acceptance is based on canonical shipped interaction benchmarks, not qualitative impressions or synthetic aggregate metrics alone.
-- [v1.3]: The first profiling inspector is live and rolling, not a full trace capture/replay system.
-- [Phase 17]: Benchmark rows derive from live rolling profiling snapshots only; no history, trace export, or persistence was added.
-- [Phase 17]: Profiling-disabled benchmark rows remain visible but inert with Profiling off status and profiling payload stays null.
-- [Phase 17]: Benchmark launch requests accept only the five canonical scenario ids and report unknown ids through non-fatal diagnostics.
-- [Phase 17]: Surface open/close benchmark launch reuses normal ShowSurface and HideSurface requests for @mesh/audio-popover.
-- [Phase 17]: Benchmark launch requests record session-local debug state but never toggle debug profiling.
-- [Phase 17]: Benchmark view rows consume primitive normalized props from the inspector parent rather than reading mesh.debug directly. — Matches existing debug inspector parent-owned payload normalization and keeps child view render-only.
-- [Phase 17]: Benchmark action buttons always publish shell.run-debug-benchmark with fixed canonical scenario ids. — Preserves debug-scoped run routing from Plan 17-02 and avoids inspector-local scenario aliases.
-- [Phase 17]: Backend-driven benchmark completion requires both provider-stage timing and frontend surface render timing. — Satisfies BACK-03/BENCH-05 using generic profiling snapshots only.
-- [Phase 17]: Backend benchmark target text is derived from existing profiling/runtime identities while preserving the canonical mesh.audio -> @mesh/pipewire-audio fallback. — Keeps Rust benchmark correlation generic and avoids audio payload parsing.
-- [Phase 17]: Task 17-04-03 is recorded with an empty verification commit because the final proof suite passed without code changes. — Preserves per-task atomic commit history without changing unrelated files.
-- [v1.4]: Retained rendering should take primary inspiration from Qt Quick's retained scene graph rather than full web-engine architecture. — MESH has shell/toolkit primitives, so item-to-render-node synchronization, retained geometry/resources, damage tracking, and batching are the better fit.
-- [v1.4]: GPU backend work waits until retained render objects, retained display data, and damage tracking exist. — Rebuilding and uploading brand-new paint data every frame would waste much of the GPU benefit.
-- [Phase 19]: Typed invalidation counts are exposed through `mesh.debug.profiling.surfaces[].invalidation` instead of a separate trace channel.
-- [Phase 19]: Script and text invalidations continue to force the full widget-tree rebuild fallback; retained style/layout/paint paths remain narrow when a previous tree is available.
-- [Phase 20]: Retained interaction restyles target previous/current stateful node keys and recompute those nodes from full style rules to prevent stale hover/focus styles.
-- [Phase 20]: Interaction restyles reuse retained layout rectangles when layout-relevant style inputs are unchanged; full layout remains the fallback for geometry-affecting changes.
-- [Phase 21]: Retained render objects are synchronized from stable widget node IDs with separate transform, clip, opacity, geometry, material, text, and accessibility slots.
-- [Phase 21]: The software painter remains unchanged; render objects are the synchronization boundary for later display-list, damage, and GPU-readiness work.
-- [Phase 29]: Retained damage-indexed paint execution stays owned by `mesh-core-render`; shell code selects effective damage and policy, then asks the retained display list for ordered command input.
-- [Phase 29]: Repaint-policy proof is published only through existing `invalidation.paint` profiling payloads with aggregate filtered-span, filtered-command, skipped-command, and fallback counters.
-- [Phase 29]: Benchmark evidence continues to reuse the Phase 26 canonical scenario IDs and harness; visible smoothness and threshold tuning remain Phase 31 responsibilities.
-- [Phase 29]: The debug-inspector Surfaces view renders retained paint policy, filtered command, skipped command, span, and fallback counters directly; partial payloads must render unavailable labels rather than zero-like proof.
-- [Phase 31]: Full-surface repaint promotion now uses a two-thirds surface-area threshold while preserving the three-quarters changed-entry tree rebuild fallback. — Keeps policy tuning conservative and testable.
-- [Phase 31]: Raster and text cache capacities remain unchanged because current shipped-surface proof rows do not show capacity-driven warm-path misses. — Avoids speculative cache growth without visible-smoothness proof.
-- [Phase 31]: Plan 31-02 fixed diagnosed audio surface interaction/state gaps in code and tests, but final acceptance still requires live retest. Automated counters alone are not sufficient for PERF-03/SMTH-01 acceptance.
-- [Phase 31]: Live UAT accepted hover, pointer update, keyboard traversal, and backend mute consistency; remaining slight audio popover transition delay is deferred as polish by user request.
-- [v1.5]: Milestone archived with all 17 requirements satisfied; accepted tech debt is the deferred audio popover transition polish and missing retroactive Nyquist validation artifacts for phases 26 and 30.
-- [v1.6]: Localized keybind management takes priority over the previously planned Skia investigation. Frontend modules should be able to declare semantic keybind actions with localized defaults, user overrides, conflict diagnostics, script dispatch, and accessibility metadata.
-- [v1.6]: Compositor-global shortcuts via XDG desktop portals are deferred until module/surface-scoped keybinds are stable.
-- [Phase 32]: Keybind declarations live in normalized module manifests as stable action-id keyed `keybinds.actions`, with handler, target reference, scope, label/i18n key, and trigger metadata available to shell code.
-- [Phase 32]: Existing `settings.keyboard.shortcuts` remains a compatibility source, but shell runtime resolves it through the same surface shortcut declaration bridge used by manifest keybinds.
-- [Phase 32]: User surface shortcut overrides remain keyed by surface id and action id; localized labels are metadata only and do not affect override identity.
-- [Phase 33]: Localized keybind defaults live as per-action `localized_triggers` and override only trigger data, not handler, target, scope, or label metadata.
-- [Phase 33]: Effective keybind precedence is user override, exact active locale, parent locale, generic module trigger, then no binding.
-- [Phase 33]: Localized trigger defaults apply only to `access_key` actions; shortcut actions keep their generic shortcut defaults unless a user override is present.
-- [v1.7]: v1.6 keybind work is paused after phases 32 and 33 so the broader module/package/interface/provider/contribution model can be consolidated before dispatch and proof work continue.
-- [v1.7]: Modularity consolidation should preserve existing backend provider and keybind declaration behavior while aligning manifests, contributions, capabilities, diagnostics, and author docs around one canonical model.
-- [Phase 38]: Canonical `module.json` is the runtime manifest target for both checked-in modules and the root module graph at `config/module.json`.
-- [Phase 38]: Old manifest files and public package names are replacement debt only; runtime handling is limited to explicit internal migration diagnostics, not compatibility aliases.
-- [v1.8 Phase 42]: Direct Blitz adoption remains blocked by Wayland shell model fit, browser-engine-level overhead concerns, and later high-level crate compile evidence; MESH-owned focused-crate adoption is the selected path.
-- [v1.8 Phase 43]: MESH-owned focused-crate proof evidence advanced to production proof because it preserves retained node identity across layout, text, paint, interaction, and accessibility.
-- [v1.8 Phase 44]: Focused proof integration is adapter-owned behind existing renderer and shell ownership; MESH retained identity, typed invalidation, damage/profiling, diagnostics, selection, and AccessKit-compatible boundaries remain authoritative.
-- [v1.8 Phase 45]: Renderer migration should proceed through phased reversible adapter expansion with explicit author-contract, ownership-classification, build/CI/release, and rollback gates before broad adoption.
-- [v1.10]: Skia is the authoritative paint/raster backend, not the render engine; MESH retains widget traversal, XML/.mesh parsing, CSS/token style resolution, layout, animation, retained display-list, damage, z-order, module, input, and presentation ownership.
-- [v1.10]: The painter API should use backend-neutral high-level commands so a future Vello backend can implement the same contract after Skia parity is proven.
-- [v1.10]: The painter engine should implement a bounded shell UI subset of web-style rendering rather than full HTML/CSS/browser compatibility. Unsupported browser-like syntax or visual combinations should produce diagnostics instead of silent missing behavior.
-- [Phase 52-01]: MESH shell CSS profile statuses are exactly implemented, diagnostic-only, deferred, and out-of-scope.
-- [Phase 52-01]: Style profile metadata remains backend-neutral and colocated with supported_css_properties.
-- [Phase 52-01]: CSS custom properties remain local StyleResolver variables and are distinct from mesh-core-theme tokens.
-- [Phase 60]: Bare printable keys remain owned by focused text inputs before surface keybind dispatch; matched shortcuts with no runtime subscribers fall through as unhandled. — Preserves shell/input precedence and prevents declared-but-unrendered keybinds from swallowing normal focused keyboard handling.
-- [Phase 61]: Localized keybind defaults apply only to access-key declarations, while user overrides apply only to existing action declarations and cannot create missing action ids. — This satisfies KRES-02 and KRES-03 while keeping manifest declarations canonical and settings override-only.
-- [Phase 62]: Keybind diagnostics use degraded component health with module id, surface id, action id, and reason. — Keybind author and override mistakes should be observable without crashing the focused surface or changing shell input precedence.
-- [Phase 63]: Resolved keybind metadata is exposed through structured mesh.debug keybind entries while accessibility uses existing keyboard_shortcut annotations. — Debug consumers need inspectable focused-surface keybind state without coupling to frontend internals or replacing the accessibility path.
-- [Phase 64]: The shipped audio popover proves keybind dispatch through a manifest-owned access_key on its existing mute action. — The milestone needed real audio-surface proof without adding compositor-global shortcut scope or a remapping UI.
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
-| Plan | Duration | Tasks | Files |
-|------|----------|-------|-------|
-| Phase 70 P01 | 15min | 3 tasks | 7 files |
-| Phase 02 P01 | 7min | 3 tasks | 4 files |
-| Phase 03 P02 | 9min | 3 tasks | 7 files |
-| Phase 03 P03 | 5min | 3 tasks | 4 files |
-| Phase 04 P01 | 3min | 3 tasks | 5 files |
-| Phase 04 P02 | 6min | 3 tasks | 5 files |
-| Phase 04 P03 | 4min | 3 tasks | 2 files |
-| Phase 04 P04 | 12min | 3 tasks | 6 files |
-| Phase 04 P05 | 4min | 3 tasks | 3 files |
-| Phase 04 P06 | 4min | 3 tasks | 4 files |
-| Phase 01 P01 | 35min | 3 tasks | 2 files |
-| Phase 01 P02 | 30min | 3 tasks | 1 files |
-| Phase 01 P03 | 25min | 3 tasks | 12 files |
-| Phase 03 P01 | 4min | 3 tasks | 2 files |
-| Phase 03 P03 | 4min | 3 tasks | 3 files |
-| Phase 03 P02 | 6min | 3 tasks | 5 files |
-| Phase 03 P04 | 6min | 3 tasks | 4 files |
-| Phase 04 P05 | 4min | 3 tasks | 2 files |
-| Phase 08 P01 | 8min | 3 tasks | 2 files |
-| Phase 08 P02 | 10min | 3 tasks | 1 files |
-| Phase 08 P03 | 12min | 3 tasks | 3 files |
-| Phase 08 P04 | 10min | 3 tasks | 2 files |
-| Phase 08 P05 | 9min | 3 tasks | 4 files |
-| Phase 09 P01 | 5min | 2 tasks | 2 files |
-| Phase 10 P01 | 8 min | 2 tasks | 9 files |
-| Phase 10 P02 | 9 min | 2 tasks | 4 files |
-| Phase 17 P01 | 6min | 3 tasks | 3 files |
-| Phase 17 P02 | 6min | 3 tasks | 7 files |
-| Phase 17 P03 | 9min | 3 tasks | 3 files |
-| Phase 17 P04 | 7min | 3 tasks | 2 files |
-| Phase 29 P01 | 27min | 3 tasks | 12 files |
-| Phase 29 P02 | 16min | 1 task | 4 files |
-| Phase 31 P01 | 48min | 5 tasks | 6 files |
-| Phase 40 P01 | 16 min | 3 tasks | 3 files |
-| Phase 40 P02 | 9 min | 3 tasks | 10 files |
-| Phase 52 P01 | 5min | 2 tasks | 3 files |
-| Phase 60 P01 | 25min | 3 tasks | 3 files |
-| Phase 61 P01 | 18min | 3 tasks | 2 files |
-| Phase 62 P01 | 20min | 3 tasks | 3 files |
-| Phase 63 P01 | 24min | 3 tasks | 10 files |
-| Phase 64 P01 | 22min | 3 tasks | 3 files |
-| Phase 71 P01 | 20 min | 4 tasks | 5 files |
-| Phase 94 P01 | 11min | 2 tasks | 3 files |
-| Phase 95 P01 | 5min | 2 tasks | 2 files |
-| Phase 95 P02 | 2min | 2 tasks | 3 files |
-| Phase 95 P03 | 2min | 2 tasks | 0 files |
+**Velocity:**
+- Total plans completed: 0
+- Average duration: —
+- Total execution time: 0 hours
 
-## Session
+**By Phase:**
 
-Last session: 2026-06-07T20:15:08+02:00
-Stopped At: Completed 95-03-PLAN.md
-Resume File: None
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 96. Selector Deps | 0 | — | — |
+| 97. Service Field Deps | 0 | — | — |
+| 98. Narrow Invalidation | 0 | — | — |
+
+**Recent Trend:** Starting v1.18 — no plans executed yet.
+
+*Updated after each plan completion*
 
 ## Accumulated Context
 
-### Roadmap Evolution
+### Decisions
 
-- v1.0 planning artifacts archived to `.planning/milestones/v1.0-reset-2026-05-03-*`.
-- v1.1 reset roadmap focuses on backend plugin MVP stability.
-- v1.4 continues phase numbering after v1.3 and starts at Phase 19.
-- v1.5 continues phase numbering after v1.4 and starts at Phase 26.
-- v1.5 archived on 2026-05-13.
-- v1.6 continues phase numbering after v1.5 and focuses on localized module keybind management.
-- v1.6 paused after phases 32 and 33 by user request to rethink modularity and extensibility concepts.
-- v1.7 continues phase numbering after the v1.6 planned roadmap and starts at Phase 37.
-- v1.7 archived on 2026-05-18 after phases 37-41 completed.
-- v1.8 continued after v1.7 Phase 41 and was archived on 2026-05-18 after phases 42-45 completed.
-- v1.17 continues phase numbering after v1.16 and starts at Phase 92.
+Decisions are logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
+
+- [v1.18]: No new crate dependencies — all data structures use Rust stdlib types already in `Cargo.toml`.
+- [v1.18]: Three integration points (selector deps, service-field deps, narrow invalidation) with A and B parallelizable, C consuming both.
+- [v1.18]: Pixel-equivalence testing gates all phases — narrow invalidation output must match full-rebuild baseline on every benchmark scenario.
+- [v1.18]: `>50%` affected-nodes threshold triggers `TREE_REBUILD` fallback to preserve correctness for bulk changes.
+
+### Pending Todos
+
+None yet.
+
+### Blockers/Concerns
+
+- **Phase 98 (research flag):** `mark_layout_ancestors_dirty()` requires parent chain access — stored in `WidgetNode` or derived from slotmap key→parent mapping. Validate against current `RetainedWidgetTree` structure during planning.
+- **Phase 98 (research flag):** Simultaneous service+interaction+script dirty states in one frame need explicit test coverage. Priority ordering must be verified against real compositor event patterns.
+- **Phase 97 (research flag):** Per-node snapshot diff adds HashMap clone+compare per expression. Profile during Phase 97 to ensure <1% render time regression.
 
 ## Deferred Items
 
-Items accepted at `v1.1` close:
+Items acknowledged and carried forward from previous milestone close:
 
-| Category | Item | Status |
-|----------|------|--------|
-| validation | Phase 01-05 Nyquist metadata remains partial rather than finalized | deferred |
-| validation | Live PipeWire or PulseAudio backend startup remains manual-only confirmation | deferred |
-| verification | Obsolete `latest_service_events` note still needs retirement from archived validation metadata | deferred |
+| Category | Item | Status | Deferred At |
+|----------|------|--------|-------------|
+| debug | phase31-live-uat-diagnosis | updated | v1.5 |
+| todo | 2026-05-15-define-module-install-requirement-resolution.md | pending | v1.8 |
+| todo | 2026-05-13-phase31-audio-popover-transition-delay.md | pending | v1.5 |
 
-Items acknowledged and deferred at `v1.2` close on 2026-05-08:
+## Session Continuity
 
-| Category | Item | Status |
-|----------|------|--------|
-| todo | 2026-05-08-create-unified-package-and-module-manifest-phase.md | completed by Phase 38 |
-| uat | Phase 11 / 11-HUMAN-UAT.md | partial |
-| verification | Phase 11 / 11-VERIFICATION.md | human_needed |
-| planning | v1.2 requirements checkbox and traceability drift for KEY-01 through KEY-04 and ANIM-01 through ANIM-05 despite completed phases | deferred |
-
-Items acknowledged and deferred at `v1.7` close on 2026-05-18:
-
-| Category | Item | Status |
-|----------|------|--------|
-| debug | phase31-live-uat-diagnosis | updated |
-| todo | 2026-05-13-phase31-audio-popover-transition-delay.md | pending |
-| todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
-| todo | 2026-05-17-evaluate-blitz-crate-dependencies.md | pending |
-
-Items acknowledged and deferred at `v1.8` close on 2026-05-18:
-
-| Category | Item | Status |
-|----------|------|--------|
-| debug | phase31-live-uat-diagnosis | updated |
-| todo | 2026-05-13-phase31-audio-popover-transition-delay.md | pending |
-| todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
-
-Items acknowledged and deferred at `v1.10` close on 2026-05-23:
-
-| Category | Item | Status |
-|----------|------|--------|
-| debug | phase31-live-uat-diagnosis | updated |
-| todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
-
-Items acknowledged and deferred at `v1.11` close on 2026-05-23:
-
-| Category | Item | Status |
-|----------|------|--------|
-| debug | phase31-live-uat-diagnosis | updated |
-| todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
-
-Items acknowledged and deferred at `v1.13` close on 2026-05-24:
-
-| Category | Item | Status |
-|----------|------|--------|
-| debug | phase31-live-uat-diagnosis | updated |
-| todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
-
-Items acknowledged and deferred at `v1.16` close on 2026-05-26:
-
-| Category | Item | Status |
-|----------|------|--------|
-| debug | phase31-live-uat-diagnosis | updated |
-| todo | 2026-05-15-define-module-install-requirement-resolution.md | pending |
-
-## Blockers
-
-(None)
-
-## Pending Todos
-
-- Audio popover transition delay polish — captured 2026-05-13; accepted v1.5 polish debt.
-- Define module install requirement resolution — captured 2026-05-15; remaining v1.7 input for typed registries, interface/provider matching, contradictory backend handling, resource requirements, shell-settings module override format, and missing icon/font/sound diagnostics.
-
-## Artifact Index
-
-| Artifact | Path |
-|----------|------|
-| Project context | `.planning/PROJECT.md` |
-| Roadmap | `.planning/ROADMAP.md` |
-| State | `.planning/STATE.md` |
-| v1.17 requirements | `.planning/REQUIREMENTS.md` |
-| v1.17 research summary | `.planning/research/SUMMARY.md` |
-| v1.5 archived requirements | `.planning/milestones/v1.5-REQUIREMENTS.md` |
-| v1.5 archived roadmap | `.planning/milestones/v1.5-ROADMAP.md` |
-| v1.5 audit | `.planning/milestones/v1.5-MILESTONE-AUDIT.md` |
-| v1.7 research summary | `.planning/research/SUMMARY.md` |
-| v1.8 archived requirements | `.planning/milestones/v1.8-REQUIREMENTS.md` |
-| v1.8 archived roadmap | `.planning/milestones/v1.8-ROADMAP.md` |
-| v1.9 archived requirements | `.planning/milestones/v1.9-REQUIREMENTS.md` |
-| v1.9 archived roadmap | `.planning/milestones/v1.9-ROADMAP.md` |
-| v1.9 audit | `.planning/milestones/v1.9-MILESTONE-AUDIT.md` |
-| v1.9 phase archive | `.planning/milestones/v1.9-phases/` |
-| v1.11 archived requirements | `.planning/milestones/v1.11-REQUIREMENTS.md` |
-| v1.11 archived roadmap | `.planning/milestones/v1.11-ROADMAP.md` |
-| v1.11 audit | `.planning/milestones/v1.11-MILESTONE-AUDIT.md` |
-| v1.11 phase archive | `.planning/milestones/v1.11-phases/` |
-| v1.13 archived requirements | `.planning/milestones/v1.13-REQUIREMENTS.md` |
-| v1.13 archived roadmap | `.planning/milestones/v1.13-ROADMAP.md` |
-| v1.13 phase archive | `.planning/milestones/v1.13-phases/` |
-| v1.16 archived requirements | `.planning/milestones/v1.16-REQUIREMENTS.md` |
-| v1.16 archived roadmap | `.planning/milestones/v1.16-ROADMAP.md` |
-| v1.16 audit | `.planning/milestones/v1.16-MILESTONE-AUDIT.md` |
-| v1.16 phase archive | `.planning/milestones/v1.16-phases/` |
-| v1.7 research details | `.planning/research/STACK.md`, `.planning/research/FEATURES.md`, `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` |
-| v1.4 research | `.planning/research/v1.4-major-performance-fixes-qt-retained-rendering.md` |
-| Codebase map | `.planning/codebase/` |
-
----
-*State updated: 2026-06-07 — Phase 95 complete: all 3 plans executed; full workspace builds with zero errors, no new test regressions (INIT-03, INT-01, INT-02)*
+Last session: 2026-06-07
+Stopped at: Roadmap created for v1.18 (phases 96-98)
+Resume file: None

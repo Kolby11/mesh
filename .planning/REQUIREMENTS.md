@@ -63,24 +63,24 @@ Deferred beyond v1.18. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SEL-01 | Pending | Pending |
-| SEL-02 | Pending | Pending |
-| SEL-03 | Pending | Pending |
-| SEL-04 | Pending | Pending |
-| SEL-05 | Pending | Pending |
-| SRV-01 | Pending | Pending |
-| SRV-02 | Pending | Pending |
-| SRV-03 | Pending | Pending |
-| INV-01 | Pending | Pending |
-| INV-02 | Pending | Pending |
-| INV-03 | Pending | Pending |
-| INV-04 | Pending | Pending |
-| INV-05 | Pending | Pending |
+| SEL-01 | Phase 96 | Pending |
+| SEL-02 | Phase 96 | Pending |
+| SEL-03 | Phase 96 | Pending |
+| SEL-04 | Phase 96 | Pending |
+| SEL-05 | Phase 96 | Pending |
+| SRV-01 | Phase 97 | Pending |
+| SRV-02 | Phase 97 | Pending |
+| SRV-03 | Phase 97 | Pending |
+| INV-01 | Phase 98 | Pending |
+| INV-02 | Phase 98 | Pending |
+| INV-03 | Phase 98 | Pending |
+| INV-04 | Phase 98 | Pending |
+| INV-05 | Phase 98 | Pending |
 
 **Coverage:**
 - v1 requirements: 13 total
-- Mapped to phases: 0
-- Unmapped: 13 ⚠️
+- Mapped to phases: 13 ✓
+- Unmapped: 0
 
 ---
 

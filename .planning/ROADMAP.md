@@ -2,6 +2,7 @@
 
 ## Milestones
 
+- 🚧 **v1.18 Performance: Smart Invalidation** — Phases 96-98 (in progress)
 - ✅ **v1.17 Performance: Scripting VM Consolidation** — Phases 92-95 shipped 2026-06-07 ([archive](milestones/v1.17-ROADMAP.md), [audit](v1.17-MILESTONE-AUDIT.md))
 - ✅ **v1.16 Element Library** — Phases 86-91 shipped 2026-05-26 ([archive](milestones/v1.16-ROADMAP.md), [audit](milestones/v1.16-MILESTONE-AUDIT.md))
 - ✅ **v1.15 Persistent Storage System** — Phases 81-85 shipped 2026-05-26 ([archive](milestones/v1.15-ROADMAP.md))
@@ -10,35 +11,68 @@
 - ✅ **v1.12 Module Object Contract** — Phases 65-69 shipped 2026-05-23 ([archive](milestones/v1.12-ROADMAP.md))
 - ✅ **v1.11 Surface Keybind Completion** — Phases 60-64 shipped 2026-05-23 ([archive](milestones/v1.11-ROADMAP.md))
 
-## Current Status
+---
 
-**No active milestone.** v1.17 shipped 2026-06-07. Run `/gsd-new-milestone` to start v1.18.
+## Phases
+
+- [ ] **Phase 96: Selector Dependency Tracking** - Per-rule state dependency masks and targeted interaction restyle at `StyleRuleIndex`
+- [ ] **Phase 97: Service Field Dependency Tracking** - Per-node service field read capture and bidirectional NodeId↔(service, field) index
+- [ ] **Phase 98: Narrow Invalidation & Event Routing** - Field-aware event routing, narrow dirty-node marking, and pixel-equivalence proof
+
+## Phase Details
+
+### 🚧 v1.18 — Performance: Smart Invalidation
+
+**Milestone Goal:** Replace coarse "tree rebuild + full repaint" invalidation with typed dependency tracking so interaction state, service events, and script state changes only dirty the affected nodes and paint slots.
+
+### Phase 96: Selector Dependency Tracking
+**Goal**: Interaction state changes (`:hover`, `:focus`, `:active`) restyle only affected nodes instead of rebuilding the entire widget tree.
+**Depends on**: Nothing (first phase)
+**Requirements**: SEL-01, SEL-02, SEL-03, SEL-04, SEL-05
+**Success Criteria** (what must be TRUE):
+  1. `:hover` transitions on any element restyle only the hovered node and its style-dependent children — not the full widget tree.
+  2. `:focus` and `:active` pseudo-class transitions produce identical visual output to full-tree restyle on all shipped surfaces.
+  3. Inherited style values (color, font-family, font-size, font-weight, line-height) propagate correctly from a partially-restyled parent to its children.
+  4. Navigation bar and audio popover shipped-surface regression tests pass with selector-narrow restyle enabled.
+**Plans**: TBD
+
+### Phase 97: Service Field Dependency Tracking
+**Goal**: The renderer captures per-node service field reads during expression evaluation to build a bidirectional dependency index without measurable render-time overhead.
+**Depends on**: Phase 96
+**Requirements**: SRV-01, SRV-02, SRV-03
+**Success Criteria** (what must be TRUE):
+  1. The template evaluator records per-node (service, field) pairs read during render, producing a dependency snapshot for each rendered node.
+  2. A bidirectional index answers both "which nodes read field X?" and "which fields does node Y read?" queries in O(1).
+  3. Per-node field tracking overhead is below 1% of total render pass time on shipped surfaces (navigation bar, audio popover).
+**Plans**: TBD
+
+### Phase 98: Narrow Invalidation & Event Routing
+**Goal**: Script state changes and service events mark only the nodes that actually depend on the changed data, with a correctness-preserving fallback threshold and pixel-equivalent output across all benchmark scenarios.
+**Depends on**: Phase 96, Phase 97
+**Requirements**: INV-01, INV-02, INV-03, INV-04, INV-05
+**Success Criteria** (what must be TRUE):
+  1. Simple text/value script state changes dirty only affected leaf nodes and their layout ancestor chain — not triggering `TREE_REBUILD`.
+  2. Service events (e.g., `audio.percent`) fan out only to components whose tracked field sets intersect the changed fields.
+  3. When >50% of nodes are affected by a change, `TREE_REBUILD` activates as a correctness-preserving fallback.
+  4. Profiling payloads show reduced dirty-node counts and retained-tree churn across all canonical benchmarks (hover, open/close, slider, traversal, backend-update).
+  5. All benchmark scenarios produce pixel-identical output compared to the pre-invalidation full-rebuild baseline.
+**Plans**: TBD
+
+---
+
+## Progress
+
+**Execution Order:** 96 → 97 → 98
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 96. Selector Dependency Tracking | v1.18 | 0/0 | Not started | - |
+| 97. Service Field Dependency Tracking | v1.18 | 0/0 | Not started | - |
+| 98. Narrow Invalidation & Event Routing | v1.18 | 0/0 | Not started | - |
 
 ---
 
 ## Backlog
-
-### v1.18 — Performance: Smart Invalidation
-
-**Goal:** Replace coarse "tree rebuild + full repaint" invalidation with typed
-dependency tracking so interaction state, service events, and script state
-changes only dirty the affected nodes and paint slots.
-
-**Scope:**
-- Selector-dependency restyle: build per-rule selector-dependency sets at
-  `StyleRuleIndex` construction time; for `:hover`/`:focus`/`:active` changes
-  only restyle nodes whose dependency set intersects the changed state.
-- Narrow script/service invalidation: add typed state dependencies so simple
-  text/value changes dirty only dependent leaf nodes, style slots, layout
-  slots, and paint slots rather than flagging `TREE_REBUILD`.
-- Service event routing by tracked-field set: restrict service event fan-out
-  to components whose runtimes actually read the changed fields, not all
-  components with the service capability.
-
-**Priority:** high — eliminates the dominant source of unnecessary CPU work on
-pointer moves, backend updates, and focus transitions.
-
----
 
 ### v1.19 — Performance: Event-Driven Frame Scheduler
 
