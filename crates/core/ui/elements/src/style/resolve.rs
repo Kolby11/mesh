@@ -191,6 +191,11 @@ pub struct StyleRuleIndex {
     class: HashMap<String, Vec<usize>>,
     id: HashMap<String, Vec<usize>>,
     state: Vec<(u32, Vec<usize>)>,
+    /// Reverse index: maps individual state bits (e.g., STATE_HOVERED=1)
+    /// to the rule indices that depend on that specific state.
+    /// Separates per-bit dependencies from the combined bitmask entries
+    /// in `state` used for forward candidate-rule lookup.
+    state_to_rules: HashMap<u32, Vec<usize>>,
     fallback: Vec<usize>,
 }
 
@@ -203,6 +208,7 @@ impl StyleRuleIndex {
             class: HashMap::new(),
             id: HashMap::new(),
             state: Vec::new(),
+            state_to_rules: HashMap::new(),
             fallback: Vec::new(),
         };
         for (idx, rule) in rules.iter().enumerate() {
@@ -292,6 +298,8 @@ impl StyleRuleIndex {
         } else {
             self.state.push((state_bit, vec![idx]));
         }
+        // Populate reverse index: map the individual state bit to this rule.
+        self.state_to_rules.entry(state_bit).or_default().push(idx);
     }
 }
 
