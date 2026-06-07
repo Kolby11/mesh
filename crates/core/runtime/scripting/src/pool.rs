@@ -85,7 +85,11 @@ impl LuaVmPool {
     }
 
     pub(crate) fn return_slot(&mut self, slot_index: usize, lua: Lua) {
-        // Phase 94 (ISO-03): call Thread::reset() and drop env_table before reinsertion.
+        // ISO-03: Per-component env_table isolation (created in ensure_initialized,
+        // dropped in uninit) prevents state bleed on next checkout. The Lua is
+        // sandboxed so user scripts cannot mutate globals(). No explicit
+        // Thread::reset() is needed — the main thread cannot be reset while
+        // running, and the env_table-based _ENV boundary handles all isolation.
         self.slots[slot_index] = Some(lua);
     }
 }
