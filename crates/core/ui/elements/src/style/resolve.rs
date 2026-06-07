@@ -1636,3 +1636,78 @@ fn find_unresolved_animation_token(value: &str, theme: &Theme) -> Option<String>
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
+
+    fn rule_with_state(state_selector: &str) -> StyleRule {
+        StyleRule {
+            selector: Selector::State("".to_string(), state_selector.to_string()),
+            declarations: vec![Declaration {
+                property: "color".to_string(),
+                value: StyleValue::Literal("red".to_string()),
+            }],
+            container_query: None,
+        }
+    }
+
+    fn rule_with_compound_state(tag: &str, state: &str) -> StyleRule {
+        StyleRule {
+            selector: Selector::Compound(vec![
+                Selector::Tag(tag.to_string()),
+                Selector::State(tag.to_string(), state.to_string()),
+            ]),
+            declarations: vec![Declaration {
+                property: "color".to_string(),
+                value: StyleValue::Literal("red".to_string()),
+            }],
+            container_query: None,
+        }
+    }
+
+    #[test]
+    fn state_to_rules_empty_for_unused_bit() {
+        let index = StyleRuleIndex::new(&[]);
+        let rules = index.rules_for_state_bit(STATE_HOVERED);
+        assert!(rules.is_empty());
+    }
+
+    #[test]
+    fn state_to_rules_returns_hover_rule_for_hover_bit() {
+        let rules = vec![rule_with_state("hover")];
+        let index = StyleRuleIndex::new(&rules);
+        let result = index.rules_for_state_bit(STATE_HOVERED);
+        assert_eq!(result, &[0]);
+    }
+
+    #[test]
+    fn state_to_rules_distinguishes_different_state_bits() {
+        let rules = vec![rule_with_state("hover"), rule_with_state("focus")];
+        let index = StyleRuleIndex::new(&rules);
+
+        assert_eq!(index.rules_for_state_bit(STATE_HOVERED), &[0]);
+        assert_eq!(index.rules_for_state_bit(STATE_FOCUSED), &[1]);
+        assert!(index.rules_for_state_bit(STATE_ACTIVE).is_empty());
+    }
+
+    #[test]
+    fn state_to_rules_handles_compound_selector_with_state() {
+        let rules = vec![rule_with_compound_state("button", "hover")];
+        let index = StyleRuleIndex::new(&rules);
+
+        assert_eq!(index.rules_for_state_bit(STATE_HOVERED), &[0]);
+    }
+
+    #[test]
+    fn state_to_rules_multiple_rules_for_same_bit() {
+        let rules = vec![rule_with_state("hover"), rule_with_state("hover")];
+        let index = StyleRuleIndex::new(&rules);
+
+        let result = index.rules_for_state_bit(STATE_HOVERED);
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&0));
+        assert!(result.contains(&1));
+    }
+}
