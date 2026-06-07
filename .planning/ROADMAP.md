@@ -33,7 +33,9 @@
   3. A `PooledVm` dropped on a different thread than the one that checked it out triggers a detectable runtime assertion.
   4. A `ChunkCache` stores a source string under its FNV64 content hash and returns the same string on a second lookup without re-reading from disk.
   5. All existing shell surfaces (`navigation-bar`, `audio-popover`) continue to mount and render identically — pool and cache types exist but are not yet wired into `ScriptContext`.
-**Plans**: TBD
+**Plans**: 2 plans
+- [ ] 92-01-PLAN.md — LuaVmPool + PooledVm RAII guard (POOL-01..04)
+- [ ] 92-02-PLAN.md — ChunkCache (FNV64 source-string cache; CACHE-01, CACHE-02)
 
 ### Phase 93: Host API Re-targeting
 **Goal**: Every per-component host API write targets a caller-supplied `&Table` rather than `lua.globals()`, validating the refactor against existing behavior before `_ENV` isolation is active.
@@ -72,7 +74,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 92. VM Pool Foundation | 0/? | Not started | - |
+| 92. VM Pool Foundation | 0/2 | Not started | - |
 | 93. Host API Re-targeting | 0/? | Not started | - |
 | 94. _ENV Isolation + Lazy-Init | 0/? | Not started | - |
 | 95. Integration + Validation | 0/? | Not started | - |
