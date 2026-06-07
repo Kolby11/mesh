@@ -215,7 +215,7 @@ impl FrontendSurfaceComponent {
                 })
                 .collect::<Vec<_>>();
             script_ctx
-                .load_script_with_interface_imports(&script.source, &interface_imports)
+                .compile_and_execute(&script.source, &interface_imports)
                 .map_err(|source| ComponentError::Script {
                     component_id: component_id.clone(),
                     source,

@@ -150,6 +150,17 @@ impl ScriptContext {
         })
     }
 
+    /// Create a new ScriptContext via the pool/cache integration point.
+    ///
+    /// Identical to `new()` — the constructor is already lazy (vm: None, env_table: None).
+    /// Named `new_lazy` as the documented integration contract for Phase 95 INT-01.
+    pub fn new_lazy(
+        module_id: impl Into<String>,
+        capabilities: CapabilitySet,
+    ) -> Result<Self, ScriptError> {
+        Self::new(module_id, capabilities)
+    }
+
     pub fn set_interface_catalog(&mut self, catalog: InterfaceCatalog) {
         self.interface_catalog = catalog;
     }
