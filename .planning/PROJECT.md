@@ -312,9 +312,18 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.12 Phase 68`: Interface and module events now support runtime subscriptions, local emits, and backend-to-frontend event transport.
 - `v1.12 Phase 69`: Bundled audio/navigation modules prove the class-like module object model with typed `VolumeChanged` event delivery.
 
+## Current Milestone: v1.18 Performance: Smart Invalidation
+
+**Goal:** Replace coarse "tree rebuild + full repaint" invalidation with typed dependency tracking so interaction state, service events, and script state changes only dirty the affected nodes and paint slots.
+
+**Target features:**
+- Per-rule selector-dependency sets at `StyleRuleIndex` construction time so `:hover`/`:focus`/`:active` changes only restyle nodes whose dependency set intersects the changed state
+- Typed script/service state dependencies so simple text/value changes dirty only dependent leaf nodes, style slots, layout slots, and paint slots — not flagging `TREE_REBUILD`
+- Service event routing restricted to components whose runtimes actually read the changed fields, not all components with the service capability
+
 ### Active
 
-*(None — v1.17 just shipped. Run `/gsd-new-milestone` to define v1.18 requirements.)*
+*(To be defined in REQUIREMENTS.md during this milestone initialization)*
 
 ### Out of Scope
 
@@ -426,4 +435,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-02 for v1.17 milestone planning*
+*Last updated: 2026-06-07 for v1.18 milestone planning*

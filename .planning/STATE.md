@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.17
-milestone_name: "Performance: Scripting VM Consolidation"
-status: in_progress
-last_updated: "2026-06-07T18:15:08Z"
+milestone: v1.18
+milestone_name: "Performance: Smart Invalidation"
+status: planning
+last_updated: "2026-06-07T18:50:34.481Z"
 last_activity: 2026-06-07
 progress:
-  total_phases: 4
-  completed_phases: 3
-  total_plans: 10
-  completed_plans: 9
-  percent: 90
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # State: MESH v1.17
@@ -24,9 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-06-02)
 
 ## Current Position
 
-Phase: 95 — Integration + Validation (complete)
-Status: Phase 95 all 3 plans executed; plan 03 verified full workspace build (zero errors) and test regression (no new failures beyond pre-existing 24) (INT-02)
-Last activity: 2026-06-07 — Phase 95 plan 03 executed: Full workspace build passes with zero errors; scripting tests 108 passed/24 pre-existing failures; backend tests 25 passed/0 failures; pool/cache integration proven end-to-end (INT-02)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-07 — Milestone v1.18 started
 
 ## Decisions
 
