@@ -136,15 +136,18 @@ impl BackendScriptContext {
             return lua;
         }
         let lua = Lua::new();
-        let globals = lua.globals();
+        self.lua = Some(lua);
+        let globals = self.lua.as_ref().unwrap().globals();
         self.install_host_api(&globals)
             .expect("backend host API setup should succeed");
-        self.builtin_globals = lua
+        self.builtin_globals = self
+            .lua
+            .as_ref()
+            .unwrap()
             .globals()
             .pairs::<String, LuaValue>()
             .filter_map(|result| result.ok().map(|(key, _)| key))
             .collect();
-        self.lua = Some(lua);
         self.lua.as_ref().unwrap()
     }
 
@@ -154,7 +157,7 @@ impl BackendScriptContext {
 
     /// Load and execute a backend Luau script.
     pub fn load_script(&mut self, source: &str) -> Result<(), BackendScriptError> {
-        self.lua
+        self.ensure_lua()
             .load(source)
             .set_name(&self.module_id)
             .exec()
@@ -172,7 +175,7 @@ impl BackendScriptContext {
     /// compatibility fallback and receives the same current-provider context.
     pub fn call_init(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
         self.reset_for_call(JsonValue::Null);
-        let globals = self.lua.globals();
+        let globals = self.ensure_lua().globals();
         let entrypoint_name = if globals.get::<Function>("start").is_ok() {
             "start"
         } else {
@@ -203,7 +206,7 @@ impl BackendScriptContext {
     pub fn call_stop(&mut self) -> Result<(), BackendScriptError> {
         self.kill_streams();
         self.reset_for_call(JsonValue::Null);
-        let globals = self.lua.globals();
+        let globals = self.ensure_lua().globals();
         let stop = match globals.get::<Function>("stop") {
             Ok(stop) => stop,
             Err(_) => {
@@ -250,7 +253,7 @@ impl BackendScriptContext {
             return Ok(None);
         }
         self.reset_for_call(JsonValue::Null);
-        let globals = self.lua.globals();
+        let globals = self.ensure_lua().globals();
         if let Ok(batch_handler) = globals.get::<Function>("on_stream_batch") {
             let current_self =
                 self.current_self_table()
@@ -259,7 +262,7 @@ impl BackendScriptContext {
                         message: err.to_string(),
                     })?;
             let lines_table = self
-                .lua
+                .ensure_lua()
                 .create_sequence_from(lines.iter().cloned())
                 .map_err(|err| BackendScriptError::Runtime {
                     module_id: self.module_id.clone(),
@@ -303,7 +306,7 @@ impl BackendScriptContext {
     /// Call `on_poll()` if it exists. Returns any exported service state.
     pub fn run_poll(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
         self.reset_for_call(JsonValue::Null);
-        let globals = self.lua.globals();
+        let globals = self.ensure_lua().globals();
         let handler = match globals.get::<Function>("on_poll") {
             Ok(handler) => handler,
             Err(_) => return Ok(None),
@@ -332,7 +335,7 @@ impl BackendScriptContext {
         self.reset_for_call(payload.clone());
         let normalized = command.replace('-', "_");
 
-        let globals = self.lua.globals();
+        let globals = self.ensure_lua().globals();
         let handler_name = format!("on_command_{normalized}");
         let handler = match globals
             .get::<Function>(handler_name.as_str())
@@ -364,7 +367,7 @@ impl BackendScriptContext {
         self.reset_for_call(payload.clone());
         let normalized = command.replace('-', "_");
 
-        let globals = self.lua.globals();
+        let globals = self.ensure_lua().globals();
         let handler_name = format!("on_command_{normalized}");
         let handler = match globals
             .get::<Function>(handler_name.as_str())
@@ -398,19 +401,23 @@ impl BackendScriptContext {
             }
         };
 
+        let state = self.take_service_state_snapshot()?;
+        let module_id = self.module_id.clone();
+        let lua = self.ensure_lua();
+        let result = command_result_from_lua(lua, &module_id, returned)?;
         Ok(BackendCommandOutcome {
-            state: self.take_service_state_snapshot()?,
-            result: command_result_from_lua(&self.lua, &self.module_id, returned)?,
+            state,
+            result,
             error: None,
         })
     }
 
-    pub fn take_service_state_snapshot(&self) -> Result<Option<JsonValue>, BackendScriptError> {
+    pub fn take_service_state_snapshot(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
         if let Some(payload) = self.take_pending_emit() {
             return Ok(Some(payload));
         }
 
-        let globals = self.lua.globals();
+        let globals = self.ensure_lua().globals();
         let state =
             globals
                 .get::<LuaValue>("state")
@@ -423,7 +430,7 @@ impl BackendScriptContext {
             return Ok(None);
         }
 
-        self.lua
+        self.ensure_lua()
             .from_value::<JsonValue>(state)
             .map(Some)
             .map_err(|err| BackendScriptError::SnapshotFailed {
@@ -451,8 +458,8 @@ impl BackendScriptContext {
         }
     }
 
-    pub fn public_function_names(&self) -> Vec<String> {
-        let globals = self.lua.globals();
+    pub fn public_function_names(&mut self) -> Vec<String> {
+        let globals = self.ensure_lua().globals();
         let mut names = globals
             .pairs::<String, LuaValue>()
             .filter_map(|pair| {
@@ -473,15 +480,15 @@ impl BackendScriptContext {
     fn install_host_api(&mut self, target: &mlua::Table) -> mlua::Result<()> {
         let globals = target;
         globals.set("self", self.current_self_table()?)?;
-        let mesh = self.lua.create_table()?;
-        let service = self.lua.create_table()?;
-        let log = self.lua.create_table()?;
+        let mesh = self.ensure_lua().create_table()?;
+        let service = self.ensure_lua().create_table()?;
+        let log = self.ensure_lua().create_table()?;
 
         let module_id = self.module_id.clone();
         let runtime = Arc::clone(&self.runtime);
         service.set(
             "set_poll_interval",
-            self.lua.create_function(move |_lua, ms: u64| {
+            self.ensure_lua().create_function(move |_lua, ms: u64| {
                 let poll_interval_ms = ms.max(MIN_POLL_INTERVAL_MS);
                 if poll_interval_ms != ms {
                     tracing::warn!(
@@ -500,17 +507,18 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         service.set(
             "emit",
-            self.lua.create_function(move |lua, value: LuaValue| {
-                let payload = lua.from_value::<JsonValue>(value)?;
-                runtime.lock().unwrap().pending_emit = Some(payload);
-                Ok(())
-            })?,
+            self.ensure_lua()
+                .create_function(move |lua, value: LuaValue| {
+                    let payload = lua.from_value::<JsonValue>(value)?;
+                    runtime.lock().unwrap().pending_emit = Some(payload);
+                    Ok(())
+                })?,
         )?;
 
         let runtime = Arc::clone(&self.runtime);
         service.set(
             "emit_json",
-            self.lua
+            self.ensure_lua()
                 .create_function(move |lua, value: Option<LuaValue>| {
                     let payload = match value {
                         None | Some(LuaValue::Nil) => {
@@ -530,7 +538,7 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         service.set(
             "emit_unavailable",
-            self.lua.create_function(move |_lua, ()| {
+            self.ensure_lua().create_function(move |_lua, ()| {
                 runtime.lock().unwrap().pending_emit = Some(serde_json::json!({
                     "available": false,
                     "source_module": module_id,
@@ -542,8 +550,8 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         service.set(
             "emit_event",
-            self.lua
-                .create_function(move |lua, (name, payload): (String, Option<LuaValue>)| {
+            self.ensure_lua().create_function(
+                move |lua, (name, payload): (String, Option<LuaValue>)| {
                     let payload = match payload {
                         Some(value) => lua.from_value::<JsonValue>(value)?,
                         None => JsonValue::Null,
@@ -554,13 +562,14 @@ impl BackendScriptContext {
                         .pending_events
                         .push(BackendScriptEvent { name, payload });
                     Ok(())
-                })?,
+                },
+            )?,
         )?;
 
         let runtime = Arc::clone(&self.runtime);
         service.set(
             "payload",
-            self.lua.create_function(move |lua, ()| {
+            self.ensure_lua().create_function(move |lua, ()| {
                 let payload = runtime.lock().unwrap().current_payload.clone();
                 lua.to_value(&payload)
             })?,
@@ -569,17 +578,18 @@ impl BackendScriptContext {
         let capabilities = self.capabilities.clone();
         service.set(
             "has_capability",
-            self.lua.create_function(move |_lua, capability: String| {
-                Ok(capabilities.contains(capability.as_str()))
-            })?,
+            self.ensure_lua()
+                .create_function(move |_lua, capability: String| {
+                    Ok(capabilities.contains(capability.as_str()))
+                })?,
         )?;
 
         let capabilities = self.capabilities.clone();
         let module_id = self.module_id.clone();
         mesh.set(
             "exec",
-            self.lua
-                .create_function(move |lua, (program, args): (String, Vec<String>)| {
+            self.ensure_lua().create_function(
+                move |lua, (program, args): (String, Vec<String>)| {
                     if let Some(required) = missing_exec_capability(&capabilities, &program) {
                         tracing::warn!(
                             module_id = %module_id,
@@ -591,7 +601,8 @@ impl BackendScriptContext {
                     }
 
                     run_exec(lua, &program, &args)
-                })?,
+                },
+            )?,
         )?;
 
         let capabilities = self.capabilities.clone();
@@ -599,8 +610,8 @@ impl BackendScriptContext {
         let streams = Arc::clone(&self.streams);
         mesh.set(
             "exec_stream",
-            self.lua
-                .create_function(move |_lua, (program, args): (String, Vec<String>)| {
+            self.ensure_lua().create_function(
+                move |_lua, (program, args): (String, Vec<String>)| {
                     if let Some(required) = missing_exec_capability(&capabilities, &program) {
                         tracing::warn!(
                             module_id = %module_id,
@@ -621,26 +632,27 @@ impl BackendScriptContext {
                             Ok(false)
                         }
                     }
-                })?,
+                },
+            )?,
         )?;
 
         let runtime = Arc::clone(&self.runtime);
         mesh.set(
             "config",
-            self.lua.create_function(move |lua, ()| {
+            self.ensure_lua().create_function(move |lua, ()| {
                 let settings = runtime.lock().unwrap().settings.clone();
                 lua.to_value(&settings)
             })?,
         )?;
 
         let module_id = self.module_id.clone();
-        let call_log = self.lua.create_function(
+        let call_log = self.ensure_lua().create_function(
             move |_lua, (_self, level, message): (mlua::Table, String, String)| {
                 log_message(&module_id, &level, &message);
                 Ok(())
             },
         )?;
-        let log_meta = self.lua.create_table()?;
+        let log_meta = self.ensure_lua().create_table()?;
         log_meta.set("__call", call_log)?;
         log.set_metatable(Some(log_meta))?;
 
@@ -655,10 +667,11 @@ impl BackendScriptContext {
             let module_id = module_id.clone();
             log.set(
                 name,
-                self.lua.create_function(move |_lua, message: String| {
-                    log_message(&module_id, level, &message);
-                    Ok(())
-                })?,
+                self.ensure_lua()
+                    .create_function(move |_lua, message: String| {
+                        log_message(&module_id, level, &message);
+                        Ok(())
+                    })?,
             )?;
         }
 
@@ -679,9 +692,9 @@ impl BackendScriptContext {
         self.runtime.lock().unwrap().pending_emit.take()
     }
 
-    fn current_self_table(&self) -> mlua::Result<mlua::Table> {
-        let current_self = self.lua.create_table()?;
-        let meta = self.lua.create_table()?;
+    fn current_self_table(&mut self) -> mlua::Result<mlua::Table> {
+        let current_self = self.ensure_lua().create_table()?;
+        let meta = self.ensure_lua().create_table()?;
         meta.set("module_id", self.module_id.as_str())?;
         meta.set("provider_id", self.module_id.as_str())?;
         meta.set("kind", "backend")?;
@@ -689,9 +702,10 @@ impl BackendScriptContext {
         meta.set("diagnostics_id", self.module_id.as_str())?;
         current_self.set("meta", meta)?;
         let runtime_for_storage_diagnostics = Arc::clone(&self.runtime);
+        let storage_arc = Arc::clone(&self.storage);
         let storage = create_lua_storage_table(
-            &self.lua,
-            Arc::clone(&self.storage),
+            self.ensure_lua(),
+            storage_arc,
             Arc::new(move |reason| {
                 runtime_for_storage_diagnostics
                     .lock()
@@ -704,10 +718,10 @@ impl BackendScriptContext {
         )?;
         current_self.set("storage", storage)?;
         let runtime = Arc::clone(&self.runtime);
-        let self_events_meta = self.lua.create_table()?;
+        let self_events_meta = self.ensure_lua().create_table()?;
         self_events_meta.set(
             "__index",
-            self.lua
+            self.ensure_lua()
                 .create_function(move |lua, (table, key): (Table, String)| {
                     if key == "meta" {
                         return table.get::<LuaValue>("meta");

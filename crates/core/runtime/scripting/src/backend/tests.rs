@@ -256,9 +256,14 @@ fn registers_handlers_from_script() {
          function on_command_volume_up()\nmesh.log.info(\"up\")\nend",
     )
     .unwrap();
-    assert!(ctx.lua.globals().get::<Function>("on_poll").is_ok());
     assert!(
-        ctx.lua
+        ctx.ensure_lua()
+            .globals()
+            .get::<Function>("on_poll")
+            .is_ok()
+    );
+    assert!(
+        ctx.ensure_lua()
             .globals()
             .get::<Function>("on_command_volume_up")
             .is_ok()
@@ -539,7 +544,7 @@ fn bundled_network_provider_exports_state() {
         payload.get("wifi_enabled").and_then(|v| v.as_bool()),
         Some(false)
     );
-    let exported_state = ctx.lua.globals().get::<Table>("state").unwrap();
+    let exported_state = ctx.ensure_lua().globals().get::<Table>("state").unwrap();
     assert!(exported_state.get::<Table>("connections").is_ok());
     assert!(exported_state.get::<Table>("devices").is_ok());
     assert!(exported_state.get::<Table>("networks").is_ok());
@@ -583,7 +588,7 @@ fn bundled_backend_scripts_expose_required_host_api_surface() {
         ctx.load_script(&script).unwrap();
         ctx.call_init().unwrap();
 
-        let mesh = ctx.lua.globals().get::<Table>("mesh").unwrap();
+        let mesh = ctx.ensure_lua().globals().get::<Table>("mesh").unwrap();
         let service = mesh.get::<Table>("service").unwrap();
         let log = mesh.get::<Table>("log").unwrap();
 
@@ -686,7 +691,7 @@ fn emit_json_rejects_invalid_json_string() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script("function init()\nend").unwrap();
 
-    let globals = ctx.lua.globals();
+    let globals = ctx.ensure_lua().globals();
     let mesh = globals.get::<mlua::Table>("mesh").unwrap();
     let service = mesh.get::<mlua::Table>("service").unwrap();
     let emit_json = service.get::<Function>("emit_json").unwrap();
@@ -1112,9 +1117,12 @@ fn backend_state_snapshot_failure_is_reported() {
     ctx2.load_script("function init()\nend").unwrap();
     ctx2.call_init().unwrap();
     // Inject a non-serializable value into state
-    ctx2.lua
+    ctx2.ensure_lua()
         .globals()
-        .set("state", ctx2.lua.create_function(|_, ()| Ok(())).unwrap())
+        .set(
+            "state",
+            ctx2.ensure_lua().create_function(|_, ()| Ok(())).unwrap(),
+        )
         .unwrap();
     let err = ctx2.take_service_state_snapshot().unwrap_err();
     assert!(
