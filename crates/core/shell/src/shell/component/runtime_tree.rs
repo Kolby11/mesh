@@ -19,6 +19,10 @@ pub(super) struct RetainedTreeDirtySummary {
     pub(super) attributes: usize,
     pub(super) children: usize,
     pub(super) state: usize,
+    /// Bitmask of state bits that flipped this frame (old_state ^ new_state),
+    /// OR'd across all nodes that had STATE dirty. Zero if no state changed.
+    /// Bits correspond to STATE_HOVERED, STATE_FOCUSED, STATE_ACTIVE, etc.
+    pub(super) changed_state_bits: u32,
 }
 
 impl RetainedTreeDirtySummary {
@@ -104,11 +108,12 @@ impl RetainedWidgetTree {
             match self.node_keys.get(&node_id).copied() {
                 Some(previous) => {
                     if let Some(previous_snapshot) = self.nodes.get(previous) {
-                        let flags = previous_snapshot.diff_flags(next);
+                        let (flags, node_state_bits) = previous_snapshot.diff_flags(next);
                         if flags.is_empty() {
                             continue;
                         }
                         dirty.add_flags(flags);
+                        dirty.changed_state_bits |= node_state_bits;
                         next_dirty.insert(previous, flags);
                         if let Some(slot) = self.nodes.get_mut(previous) {
                             *slot = next.clone();
@@ -192,7 +197,7 @@ struct RetainedNodeSnapshot {
 type LayoutFingerprint = (u32, u32, u32, u32);
 
 impl RetainedNodeSnapshot {
-    fn diff_flags(&self, next: &Self) -> RetainedNodeDirtyFlags {
+    fn diff_flags(&self, next: &Self) -> (RetainedNodeDirtyFlags, u32) {
         let mut flags = RetainedNodeDirtyFlags::empty();
         if self.layout != next.layout {
             flags |= RetainedNodeDirtyFlags::LAYOUT;
@@ -206,10 +211,13 @@ impl RetainedNodeSnapshot {
         if self.child_ids != next.child_ids {
             flags |= RetainedNodeDirtyFlags::CHILDREN;
         }
-        if self.state_hash != next.state_hash {
+        let changed_state_bits = if self.state != next.state {
             flags |= RetainedNodeDirtyFlags::STATE;
-        }
-        flags
+            state_bitmask(self.state) ^ state_bitmask(next.state)
+        } else {
+            0
+        };
+        (flags, changed_state_bits)
     }
 }
 
@@ -345,6 +353,27 @@ fn attributes_fingerprint(node: &WidgetNode) -> u64 {
         handler.hash(&mut hasher);
     }
     hasher.finish()
+}
+
+/// Converts ElementState to a u32 bitmask using stable bit positions.
+/// Bit positions mirror the style resolver's STATE_HOVERED, STATE_FOCUSED, etc. constants
+/// and are kept self-contained here to avoid a cross-crate dependency on private constants.
+fn state_bitmask(state: ElementState) -> u32 {
+    let mut mask = 0u32;
+    if state.hovered      { mask |= 1 << 0; }
+    if state.focused      { mask |= 1 << 1; }
+    if state.active       { mask |= 1 << 2; }
+    if state.disabled     { mask |= 1 << 3; }
+    if state.read_only    { mask |= 1 << 4; }
+    if state.required     { mask |= 1 << 5; }
+    if state.selected     { mask |= 1 << 6; }
+    if state.checked      { mask |= 1 << 7; }
+    if state.expanded     { mask |= 1 << 8; }
+    if state.pressed      { mask |= 1 << 9; }
+    if state.invalid      { mask |= 1 << 10; }
+    if state.value        { mask |= 1 << 11; }
+    if state.focus_visible { mask |= 1 << 12; }
+    mask
 }
 
 fn hash_dimension(value: Dimension, hasher: &mut impl Hasher) {
