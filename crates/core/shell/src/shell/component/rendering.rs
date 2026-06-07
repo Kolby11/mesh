@@ -211,23 +211,60 @@ impl FrontendSurfaceComponent {
             .cached_restyle_rules
             .as_deref()
             .expect("cache populated above");
-        let index_cache = &mut self.cached_style_rule_index;
         let targeted_interaction_restyle = trigger_kind == "restyle"
             && dirty_types.contains(ComponentDirtyFlags::STATE)
             && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
+        // Compute affected keys before borrowing index_cache to satisfy the borrow checker.
+        // collect_interaction_changed_keys takes &self, so it must run before the &mut borrow.
+        let affected_keys = if targeted_interaction_restyle {
+            self.collect_interaction_changed_keys(tree)
+        } else {
+            HashSet::new()
+        };
+        let index_cache = &mut self.cached_style_rule_index;
         let mut reused_retained_layout = false;
         let preserve_surface_root = tree.tag == "surface";
         if targeted_interaction_restyle {
-            // Pseudo-state selectors are not isolated to the stateful node:
-            // `.parent:hover .child` and similar relationship selectors can
-            // change descendants that are not themselves hovered/focused.
-            // Restyle the retained tree globally, but keep interaction
-            // invalidation layout-stable unless a caller explicitly requests
-            // layout.
-            if preserve_surface_root {
-                resolver.restyle_subtree_children_cached(tree, restyle_rules, context, index_cache);
+            if affected_keys.is_empty() {
+                // First frame or no previous interaction state — fall back
+                // to full-tree restyle.
+                if preserve_surface_root {
+                    resolver.restyle_subtree_children_cached(
+                        tree,
+                        restyle_rules,
+                        context,
+                        index_cache,
+                    );
+                } else {
+                    resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
+                }
             } else {
-                resolver.restyle_subtree_cached(tree, restyle_rules, context, index_cache);
+                // Narrow restyle: only restyle state-changed nodes and their
+                // descendants. Siblings, cousins, and unrelated subtrees are
+                // left untouched.
+                if preserve_surface_root {
+                    // For surface root, restyle only children that are in
+                    // the affected set. Use targeted restyle on each child.
+                    for child in &mut tree.children {
+                        resolver.restyle_subtree_for_keys_cached(
+                            child,
+                            restyle_rules,
+                            context,
+                            index_cache,
+                            &affected_keys,
+                        );
+                    }
+                } else {
+                    // For non-surface trees, restyle the entire tree but only
+                    // nodes in affected_keys will be touched.
+                    resolver.restyle_subtree_for_keys_cached(
+                        tree,
+                        restyle_rules,
+                        context,
+                        index_cache,
+                        &affected_keys,
+                    );
+                }
             }
             merge_runtime_primitive_defaults(tree);
             reused_retained_layout = !dirty_types.contains(ComponentDirtyFlags::LAYOUT);

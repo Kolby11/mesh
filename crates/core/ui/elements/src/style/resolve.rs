@@ -732,7 +732,12 @@ impl<'a> StyleResolver<'a> {
         target_keys: &std::collections::HashSet<String>,
     ) {
         self.restyle_subtree_for_keys_with_index_and_inheritance(
-            node, rules, index, context, target_keys, None,
+            node,
+            rules,
+            index,
+            context,
+            target_keys,
+            None,
         );
     }
 
@@ -749,23 +754,25 @@ impl<'a> StyleResolver<'a> {
             .attributes
             .get("_mesh_key")
             .is_some_and(|key| target_keys.contains(key));
-        // A node is in an "affected subtree" if either it is a target, or
-        // its parent was already restyled (parent_style is Some because an
-        // ancestor was a target and its style changed).
-        let in_affected_subtree = is_target || parent_style.is_some();
+        // A node should have its style recomputed if it is a direct target, or
+        // if it is a descendant of a restyled node (parent_style.is_some()),
+        // in which case it must inherit updated values from its restyled parent.
+        let should_restyle = is_target || parent_style.is_some();
 
-        if in_affected_subtree {
-            // Always recompute style for nodes in the affected subtree.
-            // For target nodes: they may have new pseudo-class rules applied.
-            // For non-target descendants of targets: they need inherited
-            // values from the restyled parent recomputed.
+        if should_restyle {
+            // Recompute this node's style.
+            // For target nodes: apply new pseudo-class rules.
+            // For descendants of targets: inherit updated values from the
+            // restyled ancestor.
             let attrs = StyleNodeAttrs::from_node(node);
-            node.computed_style = self
-                .resolve_node_style_with_attrs_indexed_no_diagnostics(rules, index, &attrs, context);
+            node.computed_style = self.resolve_node_style_with_attrs_indexed_no_diagnostics(
+                rules, index, &attrs, context,
+            );
             if let Some(parent) = parent_style {
                 inherit_retained_text_style(&mut node.computed_style, parent);
             }
 
+            // Pass this node's style down so children inherit from it.
             let child_parent = ParentInheritedStyle::from(&node.computed_style);
             for child in &mut node.children {
                 self.restyle_subtree_for_keys_with_index_and_inheritance(
@@ -778,8 +785,19 @@ impl<'a> StyleResolver<'a> {
                 );
             }
         } else {
-            // Node is not in the affected subtree — skip it and its children.
-            // No style changes reach this part of the tree.
+            // This node is not a target and is not in an affected subtree.
+            // Don't restyle it, but keep recursing — target nodes may be
+            // deeper in the tree.
+            for child in &mut node.children {
+                self.restyle_subtree_for_keys_with_index_and_inheritance(
+                    child,
+                    rules,
+                    index,
+                    context,
+                    target_keys,
+                    None,
+                );
+            }
         }
     }
 
