@@ -185,8 +185,8 @@ impl FrontendSurfaceComponent {
         child_instance_key: &str,
     ) {
         let child_snapshot = {
-            let runtimes = self.runtimes.lock().unwrap();
-            let Some(child) = runtimes.get(child_instance_key) else {
+            let mut runtimes = self.runtimes.lock().unwrap();
+            let Some(child) = runtimes.get_mut(child_instance_key) else {
                 return;
             };
             let mut snapshot = child.script_ctx.public_member_snapshot();

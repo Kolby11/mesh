@@ -11,6 +11,7 @@ pub struct LuaVmPool {
     baseline_globals: Arc<HashSet<String>>,
 }
 
+#[derive(Debug)]
 pub struct PooledVm {
     lua: Option<Lua>,
     slot_index: usize,
@@ -41,7 +42,11 @@ impl LuaVmPool {
             .collect();
         baseline_vm.sandbox(true)?;
         let baseline_globals = Arc::new(set);
-        Ok(Self { slots, floor, baseline_globals })
+        Ok(Self {
+            slots,
+            floor,
+            baseline_globals,
+        })
     }
 
     pub fn baseline_globals(&self) -> Arc<HashSet<String>> {
@@ -61,14 +66,22 @@ impl LuaVmPool {
         for (i, slot) in self.slots.iter_mut().enumerate() {
             if slot.is_some() {
                 let lua = slot.take().unwrap();
-                return PooledVm { lua: Some(lua), slot_index: i, owner_thread };
+                return PooledVm {
+                    lua: Some(lua),
+                    slot_index: i,
+                    owner_thread,
+                };
             }
         }
         // Grow on demand
         let slot_index = self.slots.len();
         self.slots.push(None);
         let lua = new_sandboxed_lua();
-        PooledVm { lua: Some(lua), slot_index, owner_thread }
+        PooledVm {
+            lua: Some(lua),
+            slot_index,
+            owner_thread,
+        }
     }
 
     pub(crate) fn return_slot(&mut self, slot_index: usize, lua: Lua) {
@@ -186,7 +199,10 @@ mod tests {
         let pool = LuaVmPool::new(4).unwrap();
         let globals = pool.baseline_globals();
         for key in &["self", "module", "mesh"] {
-            assert!(!globals.contains(*key), "baseline should not contain '{key}'");
+            assert!(
+                !globals.contains(*key),
+                "baseline should not contain '{key}'"
+            );
         }
     }
 
