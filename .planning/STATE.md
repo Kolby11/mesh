@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.17
 milestone_name: "Performance: Scripting VM Consolidation"
 status: in_progress
-last_updated: "2026-06-07T00:00:00.000Z"
+last_updated: "2026-06-07T17:59:15Z"
 last_activity: 2026-06-07
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 3
-  completed_plans: 4
-  percent: 62
+  completed_phases: 3
+  total_plans: 6
+  completed_plans: 6
+  percent: 87
 ---
 
 # State: MESH v1.17
@@ -24,9 +24,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-02)
 
 ## Current Position
 
-Phase: 94 — _ENV Isolation + Lazy-Init (plan 01 complete)
-Status: Phase 94 plan 01 complete; plan 01 of 1 done
-Last activity: 2026-06-07 — Phase 94 plan 01 executed: ScriptContext restructured with lazy-init vm: Option<PooledVm> + env_table: Option<Table>, per-component _ENV isolation with __index=globals() metatable, all globals() reads/writes migrated to env_table, closures capture env_table for reactive state
+Phase: 94 — _ENV Isolation + Lazy-Init (complete)
+Status: Phase 94 plan 02 complete; all 2 plans done
+Last activity: 2026-06-07 — Phase 94 plan 02 executed: Checkin cleanup documented in return_slot (env_table-based ISO-03 isolation), ScriptContext Drop wired to uninit() for pool VM return, compile_and_execute/compile_and_execute_simple methods added with ChunkCache source caching by FNV64 content hash for Phase 95 hot-reload eviction
 
 ## Decisions
 

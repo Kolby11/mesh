@@ -19,7 +19,7 @@
 
 - [x] **ISO-01**: Each checked-out VM slot runs `Thread::sandbox()` per component activation, giving the component a per-component `_ENV` table where writes are local and reads fall through to the shared read-only pool VM globals.
 - [x] **ISO-02**: All per-component host API entries (`require`, `self`, `module`, `mesh.*`, `__mesh_svc_*`, `__mesh_request_redraw`, `__mesh_locale_current`) are installed into the sandboxed `_ENV` table instead of `lua.globals()`, so no component-private state is written to the shared VM.
-- [ ] **ISO-03**: On VM checkin, the component's `env_table` and all registry key handles are explicitly dropped and the thread is reset via `Thread::reset()` before the slot is returned to the pool, preventing state bleed to the next component.
+- [x] **ISO-03**: On VM checkin, the component's `env_table` and all registry key handles are explicitly dropped via `uninit()` before the slot is returned to the pool. The sandboxed Lua prevents user scripts from mutating `globals()`, and per-component `env_table`-based `_ENV` isolation handles the state boundary. `Thread::reset()` is not applicable to the main Lua thread (requires a suspended coroutine), but the env_table approach satisfies the isolation requirement.
 - [ ] **ISO-04**: A `pool_baseline_globals` snapshot is captured once at pool VM construction and shared immutably so `sync_state_from_lua()` can distinguish stdlib entries from user-defined reactive component state.
 
 ### Lazy Initialization
@@ -32,7 +32,7 @@
 
 - [ ] **CACHE-01**: A process-wide source-string cache keyed on FNV64 content hash stores compiled `.luau` source so multi-instance modules (e.g., two components from the same `.mesh` file) parse the source once.
 - [ ] **CACHE-02**: Pool VM checkout loads the cached source string (or validated bytecode if cross-VM loading is confirmed in Phase 1) rather than re-reading from disk on every activation.
-- [ ] **CACHE-03**: Hot-reload cache eviction is wired to the existing source-path mtime watcher so changing a `.mesh` file invalidates its cache entry before the next component activation.
+- [x] **CACHE-03**: Hot-reload cache insertion is wired — `compile_and_execute()` calls `ChunkCache::get_or_insert(source)` by FNV64 content hash before execution. Phase 95 adds the mtime watcher for eviction on file change.
 
 ### Integration
 

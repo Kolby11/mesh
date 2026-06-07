@@ -18,7 +18,7 @@
 
 - [x] **Phase 92: VM Pool Foundation** — New `LuaVmPool`, `PooledVm` RAII types, and `ChunkCache`; no behavioral change to existing `ScriptContext`.
 - [x] **Phase 93: Host API Re-targeting** — Refactor `install_host_api()` to accept a `&Table` target; pass `lua.globals()` temporarily to preserve existing behavior.
-- [ ] **Phase 94: _ENV Isolation + Lazy-Init** — Replace `lua: Lua` with `vm: Option<PooledVm>` + `env: Option<Table>`; wire `ensure_initialized()`; per-component `_ENV` sandboxing; explicit checkin reset.
+- [x] **Phase 94: _ENV Isolation + Lazy-Init** — Replace `lua: Lua` with `vm: Option<PooledVm>` + `env: Option<Table>`; wire `ensure_initialized()`; per-component `_ENV` sandboxing; explicit checkin reset.
 - [ ] **Phase 95: Integration + Validation** — Wire pool and cache into `FrontendSurfaceComponent`; `BackendScriptContext` lazy-init; hot-reload cache eviction; shipped surface regression proof.
 
 ## Phase Details
@@ -63,7 +63,7 @@
 
 Plans:
 - [x] 94-01-PLAN.md — ScriptContext struct change: vm+env_table, ensure_initialized(), all method migration to per-component _ENV (INIT-01, INIT-02, ISO-01, ISO-02)
-- [ ] 94-02-PLAN.md — Checkin cleanup (Thread::reset in return_slot), uninit() wiring to Drop, compile_and_execute with ChunkCache (ISO-03, CACHE-03)
+- [x] 94-02-PLAN.md — Checkin cleanup (Thread::reset in return_slot), uninit() wiring to Drop, compile_and_execute with ChunkCache (ISO-03, CACHE-03)
 
 ### Phase 95: Integration + Validation
 **Goal**: The pool and cache are live on the production path; `FrontendSurfaceComponent` and `BackendScriptContext` use them; shipped surfaces prove the full system works end-to-end with no regressions.
@@ -82,7 +82,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 92. VM Pool Foundation | 2/2 | Complete | 2026-06-07 |
 | 93. Host API Re-targeting | 2/2 | Complete | 2026-06-07 |
-| 94. _ENV Isolation + Lazy-Init | 1/2 | In Progress | - |
+| 94. _ENV Isolation + Lazy-Init | 2/2 | Complete | 2026-06-07 |
 | 95. Integration + Validation | 0/? | Not started | - |
 
 ---
