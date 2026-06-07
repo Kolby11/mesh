@@ -26,7 +26,7 @@
 
 - [x] **INIT-01**: `ScriptContext` replaces `lua: Lua` with `vm: Option<PooledVm>` and `env: Option<Table>`; VM pool checkout is deferred until the first script call via an `ensure_initialized()` entry point.
 - [x] **INIT-02**: Components that are declared but never mounted or shown hold no pool slot, reducing idle memory footprint compared to the current model.
-- [ ] **INIT-03**: `BackendScriptContext` defers `Lua::new()` to the first `init()` or poll call; backend contexts are long-lived singletons so no pooling is applied, only lazy allocation.
+- [x] **INIT-03**: `BackendScriptContext` defers `Lua::new()` to the first `init()` or poll call; backend contexts are long-lived singletons so no pooling is applied, only lazy allocation.
 
 ### Chunk Cache
 

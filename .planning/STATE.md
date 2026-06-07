@@ -8,9 +8,9 @@ last_activity: 2026-06-07
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 9
-  completed_plans: 7
-  percent: 78
+  total_plans: 10
+  completed_plans: 8
+  percent: 80
 ---
 
 # State: MESH v1.17
@@ -25,8 +25,8 @@ See: `.planning/PROJECT.md` (updated 2026-06-02)
 ## Current Position
 
 Phase: 95 — Integration + Validation (in progress)
-Status: Phase 95 plan 02 complete; plan 01 and 03 pending
-Last activity: 2026-06-07 — Phase 95 plan 02 executed: ScriptContext::new_lazy() integration point added (delegating to new()), FrontendSurfaceComponent::create_runtime_for_component switched to cached compile_and_execute path, reload_source() wired with ChunkCache eviction (fnv64 hash) for main script and local components before .mesh recompile (INT-01, CACHE-03)
+Status: Phase 95 plan 02 and 01 complete; plan 03 pending
+Last activity: 2026-06-07 — Phase 95 plan 01 executed: BackendScriptContext lazy-init with ensure_lua() gate defers Lua::new() until first init()/poll invocation; registered-but-unused backends allocate no VM (INIT-03)
 
 ## Decisions
 
@@ -102,6 +102,9 @@ Last activity: 2026-06-07 — Phase 95 plan 02 executed: ScriptContext::new_lazy
 - [Phase 95-02]: new_lazy() delegates to new() rather than duplicating the constructor body — both set vm: None, env_table: None, preserving the lazy-init invariant established in Phase 94.
 - [Phase 95-02]: ChunkCache eviction in reload_source() uses FNV64 content hash of old script source — astronomically low collision rate on source text (~1 in 2^64), acceptable for infrequent hot-reload paths.
 - [Phase 95-02]: use mesh_core_scripting::chunk_cache import placed inside reload_source() function body rather than module-level to scope the import to its only use site.
+- [Phase 95-01]: BackendScriptContext ensure_lua() stores Lua in self.lua before calling install_host_api to prevent infinite recursion (install_host_api internally chains through ensure_lua).
+- [Phase 95-01]: ensure_lua() gate pattern returns &Lua for chaining; methods changed to &mut self where they need Lua access (take_service_state_snapshot, public_function_names, current_self_table).
+- [Phase 95-01]: Field clones before ensure_lua() in run_command_with_result and current_self_table satisfy Rust borrow checker for overlapping &Lua + &self.field access.
 - [Phase 94-01]: Script chunks loaded with set_environment(env_table) so function definitions land in per-component namespace; __index fallthrough provides read-only stdlib access via sandboxed pool VMs.
 - [Phase 04]: Plan 05 derives shell-theme backend settings from ThemeEngine.active().id so provider startup and restart match the shell's resolved theme authority.
 - [Phase 04]: Plan 05 makes theme file-watch reload return pending CoreRequest queues and synchronize mesh.theme only when the resolved active theme id changes.
@@ -216,12 +219,13 @@ Last activity: 2026-06-07 — Phase 95 plan 02 executed: ScriptContext::new_lazy
 | Phase 64 P01 | 22min | 3 tasks | 3 files |
 | Phase 71 P01 | 20 min | 4 tasks | 5 files |
 | Phase 94 P01 | 11min | 2 tasks | 3 files |
+| Phase 95 P01 | 5min | 2 tasks | 2 files |
 | Phase 95 P02 | 2min | 2 tasks | 3 files |
 
 ## Session
 
-Last session: 2026-06-07T18:08:32Z
-Stopped At: Completed 95-02-PLAN.md
+Last session: 2026-06-07T20:12:22+02:00
+Stopped At: Completed 95-01-PLAN.md
 Resume File: None
 
 ## Accumulated Context
@@ -348,4 +352,4 @@ Items acknowledged and deferred at `v1.16` close on 2026-05-26:
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-06-07 — Phase 95 plan 02 complete: ScriptContext::new_lazy() integration, compile_and_execute wiring in create_runtime_for_component, ChunkCache eviction in reload_source (INT-01, CACHE-03)*
+*State updated: 2026-06-07 — Phase 95 plan 01 complete: BackendScriptContext lazy-init with ensure_lua() gate, all 63 tests pass, registered-but-unused backends allocate no VM (INIT-03)*
