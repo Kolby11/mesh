@@ -2,7 +2,7 @@
 
 ## Milestones
 
-- 🔄 **v1.17 Performance: Scripting VM Consolidation** — Phases 92-95 active
+- ✅ **v1.17 Performance: Scripting VM Consolidation** — Phases 92-95 shipped 2026-06-07 ([archive](milestones/v1.17-ROADMAP.md), [audit](v1.17-MILESTONE-AUDIT.md))
 - ✅ **v1.16 Element Library** — Phases 86-91 shipped 2026-05-26 ([archive](milestones/v1.16-ROADMAP.md), [audit](milestones/v1.16-MILESTONE-AUDIT.md))
 - ✅ **v1.15 Persistent Storage System** — Phases 81-85 shipped 2026-05-26 ([archive](milestones/v1.15-ROADMAP.md))
 - ✅ **v1.14 Unified Luau Scripting Runtime** — Phases 74-80 shipped 2026-05-26 ([archive](milestones/v1.14-ROADMAP.md))
@@ -12,110 +12,11 @@
 
 ## Current Status
 
-**Active milestone: v1.17 Performance: Scripting VM Consolidation** — Phase 95 complete; all 3 plans executed.
-
-## Phases
-
-- [x] **Phase 92: VM Pool Foundation** — New `LuaVmPool`, `PooledVm` RAII types, and `ChunkCache`; no behavioral change to existing `ScriptContext`.
-- [x] **Phase 93: Host API Re-targeting** — Refactor `install_host_api()` to accept a `&Table` target; pass `lua.globals()` temporarily to preserve existing behavior.
-- [x] **Phase 94: _ENV Isolation + Lazy-Init** — Replace `lua: Lua` with `vm: Option<PooledVm>` + `env: Option<Table>`; wire `ensure_initialized()`; per-component `_ENV` sandboxing; explicit checkin reset.
-- [x] **Phase 95: Integration + Validation** — Wire pool and cache into `FrontendSurfaceComponent`; `BackendScriptContext` lazy-init; hot-reload cache eviction; shipped surface regression proof.
-
-## Phase Details
-
-### Phase 92: VM Pool Foundation
-**Goal**: A thread-local VM pool and compiled-source cache exist as isolated, independently testable types with no changes to existing component behavior.
-**Depends on**: Nothing (first phase of v1.17)
-**Requirements**: POOL-01, POOL-02, POOL-03, POOL-04, CACHE-01, CACHE-02
-**Success Criteria** (what must be TRUE):
-  1. A `LuaVmPool` can be created, and calling `checkout()` returns a `PooledVm` that returns its slot to the pool on drop without any assertion failure.
-  2. The pool grows on-demand and never blocks when all existing slots are checked out simultaneously (minimum 4 VMs floor).
-  3. A `PooledVm` dropped on a different thread than the one that checked it out triggers a detectable runtime assertion.
-  4. A `ChunkCache` stores a source string under its FNV64 content hash and returns the same string on a second lookup without re-reading from disk.
-  5. All existing shell surfaces (`navigation-bar`, `audio-popover`) continue to mount and render identically — pool and cache types exist but are not yet wired into `ScriptContext`.
-**Plans**: 2 plans
-- [ ] 92-01-PLAN.md — LuaVmPool + PooledVm RAII guard (POOL-01..04)
-- [ ] 92-02-PLAN.md — ChunkCache (FNV64 source-string cache; CACHE-01, CACHE-02)
-
-### Phase 93: Host API Re-targeting
-**Goal**: Every per-component host API write targets a caller-supplied `&Table` rather than `lua.globals()`, validating the refactor against existing behavior before `_ENV` isolation is active.
-**Depends on**: Phase 92
-**Requirements**: ISO-02 (foundation work), ISO-04
-**Success Criteria** (what must be TRUE):
-  1. `install_host_api()` compiles and is called with `lua.globals()` as the target — all existing host API keys (`require`, `self`, `module`, `mesh.*`, `__mesh_svc_*`, `__mesh_request_redraw`, `__mesh_locale_current`) are set on that table.
-  2. A `pool_baseline_globals` snapshot is captured once at pool VM construction and is available as an immutable shared reference before any per-component host API installation runs.
-  3. All existing shell surface tests and component render paths pass without modification — the refactor is purely mechanical at this stage with no observable behavior change.
-**Plans**: 2 plans
-- [ ] 93-01-PLAN.md — LuaVmPool::baseline_globals + ScriptContext::install_host_api(&Table) (ISO-04, ISO-02)
-- [ ] 93-02-PLAN.md — BackendScriptContext::install_host_api(&Table) (ISO-02)
-
-### Phase 94: _ENV Isolation + Lazy-Init
-**Goal**: Each component gets a private `_ENV` table on checkout so writes from one component are invisible to any other component sharing the same pool VM; components that are never mounted hold no pool slot.
-**Depends on**: Phase 93
-**Requirements**: ISO-01, ISO-02 (completion), ISO-03, INIT-01, INIT-02, CACHE-03
-**Success Criteria** (what must be TRUE):
-  1. Two components compiled from the same `.mesh` source and mounted simultaneously each have their own reactive global namespace — a write to a public field in component A does not appear in component B's render output.
-  2. A component that is declared but never shown or mounted allocates no pool VM slot; the pool slot count is zero for unused components.
-  3. On VM checkin, the component's `env_table` and all registry key handles are dropped and the thread is reset before the slot is returned — a subsequent component checkout on the same VM slot starts with a clean environment.
-  4. Changing a `.mesh` source file while the shell is running invalidates its chunk cache entry so the next component activation re-reads and re-caches the updated source.
-  5. The shipped `navigation-bar` and `audio-popover` surfaces continue to display correct reactive state after the isolation migration — service fields, locale, and theme tokens resolve through the new per-component `_ENV`.
- **Plans**: 2 plans
-
-Plans:
-- [x] 94-01-PLAN.md — ScriptContext struct change: vm+env_table, ensure_initialized(), all method migration to per-component _ENV (INIT-01, INIT-02, ISO-01, ISO-02)
-- [x] 94-02-PLAN.md — Checkin cleanup (Thread::reset in return_slot), uninit() wiring to Drop, compile_and_execute with ChunkCache (ISO-03, CACHE-03)
-
-### Phase 95: Integration + Validation
-**Goal**: The pool and cache are live on the production path; `FrontendSurfaceComponent` and `BackendScriptContext` use them; shipped surfaces prove the full system works end-to-end with no regressions.
-**Depends on**: Phase 94
-**Requirements**: INIT-03, INT-01, INT-02
-**Success Criteria** (what must be TRUE):
-  1. `FrontendSurfaceComponent::create_runtime_for_component` calls `ScriptContext::new_lazy()` with pool and cache references — the old direct `Lua::new()` constructor call is gone from that path.
-  2. `BackendScriptContext` defers its `Lua::new()` call until the first `init()` or poll invocation — a backend provider that is registered but never polled allocates no VM.
-  3. The shipped `navigation-bar` surface renders its language selector, responds to pointer hover and keyboard traversal, and reflects audio service state correctly after the full pool migration.
-  4. The shipped `audio-popover` surface shows correct volume level, responds to slider drag, and fires the mute keybind correctly after the full pool migration.
- **Plans**: 3 plans
-
-Plans:
-- [x] 95-01-PLAN.md — BackendScriptContext lazy-init: defer Lua::new() to first init()/poll() (INIT-03)
-- [x] 95-02-PLAN.md — Frontend integration wiring: ScriptContext::new_lazy() + compile_and_execute in create_runtime_for_component + ChunkCache eviction in reload_source (INT-01, CACHE-03)
-- [x] 95-03-PLAN.md — Build verification + regression proof: workspace build + test suite (INT-02)
-
-## Progress Table
-
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 92. VM Pool Foundation | 2/2 | Complete | 2026-06-07 |
-| 93. Host API Re-targeting | 2/2 | Complete | 2026-06-07 |
-| 94. _ENV Isolation + Lazy-Init | 2/2 | Complete | 2026-06-07 |
-| 95. Integration + Validation | 3/3 | Complete | 2026-06-07 |
+**No active milestone.** v1.17 shipped 2026-06-07. Run `/gsd-new-milestone` to start v1.18.
 
 ---
 
 ## Backlog
-
-### v1.17 — Performance: Scripting VM Consolidation
-
-**Goal:** Eliminate the per-component `mlua::Lua` VM allocation — the largest
-per-component startup and memory cost — and fix related hot-path cloning in
-script state delivery.
-
-**Scope:**
-- Replace per-`ScriptContext` `Lua::new()` with a per-thread VM pool using
-  `_ENV`-based environment isolation so each component gets a private namespace
-  without paying the full stdlib + metatable cost.
-- Lazy-init for inactive components; shared compiled chunks across runtimes
-  once VM ownership is stable.
-- Fix bound instance proxy deep-cloning the full snapshot `Value` into Lua
-  tables on every component mount — replace with a metatable proxy or
-  `Arc<Value>` view.
-- Fix remaining tracked-fields and side-channel maps cloned per state sync;
-  wrap in `Arc` and use copy-on-write, or return borrowed references.
-
-**Priority:** high — scales with component count; every new module pays the
-full VM cost today.
-
----
 
 ### v1.18 — Performance: Smart Invalidation
 

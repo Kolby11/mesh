@@ -10,6 +10,22 @@ MESH should let plugin authors build distinctive shell UI and service integratio
 
 ## Current State
 
+`v1.17 Performance: Scripting VM Consolidation` shipped on 2026-06-07.
+
+The project now also has a scripting VM pool and lazy-initialization system with:
+
+- Per-thread `LuaVmPool` with `PooledVm` RAII checkout/checkin (4 VM floor, on-demand growth)
+- Process-wide `ChunkCache` keyed on FNV64 content hash for compiled source sharing
+- `install_host_api` refactored to accept `&Table` target
+- Per-component `_ENV` isolation via `{ __index = globals() }` metatable
+- `ScriptContext` lazy-init: `vm: Option<PooledVm>` + `env: Option<Table>` + `ensure_initialized()`
+- Host API keys installed into per-component `_ENV`; script chunks sandboxed with `set_environment`
+- `BackendScriptContext` lazy allocation via `ensure_lua()` gate
+- `FrontendSurfaceComponent` wired to `ScriptContext::new_lazy()` + cached `compile_and_execute`
+- Hot-reload `ChunkCache` eviction in `reload_source()`
+- Full workspace build: zero errors; 108 scripting + 25 backend tests pass, zero new regressions
+- 16/16 requirements satisfied ([audit](v1.17-MILESTONE-AUDIT.md))
+
 `v1.16 Element Library` shipped on 2026-05-26.
 
 The project now also has a broad MESH-native element library with:
@@ -194,7 +210,28 @@ The project now also has a class-like module object contract with:
 - Backend `mesh.service.emit_event(...)` transport through shell payload validation into frontend `proxy.events.Name` subscribers.
 - Bundled audio/navigation proof for typed `VolumeChanged` backend-to-frontend event delivery.
 
-## Last Shipped Milestone: v1.16 Element Library
+## Last Shipped Milestone: v1.17 Performance: Scripting VM Consolidation
+
+**Goal:** Eliminate the per-component `mlua::Lua` VM allocation — the
+largest per-component startup and memory cost — by introducing a per-thread
+VM pool with `_ENV`-based isolation, and reduce per-component overhead
+through lazy-init and shared compiled chunks.
+
+**Shipped features:**
+- Per-thread `LuaVmPool` with `PooledVm` RAII checkout/checkin (4 VM floor, on-demand growth, thread assertion)
+- Process-wide `ChunkCache` keyed on FNV64 content hash for compiled source sharing
+- `install_host_api` refactored to accept `&Table` target
+- `pool_baseline_globals` snapshot for reactive state filtering
+- Per-component `_ENV` table with `{ __index = globals() }` metatable — private namespace per component
+- `ScriptContext` lazy-init: `vm: Option<PooledVm>` + `env: Option<Table>` + `ensure_initialized()` gate
+- Host API installed into per-component `_ENV`; script chunks sandboxed with `set_environment`
+- `BackendScriptContext` lazy allocation via `ensure_lua()` gate
+- `FrontendSurfaceComponent` wired to `ScriptContext::new_lazy()` + cached `compile_and_execute`
+- Hot-reload `ChunkCache` eviction in `reload_source()`
+- Full workspace build: zero errors; 108 scripting + 25 backend tests pass, zero new regressions
+- 16/16 requirements satisfied; audit: `.planning/v1.17-MILESTONE-AUDIT.md`
+
+## Previous Shipped Milestone: v1.16 Element Library
 
 **Goal:** Build a broad native MESH element library so module authors can
 compose meaningful shell surfaces from first-class markup primitives instead
@@ -207,18 +244,6 @@ of bespoke component workarounds.
 - Native choice/menu behavior for `select`/`option`, checkbox, switch, radio groups, and menus with Luau value/change/activation events.
 - Native container and collection semantics for popover, dialog, tabs/tab, details, list/list-item, and empty-state.
 - Shipped proof across navigation language selection, audio popover, debug inspector tabs/shell, surfaces view, and backend services view.
-
-## Current Milestone: v1.17 Performance: Scripting VM Consolidation
-
-**Goal:** Eliminate the per-component `mlua::Lua` VM allocation — the
-largest per-component startup and memory cost — by introducing a per-thread
-VM pool with `_ENV`-based isolation, and reduce per-component overhead
-through lazy-init and shared compiled chunks.
-
-**Target features:**
-- Replace per-`ScriptContext` `Lua::new()` with a per-thread VM pool using `_ENV`-based environment isolation so each component gets a private namespace without paying the full stdlib + metatable cost.
-- Lazy-init for inactive components; skip VM initialization until first use.
-- Share pre-compiled Lua chunks across runtimes once VM ownership is stable.
 
 ## Previous Shipped Milestone: v1.12 Module Object Contract
 
@@ -289,7 +314,7 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 
 ### Active
 
-- `v1.17`: Scripting VM consolidation should use a per-thread pool with `_ENV`-based isolation, not per-component VM allocation; lazy-init and shared compiled chunks reduce startup cost without breaking the existing authoring model.
+*(None — v1.17 just shipped. Run `/gsd-new-milestone` to define v1.18 requirements.)*
 
 ### Out of Scope
 
@@ -352,6 +377,9 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Luau scripting should split current instance context from external dependencies | Authors should use runtime-provided `self` for the current object instance and `require(...)` for external shell APIs, services, libraries, and component definitions | Shipped in v1.14 |
 | New event authoring uses named channel objects | Authors should subscribe with `audio.VolumeChanged:on(fn)` and emit local/provider events with `self.Changed:fire(payload)`, while string-literal event paths remain compatibility only | Shipped in v1.14 |
 | Persistent storage is a separate runtime milestone | `self.storage` needs shell-backed persistence, atomic JSON files, lifecycle flushing, type diagnostics, and rerender integration after the unified scripting surface lands | Shipped in v1.15 |
+| Lua VMs should pool per-thread instead of allocate per-component | A per-thread `LuaVmPool` with `_ENV`-based isolation eliminates the largest per-component startup/memory cost while preserving sandbox guarantees; `ChunkCache` shares compiled source across runtimes | Shipped in v1.17 |
+| Per-component `_ENV` tables use metatable fallthrough to shared globals | `{ __index = lua.globals() }` pattern gives each component a private namespace (writes stay local) while stdlib reads fall through to the immutable pool VM globals | Shipped in v1.17 |
+| `env_table::pairs()` iteration replaces `pool_baseline_globals` filter | Since `pairs()` only returns directly-set keys (not `__index` fallthrough entries), stdlib keys are naturally excluded from reactive state sync — the Phase 93 baseline globals snapshot is documentation, not an active runtime filter | Shipped in v1.17 |
 
 <details>
 <summary>Archived milestone framing</summary>
