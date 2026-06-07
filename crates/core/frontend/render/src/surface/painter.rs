@@ -7,9 +7,9 @@ mod widgets;
 use std::cell::{Cell, RefCell};
 use std::sync::Mutex;
 
-use super::{PixelBuffer, PixelCanvasSession};
 use super::icon;
 use super::text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer, TextSelectionGeometry};
+use super::{PixelBuffer, PixelCanvasSession};
 #[allow(unused_imports)]
 pub(crate) use backend::{
     MAX_EFFECT_BLUR_RADIUS, PaintBackend, PainterBackendCapabilities, PainterBlendMode,

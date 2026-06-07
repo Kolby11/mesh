@@ -355,7 +355,6 @@ fn build_element_node(
     }
     if !classes.is_empty() {
         node.attributes.insert("class".into(), classes.join(" "));
-        node.refresh_class_cache();
     }
 
     if tag == "text"

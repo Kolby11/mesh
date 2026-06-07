@@ -10,7 +10,9 @@ use super::profiling;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::SupportedAxes;
-use skia_safe::{AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images};
+use skia_safe::{
+    AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
+};
 use std::cell::RefCell;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};

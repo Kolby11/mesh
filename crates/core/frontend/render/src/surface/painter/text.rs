@@ -142,8 +142,19 @@ impl TextRenderCache for TextRenderer {
         max_width: Option<f32>,
     ) {
         TextRenderer::render_clipped_on_canvas(
-            self, text, font_family, font_size, font_weight, line_height, align, color, canvas, x,
-            y, clip, max_width,
+            self,
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            align,
+            color,
+            canvas,
+            x,
+            y,
+            clip,
+            max_width,
         );
     }
 
@@ -243,8 +254,19 @@ impl TextRenderCache for SharedTextMeasurer {
         max_width: Option<f32>,
     ) {
         SharedTextMeasurer::render_clipped_on_canvas(
-            self, text, font_family, font_size, font_weight, line_height, align, color, canvas, x,
-            y, clip, max_width,
+            self,
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            align,
+            color,
+            canvas,
+            x,
+            y,
+            clip,
+            max_width,
         );
     }
 
@@ -983,7 +1005,12 @@ fn render_display_selection_highlights_in_session(
             height: highlight.height.ceil() as i32,
         };
         let highlight_clip = intersect_clip(clip, rect);
-        paint_engine.fill_rect_clipped_in_session(session, rect, selection_background, highlight_clip);
+        paint_engine.fill_rect_clipped_in_session(
+            session,
+            rect,
+            selection_background,
+            highlight_clip,
+        );
         session.with_canvas(|canvas| {
             renderer.render_clipped_on_canvas(
                 display_text,

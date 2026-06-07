@@ -571,16 +571,9 @@ impl FrontendRenderEngine {
                     style.color,
                     axes,
                 ),
-                None => icon::draw_named_icon_in_session(
-                    session,
-                    name,
-                    size,
-                    x,
-                    y,
-                    w,
-                    h,
-                    style.color,
-                ),
+                None => {
+                    icon::draw_named_icon_in_session(session, name, size, x, y, w, h, style.color)
+                }
             }
         }
     }

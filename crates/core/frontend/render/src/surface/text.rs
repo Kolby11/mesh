@@ -341,12 +341,7 @@ impl TextRenderer {
         let base_x = x as i32;
         let base_y = y as i32;
         let (clip_x, clip_y, clip_w, clip_h) = clip;
-        let clip_rect = Rect::from_xywh(
-            clip_x as f32,
-            clip_y as f32,
-            clip_w as f32,
-            clip_h as f32,
-        );
+        let clip_rect = Rect::from_xywh(clip_x as f32, clip_y as f32, clip_w as f32, clip_h as f32);
 
         let save_count = canvas.save();
         canvas.clip_rect(clip_rect, None, false);
@@ -554,14 +549,13 @@ impl Renderer for SkiaGlyphRenderer<'_> {
             // image's A8 alpha modulates it.
             paint.set_argb(a, r, g, b);
         }
-        self.canvas
-            .draw_image_rect_with_sampling_options(
-                &entry.image,
-                None,
-                dest,
-                SamplingOptions::default(),
-                &paint,
-            );
+        self.canvas.draw_image_rect_with_sampling_options(
+            &entry.image,
+            None,
+            dest,
+            SamplingOptions::default(),
+            &paint,
+        );
     }
 }
 

@@ -85,7 +85,8 @@
       "Bash(/nix/store/3fvrcs8lvbd95yxbm91ivh9g80n4qxq9-auditable-rust-default-1.95.0/bin/cargo build *)",
       "Bash(/nix/store/3fvrcs8lvbd95yxbm91ivh9g80n4qxq9-auditable-rust-default-1.95.0/bin/cargo test *)",
       "Skill(gsd-progress)",
-      "Bash(cargo metadata *)"
+      "Bash(cargo metadata *)",
+      "Skill(gsd-autonomous)"
     ]
   }
 }

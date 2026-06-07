@@ -150,11 +150,7 @@ impl<'a> StyleNodeAttrs<'a> {
     }
 
     pub fn from_node(node: &'a crate::tree::WidgetNode) -> Self {
-        let classes = if let Some(cached_classes) = node.cached_classes() {
-            ClassList::Borrowed(cached_classes)
-        } else {
-            ClassList::from_class_attr(node.attributes.get("class"))
-        };
+        let classes = ClassList::from_class_attr(node.attributes.get("class"));
         Self {
             tag: node.tag.as_str(),
             classes,
@@ -1146,7 +1142,9 @@ fn apply_declaration(
             style.font_weight = resolver.resolve_number_with_variables(value, variables) as u16
         }
         "font-family" => {
-            style.font_family = resolver.resolve_value_with_variables(value, variables).into()
+            style.font_family = resolver
+                .resolve_value_with_variables(value, variables)
+                .into()
         }
         "font-style" => {
             style.font_style = match resolver

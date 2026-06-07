@@ -419,7 +419,6 @@ fn hash_option_f32(value: Option<f32>, hasher: &mut impl Hasher) {
     }
 }
 
-
 /// Collect every `_mesh_key` present in the fully built and restyled widget tree.
 /// Used by `FrontendSurfaceComponent::prune_stale_interaction_targets` to determine
 /// which interaction targets are still valid after a restyle.
@@ -589,7 +588,10 @@ pub(super) fn annotate_runtime_tree(
             };
             {
                 use std::fmt::Write as _;
-                let entry = node.attributes.entry("value".into()).or_insert_with(String::new);
+                let entry = node
+                    .attributes
+                    .entry("value".into())
+                    .or_insert_with(String::new);
                 entry.clear();
                 let _ = write!(entry, "{:.2}", value);
             }
@@ -634,10 +636,16 @@ pub(super) fn annotate_runtime_tree(
     let offset = scroll_offsets.get(&key).copied().unwrap_or_default();
     {
         use std::fmt::Write as _;
-        let ex = node.attributes.entry("_mesh_scroll_x".into()).or_insert_with(String::new);
+        let ex = node
+            .attributes
+            .entry("_mesh_scroll_x".into())
+            .or_insert_with(String::new);
         ex.clear();
         let _ = write!(ex, "{:.2}", offset.x);
-        let ey = node.attributes.entry("_mesh_scroll_y".into()).or_insert_with(String::new);
+        let ey = node
+            .attributes
+            .entry("_mesh_scroll_y".into())
+            .or_insert_with(String::new);
         ey.clear();
         let _ = write!(ey, "{:.2}", offset.y);
     }

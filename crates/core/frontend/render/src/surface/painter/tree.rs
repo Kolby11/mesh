@@ -154,10 +154,7 @@ impl FrontendRenderEngine {
                 continue;
             }
             if !scratch.batched_commands.is_empty() {
-                self.execute_painter_commands_in_session(
-                    &mut session,
-                    &scratch.batched_commands,
-                );
+                self.execute_painter_commands_in_session(&mut session, &scratch.batched_commands);
                 scratch.batched_commands.clear();
             }
             self.render_display_command(
@@ -220,10 +217,7 @@ impl FrontendRenderEngine {
                 continue;
             }
             if !scratch.batched_commands.is_empty() {
-                self.execute_painter_commands_in_session(
-                    &mut session,
-                    &scratch.batched_commands,
-                );
+                self.execute_painter_commands_in_session(&mut session, &scratch.batched_commands);
                 scratch.batched_commands.clear();
             }
             self.render_display_command(

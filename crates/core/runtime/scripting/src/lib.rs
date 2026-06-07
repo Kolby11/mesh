@@ -1,4 +1,5 @@
 pub mod backend;
+pub mod chunk_cache;
 /// Luau scripting bridge for MESH.
 ///
 /// This crate embeds Luau and injects host APIs for frontend component scripts
@@ -17,7 +18,6 @@ pub mod backend;
 /// `mesh.service.bind` and `mesh.service.on`.
 pub mod context;
 pub mod host_api;
-pub mod chunk_cache;
 pub mod pool;
 pub mod storage;
 
