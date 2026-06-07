@@ -130,7 +130,8 @@ impl BackendScriptContext {
             storage: Arc::new(Mutex::new(storage)),
             streams: StreamState::new(),
         };
-        ctx.install_host_api()
+        let globals = ctx.lua.globals();
+        ctx.install_host_api(&globals)
             .expect("backend host API setup should succeed");
         ctx.builtin_globals = ctx
             .lua
@@ -463,8 +464,8 @@ impl BackendScriptContext {
         names
     }
 
-    fn install_host_api(&mut self) -> mlua::Result<()> {
-        let globals = self.lua.globals();
+    fn install_host_api(&mut self, target: &mlua::Table) -> mlua::Result<()> {
+        let globals = target;
         globals.set("self", self.current_self_table()?)?;
         let mesh = self.lua.create_table()?;
         let service = self.lua.create_table()?;
