@@ -9,8 +9,8 @@ progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 2
-  completed_plans: 2
-  percent: 25
+  completed_plans: 3
+  percent: 50
 ---
 
 # State: MESH v1.17
@@ -24,9 +24,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-02)
 
 ## Current Position
 
-Phase: 93 — Host API Re-targeting (next)
-Status: Phase 92 complete; Phase 93 needs planning
-Last activity: 2026-06-07 — Phase 92 executed: LuaVmPool, PooledVm, ChunkCache implemented with full test coverage
+Phase: 93 — Host API Re-targeting (in progress, plan 02 complete)
+Status: Phase 93 plan 02 complete; plan 02 of 2 done
+Last activity: 2026-06-07 — Phase 93 plan 02 executed: BackendScriptContext::install_host_api refactored to accept &mlua::Table, completing ISO-02 foundation
 
 ## Decisions
 
@@ -96,6 +96,7 @@ Last activity: 2026-06-07 — Phase 92 executed: LuaVmPool, PooledVm, ChunkCache
 - [Phase 03]: Bundled providers issue system commands only through structured mesh.exec(program, args). — Keeps the Phase 03 backend host API strict and removes provider dependency on exec_shell.
 - [Phase 03]: Shell pipeline parsing for PipeWire and UPower lives in Luau provider code, not Rust core. — Preserves the no service-specific Rust command behavior rule.
 - [Phase 03]: Plan 04 locks mesh.service.set_poll_interval(ms) to a 50ms minimum with plugin-scoped warnings and post-callback runtime refresh. — Covers BHOST-05 and D-13 through D-15.
+- [Phase 93-02]: BackendScriptContext::install_host_api accepts &mlua::Table — call site passes &lua.globals() preserving identical behavior; ISO-02 foundation now complete across both frontend and backend.
 - [Phase 04]: Plan 05 derives shell-theme backend settings from ThemeEngine.active().id so provider startup and restart match the shell's resolved theme authority.
 - [Phase 04]: Plan 05 makes theme file-watch reload return pending CoreRequest queues and synchronize mesh.theme only when the resolved active theme id changes.
 - [Phase 09]: Disabled pseudo state is derived from disabled and aria-disabled attributes during runtime annotation.
@@ -339,4 +340,4 @@ Items acknowledged and deferred at `v1.16` close on 2026-05-26:
 | Codebase map | `.planning/codebase/` |
 
 ---
-*State updated: 2026-06-02 — v1.17 roadmap created; current position is Phase 92: VM Pool Foundation*
+*State updated: 2026-06-07 — Phase 93 plan 02 complete: BackendScriptContext::install_host_api refactored to accept &mlua::Table (ISO-02 foundation complete)*

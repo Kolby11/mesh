@@ -1,11 +1,14 @@
 use mlua::Lua;
 use std::cell::RefCell;
+use std::collections::HashSet;
+use std::sync::Arc;
 use std::thread::ThreadId;
 
 pub struct LuaVmPool {
     slots: Vec<Option<Lua>>,
     #[allow(dead_code)]
     floor: usize,
+    baseline_globals: Arc<HashSet<String>>,
 }
 
 pub struct PooledVm {
@@ -28,7 +31,21 @@ impl LuaVmPool {
             lua.sandbox(true)?;
             slots.push(Some(lua));
         }
-        Ok(Self { slots, floor })
+        let baseline_vm = Lua::new();
+        // Collect globals BEFORE sandbox(true) — Luau's luaL_sandbox replaces the
+        // globals table with a read-only proxy, making raw iteration return nothing.
+        let set: HashSet<String> = baseline_vm
+            .globals()
+            .pairs::<String, mlua::Value>()
+            .filter_map(|r| r.ok().map(|(k, _)| k))
+            .collect();
+        baseline_vm.sandbox(true)?;
+        let baseline_globals = Arc::new(set);
+        Ok(Self { slots, floor, baseline_globals })
+    }
+
+    pub fn baseline_globals(&self) -> Arc<HashSet<String>> {
+        Arc::clone(&self.baseline_globals)
     }
 
     pub fn len(&self) -> usize {
@@ -150,6 +167,27 @@ mod tests {
             msg.contains("PooledVm dropped on a different thread"),
             "unexpected panic message: {msg}"
         );
+    }
+
+    #[test]
+    fn baseline_globals_is_non_empty() {
+        let pool = LuaVmPool::new(4).unwrap();
+        assert!(!pool.baseline_globals().is_empty());
+    }
+
+    #[test]
+    fn baseline_globals_contains_stdlib() {
+        let pool = LuaVmPool::new(4).unwrap();
+        assert!(pool.baseline_globals().contains("string"));
+    }
+
+    #[test]
+    fn baseline_globals_excludes_host_api_keys() {
+        let pool = LuaVmPool::new(4).unwrap();
+        let globals = pool.baseline_globals();
+        for key in &["self", "module", "mesh"] {
+            assert!(!globals.contains(*key), "baseline should not contain '{key}'");
+        }
     }
 
     #[test]
