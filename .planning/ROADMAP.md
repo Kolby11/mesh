@@ -16,7 +16,7 @@
 ## Phases
 
 - [x] **Phase 96: Selector Dependency Tracking** - Per-rule state dependency masks and targeted interaction restyle at `StyleRuleIndex` (completed 2026-06-07)
-- [ ] **Phase 97: Service Field Dependency Tracking** - Per-node service field read capture and bidirectional NodeId↔(service, field) index
+- [x] **Phase 97: Service Field Dependency Tracking** - Per-node service field read capture and bidirectional NodeId↔(service, field) index (completed 2026-06-09)
 - [ ] **Phase 98: Narrow Invalidation & Event Routing** - Field-aware event routing, narrow dirty-node marking, and pixel-equivalence proof
 
 ## Phase Details
@@ -59,9 +59,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 97-01-PLAN.md — Add service_field_reads to WidgetNode + TrackingVariableStore in compiler
-- [ ] 97-02-PLAN.md — NodeServiceFieldDependencies bidirectional index + wire into FrontendSurfaceComponent
-- [ ] 97-03-PLAN.md — SRV-03 overhead benchmark and correctness smoke tests
+- [x] 97-01-PLAN.md — Add service_field_reads to WidgetNode + TrackingVariableStore in compiler
+- [x] 97-02-PLAN.md — NodeServiceFieldDependencies bidirectional index + wire into FrontendSurfaceComponent
+- [x] 97-03-PLAN.md — SRV-03 overhead benchmark and correctness smoke tests
 
 ### Phase 98: Narrow Invalidation & Event Routing
 
@@ -76,7 +76,12 @@ Plans:
   4. Profiling payloads show reduced dirty-node counts and retained-tree churn across all canonical benchmarks (hover, open/close, slider, traversal, backend-update).
   5. All benchmark scenarios produce pixel-identical output compared to the pre-invalidation full-rebuild baseline.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 98-01-PLAN.md — SCRIPT_NARROW dirty flag + narrow_script_update() with tree diff, ancestor expansion, structural fallback, >50% threshold guard, paint() routing
+- [ ] 98-02-PLAN.md — handle_service_event() JSON field-level diff + NodeServiceFieldDependencies intersection check (skip vs invalidate_script_state_narrow)
+- [ ] 98-03-PLAN.md — FNV-1a pixel equivalence helper + five canonical benchmark profiling tests + extended PHASE_PROOF format
 
 ---
 
@@ -87,7 +92,7 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 96. Selector Dependency Tracking | v1.18 | 3/3 | Complete   | 2026-06-07 |
-| 97. Service Field Dependency Tracking | v1.18 | 0/3 | Not started | - |
+| 97. Service Field Dependency Tracking | v1.18 | 3/3 | Complete | 2026-06-09 |
 | 98. Narrow Invalidation & Event Routing | v1.18 | 0/0 | Not started | - |
 
 ---
