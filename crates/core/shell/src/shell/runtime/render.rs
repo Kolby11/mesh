@@ -1,5 +1,6 @@
 use super::super::*;
-use mesh_core_render::DamageRect;
+use mesh_core_elements::style::BackgroundPaint;
+use mesh_core_render::{DamageRect, DisplayPaintCommand};
 
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
@@ -229,6 +230,17 @@ impl Shell {
                 );
             }
 
+            if visible {
+                let commands = self.components[index]
+                    .component
+                    .display_list_paint_commands();
+                if let Some((surface_w, surface_h)) = self.components[index].known_surface_size {
+                    let opaque_rect = compute_opaque_rect_for_root(commands, surface_w, surface_h);
+                    self.presentation_engine
+                        .update_opaque_region(&surface_id, opaque_rect);
+                }
+            }
+
             let mut present_damage = self.components[index].component.take_present_damage();
             if visible && self.components[index].force_full_present {
                 if let Some(buffer) = self.components[index].paint_buffer.as_ref() {
@@ -296,7 +308,10 @@ impl Shell {
                     Some("present"),
                 );
             }
-            components_want_render_after_frame |= self.components[index].component.wants_render();
+            if presented {
+                components_want_render_after_frame |=
+                    self.components[index].component.wants_render();
+            }
         }
         self.components_want_render = components_want_render_after_frame;
         Ok(())
@@ -332,4 +347,33 @@ fn full_buffer_damage(buffer: &PixelBuffer) -> DamageRect {
         width: buffer.width.max(1),
         height: buffer.height.max(1),
     }
+}
+
+fn compute_opaque_rect_for_root(
+    commands: &[DisplayPaintCommand],
+    surface_width: u32,
+    surface_height: u32,
+) -> Option<DamageRect> {
+    let root = commands.first()?;
+    let style = &root.node.style;
+
+    if style.background_color.a != 255 {
+        return None;
+    }
+    if style.background_paint != BackgroundPaint::None {
+        return None;
+    }
+    if style.border_radius > 0.0 {
+        return None;
+    }
+    if !style.overflow_x.clips_contents() || !style.overflow_y.clips_contents() {
+        return None;
+    }
+
+    Some(DamageRect {
+        x: 0,
+        y: 0,
+        width: surface_width.max(1),
+        height: surface_height.max(1),
+    })
 }
