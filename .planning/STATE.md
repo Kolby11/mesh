@@ -1,76 +1,51 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.18
-milestone_name: "— Performance: Smart Invalidation"
-status: complete
-completed_at: "2026-06-09"
-last_updated: "2026-06-09T18:00:00.000Z"
-last_activity: 2026-06-09 -- Phase 98 execution complete
+milestone: v1.19
+milestone_name: "Performance: Event-Driven Frame Scheduler"
+status: planning
+completed_at: —
+last_updated: "2026-06-09T19:00:00.000Z"
+last_activity: 2026-06-09 -- Milestone v1.19 started
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 9
-  completed_plans: 9
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: MESH v1.18
+# State: MESH v1.19
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-06-07)
+See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.18 Performance: Smart Invalidation
+**Current focus:** v1.19 Performance: Event-Driven Frame Scheduler
 
 ## Current Position
 
-Phase: V1.18 COMPLETE — All 3 phases (96-98) executed
+Phase: Not started (defining requirements)
 Plan: —
-Status: Complete
-Last activity: 2026-06-09 -- Phase 98 execution complete
+Status: Defining requirements
+Last activity: 2026-06-09 -- Milestone v1.19 started
 
-Progress: [██████████] 100%
-
-## Performance Metrics
-
-**Velocity:**
-
-- Total plans completed: 0
-- Average duration: —
-- Total execution time: 0 hours
-
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 96. Selector Deps | 0 | — | — |
-| 97. Service Field Deps | 0 | — | — |
-| 98. Narrow Invalidation | 0 | — | — |
-
-**Recent Trend:** Starting v1.18 — no plans executed yet.
-
-*Updated after each plan completion*
+Progress: [░░░░░░░░░░] 0%
 
 ## Accumulated Context
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
-- [v1.18]: No new crate dependencies — all data structures use Rust stdlib types already in `Cargo.toml`.
-- [v1.18]: Three integration points (selector deps, service-field deps, narrow invalidation) with A and B parallelizable, C consuming both.
-- [v1.18]: Pixel-equivalence testing gates all phases — narrow invalidation output must match full-rebuild baseline on every benchmark scenario.
-- [v1.18]: `>50%` affected-nodes threshold triggers `TREE_REBUILD` fallback to preserve correctness for bulk changes.
+No milestone-specific decisions yet.
 
 ### Pending Todos
 
-None yet.
+- `/todos/pending/2026-05-15-define-module-install-requirement-resolution.md` (open)
 
 ### Blockers/Concerns
 
-None — all Phase 98 research flags resolved during execution.
+None.
 
 ## Deferred Items
 
@@ -84,6 +59,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-09T16:24:36.120Z
-Stopped at: context exhaustion at 75% (2026-06-09)
+Last session: —
+Stopped at: —
 Resume file: None

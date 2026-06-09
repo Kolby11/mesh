@@ -312,14 +312,14 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.12 Phase 68`: Interface and module events now support runtime subscriptions, local emits, and backend-to-frontend event transport.
 - `v1.12 Phase 69`: Bundled audio/navigation modules prove the class-like module object model with typed `VolumeChanged` event delivery.
 
-## Current Milestone: v1.18 Performance: Smart Invalidation
+## Current Milestone: v1.19 Performance: Event-Driven Frame Scheduler
 
-**Goal:** Replace coarse "tree rebuild + full repaint" invalidation with typed dependency tracking so interaction state, service events, and script state changes only dirty the affected nodes and paint slots.
+**Goal:** Replace the fixed 16 ms shell loop sleep with a deadline-driven scheduler that blocks on real Wayland/frame-callback wakeups, eliminating idle CPU burn.
 
 **Target features:**
-- Per-rule selector-dependency sets at `StyleRuleIndex` construction time so `:hover`/`:focus`/`:active` changes only restyle nodes whose dependency set intersects the changed state
-- Typed script/service state dependencies so simple text/value changes dirty only dependent leaf nodes, style slots, layout slots, and paint slots — not flagging `TREE_REBUILD`
-- Service event routing restricted to components whose runtimes actually read the changed fields, not all components with the service capability
+- Runtime deadline calculation using shell-message backlog, pending Wayland events, render needs, reload deadlines, and throttled commands
+- Block on real Wayland events and `wl_surface::frame` callbacks as the primary render permit instead of bounded polling
+- Send `wl_surface::set_opaque_region` from the present path — compute union of fully-opaque background rects from the retained display list
 
 ### Active
 
@@ -435,4 +435,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-07 for v1.18 milestone planning*
+*Last updated: 2026-06-09 for v1.19 milestone planning*
