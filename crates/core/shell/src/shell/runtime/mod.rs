@@ -13,7 +13,7 @@ mod theme;
 mod wayland;
 
 const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
-const MIN_RUNTIME_SLEEP: Duration = Duration::from_millis(1);
+const MIN_RUNTIME_SLEEP: Duration = Duration::from_millis(16);
 
 impl Shell {
     pub(in crate::shell) fn rebuild_component_surface_index(&mut self) {
