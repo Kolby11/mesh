@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.19
 milestone_name: "Performance: Event-Driven Frame Scheduler"
-status: planning
+status: roadmap_created
 completed_at: —
 last_updated: "2026-06-09T19:00:00.000Z"
-last_activity: 2026-06-09 -- Milestone v1.19 started
+last_activity: 2026-06-09 -- ROADMAP.md created for v1.19
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -25,19 +25,39 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 99 of 100 (Event-Driven Wayland Dispatch — first of two phases)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-09 -- Milestone v1.19 started
+Status: Ready to plan (Phase 99)
+Last activity: 2026-06-09 — ROADMAP.md created; 6/6 v1.19 requirements mapped
 
 Progress: [░░░░░░░░░░] 0%
+
+## Performance Metrics
+
+**Velocity:**
+- Total plans completed: 0
+- Average duration: —
+- Total execution time: —
+
+**By Phase:**
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| - | - | - | - |
+
+*No plans executed yet for v1.19.*
 
 ## Accumulated Context
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
-No milestone-specific decisions yet.
+
+No v1.19-specific decisions yet. Research (`research/SUMMARY.md`) confirmed:
+- Zero new crate dependencies needed
+- `dispatch_available()` already implements prepare_read/poll/read/dispatch with 0ms timeout — needs deadline parameterization
+- eventfd for IPC wakeup to prevent stale-frame latency
+- Dev-window backend must preserve its existing sleep path
+- Opaque region computation must walk retained display list for background-fill alpha
 
 ### Pending Todos
 
@@ -59,6 +79,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: —
-Stopped at: —
+Last session: 2026-06-09 — roadmap creation
+Stopped at: ROADMAP.md, STATE.md, REQUIREMENTS.md traceability written for v1.19
 Resume file: None

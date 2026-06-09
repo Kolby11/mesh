@@ -52,17 +52,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SCHED-01 | — | Pending |
-| SCHED-02 | — | Pending |
-| SCHED-03 | — | Pending |
-| SCHED-04 | — | Pending |
-| OPAQUE-01 | — | Pending |
-| DIAG-01 | — | Pending |
+| SCHED-01 | Phase 99 | Pending |
+| SCHED-02 | Phase 99 | Pending |
+| SCHED-03 | Phase 99 | Pending |
+| SCHED-04 | Phase 99 | Pending |
+| DIAG-01 | Phase 99 | Pending |
+| OPAQUE-01 | Phase 100 | Pending |
 
 **Coverage:**
 - v1.19 requirements: 6 total
-- Mapped to phases: 0
-- Unmapped: 6 ⚠️
+- Mapped to phases: 6
+- Unmapped: 0 ✓
 
 ---
 
