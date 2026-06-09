@@ -205,28 +205,31 @@ impl Shell {
             self.presentation_engine.pump();
 
             let deadline = self.next_runtime_sleep(shell_message_backlog_likely);
-            if !deadline.is_zero() {
-                if self.presentation_engine.supports_blocking_dispatch() {
-                    let wait_started = self.profiling_enabled().then(std::time::Instant::now);
-                    let eventfd_borrowed = self
-                        .eventfd_fd
-                        .as_ref()
-                        .expect("eventfd must be created before shell loop")
-                        .as_fd();
-                    let result = self
-                        .presentation_engine
-                        .wait_for_events(deadline, eventfd_borrowed)
-                        .map_err(ShellRunError::Presentation)?;
-                    if let Some(started) = wait_started {
-                        self.record_shell_profiling_stage(
-                            mesh_core_debug::ProfilingStage::SchedulerIdle,
-                            started.elapsed(),
-                            Some(result.reason.as_str()),
-                        );
-                    }
-                } else {
-                    std::thread::sleep(deadline);
+            let sleep_for = if deadline.is_zero() {
+                MIN_RUNTIME_SLEEP
+            } else {
+                deadline
+            };
+            if self.presentation_engine.supports_blocking_dispatch() {
+                let wait_started = self.profiling_enabled().then(std::time::Instant::now);
+                let eventfd_borrowed = self
+                    .eventfd_fd
+                    .as_ref()
+                    .expect("eventfd must be created before shell loop")
+                    .as_fd();
+                let result = self
+                    .presentation_engine
+                    .wait_for_events(sleep_for, eventfd_borrowed)
+                    .map_err(ShellRunError::Presentation)?;
+                if let Some(started) = wait_started {
+                    self.record_shell_profiling_stage(
+                        mesh_core_debug::ProfilingStage::SchedulerIdle,
+                        started.elapsed(),
+                        Some(result.reason.as_str()),
+                    );
                 }
+            } else {
+                std::thread::sleep(sleep_for);
             }
         }
 
