@@ -908,113 +908,92 @@ impl LayerShellBackend {
         use crate::{WaitReason, WaitResult};
         use rustix::io::read as eventfd_read;
 
-        let deadline = std::time::Instant::now() + timeout;
+        // 1. Flush and drain any already-pending events (non-blocking).
+        self.event_queue
+            .flush()
+            .map_err(|e| PresentationError::SurfaceCreate(format!("flush: {e}")))?;
+        self.event_queue
+            .dispatch_pending(&mut self.state)
+            .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
 
-        loop {
-            // 1. Flush and drain any already-pending events (non-blocking).
-            self.event_queue
-                .flush()
-                .map_err(|e| PresentationError::SurfaceCreate(format!("flush: {e}")))?;
-            self.event_queue
-                .dispatch_pending(&mut self.state)
-                .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
+        // 2. prepare_read — if None, events arrived between dispatch_pending and
+        //    prepare_read; don't block, let the caller process them.
+        let Some(read_guard) = self.event_queue.prepare_read() else {
+            return Ok(WaitResult {
+                reason: WaitReason::WaylandEvent,
+            });
+        };
 
-            // 2. prepare_read — if None, events arrived between dispatch_pending and
-            //    prepare_read; dispatch them and retry without changing the deadline.
-            let Some(read_guard) = self.event_queue.prepare_read() else {
-                continue;
-            };
+        // 3. Block on the Wayland connection fd with the deadline.
+        let wayland_fd = read_guard.connection_fd();
+        let mut wayland_fds = [PollFd::new(
+            &wayland_fd,
+            PollFlags::IN | PollFlags::ERR | PollFlags::HUP,
+        )];
+        let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
 
-            // 3. Check how much time remains on the deadline.
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
+        let wayland_ready = match poll(&mut wayland_fds, timeout_ms) {
+            Ok(0) => {
                 drop(read_guard);
                 return Ok(WaitResult::deadline_expired());
             }
-
-            // 4. Block on the Wayland connection fd with the remaining deadline.
-            let wayland_fd = read_guard.connection_fd();
-            let mut wayland_fds = [PollFd::new(
-                &wayland_fd,
-                PollFlags::IN | PollFlags::ERR | PollFlags::HUP,
-            )];
-            let timeout_ms = remaining.as_millis().min(i32::MAX as u128) as i32;
-
-            let wayland_ready = match poll(&mut wayland_fds, timeout_ms) {
-                Ok(0) => {
-                    drop(read_guard);
-                    return Ok(WaitResult::deadline_expired());
-                }
-                Err(rustix::io::Errno::INTR) => {
-                    drop(read_guard);
-                    continue;
-                }
-                Ok(_) => wayland_fds[0]
-                    .revents()
-                    .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP),
-                Err(err) => {
-                    drop(read_guard);
-                    return Err(PresentationError::SurfaceCreate(format!("poll: {err}")));
-                }
-            };
-
-            // 5. Check eventfd with a 0ms poll — detects IPC/backend signals
-            //    that arrived during the Wayland block.
-            let mut eventfd_fds = [PollFd::new(&eventfd_fd, PollFlags::IN)];
-            let ipc_ready = match poll(&mut eventfd_fds, 0) {
-                Ok(0) | Err(rustix::io::Errno::INTR) => false,
-                Ok(_) => eventfd_fds[0].revents().contains(PollFlags::IN),
-                Err(_) => false,
-            };
-
-            // 6. Read and consume the eventfd counter so it doesn't keep firing.
-            if ipc_ready {
-                let mut counter = [0u8; 8];
-                let _ = eventfd_read(&eventfd_fd, &mut counter);
-            }
-
-            // 7. Read Wayland data.
-            let mut wake_reason = WaitReason::DeadlineExpired;
-            if wayland_ready {
-                match read_guard.read() {
-                    Ok(0) | Ok(_) => {
-                        wake_reason = WaitReason::WaylandEvent;
-                    }
-                    Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => {
-                        wake_reason = WaitReason::WaylandEvent;
-                    }
-                    Err(err) => {
-                        return Err(PresentationError::SurfaceCreate(format!("read: {err}")));
-                    }
-                }
-            } else {
+            Err(rustix::io::Errno::INTR) => false,
+            Ok(_) => wayland_fds[0]
+                .revents()
+                .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP),
+            Err(err) => {
                 drop(read_guard);
+                return Err(PresentationError::SurfaceCreate(format!("poll: {err}")));
             }
+        };
 
-            // If eventfd fired, that takes priority as the reported reason.
-            if ipc_ready {
-                wake_reason = WaitReason::IpcEvent;
-            }
+        // 4. Check eventfd with a 0ms poll — detects IPC/backend signals
+        //    that arrived during the Wayland block.
+        let mut eventfd_fds = [PollFd::new(&eventfd_fd, PollFlags::IN)];
+        let ipc_ready = match poll(&mut eventfd_fds, 0) {
+            Ok(0) | Err(rustix::io::Errno::INTR) => false,
+            Ok(_) => eventfd_fds[0].revents().contains(PollFlags::IN),
+            Err(_) => false,
+        };
 
-            // 8. Dispatch any events that were read.
-            self.event_queue
-                .dispatch_pending(&mut self.state)
-                .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
-            self.release_expired_surface_focus_grab()?;
-
-            // If the wake was only a Wayland event (likely a frame callback for
-            // an idle surface), loop back and block again — compositors may send
-            // frame callbacks at refresh rate regardless of client requests.
-            // But if the dispatch produced input events (pointer, keyboard etc.),
-            // return to the caller so the shell can process them.
-            if wake_reason == WaitReason::WaylandEvent && self.state.events.is_empty() {
-                continue;
-            }
-
-            return Ok(WaitResult {
-                reason: wake_reason,
-            });
+        // 5. Read and consume the eventfd counter so it doesn't keep firing.
+        if ipc_ready {
+            let mut counter = [0u8; 8];
+            let _ = eventfd_read(&eventfd_fd, &mut counter);
         }
+
+        // 6. Read Wayland data.
+        let mut wake_reason = WaitReason::DeadlineExpired;
+        if wayland_ready {
+            match read_guard.read() {
+                Ok(0) | Ok(_) => {
+                    wake_reason = WaitReason::WaylandEvent;
+                }
+                Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => {
+                    wake_reason = WaitReason::WaylandEvent;
+                }
+                Err(err) => {
+                    return Err(PresentationError::SurfaceCreate(format!("read: {err}")));
+                }
+            }
+        } else {
+            drop(read_guard);
+        }
+
+        // If eventfd fired, that takes priority as the reported reason.
+        if ipc_ready {
+            wake_reason = WaitReason::IpcEvent;
+        }
+
+        // 7. Dispatch any events that were read.
+        self.event_queue
+            .dispatch_pending(&mut self.state)
+            .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
+        self.release_expired_surface_focus_grab()?;
+
+        Ok(WaitResult {
+            reason: wake_reason,
+        })
     }
 }
 

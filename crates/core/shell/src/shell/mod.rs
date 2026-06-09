@@ -370,10 +370,15 @@ pub struct Shell {
     core: ShellCoreState,
     components: Vec<ComponentRuntime>,
     components_want_render: bool,
+    /// True after a component presented; false after a render pass with zero
+    /// presents.  When false, `components_have_ready_render_work` is suppressed
+    /// so stale `wants_render()` flags cannot spin the idle loop.
+    presented_last_frame: bool,
     component_by_surface: HashMap<SurfaceId, usize>,
     surfaces: HashMap<SurfaceId, StubSurface>,
     clipboard: Box<dyn ClipboardWriter>,
     presentation_engine: PresentationEngine,
+    eventfd_fd: Option<std::os::unix::io::OwnedFd>,
     theme_watch: ThemeWatchState,
     settings_watch: SettingsWatchState,
     next_theme_reload_check: std::time::Instant,
@@ -432,6 +437,9 @@ impl Default for Shell {
 pub enum ShellRunError {
     #[error("failed to initialize async runtime: {0}")]
     RuntimeInit(std::io::Error),
+
+    #[error("eventfd creation failed: {0}")]
+    EventfdCreate(String),
 
     #[error(transparent)]
     Component(#[from] ComponentError),

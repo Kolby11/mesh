@@ -1,5 +1,8 @@
 use super::*;
 
+use rustix::event::EventfdFlags;
+use std::os::unix::io::{AsFd, AsRawFd};
+
 mod debug;
 pub(crate) mod profiling;
 mod reload;
@@ -10,7 +13,6 @@ mod theme;
 mod wayland;
 
 const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
-const MAX_IDLE_SLEEP: Duration = Duration::from_millis(16);
 const MIN_RUNTIME_SLEEP: Duration = Duration::from_millis(1);
 
 impl Shell {
@@ -91,9 +93,7 @@ impl Shell {
             next_deadline = next_deadline.min(closing_until);
         }
 
-        let sleep_for = next_deadline
-            .saturating_duration_since(now)
-            .min(MAX_IDLE_SLEEP);
+        let sleep_for = next_deadline.saturating_duration_since(now);
         if sleep_for < MIN_RUNTIME_SLEEP {
             Duration::ZERO
         } else {
@@ -102,6 +102,9 @@ impl Shell {
     }
 
     fn components_have_ready_render_work(&self) -> bool {
+        if !self.presented_last_frame {
+            return false;
+        }
         self.components.iter().any(|runtime| {
             if !runtime.component.wants_render() {
                 return false;
@@ -133,9 +136,15 @@ impl Shell {
 
         let runtime = Runtime::new().map_err(ShellRunError::RuntimeInit)?;
         let (tx, mut rx) = mpsc::unbounded_channel::<ShellMessage>();
-        self.spawn_backend_modules(&runtime, tx.clone());
+
+        let eventfd = rustix::event::eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK)
+            .map_err(|e| ShellRunError::EventfdCreate(format!("eventfd: {e}")))?;
+        let eventfd_raw = eventfd.as_raw_fd();
+        self.eventfd_fd = Some(eventfd);
+
+        self.spawn_backend_modules(&runtime, tx.clone(), eventfd_raw);
         let ipc_socket_path = default_ipc_socket_path();
-        spawn_ipc_server(&runtime, ipc_socket_path.clone(), tx).map_err(|source| {
+        spawn_ipc_server(&runtime, ipc_socket_path.clone(), tx, eventfd_raw).map_err(|source| {
             ShellRunError::IpcInit {
                 path: ipc_socket_path.clone(),
                 source,
@@ -177,21 +186,47 @@ impl Shell {
             }
             let shell_message_backlog_likely =
                 drained_shell_message_count == MAX_SHELL_MESSAGE_DRAIN_PER_FRAME;
+            if drained_shell_message_count > 0 {
+                self.presented_last_frame = true;
+            }
             for message in shell_messages.into_vec() {
                 self.handle_shell_message(&mut pending, message)?;
             }
 
             pending.extend(self.tick_components()?);
             pending.extend(self.complete_due_surface_transitions()?);
+            if !pending.is_empty() {
+                self.presented_last_frame = true;
+            }
             self.drain_requests(&mut pending)?;
             self.flush_throttled_commands();
             self.render_components()?;
             self.flush_wayland()?;
             self.presentation_engine.pump();
 
-            let sleep_for = self.next_runtime_sleep(shell_message_backlog_likely);
-            if !sleep_for.is_zero() {
-                std::thread::sleep(sleep_for);
+            let deadline = self.next_runtime_sleep(shell_message_backlog_likely);
+            if !deadline.is_zero() {
+                if self.presentation_engine.supports_blocking_dispatch() {
+                    let wait_started = self.profiling_enabled().then(std::time::Instant::now);
+                    let eventfd_borrowed = self
+                        .eventfd_fd
+                        .as_ref()
+                        .expect("eventfd must be created before shell loop")
+                        .as_fd();
+                    let result = self
+                        .presentation_engine
+                        .wait_for_events(deadline, eventfd_borrowed)
+                        .map_err(ShellRunError::Presentation)?;
+                    if let Some(started) = wait_started {
+                        self.record_shell_profiling_stage(
+                            mesh_core_debug::ProfilingStage::SchedulerIdle,
+                            started.elapsed(),
+                            Some(result.reason.as_str()),
+                        );
+                    }
+                } else {
+                    std::thread::sleep(deadline);
+                }
             }
         }
 

@@ -10,6 +10,7 @@ impl Shell {
         }
 
         let mut components_want_render_after_frame = false;
+        let mut any_component_presented = false;
         for index in 0..self.components.len() {
             let surface_id = self.components[index].surface_id.clone();
             if !self.components[index].component.wants_render() {
@@ -280,6 +281,7 @@ impl Shell {
                     )
                     .map_err(ShellRunError::Presentation)?;
                 presented = true;
+                any_component_presented = true;
             }
             if let Some(started) = present_started
                 && presented
@@ -314,6 +316,7 @@ impl Shell {
             }
         }
         self.components_want_render = components_want_render_after_frame;
+        self.presented_last_frame = any_component_presented;
         Ok(())
     }
 
