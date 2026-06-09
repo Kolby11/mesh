@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 ## Current Position
 
-Phase: 99 of 100 (Event-Driven Wayland Dispatch — first of two phases)
+ Phase: 100 of 100 (Opaque Region Hints — second of two phases, Phase 99 planned, Phase 100 planned)
 Plan: —
-Status: Ready to plan (Phase 99)
-Last activity: 2026-06-09 — ROADMAP.md created; 6/6 v1.19 requirements mapped
+Status: Phases 99-100 planned, ready to execute
+Last activity: 2026-06-09 — Phase 100 plans (2 plans) created; 6/6 v1.19 requirements planned
 
 Progress: [░░░░░░░░░░] 0%
 

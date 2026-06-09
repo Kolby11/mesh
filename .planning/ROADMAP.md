@@ -60,7 +60,9 @@
   1. Shipped navigation/audio surfaces render identically to v1.18 with no visual artifacts (no missing content, no compositing glitches) on Sway compositor
   2. `WAYLAND_DEBUG=1` output confirms `wl_surface@N.set_opaque_region` requests with non-empty regions are sent for surfaces that have opaque root backgrounds
   3. Present-path performance is not degraded — opaque rect computation adds no measurable regressions to frame timing (verified via profiling inspector)
-**Plans**: TBD
+ **Plans**: 2 plans
+   - [ ] 100-01-PLAN.md — PresentationEngine::update_opaque_region API + wl_region lifecycle (create/set/destroy per present)
+   - [ ] 100-02-PLAN.md — Shell-side opaque rect computation from retained display list root + loop integration with guard conditions
 
 ---
 
@@ -72,7 +74,7 @@
 | 97. Service Field Dependency Tracking | v1.18 | 3/3 | Complete | 2026-06-09 |
 | 98. Narrow Invalidation & Event Routing | v1.18 | 3/3 | Complete | 2026-06-09 |
 | 99. Event-Driven Wayland Dispatch | v1.19 | 0/4 | Not started | - |
-| 100. Opaque Region Hints | v1.19 | 0/0 | Not started | - |
+| 100. Opaque Region Hints | v1.19 | 0/2 | Not started | - |
 
 ---
 
