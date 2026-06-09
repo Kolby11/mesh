@@ -980,14 +980,16 @@ impl LayerShellBackend {
                     Ok(0) | Ok(_) => {
                         wake_reason = WaitReason::WaylandEvent;
                     }
-                    Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => {}
+                    Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => {
+                        wake_reason = WaitReason::WaylandEvent;
+                    }
                     Err(err) => {
                         return Err(PresentationError::SurfaceCreate(format!("read: {err}")));
                     }
                 }
+            } else {
+                drop(read_guard);
             }
-
-            drop(read_guard);
 
             // If eventfd fired, that takes priority as the reported reason.
             if ipc_ready {
