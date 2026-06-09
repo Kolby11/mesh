@@ -19,6 +19,38 @@ use mesh_core_theme::Theme;
 
 use std::collections::BTreeMap;
 
+struct TrackingVariableStore<'a> {
+    inner: &'a dyn VariableStore,
+    reads: std::cell::RefCell<Vec<(String, String)>>,
+}
+
+impl<'a> TrackingVariableStore<'a> {
+    fn new(inner: &'a dyn VariableStore) -> Self {
+        Self { inner, reads: std::cell::RefCell::new(Vec::new()) }
+    }
+    fn into_reads(self) -> Vec<(String, String)> {
+        self.reads.into_inner()
+    }
+}
+
+impl VariableStore for TrackingVariableStore<'_> {
+    fn get(&self, name: &str) -> Option<serde_json::Value> {
+        let result = self.inner.get(name);
+        if let Some(dot_pos) = name.find('.') {
+            let service = name[..dot_pos].to_string();
+            let field = name[dot_pos + 1..].to_string();
+            self.reads.borrow_mut().push((service, field));
+        }
+        result
+    }
+    fn keys(&self) -> Vec<String> {
+        self.inner.keys()
+    }
+    fn translate(&self, key: &str) -> Option<String> {
+        self.inner.translate(key)
+    }
+}
+
 pub(crate) fn collect_component_tags(nodes: &[TemplateNode], tags: &mut Vec<String>) {
     for node in nodes {
         match node {
@@ -160,10 +192,16 @@ pub(crate) fn build_widget_node(
         TemplateNode::Expr(expr) => {
             let mut node = WidgetNode::new("text");
             attach_module_id(&mut node, &manifest.package.id);
-            let content = state
+            let tracking_store: Option<TrackingVariableStore> =
+                state.map(TrackingVariableStore::new);
+            let effective = tracking_store.as_ref().map(|t| t as &dyn VariableStore);
+            let content = effective
+                .or(state)
                 .map(|store| eval_expr(&expr.expression, store))
                 .unwrap_or_else(|| format!("{{ {} }}", expr.expression));
             node.attributes.insert("content".into(), content);
+            node.service_field_reads =
+                tracking_store.map(|t| t.into_reads()).unwrap_or_default();
             node.computed_style = text_style();
             if let Some(parent_style) = parent_style {
                 inherit_text_style(
@@ -317,8 +355,16 @@ fn build_element_node(
     let source_tag = element.tag.as_str();
     let tag = lower_source_tag(&element.tag_kind).as_str().to_string();
     let _element_diagnostics = collect_element_diagnostics(element);
+
+    // Per-node tracking: intercept service field reads for THIS node's attribute evaluation only.
+    // Children each get their own tracker via the original `state` parameter below.
+    let tracking_store: Option<TrackingVariableStore> = state.map(TrackingVariableStore::new);
+    let tracking_state: Option<&dyn VariableStore> =
+        tracking_store.as_ref().map(|t| t as &dyn VariableStore);
+    let effective_state = tracking_state.or(state);
+
     let (classes, id, mut attributes, event_handlers) =
-        parse_attributes(&element.attributes, state);
+        parse_attributes(&element.attributes, effective_state);
     attributes
         .entry("data-mesh-element".into())
         .or_insert_with(|| source_tag.to_string());
@@ -364,11 +410,14 @@ fn build_element_node(
         let content: String = element
             .children
             .iter()
-            .map(|child| resolve_inline_content(child, state))
+            .map(|child| resolve_inline_content(child, effective_state))
             .collect();
         node.attributes.insert("content".into(), content);
+        node.service_field_reads = tracking_store.map(|t| t.into_reads()).unwrap_or_default();
         return node;
     }
+
+    node.service_field_reads = tracking_store.map(|t| t.into_reads()).unwrap_or_default();
 
     let child_context = child_style_context(&node.computed_style, container_context);
     node.children = element
@@ -1305,5 +1354,47 @@ mod tests {
             Some(&"details".to_string())
         );
         assert_eq!(details.accessibility.state.expanded, Some(true));
+    }
+
+    struct MapStore(std::collections::HashMap<String, serde_json::Value>);
+    impl mesh_core_elements::VariableStore for MapStore {
+        fn get(&self, name: &str) -> Option<serde_json::Value> {
+            self.0.get(name).cloned()
+        }
+        fn keys(&self) -> Vec<String> {
+            self.0.keys().cloned().collect()
+        }
+    }
+
+    #[test]
+    fn tracking_store_records_dotted_reads() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("audio".to_string(), serde_json::json!({"percent": 80}));
+        let inner = MapStore(map);
+        let t = TrackingVariableStore::new(&inner);
+        let _ = mesh_core_elements::VariableStore::get(&t, "audio.percent");
+        let reads = t.into_reads();
+        assert_eq!(reads, vec![("audio".to_string(), "percent".to_string())]);
+    }
+
+    #[test]
+    fn tracking_store_skips_bare_reads() {
+        let inner = MapStore(std::collections::HashMap::new());
+        let t = TrackingVariableStore::new(&inner);
+        let _ = mesh_core_elements::VariableStore::get(&t, "audio");
+        let reads = t.into_reads();
+        assert!(reads.is_empty());
+    }
+
+    #[test]
+    fn tracking_store_no_cross_contamination() {
+        let inner = MapStore(std::collections::HashMap::new());
+        let t1 = TrackingVariableStore::new(&inner);
+        let t2 = TrackingVariableStore::new(&inner);
+        let _ = mesh_core_elements::VariableStore::get(&t1, "network.ssid");
+        let reads1 = t1.into_reads();
+        let reads2 = t2.into_reads();
+        assert_eq!(reads1.len(), 1);
+        assert!(reads2.is_empty());
     }
 }

@@ -205,6 +205,7 @@ impl CompiledFrontendModule {
 mod tests {
     use super::*;
     use mesh_core_component::template::{Attribute, AttributeValue};
+    use std::collections::HashMap;
 
     struct MapStore(HashMap<String, serde_json::Value>);
 

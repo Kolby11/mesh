@@ -59,6 +59,9 @@ pub struct WidgetNode {
     pub event_handlers: BTreeMap<String, String>,
     /// Live interaction state (hover, focus, active, etc.).
     pub state: ElementState,
+    /// Service field reads captured during template evaluation.
+    /// Each entry is a (service_name, field_name) pair read by this node's expressions.
+    pub service_field_reads: Vec<(String, String)>,
 }
 
 impl WidgetNode {
@@ -74,6 +77,7 @@ impl WidgetNode {
             accessibility: AccessibilityInfo::default(),
             event_handlers: BTreeMap::new(),
             state: ElementState::default(),
+            service_field_reads: Vec::new(),
         }
     }
 
@@ -106,5 +110,15 @@ impl WidgetNode {
     /// Count total nodes in this subtree.
     pub fn node_count(&self) -> usize {
         1 + self.children.iter().map(|c| c.node_count()).sum::<usize>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_widget_node_has_empty_service_field_reads() {
+        assert!(WidgetNode::new("text").service_field_reads.is_empty());
     }
 }
