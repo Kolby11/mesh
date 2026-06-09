@@ -474,17 +474,13 @@ fn service_field_tracking_overhead_under_one_percent() {
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does `resolve_inline_content` need to receive the `TrackingVariableStore`?**
-   - What we know: `build_element_node` handles the "text with inline children" case at lines 360-371 by calling `resolve_inline_content`. That function calls `eval_expr` with the outer `state`.
-   - What's unclear: Whether this call should go through the per-node `TrackingVariableStore` or the outer `state`.
-   - Recommendation: Yes — pass the `TrackingVariableStore` to `resolve_inline_content`. The reads are attributed to the same text node, so they belong in that node's `service_field_reads`.
+   - RESOLVED: Yes — pass the `TrackingVariableStore` to `resolve_inline_content`. The reads are attributed to the same text node, so they belong in that node's `service_field_reads`. Implemented in 97-01 Task 2.
 
 2. **What happens to `TemplateNode::Expr` nodes (bare inline expressions not inside `<text>`)?**
-   - What we know: `TemplateNode::Expr` creates a fresh `text` WidgetNode in `build_widget_node` at line 160-176. It calls `eval_expr` with the outer `state` — no tracking wrapper.
-   - What's unclear: Whether these nodes need per-node tracking.
-   - Recommendation: Yes — the `Expr` arm should also create a `TrackingVariableStore` and store reads in the produced `text` node's `service_field_reads`. This is a small, contained change in the `Expr` arm.
+   - RESOLVED: Yes — the `Expr` arm creates its own per-node `TrackingVariableStore` and assigns reads to the produced text node's `service_field_reads`. Implemented in 97-01 Task 2 (Expr arm section).
 
 ---
 
