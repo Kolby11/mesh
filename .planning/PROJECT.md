@@ -10,6 +10,30 @@ MESH should let plugin authors build distinctive shell UI and service integratio
 
 ## Current State
 
+`v1.19 Performance: Event-Driven Frame Scheduler` shipped on 2026-06-09.
+
+The project now also has an event-driven shell loop with:
+
+- Blocking `poll()` on the Wayland connection fd replacing `std::thread::sleep` — eliminates idle CPU burn
+- `eventfd` IPC wakeup so backend/command messages immediately wake the blocking poll
+- `ProfilingStage::SchedulerIdle` with block duration and wake reason (WaylandEvent / IpcEvent / DeadlineExpired)
+- Dev-window backend preserved with its existing `std::thread::sleep` path via `supports_blocking_dispatch()` gate
+- `wl_surface::set_opaque_region` sent from the present path with conservative root-background-only opaque rect computation
+- Zero new crate dependencies — all work uses existing `rustix::event::eventfd`/`poll`, `smithay-client-toolkit`, and `wayland-client`
+- Full workspace build: zero errors; 9/9 presentation tests pass, 8/8 presentation tests pass, 2 pre-existing shell test failures
+- 6/6 requirements satisfied ([audit](v1.19-MILESTONE-AUDIT.md))
+
+`v1.18 Performance: Smart Invalidation` shipped on 2026-06-09.
+
+The project now also has typed dependency tracking with:
+
+- Per-rule selector-dependency sets at `StyleRuleIndex` construction time so `:hover`/`:focus`/`:active` changes only restyle nodes whose dependency set intersects the changed state
+- Typed script/service state dependencies so simple text/value changes dirty only dependent leaf nodes, style slots, layout slots, and paint slots — not flagging `TREE_REBUILD`
+- Service event routing restricted to components whose runtimes actually read the changed fields, not all components with the service capability
+- `>50%` affected-nodes threshold triggers `TREE_REBUILD` fallback
+- Pixel-equivalence testing gates all phases
+- Full workspace build: zero errors; 16/16 requirements satisfied
+
 `v1.17 Performance: Scripting VM Consolidation` shipped on 2026-06-07.
 
 The project now also has a scripting VM pool and lazy-initialization system with:
@@ -210,26 +234,32 @@ The project now also has a class-like module object contract with:
 - Backend `mesh.service.emit_event(...)` transport through shell payload validation into frontend `proxy.events.Name` subscribers.
 - Bundled audio/navigation proof for typed `VolumeChanged` backend-to-frontend event delivery.
 
-## Last Shipped Milestone: v1.17 Performance: Scripting VM Consolidation
+## Last Shipped Milestone: v1.19 Performance: Event-Driven Frame Scheduler
 
-**Goal:** Eliminate the per-component `mlua::Lua` VM allocation — the
-largest per-component startup and memory cost — by introducing a per-thread
-VM pool with `_ENV`-based isolation, and reduce per-component overhead
-through lazy-init and shared compiled chunks.
+**Goal:** Replace the fixed 16 ms shell loop sleep with a deadline-driven scheduler that blocks on real Wayland/frame-callback wakeups, eliminating idle CPU burn.
 
 **Shipped features:**
-- Per-thread `LuaVmPool` with `PooledVm` RAII checkout/checkin (4 VM floor, on-demand growth, thread assertion)
-- Process-wide `ChunkCache` keyed on FNV64 content hash for compiled source sharing
-- `install_host_api` refactored to accept `&Table` target
-- `pool_baseline_globals` snapshot for reactive state filtering
-- Per-component `_ENV` table with `{ __index = globals() }` metatable — private namespace per component
-- `ScriptContext` lazy-init: `vm: Option<PooledVm>` + `env: Option<Table>` + `ensure_initialized()` gate
-- Host API installed into per-component `_ENV`; script chunks sandboxed with `set_environment`
-- `BackendScriptContext` lazy allocation via `ensure_lua()` gate
-- `FrontendSurfaceComponent` wired to `ScriptContext::new_lazy()` + cached `compile_and_execute`
-- Hot-reload `ChunkCache` eviction in `reload_source()`
-- Full workspace build: zero errors; 108 scripting + 25 backend tests pass, zero new regressions
-- 16/16 requirements satisfied; audit: `.planning/v1.17-MILESTONE-AUDIT.md`
+- Blocking `poll()` on Wayland connection fd replacing `std::thread::sleep` — eliminates idle CPU burn
+- `eventfd` IPC wakeup so backend/command messages immediately wake the blocking poll
+- `ProfilingStage::SchedulerIdle` with block duration and wake reason
+- Dev-window backend preserved with `std::thread::sleep` path via `supports_blocking_dispatch()` gate
+- `wl_surface::set_opaque_region` from present path with conservative root-background-only opaque rect computation
+- Zero new crate dependencies
+- 6/6 requirements satisfied ([audit](v1.19-MILESTONE-AUDIT.md))
+
+## Previous Shipped Milestone: v1.18 Performance: Smart Invalidation
+
+**Goal:** Replace coarse "tree rebuild + full repaint" invalidation with typed dependency tracking so interaction state, service events, and script state changes only dirty the affected nodes and paint slots.
+
+**Shipped features:**
+- Per-rule selector-dependency sets at `StyleRuleIndex` construction time
+- Typed script/service state dependencies narrowing dirty node marking
+- Service event routing restricted to components whose runtimes read the changed fields
+- `>50%` affected-nodes threshold triggers `TREE_REBUILD` fallback
+- Pixel-equivalence testing gates all phases
+- 16/16 requirements satisfied; audit: `.planning/v1.18-MILESTONE-AUDIT.md`
+
+## Previous Shipped Milestone: v1.17 Performance: Scripting VM Consolidation
 
 ## Previous Shipped Milestone: v1.16 Element Library
 
@@ -312,18 +342,13 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.12 Phase 68`: Interface and module events now support runtime subscriptions, local emits, and backend-to-frontend event transport.
 - `v1.12 Phase 69`: Bundled audio/navigation modules prove the class-like module object model with typed `VolumeChanged` event delivery.
 
-## Current Milestone: v1.19 Performance: Event-Driven Frame Scheduler
+## Current Milestone: v1.20 — (to be defined)
 
-**Goal:** Replace the fixed 16 ms shell loop sleep with a deadline-driven scheduler that blocks on real Wayland/frame-callback wakeups, eliminating idle CPU burn.
-
-**Target features:**
-- Runtime deadline calculation using shell-message backlog, pending Wayland events, render needs, reload deadlines, and throttled commands
-- Block on real Wayland events and `wl_surface::frame` callbacks as the primary render permit instead of bounded polling
-- Send `wl_surface::set_opaque_region` from the present path — compute union of fully-opaque background rects from the retained display list
+**Goal:** *(Next milestone defined via `/gsd-new-milestone`)*
 
 ### Active
 
-*(To be defined in REQUIREMENTS.md during this milestone initialization)*
+*(To be defined in REQUIREMENTS.md during next milestone initialization)*
 
 ### Out of Scope
 
@@ -435,4 +460,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-09 for v1.19 milestone planning*
+*Last updated: 2026-06-09 after v1.19 milestone completion*

@@ -2,7 +2,7 @@
 
 ## Milestones
 
-- 🚧 **v1.19 Performance: Event-Driven Frame Scheduler** — Phases 99-100 (in progress)
+- ✅ **v1.19 Performance: Event-Driven Frame Scheduler** — Phases 99-100 shipped 2026-06-09 ([archive](milestones/v1.19-ROADMAP.md), [audit](v1.19-MILESTONE-AUDIT.md))
 - ✅ **v1.18 Performance: Smart Invalidation** — Phases 96-98 shipped 2026-06-09 ([archive](milestones/v1.18-ROADMAP.md), [audit](milestones/v1.18-MILESTONE-AUDIT.md))
 - ✅ **v1.17 Performance: Scripting VM Consolidation** — Phases 92-95 shipped 2026-06-07 ([archive](milestones/v1.17-ROADMAP.md), [audit](v1.17-MILESTONE-AUDIT.md))
 - ✅ **v1.16 Element Library** — Phases 86-91 shipped 2026-05-26 ([archive](milestones/v1.16-ROADMAP.md), [audit](milestones/v1.16-MILESTONE-AUDIT.md))
@@ -25,46 +25,13 @@
 
 </details>
 
-### 🚧 v1.19 Performance: Event-Driven Frame Scheduler (In Progress)
+<details>
+<summary>✅ v1.19 Performance: Event-Driven Frame Scheduler (Phases 99-100) — SHIPPED 2026-06-09</summary>
 
-**Milestone Goal:** Replace the fixed 16 ms shell loop sleep with a deadline-driven scheduler that blocks on real Wayland/frame-callback wakeups, eliminating idle CPU burn.
+- [x] **Phase 99: Event-Driven Wayland Dispatch** — Replace `std::thread::sleep` with `poll()` on Wayland fd, add eventfd IPC wakeup, and record scheduler profiling (4/4 plans, completed 2026-06-09)
+- [x] **Phase 100: Opaque Region Hints** — Walk retained display list for opaque backgrounds and send `wl_surface::set_opaque_region` from the present path (2/2 plans, completed 2026-06-09)
 
-- [ ] **Phase 99: Event-Driven Wayland Dispatch** — Replace `std::thread::sleep` with `poll()` on Wayland fd, add eventfd IPC wakeup, and record scheduler profiling
-- [ ] **Phase 100: Opaque Region Hints** — Walk retained display list for opaque backgrounds and send `wl_surface::set_opaque_region` from the present path
-
----
-
-## Phase Details
-
-### Phase 99: Event-Driven Wayland Dispatch
-**Goal**: Shell blocks on real Wayland events instead of burning CPU with fixed sleep, while preserving existing loop order and supporting both surface backends
-**Depends on**: Phase 98 (v1.18)
-**Requirements**: SCHED-01, SCHED-02, SCHED-03, SCHED-04, DIAG-01
-**Success Criteria** (what must be TRUE):
-  1. Shell process shows near-zero CPU usage when idle (no surfaces animating, no backend events) — observable via `top`/`htop` on Linux
-  2. Wayland frame callbacks wake the shell and trigger rendering within one frame — no unnecessary polling delay beyond compositor response time
-  3. IPC messages (theme reloads, backend state changes, reload commands) are drained before the shell blocks, with no observable latency regression versus v1.18
-  4. Dev-window backend continues to open, render, and close with its existing sleep behavior unchanged
-  5. Profiling debug inspector shows `SchedulerIdle` stage with block duration and wake reason recorded after each idle period
- **Plans**: 4 plans
-  - [ ] 99-01-PLAN.md — ProfilingStage::SchedulerIdle variant + PresentationEngine API (WaitReason/WaitResult/supports_blocking_dispatch/wait_for_events)
-  - [ ] 99-02-PLAN.md — LayerShellBackend::wait_for_events blocking dispatch implementation
-  - [ ] 99-03-PLAN.md — Shell loop integration: eventfd creation, blocking dispatch, MAX_IDLE_SLEEP removal, SchedulerIdle profiling
-  - [ ] 99-04-PLAN.md — IPC and backend eventfd signaling to wake blocking poll
-
-### Phase 100: Opaque Region Hints
-**Goal**: Compositor receives opaque region metadata for surfaces with fully-opaque backgrounds, enabling compositing optimization without visual regressions
-**Depends on**: Phase 99
-**Requirements**: OPAQUE-01
-**Success Criteria** (what must be TRUE):
-  1. Shipped navigation/audio surfaces render identically to v1.18 with no visual artifacts (no missing content, no compositing glitches) on Sway compositor
-  2. `WAYLAND_DEBUG=1` output confirms `wl_surface@N.set_opaque_region` requests with non-empty regions are sent for surfaces that have opaque root backgrounds
-  3. Present-path performance is not degraded — opaque rect computation adds no measurable regressions to frame timing (verified via profiling inspector)
- **Plans**: 2 plans
-   - [ ] 100-01-PLAN.md — PresentationEngine::update_opaque_region API + wl_region lifecycle (create/set/destroy per present)
-   - [ ] 100-02-PLAN.md — Shell-side opaque rect computation from retained display list root + loop integration with guard conditions
-
----
+</details>
 
 ## Progress
 
@@ -73,8 +40,8 @@
 | 96. Selector Dependency Tracking | v1.18 | 3/3 | Complete | 2026-06-07 |
 | 97. Service Field Dependency Tracking | v1.18 | 3/3 | Complete | 2026-06-09 |
 | 98. Narrow Invalidation & Event Routing | v1.18 | 3/3 | Complete | 2026-06-09 |
-| 99. Event-Driven Wayland Dispatch | v1.19 | 0/4 | Not started | - |
-| 100. Opaque Region Hints | v1.19 | 0/2 | Not started | - |
+| 99. Event-Driven Wayland Dispatch | v1.19 | 4/4 | Complete | 2026-06-09 |
+| 100. Opaque Region Hints | v1.19 | 2/2 | Complete | 2026-06-09 |
 
 ---
 
