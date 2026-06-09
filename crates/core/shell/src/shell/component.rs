@@ -30,8 +30,8 @@ pub(in crate::shell) use catalog::FrontendCatalog;
 pub(crate) use input::KeybindResolutionSource;
 pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 use runtime_tree::{
-    RetainedWidgetTree, annotate_runtime_tree, collect_all_keys, collect_element_metrics,
-    input_accepts_char,
+    NodeServiceFieldDependencies, RetainedWidgetTree, annotate_runtime_tree, collect_all_keys,
+    collect_element_metrics, input_accepts_char,
 };
 
 use mesh_core_capability::{Capability, CapabilitySet};
@@ -349,6 +349,7 @@ pub(super) struct FrontendSurfaceComponent {
     last_tree: Option<WidgetNode>,
     intrinsic_layout_cache: IntrinsicLayoutCache,
     retained_tree: RetainedWidgetTree,
+    node_service_field_deps: NodeServiceFieldDependencies,
     retained_render_objects: RenderObjectTree,
     retained_display_list: RetainedDisplayList,
     diagnostics: Option<Diagnostics>,
@@ -457,6 +458,7 @@ impl FrontendSurfaceComponent {
             last_tree: None,
             intrinsic_layout_cache: IntrinsicLayoutCache::default(),
             retained_tree: RetainedWidgetTree::default(),
+            node_service_field_deps: NodeServiceFieldDependencies::default(),
             retained_render_objects: RenderObjectTree::default(),
             retained_display_list: RetainedDisplayList::default(),
             diagnostics: None,

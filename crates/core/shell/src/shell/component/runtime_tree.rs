@@ -713,6 +713,58 @@ fn truthy_attribute(value: &str) -> bool {
     matches!(value, "" | "true" | "1" | "disabled" | "checked")
 }
 
+/// Bidirectional index from widget nodes to the service fields they read.
+///
+/// Built after each full `build_tree()` pass (not on targeted interaction restyle).
+/// Answers both directions in O(1).
+#[derive(Debug, Default)]
+pub(super) struct NodeServiceFieldDependencies {
+    /// node_id → set of (service, field) pairs that node reads
+    forward: HashMap<NodeId, HashSet<(String, String)>>,
+    /// (service, field) → set of node_ids that read it
+    reverse: HashMap<(String, String), HashSet<NodeId>>,
+}
+
+impl NodeServiceFieldDependencies {
+    /// Build the bidirectional index from a fully-annotated WidgetNode tree.
+    /// Must be called after `annotate_runtime_tree()` so `node.id` values are stable.
+    pub(super) fn build(root: &WidgetNode) -> Self {
+        let mut deps = Self::default();
+        collect_node_service_deps(root, &mut deps);
+        deps
+    }
+
+    /// Returns node IDs that read `(service, field)`. Empty set if none.
+    pub(super) fn nodes_reading_field(&self, service: &str, field: &str) -> &HashSet<NodeId> {
+        static EMPTY: std::sync::OnceLock<HashSet<NodeId>> = std::sync::OnceLock::new();
+        let key = (service.to_string(), field.to_string());
+        self.reverse
+            .get(&key)
+            .unwrap_or_else(|| EMPTY.get_or_init(HashSet::new))
+    }
+
+    /// Returns `(service, field)` pairs that `node_id` reads. `None` if not tracked.
+    pub(super) fn fields_read_by_node(
+        &self,
+        node_id: NodeId,
+    ) -> Option<&HashSet<(String, String)>> {
+        self.forward.get(&node_id)
+    }
+}
+
+fn collect_node_service_deps(node: &WidgetNode, deps: &mut NodeServiceFieldDependencies) {
+    if !node.service_field_reads.is_empty() {
+        let entry = deps.forward.entry(node.id).or_default();
+        for pair in &node.service_field_reads {
+            entry.insert(pair.clone());
+            deps.reverse.entry(pair.clone()).or_default().insert(node.id);
+        }
+    }
+    for child in &node.children {
+        collect_node_service_deps(child, deps);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -830,5 +882,47 @@ mod tests {
                 | RetainedNodeDirtyFlags::ATTRIBUTES
                 | RetainedNodeDirtyFlags::STATE
         );
+    }
+
+    #[test]
+    fn node_service_field_deps_forward_lookup() {
+        let mut node = WidgetNode::new("text");
+        node.service_field_reads.push(("audio".to_string(), "percent".to_string()));
+        let id = node.id;
+        let mut root = WidgetNode::new("column");
+        root.children.push(node);
+
+        let deps = NodeServiceFieldDependencies::build(&root);
+        let fields = deps.fields_read_by_node(id).expect("node should be tracked");
+        assert!(fields.contains(&("audio".to_string(), "percent".to_string())));
+    }
+
+    #[test]
+    fn node_service_field_deps_reverse_lookup() {
+        let mut node = WidgetNode::new("text");
+        node.service_field_reads.push(("audio".to_string(), "percent".to_string()));
+        let id = node.id;
+        let mut root = WidgetNode::new("column");
+        root.children.push(node);
+
+        let deps = NodeServiceFieldDependencies::build(&root);
+        let nodes = deps.nodes_reading_field("audio", "percent");
+        assert!(nodes.contains(&id));
+    }
+
+    #[test]
+    fn node_service_field_deps_empty_node_not_in_forward() {
+        let root = WidgetNode::new("column");
+        let id = root.id;
+        let deps = NodeServiceFieldDependencies::build(&root);
+        assert!(deps.fields_read_by_node(id).is_none());
+    }
+
+    #[test]
+    fn node_service_field_deps_unknown_field_empty() {
+        let root = WidgetNode::new("column");
+        let deps = NodeServiceFieldDependencies::build(&root);
+        let result = deps.nodes_reading_field("bogus", "x");
+        assert!(result.is_empty());
     }
 }

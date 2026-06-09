@@ -197,6 +197,10 @@ impl FrontendSurfaceComponent {
         self.annotate_surface_shortcuts(tree);
         annotate_overflow_tree(tree, "root", &mut self.scroll_offsets);
 
+        if trigger_kind == "rebuild" {
+            self.node_service_field_deps = NodeServiceFieldDependencies::build(tree);
+        }
+
         // Populate the rule cache once, then run restyle while borrowing it.
         // The cache survives across paints — we only pay the clone cost on
         // source reload (when `cached_restyle_rules` is reset).
