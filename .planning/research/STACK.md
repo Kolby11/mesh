@@ -1,74 +1,114 @@
-# Technology Stack: Typed Dependency Tracking (v1.18)
+# Stack Research
 
-**Domain:** Smart invalidation for retained-mode shell framework
-**Researched:** 2026-06-07
-**Overall confidence:** HIGH
+**Domain:** Event-Driven Wayland Frame Scheduler
+**Researched:** 2026-06-09
+**Confidence:** HIGH
 
 ## Recommended Stack
 
-MESH's typed dependency tracking is an internal pipeline upgrade. **No new crate dependencies are required.** All data structures and algorithms live within existing crates.
+### Core Technologies
 
-### Core Framework
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| smithay-client-toolkit | 0.19.2 (already in use) | Wayland protocol binding (compositor, layer-shell, seat, SHM) | Already the platform foundation; SCT's `CompositorHandler::frame()` dispatches frame callbacks that the scheduler will block on |
+| wayland-client | 0.31.14 (already in use) | Low-level Wayland protocol objects (`wl_surface`, `wl_region`, `EventQueue`) | Provides `WlCompositor::create_region()` for opaque region objects and `EventQueue::prepare_read()` for fd-based blocking |
+| wayland-backend | 0.3.15 (already in use, transitive) | Connection fd and event loop raw I/O | `ReadEventsGuard::connection_fd()` returns the raw fd used by `rustix::event::poll` for deadline-blocking |
+| rustix | 0.38 (already in use) | `event::poll()` with timeout | Already used in `dispatch_available()` for non-blocking poll; same call accepts a `Duration` for blocking |
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| Rust | 1.85 (current MESH baseline) | All dependency tracking data structures | Already in use; `HashMap`, `HashSet`, `Vec`, `u32` suffice |
-| mlua (Luau mode) | 0.11+ | Script execution — read tracking via `__index` metatable | Existing; proxy metatable is the field-read tracking mechanism |
+### Supporting Libraries
 
-### Existing Crates Used (No New Dependencies)
+| Library | Version | Purpose | When to Use |
+|---------|---------|---------|-------------|
+| wayland-protocols | 0.32.12 (transitive via SCT) | wlr-layer-shell, xdg-activation protocol bindings | Required by layer-shell backend; no direct scheduler changes here |
 
-| Crate | Role in v1.18 | Changes |
-|-------|--------------|---------|
-| `mesh-core-elements` | `StyleRuleIndex` extension — `RuleDependencyMask`, `state_to_rules` | Modified: `StyleRuleIndex` struct, `index_selector()`, `restyle_nodes_cached()` |
-| `mesh-core-scripting` | Per-node read capture — `ServiceFieldReadSnapshot` | Modified: `ScriptContext`, proxy metatable (read tracking) |
-| `mesh-core-shell` | Narrow invalidation, field-aware routing, retained tree dirty methods | Modified: `FrontendSurfaceComponent`, `RetainedWidgetTree`, `Shell` |
-| `mesh-core-frontend` | Expression evaluator — per-node read snapshot | Modified: template expression evaluation in `build_tree_with_state` |
+### Development Tools
 
-### New Data Structures
+| Tool | Purpose | Notes |
+|------|---------|-------|
+| None new | Existing profiling infrastructure covers scheduler changes | `mesh_core_debug::ProfilingStage` already tracks shell stages; add `FrameWait` stage for blocking-duration measurement |
 
-| Structure | Underlying Types | Crate |
-|-----------|-----------------|-------|
-| `RuleDependencyMask` | `u32` bitmask + `Option<String>` (tag, class) | `mesh-core-elements` |
-| `NodeServiceFieldDependencies` | `HashMap<NodeId, HashSet<(String, String)>>` + reverse index | `mesh-core-shell` |
-| `ServiceFieldReadSnapshot` | `HashMap<NodeId, HashSet<(String, String)>>` (per-frame temp) | `mesh-core-scripting` |
+## Installation
 
-### Modified Structures
+```bash
+# No new Cargo.toml entries needed. All dependencies already present:
 
-| Structure | Change | Rationale |
-|-----------|--------|-----------|
-| `StyleRuleIndex` | `+rule_dep_masks: Vec<RuleDependencyMask>` | Per-rule state dependency masks |
-| `StyleRuleIndex` | `+state_to_rules: [Vec<usize>; 13]` | O(1) reverse lookup: state_bit → affected rules |
-| `RetainedNodeDirtyFlags` | `+SERVICE_STATE = 1 << 6` | Distinct from interaction STATE |
-| `RetainedWidgetTree` | `+mark_nodes_dirty()`, `mark_layout_ancestors_dirty()`, `nodes_with_flag()` | Per-node dirty marking without snapshot diff |
-| `ScriptContext` | `+field_read_snapshot()` method | Capture per-node reads after render |
-| `ScriptContext` | `+any_tracked_field_changed(service, fields)` | Fast check for field-aware routing |
-| `StyleResolver` | `+restyle_nodes_cached(root, rules, ctx, index, node_ids)` | Per-node selective restyle |
-| `FrontendSurfaceComponent` | `+node_service_deps: NodeServiceFieldDependencies` | Per-node field dependency cache |
-| `ComponentDirtyFlags` | No change | Narrow invalidation uses per-node dirty, not component flags |
+# Already in crates/core/presentation/Cargo.toml:
+# smithay-client-toolkit = { version = "0.19", default-features = false, features = ["xkbcommon"] }
+# wayland-client = "0.31"
+# rustix = { version = "0.38", features = ["event", "fs", "mm", "shm"] }
+```
 
-### Infrastructure (Unchanged)
+## Alternatives Considered
 
-| Component | Status | Notes |
-|-----------|--------|-------|
-| Profiling (`mesh_core_debug::ProfilingStage`) | Extended with `narrow_service`, `narrow_interaction` counts | Existing snapshots retain all fields |
-| Diagnostics (`mesh_core_diagnostics`) | Unchanged — still runs, but on fewer nodes | Per-node restyle reduces diagnostic workload |
-| Style rule cache (`cached_restyle_rules`, `cached_style_rule_index`) | Extended `StyleRuleIndex` still passes `is_for()` check | Pointer verification unchanged |
-| Retained rendering pipeline (`RetainedDisplayList`, `RenderObjectTree`) | Narrow dirty nodes feed into existing incremental paint | Downstream unchanged |
+| Recommended | Alternative | When to Use Alternative |
+|-------------|-------------|-------------------------|
+| `rustix::event::poll()` on `EventQueue` connection fd | calloop (optional SCT feature, 0.13.x) | Only if you need to multiplex with non-Wayland fd sources (IPC socket, timers). MESH already has `mpsc::unbounded_channel` for IPC; calloop adds dependency complexity without solving a current problem |
+| Deadline passed to `poll()` directly | tokio async wrapper around EventQueue | Would require converting the synchronous shell loop to async, pulling in a reactor, and paying runtime overhead. The shell loop is intentionally synchronous and single-threaded |
+| `EventQueue::dispatch_pending()` in a spin loop | `std::thread::park()` / condition variable | `park()` can't be signaled by Wayland fd readiness; need `poll` or equivalent. Spin loops burn CPU |
 
 ## What NOT to Use
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `fixedbitset` crate | Adds a dependency for ~15 lines of `Vec<u64>` bit operations | Hand-rolled `Vec<u64>` with `set_bit(idx)`, `get_bit(idx)`, `union_assign(&other)` — MESH's node count is small enough |
-| `petgraph` for dependency graph | General-purpose graph is overengineered for "which nodes match which rules" | `HashMap` + `Vec` — purpose-built reverse index |
-| `salsa` crate | Forces immutable database pattern incompatible with MESH's mutable widget tree | Salsa red-green *concept*, hand-rolled for MESH's types |
-| `dashmap` / concurrent maps | All invalidation on single render thread | Standard `HashMap` with `RefCell` borrow (existing pattern) |
-| Luau debug hooks for field tracking | Fires on every instruction — prohibitive cost | `__index` metatable proxy (already in use) |
+| calloop (`calloop` 0.13, `calloop-wayland-source` 0.3) | SCT 0.19.2 has calloop as an *optional* feature; the current codebase does not activate it. Adding calloop would require changing the entire event-dispatch architecture (replace `EventQueue` with `calloop::EventLoop` + `WaylandSource`) for marginal benefit — the single-fd use case is trivially handled by `poll()` | Existing `rustix::event::poll` on `EventQueue::prepare_read()` connection fd |
+| tokio / async-std / smol | The shell loop (`Shell::run()`) is synchronous, single-threaded, and must remain so for deterministic rendering order, profile attribution, and frame-commit sequencing. Adding an async runtime would complicate ownership and introduce scheduling unpredictability. | Synchronous `poll()` blocking with computed deadline |
+| `std::thread::sleep()` | This is the current implementation and the *thing we are replacing*. `thread::sleep` cannot be woken by Wayland frame callbacks or input events — it wastes CPU cycles polling on every wakeup and adds unnecessary latency. | `poll()` blocking on the Wayland connection fd |
+| New polling-timer crate (e.g., `timerfd`) | Not needed. The deadline computation is a pure in-memory operation; the `poll()` timeout is set to `min(computed_deadline, 16ms)` and automatically returns early if Wayland data arrives. | `poll()` timeout parameter |
+
+## Stack Patterns by Variant
+
+**If Wayland compositor is available (production path):**
+- Use `LayerShellBackend::wait_for_events(timeout)` — blocks on Wayland fd via `rustix::event::poll` with computed deadline
+- `wl_surface::frame` callbacks dispatched automatically through SCT's `CompositorHandler::frame()`
+- `set_opaque_region` computed from retained display list opaque background rects and sent before each `wl_surface.commit()`
+
+**If using dev-window backend (development path):**
+- `DevWindowBackend` continues using its existing event-driven loop (minifb internal polling)
+- `surface_waiting_for_frame_callback` returns `false` — no deadline blocking needed
+- No `set_opaque_region` call (dev window not a real Wayland surface)
+
+## Version Compatibility
+
+| Package A | Compatible With | Notes |
+|-----------|-----------------|-------|
+| smithay-client-toolkit 0.19.2 | wayland-client 0.31.14 | Locked — both are workspace dependencies with no version conflicts |
+| wayland-client 0.31.14 | wayland-backend 0.3.15 | Locked — `EventQueue::prepare_read()` returns `ReadEventsGuard` from `wayland-backend` |
+| rustix 0.38 | All above | Locked — used for `event::poll()`, `event::PollFd`, `event::PollFlags` |
+
+## Key API Points
+
+### 1. Blocking Dispatch Pattern
+The existing `dispatch_available()` method in `LayerShellBackend` already implements the correct pattern but with `poll(&mut fds, 0)` (non-blocking). The change is:
+```rust
+// Current: non-blocking poll
+poll(&mut fds, 0)
+
+// New: deadline-blocking poll
+poll(&mut fds, timeout.as_millis().min(i32::MAX as u64) as i32)
+```
+
+### 2. wl_region Creation
+`WlCompositor::create_region()` is available at `wayland-client` 0.31.14 (wayland protocol `wl_compositor` version 1+). Access via SCT's `CompositorState::wl_compositor()` which returns `&WlCompositor`.
+```rust
+let compositor = state.compositor_state.wl_compositor();
+let region = compositor.create_region(&qh, ());
+region.add(rect.x as i32, rect.y as i32, rect.width as i32, rect.height as i32);
+wl_surface.set_opaque_region(Some(&region));
+// Region can be destroyed immediately — opaque region has copy semantics
+region.destroy();
+```
+
+### 3. Frame Callback Already Wired
+`wl_surface.frame(qh, wl_surface.clone())` is already called in `SurfaceEntry::attach_shm_buffer()` (line 267 of `backend.rs`). The `CompositorHandler::frame()` handler (line 22-37 of `handlers.rs`) clears `frame_pending` and `frame_pending_since`. No new protocol bindings needed.
 
 ## Sources
 
-- MESH codebase: `crates/core/ui/elements/src/style/resolve.rs` — state bit constants (L1038-1050), `StyleRuleIndex` (L187-296)
-- MESH codebase: `crates/core/runtime/scripting/src/context/proxy.rs` — service read tracking (L152-159)
-- MESH codebase: `crates/core/shell/src/shell/component/runtime_tree.rs` — `RetainedWidgetTree`, `RetainedNodeDirtyFlags`
-- MESH codebase: `crates/core/shell/src/shell/component.rs` — `ComponentDirtyFlags`
-- Rust stdlib: `HashMap`, `HashSet` — all already in MESH Cargo.toml
+- [docs.rs/smithay-client-toolkit/0.19.2] — `CompositorState`, `CompositorHandler::frame()`, `SurfaceData` — HIGH confidence (official crate docs)
+- [docs.rs/wayland-client/0.31.14] — `WlCompositor::create_region()`, `WlSurface::set_opaque_region()`, `EventQueue::prepare_read()`, `wl_region` — HIGH confidence (official crate docs)
+- [docs.rs/rustix/0.38] — `event::poll()` with timeout — HIGH confidence (official crate docs)
+- [MESH codebase] — `crates/core/presentation/src/wayland_surface/backend.rs` (existing `dispatch_available()`, `attach_shm_buffer()`, `frame_pending` tracking), `handlers.rs` (frame callback handler), `state.rs` (State struct) — HIGH confidence (verified against live code)
+- [MESH codebase] — `crates/core/shell/src/shell/runtime/mod.rs` (`next_runtime_sleep()` deadline calculation, `run()` loop with `std::thread::sleep`) — HIGH confidence (verified against live code)
+
+---
+*Stack research for: Event-Driven Wayland Frame Scheduler*
+*Researched: 2026-06-09*

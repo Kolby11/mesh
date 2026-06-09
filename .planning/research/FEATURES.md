@@ -1,72 +1,74 @@
-# Feature Landscape: Typed Dependency Tracking (v1.18)
+# Feature Landscape
 
-**Domain:** Smart invalidation for retained-mode shell framework
-**Researched:** 2026-06-07
-**Confidence:** HIGH (all feature requirements mapped to existing codebase structures)
+**Domain:** Event-Driven Wayland Frame Scheduler for MESH
+**Researched:** 2026-06-09
+**Confidence:** HIGH
 
-## Table Stakes (Must Have for v1.18)
+## Table Stakes
 
-| Feature | Why Expected | Implementation Approach | Complexity |
-|---------|-------------|------------------------|------------|
-| **Per-rule selector dependency masks at StyleRuleIndex** | `:hover/:focus/:active` changes currently restyle the entire component tree. Rules must know which state bits they depend on. | Add `RuleDependencyMask` to `StyleRuleIndex::new()`. Build `state_to_rules` reverse index. 13 state bits → 13 `Vec<usize>` arrays. | MEDIUM — extends existing index construction |
-| **Per-node selective restyle for state changes** | Only nodes whose matched rules reference the changed state bit should be restyled. A `:hover` change on one button should restyle ~5 nodes, not 500. | Add `StyleResolver::restyle_nodes_cached()`. In finalize_tree(), replace full `restyle_subtree_cached()` with targeted `restyle_nodes_cached(affected_node_ids)`. | MEDIUM — new resolver method, reuse existing `ParentInheritedStyle` pattern |
-| **Inherited style propagation on partial restyle** | When a node is restyled and its color/font changes, children that inherit text-style must also be updated, even if not directly restyled. | In `restyle_nodes_with_index()`, after restyling a node, propagate `inherit_retained_text_style()` to children. Track which 5 properties inherit. | LOW — relies on existing `inherit_retained_text_style()` |
-| **Per-node service field dependency tracking** | Service state changes must dirty only nodes that actually render the changed fields. `audio.percent` change should dirty 2 nodes, not 200. | During template expression evaluation, snapshot per-node `tracked_service_fields` diffs. Build `NodeServiceFieldDependencies` with forward (node→fields) and reverse (field→nodes) indices. | MEDIUM — affects template evaluator hot path |
-| **Narrow per-node invalidation in handle_service_event** | Service events must produce per-node dirty flags, not `TREE_REBUILD`. | Replace `invalidate_script_state()` call in `handle_service_event` with `invalidate_service_nodes(changed_fields)`. Lookup `NodeServiceFieldDependencies` → mark affected nodes dirty. >50% fallback to `TREE_REBUILD`. | HIGH — central invalidation path, must preserve correctness |
-| **Layout ancestor propagation from narrow dirty nodes** | When a leaf node's style changes, its parent chain must be marked LAYOUT dirty for the Taffy pass. | Add `RetainedWidgetTree::mark_layout_ancestors_dirty(node_ids)`. Walk parent chain upward for each affected node. | MEDIUM — requires parent chain tracking |
-| **Field-aware service event routing** | Components whose runtimes never read the changed service fields should skip the event entirely. | Add `affected_by_service_change()` check in `observes_service_event`. Use per-runtime `any_tracked_field_changed()` fast path. | LOW — gating logic in existing event loop |
+Features users expect. Missing = product feels incomplete.
 
-## Differentiators (High Value, Moderate Cost — Defer to Future)
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| Block on Wayland connection fd instead of fixed sleep | No idle CPU burn; shell sleeps until compositor sends data | Low-Medium | Existing `dispatch_available()` already implements the full prepare_read/poll/read/dispatch loop — only the poll timeout changes from 0ms to the computed deadline |
+| wl_surface::frame callback as render permit | Standard Wayland throttling; compositors expect clients to wait for frame before repainting | Low | Already implemented: `wl_surface.frame()` called in `attach_shm_buffer()`, `CompositorHandler::frame()` clears `frame_pending` |
+| wl_surface::set_opaque_region from present path | Compositor compositing optimization; expected for well-behaved shell surfaces | Low-Medium | Requires creating `wl_region` objects from `WlCompositor` (already bound); computing opaque rects from retained display list background fills |
+| Deadline calculation (already implemented) | Determines how long to block — must consider all wakeup sources | Low | `next_runtime_sleep()` already computes deadline from shell messages, pending events, render needs, reload timers, throttled commands, and surface transitions |
+| Frame callback timeout fallback | Prevents indefinite blocking if compositor drops a frame callback | Low | Already implemented: `MAX_FRAME_CALLBACK_WAIT = 50ms` in `SurfaceEntry::waiting_for_frame_callback()` |
 
-| Feature | Value Proposition | Complexity | Defer Reason |
-|---------|------------------|------------|-------------|
-| **Direct-mutation fast path for text/value changes** | Avoid `build_tree_with_state()` entirely for simple text/content changes. Volume label "65%"→"66%" is one field update. | MEDIUM | Requires structural stability detection (no added/removed children) |
-| **Container-query re-evaluation on size changes** | Container-queries dependent on width/height must re-evaluate when container size changes from layout. | MEDIUM | MESH has few container queries today; defer until layout narrowing is stable |
-| **Accessibility-only dirty flag narrowing** | Currently ACCESSIBILITY is in `INTERACTION_RESTYLE`, `VISUAL_REPAINT`, etc. — wasted work when only visual properties change. | LOW | Tactical dirty-flag composition fix; do early in milestone |
+## Differentiators
+
+Features that set product apart. Not expected, but valued.
+
+| Feature | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| Opaque region from retained display list background analysis | Tells compositor which pixels are fully opaque without shell authors needing to annotate anything — automatic optimization | Medium | Requires walking the retained display list to find background fills with alpha=1.0 and computing their union. Only applies to fully-opaque backgrounds, not semi-transparent shells |
+| Coalesced event dispatch in blocking path | When the fd wakes, drain all pending events before returning to shell work — avoids multiple wake/drain cycles per frame | Low | Already the pattern in `dispatch_available()` — just parameterize the timeout but keep the batch-drain loop |
+
+## Anti-Features
+
+Features to explicitly NOT build.
+
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| tokio-based async event loop | The shell loop is synchronous by design for deterministic rendering order, profile attribution, and frame-commit sequencing. Adding an async runtime would complicate ownership and introduce scheduling unpredictability | Blocking `poll()` with deadline timeout — achieves the same effect (sleep until event) without an async runtime |
+| calloop integration | SCT 0.19 already has calloop as an optional feature; the current codebase does not activate it. Migrating to calloop would require rewriting the entire dispatch architecture (`EventQueue` → `calloop::EventLoop` + `WaylandSource`) | Continue using `rustix::event::poll` directly — simpler, already tested, one less dependency |
+| Per-surface fd blocking | Each MESH surface shares the same Wayland connection; there is only one fd. Polling per-surface would require epoll and doesn't add value | Block on the single connection fd; all surfaces' events arrive on the same fd |
+| Compositor-specific opaque region hints (Hyprland-only, Sway-only) | Violates Wayland protocol neutrality; would break on KWin/Mutter | Standard `wl_surface::set_opaque_region` — works on all compliant compositors |
+| Polling timer for deadline enforcement | Adding a timerfd or similar would mean blocking on *two* fds (Wayland + timer), requiring epoll. Deadlines shorter than the next Wayland event are rare (the 16ms cap ensures responsiveness) | Deadline as poll timeout — if no Wayland event arrives, the shell wakes at the deadline naturally |
 
 ## Feature Dependencies
 
 ```
-Phase A: Selector Dependency Tracking
-   RuleDependencyMask → state_to_rules reverse index
-      └── StyleResolver::restyle_nodes_cached()
-         └── finalize_tree() targeted_interaction_restyle path
-
-Phase B: Per-Node Service Dependency Tracking
-   ServiceFieldReadSnapshot (per-frame capture)
-      └── NodeServiceFieldDependencies (bidirectional index)
-         └── FrontendSurfaceComponent.node_service_deps
-
-Phase C: Narrow Invalidation + Routing
-   (depends on A + B)
-   RetainedWidgetTree::mark_nodes_dirty()
-      └── handle_service_event() → invalidate_service_nodes()
-         └── paint() → narrow restyle path (STATE only, not TREE_REBUILD)
-   affected_by_service_change() → observes_service_event() gate
+Block on Wayland fd ←→ Deadline calculation (next_runtime_sleep)
+    ↓
+Frame callback handling (already implemented)
+    ↓
+Opaque region computation ←→ Retained display list access
+    ↓
+wl_surface::set_opaque_region ←→ WlCompositor::create_region (already bound)
 ```
 
-## Anti-Features (Explicitly NOT Building)
+Key dependency: The opaque region computation depends on access to the retained display list from the paint/present path. The presentation engine receives `PixelBuffer` but not display-list structure. Either:
+- Pass opaque-rect metadata alongside the pixel buffer in `present_with_damage()`
+- Or have the shell pre-compute opaque rects and pass them through the presentation interface
 
-| Anti-Feature | Why Avoid | What to Do Instead |
-|-------------|-----------|-------------------|
-| **Per-property dirty categories** (font-size-dirty vs color-dirty vs opacity-dirty) | CSS engine level complexity. MESH supports ~50 properties. Browsers need this; shell UIs don't. | Use per-node STYLE dirty with backdating: if computed style equals previous, skip layout/paint cascade. |
-| **Compile-time Luau dependency analysis** | Luau is dynamic — `self.audio["percent"]`, closures, `pairs()`. Static analysis cannot determine what a script reads. | Runtime read tracking via `__index` metatable proxy (already exists). |
-| **Full Svelte-style signal system** (`$derived` auto-tracking) | Requires either a compiler (Svelte approach) or wrapping every value in reactive proxies (SolidJS approach). Luau doesn't support Proxies. | Per-node state-key bindings cover 90% of the value at 10% of the complexity. |
-
-## MVP Recommendation (Phase Prioritization)
+## MVP Recommendation
 
 Prioritize:
-1. **Phase A: Selector dependency tracking** — highest impact (60fps interaction events), lowest risk (extends existing index)
-2. **Phase B: Per-node service field tracking** — builds the dependency map needed for Phase C
-3. **Phase C: Narrow invalidation + field-aware routing** — combines both systems into final narrow pipeline
+1. **Blocking dispatch on Wayland fd** — replaces `std::thread::sleep()`, immediately eliminates idle CPU burn
+2. **wl_surface::set_opaque_region** — sends opaque region hints; wired from the present path
+3. **Opaque rect computation from retained display list** — automatic, no author annotations needed
 
-Defer: Direct-mutation fast path: valuable but requires structural stability detection that depends on per-node tracking being stable first.
+Defer:
+- Compositor-specific optimizations (damage region negotiation, wp_presentation feedback)
+- Multi-fd epoll integration — only needed if MESH adds timerfd or additional socket sources
+- Frame callback statistics/diagnostics beyond existing profiling infrastructure
 
 ## Sources
 
-- MESH v1.18 milestone goal (PROJECT.md: "Replace coarse 'tree rebuild + full repaint' invalidation with typed dependency tracking")
-- MESH codebase: `crates/core/shell/src/shell/component.rs` — current coarse invalidation paths
-- MESH codebase: `crates/core/ui/elements/src/style/resolve.rs` — `StyleRuleIndex` with state-bit bucketing
-- MESH codebase: `crates/core/runtime/scripting/src/context/proxy.rs` — existing field read tracking via `__index`
-- Stylo (Firefox CSS engine): restyle hints approach for pseudo-class changes
-- Svelte 5 runes: signal-based fine-grained reactivity model
+- [MESH codebase] `crates/core/shell/src/shell/runtime/mod.rs` — full shell loop, `next_runtime_sleep()`, `dispatch_wayland()`, `render_components()` — HIGH confidence
+- [MESH codebase] `crates/core/presentation/src/wayland_surface/backend.rs` — `dispatch_available()`, `attach_shm_buffer()`, `present_with_damage()`, `frame_pending` — HIGH confidence
+- [MESH codebase] `crates/core/presentation/src/wayland_surface/handlers.rs` — `CompositorHandler::frame()`, `LayerShellHandler::configure()` — HIGH confidence
+- [docs.rs/wayland-client/0.31.14] — `wl_surface.set_opaque_region()` API, `WlCompositor.create_region()` — HIGH confidence
+- [Wayland protocol spec] — `wl_surface::set_opaque_region` copy semantics — HIGH confidence

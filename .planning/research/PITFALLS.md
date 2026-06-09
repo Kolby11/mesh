@@ -1,161 +1,97 @@
-# Domain Pitfalls: Typed Dependency Tracking (v1.18)
+# Domain Pitfalls
 
-**Domain:** Narrow invalidation for retained-mode shell framework
-**Researched:** 2026-06-07
-**Confidence:** HIGH (all pitfalls identified from direct MESH codebase analysis)
+**Domain:** Event-Driven Wayland Frame Scheduler
+**Researched:** 2026-06-09
+**Confidence:** HIGH
 
 ## Critical Pitfalls
 
-Mistakes that cause stale displays or incorrect invalidation.
+Mistakes that cause rewrites or major issues.
 
-### Pitfall 1: Inherited Style Values Not Propagated on Partial Restyle
+### Pitfall 1: Blocking Before Draining the Shell Message Channel
 
-**What goes wrong:** When a node is restyled due to a state change but its children are NOT restyled (they have no state dependency), the children's inherited text-style values (color, font-family, font-size, font-weight, line-height) become stale. The parent's `color` changed, but the child keeps its old inherited `color`.
+**What goes wrong:** The shell blocks on the Wayland fd (`poll()`) before draining the `mpsc::unbounded_channel` from IPC and backends. Shell messages (theme reloads, module reloads, backend state) sit in the channel until the Wayland timeout expires.
 
-**Why it happens:** `restyle_subtree_with_index()` currently walks the full tree — every node gets `inherit_retained_text_style()` from its parent. Under narrow restyle, only affected nodes are visited, and children of restyled-but-not-dirty nodes are invisible to the inheritance pass.
+**Why it happens:** `wait_for_events()` is called at the bottom of the loop after `render_components()`, but if reordered to the top (trying to "wait first, then work"), IPC latency spikes to the poll timeout.
 
-**Consequences:** Text color changes on a container but child text nodes keep old color. Font-family changes don't propagate. Visual inconsistency between parent and children.
+**Consequences:** Theme hot-reloads and IPC commands experience up to 16ms of added latency. Remote-control responsiveness degrades. Backend state updates pile up.
 
-**Prevention:** In `restyle_nodes_with_index()`, after restyling a target node, walk its direct children and re-apply `inherit_retained_text_style()` from the restyled node. Track which 5 properties inherit (color, font-family, font-size, font-weight, line-height). Only a node whose inherited-property set changed needs this pass on its children.
+**Prevention:** Keep the existing loop order — drain shell messages, tick components, render, present, *then* block. Do not move `wait_for_events()` before `handle_shell_message()`.
 
-**Detection:** Test: change `.container:hover { color: red }` on hover → all descendant text nodes should show red. Pixel-equivalence test against full restyle baseline.
+**Detection:** Profile `shell_message_backlog_likely` — if it's ever true after a blocking wait, the order is wrong.
 
-**Phase:** Selector dependency tracking (Phase A).
+### Pitfall 2: wl_region Leak on set_opaque_region
 
----
+**What goes wrong:** Each frame creates a new `WlRegion`, calls `set_opaque_region()`, but never destroys the region. The compositor tracks every region object until disconnect.
 
-### Pitfall 2: Script + Interaction Co-Dirtying Destroys Narrow Work
+**Why it happens:** The `wl_surface.set_opaque_region` docs say "the wl_region object can be destroyed immediately" (copy semantics) — but if this isn't read carefully, it's easy to miss the destroy step.
 
-**What goes wrong:** A `:hover` restyle (Phase A path, restyles ~5 nodes) and a backend service update (Phase C path, dirties 2 nodes) arrive in the same frame. The current `take_dirty_for_paint()` calls `requires_tree_rebuild` first — if SCRIPT is dirty, it jumps to `build_tree()` which discards ALL narrow invalidation work and produces a fresh tree from source.
+**Consequences:** Over hours of uptime at 60fps, 216,000 leaked region objects per hour. Compositors may reject new objects, crash, or slow down significantly.
 
-**Why it happens:** Dirty resolution order is currently: check `requires_tree_rebuild` → `build_tree()` (full) or `restyle_retained_tree()` (retained with skip). There's no "apply narrow then merge" path.
+**Prevention:** Always `region.destroy()` after `set_opaque_region()`. Add a debug-only leak check that asserts `wl_region` objects are destroyed within the same frame.
 
-**Consequences:** Narrow invalidation work is wasted when co-occurring with script changes. The rebuilt tree may not reflect interaction state if build-time state is stale.
+**Detection:** Monitor Wayland object counts in compositor debug tools. A monotonically increasing `wl_region` count is a leak.
 
-**Prevention:** The dirty-type priority order must be: SCRIPT > TEXT > STATE > STYLE > LAYOUT > PAINT. If SCRIPT is dirty, skip ALL narrow invalidation — full `build_tree()` is correct. Only apply narrow restyle when SCRIPT and TEXT are clean. The existing code already implements this logic via `requires_tree_rebuild` gate — narrow invalidation must fit within the existing retained path (not add a third path).
+### Pitfall 3: Setting Opaque Region on Semi-Transparent Surfaces
 
-**Detection:** Test: simultaneous `:hover` change + service state update → one frame produces correct output (not flickering stale styles).
+**What goes wrong:** A surface uses theme-defined alpha (e.g., `rgba(0, 0, 0, 0.85)` for a panel background). The opaque region computation sees the background fill and marks it opaque, telling the compositor it can skip compositing surfaces behind it.
 
-**Phase:** Narrow invalidation (Phase C).
+**Why it happens:** The opaque region computation incorrectly uses the fill color's alpha channel as a binary "opaque or not" check without considering that 0.85 alpha means 15% of background bleeds through.
 
----
+**Consequences:** Compositor skips rendering surfaces behind the "opaque" region — users see stale framebuffer contents or rendering artifacts where transparent surfaces should show underlying content.
 
-### Pitfall 3: Text Measure Cascade Into Layout
+**Prevention:** Only mark regions as opaque when the background fill alpha is exactly 1.0 (255). Any alpha < 1.0 means the region is NOT opaque. Theme tokens with alpha channels (semi-transparent panels, glass effects) must not produce opaque region hints.
 
-**What goes wrong:** A service field change updates a text node's content (e.g., `audio_label` changes from "65%" to "66%"). The text measure changes (different glyph width). Under narrow invalidation, only the text node is flagged dirty. But its parent flex container must recalculate because the child's intrinsic width changed.
-
-**Why it happens:** Text measure is computed during layout by `SharedTextMeasurer`. Under narrow invalidation, the parent is not flagged LAYOUT dirty, so Taffy doesn't recompute the parent's layout, and the child's new bounds are not reflected.
-
-**Prevention:** When a text node's content changes, after computing the new text measure, compare old vs new intrinsic size. If size changed, flag the node's ANCESTORS as LAYOUT dirty (propagate up). This is the `mark_layout_ancestors_dirty()` method on `RetainedWidgetTree`.
-
-**Detection:** Test: service field changes a label's text → parent container re-layouts if needed. Pixel-equivalence test against full rebuild baseline.
-
-**Phase:** Narrow invalidation (Phase C), during `invalidate_service_nodes()`.
-
----
-
-### Pitfall 4: Service Field Tracking False Negatives on First Render
-
-**What goes wrong:** On first component mount, `tracked_service_fields` is empty (no render has happened yet). A service event arrives before the first render completes. `tracked_service_fields_changed()` returns `false` (no fields tracked) → component skips invalidation → stale display.
-
-**Why it happens:** Narrow invalidation depends on `tracked_service_fields` being populated. Before the first render, no fields have been read, so the index is empty.
-
-**Consequences:** Components that mount and immediately receive service events show stale data.
-
-**Prevention:** Before the first render, `tracked_service_fields` is empty. The `handle_service_event` must fall back to `TREE_REBUILD` when tracked set is empty. Alternatively, seed the tracked set with all fields from the service contract's `state_fields` definition (from `InterfaceContract`). The existing code already applies the payload unconditionally — the question is whether the downstream invalidation is correct. Since `invalidate_script_state()` → `TREE_REBUILD` handles this, and the fallback to `TREE_REBUILD` when tracked set is empty is the narrow-equivalent, this is a design constraint, not a bug.
-
-**Detection:** Test: mount component, send service event before first render → component shows correct data.
-
-**Phase:** Service event routing (Phase C).
-
----
+**Detection:** Visual inspection: if a semi-transparent panel shows correct content behind it on Sway but garbage/black on Hyprland, the opaque region is wrong.
 
 ## Moderate Pitfalls
 
-### Pitfall 5: Nested JSON Field Indistinguishability
+### Pitfall 4: Frame Callback Not Requested on Every Commit
 
-**What goes wrong:** Service payload is `{"playback": {"title": "Song", "artist": "Artist"}}`. A script does `playback.title`. The `__index` trap fires on `playback` (returns a table), then on `.title`. The tracker records `"playback"` as the read field. When the next update changes `playback.artist` but not `playback.title`, the tracker sees `"playback"` changed → triggers rebuild unnecessarily.
+**What goes wrong:** `wl_surface.frame()` is only called in `attach_shm_buffer()` — which is only called when there's a buffer to present. If a commit happens without a buffer (e.g., a configure-only commit or a hide), no frame callback is requested, and the shell blocks for the full timeout.
 
-**Prevention:** Service proxy objects must support recursive nested field tracking. When `__index` on the root proxy returns a table, wrap it in a child proxy with its own `__index` that prepends the parent key path. Accessing `.title` on the child proxy records `"playback.title"`.
+**Why it happens:** The current codebase already handles this: `hide()` calls `wl_surface.attach(None, 0, 0)` then `commit()` without requesting a frame callback.
 
-**Detection:** Benchmark: component reading `playback.title` is NOT invalidated when only `playback.artist` changes.
+**Consequences:** Surface hide transitions have up to 16ms of unnecessary latency. Polish issue, not correctness.
 
-**Phase:** Service event routing (Phase C). This is deferred past the MVP because flat payloads (audio: `percent`, `muted`) are the common case.
+**Prevention:** After a hide commit, either: (a) skip the blocking wait entirely, or (b) request a frame callback even on null-buffer commits. Option (a) is simpler and preferred.
 
----
+### Pitfall 5: Dev-Window Backend Blocking
 
-### Pitfall 6: Metatable Overhead in Render Hot Path
+**What goes wrong:** `PresentationEngine::wait_for_events()` is implemented for `Backend::DevWindow` by calling `thread::sleep()`, making the dev window unresponsive.
 
-**What goes wrong:** The `__index` metatable on service proxy fires on every field read. A render hook that reads 100 service fields pays 100 metatable dispatches. Luau metatable dispatch is ~50-100ns per call on x86_64, so 100 reads = 5-10μs — typically negligible. But 1,000 reads = 50-100μs — potentially significant for complex render hooks.
+**Why it happens:** The dev-window backend (minifb) doesn't expose a Wayland fd.
 
-**Prevention:** Cache tracked status on the Lua side after first read. The metatable `__index` should: (1) check if field is already tracked (fast path — bit test on a Lua-side table), (2) if not tracked, record and notify Rust side (slow path — only hit once per field per lifecycle). Profile with existing `mesh-core-debug` infrastructure during Phase B.
+**Consequences:** Dev window freezes or has 16ms input latency.
 
-**Detection:** Profiling shows script execution time growth >5% after field tracking is added.
-
-**Phase:** Per-node service dependency tracking (Phase B). The existing `tracked_service_fields` already uses this pattern; per-node tracking adds the snapshot stage only, not more metatable overhead.
-
----
+**Prevention:** Match on `Backend::DevWindow` and return immediately (no-op). Minifb's internal update loop already handles its own event polling.
 
 ## Minor Pitfalls
 
-### Pitfall 7: State Bitmask Non-Orthogonality (Disabled + Hover)
+### Pitfall 6: poll() Timeout Truncation
 
-**What goes wrong:** `disabled` and `hovered` are independent bits in `ElementState`. A node can be both `disabled=true` and `hovered=true`. CSS cascade handles this via rule ordering (later rule wins). But if the dependency set treats bits independently, a `:hover` change on a disabled node triggers restyle that the cascade then suppresses. This is wasted work, not incorrect output.
+**What goes wrong:** `Duration::as_millis()` returns `u128`. Truncating to `i32` for `rustix::event::poll()` silently wraps on very large values.
 
-**Prevention:** Dependency sets should still track all state bits independently. The cascade, not the dependency set, resolves conflicts. This is correct but suboptimal for mutually exclusive states. Optimization deferred.
+**Why it happens:** The deadline is capped at `MAX_IDLE_SLEEP = 16ms`, well within i32 range. But a future change removing the cap could overflow.
 
-**Detection:** Test: disabled button receives hover → no visual change, but profiling shows style restyle occurred. Acceptable for v1.18.
+**Consequences:** None currently (16ms << i32::MAX). Future risk only.
 
-**Phase:** Selector dependency tracking (Phase A). Accept as known overhead.
-
----
-
-### Pitfall 8: Fallback Rule Bucket Dominance
-
-**What goes wrong:** The `StyleRuleIndex.fallback` bucket contains selectors that couldn't be indexed (universal `*`, unindexable compounds). These are ALWAYS re-evaluated during restyle. If the fallback bucket is large (>5% of rules), the benefit of narrow restyle is eroded.
-
-**Prevention:** Audit the fallback bucket during Phase A. If >5% of rules land there, improve `selector_index_key()` to handle more compound cases. Universal selectors can be cached — evaluate once per theme change, not per-restyle.
-
-**Detection:** `StyleRuleIndex.fallback.len()` is small relative to `rules.len()`. Audit during index construction.
-
-**Phase:** Selector dependency tracking (Phase A). Part of the `StateRuleIndex::new()` audit.
-
----
+**Prevention:** `timeout.as_millis().min(i32::MAX as u64) as i32`.
 
 ## Phase-Specific Warnings
 
-| Phase | Likely Pitfall | Mitigation |
-|-------|---------------|------------|
-| Phase A: Selector deps | Inherited style not propagated (Pitfall 1) | Walk children after restyle, apply `inherit_retained_text_style()` |
-| Phase A: Selector deps | Fallback bucket dominance (Pitfall 8) | Audit `fallback.len()`; cache universal selectors |
-| Phase A: Selector deps | State bitmask non-orthogonality (Pitfall 7) | Accept as acceptable overhead |
-| Phase B: Per-node tracking | Metatable overhead (Pitfall 6) | Cache tracked status on Lua side; profile |
-| Phase C: Narrow invalidation | Co-dirtying destroys work (Pitfall 2) | Respect dirty-type priority order; only narrow when SCRIPT+TEXT clean |
-| Phase C: Narrow invalidation | Text measure cascade (Pitfall 3) | Propagate LAYOUT dirty to ancestors on text size change |
-| Phase C: Routing | Nested fields indistinguishable (Pitfall 5) | Recursive proxy wrapping; deferred past MVP |
-
-## Testing Strategy
-
-### Required Equivalence Tests (CI Gate)
-
-For every benchmark scenario (hover, open/close, slider, traversal, backend-update):
-
-1. Run narrow invalidation path → capture `WidgetNode` tree + `PixelBuffer`
-2. Run full restyle/rebuild path (force `TREE_REBUILD`) → capture same
-3. Assert pixel-identical output AND widget-tree identical (all `computed_style` fields, all `layout` bounds)
-
-### Required Profiling Tests
-
-- `component.style` count: should drop from 1/frame to 0 most frames (only on state transition)
-- `retained.inserted` / `retained.removed`: should be 0 for state-only changes
-- `paint.damage_area / paint.surface_area`: should decrease
+| Phase Topic | Likely Pitfall | Mitigation |
+|-------------|---------------|------------|
+| Scheduling: fd blocking | Blocking order (pitfall 1) | Keep drain-then-wait order |
+| Scheduling: deadline calculation | Removing MAX_IDLE_SLEEP cap | Keep the 16ms cap — it's safety, not legacy |
+| Opaque region: display list walking | Alpha threshold (pitfall 3) | Only mark alpha=255 as opaque; test with alpha=254 background |
+| Opaque region: wl_region lifecycle | Region leak (pitfall 2) | Mandatory `destroy()` after `set_opaque_region()` |
+| Integration: dev-window backend | Blocking on wrong backend (pitfall 5) | DevWindow returns immediately from `wait_for_events()` |
 
 ## Sources
 
-- MESH codebase: `crates/core/shell/src/shell/component/rendering.rs` — `finalize_tree()` targeted_interaction_restyle path (L217)
-- MESH codebase: `crates/core/ui/elements/src/style/resolve.rs` — `inherit_retained_text_style()` (L992-1009), inherited properties
-- MESH codebase: `crates/core/shell/src/shell/component/shell_component.rs` — `handle_service_event` (L119-182), `paint()` (L289-489)
-- MESH codebase: `crates/core/runtime/scripting/src/context/proxy.rs` — metatable `__index` dispatch (L152-159)
-- MESH v1.3 benchmark scenarios: hover, open/close, slider, traversal, backend-update
-- CSS cascade spec: inheritance behavior for `color`, `font-family`, `font-size`, `font-weight`, `line-height`
-- Luau performance notes: metatable dispatch cost ~50-100ns: https://luau.org/performance/
+- [MESH codebase] `crates/core/presentation/src/wayland_surface/backend.rs` — `hide()`, `attach_shm_buffer()`, `dispatch_available()`, `MAX_FRAME_CALLBACK_WAIT` — HIGH confidence
+- [MESH codebase] `crates/core/shell/src/shell/runtime/mod.rs` — `run()` loop order, `next_runtime_sleep()`, `MAX_IDLE_SLEEP` — HIGH confidence
+- [docs.rs/wayland-client/0.31.14] — `wl_surface.set_opaque_region()` copy semantics — HIGH confidence
+- [Wayland protocol spec] — `wl_region` lifecycle — HIGH confidence
+- [Community wisdom] — Common Wayland client bugs: region leaks, opaque region on transparent surfaces — MEDIUM confidence
