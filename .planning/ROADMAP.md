@@ -59,6 +59,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
+
 - [x] 97-01-PLAN.md — Add service_field_reads to WidgetNode + TrackingVariableStore in compiler
 - [x] 97-02-PLAN.md — NodeServiceFieldDependencies bidirectional index + wire into FrontendSurfaceComponent
 - [x] 97-03-PLAN.md — SRV-03 overhead benchmark and correctness smoke tests
@@ -79,8 +80,16 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 98-01-PLAN.md — SCRIPT_NARROW dirty flag + narrow_script_update() with tree diff, ancestor expansion, structural fallback, >50% threshold guard, paint() routing
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 98-02-PLAN.md — handle_service_event() JSON field-level diff + NodeServiceFieldDependencies intersection check (skip vs invalidate_script_state_narrow)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 98-03-PLAN.md — FNV-1a pixel equivalence helper + five canonical benchmark profiling tests + extended PHASE_PROOF format
 
 ---
