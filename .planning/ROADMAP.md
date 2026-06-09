@@ -46,7 +46,11 @@
   3. IPC messages (theme reloads, backend state changes, reload commands) are drained before the shell blocks, with no observable latency regression versus v1.18
   4. Dev-window backend continues to open, render, and close with its existing sleep behavior unchanged
   5. Profiling debug inspector shows `SchedulerIdle` stage with block duration and wake reason recorded after each idle period
-**Plans**: TBD
+ **Plans**: 4 plans
+  - [ ] 99-01-PLAN.md — ProfilingStage::SchedulerIdle variant + PresentationEngine API (WaitReason/WaitResult/supports_blocking_dispatch/wait_for_events)
+  - [ ] 99-02-PLAN.md — LayerShellBackend::wait_for_events blocking dispatch implementation
+  - [ ] 99-03-PLAN.md — Shell loop integration: eventfd creation, blocking dispatch, MAX_IDLE_SLEEP removal, SchedulerIdle profiling
+  - [ ] 99-04-PLAN.md — IPC and backend eventfd signaling to wake blocking poll
 
 ### Phase 100: Opaque Region Hints
 **Goal**: Compositor receives opaque region metadata for surfaces with fully-opaque backgrounds, enabling compositing optimization without visual regressions
@@ -67,7 +71,7 @@
 | 96. Selector Dependency Tracking | v1.18 | 3/3 | Complete | 2026-06-07 |
 | 97. Service Field Dependency Tracking | v1.18 | 3/3 | Complete | 2026-06-09 |
 | 98. Narrow Invalidation & Event Routing | v1.18 | 3/3 | Complete | 2026-06-09 |
-| 99. Event-Driven Wayland Dispatch | v1.19 | 0/0 | Not started | - |
+| 99. Event-Driven Wayland Dispatch | v1.19 | 0/4 | Not started | - |
 | 100. Opaque Region Hints | v1.19 | 0/0 | Not started | - |
 
 ---
