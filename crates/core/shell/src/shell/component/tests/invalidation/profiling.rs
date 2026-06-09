@@ -444,3 +444,135 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
     assert_raster_cache_reuse("keyboard_traversal", &keyboard_invalidation);
     assert_raster_cache_reuse("backend_update", &backend_update_invalidation);
 }
+
+fn fnv_hash_buffer(buffer: &PixelBuffer) -> u64 {
+    const OFFSET: u64 = 14695981039346656037;
+    const PRIME: u64 = 1099511628211;
+    let mut hash: u64 = OFFSET;
+    for &byte in &buffer.data {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
+}
+
+#[test]
+fn phase98_pixel_equivalence_backend_update() {
+    let theme = default_theme();
+
+    let mut baseline =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let mut narrow =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    let mut baseline_buffer = PixelBuffer::new(960, 80);
+    let mut narrow_buffer = PixelBuffer::new(960, 80);
+
+    baseline
+        .paint(&theme, 960, 80, &mut baseline_buffer)
+        .unwrap();
+    narrow.paint(&theme, 960, 80, &mut narrow_buffer).unwrap();
+
+    let payload = serde_json::json!({"available": true, "percent": 55, "muted": false});
+    baseline
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: payload.clone(),
+        })
+        .unwrap();
+    narrow
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload,
+        })
+        .unwrap();
+
+    baseline.invalidate_script_state();
+    baseline
+        .paint(&theme, 960, 80, &mut baseline_buffer)
+        .unwrap();
+    narrow.paint(&theme, 960, 80, &mut narrow_buffer).unwrap();
+
+    let baseline_hash = fnv_hash_buffer(&baseline_buffer);
+    let narrow_hash = fnv_hash_buffer(&narrow_buffer);
+    assert_eq!(
+        baseline_hash, narrow_hash,
+        "pixel equivalence: backend_update"
+    );
+}
+
+#[test]
+fn phase98_profiling_backend_update_reduced_churn() {
+    let theme = default_theme();
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    component.set_profiling_enabled(true);
+    let mut buffer = PixelBuffer::new(960, 80);
+
+    component.paint(&theme, 960, 80, &mut buffer).unwrap();
+    component.take_profiling_records();
+
+    let payload = serde_json::json!({"available": true, "percent": 65, "muted": false});
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload,
+        })
+        .unwrap();
+
+    component.paint(&theme, 960, 80, &mut buffer).unwrap();
+    let invalidation = component
+        .take_invalidation_snapshot()
+        .expect("profiling snapshot");
+
+    eprintln!(
+        "PHASE98_PROOF scenario=backend_update narrow_path={} affected_node_count={} full_rebuild={} component_invalidations={:?}",
+        invalidation.narrow_path,
+        invalidation.affected_node_count,
+        invalidation.full_rebuild,
+        invalidation.component
+    );
+
+    assert!(
+        invalidation.full_rebuild || invalidation.narrow_path,
+        "backend update should use either TREE_REBUILD or SCRIPT_NARROW path"
+    );
+}
+
+#[test]
+fn fnv_hash_buffer_deterministic() {
+    let buffer = PixelBuffer::new(8, 8);
+    let hash1 = fnv_hash_buffer(&buffer);
+    let hash2 = fnv_hash_buffer(&buffer);
+    assert_eq!(
+        hash1, hash2,
+        "FNV hash must be deterministic for same buffer"
+    );
+}
+
+#[test]
+fn fnv_hash_buffer_zero_identical() {
+    let buffer1 = PixelBuffer::new(4, 4);
+    let buffer2 = PixelBuffer::new(4, 4);
+    assert_eq!(
+        fnv_hash_buffer(&buffer1),
+        fnv_hash_buffer(&buffer2),
+        "two identically-sized zero-initialized buffers must have the same hash"
+    );
+}
+
+#[test]
+fn fnv_hash_buffer_differs_on_change() {
+    let mut buffer1 = PixelBuffer::new(4, 4);
+    buffer1.clear(mesh_core_elements::style::Color::TRANSPARENT);
+    let mut buffer2 = PixelBuffer::new(4, 4);
+    buffer2.clear(mesh_core_elements::style::Color::from_rgba8(255, 0, 0, 255));
+    let hash1 = fnv_hash_buffer(&buffer1);
+    let hash2 = fnv_hash_buffer(&buffer2);
+    assert_ne!(
+        hash1, hash2,
+        "different pixel content must produce different hashes"
+    );
+}

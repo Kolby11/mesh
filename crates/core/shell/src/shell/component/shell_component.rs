@@ -131,6 +131,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.last_service_update = Some(format!("{service}:{source_module}"));
         let caps = crate::shell::service::service_capabilities(service);
         let service_name = &caps.service_name;
+        let previous_payload = self.cached_service_payloads.get(service_name).cloned();
         self.cached_service_payloads
             .insert(service_name.clone(), payload.clone().into());
         let mut needs_rebuild = false;
@@ -176,7 +177,23 @@ impl ShellComponent for FrontendSurfaceComponent {
         *self.runtimes.lock().unwrap() = runtimes;
         if needs_rebuild {
             self.render_hooks_pending = true;
-            self.invalidate_script_state();
+            let narrow_eligible = if let Some(ref prev) = previous_payload {
+                let fields = json_field_diff(service, prev, payload);
+                !fields.is_empty()
+                    && fields.iter().any(|(svc, fld)| {
+                        !self
+                            .node_service_field_deps
+                            .nodes_reading_field(svc, fld)
+                            .is_empty()
+                    })
+            } else {
+                false
+            };
+            if narrow_eligible {
+                self.invalidate_script_state_narrow();
+            } else {
+                self.invalidate_script_state();
+            }
         }
         Ok(Vec::new())
     }
@@ -319,10 +336,12 @@ impl ShellComponent for FrontendSurfaceComponent {
         } else {
             Default::default()
         };
-        // Fast path: when only appearance changed (e.g. hover) and a previous
-        // tree is cached, skip the Luau-driven tree build and mutate the
-        // retained tree instead of cloning it.
-        let mut tree = if use_retained_style_path {
+        let mut tree = if dirty_types.contains(ComponentDirtyFlags::SCRIPT_NARROW) {
+            match self.narrow_script_update(theme, content_width, content_height) {
+                Some(t) => t,
+                None => self.build_tree(theme, content_width, content_height),
+            }
+        } else if use_retained_style_path {
             match self.restyle_retained_tree(theme, content_width, content_height, dirty_types) {
                 Some(t) => t,
                 None => self.build_tree(theme, content_width, content_height),
@@ -481,6 +500,10 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.record_focused_proof_diagnostic(diagnostic);
         }
         self.focused_proof_snapshot = Some(focused_proof_snapshot);
+        let narrow_path = self.narrow_path_active;
+        let affected_count = self.affected_node_count;
+        self.narrow_path_active = false;
+        self.affected_node_count = 0;
         self.invalidation_snapshot = Some(mesh_core_debug::ProfilingInvalidationSnapshot {
             full_rebuild: requires_tree_rebuild,
             retained_path: use_retained_style_path,
@@ -489,6 +512,8 @@ impl ShellComponent for FrontendSurfaceComponent {
             retained: retained_dirty.to_debug_counts(),
             paint: retained_paint_snapshot(selected_paint.metrics(), &effective_damage),
             text: mesh_core_debug::TextCacheSnapshot::default(),
+            narrow_path,
+            affected_node_count: affected_count,
         });
         tracing::trace!(
             "retained widget tree '{}' generation={} dirty={:?}",

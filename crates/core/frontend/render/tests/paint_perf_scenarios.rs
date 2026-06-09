@@ -227,23 +227,38 @@ fn service_field_reads_populated_on_nodes() {
     let mut root = node(1, "column", 0.0, 0.0, 400.0, 200.0);
 
     let mut child_a = node(2, "text", 0.0, 0.0, 100.0, 20.0);
-    child_a.service_field_reads.push(("audio".to_string(), "percent".to_string()));
-    child_a.service_field_reads.push(("audio".to_string(), "muted".to_string()));
+    child_a
+        .service_field_reads
+        .push(("audio".to_string(), "percent".to_string()));
+    child_a
+        .service_field_reads
+        .push(("audio".to_string(), "muted".to_string()));
 
     let child_b = node(3, "text", 100.0, 0.0, 100.0, 20.0);
 
     let mut child_c = node(4, "icon", 200.0, 0.0, 20.0, 20.0);
-    child_c.service_field_reads.push(("network".to_string(), "connected".to_string()));
+    child_c
+        .service_field_reads
+        .push(("network".to_string(), "connected".to_string()));
 
     root.children.push(child_a);
     root.children.push(child_b);
     root.children.push(child_c);
 
     assert_eq!(root.children[0].service_field_reads.len(), 2);
-    assert_eq!(root.children[0].service_field_reads[0], ("audio".to_string(), "percent".to_string()));
-    assert_eq!(root.children[0].service_field_reads[1], ("audio".to_string(), "muted".to_string()));
+    assert_eq!(
+        root.children[0].service_field_reads[0],
+        ("audio".to_string(), "percent".to_string())
+    );
+    assert_eq!(
+        root.children[0].service_field_reads[1],
+        ("audio".to_string(), "muted".to_string())
+    );
     assert!(root.children[1].service_field_reads.is_empty());
     assert_eq!(root.children[2].service_field_reads.len(), 1);
-    assert_eq!(root.children[2].service_field_reads[0], ("network".to_string(), "connected".to_string()));
+    assert_eq!(
+        root.children[2].service_field_reads[0],
+        ("network".to_string(), "connected".to_string())
+    );
     assert!(root.service_field_reads.is_empty());
 }

@@ -76,6 +76,11 @@ bitflags::bitflags! {
         const ACCESSIBILITY = 1 << 6;
         const METRICS = 1 << 7;
         const SURFACE_CONFIG = 1 << 8;
+        /// Leaf-only script change; bypasses TREE_REBUILD.
+        /// Does NOT trigger a full Luau re-evaluation of the tree structure;
+        /// instead, `narrow_script_update()` diffs the freshly rebuilt tree
+        /// against the retained tree and marks only changed leaf nodes dirty.
+        const SCRIPT_NARROW = 1 << 9;
     }
 }
 
@@ -130,6 +135,7 @@ impl ComponentDirtyFlags {
             accessibility: self.contains(Self::ACCESSIBILITY) as u64,
             metrics: self.contains(Self::METRICS) as u64,
             surface_config: self.contains(Self::SURFACE_CONFIG) as u64,
+            script_narrow: self.contains(Self::SCRIPT_NARROW) as u64,
         }
     }
 }
@@ -348,7 +354,7 @@ pub(super) struct FrontendSurfaceComponent {
     interface_catalog: mesh_core_service::InterfaceCatalog,
     last_tree: Option<WidgetNode>,
     intrinsic_layout_cache: IntrinsicLayoutCache,
-    retained_tree: RetainedWidgetTree,
+    pub(super) retained_tree: RetainedWidgetTree,
     node_service_field_deps: NodeServiceFieldDependencies,
     retained_render_objects: RenderObjectTree,
     retained_display_list: RetainedDisplayList,
@@ -367,6 +373,8 @@ pub(super) struct FrontendSurfaceComponent {
     keyframe_animations: HashMap<String, mesh_core_animation::keyframes::ActiveKeyframeAnimation>,
     keyframe_rules: HashMap<String, mesh_core_animation::keyframes::KeyframeRule>,
     has_active_keyframe_animation: bool,
+    narrow_path_active: bool,
+    affected_node_count: u64,
     profiling_enabled: bool,
     profiling_records: Vec<ComponentProfilingRecord>,
     invalidation_snapshot: Option<mesh_core_debug::ProfilingInvalidationSnapshot>,
@@ -510,6 +518,17 @@ impl FrontendSurfaceComponent {
         self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
     }
 
+    /// Narrow script invalidation — signals that only leaf-level values may
+    /// have changed (no structural changes: no added/removed nodes, no
+    /// conditional-branch flips). The paint path will call `narrow_script_update()`,
+    /// which rebuilds the tree, diffs against the prior retained snapshot, and
+    /// falls back to a full TREE_REBUILD if any structural change is detected or
+    /// if more than 50% of nodes are affected.
+    pub(super) fn invalidate_script_state_narrow(&mut self) {
+        self.surface_pixels_invalid = true;
+        self.invalidate(ComponentDirtyFlags::SCRIPT_NARROW);
+    }
+
     pub(super) fn invalidate_interaction_restyle(&mut self) {
         self.invalidate_style_path(ComponentDirtyFlags::INTERACTION_RESTYLE);
     }
@@ -596,6 +615,36 @@ fn capability_caches_service_payload(capability: &str) -> bool {
             .strip_prefix("service.")
             .and_then(|capability| capability.strip_suffix(".read"))
             .is_some_and(|service| !service.is_empty())
+}
+
+pub(super) fn json_field_diff(
+    service: &str,
+    previous: &serde_json::Value,
+    next: &serde_json::Value,
+) -> Vec<(String, String)> {
+    let mut changed = Vec::new();
+    let prev_obj = match previous.as_object() {
+        Some(o) => o,
+        None => return changed,
+    };
+    let next_obj = match next.as_object() {
+        Some(o) => o,
+        None => return changed,
+    };
+    for (key, val) in next_obj {
+        match prev_obj.get(key) {
+            Some(prev_val) if prev_val == val => {}
+            _ => {
+                changed.push((service.to_string(), key.clone()));
+            }
+        }
+    }
+    for key in prev_obj.keys() {
+        if !next_obj.contains_key(key) {
+            changed.push((service.to_string(), key.clone()));
+        }
+    }
+    changed
 }
 
 pub(super) fn grant_capabilities_from_manifest(

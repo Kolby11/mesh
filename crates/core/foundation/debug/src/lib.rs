@@ -179,6 +179,10 @@ pub struct ProfilingInvalidationSnapshot {
     pub retained: RetainedInvalidationCounts,
     pub paint: RetainedPaintSnapshot,
     pub text: TextCacheSnapshot,
+    /// True when the paint pass took the narrow-script path (SCRIPT_NARROW flag).
+    pub narrow_path: bool,
+    /// Number of nodes (expanded leaf + ancestor chain) dirtied on the narrow path.
+    pub affected_node_count: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -192,6 +196,8 @@ pub struct ComponentInvalidationCounts {
     pub accessibility: u64,
     pub metrics: u64,
     pub surface_config: u64,
+    /// Incremented when a SCRIPT_NARROW invalidation was taken (leaf-only path).
+    pub script_narrow: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

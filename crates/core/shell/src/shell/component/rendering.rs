@@ -148,6 +148,24 @@ impl FrontendSurfaceComponent {
         tree
     }
 
+    pub(super) fn narrow_script_update(
+        &mut self,
+        theme: &Theme,
+        width: u32,
+        height: u32,
+    ) -> Option<WidgetNode> {
+        let tree = self.build_tree(theme, width, height);
+        let (mut affected, total) = self.retained_tree.narrow_script_diff(&tree)?;
+        if affected.len() * 2 > total {
+            return None;
+        }
+        let mut full_affected = affected.clone();
+        narrow_expand_ancestors(&tree, &affected, &mut full_affected);
+        self.affected_node_count = full_affected.len() as u64;
+        self.narrow_path_active = true;
+        Some(tree)
+    }
+
     /// Retained fast path used when only appearance changed (e.g. hover)
     /// without any script-state mutation. Moves the previously built widget
     /// tree out of `last_tree`, mutates it in place, and returns it for paint.
@@ -552,4 +570,33 @@ fn annotate_selection_node(
     }
 
     false
+}
+
+pub(super) fn narrow_expand_ancestors(
+    tree: &WidgetNode,
+    affected: &HashSet<NodeId>,
+    full_affected: &mut HashSet<NodeId>,
+) {
+    let mut parent_map = HashMap::new();
+    narrow_build_parent_map(tree, None, &mut parent_map);
+    for &leaf_id in affected.iter() {
+        let mut current = leaf_id;
+        while let Some(&parent) = parent_map.get(&current) {
+            full_affected.insert(parent);
+            current = parent;
+        }
+    }
+}
+
+fn narrow_build_parent_map(
+    node: &WidgetNode,
+    parent_id: Option<NodeId>,
+    parent_map: &mut HashMap<NodeId, NodeId>,
+) {
+    if let Some(pid) = parent_id {
+        parent_map.insert(node.id, pid);
+    }
+    for child in &node.children {
+        narrow_build_parent_map(child, Some(node.id), parent_map);
+    }
 }

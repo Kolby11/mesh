@@ -183,6 +183,33 @@ impl RetainedWidgetTree {
     fn retained_key_for_node_id(&self, node_id: NodeId) -> Option<RetainedNodeKey> {
         self.node_keys.get(&node_id).copied()
     }
+
+    pub(super) fn narrow_script_diff(&self, root: &WidgetNode) -> Option<(HashSet<NodeId>, usize)> {
+        let mut fresh_snapshots = HashMap::new();
+        collect_retained_snapshots(root, &mut fresh_snapshots);
+        let total = fresh_snapshots.len();
+
+        let mut affected = HashSet::new();
+        for (&node_id, fresh) in &fresh_snapshots {
+            let prev_key = match self.node_keys.get(&node_id).copied() {
+                Some(key) => key,
+                None => return None, // INSERTED
+            };
+            let prev = match self.nodes.get(prev_key) {
+                Some(snap) => snap,
+                None => return None, // INSERTED
+            };
+            let (flags, _) = prev.diff_flags(fresh);
+            if flags.is_empty() {
+                continue;
+            }
+            if flags.contains(RetainedNodeDirtyFlags::CHILDREN) {
+                return None; // structural change
+            }
+            affected.insert(node_id);
+        }
+        Some((affected, total))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -757,7 +784,10 @@ fn collect_node_service_deps(node: &WidgetNode, deps: &mut NodeServiceFieldDepen
         let entry = deps.forward.entry(node.id).or_default();
         for pair in &node.service_field_reads {
             entry.insert(pair.clone());
-            deps.reverse.entry(pair.clone()).or_default().insert(node.id);
+            deps.reverse
+                .entry(pair.clone())
+                .or_default()
+                .insert(node.id);
         }
     }
     for child in &node.children {
@@ -887,20 +917,24 @@ mod tests {
     #[test]
     fn node_service_field_deps_forward_lookup() {
         let mut node = WidgetNode::new("text");
-        node.service_field_reads.push(("audio".to_string(), "percent".to_string()));
+        node.service_field_reads
+            .push(("audio".to_string(), "percent".to_string()));
         let id = node.id;
         let mut root = WidgetNode::new("column");
         root.children.push(node);
 
         let deps = NodeServiceFieldDependencies::build(&root);
-        let fields = deps.fields_read_by_node(id).expect("node should be tracked");
+        let fields = deps
+            .fields_read_by_node(id)
+            .expect("node should be tracked");
         assert!(fields.contains(&("audio".to_string(), "percent".to_string())));
     }
 
     #[test]
     fn node_service_field_deps_reverse_lookup() {
         let mut node = WidgetNode::new("text");
-        node.service_field_reads.push(("audio".to_string(), "percent".to_string()));
+        node.service_field_reads
+            .push(("audio".to_string(), "percent".to_string()));
         let id = node.id;
         let mut root = WidgetNode::new("column");
         root.children.push(node);

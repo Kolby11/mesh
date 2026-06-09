@@ -26,7 +26,10 @@ struct TrackingVariableStore<'a> {
 
 impl<'a> TrackingVariableStore<'a> {
     fn new(inner: &'a dyn VariableStore) -> Self {
-        Self { inner, reads: std::cell::RefCell::new(Vec::new()) }
+        Self {
+            inner,
+            reads: std::cell::RefCell::new(Vec::new()),
+        }
     }
     fn into_reads(self) -> Vec<(String, String)> {
         self.reads.into_inner()
@@ -200,8 +203,7 @@ pub(crate) fn build_widget_node(
                 .map(|store| eval_expr(&expr.expression, store))
                 .unwrap_or_else(|| format!("{{ {} }}", expr.expression));
             node.attributes.insert("content".into(), content);
-            node.service_field_reads =
-                tracking_store.map(|t| t.into_reads()).unwrap_or_default();
+            node.service_field_reads = tracking_store.map(|t| t.into_reads()).unwrap_or_default();
             node.computed_style = text_style();
             if let Some(parent_style) = parent_style {
                 inherit_text_style(
@@ -1408,8 +1410,12 @@ mod tests {
 
         struct NoopStore;
         impl mesh_core_elements::VariableStore for NoopStore {
-            fn get(&self, _: &str) -> Option<serde_json::Value> { None }
-            fn keys(&self) -> Vec<String> { Vec::new() }
+            fn get(&self, _: &str) -> Option<serde_json::Value> {
+                None
+            }
+            fn keys(&self) -> Vec<String> {
+                Vec::new()
+            }
         }
 
         let iterations = 10_000usize;
