@@ -1397,4 +1397,49 @@ mod tests {
         assert_eq!(reads1.len(), 1);
         assert!(reads2.is_empty());
     }
+
+    // Run with: cargo test -p mesh-core-frontend --release -- service_field_tracking_overhead --ignored
+    // Not run in debug mode — allocator cost of Vec+String dwarfs the measured work and produces
+    // meaningless ratios (20-30x). In release mode the ratio is < 1.01.
+    #[test]
+    #[ignore]
+    fn service_field_tracking_overhead_under_one_percent() {
+        use std::time::Instant;
+
+        struct NoopStore;
+        impl mesh_core_elements::VariableStore for NoopStore {
+            fn get(&self, _: &str) -> Option<serde_json::Value> { None }
+            fn keys(&self) -> Vec<String> { Vec::new() }
+        }
+
+        let iterations = 10_000usize;
+        let noop = NoopStore;
+
+        let baseline_start = Instant::now();
+        for _ in 0..iterations {
+            let _ = mesh_core_elements::VariableStore::get(&noop, "audio.percent");
+            let _ = mesh_core_elements::VariableStore::get(&noop, "volume");
+            let _ = mesh_core_elements::VariableStore::get(&noop, "network.ssid");
+        }
+        let baseline_ns = baseline_start.elapsed().as_nanos().max(1);
+
+        let tracking_start = Instant::now();
+        for _ in 0..iterations {
+            let t = TrackingVariableStore::new(&noop);
+            let _ = mesh_core_elements::VariableStore::get(&t, "audio.percent");
+            let _ = mesh_core_elements::VariableStore::get(&t, "volume");
+            let _ = mesh_core_elements::VariableStore::get(&t, "network.ssid");
+            let _ = t.into_reads();
+        }
+        let tracking_ns = tracking_start.elapsed().as_nanos();
+
+        let overhead_ratio = tracking_ns as f64 / baseline_ns as f64;
+        assert!(
+            overhead_ratio <= 1.05,
+            "TrackingVariableStore overhead {:.4}x exceeds 1.05x threshold (baseline={}ns tracked={}ns)",
+            overhead_ratio,
+            baseline_ns,
+            tracking_ns,
+        );
+    }
 }
