@@ -56,7 +56,12 @@ Plans:
   2. A bidirectional index answers both "which nodes read field X?" and "which fields does node Y read?" queries in O(1).
   3. Per-node field tracking overhead is below 1% of total render pass time on shipped surfaces (navigation bar, audio popover).
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 97-01-PLAN.md — Add service_field_reads to WidgetNode + TrackingVariableStore in compiler
+- [ ] 97-02-PLAN.md — NodeServiceFieldDependencies bidirectional index + wire into FrontendSurfaceComponent
+- [ ] 97-03-PLAN.md — SRV-03 overhead benchmark and correctness smoke tests
 
 ### Phase 98: Narrow Invalidation & Event Routing
 
@@ -82,7 +87,7 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 96. Selector Dependency Tracking | v1.18 | 3/3 | Complete   | 2026-06-07 |
-| 97. Service Field Dependency Tracking | v1.18 | 0/0 | Not started | - |
+| 97. Service Field Dependency Tracking | v1.18 | 0/3 | Not started | - |
 | 98. Narrow Invalidation & Event Routing | v1.18 | 0/0 | Not started | - |
 
 ---
