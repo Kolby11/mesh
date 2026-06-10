@@ -594,6 +594,36 @@ impl Dispatch<WpViewport, ()> for State {
     }
 }
 
+// The org_kde_kwin_blur_manager interface has no events — it is a factory
+// that only creates org_kde_kwin_blur objects.
+impl Dispatch<OrgKdeKwinBlurManager, GlobalData> for State {
+    fn event(
+        _: &mut State,
+        _: &OrgKdeKwinBlurManager,
+        _: org_kde_kwin_blur_manager::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        unreachable!("org_kde_kwin_blur_manager has no events");
+    }
+}
+
+// The org_kde_kwin_blur interface has no events — it is a pure request
+// interface for set_region + commit.
+impl Dispatch<OrgKdeKwinBlur, ()> for State {
+    fn event(
+        _: &mut State,
+        _: &OrgKdeKwinBlur,
+        _: org_kde_kwin_blur::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        unreachable!("org_kde_kwin_blur has no events");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::normalize_keysym_name;

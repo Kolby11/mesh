@@ -603,6 +603,7 @@ impl LayerShellBackend {
         let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, GlobalData).ok();
         let fractional_scale_manager: Option<WpFractionalScaleManagerV1> =
             globals.bind(&qh, 1..=1, GlobalData).ok();
+        let blur_manager: Option<OrgKdeKwinBlurManager> = globals.bind(&qh, 1..=1, GlobalData).ok();
         let seat_state = SeatState::new(&globals, &qh);
 
         let pool = SlotPool::new(256 * 256 * 4, &shm).ok();
@@ -617,7 +618,7 @@ impl LayerShellBackend {
             focus_grab_manager,
             viewporter,
             fractional_scale_manager,
-            blur_manager: None,
+            blur_manager,
             seat_state,
             activation_seat: None,
             focus_grab: None,
@@ -699,6 +700,15 @@ impl LayerShellBackend {
                         let wl_surface = entry.layer_surface.wl_surface().clone();
                         let qh = self.state.qh.clone();
                         entry.viewport = Some(viewporter.get_viewport(&wl_surface, &qh, ()));
+                    }
+                }
+                // Create kde_blur object lazily (BLUR-01): will be used when
+                // update_blur_region is called with a non-None region.
+                if let Some(ref manager) = self.state.blur_manager {
+                    if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
+                        let wl_surface = entry.layer_surface.wl_surface().clone();
+                        let qh = self.state.qh.clone();
+                        entry.kde_blur = Some(manager.create(&wl_surface, &qh, ()));
                     }
                 }
             }
@@ -862,6 +872,21 @@ impl LayerShellBackend {
             physical_h,
             shm_copy_damage,
         )?;
+        // Commit kde_blur region before wl_surface commit (BLUR-02, BLUR-04)
+        if let Some(ref kde_blur) = entry.kde_blur {
+            if let Some(region_rect) = entry.blur_region {
+                if let Ok(region) = Region::new(&state.compositor_state) {
+                    region.add(
+                        region_rect.x as i32,
+                        region_rect.y as i32,
+                        region_rect.width as i32,
+                        region_rect.height as i32,
+                    );
+                    kde_blur.set_region(Some(region.wl_region()));
+                    kde_blur.commit();
+                }
+            }
+        }
         entry.attach_shm_buffer(
             &qh,
             buffer_index,
@@ -907,6 +932,17 @@ impl LayerShellBackend {
             rect.height as i32,
         );
         wl_surface.set_opaque_region(Some(region.wl_region()));
+    }
+
+    /// Set the logical-coordinate blur region for a surface.
+    /// The region is sent as kde_blur protocol calls before the next
+    /// wl_surface.commit(). If `blur_region` is `None`, no kde_blur
+    /// calls are emitted — the compositor gets no blur hint.
+    pub(crate) fn update_blur_region(&mut self, surface_id: &str, blur_region: Option<DamageRect>) {
+        let Some(entry) = self.state.surfaces.get_mut(surface_id) else {
+            return;
+        };
+        entry.blur_region = blur_region;
     }
 
     pub fn surface_size(
