@@ -10,8 +10,8 @@
 
 ### Per-Region Damage
 
-- [ ] **DMGE-01**: Shell passes a `Vec<DamageRect>` from the retained renderer through the present path instead of a single unioned rect
-- [ ] **DMGE-02**: Presentation calls `wl_surface::damage_buffer` once per dirty rect (capped at 16) per frame commit
+- [x] **DMGE-01**: Shell passes a `Vec<DamageRect>` from the retained renderer through the present path instead of a single unioned rect
+- [x] **DMGE-02**: Presentation calls `wl_surface::damage_buffer` once per dirty rect (capped at 16) per frame commit
 - [ ] **DMGE-03**: Debug/profiling exposes damage rect count per frame alongside existing damage metrics
 
 ### HiDPI / Fractional Scale
@@ -54,8 +54,8 @@
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| DMGE-01 | Phase 101 | Pending |
-| DMGE-02 | Phase 101 | Pending |
+| DMGE-01 | Phase 101 | Complete |
+| DMGE-02 | Phase 101 | Complete |
 | DMGE-03 | Phase 101 | Pending |
 | HDPI-01 | Phase 102 | Pending |
 | HDPI-02 | Phase 102 | Pending |

@@ -1,16 +1,17 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.20
-milestone_name: "Compositor Integration"
+milestone_name: Compositor Integration
 status: planning
-last_updated: "2026-06-10T00:00:00.000Z"
-last_activity: 2026-06-10 -- Roadmap created (3 phases, 12 requirements)
+stopped_at: Roadmap created — ready to plan Phase 101 (Per-Region Damage)
+last_updated: "2026-06-10T14:34:30.266Z"
+last_activity: 2026-06-10 — Roadmap created
 progress:
   total_phases: 3
-  completed_phases: 0
-  total_plans: 9
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 100
 ---
 
 # State: MESH v1.20
@@ -24,13 +25,13 @@ See: `.planning/PROJECT.md` (updated 2026-06-10)
 
 ## Current Position
 
-Phase: 101 (Per-Region Damage) — Not started
-Plan: —
-Status: Ready to plan Phase 101
-Last activity: 2026-06-10 — Roadmap created
+Phase: 101 (Per-Region Damage) — Complete
+Plan: 01 (Per-Region Damage Tracking) — Complete
+Status: Phase 101 complete; ready for Phase 102
+Last activity: 2026-06-10 — Plan 01 executed (per-region damage Vec<DamageRect> threaded end-to-end)
 
 ```
-Progress [----------] 0% (0/3 phases, 0/9 plans)
+Progress [===-------] 33% (1/3 phases, 1/9 plans)
 ```
 
 ## Accumulated Context
@@ -47,6 +48,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [v1.20]: No CPU software blur fallback — clients cannot read the compositor framebuffer; unsupported compositors render flat background
 - [v1.20]: Damage rects capped at 16 per frame to bound protocol overhead
 - [v1.20]: Phase order: damage → HiDPI → blur (scale must be authoritative before blur region coordinates are correct)
+- [v1.20]: protocol_damage_rects helper extracted as pure function for testability
+- [v1.20]: SHM copy region stays unioned; per-rect damage_buffer only for protocol calls
 
 ### Blockers/Concerns
 
@@ -64,6 +67,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-10T00:00:00.000Z
-Stopped at: Roadmap created — ready to plan Phase 101 (Per-Region Damage)
-Resume file: None
+Last session: 2026-06-10T14:34:30.246Z
+Stopped at: Completed 101-01-PLAN — per-region damage Vec<DamageRect> threaded end-to-end
+Resume file: .planning/phases/101-per-region-damage/101-01-SUMMARY.md

@@ -36,7 +36,7 @@
 
 ### v1.20 Compositor Integration
 
-- [ ] **Phase 101: Per-Region Damage** — Thread `Vec<DamageRect>` from the retained renderer through to `wl_surface::damage_buffer` calls, replacing the single unioned rect commit
+- [x] **Phase 101: Per-Region Damage** — Thread `Vec<DamageRect>` from the retained renderer through to `wl_surface::damage_buffer` calls, replacing the single unioned rect commit (completed 2026-06-10)
 - [ ] **Phase 102: HiDPI / Fractional Scale** — Wire `wl_output::scale` and `wp_fractional_scale_v1` as authoritative scale sources; allocate `PixelBuffer` at physical pixels; pair with `wp_viewporter` for non-integer ratios
 - [ ] **Phase 103: Compositor Blur Offload** — Bind `org_kde_kwin_blur` optionally; send `kde_blur.set_region` + `kde_blur.commit` per surface with `backdrop-filter` nodes before each `wl_surface.commit`
 
@@ -84,7 +84,7 @@
 | 98. Narrow Invalidation & Event Routing | v1.18 | 3/3 | Complete | 2026-06-09 |
 | 99. Event-Driven Wayland Dispatch | v1.19 | 4/4 | Complete | 2026-06-09 |
 | 100. Opaque Region Hints | v1.19 | 2/2 | Complete | 2026-06-09 |
-| 101. Per-Region Damage | v1.20 | 0/? | Not started | - |
+| 101. Per-Region Damage | v1.20 | 1/1 | Complete   | 2026-06-10 |
 | 102. HiDPI / Fractional Scale | v1.20 | 0/? | Not started | - |
 | 103. Compositor Blur Offload | v1.20 | 0/? | Not started | - |
 
