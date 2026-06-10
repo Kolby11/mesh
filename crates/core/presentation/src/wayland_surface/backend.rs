@@ -533,8 +533,8 @@ fn union_damage(current: Option<DamageRect>, next: DamageRect) -> DamageRect {
 /// Scale a damage rect from logical (CSS) coordinates to physical (device) coordinates.
 fn scale_damage_rect_to_physical(rect: DamageRect, scale: f32) -> DamageRect {
     DamageRect {
-        x: (rect.x as f32 * scale) as u32,
-        y: (rect.y as f32 * scale) as u32,
+        x: (rect.x as f32 * scale).floor() as u32,
+        y: (rect.y as f32 * scale).floor() as u32,
         width: ((rect.width as f32 * scale).ceil() as u32).max(1),
         height: ((rect.height as f32 * scale).ceil() as u32).max(1),
     }
