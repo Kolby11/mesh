@@ -1,36 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.19
-milestone_name: "Performance: Event-Driven Frame Scheduler"
-status: complete
-completed_at: "2026-06-09"
-last_updated: "2026-06-09T19:45:00.000Z"
-last_activity: 2026-06-09 -- Milestone v1.19 complete
+milestone: v1.20
+milestone_name: "Compositor Integration"
+status: planning
+last_updated: "2026-06-10T00:00:00.000Z"
+last_activity: 2026-06-10 -- Milestone v1.20 started
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: MESH v1.19
+# State: MESH v1.20
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-06-09)
+See: `.planning/PROJECT.md` (updated 2026-06-10)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.19 Complete — awaiting next milestone
+**Current focus:** v1.20 Compositor Integration — defining requirements
 
 ## Current Position
 
-Phase: V1.19 COMPLETE — All 2 phases (99-100) executed
+Phase: Not started (defining requirements)
 Plan: —
-Status: Complete
-Last activity: 2026-06-09 -- Milestone v1.19 complete
-
-Progress: [██████████] 100%
+Status: Defining requirements
+Last activity: 2026-06-10 — Milestone v1.20 started
 
 ## Accumulated Context
 
@@ -45,7 +42,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 ### Blockers/Concerns
 
-None — milestone shipped.
+None.
 
 ## Deferred Items
 
@@ -59,6 +56,6 @@ None — milestone shipped.
 
 ## Session Continuity
 
-Last session: 2026-06-09T19:00:00.000Z
-Stopped at: Milestone complete
+Last session: 2026-06-10T00:00:00.000Z
+Stopped at: Milestone v1.20 initialized — requirements definition in progress
 Resume file: None

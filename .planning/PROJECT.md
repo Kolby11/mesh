@@ -342,9 +342,14 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.12 Phase 68`: Interface and module events now support runtime subscriptions, local emits, and backend-to-frontend event transport.
 - `v1.12 Phase 69`: Bundled audio/navigation modules prove the class-like module object model with typed `VolumeChanged` event delivery.
 
-## Current Milestone: v1.20 — (to be defined)
+## Current Milestone: v1.20 — Compositor Integration
 
-**Goal:** *(Next milestone defined via `/gsd-new-milestone`)*
+**Goal:** Use Wayland compositor protocols to offload work and support HiDPI displays without upscaling.
+
+**Target features:**
+- HiDPI / fractional scale — plumb `wl_output::scale` / `wp_fractional_scale_v1` to each surface; render at native pixel density; `wp_viewporter` for non-integer ratios
+- Compositor blur offload — wire `wp_blur_v1` / `org_kde_kwin_blur_v1` so `backdrop-filter` blur runs in the compositor on supporting compositors instead of CPU Skia
+- Per-region damage — track damage as multiple rects deeper in the retained renderer so presentation commits per-region damage instead of whole-surface damage
 
 ### Active
 
@@ -460,4 +465,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-09 after v1.19 milestone completion*
+*Last updated: 2026-06-10 — Milestone v1.20 started*
