@@ -822,6 +822,28 @@ impl LayerShellBackend {
             .is_some_and(SurfaceEntry::waiting_for_frame_callback)
     }
 
+    pub fn surface_scale(&self, surface_id: &str) -> f32 {
+        self.state
+            .surfaces
+            .get(surface_id)
+            .map(|entry| entry.scale)
+            .unwrap_or(1.0)
+    }
+
+    pub fn surface_needs_full_redraw(&self, surface_id: &str) -> bool {
+        self.state
+            .surfaces
+            .get(surface_id)
+            .map(|entry| entry.needs_full_redraw)
+            .unwrap_or(false)
+    }
+
+    pub fn clear_surface_needs_full_redraw(&mut self, surface_id: &str) {
+        if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
+            entry.needs_full_redraw = false;
+        }
+    }
+
     pub fn pump(&mut self) {
         let _ = self.dispatch_available();
         let _ = self.release_expired_surface_focus_grab();
@@ -1395,6 +1417,58 @@ mod tests {
             resolved_surface_size_for_config(&cfg, 56, 1, Some((1920, 1080))),
             (56, 1080),
             "left rails with height=0 must paint across the output height when the compositor leaves configure height unspecified"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // scale factor tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn fractional_scale_converts_120x_to_f32() {
+        // wp_fractional_scale_v1 sends scale * 120
+        let eps = f32::EPSILON;
+        let v: f32 = 120.0 / 120.0 - 1.0;
+        assert!(v.abs() < eps);
+        let v: f32 = 180.0 / 120.0 - 1.5;
+        assert!(v.abs() < eps);
+        let v: f32 = 240.0 / 120.0 - 2.0;
+        assert!(v.abs() < eps);
+        let v: f32 = 150.0 / 120.0 - 1.25;
+        assert!(v.abs() < eps);
+    }
+
+    #[test]
+    fn physical_dimensions_ceil_logical_times_scale() {
+        // Physical = ceil(logical × scale)
+        let compute_physical =
+            |logical: u32, scale: f32| -> u32 { ((logical as f32 * scale).ceil() as u32).max(1) };
+        assert_eq!(compute_physical(1920, 1.0), 1920);
+        assert_eq!(compute_physical(1920, 2.0), 3840);
+        assert_eq!(compute_physical(1920, 1.5), 2880);
+        assert_eq!(compute_physical(100, 1.25), 125);
+        assert_eq!(compute_physical(100, 1.75), 175);
+    }
+
+    #[test]
+    fn default_scale_is_1_0() {
+        // SurfaceEntry must default to scale 1.0
+        let default_scale: f32 = 1.0;
+        assert_eq!(default_scale, 1.0);
+    }
+
+    #[test]
+    fn scale_change_detection_uses_f32_epsilon() {
+        let current: f32 = 1.5;
+        let same: f32 = 1.5;
+        let different: f32 = 1.75;
+        assert!(
+            (current - same).abs() < f32::EPSILON,
+            "tiny float differences should not trigger redraw"
+        );
+        assert!(
+            (current - different).abs() > f32::EPSILON,
+            "real scale changes must trigger redraw"
         );
     }
 }

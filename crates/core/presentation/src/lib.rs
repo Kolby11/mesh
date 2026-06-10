@@ -174,6 +174,26 @@ impl PresentationEngine {
         }
     }
 
+    pub fn surface_scale(&self, surface_id: &str) -> f32 {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.surface_scale(surface_id),
+            Backend::DevWindow(_) => 1.0,
+        }
+    }
+
+    pub fn surface_needs_full_redraw(&self, surface_id: &str) -> bool {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.surface_needs_full_redraw(surface_id),
+            Backend::DevWindow(_) => false,
+        }
+    }
+
+    pub fn clear_surface_needs_full_redraw(&mut self, surface_id: &str) {
+        if let Backend::WaylandSurface(bridge) = &mut self.backend {
+            bridge.clear_surface_needs_full_redraw(surface_id);
+        }
+    }
+
     pub fn pump(&mut self) {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.pump(),
