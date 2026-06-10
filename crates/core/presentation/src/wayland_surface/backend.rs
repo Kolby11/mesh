@@ -826,9 +826,9 @@ impl LayerShellBackend {
             return Ok(());
         }
 
-        // Get the logical dimensions from the surface config
-        let logical_w = entry.cfg.width.max(1);
-        let logical_h = entry.cfg.height.max(1);
+        // Get the logical dimensions from compositor-configured size
+        let logical_w = entry.width.max(1);
+        let logical_h = entry.height.max(1);
         let scale = entry.scale;
 
         // SHM copy must use physical buffer dimensions for the copy region
