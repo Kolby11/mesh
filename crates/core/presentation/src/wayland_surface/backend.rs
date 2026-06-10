@@ -88,6 +88,9 @@ pub(super) struct SurfaceEntry {
     next_shm_buffer: usize,
     pub(super) frame_pending: bool,
     pub(super) frame_pending_since: Option<Instant>,
+    pub(super) scale: f32,
+    pub(super) needs_full_redraw: bool,
+    pub(super) fractional_scale: Option<WpFractionalScaleV1>,
 }
 
 struct SurfaceConfigHasher(u64);
@@ -130,6 +133,9 @@ impl SurfaceEntry {
             next_shm_buffer: 0,
             frame_pending: false,
             frame_pending_since: None,
+            scale: 1.0,
+            needs_full_redraw: false,
+            fractional_scale: None,
         }
     }
 
@@ -597,6 +603,21 @@ impl LayerShellBackend {
                 if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
                     let cfg = entry.cfg.clone();
                     entry.apply_config(cfg, effective_keyboard_mode);
+                }
+                // Bind fractional scale protocol for new surfaces.
+                let wl_surface = self
+                    .state
+                    .surfaces
+                    .get(surface_id)
+                    .map(|entry| entry.layer_surface.wl_surface().clone());
+                let qh = self.state.qh.clone();
+                if let Some(wl_surface) = wl_surface
+                    && let Some(fs) =
+                        self.state
+                            .bind_fractional_scale(&wl_surface, &qh, surface_id.to_string())
+                    && let Some(entry) = self.state.surfaces.get_mut(surface_id)
+                {
+                    entry.fractional_scale = Some(fs);
                 }
             }
         }

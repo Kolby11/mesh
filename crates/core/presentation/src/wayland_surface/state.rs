@@ -305,6 +305,17 @@ impl State {
             .find(|(_, entry)| entry.layer_surface.wl_surface() == surface)
             .map(|(surface_id, _)| surface_id.clone())
     }
+
+    pub(super) fn bind_fractional_scale(
+        &self,
+        surface: &wl_surface::WlSurface,
+        qh: &QueueHandle<Self>,
+        surface_id: String,
+    ) -> Option<WpFractionalScaleV1> {
+        self.fractional_scale_manager
+            .as_ref()
+            .map(|mgr| mgr.get_fractional_scale(surface, qh, surface_id))
+    }
 }
 
 fn is_non_repeating_key(key: &str) -> bool {

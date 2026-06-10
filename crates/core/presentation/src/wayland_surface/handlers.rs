@@ -5,9 +5,29 @@ impl CompositorHandler for State {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
-        _new_factor: i32,
+        surface: &wl_surface::WlSurface,
+        new_factor: i32,
     ) {
+        let Some(entry) = self
+            .surfaces
+            .values_mut()
+            .find(|entry| entry.layer_surface.wl_surface() == surface)
+        else {
+            return;
+        };
+        // T-102-01: Clamp to 1..=3 to prevent extreme scale values from
+        // malicious compositors that could cause zero-size or overflow buffers.
+        let new_scale = new_factor.clamp(1, 3) as f32;
+        if (entry.scale - new_scale).abs() > f32::EPSILON {
+            entry.scale = new_scale;
+            entry.needs_full_redraw = true;
+            tracing::info!(
+                scale = new_scale,
+                surface_width = entry.width,
+                surface_height = entry.height,
+                "scale_factor_changed: integer scale update triggered full redraw"
+            );
+        }
     }
 
     fn transform_changed(
@@ -350,6 +370,37 @@ impl Dispatch<HyprlandFocusGrabV1, (), State> for State {
             state.focus_grab_requested_at = None;
             if let Some(surface_id) = state.focus_grab_surface_id.take() {
                 state.reapply_surface_config(&surface_id);
+            }
+        }
+    }
+}
+
+impl Dispatch<WpFractionalScaleV1, String, State> for State {
+    fn event(
+        state: &mut State,
+        _: &WpFractionalScaleV1,
+        event: wp_fractional_scale_v1::Event,
+        surface_id: &String,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        let wp_fractional_scale_v1::Event::PreferredScale { scale } = event else {
+            return;
+        };
+        // T-102-02: Clamp preferred_scale to 60..=480 (0.5x to 4.0x) to
+        // prevent extreme values from a malicious compositor. Values outside
+        // this range are silently ignored.
+        let clamped = scale.clamp(60, 480);
+        let new_scale = clamped as f32 / 120.0;
+        if let Some(entry) = state.surfaces.get_mut(surface_id) {
+            if (entry.scale - new_scale).abs() > f32::EPSILON {
+                entry.scale = new_scale;
+                entry.needs_full_redraw = true;
+                tracing::info!(
+                    scale = new_scale,
+                    surface_id = surface_id.as_str(),
+                    "wp_fractional_scale_v1: preferred_scale update triggered full redraw"
+                );
             }
         }
     }
