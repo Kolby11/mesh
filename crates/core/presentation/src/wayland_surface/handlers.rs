@@ -307,6 +307,32 @@ impl Dispatch<HyprlandFocusGrabManagerV1, GlobalData, State> for State {
     }
 }
 
+impl Dispatch<WpViewporter, GlobalData, State> for State {
+    fn event(
+        _: &mut State,
+        _: &WpViewporter,
+        _: wp_viewporter::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        unreachable!("wp_viewporter has no events");
+    }
+}
+
+impl Dispatch<WpFractionalScaleManagerV1, GlobalData, State> for State {
+    fn event(
+        _: &mut State,
+        _: &WpFractionalScaleManagerV1,
+        _: wp_fractional_scale_manager_v1::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        unreachable!("wp_fractional_scale_manager_v1 has no events");
+    }
+}
+
 impl Dispatch<HyprlandFocusGrabV1, (), State> for State {
     fn event(
         state: &mut State,

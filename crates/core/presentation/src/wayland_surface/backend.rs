@@ -521,6 +521,9 @@ impl LayerShellBackend {
         })?;
         let activation_state = ActivationState::bind(&globals, &qh).ok();
         let focus_grab_manager = globals.bind(&qh, 1..=1, GlobalData).ok();
+        let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, GlobalData).ok();
+        let fractional_scale_manager: Option<WpFractionalScaleManagerV1> =
+            globals.bind(&qh, 1..=1, GlobalData).ok();
         let seat_state = SeatState::new(&globals, &qh);
 
         let pool = SlotPool::new(256 * 256 * 4, &shm).ok();
@@ -533,6 +536,8 @@ impl LayerShellBackend {
             layer_shell,
             activation_state,
             focus_grab_manager,
+            viewporter,
+            fractional_scale_manager,
             seat_state,
             activation_seat: None,
             focus_grab: None,

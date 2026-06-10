@@ -17,7 +17,7 @@ use mesh_core_wayland::{Edge, KeyboardMode, Layer as MeshLayer};
 use rustix::event::{PollFd, PollFlags, poll};
 use smithay_client_toolkit::{
     activation::{ActivationHandler, ActivationState, RequestData},
-    compositor::{CompositorHandler, CompositorState},
+    compositor::{CompositorHandler, CompositorState, Region},
     delegate_activation, delegate_compositor, delegate_keyboard, delegate_layer, delegate_output,
     delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
     globals::GlobalData,
@@ -52,6 +52,13 @@ use wayland_client::{
     backend::WaylandError,
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
+};
+use wayland_protocols::wp::fractional_scale::v1::client::{
+    wp_fractional_scale_manager_v1, wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
+    wp_fractional_scale_v1, wp_fractional_scale_v1::WpFractionalScaleV1,
+};
+use wayland_protocols::wp::viewporter::client::{
+    wp_viewport, wp_viewport::WpViewport, wp_viewporter, wp_viewporter::WpViewporter,
 };
 use wayland_protocols_hyprland::focus_grab::v1::client::{
     hyprland_focus_grab_manager_v1, hyprland_focus_grab_manager_v1::HyprlandFocusGrabManagerV1,

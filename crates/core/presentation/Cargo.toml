@@ -18,3 +18,4 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 wayland-client = "0.31"
 wayland-protocols-hyprland = { version = "1.2.0", features = ["client"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }

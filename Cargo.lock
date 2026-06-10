@@ -1556,6 +1556,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "wayland-client 0.31.14",
+ "wayland-protocols 0.32.12",
  "wayland-protocols-hyprland",
 ]
 
@@ -1654,6 +1655,7 @@ dependencies = [
  "mesh-core-surface-config",
  "mesh-core-theme",
  "mesh-core-wayland",
+ "rustix 0.38.44",
  "serde_json",
  "slotmap",
  "tempfile",
