@@ -50,7 +50,9 @@
   1. A frame where only one widget changes causes `wl_surface::damage_buffer` to be called once with the widget's rect, not the full surface bounds
   2. A frame with multiple dirty regions calls `damage_buffer` once per rect, capped at 16 calls total per commit
   3. Debug overlay shows a per-frame damage rect count alongside existing damage metrics
-**Plans**: TBD
+**Plans**: 1/1 done
+**Plans**:
+- [x] 101-01-PLAN.md — Per-region damage: Vec<DamageRect> end-to-end through wl_surface::damage_buffer
 
 ### Phase 102: HiDPI / Fractional Scale
 **Goal**: Shell surfaces render at native physical pixel density on HiDPI displays; layout coordinates stay in logical CSS pixels throughout
@@ -61,8 +63,10 @@
   2. On a 1.5× fractional-scale display, `wp_viewporter` sets the destination to logical dimensions and the buffer is allocated at `ceil(logical × 1.5)` physical pixels
   3. Plugging in or unplugging a HiDPI monitor (scale factor change) triggers a resize and full redraw with no stale pixels visible
   4. On a compositor without `wp_fractional_scale_v1`, the `wl_output::scale` integer fallback keeps rendering correct
-**Plans**: TBD
-**UI hint**: yes
+ **Plans**:
+ - [ ] 102-01-PLAN.md — Scale acquisition: bind wp_viewporter + wp_fractional_scale_v1, store scale: f32 on SurfaceEntry, implement scale handlers
+ - [ ] 102-02-PLAN.md — Physical pixel pipeline: PixelBuffer at ceil(logical×scale), wp_viewporter integration, damage rect scaling
+ **UI hint**: yes
 
 ### Phase 103: Compositor Blur Offload
 **Goal**: Surfaces with `backdrop-filter: blur(...)` nodes delegate blur rendering to the compositor on KDE; non-KDE compositors render a flat background without error
