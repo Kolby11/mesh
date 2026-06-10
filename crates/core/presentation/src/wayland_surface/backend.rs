@@ -730,12 +730,16 @@ impl LayerShellBackend {
             }
             Some(Edge::Top) => {
                 let max_left = max_width.saturating_sub(cfg.width) as i32;
+                let max_right = max_width.saturating_sub(cfg.width) as i32;
                 cfg.margin_left = cfg.margin_left.clamp(0, max_left.max(0));
+                cfg.margin_right = cfg.margin_right.clamp(0, max_right.max(0));
             }
             Some(Edge::Bottom) => {
                 let max_left = max_width.saturating_sub(cfg.width) as i32;
+                let max_right = max_width.saturating_sub(cfg.width) as i32;
                 let max_bottom = max_height.saturating_sub(cfg.height) as i32;
                 cfg.margin_left = cfg.margin_left.clamp(0, max_left.max(0));
+                cfg.margin_right = cfg.margin_right.clamp(0, max_right.max(0));
                 cfg.margin_bottom = cfg.margin_bottom.clamp(0, max_bottom.max(0));
             }
         }
