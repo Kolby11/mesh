@@ -424,6 +424,32 @@ fn clip_damage(rect: DamageRect, bounds: DamageRect) -> Option<DamageRect> {
     })
 }
 
+/// Maximum number of `wl_surface::damage_buffer` calls allowed per commit.
+/// When the damage list exceeds this cap the entire surface is marked dirty
+/// with a single bounding-union call to avoid unbounded protocol overhead.
+const MAX_PROTOCOL_DAMAGE_RECTS: usize = 16;
+
+/// Select the rects to pass to `wl_surface::damage_buffer`.
+///
+/// When `rects.len() <= MAX_PROTOCOL_DAMAGE_RECTS` every rect is forwarded
+/// unchanged (same count, same order). When the count exceeds the cap all
+/// rects are collapsed into a single bounding union. An empty input yields
+/// an empty output — the caller is responsible for skipping the present.
+fn protocol_damage_rects(rects: &[DamageRect], width: u32, height: u32) -> Vec<DamageRect> {
+    if rects.is_empty() {
+        return Vec::new();
+    }
+    if rects.len() <= MAX_PROTOCOL_DAMAGE_RECTS {
+        return rects.to_vec();
+    }
+    let union = rects
+        .iter()
+        .copied()
+        .fold(None, |acc, r| Some(union_damage(acc, r)))
+        .unwrap_or_else(|| full_damage(width, height));
+    vec![union]
+}
+
 fn union_damage(current: Option<DamageRect>, next: DamageRect) -> DamageRect {
     let Some(current) = current else {
         return next;
@@ -1049,6 +1075,210 @@ fn map_keyboard(mode: KeyboardMode) -> KeyboardInteractivity {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---------------------------------------------------------------------------
+    // protocol_damage_rects tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn protocol_damage_rects_single_rect_passthrough() {
+        let rects = vec![DamageRect {
+            x: 10,
+            y: 20,
+            width: 100,
+            height: 50,
+        }];
+        let result = protocol_damage_rects(&rects, 1920, 1080);
+        assert_eq!(result.len(), 1, "single rect should pass through unchanged");
+        assert_eq!(result[0].x, 10);
+        assert_eq!(result[0].y, 20);
+        assert_eq!(result[0].width, 100);
+        assert_eq!(result[0].height, 50);
+    }
+
+    #[test]
+    fn protocol_damage_rects_exactly_16_passthrough() {
+        let rects: Vec<DamageRect> = (0..16)
+            .map(|i| DamageRect {
+                x: i * 10,
+                y: i * 5,
+                width: 10,
+                height: 5,
+            })
+            .collect();
+        let result = protocol_damage_rects(&rects, 1920, 1080);
+        assert_eq!(
+            result.len(),
+            16,
+            "exactly 16 rects should pass through unchanged"
+        );
+        for (i, r) in result.iter().enumerate() {
+            assert_eq!(r.x, (i as u32) * 10);
+            assert_eq!(r.y, (i as u32) * 5);
+        }
+    }
+
+    #[test]
+    fn protocol_damage_rects_17_triggers_union_fallback() {
+        let rects: Vec<DamageRect> = (0..17)
+            .map(|i| DamageRect {
+                x: (i % 10) * 20,
+                y: (i / 10) * 30,
+                width: 18,
+                height: 28,
+            })
+            .collect();
+        let result = protocol_damage_rects(&rects, 1920, 1080);
+        assert_eq!(
+            result.len(),
+            1,
+            "more than 16 rects must collapse to a single bounding union"
+        );
+        let union_rect = result[0];
+        // All input rects must be contained within the union
+        for r in &rects {
+            assert!(
+                r.x >= union_rect.x
+                    && r.y >= union_rect.y
+                    && r.x.saturating_add(r.width) <= union_rect.x.saturating_add(union_rect.width)
+                    && r.y.saturating_add(r.height)
+                        <= union_rect.y.saturating_add(union_rect.height),
+                "every input rect must be contained within the union; rect {:?} not in {:?}",
+                r,
+                union_rect
+            );
+        }
+    }
+
+    #[test]
+    fn protocol_damage_rects_empty_input_returns_empty() {
+        let result = protocol_damage_rects(&[], 1920, 1080);
+        assert_eq!(result.len(), 0, "empty input must produce empty output");
+    }
+
+    #[test]
+    fn protocol_damage_rects_union_covers_known_geometry() {
+        // rects spanning x:[0..100] and y:[0..50]
+        let rects = vec![
+            DamageRect {
+                x: 0,
+                y: 0,
+                width: 50,
+                height: 25,
+            },
+            DamageRect {
+                x: 50,
+                y: 0,
+                width: 50,
+                height: 25,
+            },
+            DamageRect {
+                x: 0,
+                y: 25,
+                width: 50,
+                height: 25,
+            },
+            DamageRect {
+                x: 50,
+                y: 25,
+                width: 50,
+                height: 25,
+            },
+            // Fill out to 17 with more disjoint rects
+            DamageRect {
+                x: 10,
+                y: 30,
+                width: 30,
+                height: 10,
+            },
+            DamageRect {
+                x: 20,
+                y: 40,
+                width: 30,
+                height: 10,
+            },
+            DamageRect {
+                x: 10,
+                y: 10,
+                width: 20,
+                height: 5,
+            },
+            DamageRect {
+                x: 60,
+                y: 10,
+                width: 20,
+                height: 5,
+            },
+            DamageRect {
+                x: 10,
+                y: 35,
+                width: 20,
+                height: 5,
+            },
+            DamageRect {
+                x: 60,
+                y: 35,
+                width: 20,
+                height: 5,
+            },
+            DamageRect {
+                x: 15,
+                y: 5,
+                width: 10,
+                height: 10,
+            },
+            DamageRect {
+                x: 70,
+                y: 5,
+                width: 10,
+                height: 10,
+            },
+            DamageRect {
+                x: 15,
+                y: 40,
+                width: 10,
+                height: 5,
+            },
+            DamageRect {
+                x: 70,
+                y: 40,
+                width: 10,
+                height: 5,
+            },
+            DamageRect {
+                x: 0,
+                y: 20,
+                width: 5,
+                height: 10,
+            },
+            DamageRect {
+                x: 95,
+                y: 20,
+                width: 5,
+                height: 10,
+            },
+            DamageRect {
+                x: 0,
+                y: 45,
+                width: 5,
+                height: 5,
+            },
+        ];
+        assert!(
+            rects.len() > 16,
+            "this test needs >16 rects to trigger union"
+        );
+        let result = protocol_damage_rects(&rects, 1920, 1080);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].x, 0);
+        assert_eq!(result[0].y, 0);
+        assert_eq!(result[0].width, 100);
+        assert_eq!(result[0].height, 50);
+    }
+
+    // ---------------------------------------------------------------------------
+    // layer-surface config tests
+    // ---------------------------------------------------------------------------
 
     fn base_cfg() -> LayerSurfaceConfig {
         LayerSurfaceConfig {
