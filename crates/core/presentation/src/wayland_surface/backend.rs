@@ -838,9 +838,12 @@ impl LayerShellBackend {
         // SHM copy region must always be a union (Pitfall 1) — fold all rects
         // into a single DamageRect for the buffer copy, then forward the
         // original rect slice for the per-rect damage_buffer calls.
+        // Damage rects arrive in logical/CSS coordinates; scale to physical
+        // before the copy so the region matches the physical buffer dimensions.
         let shm_copy_damage = damage_rects
             .iter()
             .copied()
+            .map(|r| scale_damage_rect_to_physical(r, scale))
             .fold(None, |acc, r| Some(union_damage(acc, r)))
             .or_else(|| {
                 // If the slice is empty (shouldn't normally reach here due to
