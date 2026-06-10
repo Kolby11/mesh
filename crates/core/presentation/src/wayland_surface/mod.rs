@@ -64,3 +64,7 @@ use wayland_protocols_hyprland::focus_grab::v1::client::{
     hyprland_focus_grab_manager_v1, hyprland_focus_grab_manager_v1::HyprlandFocusGrabManagerV1,
     hyprland_focus_grab_v1, hyprland_focus_grab_v1::HyprlandFocusGrabV1,
 };
+use wayland_protocols_plasma::blur::client::{
+    org_kde_kwin_blur, org_kde_kwin_blur::OrgKdeKwinBlur, org_kde_kwin_blur_manager,
+    org_kde_kwin_blur_manager::OrgKdeKwinBlurManager,
+};
