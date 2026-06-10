@@ -77,7 +77,12 @@
   2. On a non-KDE compositor (e.g., Sway), the same surface starts and renders normally with a flat background and no Wayland protocol errors in logs
   3. A surface with no `backdrop-filter` nodes produces no `kde_blur` protocol calls during its commit sequence
   4. Removing the CPU software blur path does not regress any existing test or visual output
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 103-01-PLAN.md — Protocol infrastructure: wayland-protocols-plasma dep, KdeBlur state, optional global binding, commit-time protocol calls
+- [ ] 103-02-PLAN.md — Blur region computation: walk display list for backdrop-filter nodes, compute logical-coordinate union rect, wire through present path
+- [ ] 103-03-PLAN.md — CPU blur removal: make apply_backdrop_filter and push_backdrop_filter_command no-ops; keep function structure for future effects
 
 ## Progress
 
@@ -90,7 +95,7 @@
 | 100. Opaque Region Hints | v1.19 | 2/2 | Complete | 2026-06-09 |
 | 101. Per-Region Damage | v1.20 | 1/1 | Complete   | 2026-06-10 |
 | 102. HiDPI / Fractional Scale | v1.20 | 2/2 | Complete   | 2026-06-10 |
-| 103. Compositor Blur Offload | v1.20 | 0/? | Not started | - |
+| 103. Compositor Blur Offload | v1.20 | 0/3 | Not started | - |
 
 ---
 
