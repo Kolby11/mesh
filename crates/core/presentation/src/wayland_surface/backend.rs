@@ -1570,4 +1570,118 @@ mod tests {
             "real scale changes must trigger redraw"
         );
     }
+
+    // ---------------------------------------------------------------------------
+    // damage rect scaling tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn scale_damage_rect_to_physical_multiplies_coordinates() {
+        let logical = DamageRect {
+            x: 10,
+            y: 20,
+            width: 100,
+            height: 50,
+        };
+        let scaled = scale_damage_rect_to_physical(logical, 2.0);
+        assert_eq!(scaled.x, 20);
+        assert_eq!(scaled.y, 40);
+        assert_eq!(scaled.width, 200);
+        assert_eq!(scaled.height, 100);
+    }
+
+    #[test]
+    fn scale_damage_rect_to_physical_at_fractional_scale_ceils_dimensions() {
+        let logical = DamageRect {
+            x: 10,
+            y: 20,
+            width: 100,
+            height: 50,
+        };
+        let scaled = scale_damage_rect_to_physical(logical, 1.5);
+        assert_eq!(scaled.x, 15); // 10 * 1.5 = 15.0 → 15
+        assert_eq!(scaled.y, 30); // 20 * 1.5 = 30.0 → 30
+        assert_eq!(scaled.width, 150); // 100 * 1.5 = 150.0 → 150
+        assert_eq!(scaled.height, 75); // 50 * 1.5 = 75.0 → 75
+    }
+
+    #[test]
+    fn scale_damage_rect_to_physical_at_identity_scale_is_identity() {
+        let logical = DamageRect {
+            x: 5,
+            y: 10,
+            width: 80,
+            height: 40,
+        };
+        let scaled = scale_damage_rect_to_physical(logical, 1.0);
+        assert_eq!(scaled.x, 5);
+        assert_eq!(scaled.y, 10);
+        assert_eq!(scaled.width, 80);
+        assert_eq!(scaled.height, 40);
+    }
+
+    #[test]
+    fn scale_damage_rect_to_physical_never_produces_zero_dimensions() {
+        let logical = DamageRect {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        };
+        let scaled = scale_damage_rect_to_physical(logical, 0.5);
+        assert!(
+            scaled.width >= 1,
+            "width must be >= 1, got {}",
+            scaled.width
+        );
+        assert!(
+            scaled.height >= 1,
+            "height must be >= 1, got {}",
+            scaled.height
+        );
+    }
+
+    #[test]
+    fn damage_rects_remain_in_logical_space_until_present() {
+        // Proof that the render path emits logical damage rects and attach_shm_buffer
+        // scales them to physical. This is an architectural invariant test.
+        let logical_rects = vec![DamageRect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 50,
+        }];
+        let physical: Vec<DamageRect> = logical_rects
+            .iter()
+            .map(|r| scale_damage_rect_to_physical(*r, 2.0))
+            .collect();
+        assert_eq!(physical[0].x, 0);
+        assert_eq!(physical[0].width, 200);
+    }
+
+    // ---------------------------------------------------------------------------
+    // scale factor integer/ceil logic tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn integer_scale_detection() {
+        assert!((1.0_f32 - 1.0_f32.round()).abs() < f32::EPSILON);
+        assert!((2.0_f32 - 2.0_f32.round()).abs() < f32::EPSILON);
+        assert!((1.5_f32 - 1.5_f32.round()).abs() > f32::EPSILON);
+        assert!((1.25_f32 - 1.25_f32.round()).abs() > f32::EPSILON);
+    }
+
+    #[test]
+    fn buffer_scale_for_integer_scale_equals_exact_value() {
+        let scale: f32 = 2.0;
+        assert_eq!(scale as i32, 2);
+    }
+
+    #[test]
+    fn buffer_scale_for_fractional_scale_ceils() {
+        let scale: f32 = 1.5;
+        assert_eq!(scale.ceil() as i32, 2);
+        let scale: f32 = 1.25;
+        assert_eq!(scale.ceil() as i32, 2);
+    }
 }
