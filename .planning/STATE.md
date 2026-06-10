@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.20
 milestone_name: Compositor Integration
-status: planning
-stopped_at: Roadmap created — ready to plan Phase 101 (Per-Region Damage)
-last_updated: "2026-06-10T14:34:30.266Z"
-last_activity: 2026-06-10 — Roadmap created
+status: executing
+stopped_at: Completed 102-01-PLAN — Scale factor acquisition wired, ready for Plan 02
+last_updated: "2026-06-10T15:27:13.690Z"
+last_activity: 2026-06-10 — Plan 01 executed (scale: f32 on SurfaceEntry, wp_fractional_scale_v1 bound)
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 100
+  total_plans: 9
+  completed_plans: 2
+  percent: 22
 ---
 
 # State: MESH v1.20
@@ -21,17 +21,18 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-06-10)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.20 Compositor Integration — roadmap created, ready for Phase 101
+**Current focus:** v1.20 Compositor Integration — Phase 102 HiDPI, Plan 02 remaining
 
 ## Current Position
 
-Phase: 101 (Per-Region Damage) — Complete
-Plan: 01 (Per-Region Damage Tracking) — Complete
-Status: Phase 101 complete; ready for Phase 102
-Last activity: 2026-06-10 — Plan 01 executed (per-region damage Vec<DamageRect> threaded end-to-end)
+Phase: 102 (HiDPI / Fractional Scale) — In Progress
+Plan: 01 (Scale Factor Acquisition) — Complete
+Next: Plan: 02 (Physical Pixel Pipeline)
+Status: Plan 01 complete; ready for Plan 02
+Last activity: 2026-06-10 — Plan 01 executed (scale: f32 on SurfaceEntry, wp_fractional_scale_v1 bound)
 
 ```
-Progress [===-------] 33% (1/3 phases, 1/9 plans)
+Progress [===-------] 22% (1/3 phases, 2/9 plans)
 ```
 
 ## Accumulated Context
@@ -50,6 +51,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [v1.20]: Phase order: damage → HiDPI → blur (scale must be authoritative before blur region coordinates are correct)
 - [v1.20]: protocol_damage_rects helper extracted as pure function for testability
 - [v1.20]: SHM copy region stays unioned; per-rect damage_buffer only for protocol calls
+- [v1.20]: wp_viewporter lives in wayland-protocols::wp::viewporter, not wayland-protocols-wlr
+- [v1.20]: fractional_scale requires staging feature flag on wayland-protocols
+- [v1.20]: Scale factor handlers clamp values: 1..=3 (integer) and 60..=480 (fractional) per threat model
 
 ### Blockers/Concerns
 
@@ -67,6 +71,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-10T14:34:30.246Z
-Stopped at: Completed 101-01-PLAN — per-region damage Vec<DamageRect> threaded end-to-end
-Resume file: .planning/phases/101-per-region-damage/101-01-SUMMARY.md
+Last session: 2026-06-10T15:18:22Z
+Stopped at: Completed 102-01-PLAN — scale factor acquisition wired for HiDPI
+Resume file: .planning/phases/102-hidpi-fractional-scale/102-01-SUMMARY.md

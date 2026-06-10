@@ -16,11 +16,11 @@
 
 ### HiDPI / Fractional Scale
 
-- [ ] **HDPI-01**: `SurfaceEntry` stores a `scale_factor: f64` updated from `wl_output::scale` and `wp_fractional_scale_v1` events
+- [x] **HDPI-01**: `SurfaceEntry` stores a `scale_factor: f64` updated from `wl_output::scale` and `wp_fractional_scale_v1` events
 - [ ] **HDPI-02**: `PixelBuffer` is allocated at `ceil(logical × scale_factor)` physical pixels; layout remains in logical CSS pixels
 - [ ] **HDPI-03**: `wp_viewporter` sets destination size to logical dimensions for correct compositing at non-integer scale ratios
-- [ ] **HDPI-04**: Scale factor changes trigger a surface resize and full redraw without visual glitches or stale pixels
-- [ ] **HDPI-05**: Integer `wl_output::scale` path is used as fallback when `wp_fractional_scale_v1` is unavailable
+- [x] **HDPI-04**: Scale factor changes trigger a surface resize and full redraw without visual glitches or stale pixels
+- [x] **HDPI-05**: Integer `wl_output::scale` path is used as fallback when `wp_fractional_scale_v1` is unavailable
 
 ### Compositor Blur Offload
 
@@ -57,11 +57,11 @@
 | DMGE-01 | Phase 101 | Complete |
 | DMGE-02 | Phase 101 | Complete |
 | DMGE-03 | Phase 101 | Pending |
-| HDPI-01 | Phase 102 | Pending |
+| HDPI-01 | Phase 102 | Complete |
 | HDPI-02 | Phase 102 | Pending |
 | HDPI-03 | Phase 102 | Pending |
-| HDPI-04 | Phase 102 | Pending |
-| HDPI-05 | Phase 102 | Pending |
+| HDPI-04 | Phase 102 | Complete |
+| HDPI-05 | Phase 102 | Complete |
 | BLUR-01 | Phase 103 | Pending |
 | BLUR-02 | Phase 103 | Pending |
 | BLUR-03 | Phase 103 | Pending |

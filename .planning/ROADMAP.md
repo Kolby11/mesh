@@ -64,7 +64,7 @@
   3. Plugging in or unplugging a HiDPI monitor (scale factor change) triggers a resize and full redraw with no stale pixels visible
   4. On a compositor without `wp_fractional_scale_v1`, the `wl_output::scale` integer fallback keeps rendering correct
  **Plans**:
- - [ ] 102-01-PLAN.md — Scale acquisition: bind wp_viewporter + wp_fractional_scale_v1, store scale: f32 on SurfaceEntry, implement scale handlers
+ - [x] 102-01-PLAN.md — Scale acquisition: bind wp_viewporter + wp_fractional_scale_v1, store scale: f32 on SurfaceEntry, implement scale handlers
  - [ ] 102-02-PLAN.md — Physical pixel pipeline: PixelBuffer at ceil(logical×scale), wp_viewporter integration, damage rect scaling
  **UI hint**: yes
 
@@ -89,7 +89,7 @@
 | 99. Event-Driven Wayland Dispatch | v1.19 | 4/4 | Complete | 2026-06-09 |
 | 100. Opaque Region Hints | v1.19 | 2/2 | Complete | 2026-06-09 |
 | 101. Per-Region Damage | v1.20 | 1/1 | Complete   | 2026-06-10 |
-| 102. HiDPI / Fractional Scale | v1.20 | 0/? | Not started | - |
+| 102. HiDPI / Fractional Scale | v1.20 | 1/2 | In Progress|  |
 | 103. Compositor Blur Offload | v1.20 | 0/? | Not started | - |
 
 ---
