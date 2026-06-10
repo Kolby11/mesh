@@ -55,9 +55,9 @@ Declared values (inherited from existing MESH theme system):
 | Role | Size | Weight | Line Height |
 |------|------|--------|-------------|
 | Body | 14px | Regular (400) | 1.5 |
-| Label | 12px | Medium (500) | 1.4 |
+| Label | 12px | Regular (400) | 1.4 |
 | Heading | 20px | Semibold (600) | 1.2 |
-| Display | 28px | Bold (700) | 1.1 |
+| Display | 28px | Semibold (600) | 1.1 |
 
 **Phase 102 contract:** Text is rasterized at physical pixel density via Skia/Parley. At 2× integer scale, glyphs are drawn at native resolution — no bitmap upscaling occurs. At 1.5× fractional scale, the Skia surface renders at `ceil() × 1.5` physical pixels and the compositor's `wp_viewporter` downscales to logical dimensions.
 
