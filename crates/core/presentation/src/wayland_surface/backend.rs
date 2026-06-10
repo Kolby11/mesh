@@ -92,6 +92,8 @@ pub(super) struct SurfaceEntry {
     pub(super) needs_full_redraw: bool,
     pub(super) fractional_scale: Option<WpFractionalScaleV1>,
     pub(super) viewport: Option<WpViewport>,
+    pub(super) kde_blur: Option<OrgKdeKwinBlur>,
+    pub(super) blur_region: Option<DamageRect>,
 }
 
 struct SurfaceConfigHasher(u64);
@@ -138,6 +140,8 @@ impl SurfaceEntry {
             needs_full_redraw: false,
             fractional_scale: None,
             viewport: None,
+            kde_blur: None,
+            blur_region: None,
         }
     }
 
@@ -613,6 +617,7 @@ impl LayerShellBackend {
             focus_grab_manager,
             viewporter,
             fractional_scale_manager,
+            blur_manager: None,
             seat_state,
             activation_seat: None,
             focus_grab: None,

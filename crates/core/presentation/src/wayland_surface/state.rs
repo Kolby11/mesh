@@ -43,6 +43,7 @@ pub(super) struct State {
     pub(super) focus_grab_manager: Option<HyprlandFocusGrabManagerV1>,
     pub(super) viewporter: Option<WpViewporter>,
     pub(super) fractional_scale_manager: Option<WpFractionalScaleManagerV1>,
+    pub(super) blur_manager: Option<OrgKdeKwinBlurManager>,
     pub(super) seat_state: SeatState,
     pub(super) activation_seat: Option<wl_seat::WlSeat>,
     pub(super) focus_grab: Option<HyprlandFocusGrabV1>,
