@@ -470,6 +470,20 @@ pub enum ShellRunError {
 
     #[error(transparent)]
     Theme(#[from] mesh_core_theme::ThemeError),
+
+    #[error(
+        "buffer allocation exceeds {requested_bytes} bytes (max {max_bytes}); surface '{surface_id}' at scale {scale:.2} would require {logical_w}x{logical_h} logical -> {physical_w}x{physical_h} physical"
+    )]
+    BufferAlloc {
+        surface_id: String,
+        logical_w: u32,
+        logical_h: u32,
+        physical_w: u32,
+        physical_h: u32,
+        scale: f32,
+        requested_bytes: u64,
+        max_bytes: u64,
+    },
 }
 
 fn resolve_default_module_dirs(config: &ShellConfig) -> Vec<PathBuf> {

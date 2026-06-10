@@ -60,6 +60,38 @@ impl Shell {
             let mut rerender_attempts = 0;
             let mut component_stage_records = Vec::new();
             let component_id = self.components[index].component.id().to_string();
+            // Hoist logical dimensions and scale before the loop so that
+            // the post-loop force-full-redraw and debug-overlay paths can
+            // reference them without depending on loop-scoped mutable borrows.
+            let (width, height, scale) = {
+                let surface = self
+                    .surfaces
+                    .get(&surface_id)
+                    .ok_or_else(|| ShellRunError::MissingSurface(surface_id.clone()))?;
+                let requested_width = surface.width;
+                let requested_height = surface.height;
+                let (width, height) = if requested_width == 0 || requested_height == 0 {
+                    let dynamic_size = self.resolve_dynamic_surface_size(index, &surface_id)?;
+                    let w = if requested_width == 0 {
+                        dynamic_size.map(|(w, _)| w).unwrap_or(1)
+                    } else {
+                        requested_width.max(1)
+                    };
+                    let h = if requested_height == 0 {
+                        dynamic_size.map(|(_, h)| h).unwrap_or(1)
+                    } else {
+                        requested_height.max(1)
+                    };
+                    (w, h)
+                } else {
+                    (requested_width.max(1), requested_height.max(1))
+                };
+                let scale = self.presentation_engine.surface_scale(&surface_id);
+                (width, height, scale)
+            };
+            let mut width = width;
+            let mut height = height;
+            let mut scale = scale;
             loop {
                 let surface = self
                     .surfaces
@@ -137,22 +169,22 @@ impl Shell {
                     self.components[index].last_surface_config = Some(cfg);
                 }
 
-                let requested_width = surface.width;
-                let requested_height = surface.height;
-                let dynamic_size = if requested_width == 0 || requested_height == 0 {
+                let inner_requested_width = surface.width;
+                let inner_requested_height = surface.height;
+                let dynamic_size = if inner_requested_width == 0 || inner_requested_height == 0 {
                     self.resolve_dynamic_surface_size(index, &surface_id)?
                 } else {
                     None
                 };
-                let width = if requested_width == 0 {
-                    dynamic_size.map(|(width, _)| width).unwrap_or(1)
+                width = if inner_requested_width == 0 {
+                    dynamic_size.map(|(w, _)| w).unwrap_or(1)
                 } else {
-                    requested_width.max(1)
+                    inner_requested_width.max(1)
                 };
-                let height = if requested_height == 0 {
-                    dynamic_size.map(|(_, height)| height).unwrap_or(1)
+                height = if inner_requested_height == 0 {
+                    dynamic_size.map(|(_, h)| h).unwrap_or(1)
                 } else {
-                    requested_height.max(1)
+                    inner_requested_height.max(1)
                 };
                 let resolved_size = (width, height);
                 if self.components[index].known_surface_size != Some(resolved_size) {
@@ -162,14 +194,34 @@ impl Shell {
                         .surface_size_changed(width, height);
                 }
 
+                scale = self.presentation_engine.surface_scale(&surface_id);
+                let physical_w = ((width as f32 * scale).ceil() as u32).max(1);
+                let physical_h = ((height as f32 * scale).ceil() as u32).max(1);
+
+                // Buffer size cap (T-102-05): prevent allocation beyond 512 MB
+                const MAX_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
+                let requested_bytes = (physical_w as u64) * (physical_h as u64) * 4;
+                if requested_bytes > MAX_BUFFER_BYTES {
+                    return Err(ShellRunError::BufferAlloc {
+                        surface_id: surface_id.clone(),
+                        logical_w: width,
+                        logical_h: height,
+                        physical_w,
+                        physical_h,
+                        scale,
+                        requested_bytes,
+                        max_bytes: MAX_BUFFER_BYTES,
+                    });
+                }
+
                 let runtime = &mut self.components[index];
                 if runtime
                     .paint_buffer
                     .as_ref()
-                    .map(|buffer| buffer.width != width || buffer.height != height)
+                    .map(|buffer| buffer.width != physical_w || buffer.height != physical_h)
                     .unwrap_or(true)
                 {
-                    runtime.paint_buffer = Some(PixelBuffer::new(width, height));
+                    runtime.paint_buffer = Some(PixelBuffer::new(physical_w, physical_h));
                 }
                 runtime
                     .component
@@ -181,6 +233,7 @@ impl Shell {
                             .paint_buffer
                             .as_mut()
                             .expect("paint buffer initialised"),
+                        scale,
                     )
                     .map_err(ShellRunError::Component)?;
                 component_stage_records.extend(runtime.component.take_profiling_records());
@@ -244,11 +297,33 @@ impl Shell {
 
             let mut present_damage: Vec<DamageRect> =
                 self.components[index].component.take_present_damage();
+            // Scale change or explicit force-full triggers full-buffer present (per HDPI-04)
+            let mut force_full = false;
+            if visible
+                && self
+                    .presentation_engine
+                    .surface_needs_full_redraw(&surface_id)
+            {
+                force_full = true;
+                self.presentation_engine
+                    .clear_surface_needs_full_redraw(&surface_id);
+                tracing::debug!(
+                    surface_id = surface_id.as_str(),
+                    "scale change triggered full-buffer present"
+                );
+            }
             if visible && self.components[index].force_full_present {
-                if let Some(buffer) = self.components[index].paint_buffer.as_ref() {
-                    present_damage = vec![full_buffer_damage(buffer)];
-                }
+                force_full = true;
                 self.components[index].force_full_present = false;
+            }
+            if force_full {
+                // Emit full damage in logical coordinates (attach_shm_buffer scales to physical)
+                present_damage = vec![DamageRect {
+                    x: 0,
+                    y: 0,
+                    width: width.max(1),
+                    height: height.max(1),
+                }];
             }
             if visible && self.debug.show_layout_bounds {
                 let runtime = &mut self.components[index];
@@ -257,8 +332,13 @@ impl Shell {
                         .paint_buffer
                         .as_mut()
                         .expect("paint buffer initialised");
-                    self.debug_overlay.paint_layout_bounds(tree, buffer, 1.0);
-                    present_damage = vec![full_buffer_damage(buffer)];
+                    self.debug_overlay.paint_layout_bounds(tree, buffer, scale);
+                    present_damage = vec![DamageRect {
+                        x: 0,
+                        y: 0,
+                        width: width.max(1),
+                        height: height.max(1),
+                    }];
                 }
             }
 
@@ -340,15 +420,6 @@ impl Shell {
             self.components[index].known_surface_size = Some(size);
         }
         Ok(size)
-    }
-}
-
-fn full_buffer_damage(buffer: &PixelBuffer) -> DamageRect {
-    DamageRect {
-        x: 0,
-        y: 0,
-        width: buffer.width.max(1),
-        height: buffer.height.max(1),
     }
 }
 
