@@ -54,15 +54,15 @@
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| DMGE-01 | TBD | Pending |
-| DMGE-02 | TBD | Pending |
-| DMGE-03 | TBD | Pending |
-| HDPI-01 | TBD | Pending |
-| HDPI-02 | TBD | Pending |
-| HDPI-03 | TBD | Pending |
-| HDPI-04 | TBD | Pending |
-| HDPI-05 | TBD | Pending |
-| BLUR-01 | TBD | Pending |
-| BLUR-02 | TBD | Pending |
-| BLUR-03 | TBD | Pending |
-| BLUR-04 | TBD | Pending |
+| DMGE-01 | Phase 101 | Pending |
+| DMGE-02 | Phase 101 | Pending |
+| DMGE-03 | Phase 101 | Pending |
+| HDPI-01 | Phase 102 | Pending |
+| HDPI-02 | Phase 102 | Pending |
+| HDPI-03 | Phase 102 | Pending |
+| HDPI-04 | Phase 102 | Pending |
+| HDPI-05 | Phase 102 | Pending |
+| BLUR-01 | Phase 103 | Pending |
+| BLUR-02 | Phase 103 | Pending |
+| BLUR-03 | Phase 103 | Pending |
+| BLUR-04 | Phase 103 | Pending |

@@ -2,6 +2,7 @@
 
 ## Milestones
 
+- 🔄 **v1.20 Compositor Integration** — Phases 101-103 in progress
 - ✅ **v1.19 Performance: Event-Driven Frame Scheduler** — Phases 99-100 shipped 2026-06-09 ([archive](milestones/v1.19-ROADMAP.md), [audit](v1.19-MILESTONE-AUDIT.md))
 - ✅ **v1.18 Performance: Smart Invalidation** — Phases 96-98 shipped 2026-06-09 ([archive](milestones/v1.18-ROADMAP.md), [audit](milestones/v1.18-MILESTONE-AUDIT.md))
 - ✅ **v1.17 Performance: Scripting VM Consolidation** — Phases 92-95 shipped 2026-06-07 ([archive](milestones/v1.17-ROADMAP.md), [audit](v1.17-MILESTONE-AUDIT.md))
@@ -33,6 +34,47 @@
 
 </details>
 
+### v1.20 Compositor Integration
+
+- [ ] **Phase 101: Per-Region Damage** — Thread `Vec<DamageRect>` from the retained renderer through to `wl_surface::damage_buffer` calls, replacing the single unioned rect commit
+- [ ] **Phase 102: HiDPI / Fractional Scale** — Wire `wl_output::scale` and `wp_fractional_scale_v1` as authoritative scale sources; allocate `PixelBuffer` at physical pixels; pair with `wp_viewporter` for non-integer ratios
+- [ ] **Phase 103: Compositor Blur Offload** — Bind `org_kde_kwin_blur` optionally; send `kde_blur.set_region` + `kde_blur.commit` per surface with `backdrop-filter` nodes before each `wl_surface.commit`
+
+## Phase Details
+
+### Phase 101: Per-Region Damage
+**Goal**: The compositor receives accurate per-dirty-rect damage information instead of a single unioned bounding rect on every frame commit
+**Depends on**: Phase 100 (opaque region hints — retained display list already in place)
+**Requirements**: DMGE-01, DMGE-02, DMGE-03
+**Success Criteria** (what must be TRUE):
+  1. A frame where only one widget changes causes `wl_surface::damage_buffer` to be called once with the widget's rect, not the full surface bounds
+  2. A frame with multiple dirty regions calls `damage_buffer` once per rect, capped at 16 calls total per commit
+  3. Debug overlay shows a per-frame damage rect count alongside existing damage metrics
+**Plans**: TBD
+
+### Phase 102: HiDPI / Fractional Scale
+**Goal**: Shell surfaces render at native physical pixel density on HiDPI displays; layout coordinates stay in logical CSS pixels throughout
+**Depends on**: Phase 101 (damage rects must be correctly scaled before commit)
+**Requirements**: HDPI-01, HDPI-02, HDPI-03, HDPI-04, HDPI-05
+**Success Criteria** (what must be TRUE):
+  1. On a 2× integer-scale display, text and icons appear sharp without upscaling artifacts
+  2. On a 1.5× fractional-scale display, `wp_viewporter` sets the destination to logical dimensions and the buffer is allocated at `ceil(logical × 1.5)` physical pixels
+  3. Plugging in or unplugging a HiDPI monitor (scale factor change) triggers a resize and full redraw with no stale pixels visible
+  4. On a compositor without `wp_fractional_scale_v1`, the `wl_output::scale` integer fallback keeps rendering correct
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 103: Compositor Blur Offload
+**Goal**: Surfaces with `backdrop-filter: blur(...)` nodes delegate blur rendering to the compositor on KDE; non-KDE compositors render a flat background without error
+**Depends on**: Phase 102 (scale factor must be established before blur region coordinates are correct)
+**Requirements**: BLUR-01, BLUR-02, BLUR-03, BLUR-04
+**Success Criteria** (what must be TRUE):
+  1. On KDE Plasma, a surface with `backdrop-filter: blur(8px)` shows compositor-driven background blur behind the affected region
+  2. On a non-KDE compositor (e.g., Sway), the same surface starts and renders normally with a flat background and no Wayland protocol errors in logs
+  3. A surface with no `backdrop-filter` nodes produces no `kde_blur` protocol calls during its commit sequence
+  4. Removing the CPU software blur path does not regress any existing test or visual output
+**Plans**: TBD
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -42,33 +84,13 @@
 | 98. Narrow Invalidation & Event Routing | v1.18 | 3/3 | Complete | 2026-06-09 |
 | 99. Event-Driven Wayland Dispatch | v1.19 | 4/4 | Complete | 2026-06-09 |
 | 100. Opaque Region Hints | v1.19 | 2/2 | Complete | 2026-06-09 |
+| 101. Per-Region Damage | v1.20 | 0/? | Not started | - |
+| 102. HiDPI / Fractional Scale | v1.20 | 0/? | Not started | - |
+| 103. Compositor Blur Offload | v1.20 | 0/? | Not started | - |
 
 ---
 
 ## Backlog
-
-### v1.20 — Compositor Integration
-
-**Goal:** Use Wayland compositor protocols to offload work and support HiDPI
-displays without upscaling.
-
-**Scope:**
-
-- HiDPI / fractional scale: plumb `wl_output::scale` / `wp_fractional_scale_v1`
-  to each surface and render at native pixel density; pair with `wp_viewporter`
-  for non-integer ratios.
-
-- Compositor blur offload: wire `wp_blur_v1` / `org_kde_kwin_blur_v1` for
-  backdrop-filter blur regions so the compositor handles blur on supported
-  compositors instead of Skia on the CPU.
-
-- Track damage as multiple rects deeper into the retained renderer so
-  presentation can commit per-region damage instead of whole-surface damage.
-
-**Priority:** medium — HiDPI is a correctness issue on 2× displays; blur
-offload and fine-grained damage are performance polish.
-
----
 
 ### v1.21 — Retained Layout & Display List
 
@@ -160,6 +182,43 @@ Language server protocol support for `.mesh` authoring: element/component
 completion, hover, diagnostics, `require(...)` resolution, `ref.field`
 completions derived from the element model, and IDE integration. Depends on
 stable module-graph semantics.
+
+---
+
+### v1.27 — Performance: Incremental Tree Build & Retained Diff
+
+**Goal:** Eliminate the remaining O(whole-tree) work the component runtime
+does on every frame: rebuild only affected template subtrees, diff only dirty
+nodes, and collapse the per-frame annotation passes into one walk.
+
+Continuation of v1.18 (smart invalidation) and v1.19 (frame scheduler);
+identified in the 2026-06-10 performance deep dive alongside the shipped
+per-frame clone/parse batch (expression AST cache, `Arc<Theme>`,
+`Arc<ScriptState>` snapshots, release LTO).
+
+**Scope:**
+
+- Affected-subtree template re-evaluation: `narrow_script_update` still
+  rebuilds the full widget tree (full template evaluation) and diffs
+  afterward, so every script/service change pays O(tree) tree-build cost.
+  Use the `NodeServiceFieldDependencies` index from v1.18 to re-evaluate only
+  template nodes whose tracked fields changed.
+
+- Generation-aware retained-tree diff: `RetainedWidgetTree::update` walks the
+  whole tree and FNV-hashes every node's computed style and attribute strings
+  on every paint. Skip snapshot collection/hashing for subtrees whose dirty
+  bits prove them clean since the last generation.
+
+- Fuse the `finalize_tree` annotation walks (`annotate_runtime_tree`,
+  `annotate_surface_shortcuts`, `annotate_overflow_tree`,
+  `merge_runtime_primitive_defaults`, `annotate_selection_tree`) into a
+  single traversal, and move hot annotations (`_mesh_key`, slider/scroll
+  values, exiting flags) from string attributes toward typed `WidgetNode`
+  fields — pairs with the v1.23 typed-node work.
+
+**Priority:** medium-high — these are the last per-frame full-tree passes in
+the component runtime; sequencing before v1.21/v1.25 keeps layout and GPU
+work from being measured against an inflated baseline.
 
 ---
 
