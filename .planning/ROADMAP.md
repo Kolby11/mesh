@@ -37,7 +37,7 @@
 ### v1.20 Compositor Integration
 
 - [x] **Phase 101: Per-Region Damage** — Thread `Vec<DamageRect>` from the retained renderer through to `wl_surface::damage_buffer` calls, replacing the single unioned rect commit (completed 2026-06-10)
-- [ ] **Phase 102: HiDPI / Fractional Scale** — Wire `wl_output::scale` and `wp_fractional_scale_v1` as authoritative scale sources; allocate `PixelBuffer` at physical pixels; pair with `wp_viewporter` for non-integer ratios
+- [x] **Phase 102: HiDPI / Fractional Scale** — Wire `wl_output::scale` and `wp_fractional_scale_v1` as authoritative scale sources; allocate `PixelBuffer` at physical pixels; pair with `wp_viewporter` for non-integer ratios (completed 2026-06-10)
 - [ ] **Phase 103: Compositor Blur Offload** — Bind `org_kde_kwin_blur` optionally; send `kde_blur.set_region` + `kde_blur.commit` per surface with `backdrop-filter` nodes before each `wl_surface.commit`
 
 ## Phase Details
@@ -65,7 +65,7 @@
   4. On a compositor without `wp_fractional_scale_v1`, the `wl_output::scale` integer fallback keeps rendering correct
  **Plans**:
  - [x] 102-01-PLAN.md — Scale acquisition: bind wp_viewporter + wp_fractional_scale_v1, store scale: f32 on SurfaceEntry, implement scale handlers
- - [ ] 102-02-PLAN.md — Physical pixel pipeline: PixelBuffer at ceil(logical×scale), wp_viewporter integration, damage rect scaling
+ - [x] 102-02-PLAN.md — Physical pixel pipeline: PixelBuffer at ceil(logical×scale), wp_viewporter integration, damage rect scaling
  **UI hint**: yes
 
 ### Phase 103: Compositor Blur Offload
@@ -89,7 +89,7 @@
 | 99. Event-Driven Wayland Dispatch | v1.19 | 4/4 | Complete | 2026-06-09 |
 | 100. Opaque Region Hints | v1.19 | 2/2 | Complete | 2026-06-09 |
 | 101. Per-Region Damage | v1.20 | 1/1 | Complete   | 2026-06-10 |
-| 102. HiDPI / Fractional Scale | v1.20 | 1/2 | In Progress|  |
+| 102. HiDPI / Fractional Scale | v1.20 | 2/2 | Complete   | 2026-06-10 |
 | 103. Compositor Blur Offload | v1.20 | 0/? | Not started | - |
 
 ---
