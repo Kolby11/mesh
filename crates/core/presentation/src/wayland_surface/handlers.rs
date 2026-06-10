@@ -15,6 +15,11 @@ impl CompositorHandler for State {
         else {
             return;
         };
+        // When wp_fractional_scale_v1 is bound for this surface, prefer its
+        // more precise preferred_scale events over the deprecated integer path.
+        if entry.fractional_scale.is_some() {
+            return;
+        }
         // T-102-01: Clamp to 1..=3 to prevent extreme scale values from
         // malicious compositors that could cause zero-size or overflow buffers.
         let new_scale = new_factor.clamp(1, 3) as f32;
