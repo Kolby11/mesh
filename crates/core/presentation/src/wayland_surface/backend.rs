@@ -91,6 +91,7 @@ pub(super) struct SurfaceEntry {
     pub(super) scale: f32,
     pub(super) needs_full_redraw: bool,
     pub(super) fractional_scale: Option<WpFractionalScaleV1>,
+    pub(super) viewport: Option<WpViewport>,
 }
 
 struct SurfaceConfigHasher(u64);
@@ -136,6 +137,7 @@ impl SurfaceEntry {
             scale: 1.0,
             needs_full_redraw: false,
             fractional_scale: None,
+            viewport: None,
         }
     }
 
@@ -257,13 +259,30 @@ impl SurfaceEntry {
         &mut self,
         qh: &QueueHandle<State>,
         index: usize,
-        width: u32,
-        height: u32,
+        logical_width: u32,
+        logical_height: u32,
+        physical_width: u32,
+        physical_height: u32,
         damage_rects: &[DamageRect],
+        scale: f32,
     ) {
         let buffer = &self.shm_buffers[index].buffer;
         let wl_surface = self.layer_surface.wl_surface();
-        for rect in protocol_damage_rects(damage_rects, width, height) {
+
+        // Scale damage rects from logical to physical coordinates
+        let physical_damage: Vec<DamageRect> = damage_rects
+            .iter()
+            .map(|r| scale_damage_rect_to_physical(*r, scale))
+            .collect();
+
+        // Clip scaled rects to physical buffer bounds (T-102-06)
+        let clipped_damage: Vec<DamageRect> = physical_damage
+            .iter()
+            .map(|r| clip_damage_rect_to_buffer(*r, physical_width, physical_height))
+            .collect();
+
+        // Emit damage_buffer calls with physical coordinates
+        for rect in protocol_damage_rects(&clipped_damage, physical_width, physical_height) {
             wl_surface.damage_buffer(
                 rect.x as i32,
                 rect.y as i32,
@@ -271,13 +290,38 @@ impl SurfaceEntry {
                 rect.height as i32,
             );
         }
+
+        // Set buffer scale and viewport destination per D-01/CONTEXT.md
+        let scale_is_integer = (scale - scale.round()).abs() < f32::EPSILON;
+        if scale_is_integer {
+            // Integer scale: use set_buffer_scale only. No viewporter needed.
+            wl_surface.set_buffer_scale(scale as i32);
+            if let Some(ref viewport) = self.viewport {
+                viewport.set_destination(-1, -1); // Reset viewport to intrinsic size
+            }
+        } else if self.viewport.is_some() {
+            // Fractional scale WITH viewporter: set_buffer_scale to ceil(scale),
+            // then set_destination to logical dimensions so the compositor scales down.
+            let integer_scale = scale.ceil() as i32;
+            wl_surface.set_buffer_scale(integer_scale);
+            if let Some(ref viewport) = self.viewport {
+                viewport.set_destination(logical_width as i32, logical_height as i32);
+            }
+        } else {
+            // Fractional scale WITHOUT viewporter: round to nearest integer,
+            // accept slight sizing mismatch per CONTEXT.md Fallback Behavior.
+            let rounded_scale = scale.round() as i32;
+            wl_surface.set_buffer_scale(rounded_scale);
+        }
+
         buffer.attach_to(wl_surface).ok();
         wl_surface.frame(qh, wl_surface.clone());
         self.frame_pending = true;
         self.frame_pending_since = Some(Instant::now());
         self.layer_surface.commit();
-        self.width = width;
-        self.height = height;
+        // Store logical dimensions (the authoritative size)
+        self.width = logical_width;
+        self.height = logical_height;
     }
 
     pub(super) fn waiting_for_frame_callback(&self) -> bool {
@@ -486,6 +530,31 @@ fn union_damage(current: Option<DamageRect>, next: DamageRect) -> DamageRect {
     }
 }
 
+/// Scale a damage rect from logical (CSS) coordinates to physical (device) coordinates.
+fn scale_damage_rect_to_physical(rect: DamageRect, scale: f32) -> DamageRect {
+    DamageRect {
+        x: (rect.x as f32 * scale) as u32,
+        y: (rect.y as f32 * scale) as u32,
+        width: ((rect.width as f32 * scale).ceil() as u32).max(1),
+        height: ((rect.height as f32 * scale).ceil() as u32).max(1),
+    }
+}
+
+/// Clip a damage rect to the physical buffer bounds (T-102-06).
+/// Sending out-of-bounds damage is a Wayland protocol error.
+fn clip_damage_rect_to_buffer(rect: DamageRect, buffer_w: u32, buffer_h: u32) -> DamageRect {
+    let x = rect.x.min(buffer_w.saturating_sub(1));
+    let y = rect.y.min(buffer_h.saturating_sub(1));
+    let w = rect.width.min(buffer_w.saturating_sub(x));
+    let h = rect.height.min(buffer_h.saturating_sub(y));
+    DamageRect {
+        x,
+        y,
+        width: w.max(1),
+        height: h.max(1),
+    }
+}
+
 fn copy_bgra_damage_to_canvas(
     src: &[u8],
     canvas: &mut [u8],
@@ -619,6 +688,14 @@ impl LayerShellBackend {
                 {
                     entry.fractional_scale = Some(fs);
                 }
+                // Create viewport for this surface (wp_viewporter for non-integer scale)
+                if let Some(ref viewporter) = self.state.viewporter {
+                    if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
+                        let wl_surface = entry.layer_surface.wl_surface().clone();
+                        let qh = self.state.qh.clone();
+                        entry.viewport = Some(viewporter.get_viewport(&wl_surface, &qh, ()));
+                    }
+                }
             }
         }
     }
@@ -717,8 +794,6 @@ impl LayerShellBackend {
         }
         self.wait_for_surface_configure(surface_id)?;
 
-        let width = buffer.width.max(1);
-        let height = buffer.height.max(1);
         if self
             .state
             .surfaces
@@ -746,6 +821,16 @@ impl LayerShellBackend {
         if !entry.configured {
             return Ok(());
         }
+
+        // Get the logical dimensions from the surface config
+        let logical_w = entry.cfg.width.max(1);
+        let logical_h = entry.cfg.height.max(1);
+        let scale = entry.scale;
+
+        // SHM copy must use physical buffer dimensions for the copy region
+        let physical_w = buffer.width.max(1);
+        let physical_h = buffer.height.max(1);
+
         // SHM copy region must always be a union (Pitfall 1) — fold all rects
         // into a single DamageRect for the buffer copy, then forward the
         // original rect slice for the per-rect damage_buffer calls.
@@ -756,11 +841,25 @@ impl LayerShellBackend {
             .or_else(|| {
                 // If the slice is empty (shouldn't normally reach here due to
                 // the skip gate in render.rs), upload the full buffer.
-                Some(full_damage(width, height))
+                Some(full_damage(physical_w, physical_h))
             });
-        let (buffer_index, _copy_damage) =
-            entry.copy_into_shm_buffer(pool, &buffer.data, width, height, shm_copy_damage)?;
-        entry.attach_shm_buffer(&qh, buffer_index, width, height, damage_rects);
+        let (buffer_index, _copy_damage) = entry.copy_into_shm_buffer(
+            pool,
+            &buffer.data,
+            physical_w,
+            physical_h,
+            shm_copy_damage,
+        )?;
+        entry.attach_shm_buffer(
+            &qh,
+            buffer_index,
+            logical_w,
+            logical_h,
+            physical_w,
+            physical_h,
+            damage_rects,
+            scale,
+        );
 
         self.dispatch_pending()?;
         Ok(())

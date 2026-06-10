@@ -576,6 +576,19 @@ delegate_pointer!(State);
 delegate_keyboard!(State);
 delegate_registry!(State);
 
+impl Dispatch<WpViewport, ()> for State {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WpViewport,
+        _event: <WpViewport as wayland_client::Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        // wp_viewport has no events in protocol version 1.
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::normalize_keysym_name;
