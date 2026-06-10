@@ -2,6 +2,7 @@ mod dev_window;
 mod wayland_surface;
 
 use std::collections::HashMap;
+use std::os::unix::io::BorrowedFd;
 
 use mesh_core_render::{DamageRect, PixelBuffer};
 
@@ -10,6 +11,42 @@ pub use wayland_surface::{LayerSurfaceConfig, LayerSurfaceSizePolicy};
 
 use dev_window::DevWindowBackend;
 use wayland_surface::LayerShellBackend;
+
+/// Why a blocking wait returned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitReason {
+    /// The Wayland connection fd became readable.
+    WaylandEvent,
+    /// The IPC/backend eventfd was signaled.
+    IpcEvent,
+    /// The deadline expired before any fd became ready.
+    DeadlineExpired,
+}
+
+impl WaitReason {
+    /// Profiling trigger-kind string suitable for `ProfilingStage::SchedulerIdle`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WaylandEvent => "wayland_event",
+            Self::IpcEvent => "ipc_event",
+            Self::DeadlineExpired => "deadline_expired",
+        }
+    }
+}
+
+/// Result of a blocking wait on the presentation backend.
+#[derive(Debug, Clone, Copy)]
+pub struct WaitResult {
+    pub reason: WaitReason,
+}
+
+impl WaitResult {
+    pub fn deadline_expired() -> Self {
+        Self {
+            reason: WaitReason::DeadlineExpired,
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum PresentationError {
@@ -77,7 +114,16 @@ impl PresentationEngine {
         visible: bool,
         buffer: &PixelBuffer,
     ) -> Result<(), PresentationError> {
-        self.present_with_damage(surface_id, title, visible, buffer, None)
+        // `present()` is only used by DevWindow callers. Pass a full-damage
+        // slice so the Wayland path would get a complete upload if ever
+        // reached, but in practice this only hits Backend::DevWindow.
+        let full = DamageRect {
+            x: 0,
+            y: 0,
+            width: buffer.width.max(1),
+            height: buffer.height.max(1),
+        };
+        self.present_with_damage(surface_id, title, visible, buffer, &[full])
     }
 
     pub fn present_with_damage(
@@ -86,13 +132,19 @@ impl PresentationEngine {
         title: &str,
         visible: bool,
         buffer: &PixelBuffer,
-        damage: Option<DamageRect>,
+        damage: &[DamageRect],
     ) -> Result<(), PresentationError> {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => {
                 bridge.present_with_damage(surface_id, title, visible, buffer, damage)
             }
             Backend::DevWindow(bridge) => bridge.present(surface_id, title, visible, buffer),
+        }
+    }
+
+    pub fn update_opaque_region(&mut self, surface_id: &str, opaque_rect: Option<DamageRect>) {
+        if let Backend::WaylandSurface(bridge) = &mut self.backend {
+            bridge.update_opaque_region(surface_id, opaque_rect);
         }
     }
 
@@ -133,6 +185,28 @@ impl PresentationEngine {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.poll_events(),
             Backend::DevWindow(bridge) => bridge.poll_events(),
+        }
+    }
+
+    /// Returns true when the backend supports fd-based blocking dispatch (WaylandSurface).
+    /// Returns false for DevWindow, which uses internal polling.
+    pub fn supports_blocking_dispatch(&self) -> bool {
+        matches!(&self.backend, Backend::WaylandSurface(_))
+    }
+
+    /// Block on the backend until `timeout` elapses or a wakeup occurs.
+    ///
+    /// `eventfd_fd` is an optional IPC/backend wakeup fd checked *after*
+    /// the Wayland connection fd (non-blocking check). For `Backend::DevWindow`
+    /// this returns `DeadlineExpired` immediately.
+    pub fn wait_for_events(
+        &mut self,
+        timeout: std::time::Duration,
+        eventfd_fd: BorrowedFd<'_>,
+    ) -> Result<WaitResult, PresentationError> {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.wait_for_events(timeout, eventfd_fd),
+            Backend::DevWindow(_) => Ok(WaitResult::deadline_expired()),
         }
     }
 }

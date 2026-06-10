@@ -91,7 +91,7 @@ fn phase44_focused_proof_preserves_invalidation_and_damage_payloads() {
         let _accessibility = proof.dirty.accessibility;
     }
     assert!(component.take_invalidation_snapshot().is_some());
-    assert!(component.take_present_damage().is_some());
+    assert!(!component.take_present_damage().is_empty());
 }
 
 #[test]
@@ -568,7 +568,12 @@ fn fnv_hash_buffer_differs_on_change() {
     let mut buffer1 = PixelBuffer::new(4, 4);
     buffer1.clear(mesh_core_elements::style::Color::TRANSPARENT);
     let mut buffer2 = PixelBuffer::new(4, 4);
-    buffer2.clear(mesh_core_elements::style::Color::from_rgba8(255, 0, 0, 255));
+    buffer2.clear(mesh_core_elements::style::Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
     let hash1 = fnv_hash_buffer(&buffer1);
     let hash2 = fnv_hash_buffer(&buffer2);
     assert_ne!(

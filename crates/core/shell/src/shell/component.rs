@@ -45,19 +45,19 @@ use mesh_core_frontend::{
 };
 use mesh_core_locale::LocaleEngine;
 use mesh_core_scripting::{
-    BoundInstanceCall, LocaleBoundState, ScriptContext, ScriptInterfaceImport,
+    BoundInstanceCall, LocaleBoundState, ScriptContext, ScriptInterfaceImport, ScriptState,
 };
 use mesh_core_theme::{Theme, default_theme};
 use mesh_core_wayland::{Edge, KeyboardMode, ShellSurface};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mesh_core_render::{
-    DamageRect, DisplayListMetrics, DisplayListRepaintPolicy, PixelBuffer, RenderObjectTree,
-    RetainedDisplayList, SharedTextMeasurer, TextCacheMetrics, TextRenderer,
+    DamageRect, DisplayListMetrics, DisplayListRepaintPolicy, DisplayPaintCommand, PixelBuffer,
+    RenderObjectTree, RetainedDisplayList, SharedTextMeasurer, TextCacheMetrics, TextRenderer,
 };
 
 const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
@@ -346,7 +346,15 @@ pub(super) struct FrontendSurfaceComponent {
     last_tooltip_damage: Option<DamageRect>,
     runtimes: Arc<Mutex<HashMap<String, EmbeddedFrontendRuntime>>>,
     render_stack: RefCell<Vec<String>>,
-    active_theme: RefCell<Theme>,
+    /// The theme used by the current/last paint, shared cheaply with child
+    /// component builds and animation restyle. Refreshed from the paint-time
+    /// `&Theme` only when `active_theme_stale` is set — cloning the full
+    /// token/defaults maps every frame is wasted work while the theme is
+    /// unchanged.
+    active_theme: RefCell<Arc<Theme>>,
+    /// Set on construction and by `theme_changed()`; cleared once the next
+    /// paint captures the new theme into `active_theme`.
+    active_theme_stale: Cell<bool>,
     measured_size: Option<(u32, u32)>,
     last_surface_size: Option<(u32, u32)>,
     surface_pixels_invalid: bool,
@@ -379,7 +387,7 @@ pub(super) struct FrontendSurfaceComponent {
     profiling_records: Vec<ComponentProfilingRecord>,
     invalidation_snapshot: Option<mesh_core_debug::ProfilingInvalidationSnapshot>,
     focused_proof_snapshot: Option<mesh_core_render::FocusedProofSnapshot>,
-    last_present_damage: Option<DamageRect>,
+    last_present_damage_rects: Vec<DamageRect>,
     last_visual_damage: HashMap<NodeId, DamageRect>,
     tooltip_damage_scratch: Vec<DamageRect>,
     dirty_node_visual_damage_scratch: Vec<DamageRect>,
@@ -394,12 +402,23 @@ pub(super) struct FrontendSurfaceComponent {
     /// across restyle passes; `is_for()` verifies identity against the rules
     /// slice before each restyle so a rules rebuild forces a rebuild here too.
     cached_style_rule_index: Option<mesh_core_elements::style::StyleRuleIndex>,
+    /// Whether any script in the compiled module references `elements` or
+    /// `refs`. When false, `publish_element_metrics` is skipped: building the
+    /// per-element JSON snapshot every paint costs ~10% of an interaction
+    /// frame and is wasted on scripts that never read it. Recomputed on
+    /// source reload.
+    scripts_use_element_metrics: bool,
 }
 
 #[derive(Debug)]
 struct EmbeddedFrontendRuntime {
     module_id: String,
     script_ctx: ScriptContext,
+    /// Cached clone of the script state, keyed by its mutation generation.
+    /// Tree builds need a state snapshot that outlives the runtimes lock;
+    /// this avoids re-cloning the full variable map on every frame the
+    /// state did not change.
+    cached_state_clone: Option<(u64, Arc<ScriptState>)>,
 }
 
 impl FrontendSurfaceComponent {
@@ -413,6 +432,7 @@ impl FrontendSurfaceComponent {
         let settings_state =
             load_frontend_module_settings(&module_settings_file, &compiled.manifest);
         let service_payload_capacity = service_payload_cache_capacity(&compiled.manifest);
+        let scripts_use_element_metrics = scripts_reference_element_metrics(&compiled);
         Self {
             compiled,
             module_dir,
@@ -457,7 +477,8 @@ impl FrontendSurfaceComponent {
             last_tooltip_damage: None,
             runtimes: Arc::new(Mutex::new(HashMap::new())),
             render_stack: RefCell::new(Vec::new()),
-            active_theme: RefCell::new(default_theme()),
+            active_theme: RefCell::new(Arc::new(default_theme())),
+            active_theme_stale: Cell::new(true),
             measured_size: None,
             last_surface_size: None,
             surface_pixels_invalid: true,
@@ -477,11 +498,13 @@ impl FrontendSurfaceComponent {
             keyframe_animations: HashMap::new(),
             keyframe_rules: HashMap::new(),
             has_active_keyframe_animation: false,
+            narrow_path_active: false,
+            affected_node_count: 0,
             profiling_enabled: false,
             profiling_records: Vec::new(),
             invalidation_snapshot: None,
             focused_proof_snapshot: None,
-            last_present_damage: None,
+            last_present_damage_rects: Vec::new(),
             last_visual_damage: HashMap::new(),
             tooltip_damage_scratch: Vec::new(),
             dirty_node_visual_damage_scratch: Vec::new(),
@@ -489,6 +512,7 @@ impl FrontendSurfaceComponent {
             effective_damage_scratch: Vec::new(),
             cached_restyle_rules: None,
             cached_style_rule_index: None,
+            scripts_use_element_metrics,
         }
     }
 
@@ -596,6 +620,28 @@ fn tracked_service_fields_changed(
         let next_value = next.get(field);
         previous_value != next_value
     })
+}
+
+/// Whether any script block in the module references the `elements` or `refs`
+/// host tables. Substring match over the raw sources: a false positive only
+/// re-enables the old always-publish behavior, never breaks a consumer.
+fn scripts_reference_element_metrics(compiled: &CompiledFrontendModule) -> bool {
+    let uses_metrics = |source: &str| {
+        ["refs.", "refs[", "elements.", "elements["]
+            .iter()
+            .any(|pattern| source.contains(pattern))
+    };
+    compiled
+        .component
+        .script
+        .as_ref()
+        .is_some_and(|script| uses_metrics(&script.source))
+        || compiled.local_components.values().any(|component| {
+            component
+                .script
+                .as_ref()
+                .is_some_and(|script| uses_metrics(&script.source))
+        })
 }
 
 fn service_payload_cache_capacity(manifest: &mesh_core_module::Manifest) -> usize {

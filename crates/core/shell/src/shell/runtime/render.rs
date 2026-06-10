@@ -242,10 +242,11 @@ impl Shell {
                 }
             }
 
-            let mut present_damage = self.components[index].component.take_present_damage();
+            let mut present_damage: Vec<DamageRect> =
+                self.components[index].component.take_present_damage();
             if visible && self.components[index].force_full_present {
                 if let Some(buffer) = self.components[index].paint_buffer.as_ref() {
-                    present_damage = Some(full_buffer_damage(buffer));
+                    present_damage = vec![full_buffer_damage(buffer)];
                 }
                 self.components[index].force_full_present = false;
             }
@@ -257,17 +258,16 @@ impl Shell {
                         .as_mut()
                         .expect("paint buffer initialised");
                     self.debug_overlay.paint_layout_bounds(tree, buffer, 1.0);
-                    present_damage = Some(full_buffer_damage(buffer));
+                    present_damage = vec![full_buffer_damage(buffer)];
                 }
             }
 
             let mut presented = false;
             let present_started = self.profiling_enabled().then(std::time::Instant::now);
-            // `take_present_damage == None` means paint produced no changed pixels,
-            // so skip the present entirely. `present_with_damage(None)` is reserved
-            // for legacy callers that do not know their damage and need a full
-            // buffer upload/damage.
-            if !visible || present_damage.is_some() {
+            // An empty `present_damage` Vec means paint produced no changed pixels,
+            // so skip the present entirely. This mirrors the old `is_some()` gate
+            // (None -> skip) but works with the multi-rect type.
+            if !visible || !present_damage.is_empty() {
                 self.presentation_engine
                     .present_with_damage(
                         &surface_id,
@@ -277,7 +277,7 @@ impl Shell {
                             .paint_buffer
                             .as_ref()
                             .expect("paint buffer initialised"),
-                        present_damage,
+                        &present_damage,
                     )
                     .map_err(ShellRunError::Presentation)?;
                 presented = true;

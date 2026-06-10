@@ -94,7 +94,7 @@ text {
     component.paint(&light, 160, 48, &mut buffer).unwrap();
 
     assert!(
-        component.take_present_damage().is_some(),
+        !component.take_present_damage().is_empty(),
         "same-frame rerender must preserve first-pass damage so the shell still presents"
     );
 }

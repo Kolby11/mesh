@@ -253,16 +253,18 @@ impl SurfaceEntry {
         index: usize,
         width: u32,
         height: u32,
-        damage: DamageRect,
+        damage_rects: &[DamageRect],
     ) {
         let buffer = &self.shm_buffers[index].buffer;
         let wl_surface = self.layer_surface.wl_surface();
-        wl_surface.damage_buffer(
-            damage.x as i32,
-            damage.y as i32,
-            damage.width as i32,
-            damage.height as i32,
-        );
+        for rect in protocol_damage_rects(damage_rects, width, height) {
+            wl_surface.damage_buffer(
+                rect.x as i32,
+                rect.y as i32,
+                rect.width as i32,
+                rect.height as i32,
+            );
+        }
         buffer.attach_to(wl_surface).ok();
         wl_surface.frame(qh, wl_surface.clone());
         self.frame_pending = true;
@@ -666,7 +668,7 @@ impl LayerShellBackend {
         _title: &str,
         visible: bool,
         buffer: &PixelBuffer,
-        damage: Option<DamageRect>,
+        damage_rects: &[DamageRect],
     ) -> Result<(), PresentationError> {
         if !visible {
             self.state.release_surface_focus_grab(surface_id);
@@ -718,9 +720,21 @@ impl LayerShellBackend {
         if !entry.configured {
             return Ok(());
         }
-        let (buffer_index, damage) =
-            entry.copy_into_shm_buffer(pool, &buffer.data, width, height, damage)?;
-        entry.attach_shm_buffer(&qh, buffer_index, width, height, damage);
+        // SHM copy region must always be a union (Pitfall 1) — fold all rects
+        // into a single DamageRect for the buffer copy, then forward the
+        // original rect slice for the per-rect damage_buffer calls.
+        let shm_copy_damage = damage_rects
+            .iter()
+            .copied()
+            .fold(None, |acc, r| Some(union_damage(acc, r)))
+            .or_else(|| {
+                // If the slice is empty (shouldn't normally reach here due to
+                // the skip gate in render.rs), upload the full buffer.
+                Some(full_damage(width, height))
+            });
+        let (buffer_index, _copy_damage) =
+            entry.copy_into_shm_buffer(pool, &buffer.data, width, height, shm_copy_damage)?;
+        entry.attach_shm_buffer(&qh, buffer_index, width, height, damage_rects);
 
         self.dispatch_pending()?;
         Ok(())

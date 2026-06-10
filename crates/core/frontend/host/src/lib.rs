@@ -6,7 +6,7 @@ use mesh_core_debug::ProfilingStage;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::WidgetNode;
 use mesh_core_locale::LocaleEngine;
-use mesh_core_render::{DamageRect, PixelBuffer};
+use mesh_core_render::{DamageRect, DisplayPaintCommand, PixelBuffer};
 use mesh_core_scripting::ScriptError;
 use mesh_core_theme::Theme;
 use mesh_core_wayland::{KeyboardMode, ShellSurface};
@@ -277,9 +277,10 @@ pub trait ShellComponent: Send {
     ) -> Option<mesh_core_debug::ProfilingInvalidationSnapshot> {
         None
     }
-    /// Return the damage from the most recent paint for partial presentation.
-    fn take_present_damage(&mut self) -> Option<DamageRect> {
-        None
+    /// Return the damage rects from the most recent paint for partial presentation.
+    /// An empty Vec means no changed pixels — the caller should skip the present.
+    fn take_present_damage(&mut self) -> Vec<DamageRect> {
+        Vec::new()
     }
     /// Whether pending dirtiness should be resolved in the same render pass.
     fn wants_immediate_rerender(&self) -> bool {
@@ -300,6 +301,11 @@ pub trait ShellComponent: Send {
     }
     fn reload_module_settings(&mut self) -> Result<bool, ComponentError> {
         Ok(false)
+    }
+    /// Return the retained display list paint commands from the most recent paint,
+    /// for opaque region computation.
+    fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {
+        &[]
     }
     /// Return the last widget tree built by `paint`, for the debug layout inspector.
     fn last_widget_tree(&self) -> Option<&WidgetNode> {

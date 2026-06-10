@@ -454,7 +454,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             &tooltip_damage_rects,
             effective_damage_rects,
         );
-        let paint_damage = if effective_damage.full_surface {
+        let _paint_damage = if effective_damage.full_surface {
             Some(surface_damage)
         } else {
             effective_damage.rect
@@ -472,7 +472,9 @@ impl ShellComponent for FrontendSurfaceComponent {
                 self.invalidate_surface_config_only();
             }
         }
-        self.publish_element_metrics(&tree);
+        if self.scripts_use_element_metrics {
+            self.publish_element_metrics(&tree);
+        }
 
         let effective_damage_area = effective_damage.damage_area(display_list_metrics.surface_area);
         let paint_bounding_rect = matches!(
@@ -638,8 +640,16 @@ impl ShellComponent for FrontendSurfaceComponent {
                 }
             }
         };
-        self.last_present_damage =
-            merge_optional_damage(self.last_present_damage, paint_damage, surface_damage);
+        if effective_damage.full_surface {
+            self.last_present_damage_rects.clear();
+            self.last_present_damage_rects.push(surface_damage);
+        } else if !effective_damage.rects.is_empty() {
+            for &rect in &effective_damage.rects {
+                push_damage_rect(&mut self.last_present_damage_rects, rect, surface_damage);
+            }
+        }
+        // When effective_damage.rects is empty, leave last_present_damage_rects unchanged
+        // (accumulates across immediate-rerender passes, matching old merge_optional_damage behaviour)
         self.last_visual_damage = collect_visual_damage_rects(&tree, surface_damage);
         let traversal_micros = paint_metrics
             .traversal_micros
@@ -695,6 +705,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // and force a full pixel-buffer repaint so the selective-damage path
         // cannot skip the present.
         tracing::debug!("theme_changed for component '{}'", self.id());
+        self.active_theme_stale.set(true);
         self.last_tree = None;
         self.cached_restyle_rules = None;
         self.cached_style_rule_index = None;
@@ -821,6 +832,7 @@ impl ShellComponent for FrontendSurfaceComponent {
 
         let component_id = self.id().to_string();
         self.compiled = recompiled;
+        self.scripts_use_element_metrics = scripts_reference_element_metrics(&self.compiled);
         if let Some(entry) = self.frontend_catalog.modules.get_mut(&component_id) {
             entry.compiled = self.compiled.clone();
         }
@@ -890,8 +902,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.invalidation_snapshot.take()
     }
 
-    fn take_present_damage(&mut self) -> Option<DamageRect> {
-        self.last_present_damage.take()
+    fn take_present_damage(&mut self) -> Vec<DamageRect> {
+        std::mem::take(&mut self.last_present_damage_rects)
     }
 
     fn wants_immediate_rerender(&self) -> bool {
@@ -953,6 +965,10 @@ impl ShellComponent for FrontendSurfaceComponent {
 }
 
 impl FrontendSurfaceComponent {
+    pub fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {
+        self.retained_display_list.paint_commands()
+    }
+
     fn handle_interface_event(
         &mut self,
         event: &ServiceEvent,
@@ -1314,19 +1330,6 @@ fn collect_visual_damage_rects_into(
     }
     for child in &node.children {
         collect_visual_damage_rects_into(child, surface, damage);
-    }
-}
-
-fn merge_optional_damage(
-    current: Option<DamageRect>,
-    next: Option<DamageRect>,
-    surface: DamageRect,
-) -> Option<DamageRect> {
-    match (current, next) {
-        (Some(current), Some(next)) => clip_damage(union_damage(current, next), surface),
-        (Some(current), None) => clip_damage(current, surface),
-        (None, Some(next)) => clip_damage(next, surface),
-        (None, None) => None,
     }
 }
 

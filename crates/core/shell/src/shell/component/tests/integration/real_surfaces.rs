@@ -114,7 +114,7 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
         "phase47 navigation repaint should retain invalidation proof"
     );
     assert!(
-        navigation.take_present_damage().is_some(),
+        !navigation.take_present_damage().is_empty(),
         "phase47 navigation repaint should retain damage proof"
     );
 
@@ -145,7 +145,7 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
         "phase47 audio repaint should retain invalidation proof"
     );
     assert!(
-        audio.take_present_damage().is_some(),
+        !audio.take_present_damage().is_empty(),
         "phase47 audio repaint should retain damage proof"
     );
 }
