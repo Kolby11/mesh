@@ -148,6 +148,19 @@ impl PresentationEngine {
         }
     }
 
+    /// Set the logical-coordinate blur region for a surface.
+    /// Only meaningful on Wayland backends with `org_kde_kwin_blur` support.
+    /// Pass `None` to skip blur protocol calls for this frame (BLUR-04).
+    pub fn update_blur_region(
+        &mut self,
+        surface_id: &str,
+        blur_region: Option<DamageRect>,
+    ) {
+        if let Backend::WaylandSurface(bridge) = &mut self.backend {
+            bridge.update_blur_region(surface_id, blur_region);
+        }
+    }
+
     pub fn surface_size(
         &mut self,
         surface_id: &str,
