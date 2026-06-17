@@ -516,13 +516,16 @@ fn painter_primitive_box_rounded_shadow_and_filters_emit_effect_classes() {
     let mut buffer = PixelBuffer::new(32, 32);
     engine.render_tree(&root, &mut buffer, 1.0);
 
+    // BLUR-03: backdrop_filter no longer emits ApplyFilter::Backdrop; CPU blur
+    // is offloaded to the compositor via org_kde_kwin_blur protocol.
+    // CSS filter (non-backdrop) is encoded in DrawRoundedRect.paint.filter,
+    // so there is no separate apply_filter command either.
     let classes = painter_command_classes(&recorded.recorded_commands());
     assert_eq!(
         classes,
-        vec!["draw_shadow", "apply_filter", "draw_rounded_rect"]
+        vec!["draw_shadow", "draw_rounded_rect"]
     );
     assert!(classes.contains(&"draw_shadow"));
-    assert!(classes.contains(&"apply_filter"));
     assert!(classes.contains(&"draw_rounded_rect"));
 }
 
@@ -1828,8 +1831,10 @@ fn painter_helper_lowering_routes_effect_helpers_through_command_backend() {
         clip,
     );
 
+    // BLUR-03: apply_backdrop_filter is now a no-op; CPU blur offloaded to compositor.
+    // Only fill and shadow commands are emitted; no ApplyFilter::Backdrop.
     let commands = recorded.recorded_commands();
-    assert_eq!(commands.len(), 3);
+    assert_eq!(commands.len(), 2);
     assert!(matches!(
         commands[0],
         PainterCommand::DrawRoundedRect {
@@ -1841,13 +1846,6 @@ fn painter_helper_lowering_routes_effect_helpers_through_command_backend() {
         }
     ));
     assert!(matches!(commands[1], PainterCommand::DrawShadow { .. }));
-    assert!(matches!(
-        commands[2],
-        PainterCommand::ApplyFilter {
-            filter: PainterFilter::Backdrop(VisualFilter { blur_radius: 3.0 }),
-            ..
-        }
-    ));
 }
 
 #[test]
