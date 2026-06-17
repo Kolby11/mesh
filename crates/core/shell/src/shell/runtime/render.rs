@@ -293,6 +293,10 @@ impl Shell {
                     self.presentation_engine
                         .update_opaque_region(&surface_id, opaque_rect);
                 }
+                // Compute and set blur region from display list backdrop-filter nodes
+                let blur_region = compute_blur_region(commands);
+                self.presentation_engine
+                    .update_blur_region(&surface_id, blur_region);
             }
 
             let mut present_damage: Vec<DamageRect> =
@@ -421,6 +425,48 @@ impl Shell {
         }
         Ok(size)
     }
+}
+
+/// Compute the logical-coordinate union rect of all display list nodes
+/// that have an active `backdrop-filter: blur(...)`.
+///
+/// Returns `None` when no nodes have `backdrop_filter.blur_radius > 0.0`,
+/// which means no `kde_blur` protocol calls are emitted (BLUR-04).
+fn compute_blur_region(commands: &[DisplayPaintCommand]) -> Option<DamageRect> {
+    let mut union: Option<DamageRect> = None;
+    for cmd in commands {
+        if cmd.node.style.backdrop_filter.blur_radius <= 0.0 {
+            continue;
+        }
+        let rect = DamageRect {
+            x: cmd.node.layout.x as u32,
+            y: cmd.node.layout.y as u32,
+            width: (cmd.node.layout.width as u32).max(1),
+            height: (cmd.node.layout.height as u32).max(1),
+        };
+        union = Some(match union {
+            None => rect,
+            Some(current) => {
+                let left = current.x.min(rect.x);
+                let top = current.y.min(rect.y);
+                let right = current
+                    .x
+                    .saturating_add(current.width)
+                    .max(rect.x.saturating_add(rect.width));
+                let bottom = current
+                    .y
+                    .saturating_add(current.height)
+                    .max(rect.y.saturating_add(rect.height));
+                DamageRect {
+                    x: left,
+                    y: top,
+                    width: right.saturating_sub(left),
+                    height: bottom.saturating_sub(top),
+                }
+            }
+        });
+    }
+    union
 }
 
 fn compute_opaque_rect_for_root(
