@@ -381,24 +381,21 @@ impl FrontendRenderEngine {
 
     pub(super) fn apply_backdrop_filter(
         &self,
-        buffer: &mut PixelBuffer,
-        rect: ClipRect,
-        radius: f32,
+        _buffer: &mut PixelBuffer,
+        _rect: ClipRect,
+        _radius: f32,
         filter: VisualFilter,
-        clip: ClipRect,
+        _clip: ClipRect,
     ) {
+        // CPU software blur removed per BLUR-03.
+        // Compositor blur is handled by org_kde_kwin_blur protocol
+        // (see crates/core/presentation). The backdrop_filter data
+        // continues to flow through the display list for region
+        // computation even though we don't render it on the CPU.
         if filter.is_none() {
             return;
         }
-        self.execute_painter_commands(
-            buffer,
-            &[PainterCommand::ApplyFilter {
-                rect,
-                radius,
-                filter: PainterFilter::Backdrop(filter),
-                clip,
-            }],
-        );
+        // No-op: blur is offloaded to compositor or rendered flat.
     }
 
     pub(super) fn draw_background_paint(
@@ -478,24 +475,18 @@ impl FrontendRenderEngine {
 
     pub(super) fn apply_backdrop_filter_in_session(
         &self,
-        session: &mut PixelCanvasSession<'_>,
-        rect: ClipRect,
-        radius: f32,
+        _session: &mut PixelCanvasSession<'_>,
+        _rect: ClipRect,
+        _radius: f32,
         filter: VisualFilter,
-        clip: ClipRect,
+        _clip: ClipRect,
     ) {
+        // CPU software blur removed per BLUR-03.
+        // See apply_backdrop_filter comment above.
         if filter.is_none() {
             return;
         }
-        self.execute_painter_commands_in_session(
-            session,
-            &[PainterCommand::ApplyFilter {
-                rect,
-                radius,
-                filter: PainterFilter::Backdrop(filter),
-                clip,
-            }],
-        );
+        // No-op: blur is offloaded to compositor or rendered flat.
     }
 
     pub(super) fn draw_background_paint_in_session(
