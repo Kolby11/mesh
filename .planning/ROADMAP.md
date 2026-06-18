@@ -39,6 +39,7 @@
 - [x] **Phase 101: Per-Region Damage** — Thread `Vec<DamageRect>` from the retained renderer through to `wl_surface::damage_buffer` calls, replacing the single unioned rect commit (completed 2026-06-10)
 - [x] **Phase 102: HiDPI / Fractional Scale** — Wire `wl_output::scale` and `wp_fractional_scale_v1` as authoritative scale sources; allocate `PixelBuffer` at physical pixels; pair with `wp_viewporter` for non-integer ratios (completed 2026-06-10)
 - [x] **Phase 103: Compositor Blur Offload** — Bind `org_kde_kwin_blur` optionally; send `kde_blur.set_region` + `kde_blur.commit` per surface with `backdrop-filter` nodes before each `wl_surface.commit` (completed 2026-06-17)
+- [x] **Phase 103.1: Audit Gap Closure** — Fix CR-01 (blur region not cleared on backdrop-filter removal), CR-02 (negative coord cast in compute_blur_region), and DMGE-03 (damage_rect_count reports binary not count); add Phase 103 VERIFICATION.md and VALIDATION.md (INSERTED) (completed 2026-06-18)
 
 ## Phase Details
 
@@ -84,6 +85,17 @@ Plans:
 - [x] 103-02-PLAN.md — Blur region computation: walk display list for backdrop-filter nodes, compute logical-coordinate union rect, wire through present path
 - [x] 103-03-PLAN.md — CPU blur removal: make apply_backdrop_filter and push_backdrop_filter_command no-ops; keep function structure for future effects
 
+### Phase 103.1: Audit Gap Closure (INSERTED)
+**Goal**: Close the three gaps found by the v1.20 milestone audit: fix the blur region clear path (CR-01/BLUR-04), fix negative coordinate saturation in compute_blur_region (CR-02), fix damage_rect_count to report actual count not binary (DMGE-03), and produce Phase 103 VERIFICATION.md and VALIDATION.md
+**Depends on**: Phase 103
+**Requirements**: DMGE-03, BLUR-04 (re-verify BLUR-02)
+**Success Criteria** (what must be TRUE):
+  1. Removing `backdrop-filter` from a surface causes `kde_blur.set_region(None); kde_blur.commit()` to be emitted — the compositor stops blurring after the next commit
+  2. A `backdrop-filter` node with negative layout x/y coordinates produces a blur rect that is clipped to `x=0, y=0` with width/height reduced by the clipped amount, not a rect shifted to the surface origin
+  3. The debug overlay's damage rect count field shows the actual number of `DamageRect` entries passed to the present path (e.g., "3" for a 3-rect frame), not "0" or "1"
+  4. Phase 103 VERIFICATION.md exists with `status: passed`
+**Plans**: 1 plan
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -96,6 +108,7 @@ Plans:
 | 101. Per-Region Damage | v1.20 | 1/1 | Complete   | 2026-06-10 |
 | 102. HiDPI / Fractional Scale | v1.20 | 2/2 | Complete   | 2026-06-10 |
 | 103. Compositor Blur Offload | v1.20 | 3/3 | Complete   | 2026-06-17 |
+| 103.1. Audit Gap Closure (INSERTED) | v1.20 | 1/1 | Complete   | 2026-06-18 |
 
 ---
 

@@ -12,7 +12,7 @@
 
 - [x] **DMGE-01**: Shell passes a `Vec<DamageRect>` from the retained renderer through the present path instead of a single unioned rect
 - [x] **DMGE-02**: Presentation calls `wl_surface::damage_buffer` once per dirty rect (capped at 16) per frame commit
-- [ ] **DMGE-03**: Debug/profiling exposes damage rect count per frame alongside existing damage metrics
+- [x] **DMGE-03**: Debug/profiling exposes damage rect count per frame alongside existing damage metrics
 
 ### HiDPI / Fractional Scale
 
@@ -27,7 +27,7 @@
 - [ ] **BLUR-01**: Shell binds `org_kde_kwin_blur` as an optional global at startup; surfaces proceed without blur on non-KDE compositors
 - [ ] **BLUR-02**: For surfaces with `backdrop-filter: blur(...)` nodes, shell sends `kde_blur.set_region` + `kde_blur.commit` before `wl_surface.commit` using logical pixel coordinates
 - [ ] **BLUR-03**: CPU software blur is not implemented as a fallback; unsupported compositors render a flat background
-- [ ] **BLUR-04**: Blur region commits are skipped cleanly when no backdrop-filter nodes exist in the display list
+- [x] **BLUR-04**: Blur region commits are skipped cleanly when no backdrop-filter nodes exist in the display list
 
 ---
 
@@ -56,7 +56,7 @@
 |--------|-------|--------|
 | DMGE-01 | Phase 101 | Complete |
 | DMGE-02 | Phase 101 | Complete |
-| DMGE-03 | Phase 101 | Pending |
+| DMGE-03 | Phase 101 | Complete |
 | HDPI-01 | Phase 102 | Complete |
 | HDPI-02 | Phase 102 | Pending |
 | HDPI-03 | Phase 102 | Pending |
@@ -65,4 +65,4 @@
 | BLUR-01 | Phase 103 | Pending |
 | BLUR-02 | Phase 103 | Pending |
 | BLUR-03 | Phase 103 | Pending |
-| BLUR-04 | Phase 103 | Pending |
+| BLUR-04 | Phase 103 | Complete |
