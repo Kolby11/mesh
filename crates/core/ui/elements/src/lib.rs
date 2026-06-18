@@ -32,7 +32,9 @@ pub use element::{
     validate_element_event,
 };
 pub use events::{EventDispatcher, InputState, Modifiers, RawInputEvent, UiEvent};
-pub use layout::{IntrinsicLayoutCache, LayoutEngine, LayoutRect, TextMeasurer};
+pub use layout::{
+    IntrinsicLayoutCache, LayoutEngine, LayoutRect, PerSurfaceLayoutState, TextMeasurer,
+};
 pub use style::{
     AlignContent, AlignItems, AlignSelf, BoxShadow, Color, ComputedStyle, Corners, Dimension,
     Display, Edges, FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow, Position,

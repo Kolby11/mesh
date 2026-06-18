@@ -132,6 +132,36 @@ impl TextMeasureKey {
 /// The layout engine. Stateless — call `compute` on a widget tree.
 pub struct LayoutEngine;
 
+/// Retained layout state for a single surface, holding a persistent
+/// [`TaffyTree`] and the `_mesh_key → TaffyNodeId` identity map so that
+/// layout geometry is mutated in place across frames instead of rebuilt
+/// from scratch.
+pub struct PerSurfaceLayoutState {
+    /// The retained Taffy layout tree, mutated incrementally.
+    pub tree: TaffyTree<NodeId>,
+    /// Maps stable `_mesh_key` attribute values (e.g. `"root/0/button"`)
+    /// to their corresponding `TaffyNodeId` in the retained tree.
+    /// Keyed by `String` (NOT ephemeral `NodeId`) per LAYOUT-03.
+    pub node_map: HashMap<String, TaffyNodeId>,
+    /// `(width, height)` used in the last `compute_layout` call.
+    pub last_available: (f32, f32),
+    /// `false` after theme/locale/source-reload resets; forces a
+    /// full fresh-build on the next pass, which then sets `valid = true`.
+    pub valid: bool,
+}
+
+impl PerSurfaceLayoutState {
+    /// Construct a fresh, invalid state (equivalent to `Default`).
+    pub fn new() -> Self {
+        Self {
+            tree: TaffyTree::new(),
+            node_map: HashMap::new(),
+            last_available: (0.0, 0.0),
+            valid: false,
+        }
+    }
+}
+
 impl LayoutEngine {
     /// Compute layout for the entire tree within the given bounds.
     pub fn compute(root: &mut WidgetNode, available_width: f32, available_height: f32) {
@@ -589,6 +619,20 @@ fn zero_layout_subtree(node: &mut WidgetNode) {
     for child in &mut node.children {
         zero_layout_subtree(child);
     }
+}
+
+/// Remove a Taffy node and all its descendants, post-order.
+///
+/// [`TaffyTree::remove`] only detaches the parent and orphans its
+/// children — it does NOT recurse.  This helper walks children first
+/// (post-order) so no orphan TaffyNodeIds accumulate (LAYOUT-04).
+pub fn remove_taffy_subtree(
+    tree: &mut TaffyTree<NodeId>,
+    node_id: TaffyNodeId,
+) -> Result<(), taffy::TaffyError> {
+    // Stub — does nothing (RED phase)
+    let _ = (tree, node_id);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1082,5 +1126,43 @@ mod tests {
         assert!(!is_expected_taffy_measurement_diagnostic(
             "unsupported layout mapping: test-only"
         ));
+    }
+
+    #[test]
+    fn remove_taffy_subtree_removes_all_descendants() {
+        // Build a 4-node TaffyTree: grandparent → parent → leaf + sibling leaf.
+        let mut tree = TaffyTree::<NodeId>::new();
+        let leaf1 = tree.new_leaf(taffy_style::Style::default()).unwrap();
+        let leaf2 = tree.new_leaf(taffy_style::Style::default()).unwrap();
+        let parent = tree
+            .new_with_children(taffy_style::Style::default(), &[leaf1, leaf2])
+            .unwrap();
+        let leaf3 = tree.new_leaf(taffy_style::Style::default()).unwrap();
+        let grandparent = tree
+            .new_with_children(taffy_style::Style::default(), &[parent, leaf3])
+            .unwrap();
+
+        assert!(
+            tree.total_node_count() >= 4,
+            "sanity: tree should have at least 4 nodes"
+        );
+
+        // Remove the root → post-order walks children first.
+        remove_taffy_subtree(&mut tree, grandparent).unwrap();
+
+        assert_eq!(
+            tree.total_node_count(),
+            0,
+            "all nodes should be removed after post-order subtree removal"
+        );
+    }
+
+    #[test]
+    fn per_surface_layout_state_default_is_invalid() {
+        let state = PerSurfaceLayoutState::new();
+        assert!(!state.valid);
+        assert!(state.node_map.is_empty());
+        assert_eq!(state.last_available, (0.0, 0.0));
+        assert_eq!(state.tree.total_node_count(), 0);
     }
 }
