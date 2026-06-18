@@ -613,7 +613,7 @@ fn shipped_module_graph_loads_repo_module_fixture() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
 
-    assert_eq!(graph.frontend_modules().len(), 2);
+    assert_eq!(graph.frontend_modules().len(), 5);
     assert_eq!(
         graph
             .module("@mesh/navigation-bar")

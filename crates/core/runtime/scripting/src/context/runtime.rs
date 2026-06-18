@@ -278,7 +278,10 @@ impl ScriptContext {
         let _ = self.ensure_initialized();
         let service_key = format!("__mesh_svc_{service}");
         if let Ok(lua_value) = self.lua().to_value(payload) {
-            let _ = self.env().set(service_key, lua_value);
+            // Set on globals() so proxy __index (service_payload_field) can find it.
+            // The env table __index falls through to globals, so scripts accessing
+            // __mesh_svc_* directly from the env also work.
+            let _ = self.lua().globals().set(service_key.as_str(), lua_value);
         }
         if service == "locale"
             && let Some(locale) = payload
@@ -286,7 +289,7 @@ impl ScriptContext {
                 .or_else(|| payload.get("current"))
                 .and_then(|value| value.as_str())
         {
-            let _ = self.env().set("__mesh_locale_current", locale);
+            let _ = self.lua().globals().set("__mesh_locale_current", locale);
         }
         self.refresh_module_object();
     }

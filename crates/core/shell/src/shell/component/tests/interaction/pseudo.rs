@@ -145,7 +145,7 @@ input:checked {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 120);
-    component.paint(&theme, 240, 120, &mut buffer).unwrap();
+    component.paint(&theme, 240, 120, &mut buffer, 1.0).unwrap();
     let tree = component.last_tree.as_ref().unwrap();
 
     let disabled_button = node_by_mesh_key(tree, "root/0/0");

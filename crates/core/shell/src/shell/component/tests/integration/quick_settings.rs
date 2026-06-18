@@ -262,7 +262,7 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(220, 80);
-    component.paint(&theme, 220, 80, &mut buffer).unwrap();
+    component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
     let tree = component.last_tree.as_ref().expect("rendered tree");
     let button = first_node_by_tag(tree, "button").expect("button node");
     let handler = button
@@ -307,7 +307,7 @@ end
 
     assert!(!runtime_bool(&component, "audio_surface_hidden"));
 
-    component.paint(&theme, 220, 80, &mut buffer).unwrap();
+    component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
     let visibility_requests = component.tick().unwrap();
     match visibility_requests.as_slice() {
         [CoreRequest::ShowSurface { surface_id }] => {
@@ -329,7 +329,7 @@ end
         "keyboard-driven popover hide must sync the portal owner script state"
     );
 
-    component.paint(&theme, 220, 80, &mut buffer).unwrap();
+    component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
     let requests = component.tick().unwrap();
     assert!(
         requests.is_empty(),

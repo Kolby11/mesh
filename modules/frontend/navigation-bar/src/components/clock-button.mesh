@@ -1,0 +1,90 @@
+<template>
+  <button
+    class="clock-btn"
+    onclick={onClockClick}
+    title="{clock_full_date}"
+    aria-label="{clock_aria_label}"
+  >
+    <column class="clock-content">
+      <text class="clock-time">{clock_time}</text>
+      <text class="clock-date">{clock_date}</text>
+    </column>
+  </button>
+</template>
+
+<script lang="luau">
+clock_time = "00:00"
+clock_date = "Jan 01"
+clock_full_date = ""
+clock_aria_label = ""
+
+local MONTHS = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"}
+local DAYS   = {"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"}
+
+function render(self)
+    local t = os.date("*t")
+    clock_time = string.format("%02d:%02d", t.hour, t.min)
+    clock_date = string.format("%s %02d", MONTHS[t.month], t.day)
+    clock_full_date = string.format(
+        "%s, %s %d, %d",
+        DAYS[t.wday], MONTHS[t.month], t.day, t.year
+    )
+    clock_aria_label = "Time " .. clock_time .. " — " .. clock_full_date
+end
+
+function onClockClick()
+    mesh.events.publish("shell.toggle-calendar", {})
+end
+</script>
+
+<style>
+.clock-btn {
+    height: 40px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    padding-inline: token(spacing.md);
+    border-radius: token(radius.md);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+    border-width: 0;
+    text-wrap: none;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
+}
+
+.clock-btn:hover {
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
+    border-radius: token(radius.lg);
+}
+
+.clock-btn:active {
+    background: token(color.primary);
+    color: token(color.on-primary);
+    border-radius: token(radius.full);
+}
+
+.clock-content {
+    align-items: center;
+    gap: 0;
+}
+
+.clock-time {
+    color: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    text-wrap: none;
+    line-height: 1.1;
+}
+
+.clock-date {
+    color: inherit;
+    font-size: 10px;
+    font-weight: 500;
+    text-wrap: none;
+    opacity: 0.75;
+    line-height: 1.1;
+}
+</style>

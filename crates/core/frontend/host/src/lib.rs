@@ -232,6 +232,7 @@ pub trait ShellComponent: Send {
         width: u32,
         height: u32,
         buffer: &mut PixelBuffer,
+        scale: f32,
     ) -> Result<(), ComponentError>;
     fn theme_changed(&mut self) -> Result<(), ComponentError>;
     fn locale_changed(&mut self, _locale: &LocaleEngine) -> Result<(), ComponentError> {

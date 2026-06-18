@@ -1,4 +1,5 @@
 use super::types::{CoreRequest, ShellMessage};
+use rustix::fd::BorrowedFd;
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -12,6 +13,7 @@ pub(super) fn spawn_ipc_server(
     runtime: &Runtime,
     socket_path: PathBuf,
     tx: mpsc::UnboundedSender<ShellMessage>,
+    eventfd_fd: std::os::unix::io::RawFd,
 ) -> Result<(), std::io::Error> {
     if let Some(parent) = socket_path.parent() {
         prepare_ipc_parent(parent)?;
@@ -48,7 +50,7 @@ pub(super) fn spawn_ipc_server(
 
             let tx = tx.clone();
             tokio::spawn(async move {
-                if let Err(err) = handle_ipc_client(stream, tx).await {
+                if let Err(err) = handle_ipc_client(stream, tx, eventfd_fd).await {
                     tracing::warn!("ipc client failed: {err}");
                 }
             });
@@ -100,6 +102,7 @@ fn current_uid() -> u32 {
 async fn handle_ipc_client(
     stream: tokio::net::UnixStream,
     tx: mpsc::UnboundedSender<ShellMessage>,
+    eventfd_fd: std::os::unix::io::RawFd,
 ) -> Result<(), std::io::Error> {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -120,6 +123,8 @@ async fn handle_ipc_client(
                 tx.send(ShellMessage::Ipc(request)).map_err(|_| {
                     std::io::Error::new(std::io::ErrorKind::BrokenPipe, "shell is not running")
                 })?;
+                let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
+                let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
                 writer.write_all(b"ok\n").await?;
             }
             None => {
@@ -212,6 +217,7 @@ fn is_private_tmp_ipc_dir(path: &std::path::Path) -> bool {
 mod tests {
     use super::*;
     use std::os::unix::fs::{FileTypeExt, PermissionsExt, symlink};
+    use std::os::unix::io::AsRawFd;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -223,6 +229,10 @@ mod tests {
         std::path::PathBuf::from(format!("/tmp/mesh-{label}-{}-{unique}", std::process::id()))
     }
 
+    fn test_eventfd() -> std::os::unix::io::OwnedFd {
+        rustix::event::eventfd(0, rustix::event::EventfdFlags::NONBLOCK).unwrap()
+    }
+
     #[test]
     fn ipc_server_refuses_to_replace_non_socket_path() {
         let dir = tempfile::tempdir().unwrap();
@@ -231,7 +241,8 @@ mod tests {
         let runtime = Runtime::new().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
 
-        let err = spawn_ipc_server(&runtime, socket_path, tx).unwrap_err();
+        let err =
+            spawn_ipc_server(&runtime, socket_path, tx, test_eventfd().as_raw_fd()).unwrap_err();
 
         assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
     }
@@ -243,7 +254,13 @@ mod tests {
         let runtime = Runtime::new().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
 
-        spawn_ipc_server(&runtime, socket_path.clone(), tx).unwrap();
+        spawn_ipc_server(
+            &runtime,
+            socket_path.clone(),
+            tx,
+            test_eventfd().as_raw_fd(),
+        )
+        .unwrap();
 
         let metadata = std::fs::symlink_metadata(socket_path).unwrap();
         assert!(metadata.file_type().is_socket());
@@ -257,7 +274,13 @@ mod tests {
         let runtime = Runtime::new().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
 
-        spawn_ipc_server(&runtime, socket_path.clone(), tx).unwrap();
+        spawn_ipc_server(
+            &runtime,
+            socket_path.clone(),
+            tx,
+            test_eventfd().as_raw_fd(),
+        )
+        .unwrap();
 
         let parent_metadata = std::fs::symlink_metadata(&parent).unwrap();
         let socket_metadata = std::fs::symlink_metadata(&socket_path).unwrap();
@@ -277,7 +300,8 @@ mod tests {
         let runtime = Runtime::new().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
 
-        let err = spawn_ipc_server(&runtime, socket_path, tx).unwrap_err();
+        let err =
+            spawn_ipc_server(&runtime, socket_path, tx, test_eventfd().as_raw_fd()).unwrap_err();
         std::fs::remove_dir(parent).unwrap();
 
         assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
@@ -292,7 +316,8 @@ mod tests {
         let runtime = Runtime::new().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
 
-        let err = spawn_ipc_server(&runtime, socket_path, tx).unwrap_err();
+        let err =
+            spawn_ipc_server(&runtime, socket_path, tx, test_eventfd().as_raw_fd()).unwrap_err();
         std::fs::remove_file(&parent).unwrap();
 
         assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
@@ -304,7 +329,9 @@ mod tests {
         runtime.block_on(async {
             let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
-            let task = tokio::spawn(handle_ipc_client(server, tx));
+            let eventfd = test_eventfd();
+            let eventfd_raw = eventfd.as_raw_fd();
+            let task = tokio::spawn(handle_ipc_client(server, tx, eventfd_raw));
 
             let mut payload = vec![b'x'; MAX_IPC_COMMAND_BYTES + 1];
             payload.push(b'\n');

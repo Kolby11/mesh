@@ -1,0 +1,73 @@
+{
+  "name": "@mesh/hyprland-wm",
+  "version": "0.1.0",
+  "description": "Hyprland compositor backend — workspace and window state via hyprctl.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "capabilities": {
+      "required": [
+        "exec.hyprctl",
+        "exec.sh",
+        "service.hyprland.read"
+      ],
+      "optional": [
+        "exec.socat",
+        "exec.nc",
+        "service.hyprland.control"
+      ]
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en"]
+    },
+    "dependencies": {
+      "binaries": [
+        {
+          "name": "hyprctl",
+          "reason": "Query active workspace, active window, and dispatch workspace switches.",
+          "packages": {
+            "arch": "hyprland",
+            "nixos": "hyprland"
+          }
+        },
+        {
+          "name": "socat",
+          "reason": "Stream Hyprland IPC events for instant workspace/window change updates (preferred over nc).",
+          "optional": true,
+          "packages": {
+            "debian": "socat",
+            "arch": "socat",
+            "fedora": "socat",
+            "nixos": "socat"
+          }
+        },
+        {
+          "name": "nc",
+          "reason": "Fallback stream reader for the Hyprland event socket when socat is not available.",
+          "optional": true,
+          "packages": {
+            "debian": "netcat-openbsd",
+            "arch": "openbsd-netcat",
+            "fedora": "nmap-ncat",
+            "nixos": "netcat-openbsd"
+          }
+        }
+      ]
+    },
+    "entrypoints": {
+      "main": "src/main.luau"
+    },
+    "implements": [
+      {
+        "interface": "mesh.hyprland",
+        "version": "1.0",
+        "baseModule": "@mesh/hyprland-interface",
+        "provider": "hyprland",
+        "label": "Hyprland",
+        "priority": 100
+      }
+    ]
+  }
+}

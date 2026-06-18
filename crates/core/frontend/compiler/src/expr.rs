@@ -1,3 +1,7 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
 pub(crate) fn json_value_to_string(value: serde_json::Value) -> String {
     match value {
         serde_json::Value::Null => String::new(),
@@ -16,117 +20,217 @@ pub(crate) fn json_value_to_string(value: serde_json::Value) -> String {
 /// - `x .. y` - string concatenation
 /// - `t("key")` / `t(variable)` - translation
 /// - `variable` / `a.b.c` - variable lookup
+///
+/// Expressions are static after module compilation, so the parsed form is
+/// memoized per expression string; only evaluation runs per frame.
 pub(crate) fn eval_expr(expr: &str, store: &dyn mesh_core_elements::VariableStore) -> String {
+    let compiled = compiled_expr(expr);
+    eval_compiled(&compiled, store)
+}
+
+/// Upper bound on memoized expressions. Template expressions are a fixed set
+/// per loaded module, so this is only reached through repeated hot reloads
+/// with changing sources; clearing then is cheap and self-corrects.
+const EXPR_CACHE_CAPACITY: usize = 4096;
+
+thread_local! {
+    static EXPR_CACHE: RefCell<HashMap<String, Rc<CompiledExpr>>> =
+        RefCell::new(HashMap::new());
+}
+
+fn compiled_expr(expr: &str) -> Rc<CompiledExpr> {
+    EXPR_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(compiled) = cache.get(expr) {
+            return Rc::clone(compiled);
+        }
+        let compiled = Rc::new(parse_expr(expr));
+        if cache.len() >= EXPR_CACHE_CAPACITY {
+            cache.clear();
+        }
+        cache.insert(expr.to_string(), Rc::clone(&compiled));
+        compiled
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompareOp {
+    NotEq,
+    Eq,
+    Ge,
+    Le,
+    Gt,
+    Lt,
+}
+
+#[derive(Debug)]
+enum CompiledExpr {
+    /// `#name` — length of an array/string/object variable.
+    Length(String),
+    Not(Rc<CompiledExpr>),
+    /// `cond and a or b` Lua ternary idiom.
+    Ternary {
+        cond: Rc<CompiledExpr>,
+        then_val: Rc<CompiledExpr>,
+        else_val: Rc<CompiledExpr>,
+    },
+    And(Rc<CompiledExpr>, Rc<CompiledExpr>),
+    Or(Rc<CompiledExpr>, Rc<CompiledExpr>),
+    Compare {
+        op: CompareOp,
+        lhs: Rc<CompiledExpr>,
+        rhs: Rc<CompiledExpr>,
+    },
+    Concat(Rc<CompiledExpr>, Rc<CompiledExpr>),
+    /// `t("key")` with a literal key.
+    TranslateLiteral(String),
+    /// `t(path)` — resolve the path, then translate the result.
+    TranslatePath(String),
+    Literal(String),
+    /// Bare variable or dotted path lookup.
+    Path(String),
+}
+
+fn parse_expr(expr: &str) -> CompiledExpr {
     let expr = expr.trim();
 
     if expr.starts_with('(') && expr.ends_with(')') && balanced_parens(expr) {
-        return eval_expr(&expr[1..expr.len() - 1], store);
+        return parse_expr(&expr[1..expr.len() - 1]);
     }
 
     if let Some(inner) = expr.strip_prefix('#') {
-        let inner = inner.trim();
-        return match store.get(inner) {
-            Some(serde_json::Value::Array(arr)) => arr.len().to_string(),
-            Some(serde_json::Value::String(s)) => s.len().to_string(),
-            Some(serde_json::Value::Object(obj)) => obj.len().to_string(),
-            _ => "0".into(),
-        };
+        return CompiledExpr::Length(inner.trim().to_string());
     }
 
     if let Some(inner) = expr.strip_prefix("not ") {
-        let value = eval_expr(inner.trim(), store);
-        let is_truthy = !matches!(value.as_str(), "false" | "nil" | "" | "0");
-        return if is_truthy {
-            "false".into()
-        } else {
-            "true".into()
-        };
+        return CompiledExpr::Not(Rc::new(parse_expr(inner.trim())));
     }
 
     if let Some((lhs, rest)) = split_op(expr, " and ") {
         if let Some((then_val, else_val)) = split_op(rest, " or ") {
-            let cond_result = eval_expr(lhs, store);
-            let truthy = !matches!(cond_result.as_str(), "false" | "nil" | "" | "0");
-            return if truthy {
-                eval_expr(then_val, store)
-            } else {
-                eval_expr(else_val, store)
+            return CompiledExpr::Ternary {
+                cond: Rc::new(parse_expr(lhs)),
+                then_val: Rc::new(parse_expr(then_val)),
+                else_val: Rc::new(parse_expr(else_val)),
             };
         }
-        let l = eval_expr(lhs, store);
-        if matches!(l.as_str(), "false" | "nil" | "" | "0") {
-            return "false".into();
-        }
-        let r = eval_expr(rest, store);
-        return if matches!(r.as_str(), "false" | "nil" | "" | "0") {
-            "false".into()
-        } else {
-            "true".into()
-        };
+        return CompiledExpr::And(Rc::new(parse_expr(lhs)), Rc::new(parse_expr(rest)));
     }
 
     if let Some((lhs, rhs)) = split_op(expr, " or ") {
-        let l = eval_expr(lhs, store);
-        if !matches!(l.as_str(), "false" | "nil" | "" | "0") {
-            return "true".into();
-        }
-        let r = eval_expr(rhs, store);
-        return if matches!(r.as_str(), "false" | "nil" | "" | "0") {
-            "false".into()
-        } else {
-            "true".into()
-        };
+        return CompiledExpr::Or(Rc::new(parse_expr(lhs)), Rc::new(parse_expr(rhs)));
     }
 
-    for op in &["~=", "==", ">=", "<=", ">", "<"] {
-        if let Some((lhs, rhs)) = split_op(expr, op) {
-            let l = eval_expr(lhs, store);
-            let r = eval_expr(rhs, store);
-            let result = if let (Ok(ln), Ok(rn)) = (l.parse::<f64>(), r.parse::<f64>()) {
-                match *op {
-                    "==" => (ln - rn).abs() < f64::EPSILON,
-                    "~=" => (ln - rn).abs() >= f64::EPSILON,
-                    ">=" => ln >= rn,
-                    "<=" => ln <= rn,
-                    ">" => ln > rn,
-                    "<" => ln < rn,
-                    _ => false,
-                }
-            } else {
-                match *op {
-                    "==" => l == r,
-                    "~=" => l != r,
-                    _ => false,
-                }
-            };
-            return if result {
-                "true".into()
-            } else {
-                "false".into()
+    for (token, op) in [
+        ("~=", CompareOp::NotEq),
+        ("==", CompareOp::Eq),
+        (">=", CompareOp::Ge),
+        ("<=", CompareOp::Le),
+        (">", CompareOp::Gt),
+        ("<", CompareOp::Lt),
+    ] {
+        if let Some((lhs, rhs)) = split_op(expr, token) {
+            return CompiledExpr::Compare {
+                op,
+                lhs: Rc::new(parse_expr(lhs)),
+                rhs: Rc::new(parse_expr(rhs)),
             };
         }
     }
 
     if let Some((lhs, rhs)) = split_op(expr, " .. ") {
-        let l = eval_expr(lhs, store);
-        let r = eval_expr(rhs, store);
-        return format!("{l}{r}");
+        return CompiledExpr::Concat(Rc::new(parse_expr(lhs)), Rc::new(parse_expr(rhs)));
     }
 
     if let Some(arg) = expr.strip_prefix("t(").and_then(|s| s.strip_suffix(')')) {
         let arg = arg.trim();
         if let Some(key) = strip_string_literal(arg) {
-            return store.translate(&key).unwrap_or(key);
+            return CompiledExpr::TranslateLiteral(key);
         }
-        let resolved = eval_path(arg, store);
-        return store.translate(&resolved).unwrap_or(resolved);
+        return CompiledExpr::TranslatePath(arg.to_string());
     }
 
     if let Some(s) = strip_string_literal(expr) {
-        return s;
+        return CompiledExpr::Literal(s);
     }
 
-    eval_path(expr, store)
+    CompiledExpr::Path(expr.to_string())
+}
+
+fn is_truthy(value: &str) -> bool {
+    !matches!(value, "false" | "nil" | "" | "0")
+}
+
+fn bool_str(value: bool) -> String {
+    if value { "true".into() } else { "false".into() }
+}
+
+fn eval_compiled(expr: &CompiledExpr, store: &dyn mesh_core_elements::VariableStore) -> String {
+    match expr {
+        CompiledExpr::Length(name) => match store.get(name) {
+            Some(serde_json::Value::Array(arr)) => arr.len().to_string(),
+            Some(serde_json::Value::String(s)) => s.len().to_string(),
+            Some(serde_json::Value::Object(obj)) => obj.len().to_string(),
+            _ => "0".into(),
+        },
+        CompiledExpr::Not(inner) => bool_str(!is_truthy(&eval_compiled(inner, store))),
+        CompiledExpr::Ternary {
+            cond,
+            then_val,
+            else_val,
+        } => {
+            if is_truthy(&eval_compiled(cond, store)) {
+                eval_compiled(then_val, store)
+            } else {
+                eval_compiled(else_val, store)
+            }
+        }
+        CompiledExpr::And(lhs, rhs) => {
+            if !is_truthy(&eval_compiled(lhs, store)) {
+                return "false".into();
+            }
+            bool_str(is_truthy(&eval_compiled(rhs, store)))
+        }
+        CompiledExpr::Or(lhs, rhs) => {
+            if is_truthy(&eval_compiled(lhs, store)) {
+                return "true".into();
+            }
+            bool_str(is_truthy(&eval_compiled(rhs, store)))
+        }
+        CompiledExpr::Compare { op, lhs, rhs } => {
+            let l = eval_compiled(lhs, store);
+            let r = eval_compiled(rhs, store);
+            let result = if let (Ok(ln), Ok(rn)) = (l.parse::<f64>(), r.parse::<f64>()) {
+                match op {
+                    CompareOp::Eq => (ln - rn).abs() < f64::EPSILON,
+                    CompareOp::NotEq => (ln - rn).abs() >= f64::EPSILON,
+                    CompareOp::Ge => ln >= rn,
+                    CompareOp::Le => ln <= rn,
+                    CompareOp::Gt => ln > rn,
+                    CompareOp::Lt => ln < rn,
+                }
+            } else {
+                match op {
+                    CompareOp::Eq => l == r,
+                    CompareOp::NotEq => l != r,
+                    _ => false,
+                }
+            };
+            bool_str(result)
+        }
+        CompiledExpr::Concat(lhs, rhs) => {
+            let l = eval_compiled(lhs, store);
+            let r = eval_compiled(rhs, store);
+            format!("{l}{r}")
+        }
+        CompiledExpr::TranslateLiteral(key) => store.translate(key).unwrap_or_else(|| key.clone()),
+        CompiledExpr::TranslatePath(arg) => {
+            let resolved = eval_path(arg, store);
+            store.translate(&resolved).unwrap_or(resolved)
+        }
+        CompiledExpr::Literal(s) => s.clone(),
+        CompiledExpr::Path(path) => eval_path(path, store),
+    }
 }
 
 fn split_op<'a>(expr: &'a str, op: &str) -> Option<(&'a str, &'a str)> {

@@ -106,12 +106,12 @@ fn phase18_script_and_text_invalidations_take_full_rebuild_paint_path() {
     let mut buffer = PixelBuffer::new(160, 48);
 
     component.set_profiling_enabled(true);
-    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
     component.take_invalidation_snapshot();
     component.take_profiling_records();
 
     component.invalidate_interaction_restyle();
-    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
     let restyle_snapshot = component
         .take_invalidation_snapshot()
         .expect("restyle paint should record invalidation");
@@ -126,7 +126,7 @@ fn phase18_script_and_text_invalidations_take_full_rebuild_paint_path() {
     );
 
     component.invalidate_script_state();
-    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
     let script_snapshot = component
         .take_invalidation_snapshot()
         .expect("script paint should record invalidation");
@@ -142,7 +142,7 @@ fn phase18_script_and_text_invalidations_take_full_rebuild_paint_path() {
     );
 
     component.invalidate_text_state();
-    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
     let text_snapshot = component
         .take_invalidation_snapshot()
         .expect("text paint should record invalidation");
@@ -167,7 +167,7 @@ fn retained_paint_path_records_phase26_cpu_attribution_stages() {
     let mut buffer = PixelBuffer::new(160, 48);
 
     component.set_profiling_enabled(true);
-    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
 
     let stages: std::collections::HashSet<_> = component
         .take_profiling_records()

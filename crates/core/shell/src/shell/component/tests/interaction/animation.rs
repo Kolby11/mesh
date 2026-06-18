@@ -242,7 +242,7 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(96, 32);
-    component.paint(&theme, 96, 32, &mut buffer).unwrap();
+    component.paint(&theme, 96, 32, &mut buffer, 1.0).unwrap();
     component.dirty = false;
 
     assert!(
@@ -289,7 +289,7 @@ end
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 48);
-    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
 
     let key = "root/0::pulse".to_string();
     let preserved_start = Instant::now()
@@ -302,7 +302,7 @@ end
         .started_at = preserved_start;
 
     component.call_namespaced_handler("onClick", &[]).unwrap();
-    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
 
     assert_eq!(
         component
@@ -332,7 +332,7 @@ fn navigation_bar_keyframe_animation_continues_across_rebuild() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(420, 80);
-    component.paint(&theme, 420, 80, &mut buffer).unwrap();
+    component.paint(&theme, 420, 80, &mut buffer, 1.0).unwrap();
     let first_tree = component
         .last_tree
         .as_ref()
@@ -355,7 +355,7 @@ fn navigation_bar_keyframe_animation_continues_across_rebuild() {
             }),
         })
         .unwrap();
-    component.paint(&theme, 420, 80, &mut buffer).unwrap();
+    component.paint(&theme, 420, 80, &mut buffer, 1.0).unwrap();
     let rebuilt_tree = component
         .last_tree
         .as_ref()
@@ -395,7 +395,7 @@ fn keyframe_animation_finite_completion_stops_render_requests() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer).unwrap();
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
     assert!(component.wants_render());
 
     let key = "root/0::pulse".to_string();
@@ -407,7 +407,7 @@ fn keyframe_animation_finite_completion_stops_render_requests() {
         .checked_sub(Duration::from_millis(200))
         .expect("monotonic instant subtraction");
     component.dirty = false;
-    component.paint(&theme, 120, 40, &mut buffer).unwrap();
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
     component.dirty = false;
 
     assert!(!component.wants_render());
@@ -441,7 +441,7 @@ fn keyframe_animation_name_change_restarts_timeline() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 48);
-    component.paint(&theme, 160, 48, &mut buffer).unwrap();
+    component.paint(&theme, 160, 48, &mut buffer, 1.0).unwrap();
 
     let original_start = Instant::now()
         .checked_sub(Duration::from_millis(400))
@@ -499,7 +499,7 @@ fn keyframe_animation_infinite_keeps_render_requests_active() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer).unwrap();
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
 
     component
         .keyframe_animations
@@ -509,7 +509,7 @@ fn keyframe_animation_infinite_keeps_render_requests_active() {
         .checked_sub(Duration::from_millis(200))
         .expect("monotonic instant subtraction");
     component.dirty = false;
-    component.paint(&theme, 120, 40, &mut buffer).unwrap();
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
     component.dirty = false;
 
     assert!(component.wants_render());
@@ -535,7 +535,7 @@ fn keyframe_animation_missing_name_records_diagnostic() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer).unwrap();
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
 
     let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
     assert_eq!(diagnostics.error_count(), 1);
@@ -571,7 +571,7 @@ fn animation_token_runtime_diagnostic_reaches_component() {
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, 120, 40, &mut buffer).unwrap();
+    component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
 
     let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
     assert!(diagnostics.error_count() >= 1);

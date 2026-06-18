@@ -1,0 +1,328 @@
+<template>
+  <popover class="qs-shell" aria-label="Quick Settings">
+    <column class="qs-panel">
+
+      <row class="qs-header">
+        <text class="qs-title">Quick Settings</text>
+        <spacer />
+        <button class="qs-close-btn" onclick={onClose} aria-label="Close">
+          <icon name="window-close" size="16" />
+        </button>
+      </row>
+
+      <row class="qs-control-row">
+        <icon class="qs-row-icon" name="{volume_icon}" size="18" />
+        <slider
+          class="qs-slider"
+          value="{volume_percent}"
+          onchange={onVolumeChange}
+          min="0"
+          max="100"
+          aria-label="Volume"
+        />
+        <text class="qs-row-value">{volume_label}</text>
+      </row>
+
+      <row class="qs-control-row">
+        <icon class="qs-row-icon" name="weather-clear" size="18" />
+        <slider
+          class="qs-slider"
+          value="{brightness_level}"
+          onchange={onBrightnessChange}
+          min="0"
+          max="100"
+          aria-label="Brightness"
+        />
+        <text class="qs-row-value">{brightness_label}</text>
+      </row>
+
+      <separator class="qs-sep" />
+
+      <row class="qs-section-row">
+        <text class="qs-section-label">Theme</text>
+        <row class="qs-chip-row">
+          <button class="{theme_dark_class}" onclick={onThemeDark}><text class="qs-chip-text">Dark</text></button>
+          <button class="{theme_light_class}" onclick={onThemeLight}><text class="qs-chip-text">Light</text></button>
+        </row>
+      </row>
+
+      <row class="qs-section-row">
+        <text class="qs-section-label">Language</text>
+        <row class="qs-chip-row">
+          <button class="{lang_en_class}" onclick={onLangEn}><text class="qs-chip-text">English</text></button>
+          <button class="{lang_sk_class}" onclick={onLangSk}><text class="qs-chip-text">Slovak</text></button>
+        </row>
+      </row>
+
+    </column>
+  </popover>
+</template>
+
+<script lang="luau">
+volume_percent   = 0
+volume_label     = "0%"
+volume_icon      = "audio-volume-muted"
+
+brightness_level = 100
+brightness_label = "100%"
+
+theme_dark_class  = "qs-chip qs-chip-active"
+theme_light_class = "qs-chip"
+
+lang_en_class = "qs-chip qs-chip-active"
+lang_sk_class = "qs-chip"
+
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
+if not audio_ok then audio = nil end
+
+local bright_ok, brightness = pcall(require, "mesh.brightness@>=1.0")
+if not bright_ok then brightness = nil end
+
+local theme_ok, theme = pcall(require, "mesh.theme")
+if not theme_ok then theme = nil end
+
+local function volume_icon_for(percent, muted)
+    if muted or percent == 0 then return "audio-volume-muted"
+    elseif percent < 34 then return "audio-volume-low"
+    elseif percent < 67 then return "audio-volume-medium"
+    else return "audio-volume-high"
+    end
+end
+
+local function sync_volume(percent, muted)
+    volume_percent = percent
+    volume_label   = string.format("%d%%", percent)
+    volume_icon    = volume_icon_for(percent, muted)
+end
+
+local function sync_theme(is_dark)
+    if is_dark then
+        theme_dark_class  = "qs-chip qs-chip-active"
+        theme_light_class = "qs-chip"
+    else
+        theme_dark_class  = "qs-chip"
+        theme_light_class = "qs-chip qs-chip-active"
+    end
+end
+
+local function sync_lang(is_sk)
+    if is_sk then
+        lang_en_class = "qs-chip"
+        lang_sk_class = "qs-chip qs-chip-active"
+    else
+        lang_en_class = "qs-chip qs-chip-active"
+        lang_sk_class = "qs-chip"
+    end
+end
+
+function render(self)
+    if audio_ok and audio and audio.available then
+        local p = math.max(0, math.min(100, math.floor(tonumber(audio.percent) or 0)))
+        sync_volume(p, audio.muted or false)
+    end
+
+    if bright_ok and brightness and brightness.level ~= nil then
+        brightness_level = math.max(0, math.min(100, math.floor(tonumber(brightness.level) or 100)))
+        brightness_label = string.format("%d%%", brightness_level)
+    end
+
+    if theme_ok and theme then
+        local is_dark = true
+        if theme.is_dark ~= nil then
+            is_dark = theme.is_dark == true
+        elseif theme.current then
+            is_dark = string.find(theme.current, "dark", 1, true) ~= nil
+        end
+        sync_theme(is_dark)
+    end
+
+    local locale = mesh.locale.current()
+    local is_sk  = locale == "sk" or string.find(locale or "", "sk-", 1, true) == 1
+    sync_lang(is_sk)
+end
+
+function onVolumeChange(event)
+    local val = math.max(0, math.min(100, math.floor(tonumber(event.value) or 0)))
+    sync_volume(val, false)
+    if audio_ok and audio and type(audio.set_volume) == "function" then
+        audio.set_volume("default", val)
+    end
+end
+
+function onBrightnessChange(event)
+    local val = math.max(0, math.min(100, math.floor(tonumber(event.value) or 100)))
+    brightness_level = val
+    brightness_label = string.format("%d%%", val)
+    if bright_ok and brightness and type(brightness.set) == "function" then
+        brightness.set(val)
+    else
+        mesh.events.publish("shell.set-brightness", { level = val })
+    end
+end
+
+function onThemeDark()
+    sync_theme(true)
+    mesh.events.publish("shell.set-theme", { theme_id = "mesh-default-dark" })
+end
+
+function onThemeLight()
+    sync_theme(false)
+    mesh.events.publish("shell.set-theme", { theme_id = "mesh-default-light" })
+end
+
+function onLangEn()
+    sync_lang(false)
+    mesh.locale.set("en")
+end
+
+function onLangSk()
+    sync_lang(true)
+    mesh.locale.set("sk")
+end
+
+function onClose()
+    mesh.popover.hide("@mesh/quick-settings")
+end
+</script>
+
+<style>
+.qs-shell {
+    width: 100%;
+    height: 100%;
+    padding: token(spacing.xs) token(spacing.sm) token(spacing.sm) token(spacing.sm);
+    background: transparent;
+    opacity: 1;
+    transition: opacity token(animation.duration.short) token(animation.curves.bezier.standard);
+}
+
+.qs-shell.mesh-surface-exiting {
+    opacity: 0;
+}
+
+.qs-panel {
+    width: 300px;
+    gap: token(spacing.sm);
+    padding: token(spacing.md);
+    border-radius: token(radius.xl);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+    border-width: 1px;
+    border-style: solid;
+    border-color: token(color.outline-variant);
+}
+
+.qs-header {
+    align-items: center;
+    height: 32px;
+    gap: token(spacing.sm);
+    margin-bottom: token(spacing.xs);
+}
+
+.qs-title {
+    font-size: token(typography.size.md);
+    font-weight: 700;
+    color: token(color.on-surface);
+}
+
+.qs-close-btn {
+    width: 28px;
+    height: 28px;
+    justify-content: center;
+    align-items: center;
+    border-radius: token(radius.full);
+    background: transparent;
+    color: token(color.on-surface-variant);
+    border-width: 0;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard);
+}
+
+.qs-close-btn:hover {
+    background: token(color.surface-container-high);
+    color: token(color.on-surface);
+}
+
+.qs-control-row {
+    align-items: center;
+    gap: token(spacing.sm);
+    height: 36px;
+}
+
+.qs-row-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    color: token(color.on-surface-variant);
+}
+
+.qs-slider {
+    flex-grow: 1;
+    height: 4px;
+}
+
+.qs-row-value {
+    font-size: token(typography.size.xs);
+    font-weight: 600;
+    color: token(color.on-surface-variant);
+    text-wrap: none;
+    min-width: 32px;
+    justify-content: end;
+    align-items: center;
+}
+
+.qs-sep {
+    height: 1px;
+    background: token(color.outline-variant);
+    margin-block: token(spacing.xs);
+}
+
+.qs-section-row {
+    align-items: center;
+    gap: token(spacing.md);
+    min-height: 36px;
+}
+
+.qs-section-label {
+    font-size: token(typography.size.xs);
+    font-weight: 600;
+    color: token(color.on-surface-variant);
+    text-transform: uppercase;
+    text-wrap: none;
+    min-width: 64px;
+}
+
+.qs-chip-row {
+    gap: token(spacing.xs);
+    align-items: center;
+}
+
+.qs-chip {
+    height: 28px;
+    padding-inline: token(spacing.sm);
+    justify-content: center;
+    align-items: center;
+    border-radius: token(radius.full);
+    background: token(color.surface-container-high);
+    color: token(color.on-surface);
+    border-width: 0;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard);
+}
+
+.qs-chip:hover {
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
+}
+
+.qs-chip-active {
+    background: token(color.primary);
+    color: token(color.on-primary);
+}
+
+.qs-chip-text {
+    font-size: token(typography.size.xs);
+    font-weight: 600;
+    color: inherit;
+    text-wrap: none;
+}
+</style>

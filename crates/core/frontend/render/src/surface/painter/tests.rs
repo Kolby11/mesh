@@ -521,10 +521,7 @@ fn painter_primitive_box_rounded_shadow_and_filters_emit_effect_classes() {
     // CSS filter (non-backdrop) is encoded in DrawRoundedRect.paint.filter,
     // so there is no separate apply_filter command either.
     let classes = painter_command_classes(&recorded.recorded_commands());
-    assert_eq!(
-        classes,
-        vec!["draw_shadow", "draw_rounded_rect"]
-    );
+    assert_eq!(classes, vec!["draw_shadow", "draw_rounded_rect"]);
     assert!(classes.contains(&"draw_shadow"));
     assert!(classes.contains(&"draw_rounded_rect"));
 }

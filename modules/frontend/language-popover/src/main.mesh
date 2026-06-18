@@ -21,7 +21,7 @@
 
 <script lang="luau">
 english_button_class = "language-option language-option-selected"
-slovak_button_class = "language-option"
+slovak_button_class  = "language-option"
 
 local function locale_is_slovak(locale)
     return locale == "sk" or string.find(locale or "", "sk-", 1, true) == 1
@@ -35,8 +35,8 @@ local function current_locale()
     return locale
 end
 
-local function stored_locale()
-    local locale = self.storage.language
+local function stored_locale(storage)
+    local locale = storage and storage.language
     if locale == "en" or locale == "sk" then
         return locale
     end
@@ -46,37 +46,34 @@ end
 local function apply_selection(locale)
     if locale_is_slovak(locale) then
         english_button_class = "language-option"
-        slovak_button_class = "language-option language-option-selected"
+        slovak_button_class  = "language-option language-option-selected"
     else
         english_button_class = "language-option language-option-selected"
-        slovak_button_class = "language-option"
+        slovak_button_class  = "language-option"
     end
 end
 
-local function select_locale(locale)
-    self.storage.language = locale
-    mesh.locale.set(locale)
-    apply_selection(locale)
-    mesh.popover.hide("@mesh/language-popover")
-end
-
 function init(self)
-    local locale = stored_locale()
+    local locale = stored_locale(self.storage)
     if locale ~= nil then
         mesh.locale.set(locale)
     end
 end
 
 function render(self)
-    apply_selection(stored_locale() or current_locale())
+    apply_selection(stored_locale(self.storage) or current_locale())
 end
 
-function onSelectEnglish()
-    select_locale("en")
+function onSelectEnglish(event)
+    apply_selection("en")
+    mesh.locale.set("en")
+    mesh.popover.hide("@mesh/language-popover")
 end
 
-function onSelectSlovak()
-    select_locale("sk")
+function onSelectSlovak(event)
+    apply_selection("sk")
+    mesh.locale.set("sk")
+    mesh.popover.hide("@mesh/language-popover")
 end
 </script>
 
@@ -103,6 +100,9 @@ end
     border-radius: token(radius.lg);
     background: token(color.surface-container);
     color: token(color.on-surface);
+    border-width: 1px;
+    border-style: solid;
+    border-color: token(color.outline-variant);
 }
 
 .language-option {

@@ -40,14 +40,14 @@ end
     // Pre-hover paint: button is 40px wide, no hover state yet.
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
-    component.paint(&theme, 200, 60, &mut buffer).unwrap();
+    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
 
     // Simulate a hover over the button region.  The button key is "root/0/0"
     // (surface → column/row → button, index 0 in the single-child template).
     component.hovered_path = vec!["root".into(), "root/0".into()];
     component.hovered_key = Some("root/0".into());
     component.dirty = true;
-    component.paint(&theme, 200, 60, &mut buffer).unwrap();
+    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
 
     // After the hover restyle the button should be 80px wide.
     let tree = component.last_tree.as_ref().unwrap();
@@ -123,7 +123,7 @@ button:focus {
     let mut buffer = PixelBuffer::new(200, 60);
 
     // First paint: no focus — button width should be 40px in metrics.
-    component.paint(&theme, 200, 60, &mut buffer).unwrap();
+    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
     let width_before = {
         let runtimes = component.runtimes.lock().unwrap();
         let state = runtimes.get(component.id()).unwrap().script_ctx.state();
@@ -137,7 +137,7 @@ button:focus {
     // Focus the button and repaint.
     component.focused_key = Some("root/0".into());
     component.dirty = true;
-    component.paint(&theme, 200, 60, &mut buffer).unwrap();
+    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
     let width_after = {
         let runtimes = component.runtimes.lock().unwrap();
         let state = runtimes.get(component.id()).unwrap().script_ctx.state();
@@ -189,7 +189,7 @@ button:focus {
     let mut buffer = PixelBuffer::new(300, 80);
 
     // Paint without focus.
-    component.paint(&theme, 300, 80, &mut buffer).unwrap();
+    component.paint(&theme, 300, 80, &mut buffer, 1.0).unwrap();
     let tree_unfocused = component.last_tree.as_ref().unwrap().clone();
     let a11y_unfocused = AccessibilityTree::from_widget_tree(&tree_unfocused);
 
@@ -209,7 +209,7 @@ button:focus {
     // Focus the button and repaint.
     component.focused_key = Some("root/0".into());
     component.dirty = true;
-    component.paint(&theme, 300, 80, &mut buffer).unwrap();
+    component.paint(&theme, 300, 80, &mut buffer, 1.0).unwrap();
     let tree_focused = component.last_tree.as_ref().unwrap().clone();
     let a11y_focused = AccessibilityTree::from_widget_tree(&tree_focused);
 

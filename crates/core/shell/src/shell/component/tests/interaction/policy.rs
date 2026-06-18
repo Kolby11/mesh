@@ -67,7 +67,7 @@ text {
         })
         .unwrap();
     for _ in 0..2 {
-        component.paint(&dark, 160, 48, &mut buffer).unwrap();
+        component.paint(&dark, 160, 48, &mut buffer, 1.0).unwrap();
         if !component.wants_immediate_rerender() {
             break;
         }
@@ -86,12 +86,12 @@ text {
             }),
         })
         .unwrap();
-    component.paint(&light, 160, 48, &mut buffer).unwrap();
+    component.paint(&light, 160, 48, &mut buffer, 1.0).unwrap();
     assert!(
         component.wants_immediate_rerender(),
         "onRender state sync should request the same-frame rerender that used to erase damage"
     );
-    component.paint(&light, 160, 48, &mut buffer).unwrap();
+    component.paint(&light, 160, 48, &mut buffer, 1.0).unwrap();
 
     assert!(
         !component.take_present_damage().is_empty(),
@@ -141,7 +141,7 @@ slider {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 40);
 
-    component.paint(&theme, 240, 40, &mut buffer).unwrap();
+    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
     component
         .handle_input(
             &theme,
@@ -154,7 +154,7 @@ slider {
             },
         )
         .unwrap();
-    component.paint(&theme, 240, 40, &mut buffer).unwrap();
+    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
     let after_first_drag = buffer.data.clone();
 
     component
@@ -165,7 +165,7 @@ slider {
             ComponentInput::PointerMove { x: 60.0, y: 20.0 },
         )
         .unwrap();
-    component.paint(&theme, 240, 40, &mut buffer).unwrap();
+    component.paint(&theme, 240, 40, &mut buffer, 1.0).unwrap();
 
     assert_ne!(
         buffer.data, after_first_drag,
@@ -182,7 +182,9 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
     let height = 180;
     let mut buffer = PixelBuffer::new(width, height);
 
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let requests = component
         .call_namespaced_handler("onToggleMute", &[])
         .unwrap();
@@ -208,7 +210,9 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
         .expect("audio popover slider");
@@ -226,7 +230,9 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
             },
         )
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -239,7 +245,9 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
         .and_then(|slider| slider.attributes.get("value"))
@@ -271,7 +279,9 @@ fn audio_popover_first_slider_grab_dispatches_change() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
         .expect("audio popover slider");
@@ -331,7 +341,9 @@ fn audio_popover_drag_keeps_fractional_slider_value_visible() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
         .expect("audio popover slider");
@@ -349,7 +361,9 @@ fn audio_popover_drag_keeps_fractional_slider_value_visible() {
             },
         )
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
         .and_then(|slider| slider.attributes.get("value"))
@@ -381,7 +395,9 @@ fn audio_popover_button_volume_updates_slider_after_drag() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
         .expect("audio popover slider");
@@ -411,7 +427,9 @@ fn audio_popover_button_volume_updates_slider_after_drag() {
             },
         )
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let requests = component
         .call_namespaced_handler("onVolumeDown", &[])
@@ -425,7 +443,9 @@ fn audio_popover_button_volume_updates_slider_after_drag() {
         )),
         "volume-down button should send precise set_volume after drag: {requests:?}"
     );
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
         .and_then(|slider| slider.attributes.get("value"))
@@ -457,7 +477,9 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
         .expect("audio popover slider");
@@ -487,7 +509,9 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
             },
         )
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -500,7 +524,9 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
@@ -512,7 +538,9 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
         .and_then(|slider| slider.attributes.get("value"))
@@ -544,7 +572,9 @@ fn audio_popover_mute_renders_shell_normalized_state() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let requests = component
         .call_namespaced_handler("onToggleMute", &[])
@@ -559,7 +589,9 @@ fn audio_popover_mute_renders_shell_normalized_state() {
         )),
         "mute action should dispatch idempotent set_muted(true): {requests:?}"
     );
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let pre_optimistic_text = rendered_text(&component);
     assert!(
         pre_optimistic_text.iter().any(|text| text == "Mute"),
@@ -577,7 +609,9 @@ fn audio_popover_mute_renders_shell_normalized_state() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let optimistic_text = rendered_text(&component);
     assert!(
         optimistic_text.iter().any(|text| text == "Unmute"),
@@ -597,7 +631,9 @@ fn audio_popover_mute_renders_shell_normalized_state() {
         )),
         "second mute action should dispatch idempotent set_muted(false): {requests:?}"
     );
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let pre_unmute_text = rendered_text(&component);
     assert!(
         pre_unmute_text.iter().any(|text| text == "Unmute"),
@@ -615,7 +651,9 @@ fn audio_popover_mute_renders_shell_normalized_state() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let optimistic_unmute_text = rendered_text(&component);
     assert!(
         optimistic_unmute_text.iter().any(|text| text == "Mute"),
@@ -643,7 +681,9 @@ fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
         .expect("audio popover slider");
@@ -673,7 +713,9 @@ fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
             },
         )
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let requests = component
         .handle_input(

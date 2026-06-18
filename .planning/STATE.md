@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.21
 milestone_name: Retained Layout & Display List
-status: executing
-stopped_at: Roadmap created for v1.21; Phase 104 ready for planning
-last_updated: "2026-06-18T15:49:32.140Z"
-last_activity: 2026-06-18 -- Phase 104 planning complete
+status: blocked
+stopped_at: Phase 104 verification gaps found in shell suite on dirty navigation/module worktree
+last_updated: "2026-06-18T16:40:00.000Z"
+last_activity: 2026-06-18 -- Phase 104 implemented; retained-layout proof passed; shell suite has unrelated dirty-tree failures
 progress:
-  total_phases: 7
+  total_phases: 3
   completed_phases: 0
   total_plans: 3
-  completed_plans: 0
+  completed_plans: 3
   percent: 0
 ---
 
@@ -21,17 +21,17 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-06-18)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.21 Retained Layout & Display List — Phase 104 next
+**Current focus:** Phase 104 — Retained TaffyTree
 
 ## Current Position
 
-Phase: 104 (not started)
-Plan: —
-Status: Ready to execute
-Last activity: 2026-06-18 -- Phase 104 planning complete
+Phase: 104 (Retained TaffyTree) — VERIFICATION GAPS
+Plan: 3 of 3
+Status: Blocked on shell-suite gap closure
+Last activity: 2026-06-18 -- Phase 104 implemented; verification recorded gaps_found
 
 ```
-Progress: [░░░░░░░░░░░░░░░░░░░░] 0% (0/3 phases)
+Progress: [██████░░░░░░░░░░░░░░] 33% (1/3 phases with implementation complete; verification gaps remain)
 ```
 
 ## Performance Metrics
@@ -61,7 +61,7 @@ Decisions are logged in PROJECT.md Key Decisions table. v1.20 decisions archived
 
 ### Blockers/Concerns
 
-None.
+- Phase 104 full shell verification is blocked by current dirty-tree navigation/module/service test failures. Focused retained-layout tests pass and `mesh-core-shell` builds under Nix; full `nix develop -c cargo test --package mesh-core-shell` fails 54 tests against changed shipped surfaces/module graph. See `.planning/phases/104-retained-taffytree/104-VERIFICATION.md`.
 
 ## Deferred Items
 

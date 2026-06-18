@@ -1,9 +1,9 @@
 use mesh_core_elements::VariableStore;
 use mesh_core_locale::LocaleEngine;
 use serde_json::{Map, Value};
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Mutex;
 
 /// Reactive state exposed to and mutated by Luau scripts.
 ///
@@ -21,7 +21,12 @@ pub struct ScriptState {
     /// actually changes. Used by callers to skip expensive re-serialization
     /// when state is provably unchanged since the last flush.
     snapshot_generation: u64,
-    cached_snapshot: RefCell<Option<(u64, Value)>>,
+    cached_snapshot: Mutex<Option<(u64, Value)>>,
+    /// Advances on every observable mutation, including host-value writes and
+    /// proxy registration changes that deliberately do not advance
+    /// `snapshot_generation`. Lets callers cache full-state clones and skip
+    /// re-cloning when nothing could have changed.
+    mutation_generation: u64,
 }
 
 impl ScriptState {
@@ -31,7 +36,8 @@ impl ScriptState {
             dirty: false,
             proxies: HashMap::new(),
             snapshot_generation: 0,
-            cached_snapshot: RefCell::new(None),
+            cached_snapshot: Mutex::new(None),
+            mutation_generation: 0,
         }
     }
 
@@ -47,6 +53,14 @@ impl ScriptState {
     /// also check this and always refresh when proxies are present.
     pub fn has_proxies(&self) -> bool {
         !self.proxies.is_empty()
+    }
+
+    /// Counter that advances on every mutation of any kind (`set`,
+    /// `set_host_value`, proxy register/unregister). Cached clones of this
+    /// state are valid as long as this value is unchanged: proxies are not
+    /// carried by `Clone`, so live proxy reads cannot invalidate a clone.
+    pub fn mutation_generation(&self) -> u64 {
+        self.mutation_generation
     }
 
     /// Set a variable and mark state as dirty.
@@ -72,7 +86,11 @@ impl ScriptState {
         self.variables.insert(name, value);
         self.dirty = true;
         self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
-        self.cached_snapshot.get_mut().take();
+        self.mutation_generation = self.mutation_generation.wrapping_add(1);
+        self.cached_snapshot
+            .get_mut()
+            .expect("snapshot cache poisoned")
+            .take();
     }
 
     /// Set a host-maintained variable without requesting a component rebuild.
@@ -89,7 +107,11 @@ impl ScriptState {
             return;
         }
         self.variables.insert(name, value);
-        self.cached_snapshot.get_mut().take();
+        self.mutation_generation = self.mutation_generation.wrapping_add(1);
+        self.cached_snapshot
+            .get_mut()
+            .expect("snapshot cache poisoned")
+            .take();
     }
 
     /// Check if any variable changed since last tree build.
@@ -106,20 +128,28 @@ impl ScriptState {
     pub fn register_proxy(
         &mut self,
         name: impl Into<String>,
-        getter: Box<dyn Fn() -> Value + Send + 'static>,
-        setter: Option<Box<dyn Fn(Value) + Send + 'static>>,
+        getter: Box<dyn Fn() -> Value + Send + Sync + 'static>,
+        setter: Option<Box<dyn Fn(Value) + Send + Sync + 'static>>,
     ) {
         let name = name.into();
         self.proxies.insert(name, Proxy { getter, setter });
         self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
-        self.cached_snapshot.get_mut().take();
+        self.mutation_generation = self.mutation_generation.wrapping_add(1);
+        self.cached_snapshot
+            .get_mut()
+            .expect("snapshot cache poisoned")
+            .take();
     }
 
     /// Remove a previously-registered proxy.
     pub fn unregister_proxy(&mut self, name: &str) {
         if self.proxies.remove(name).is_some() {
             self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
-            self.cached_snapshot.get_mut().take();
+            self.mutation_generation = self.mutation_generation.wrapping_add(1);
+            self.cached_snapshot
+                .get_mut()
+                .expect("snapshot cache poisoned")
+                .take();
         }
     }
 
@@ -132,8 +162,11 @@ impl ScriptState {
     pub fn snapshot(&self) -> Value {
         if self.proxies.is_empty() {
             let generation = self.snapshot_generation;
-            if let Some((cached_generation, cached_snapshot)) =
-                self.cached_snapshot.borrow().as_ref()
+            if let Some((cached_generation, cached_snapshot)) = self
+                .cached_snapshot
+                .lock()
+                .expect("snapshot cache poisoned")
+                .as_ref()
                 && *cached_generation == generation
             {
                 return cached_snapshot.clone();
@@ -145,7 +178,10 @@ impl ScriptState {
                     .map(|(key, value)| (key.clone(), value.clone()))
                     .collect(),
             );
-            *self.cached_snapshot.borrow_mut() = Some((generation, snapshot.clone()));
+            *self
+                .cached_snapshot
+                .lock()
+                .expect("snapshot cache poisoned") = Some((generation, snapshot.clone()));
             return snapshot;
         }
 
@@ -196,8 +232,8 @@ impl VariableStore for ScriptState {
 // A lightweight proxy that forwards get/set operations to host-provided
 // closures.
 struct Proxy {
-    getter: Box<dyn Fn() -> Value + Send + 'static>,
-    setter: Option<Box<dyn Fn(Value) + Send + 'static>>,
+    getter: Box<dyn Fn() -> Value + Send + Sync + 'static>,
+    setter: Option<Box<dyn Fn(Value) + Send + Sync + 'static>>,
 }
 
 impl Clone for ScriptState {
@@ -207,7 +243,8 @@ impl Clone for ScriptState {
             dirty: self.dirty,
             proxies: HashMap::new(), // proxies are host-registered and not cloned
             snapshot_generation: self.snapshot_generation,
-            cached_snapshot: RefCell::new(None),
+            cached_snapshot: Mutex::new(None),
+            mutation_generation: self.mutation_generation,
         }
     }
 }

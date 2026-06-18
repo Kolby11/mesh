@@ -1,0 +1,121 @@
+<template>
+  <row class="brightness-row" title="{t('nav.brightness')} {brightness_label}">
+    <button
+      class="brightness-ctrl"
+      onclick={onBrightnessDown}
+      title="{t('nav.brightness_down')}"
+      aria-label="{t('nav.brightness_down')}"
+    >
+      <icon class="ctrl-icon-sm" name="weather-few-clouds" size="12" />
+    </button>
+    <icon class="brightness-icon" name="weather-clear" size="16" />
+    <button
+      class="brightness-ctrl"
+      onclick={onBrightnessUp}
+      title="{t('nav.brightness_up')}"
+      aria-label="{t('nav.brightness_up')}"
+    >
+      <icon class="ctrl-icon-lg" name="weather-clear" size="18" />
+    </button>
+  </row>
+</template>
+
+<script lang="luau">
+brightness_level = 100
+brightness_label = "100%"
+
+local bright_ok, brightness = pcall(require, "mesh.brightness@>=1.0")
+if not bright_ok then brightness = nil end
+
+function render(self)
+    if bright_ok and brightness and brightness.level ~= nil then
+        brightness_level = math.max(0, math.min(100, math.floor(tonumber(brightness.level) or 100)))
+        brightness_label = string.format("%d%%", brightness_level)
+    end
+end
+
+function onBrightnessDown()
+    brightness_level = math.max(0, brightness_level - 10)
+    brightness_label = string.format("%d%%", brightness_level)
+    if bright_ok and brightness and type(brightness.decrease) == "function" then
+        brightness.decrease(10)
+    else
+        mesh.events.publish("shell.brightness-down", { step = 10 })
+    end
+end
+
+function onBrightnessUp()
+    brightness_level = math.min(100, brightness_level + 10)
+    brightness_label = string.format("%d%%", brightness_level)
+    if bright_ok and brightness and type(brightness.increase) == "function" then
+        brightness.increase(10)
+    else
+        mesh.events.publish("shell.brightness-up", { step = 10 })
+    end
+end
+</script>
+
+<style>
+.brightness-row {
+    height: 40px;
+    align-items: center;
+    gap: 1px;
+    flex-shrink: 0;
+    padding-inline: token(spacing.xs);
+    border-radius: token(radius.full);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard);
+}
+
+.brightness-ctrl {
+    width: 28px;
+    height: 28px;
+    justify-content: center;
+    align-items: center;
+    border-radius: token(radius.full);
+    background: transparent;
+    color: token(color.on-surface);
+    border-width: 0;
+    flex-shrink: 0;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard);
+}
+
+.brightness-ctrl:hover {
+    background: token(color.surface-container-high);
+}
+
+.brightness-ctrl:active {
+    background: token(color.primary);
+    color: token(color.on-primary);
+}
+
+.brightness-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    color: token(color.on-surface-variant);
+}
+
+.ctrl-icon-sm {
+    width: 12px;
+    height: 12px;
+    color: inherit;
+    flex-shrink: 0;
+    opacity: 0.6;
+}
+
+.ctrl-icon-lg {
+    width: 18px;
+    height: 18px;
+    color: inherit;
+    flex-shrink: 0;
+}
+
+@container (max-width: 720px) {
+    .brightness-row {
+        display: none;
+    }
+}
+</style>

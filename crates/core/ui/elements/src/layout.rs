@@ -2,7 +2,7 @@
 ///
 /// Computes `LayoutRect` for every node in a widget tree. Supports row/column
 /// direction, flex-grow/shrink, gap, padding, and margin.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::lru::LruCache;
@@ -150,6 +150,12 @@ pub struct PerSurfaceLayoutState {
     pub valid: bool,
 }
 
+// SAFETY: `PerSurfaceLayoutState` is an owned per-surface cache. The shell may
+// move a `FrontendSurfaceComponent` between threads because `ShellComponent`
+// requires `Send`, but layout mutation happens only through `&mut self`; the
+// retained `TaffyTree` is never shared concurrently.
+unsafe impl Send for PerSurfaceLayoutState {}
+
 impl PerSurfaceLayoutState {
     /// Construct a fresh, invalid state (equivalent to `Default`).
     pub fn new() -> Self {
@@ -159,6 +165,12 @@ impl PerSurfaceLayoutState {
             last_available: (0.0, 0.0),
             valid: false,
         }
+    }
+}
+
+impl Default for PerSurfaceLayoutState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -299,6 +311,98 @@ impl LayoutEngine {
                 );
             }
         }
+    }
+
+    /// Compute layout by mutating a retained per-surface Taffy tree.
+    pub fn compute_incremental(
+        root: &mut WidgetNode,
+        state: &mut PerSurfaceLayoutState,
+        available_width: f32,
+        available_height: f32,
+        dirty_layout: bool,
+        dirty_structural: bool,
+        intrinsic_cache: &mut IntrinsicLayoutCache,
+        measurer: Option<&dyn TextMeasurer>,
+    ) {
+        if !state.valid {
+            compute_fresh_retained_layout(
+                root,
+                state,
+                available_width,
+                available_height,
+                intrinsic_cache,
+                measurer,
+            );
+            return;
+        }
+
+        if dirty_structural {
+            compute_structural_retained_layout(
+                root,
+                state,
+                available_width,
+                available_height,
+                intrinsic_cache,
+                measurer,
+            );
+            return;
+        }
+
+        let Some(root_id) = retained_taffy_id(root, state) else {
+            state.valid = false;
+            compute_fresh_retained_layout(
+                root,
+                state,
+                available_width,
+                available_height,
+                intrinsic_cache,
+                measurer,
+            );
+            return;
+        };
+
+        let mut report = TaffyLayoutReport::default();
+        let mut node_map = HashMap::new();
+        let mut text_nodes = HashMap::new();
+        update_retained_node_styles(
+            root,
+            state,
+            dirty_layout,
+            &mut node_map,
+            &mut text_nodes,
+            &mut report,
+        );
+
+        let available_changed = state.last_available != (available_width, available_height);
+        if available_changed || dirty_layout {
+            let available_space = taffy_available_space(available_width, available_height);
+            if let Err(error) = state.tree.compute_layout_with_measure(
+                root_id,
+                available_space,
+                |known_dimensions, available_space, _node_id, context, _style| {
+                    measure_taffy_node(
+                        known_dimensions,
+                        available_space,
+                        context.map(|node_id| *node_id),
+                        &text_nodes,
+                        intrinsic_cache,
+                        measurer,
+                    )
+                },
+            ) {
+                tracing::warn!(
+                    target: "mesh::layout",
+                    error = %error,
+                    "retained taffy layout computation failed"
+                );
+                zero_layout_subtree(root);
+            } else {
+                write_taffy_layout(root, &state.tree, &node_map);
+                state.last_available = (available_width, available_height);
+            }
+        }
+
+        log_taffy_report(&report);
     }
 }
 
@@ -496,6 +600,328 @@ fn build_taffy_tree(
     Ok(taffy_node)
 }
 
+fn compute_fresh_retained_layout(
+    root: &mut WidgetNode,
+    state: &mut PerSurfaceLayoutState,
+    available_width: f32,
+    available_height: f32,
+    intrinsic_cache: &mut IntrinsicLayoutCache,
+    measurer: Option<&dyn TextMeasurer>,
+) {
+    let mut report = TaffyLayoutReport::default();
+    let mut node_id_to_taffy = HashMap::new();
+    let mut text_nodes = HashMap::new();
+
+    state.tree = TaffyTree::<NodeId>::new();
+    state.node_map.clear();
+
+    match build_taffy_tree(
+        root,
+        &mut state.tree,
+        &mut node_id_to_taffy,
+        &mut text_nodes,
+        &mut report,
+    ) {
+        Ok(root_id) => {
+            collect_stable_taffy_map(root, &node_id_to_taffy, &mut state.node_map);
+            let available_space = taffy_available_space(available_width, available_height);
+            if let Err(error) = state.tree.compute_layout_with_measure(
+                root_id,
+                available_space,
+                |known_dimensions, available_space, _node_id, context, _style| {
+                    measure_taffy_node(
+                        known_dimensions,
+                        available_space,
+                        context.map(|node_id| *node_id),
+                        &text_nodes,
+                        intrinsic_cache,
+                        measurer,
+                    )
+                },
+            ) {
+                tracing::warn!(
+                    target: "mesh::layout",
+                    error = %error,
+                    "retained taffy fresh layout computation failed"
+                );
+                zero_layout_subtree(root);
+                state.valid = false;
+            } else {
+                write_taffy_layout(root, &state.tree, &node_id_to_taffy);
+                state.last_available = (available_width, available_height);
+                state.valid = true;
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                target: "mesh::layout",
+                error = %error,
+                "retained taffy tree construction failed"
+            );
+            zero_layout_subtree(root);
+            state.valid = false;
+        }
+    }
+
+    log_taffy_report(&report);
+}
+
+fn compute_structural_retained_layout(
+    root: &mut WidgetNode,
+    state: &mut PerSurfaceLayoutState,
+    available_width: f32,
+    available_height: f32,
+    intrinsic_cache: &mut IntrinsicLayoutCache,
+    measurer: Option<&dyn TextMeasurer>,
+) {
+    let mut report = TaffyLayoutReport::default();
+    let mut node_id_to_taffy = HashMap::new();
+    let mut text_nodes = HashMap::new();
+    let mut present_keys = HashSet::new();
+    collect_mesh_keys(root, &mut present_keys);
+
+    match reconcile_retained_taffy_node(
+        root,
+        state,
+        &mut node_id_to_taffy,
+        &mut text_nodes,
+        &mut report,
+    ) {
+        Ok(root_id) => {
+            let mut stale_keys = state
+                .node_map
+                .keys()
+                .filter(|key| !present_keys.contains(*key))
+                .cloned()
+                .collect::<Vec<_>>();
+            stale_keys.sort_by_key(|key| std::cmp::Reverse(key.len()));
+            for key in stale_keys {
+                if let Some(taffy_id) = state.node_map.remove(&key) {
+                    if let Err(error) = remove_taffy_subtree(&mut state.tree, taffy_id) {
+                        tracing::warn!(
+                            target: "mesh::layout",
+                            key = %key,
+                            error = %error,
+                            "failed to remove stale retained layout subtree"
+                        );
+                    }
+                }
+            }
+
+            let available_space = taffy_available_space(available_width, available_height);
+            if let Err(error) = state.tree.compute_layout_with_measure(
+                root_id,
+                available_space,
+                |known_dimensions, available_space, _node_id, context, _style| {
+                    measure_taffy_node(
+                        known_dimensions,
+                        available_space,
+                        context.map(|node_id| *node_id),
+                        &text_nodes,
+                        intrinsic_cache,
+                        measurer,
+                    )
+                },
+            ) {
+                tracing::warn!(
+                    target: "mesh::layout",
+                    error = %error,
+                    "retained taffy structural layout computation failed"
+                );
+                zero_layout_subtree(root);
+                state.valid = false;
+            } else {
+                write_taffy_layout(root, &state.tree, &node_id_to_taffy);
+                state.last_available = (available_width, available_height);
+                state.valid = true;
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                target: "mesh::layout",
+                error = %error,
+                "retained taffy structural reconciliation failed"
+            );
+            zero_layout_subtree(root);
+            state.valid = false;
+        }
+    }
+
+    log_taffy_report(&report);
+}
+
+fn reconcile_retained_taffy_node(
+    node: &WidgetNode,
+    state: &mut PerSurfaceLayoutState,
+    node_id_to_taffy: &mut HashMap<NodeId, TaffyNodeId>,
+    text_nodes: &mut HashMap<NodeId, TextMeasureData>,
+    report: &mut TaffyLayoutReport,
+) -> Result<TaffyNodeId, taffy::TaffyError> {
+    let style = taffy_style_for_node(node, report);
+    let key = node.attributes.get("_mesh_key").cloned();
+    let taffy_id = if let Some(key) = key {
+        if let Some(existing) = state.node_map.get(&key).copied() {
+            state.tree.set_style(existing, style)?;
+            existing
+        } else {
+            let created = state.tree.new_leaf(style)?;
+            state.node_map.insert(key, created);
+            created
+        }
+    } else {
+        // Unkeyed nodes cannot be retained safely across TREE_REBUILD passes:
+        // there is no stable identity to reconcile against (RESEARCH.md Pitfall 3).
+        state.tree.new_leaf(style)?
+    };
+
+    update_text_context(node, &mut state.tree, taffy_id, text_nodes)?;
+    node_id_to_taffy.insert(node.id, taffy_id);
+
+    let child_ids = node
+        .children
+        .iter()
+        .map(|child| {
+            reconcile_retained_taffy_node(child, state, node_id_to_taffy, text_nodes, report)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    state.tree.set_children(taffy_id, &child_ids)?;
+    Ok(taffy_id)
+}
+
+fn update_retained_node_styles(
+    node: &WidgetNode,
+    state: &mut PerSurfaceLayoutState,
+    mark_dirty: bool,
+    node_id_to_taffy: &mut HashMap<NodeId, TaffyNodeId>,
+    text_nodes: &mut HashMap<NodeId, TextMeasureData>,
+    report: &mut TaffyLayoutReport,
+) {
+    if let Some(taffy_id) = retained_taffy_id(node, state) {
+        let style = taffy_style_for_node(node, report);
+        if let Err(error) = state.tree.set_style(taffy_id, style) {
+            tracing::warn!(
+                target: "mesh::layout",
+                error = %error,
+                "failed to update retained taffy style"
+            );
+        }
+        if mark_dirty && let Err(error) = state.tree.mark_dirty(taffy_id) {
+            tracing::warn!(
+                target: "mesh::layout",
+                error = %error,
+                "failed to mark retained taffy node dirty"
+            );
+        }
+        if let Err(error) = update_text_context(node, &mut state.tree, taffy_id, text_nodes) {
+            tracing::warn!(
+                target: "mesh::layout",
+                error = %error,
+                "failed to update retained taffy text context"
+            );
+        }
+        node_id_to_taffy.insert(node.id, taffy_id);
+    }
+
+    for child in &node.children {
+        update_retained_node_styles(
+            child,
+            state,
+            mark_dirty,
+            node_id_to_taffy,
+            text_nodes,
+            report,
+        );
+    }
+}
+
+fn update_text_context(
+    node: &WidgetNode,
+    tree: &mut TaffyTree<NodeId>,
+    taffy_id: TaffyNodeId,
+    text_nodes: &mut HashMap<NodeId, TextMeasureData>,
+) -> Result<(), taffy::TaffyError> {
+    if node.tag == "text" {
+        text_nodes.insert(
+            node.id,
+            TextMeasureData {
+                content: node
+                    .attributes
+                    .get("content")
+                    .cloned()
+                    .unwrap_or_else(String::new),
+                font_family: node.computed_style.font_family.clone(),
+                font_size: node.computed_style.font_size,
+                font_weight: node.computed_style.font_weight,
+                line_height: node.computed_style.line_height,
+            },
+        );
+        tree.set_node_context(taffy_id, Some(node.id))?;
+    } else {
+        tree.set_node_context(taffy_id, None)?;
+    }
+    Ok(())
+}
+
+fn collect_stable_taffy_map(
+    node: &WidgetNode,
+    node_id_to_taffy: &HashMap<NodeId, TaffyNodeId>,
+    stable_map: &mut HashMap<String, TaffyNodeId>,
+) {
+    if let Some(key) = node.attributes.get("_mesh_key")
+        && let Some(taffy_id) = node_id_to_taffy.get(&node.id)
+    {
+        stable_map.insert(key.clone(), *taffy_id);
+    }
+    for child in &node.children {
+        collect_stable_taffy_map(child, node_id_to_taffy, stable_map);
+    }
+}
+
+fn collect_mesh_keys(node: &WidgetNode, keys: &mut HashSet<String>) {
+    if let Some(key) = node.attributes.get("_mesh_key") {
+        keys.insert(key.clone());
+    }
+    for child in &node.children {
+        collect_mesh_keys(child, keys);
+    }
+}
+
+fn retained_taffy_id(node: &WidgetNode, state: &PerSurfaceLayoutState) -> Option<TaffyNodeId> {
+    node.attributes
+        .get("_mesh_key")
+        .and_then(|key| state.node_map.get(key))
+        .copied()
+}
+
+fn taffy_available_space(width: f32, height: f32) -> TaffySize<TaffyAvailableSpace> {
+    TaffySize {
+        width: TaffyAvailableSpace::Definite(width),
+        height: TaffyAvailableSpace::Definite(height),
+    }
+}
+
+fn log_taffy_report(report: &TaffyLayoutReport) {
+    for diagnostic in &report.diagnostics {
+        if is_expected_taffy_measurement_diagnostic(&diagnostic.reason) {
+            tracing::debug!(
+                target: "mesh::layout",
+                node_id = diagnostic.node_id,
+                tag = %diagnostic.tag,
+                reason = %diagnostic.reason,
+                "taffy layout diagnostic"
+            );
+        } else {
+            tracing::warn!(
+                target: "mesh::layout",
+                node_id = diagnostic.node_id,
+                tag = %diagnostic.tag,
+                reason = %diagnostic.reason,
+                "taffy layout diagnostic"
+            );
+        }
+    }
+}
+
 fn measure_taffy_node(
     known_dimensions: TaffySize<Option<f32>>,
     available_space: TaffySize<TaffyAvailableSpace>,
@@ -630,15 +1056,21 @@ pub fn remove_taffy_subtree(
     tree: &mut TaffyTree<NodeId>,
     node_id: TaffyNodeId,
 ) -> Result<(), taffy::TaffyError> {
-    // Stub — does nothing (RED phase)
-    let _ = (tree, node_id);
+    // Snapshot children before any mutation — once we remove the parent,
+    // the children handles become invalid.
+    let children = tree.children(node_id).unwrap_or_default();
+    // Post-order: remove children first so no orphan TaffyNodeIds accumulate.
+    for child in children {
+        remove_taffy_subtree(tree, child)?;
+    }
+    tree.remove(node_id)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::style::{Display, Edges, FlexDirection, Position};
+    use crate::style::{Color, Display, Edges, FlexDirection, Position};
     use std::cell::Cell;
 
     fn make_node(tag: &str, width: Dimension, height: Dimension) -> WidgetNode {
@@ -646,6 +1078,85 @@ mod tests {
         node.computed_style.width = width;
         node.computed_style.height = height;
         node
+    }
+
+    fn keyed_node(key: &str, tag: &str, width: Dimension, height: Dimension) -> WidgetNode {
+        let mut node = make_node(tag, width, height);
+        node.attributes.insert("_mesh_key".into(), key.into());
+        node
+    }
+
+    fn retained_fixture() -> WidgetNode {
+        let mut root = keyed_node("root", "row", Dimension::Px(200.0), Dimension::Px(100.0));
+        root.computed_style.direction = FlexDirection::Row;
+        root.children = vec![
+            keyed_node("root/0", "a", Dimension::Px(50.0), Dimension::Px(20.0)),
+            keyed_node("root/1", "b", Dimension::Px(60.0), Dimension::Px(20.0)),
+        ];
+        root
+    }
+
+    fn collect_keyed_layouts(node: &WidgetNode, layouts: &mut HashMap<String, LayoutRect>) {
+        if let Some(key) = node.attributes.get("_mesh_key") {
+            layouts.insert(key.clone(), node.layout);
+        }
+        for child in &node.children {
+            collect_keyed_layouts(child, layouts);
+        }
+    }
+
+    fn keyed_layouts(node: &WidgetNode) -> HashMap<String, LayoutRect> {
+        let mut layouts = HashMap::new();
+        collect_keyed_layouts(node, &mut layouts);
+        layouts
+    }
+
+    fn assert_layout_maps_eq(
+        retained: &HashMap<String, LayoutRect>,
+        fresh: &HashMap<String, LayoutRect>,
+    ) {
+        assert_eq!(retained.len(), fresh.len());
+        for (key, retained_rect) in retained {
+            let fresh_rect = fresh.get(key).expect("fresh layout has key");
+            assert_eq!(
+                (
+                    retained_rect.x,
+                    retained_rect.y,
+                    retained_rect.width,
+                    retained_rect.height
+                ),
+                (
+                    fresh_rect.x,
+                    fresh_rect.y,
+                    fresh_rect.width,
+                    fresh_rect.height
+                ),
+                "layout mismatch for {key}"
+            );
+        }
+    }
+
+    fn assert_retained_matches_fresh(mut retained: WidgetNode, mut fresh: WidgetNode) {
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            false,
+            &mut cache,
+            None,
+        );
+        LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+            &mut fresh,
+            200.0,
+            100.0,
+            &mut IntrinsicLayoutCache::default(),
+            None,
+        );
+        assert_layout_maps_eq(&keyed_layouts(&retained), &keyed_layouts(&fresh));
     }
 
     #[derive(Default)]
@@ -1126,6 +1637,234 @@ mod tests {
         assert!(!is_expected_taffy_measurement_diagnostic(
             "unsupported layout mapping: test-only"
         ));
+    }
+
+    #[test]
+    fn compute_incremental_fresh_build_matches_baseline() {
+        assert_retained_matches_fresh(retained_fixture(), retained_fixture());
+    }
+
+    #[test]
+    fn compute_incremental_visual_repaint_preserves_layout() {
+        let mut root = retained_fixture();
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 200.0, 100.0, false, false, &mut cache, None,
+        );
+        let before = keyed_layouts(&root);
+
+        root.children[0].computed_style.background_color = Color {
+            r: 10,
+            g: 20,
+            b: 30,
+            a: 255,
+        };
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 200.0, 100.0, false, false, &mut cache, None,
+        );
+
+        assert_layout_maps_eq(&keyed_layouts(&root), &before);
+    }
+
+    #[test]
+    fn retained_layout_parity_style_only() {
+        let mut retained = retained_fixture();
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            false,
+            &mut cache,
+            None,
+        );
+
+        retained.children[0].computed_style.opacity = 0.5;
+        let mut fresh = retained.clone();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            false,
+            &mut cache,
+            None,
+        );
+        LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+            &mut fresh,
+            200.0,
+            100.0,
+            &mut IntrinsicLayoutCache::default(),
+            None,
+        );
+
+        assert_layout_maps_eq(&keyed_layouts(&retained), &keyed_layouts(&fresh));
+    }
+
+    #[test]
+    fn retained_layout_parity_layout_dirty() {
+        let mut retained = retained_fixture();
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            false,
+            &mut cache,
+            None,
+        );
+
+        retained.children[0].computed_style.width = Dimension::Px(80.0);
+        let mut fresh = retained.clone();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            true,
+            false,
+            &mut cache,
+            None,
+        );
+        LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+            &mut fresh,
+            200.0,
+            100.0,
+            &mut IntrinsicLayoutCache::default(),
+            None,
+        );
+
+        assert_layout_maps_eq(&keyed_layouts(&retained), &keyed_layouts(&fresh));
+    }
+
+    #[test]
+    fn retained_layout_parity_add_node() {
+        let mut retained = retained_fixture();
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            false,
+            &mut cache,
+            None,
+        );
+
+        retained.children.push(keyed_node(
+            "root/2",
+            "c",
+            Dimension::Px(40.0),
+            Dimension::Px(20.0),
+        ));
+        let mut fresh = retained.clone();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            true,
+            &mut cache,
+            None,
+        );
+        LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+            &mut fresh,
+            200.0,
+            100.0,
+            &mut IntrinsicLayoutCache::default(),
+            None,
+        );
+
+        assert_layout_maps_eq(&keyed_layouts(&retained), &keyed_layouts(&fresh));
+    }
+
+    #[test]
+    fn retained_layout_parity_remove_node() {
+        let mut retained = retained_fixture();
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            false,
+            &mut cache,
+            None,
+        );
+
+        retained.children.remove(0);
+        let mut fresh = retained.clone();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            true,
+            &mut cache,
+            None,
+        );
+        LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+            &mut fresh,
+            200.0,
+            100.0,
+            &mut IntrinsicLayoutCache::default(),
+            None,
+        );
+
+        assert_layout_maps_eq(&keyed_layouts(&retained), &keyed_layouts(&fresh));
+    }
+
+    #[test]
+    fn retained_layout_parity_reorder() {
+        let mut retained = retained_fixture();
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            false,
+            &mut cache,
+            None,
+        );
+
+        retained.children.swap(0, 1);
+        let mut fresh = retained.clone();
+        LayoutEngine::compute_incremental(
+            &mut retained,
+            &mut state,
+            200.0,
+            100.0,
+            false,
+            true,
+            &mut cache,
+            None,
+        );
+        LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+            &mut fresh,
+            200.0,
+            100.0,
+            &mut IntrinsicLayoutCache::default(),
+            None,
+        );
+
+        assert_layout_maps_eq(&keyed_layouts(&retained), &keyed_layouts(&fresh));
     }
 
     #[test]

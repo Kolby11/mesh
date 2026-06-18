@@ -1,0 +1,84 @@
+<template>
+  <row class="now-playing" hidden={not is_playing}>
+    <icon class="np-icon" name="media-playback-start" size="12" />
+    <text class="np-text">{track_name}</text>
+  </row>
+</template>
+
+<script lang="luau">
+is_playing = false
+track_name = ""
+
+local media_ok, media = pcall(require, "mesh.media@>=1.0")
+if not media_ok then media = nil end
+
+function render(self)
+    if not media_ok or not media or not media.available then
+        is_playing = false
+        track_name = ""
+        return
+    end
+
+    local title = media.title or ""
+    local artist = media.artist or ""
+    local state_val = media.state or "paused"
+    local playing = (state_val == "playing")
+
+    is_playing = playing and (title ~= "" or artist ~= "")
+
+    if artist ~= "" and title ~= "" then
+        local full = artist .. " — " .. title
+        track_name = #full > 38 and (string.sub(full, 1, 36) .. "…") or full
+    elseif title ~= "" then
+        track_name = #title > 38 and (string.sub(title, 1, 36) .. "…") or title
+    else
+        track_name = ""
+        is_playing = false
+    end
+end
+</script>
+
+<style>
+.now-playing {
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    max-width: 200px;
+    flex-shrink: 1;
+    padding-inline: token(spacing.sm);
+    height: 32px;
+    border-radius: token(radius.full);
+    background: token(color.surface-container);
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard);
+}
+
+.now-playing:hover {
+    background: token(color.surface-container-high);
+}
+
+.np-icon {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    color: token(color.primary);
+}
+
+.np-text {
+    color: token(color.on-surface);
+    font-size: token(typography.size.xs);
+    font-weight: 500;
+    text-wrap: none;
+}
+
+@container (max-width: 860px) {
+    .now-playing {
+        max-width: 140px;
+    }
+}
+
+@container (max-width: 720px) {
+    .now-playing {
+        display: none;
+    }
+}
+</style>

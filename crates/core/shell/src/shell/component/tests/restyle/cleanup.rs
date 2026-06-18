@@ -20,7 +20,7 @@ fn restyle_state_cleanup_focus_cleared_when_node_removed() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 80);
-    component.paint(&theme, 240, 80, &mut buffer).unwrap();
+    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
 
     assert!(
         component.focused_key.is_none(),
@@ -57,7 +57,7 @@ fn restyle_state_cleanup_active_cleared_when_node_removed() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 80);
-    component.paint(&theme, 240, 80, &mut buffer).unwrap();
+    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
 
     assert!(
         component.pointer_down_key.is_none(),
@@ -99,7 +99,7 @@ button:hover {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 80);
 
-    component.paint(&theme, 240, 80, &mut buffer).unwrap();
+    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
 
     // Both keys are valid — set focus on first, hover on second.
     component.focused_key = Some("root/0/0".into());
@@ -107,7 +107,7 @@ button:hover {
     component.hovered_path = vec!["root".into(), "root/0".into(), "root/0/1".into()];
     component.pointer_down_key = Some("root/0/0".into());
     component.dirty = true;
-    component.paint(&theme, 240, 80, &mut buffer).unwrap();
+    component.paint(&theme, 240, 80, &mut buffer, 1.0).unwrap();
 
     // All valid targets must survive pruning.
     assert_eq!(

@@ -79,14 +79,14 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 640);
-    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
     component
         .call_namespaced_handler(
             "__mesh_embed__::@mesh/debug-inspector::showBackendServices",
             &[],
         )
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Backend services"));
@@ -197,11 +197,11 @@ fn debug_inspector_surfaces_view_renders_retained_paint_filtering_counters() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 640);
-    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Surfaces"));
@@ -246,11 +246,11 @@ fn debug_inspector_benchmark_view_renders_five_rows_when_profiling_off() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 640);
-    component.paint(&theme, 320, 640, &mut buffer).unwrap();
+    component.paint(&theme, 320, 640, &mut buffer, 1.0).unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
         .unwrap();
-    component.paint(&theme, 320, 640, &mut buffer).unwrap();
+    component.paint(&theme, 320, 640, &mut buffer, 1.0).unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Benchmark / Interaction"));
@@ -313,11 +313,11 @@ fn debug_inspector_benchmark_view_renders_waiting_rows_when_profiling_live_witho
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 640);
-    component.paint(&theme, 320, 640, &mut buffer).unwrap();
+    component.paint(&theme, 320, 640, &mut buffer, 1.0).unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
         .unwrap();
-    component.paint(&theme, 320, 640, &mut buffer).unwrap();
+    component.paint(&theme, 320, 640, &mut buffer, 1.0).unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Benchmark / Interaction"));
@@ -425,11 +425,11 @@ fn debug_inspector_benchmark_view_renders_populated_benchmark_result_rows() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 720);
-    component.paint(&theme, 320, 720, &mut buffer).unwrap();
+    component.paint(&theme, 320, 720, &mut buffer, 1.0).unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
         .unwrap();
-    component.paint(&theme, 320, 720, &mut buffer).unwrap();
+    component.paint(&theme, 320, 720, &mut buffer, 1.0).unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Benchmark / Interaction"));

@@ -364,7 +364,38 @@ pub(super) fn looks_like_time(token: &str) -> bool {
     }
 }
 
+/// Memoized front-end for `parse_transition_shorthand_uncached`. Transition
+/// shorthand strings come from a small static set of style declarations, but
+/// restyle re-applies them per node per frame; profiling showed the raw parse
+/// at ~14% of interaction-burst CPU.
 pub(super) fn parse_transition_shorthand(
+    value: &str,
+) -> (TransitionProperties, u32, u32, TransitionEasing) {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    const CACHE_CAPACITY: usize = 256;
+
+    thread_local! {
+        static CACHE: RefCell<HashMap<String, (TransitionProperties, u32, u32, TransitionEasing)>> =
+            RefCell::new(HashMap::new());
+    }
+
+    CACHE.with(|cache| {
+        if let Some(parsed) = cache.borrow().get(value) {
+            return *parsed;
+        }
+        let parsed = parse_transition_shorthand_uncached(value);
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= CACHE_CAPACITY {
+            cache.clear();
+        }
+        cache.insert(value.to_string(), parsed);
+        parsed
+    })
+}
+
+fn parse_transition_shorthand_uncached(
     value: &str,
 ) -> (TransitionProperties, u32, u32, TransitionEasing) {
     let mut properties = TransitionProperties::none();

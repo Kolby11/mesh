@@ -15,8 +15,10 @@
       },
       "mappings": {
         "settings": "hicolor/preferences-system",
+        "preferences-system": "hicolor/preferences-system",
         "weather-clear": "hicolor/weather-clear",
         "weather-clear-night": "hicolor/weather-clear-night",
+        "weather-few-clouds": "hicolor/weather-few-clouds",
         "audio-volume-muted": "hicolor/audio-volume-muted",
         "audio-volume-low": "hicolor/audio-volume-low",
         "audio-volume-medium": "hicolor/audio-volume-medium",
@@ -26,9 +28,14 @@
         "battery-good": "hicolor/battery-good",
         "battery-full": "hicolor/battery-full",
         "language": "hicolor/preferences-desktop-locale",
+        "preferences-desktop-locale": "hicolor/preferences-desktop-locale",
+        "media-playback-start": "hicolor/media-playback-start",
+        "applications-graphics": "hicolor/applications-graphics",
+        "emblem-photos": "hicolor/emblem-photos",
         "wifi": "hicolor/network-wireless",
         "bluetooth": "hicolor/bluetooth",
-        "close": "hicolor/window-close"
+        "close": "hicolor/window-close",
+        "window-close": "hicolor/window-close"
       }
     }
   }

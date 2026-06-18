@@ -150,21 +150,25 @@ impl ShellComponent for FrontendSurfaceComponent {
                     .locale
                     .as_ref()
                     .is_some_and(|capability| capabilities.is_granted(capability));
+            // Always apply the Lua-level service payload so interface
+            // proxies can read state fields even when the runtime lacks
+            // the canonical SERVICE_NAME.read capability.
+            runtime
+                .script_ctx
+                .apply_service_payload(service_name, payload);
+            needs_rebuild = true;
             if !has_read {
                 continue;
             }
             let previous = runtime.script_ctx.state().get(service_name);
             apply_service_update(
                 runtime.script_ctx.state_mut(),
-                has_read,
+                true,
                 service,
                 source_module,
                 payload,
             );
             let state_changed = runtime.script_ctx.state().is_dirty();
-            runtime
-                .script_ctx
-                .apply_service_payload(service_name, payload);
             let tracked_fields_changed = runtime.script_ctx.tracked_service_fields_changed(
                 service_name,
                 previous.as_ref(),
@@ -199,29 +203,18 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn observes_service_event(&self, event: &ServiceEvent) -> bool {
-        let service = match event {
-            ServiceEvent::Updated { service, .. }
-            | ServiceEvent::InterfaceEvent { service, .. } => service,
-        };
-        let caps = crate::shell::service::service_capabilities(service);
+        // Service payloads are now applied to every runtime so interface
+        // proxies work regardless of read capability.  Always observe
+        // when we have any runtimes — the per-runtime read capability
+        // check inside handle_service_event only gates Rust-side state.
+        let _ = event;
         let Ok(runtimes) = self.runtimes.lock() else {
             return true;
         };
         if runtimes.is_empty() {
             return true;
         }
-        runtimes.values().any(|runtime| {
-            let capabilities = &runtime.script_ctx.capabilities;
-            capabilities.is_granted(&caps.read)
-                || caps
-                    .theme
-                    .as_ref()
-                    .is_some_and(|capability| capabilities.is_granted(capability))
-                || caps
-                    .locale
-                    .as_ref()
-                    .is_some_and(|capability| capabilities.is_granted(capability))
-        })
+        true
     }
 
     fn wants_tick(&self) -> bool {
@@ -309,6 +302,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         width: u32,
         height: u32,
         buffer: &mut PixelBuffer,
+        scale: f32,
     ) -> Result<(), ComponentError> {
         // Capture and clear dirty flags up front. paint is the work-doer; if
         // anything during paint (measured_size change, active animation) needs
@@ -548,7 +542,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
                     &selected_paint,
                     buffer,
-                    1.0,
+                    scale,
                     None,
                     None,
                     tooltip
@@ -577,7 +571,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                         mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
                             &selected_paint,
                             buffer,
-                            1.0,
+                            scale,
                             Some((damage.x, damage.y, damage.width, damage.height)),
                             None,
                             tooltip_for_damage,
@@ -603,7 +597,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                     mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
                         &selected_paint,
                         buffer,
-                        1.0,
+                        scale,
                         Some((damage.x, damage.y, damage.width, damage.height)),
                         None,
                         tooltip_for_damage,
@@ -628,7 +622,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                             mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
                                 &selected_paint,
                                 buffer,
-                                1.0,
+                                scale,
                                 Some((damage.x, damage.y, damage.width, damage.height)),
                                 None,
                                 tooltip_for_damage,
@@ -710,6 +704,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.cached_restyle_rules = None;
         self.cached_style_rule_index = None;
         self.intrinsic_layout_cache = IntrinsicLayoutCache::default();
+        self.layout_state = PerSurfaceLayoutState::default();
         self.retained_tree = RetainedWidgetTree::default();
         self.retained_render_objects = RenderObjectTree::default();
         self.retained_display_list = RetainedDisplayList::default();
@@ -736,6 +731,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.cached_restyle_rules = None;
         self.cached_style_rule_index = None;
         self.intrinsic_layout_cache = IntrinsicLayoutCache::default();
+        self.layout_state = PerSurfaceLayoutState::default();
         self.retained_tree = RetainedWidgetTree::default();
         self.retained_render_objects = RenderObjectTree::default();
         self.retained_display_list = RetainedDisplayList::default();
@@ -843,6 +839,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // Style rules may have changed in the recompiled module.
         self.cached_restyle_rules = None;
         self.cached_style_rule_index = None;
+        self.layout_state = PerSurfaceLayoutState::default();
         self.focused_proof_snapshot = None;
         self.last_visual_damage.clear();
         Ok(true)

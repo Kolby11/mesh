@@ -29,6 +29,12 @@ members = [
     "crates/tools/lsp",
 ]
 
+# The shell is CPU-bound in paint/layout/style hot loops; cross-crate inlining
+# matters because the pipeline is split across many small workspace crates.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
 [workspace.package]
 version = "0.1.0"
 edition = "2024"

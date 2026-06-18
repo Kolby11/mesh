@@ -51,7 +51,7 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
     navigation.visible = true;
     let mut navigation_buffer = PixelBuffer::new(960, 80);
     navigation
-        .paint(&theme, 960, 80, &mut navigation_buffer)
+        .paint(&theme, 960, 80, &mut navigation_buffer, 1.0)
         .unwrap();
     let navigation_health = format!(
         "{:?}",
@@ -132,7 +132,9 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
         })
         .unwrap();
     let mut audio_buffer = PixelBuffer::new(320, 220);
-    audio.paint(&theme, 320, 220, &mut audio_buffer).unwrap();
+    audio
+        .paint(&theme, 320, 220, &mut audio_buffer, 1.0)
+        .unwrap();
     let audio_tree = audio
         .last_tree
         .as_ref()
@@ -167,7 +169,7 @@ fn shipped_audio_popover_content_measured_surface_contains_volume_actions() {
         .unwrap();
 
     let mut buffer = PixelBuffer::new(280, 164);
-    audio.paint(&theme, 280, 164, &mut buffer).unwrap();
+    audio.paint(&theme, 280, 164, &mut buffer, 1.0).unwrap();
 
     let (measured_width, measured_height) = audio.requested_layout_size();
     assert_eq!(measured_width, 280);
@@ -204,7 +206,7 @@ fn audio_popover_theme_repaint_keeps_audio_state_without_available_flag() {
         .unwrap();
 
     let mut buffer = PixelBuffer::new(320, 220);
-    audio.paint(&theme, 320, 220, &mut buffer).unwrap();
+    audio.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
     assert_eq!(
         runtime_value(&audio, "audio_title_key"),
         Some(serde_json::json!("audio.output"))
@@ -215,7 +217,7 @@ fn audio_popover_theme_repaint_keeps_audio_state_without_available_flag() {
     );
 
     audio.theme_changed().unwrap();
-    audio.paint(&theme, 320, 220, &mut buffer).unwrap();
+    audio.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
 
     let text = rendered_text(&audio);
     assert!(
@@ -304,7 +306,7 @@ fn phase44_navigation_audio_surface_emits_focused_proof_snapshot() {
     navigation.visible = true;
     let mut navigation_buffer = PixelBuffer::new(960, 80);
     navigation
-        .paint(&theme, 960, 80, &mut navigation_buffer)
+        .paint(&theme, 960, 80, &mut navigation_buffer, 1.0)
         .unwrap();
     assert_phase44_focused_proof_snapshot(&navigation, "navigation bar");
 
@@ -321,7 +323,9 @@ fn phase44_navigation_audio_surface_emits_focused_proof_snapshot() {
         })
         .unwrap();
     let mut audio_buffer = PixelBuffer::new(320, 220);
-    audio.paint(&theme, 320, 220, &mut audio_buffer).unwrap();
+    audio
+        .paint(&theme, 320, 220, &mut audio_buffer, 1.0)
+        .unwrap();
     assert_phase44_focused_proof_snapshot(&audio, "audio popover");
 }
 
@@ -439,7 +443,7 @@ end
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(220, 80);
-    component.paint(&theme, 220, 80, &mut buffer).unwrap();
+    component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
     let tree = component.last_tree.as_ref().expect("rendered tree");
     let button = first_node_by_tag(tree, "button").expect("button node");
     let handler = button
@@ -459,7 +463,7 @@ end
     component
         .call_namespaced_handler(&handler, std::slice::from_ref(&click_event))
         .unwrap();
-    component.paint(&theme, 220, 80, &mut buffer).unwrap();
+    component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
     let show_requests = component.tick().unwrap();
     assert!(matches!(
         show_requests.as_slice(),
@@ -475,7 +479,7 @@ end
     );
     assert!(runtime_bool(&component, "audio_surface_hidden"));
 
-    component.paint(&theme, 220, 80, &mut buffer).unwrap();
+    component.paint(&theme, 220, 80, &mut buffer, 1.0).unwrap();
     let requests = component.tick().unwrap();
     match requests.as_slice() {
         [CoreRequest::HideSurface { surface_id }] => {
@@ -495,7 +499,7 @@ fn shipped_navigation_volume_button_publishes_immediate_audio_popover_show() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 80);
-    component.paint(&theme, 320, 80, &mut buffer).unwrap();
+    component.paint(&theme, 320, 80, &mut buffer, 1.0).unwrap();
     let health = format!(
         "{:?}",
         component
@@ -604,7 +608,7 @@ fn shipped_navigation_audio_popover_transition_delay_stays_bounded() {
     component.set_surface_exiting(true);
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 220);
-    component.paint(&theme, 320, 220, &mut buffer).unwrap();
+    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -625,7 +629,9 @@ fn shipped_navigation_audio_popover_transition_does_not_consume_first_input() {
 
     let theme = default_theme();
     let mut nav_buffer = PixelBuffer::new(960, 80);
-    navigation.paint(&theme, 960, 80, &mut nav_buffer).unwrap();
+    navigation
+        .paint(&theme, 960, 80, &mut nav_buffer, 1.0)
+        .unwrap();
     let tree = navigation
         .last_tree
         .as_ref()
@@ -679,7 +685,9 @@ fn shipped_navigation_audio_popover_transition_does_not_consume_first_input() {
         })
         .unwrap();
     let mut audio_buffer = PixelBuffer::new(320, 220);
-    audio.paint(&theme, 320, 220, &mut audio_buffer).unwrap();
+    audio
+        .paint(&theme, 320, 220, &mut audio_buffer, 1.0)
+        .unwrap();
     let audio_tree = audio.last_tree.as_ref().expect("rendered audio popover");
     let slider = first_node_by_tag(audio_tree, "slider").expect("slider node");
     let slider_key = slider
@@ -731,7 +739,9 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     let width = 960;
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -769,7 +779,9 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
 
     let slovak_locale = mesh_core_locale::LocaleEngine::new("sk");
     component.locale_changed(&slovak_locale).unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -981,7 +993,7 @@ fn debug_inspector_overview_renders_profiling_off_state_on_real_surface() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 640);
-    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
 
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Debug Inspector"));
@@ -1029,7 +1041,7 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
         })
         .unwrap();
 
-    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
     let overview_text = rendered_text(&component);
     assert!(overview_text.iter().any(|line| line == "Overview"));
     assert!(
@@ -1041,7 +1053,7 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
     let surfaces_text = rendered_text(&component);
     assert!(surfaces_text.iter().any(|line| line == "Surfaces"));
     assert!(
@@ -1056,7 +1068,7 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
             &[],
         )
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
     let backend_text = rendered_text(&component);
     assert!(backend_text.iter().any(|line| line == "Backend services"));
     assert!(
@@ -1068,7 +1080,7 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
     let benchmark_text = rendered_text(&component);
     assert!(
         benchmark_text
@@ -1126,11 +1138,11 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
             }),
         })
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
 
     let empty_text = rendered_text(&component);
     assert!(empty_text.iter().any(|line| line == "Surfaces"));
@@ -1184,7 +1196,7 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
             }),
         })
         .unwrap();
-    component.paint(&theme, 360, 640, &mut buffer).unwrap();
+    component.paint(&theme, 360, 640, &mut buffer, 1.0).unwrap();
 
     let live_text = rendered_text(&component);
     assert!(live_text.iter().any(|line| line == "@mesh/navigation-bar"));

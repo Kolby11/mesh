@@ -74,12 +74,18 @@ impl FrontendSurfaceComponent {
     pub(super) fn runtime_state(
         &self,
         instance_key: &str,
-    ) -> Option<mesh_core_scripting::ScriptState> {
-        self.runtimes
-            .lock()
-            .unwrap()
-            .get(instance_key)
-            .map(|runtime| runtime.script_ctx.state().clone())
+    ) -> Option<Arc<mesh_core_scripting::ScriptState>> {
+        let mut runtimes = self.runtimes.lock().unwrap();
+        let runtime = runtimes.get_mut(instance_key)?;
+        let generation = runtime.script_ctx.state().mutation_generation();
+        if let Some((cached_generation, cached)) = runtime.cached_state_clone.as_ref()
+            && *cached_generation == generation
+        {
+            return Some(Arc::clone(cached));
+        }
+        let snapshot = Arc::new(runtime.script_ctx.state().clone());
+        runtime.cached_state_clone = Some((generation, Arc::clone(&snapshot)));
+        Some(snapshot)
     }
 
     /// Load translation files from `config/i18n/{locale}.json` inside the module directory.
@@ -186,6 +192,9 @@ impl FrontendSurfaceComponent {
         }
         for (service_name, payload) in &self.cached_service_payloads {
             let interface = format!("mesh.{service_name}");
+            // Always seed the Lua-level service payload so interface proxies
+            // can read state fields regardless of read capability.
+            script_ctx.apply_service_payload(service_name, payload);
             if script_has_service_read(&script_ctx, &interface, service_name) {
                 apply_service_update(
                     script_ctx.state_mut(),
@@ -194,7 +203,6 @@ impl FrontendSurfaceComponent {
                     "<cached>",
                     payload.clone(),
                 );
-                script_ctx.apply_service_payload(service_name, payload);
             }
         }
 
@@ -231,6 +239,7 @@ impl FrontendSurfaceComponent {
         Ok(EmbeddedFrontendRuntime {
             module_id: component_id,
             script_ctx,
+            cached_state_clone: None,
         })
     }
 
@@ -306,6 +315,7 @@ impl FrontendSurfaceComponent {
         &self,
         instance_key: &str,
         host_module_id: &str,
+        host_manifest: &mesh_core_module::Manifest,
         alias: &str,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
@@ -324,7 +334,7 @@ impl FrontendSurfaceComponent {
             };
             let runtime = self.create_runtime_for_component(
                 format!("{host_module_id}::{alias}"),
-                &entry.compiled.manifest,
+                host_manifest,
                 component,
                 props,
             )?;
@@ -358,7 +368,7 @@ impl FrontendSurfaceComponent {
         container_height: f32,
     ) -> WidgetNode {
         if let Err(err) =
-            self.ensure_local_component_runtime(instance_key, &host.package.id, alias, props)
+            self.ensure_local_component_runtime(instance_key, &host.package.id, host, alias, props)
         {
             return self.build_error_widget(err.to_string());
         }

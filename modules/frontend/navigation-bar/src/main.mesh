@@ -1,17 +1,24 @@
 <template>
   <stack class="nav-root">
     <row class="nav-shell">
-      <row ref="status-cluster" class="status-cluster">
-        <text ref="status-primary" class="status-primary">{t(primary_status_key)}</text>
-        <box class="status-accent">
-          <MetaPill />
-        </box>
-        <MetaLabel />
-        <text ref="status-secondary" class="status-secondary">{t(secondary_status_key) .. secondary_status_value}</text>
-        <BatteryButton />
+
+      <!-- Left: workspaces, active window, now playing -->
+      <row class="left-cluster">
+        <WorkspaceList />
+        <WindowTitle />
+        <NowPlaying />
       </row>
+
       <spacer class="nav-spacer" />
-      <row ref="control-cluster" class="control-cluster">
+
+      <!-- Center: clock with date -->
+      <ClockButton />
+
+      <spacer class="nav-spacer" />
+
+      <!-- Right: brightness, audio, theme, language, battery, settings -->
+      <row class="right-cluster">
+        <BrightnessButton />
         <row class="control-button-cell">
           <VolumeButton
             onActivate={onToggleAudioSurface}
@@ -19,126 +26,97 @@
           />
         </row>
         <row class="control-button-cell">
-          <ThemeButton />
+          <ThemeButton onActivate={onToggleThemeSurface} />
         </row>
         <row class="control-button-cell">
           <LanguageButton onActivate={onToggleLanguageSurface} />
         </row>
         <row class="control-button-cell">
-          <SettingsButton />
+          <BatteryButton />
+        </row>
+        <row class="control-button-cell">
+          <SettingsButton onActivate={onToggleSettingsSurface} />
         </row>
       </row>
+
     </row>
+
+    <!-- Popover surfaces -->
     <AudioPopover hidden={audio_surface_hidden} />
     <LanguagePopover hidden={language_surface_hidden} />
+    <ThemeSelector hidden={theme_surface_hidden} />
+    <QuickSettings hidden={settings_surface_hidden} />
   </stack>
 </template>
 
 <script lang="luau">
-local AudioPopover = require("@mesh/audio-popover")
+local AudioPopover   = require("@mesh/audio-popover")
 local LanguagePopover = require("@mesh/language-popover")
-local BatteryButton = require("./components/battery-button.mesh")
-local MetaLabel = require("./components/meta-label.mesh")
-local MetaPill = require("./components/meta-pill.mesh")
-local SettingsButton = require("./components/settings-button.mesh")
-local VolumeButton = require("./components/volume-button.mesh")
-local ThemeButton = require("./components/theme-button.mesh")
-local LanguageButton = require("./components/language-button.mesh")
+local ThemeSelector  = require("@mesh/theme-selector")
+local QuickSettings  = require("@mesh/quick-settings")
+
+local BatteryButton   = require("./components/battery-button.mesh")
+local BrightnessButton = require("./components/brightness-button.mesh")
+local ClockButton     = require("./components/clock-button.mesh")
+local LanguageButton  = require("./components/language-button.mesh")
+local NowPlaying      = require("./components/now-playing.mesh")
+local SettingsButton  = require("./components/settings-button.mesh")
+local ThemeButton     = require("./components/theme-button.mesh")
+local VolumeButton    = require("./components/volume-button.mesh")
+local WindowTitle     = require("./components/window-title.mesh")
+local WorkspaceList   = require("./components/workspace-list.mesh")
 
 local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
-audio_surface_id = "@mesh/audio-popover"
+audio_surface_id    = "@mesh/audio-popover"
 audio_surface_hidden = true
-language_surface_id = "@mesh/language-popover"
+
+language_surface_id    = "@mesh/language-popover"
 language_surface_hidden = true
-primary_status_key = "nav.surface_active"
-secondary_status_key = "nav.audio_offline"
-secondary_status_value = ""
 
-local function clamp_percent(value)
-    local percent = math.floor(tonumber(value) or 0)
-    if percent < 0 then percent = 0 end
-    if percent > 100 then percent = 100 end
-    return percent
-end
+theme_surface_id    = "@mesh/theme-selector"
+theme_surface_hidden = true
 
-function render(self)
-    if audio_ok and audio and audio.available == true then
-        local percent = clamp_percent(audio.percent)
-        if audio.muted then
-            secondary_status_key = "nav.audio_muted_at"
-        else
-            secondary_status_key = "nav.audio_steady_at"
-        end
-        secondary_status_value = string.format(" %d%%", percent)
+settings_surface_id    = "@mesh/quick-settings"
+settings_surface_hidden = true
+
+local function toggle_surface(surface_id, is_hidden_ref, event)
+    if is_hidden_ref then
+        mesh.events.publish("shell.position-surface", {
+            surface_id  = surface_id,
+            margin_top  = 0,
+            margin_left = tonumber((event.current_target.position or {}).margin_left) or 0,
+        })
+        local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
+        mesh.popover.activate(surface_id, event, { focus = focus })
+        return false
     else
-        secondary_status_key = "nav.audio_offline"
-        secondary_status_value = ""
+        mesh.popover.hide(surface_id)
+        return true
     end
-end
-
-if audio_ok and audio and audio.VolumeChanged then
-    audio.VolumeChanged:on(function(event)
-        local percent = clamp_percent(event.level)
-        if audio and audio.muted then
-            secondary_status_key = "nav.audio_muted_at"
-        else
-            secondary_status_key = "nav.audio_steady_at"
-        end
-        secondary_status_value = string.format(" %d%%", percent)
-    end)
 end
 
 function onToggleAudioSurface(event)
-    local position = event.current_target.position or {}
-    local margin_left = tonumber(position.margin_left) or 0
-    -- Layer-shell places this popover in the usable area below the navbar's
-    -- exclusive zone, so vertical margin is relative to that boundary.
-    local margin_top = 0
-
-    if audio_surface_hidden then
-        audio_surface_hidden = false
-        mesh.events.publish("shell.position-surface", {
-            surface_id = audio_surface_id,
-            margin_top = margin_top,
-            margin_left = margin_left
-        })
-        -- Pointer activation should not steal focus before the user's first
-        -- interaction with the popover. Keyboard activation still enters it.
-        local should_focus = event.trigger ~= nil and event.trigger.type == "keyboard"
-        mesh.popover.activate(audio_surface_id, event, { focus = should_focus })
-    else
-        audio_surface_hidden = true
-        mesh.popover.hide(audio_surface_id)
-    end
+    audio_surface_hidden = toggle_surface(audio_surface_id, audio_surface_hidden, event)
 end
 
 function onToggleLanguageSurface(event)
-    local position = event.current_target.position or {}
-    local margin_left = tonumber(position.margin_left) or 0
-    local margin_top = 0
+    language_surface_hidden = toggle_surface(language_surface_id, language_surface_hidden, event)
+end
 
-    if language_surface_hidden then
-        language_surface_hidden = false
-        mesh.events.publish("shell.position-surface", {
-            surface_id = language_surface_id,
-            margin_top = margin_top,
-            margin_left = margin_left
-        })
-        local should_focus = event.trigger ~= nil and event.trigger.type == "keyboard"
-        mesh.popover.activate(language_surface_id, event, { focus = should_focus })
-    else
-        language_surface_hidden = true
-        mesh.popover.hide(language_surface_id)
-    end
+function onToggleThemeSurface(event)
+    theme_surface_hidden = toggle_surface(theme_surface_id, theme_surface_hidden, event)
+end
+
+function onToggleSettingsSurface(event)
+    settings_surface_hidden = toggle_surface(settings_surface_id, settings_surface_hidden, event)
 end
 
 function onMuteShortcut()
     if audio_ok and audio and audio.available ~= false then
-        local next_muted = not (audio.muted or false)
         if type(audio.set_muted) == "function" then
-            audio.set_muted("default", next_muted)
+            audio.set_muted("default", not (audio.muted or false))
         else
             audio.toggle_mute()
         end
@@ -158,18 +136,19 @@ end
     container-type: inline-size;
     justify-content: start;
     align-items: center;
-    gap: token(spacing.lg);
+    gap: token(spacing.md);
     padding-inline: token(spacing.lg);
     overflow-x: hidden;
     overflow-y: hidden;
-    background: token(color.surface);
+    background: rgba(10, 10, 14, 0.75);
+    backdrop-filter: blur(20px);
     color: token(color.on-surface);
     transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
                 color token(animation.duration.short) token(animation.curves.bezier.standard),
                 gap token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 
-.status-cluster {
+.left-cluster {
     align-items: center;
     gap: token(spacing.sm);
     min-width: 0;
@@ -181,32 +160,7 @@ end
     flex-grow: 1;
 }
 
-.status-primary {
-    color: token(color.on-surface);
-    font-size: token(typography.size.md);
-    font-weight: 700;
-    text-wrap: none;
-}
-
-.status-secondary {
-    color: token(color.on-surface-variant);
-    font-size: token(typography.size.sm);
-    font-weight: 500;
-    text-wrap: none;
-}
-
-.status-accent {
-    flex-shrink: 0;
-    animation-name: status-pulse;
-    animation-duration: token(animation.duration.long);
-    animation-timing-function: token(animation.curves.bezier.standard);
-    animation-delay: 0ms;
-    animation-iteration-count: 2;
-    animation-direction: alternate;
-    animation-fill-mode: both;
-}
-
-.control-cluster {
+.right-cluster {
     height: 100%;
     flex-shrink: 0;
     align-items: center;
@@ -222,30 +176,9 @@ end
     padding-block: 0;
 }
 
-@keyframes status-pulse {
-    0% {
-        opacity: 0.86;
-        transform: scale(1);
-    }
-
-    55% {
-        opacity: 1;
-        transform: scale(1.03);
-    }
-
-    100% {
-        opacity: 0.92;
-        transform: scale(1);
-    }
-}
-
 @container (max-width: 860px) {
     .nav-shell {
-        gap: token(spacing.md);
-    }
-
-    .status-secondary {
-        max-width: 180px;
+        gap: token(spacing.sm);
     }
 }
 
@@ -255,30 +188,8 @@ end
         padding-inline: token(spacing.md);
     }
 
-    .status-secondary-row {
-        gap: token(spacing.xs);
-    }
-
-    .control-cluster {
+    .right-cluster {
         gap: 1px;
-    }
-
-    .status-secondary {
-        display: none;
-    }
-}
-
-@container (max-width: 560px) {
-    .status-head {
-        gap: token(spacing.xs);
-    }
-
-    .status-accent {
-        display: none;
-    }
-
-    .status-primary {
-        font-size: token(typography.size.sm);
     }
 }
 </style>

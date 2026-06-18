@@ -1,0 +1,143 @@
+<template>
+  <popover class="ts-shell" aria-label="Select theme">
+    <column class="ts-panel">
+      <button class="{dark_class}" onclick={onDark} aria-label="Default Dark">
+        <icon class="ts-icon" name="weather-clear-night" size="18" />
+        <text class="ts-label">Default Dark</text>
+      </button>
+      <button class="{light_class}" onclick={onLight} aria-label="Default Light">
+        <icon class="ts-icon" name="weather-clear" size="18" />
+        <text class="ts-label">Default Light</text>
+      </button>
+      <button class="{catppuccin_class}" onclick={onCatppuccin} aria-label="Catppuccin">
+        <icon class="ts-icon" name="applications-graphics" size="18" />
+        <text class="ts-label">Catppuccin</text>
+      </button>
+      <button class="{gruvbox_class}" onclick={onGruvbox} aria-label="Gruvbox">
+        <icon class="ts-icon" name="emblem-photos" size="18" />
+        <text class="ts-label">Gruvbox</text>
+      </button>
+    </column>
+  </popover>
+</template>
+
+<script lang="luau">
+dark_class        = "ts-option ts-option-active"
+light_class       = "ts-option"
+catppuccin_class  = "ts-option"
+gruvbox_class     = "ts-option"
+
+local theme_ok, theme = pcall(require, "mesh.theme")
+if not theme_ok then theme = nil end
+
+local THEME_DARK        = "mesh-default-dark"
+local THEME_LIGHT       = "mesh-default-light"
+local THEME_CATPPUCCIN  = "mesh-catppuccin-mocha"
+local THEME_GRUVBOX     = "mesh-gruvbox-dark"
+
+local function sync_classes(current)
+    dark_class       = (current == THEME_DARK)       and "ts-option ts-option-active" or "ts-option"
+    light_class      = (current == THEME_LIGHT)      and "ts-option ts-option-active" or "ts-option"
+    catppuccin_class = (current == THEME_CATPPUCCIN) and "ts-option ts-option-active" or "ts-option"
+    gruvbox_class    = (current == THEME_GRUVBOX)    and "ts-option ts-option-active" or "ts-option"
+end
+
+function render(self)
+    if theme_ok and theme then
+        local current = theme.current or theme.theme_id or THEME_DARK
+        sync_classes(current)
+    end
+end
+
+local function apply_theme(id)
+    sync_classes(id)
+    mesh.events.publish("shell.set-theme", { theme_id = id })
+    mesh.popover.hide("@mesh/theme-selector")
+end
+
+function onDark()       apply_theme(THEME_DARK)        end
+function onLight()      apply_theme(THEME_LIGHT)       end
+function onCatppuccin() apply_theme(THEME_CATPPUCCIN)  end
+function onGruvbox()    apply_theme(THEME_GRUVBOX)     end
+</script>
+
+<style>
+.ts-shell {
+    width: 100%;
+    height: 100%;
+    padding: token(spacing.xs) token(spacing.sm) token(spacing.sm) token(spacing.sm);
+    background: transparent;
+    opacity: 1;
+    transition: opacity token(animation.duration.short) token(animation.curves.bezier.standard);
+}
+
+.ts-shell.mesh-surface-exiting {
+    opacity: 0;
+}
+
+.ts-panel {
+    gap: token(spacing.xs);
+    padding: token(spacing.sm);
+    border-radius: token(radius.lg);
+    background: token(color.surface-container);
+    color: token(color.on-surface);
+    border-width: 1px;
+    border-style: solid;
+    border-color: token(color.outline-variant);
+    min-width: 180px;
+}
+
+.ts-option {
+    width: 100%;
+    height: 40px;
+    justify-content: start;
+    align-items: center;
+    gap: token(spacing.sm);
+    padding-inline: token(spacing.md);
+    border-radius: token(radius.md);
+    background: transparent;
+    color: token(color.on-surface);
+    border-width: 2px;
+    border-style: solid;
+    border-color: transparent;
+    text-wrap: none;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
+}
+
+.ts-option:hover {
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
+    border-radius: token(radius.md);
+}
+
+.ts-option:focus,
+.ts-option:focus-visible {
+    background: token(color.tertiary-container);
+    color: token(color.on-tertiary-container);
+}
+
+.ts-option:active,
+.ts-option-active {
+    background: token(color.primary-container);
+    color: token(color.on-primary-container);
+    border-color: token(color.primary);
+    border-radius: token(radius.full);
+}
+
+.ts-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    color: inherit;
+}
+
+.ts-label {
+    font-size: token(typography.size.sm);
+    font-weight: 600;
+    color: inherit;
+    text-wrap: none;
+}
+</style>

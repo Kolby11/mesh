@@ -87,7 +87,31 @@
       "Skill(gsd-progress)",
       "Bash(cargo metadata *)",
       "Skill(gsd-autonomous)",
-      "Skill(gsd-execute-phase)"
+      "Skill(gsd-execute-phase)",
+      "Bash(ps -eo pid,pcpu,comm,args --sort=-pcpu)",
+      "Read(//proc/1572955/**)",
+      "Bash(ps -L -p 1572955 -o tid,pcpu,comm)",
+      "Bash(sort -k2 -rn)",
+      "Bash(awk '{print $16+$17, $14+$15}' /proc/1572955/stat)",
+      "Bash(getconf CLK_TCK)",
+      "Bash(echo \"clk_tck: $\\(getconf CLK_TCK\\)\")",
+      "Bash(command -v lua luajit lua5.1 lua5.4 nix)",
+      "Bash(lua *)",
+      "Bash(command *)",
+      "Bash(hyprctl layers *)",
+      "Bash(hyprctl monitors *)",
+      "Bash(hyprctl clients *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(nix shell *)",
+      "Bash(RUST_LOG=info nohup target/debug/mesh-shell start)",
+      "Bash(echo \"started pid $!\")",
+      "Bash(kill 1942751)",
+      "Bash(coredumpctl list *)",
+      "Bash(dmesg)",
+      "Bash(journalctl --user -n 20 --no-pager)",
+      "Skill(gsd-audit-milestone)",
+      "Skill(gsd-new-milestone)",
+      "Bash(node /home/kolby/.claude/get-shit-done/bin/gsd-tools.cjs gap-analysis --phase-dir .planning/phases/104-retained-taffytree)"
     ]
   }
 }

@@ -153,11 +153,7 @@ impl PresentationEngine {
     /// Pass `None` to clear any previously committed blur region from the
     /// compositor. No protocol calls are emitted if no blur region has ever
     /// been set for this surface.
-    pub fn update_blur_region(
-        &mut self,
-        surface_id: &str,
-        blur_region: Option<DamageRect>,
-    ) {
+    pub fn update_blur_region(&mut self, surface_id: &str, blur_region: Option<DamageRect>) {
         if let Backend::WaylandSurface(bridge) = &mut self.backend {
             bridge.update_blur_region(surface_id, blur_region);
         }

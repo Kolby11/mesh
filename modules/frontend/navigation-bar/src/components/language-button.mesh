@@ -6,15 +6,12 @@
     title="{t('nav.language_menu')}"
     aria-label="{t('nav.language_menu')}"
   >
-    <row class="language-button-content">
-      <icon class="nav-button-glyph" name="language" size="18" />
-      <text class="language-code">{language_code}</text>
-    </row>
+    <icon class="nav-button-glyph" name="preferences-desktop-locale" size="18" />
   </button>
 </template>
 
 <script lang="luau">
-language_code = "EN"
+onActivate = nil
 
 local function locale_is_slovak(locale)
     return locale == "sk" or string.find(locale or "", "sk-", 1, true) == 1
@@ -28,8 +25,8 @@ local function current_locale()
     return locale
 end
 
-local function stored_locale()
-    local locale = self.storage.language
+local function stored_locale(storage)
+    local locale = storage and storage.language
     if locale == "en" or locale == "sk" then
         return locale
     end
@@ -37,31 +34,26 @@ local function stored_locale()
 end
 
 function init(self)
-    local locale = stored_locale()
+    local locale = stored_locale(self.storage)
     if locale ~= nil then
         mesh.locale.set(locale)
     end
 end
 
 function render(self)
-    local locale = stored_locale() or current_locale()
-    if locale_is_slovak(locale) then
-        language_code = "SK"
-    else
-        language_code = "EN"
-    end
+    -- kept for reactive re-render when locale changes
 end
 </script>
 
 <style>
 .nav-button {
-    min-width: 52px;
+    width: 40px;
     height: 40px;
     flex-shrink: 0;
     justify-content: center;
     align-items: center;
     padding: token(spacing.xs);
-    border-radius: token(radius.md);
+    border-radius: token(radius.full);
     transform: translateY(0px) scale(1);
     background: token(color.surface-container);
     color: token(color.on-surface);
@@ -72,14 +64,12 @@ end
     transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
                 color token(animation.duration.short) token(animation.curves.bezier.standard),
                 border-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate),
                 transform token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
 }
 
 .nav-button:hover {
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
-    border-radius: token(radius.md);
     transform: translateY(-1px) scale(1.04);
 }
 
@@ -87,7 +77,6 @@ end
 .nav-button:focus-visible {
     background: token(color.tertiary-container);
     color: token(color.on-tertiary-container);
-    border-radius: token(radius.md);
     transform: translateY(-1px) scale(1.03);
 }
 
@@ -95,40 +84,16 @@ end
     background: token(color.primary);
     color: token(color.on-primary);
     border-color: token(color.primary);
-    border-radius: token(radius.full);
     transform: translateY(0px) scale(0.94);
 }
 
-.language-button-content {
-    gap: 4px;
-    align-items: center;
-    justify-content: center;
-    padding-inline: 1px;
-    padding-block: 0;
-}
-
 .nav-button-glyph {
-    width: 20px;
-    height: 20px;
+    width: 24px;
+    height: 24px;
     flex-shrink: 0;
     justify-content: center;
     align-items: center;
     color: inherit;
     transition: color token(animation.duration.short) token(animation.curves.bezier.standard);
-}
-
-.language-code {
-    min-width: 20px;
-    font-size: 12px;
-    font-weight: 700;
-    color: inherit;
-    text-wrap: none;
-}
-
-@container (max-width: 720px) {
-    .nav-button {
-        min-width: 48px;
-        padding: token(spacing.xs);
-    }
 }
 </style>

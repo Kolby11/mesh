@@ -1,8 +1,8 @@
 -- PipeWire audio backend.
 --
 -- Reads volume via wpctl. Reacts to external volume changes (hardware keys,
--- other clients) through `pw-mon`, streamed via mesh.exec_stream. A fast poll
--- remains enabled so held hardware keys still repaint if monitor output stalls.
+-- other clients) through `pw-mon`, streamed via mesh.exec_stream. A slow
+-- safety-net poll covers changes that produce no monitor output.
 
 local SOUNDS_ROOT = "/usr/share/mesh/sounds/"
 
@@ -20,29 +20,44 @@ local function debug_warn(message)
     mesh.log.warn("[pipewire-audio] " .. message)
 end
 
-function start(self)
-    -- Keep a fast safety-net poll even when pw-mon is available. Some
-    -- compositor/audio-stack combinations delay or batch monitor output while
-    -- a hardware volume key is held, then flush on release. Polling keeps the
-    -- visible slider moving during the hold instead of waiting for that flush.
-    mesh.service.set_poll_interval(100)
+-- Every wpctl invocation registers a short-lived PipeWire client, which
+-- pw-mon reports as a Client added/removed batch. Without accounting, each
+-- refresh would spawn wpctl, whose connect event would arrive as a new
+-- pw-mon batch and trigger another refresh — a self-sustaining exec loop
+-- (~22 wpctl spawns/sec measured). This counter tracks connects we caused
+-- ourselves so on_stream_batch can swallow them.
+local pending_self_noise = 0
+local stream_active = false
 
-    -- Event-driven path: every PipeWire object change emits a `changed:`
-    -- line. Most volume changes produce a `changed:` block within a few
-    -- milliseconds of the actual change.
+local function wpctl(args)
+    if stream_active then
+        pending_self_noise = pending_self_noise + 1
+    end
+    return mesh.exec("wpctl", args)
+end
+
+function start(self)
+    -- Slow safety-net poll. With pw-mon active, external volume changes are
+    -- detected through client/object events (e.g. the compositor's wpctl run
+    -- for a hardware volume key registers a client), so the poll only covers
+    -- changes that produce no monitor output at all.
+    mesh.service.set_poll_interval(1000)
+
     local started = mesh.exec_stream(
         "pw-mon",
         { "--hide-props", "--hide-params", "--print-separator" }
     )
     if started then
+        stream_active = true
         debug_info("subscribed to pw-mon for live volume events")
     else
-        debug_warn("pw-mon stream unavailable; falling back to 100ms poll")
+        mesh.service.set_poll_interval(250)
+        debug_warn("pw-mon stream unavailable; falling back to 250ms poll")
     end
 end
 
 local function resolve_sink_id()
-    local result = mesh.exec("wpctl", { "status" })
+    local result = wpctl({ "status" })
     if not result.success then
         return nil
     end
@@ -70,7 +85,7 @@ local function read_state()
     -- @DEFAULT_AUDIO_SINK@ resolves server-side, avoiding a second wpctl
     -- status call. Each saved wpctl invocation is ~20ms, which matters at
     -- key-repeat rates (~30Hz) where every refresh is on the hot path.
-    local result = mesh.exec("wpctl", { "get-volume", "@DEFAULT_AUDIO_SINK@" })
+    local result = wpctl({ "get-volume", "@DEFAULT_AUDIO_SINK@" })
     if not result.success then
         return nil
     end
@@ -164,17 +179,77 @@ local function maybe_emit_volume_changed(self)
     emit_volume_changed(self)
 end
 
+-- Scan one pw-mon batch. Returns whether it carries a real signal (any
+-- `changed:` block, or an `added:` block whose object is not a Client) and
+-- how many Client `added:` blocks it contains. Client connects are how
+-- short-lived CLI tools (wpctl, pactl, aplay) show up; `removed:` blocks
+-- carry no type line and are always the tail of a connect pair or an object
+-- teardown the safety poll covers.
+local function classify_pwmon_batch(lines)
+    local has_signal = false
+    local client_added = 0
+    local in_added_block = false
+    local added_block_is_client = false
+
+    local function close_added_block()
+        if not in_added_block then
+            return
+        end
+        if added_block_is_client then
+            client_added = client_added + 1
+        else
+            has_signal = true
+        end
+        in_added_block = false
+    end
+
+    for _, line in ipairs(lines) do
+        if line:match("^changed:") then
+            close_added_block()
+            has_signal = true
+        elseif line:match("^added:") then
+            close_added_block()
+            in_added_block = true
+            added_block_is_client = false
+        elseif line:match("^removed:") then
+            close_added_block()
+        elseif in_added_block and line:find("PipeWire:Interface:Client", 1, true) then
+            added_block_is_client = true
+        end
+    end
+    close_added_block()
+
+    return has_signal, client_added
+end
+
 function on_stream_batch(self, program, lines)
-    -- pw-mon emits one multi-line block per changed PipeWire object: a
-    -- `changed:` header plus indented property continuations, optionally
-    -- followed by `added:`/`removed:` blocks. The runtime hands us the
-    -- whole batch for one wakeup, so we re-read state once regardless of
-    -- which lines arrived. `maybe_emit_volume_changed` dedupes identical
-    -- (percent, muted) snapshots so unrelated PipeWire activity (e.g. a
-    -- client connecting) does not generate frontend traffic.
     if program ~= "pw-mon" then
         return
     end
+
+    local has_signal, client_added = classify_pwmon_batch(lines)
+
+    -- Swallow Client connects caused by our own wpctl runs so a refresh
+    -- cannot re-trigger itself through the monitor stream. Connects beyond
+    -- our outstanding count are external clients (e.g. the compositor's
+    -- wpctl for a hardware volume key) and warrant a refresh.
+    local external_client = false
+    if client_added > 0 then
+        if pending_self_noise >= client_added then
+            pending_self_noise = pending_self_noise - client_added
+        else
+            pending_self_noise = 0
+            external_client = true
+        end
+    end
+
+    if not has_signal and not external_client then
+        return
+    end
+
+    -- `maybe_emit_volume_changed` dedupes identical (percent, muted)
+    -- snapshots so unrelated PipeWire activity does not generate frontend
+    -- traffic.
     refresh_state()
     maybe_emit_volume_changed(self)
 end
@@ -187,8 +262,8 @@ function on_command_volume_up(self)
         debug_warn("volume_up failed: no sink id")
         return { ok = false, error = "audio sink unavailable" }
     end
-    local volume = mesh.exec("wpctl", { "set-volume", sink_id, "5%+" })
-    local mute = mesh.exec("wpctl", { "set-mute", sink_id, "0" })
+    local volume = wpctl({ "set-volume", sink_id, "5%+" })
+    local mute = wpctl({ "set-mute", sink_id, "0" })
     refresh_state()
     emit_volume_changed(self)
     return { ok = volume.success and mute.success, error = volume.stderr ~= "" and volume.stderr or mute.stderr }
@@ -202,7 +277,7 @@ function on_command_volume_down(self)
         debug_warn("volume_down failed: no sink id")
         return { ok = false, error = "audio sink unavailable" }
     end
-    local result = mesh.exec("wpctl", { "set-volume", sink_id, "5%-" })
+    local result = wpctl({ "set-volume", sink_id, "5%-" })
     refresh_state()
     emit_volume_changed(self)
     return { ok = result.success, error = result.stderr }
@@ -218,7 +293,7 @@ function on_command_set_volume(self)
         debug_warn("set_volume failed: no sink id")
         return { ok = false, error = "audio sink unavailable" }
     end
-    local result = mesh.exec("wpctl", { "set-volume", sink_id, tostring(percent) .. "%" })
+    local result = wpctl({ "set-volume", sink_id, tostring(percent) .. "%" })
     refresh_state()
     emit_volume_changed(self)
     return { ok = result.success, error = result.stderr }
@@ -232,7 +307,7 @@ function on_command_toggle_mute(self)
         debug_warn("toggle_mute failed: no sink id")
         return { ok = false, error = "audio sink unavailable" }
     end
-    local result = mesh.exec("wpctl", { "set-mute", sink_id, "toggle" })
+    local result = wpctl({ "set-mute", sink_id, "toggle" })
     refresh_state()
     emit_volume_changed(self)
     return { ok = result.success, error = result.stderr }
@@ -248,7 +323,7 @@ function on_command_set_muted(self)
         debug_warn("set_muted failed: no sink id")
         return { ok = false, error = "audio sink unavailable" }
     end
-    local result = mesh.exec("wpctl", { "set-mute", sink_id, muted and "1" or "0" })
+    local result = wpctl({ "set-mute", sink_id, muted and "1" or "0" })
     refresh_state()
     emit_volume_changed(self)
     return { ok = result.success, error = result.stderr }

@@ -446,7 +446,12 @@ fn compute_blur_region(commands: &[DisplayPaintCommand]) -> Option<DamageRect> {
         let y = raw_y.max(0.0) as u32;
         let width = ((cmd.node.layout.width + raw_x.min(0.0)).max(0.0) as u32).max(1);
         let height = ((cmd.node.layout.height + raw_y.min(0.0)).max(0.0) as u32).max(1);
-        let rect = DamageRect { x, y, width, height };
+        let rect = DamageRect {
+            x,
+            y,
+            width,
+            height,
+        };
         union = Some(match union {
             None => rect,
             Some(current) => {
@@ -475,15 +480,13 @@ fn compute_blur_region(commands: &[DisplayPaintCommand]) -> Option<DamageRect> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mesh_core_render::{
-        DamageRect, DisplayListClip, DisplayPaintCommand, DisplayPaintCommandKind,
-        DisplayPaintNode,
-    };
     use mesh_core_elements::{
         BoxShadow, LayoutRect, VisualFilter,
-        style::{
-            BackgroundPaint, Color, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
-        },
+        style::{BackgroundPaint, Color, Edges, Overflow, TextAlign, TextDirection, TextOverflow},
+    };
+    use mesh_core_render::{
+        DamageRect, DisplayListClip, DisplayPaintCommand, DisplayPaintCommandKind,
+        display_list::DisplayPaintNode,
     };
     use std::sync::Arc;
 
@@ -494,23 +497,43 @@ mod tests {
         DisplayPaintCommand {
             node: DisplayPaintNode {
                 id: 1,
-                layout: LayoutRect { x, y, width, height },
+                layout: LayoutRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                },
                 style: DisplayPaintStyle {
-                    background_color: Color { r: 0, g: 0, b: 0, a: 0 },
+                    background_color: Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 0,
+                    },
                     background_paint: BackgroundPaint::None,
-                    border_color: Color { r: 0, g: 0, b: 0, a: 0 },
-                    border_width: Edges::default(),
+                    border_color: Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 0,
+                    },
+                    border_width: Edges::zero(),
                     border_radius: 0.0,
-                    color: Color { r: 0, g: 0, b: 0, a: 255 },
-                    padding: Edges::default(),
+                    color: Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 255,
+                    },
+                    padding: Edges::zero(),
                     overflow_x: Overflow::Visible,
                     overflow_y: Overflow::Visible,
                     font_family: Arc::from(""),
                     font_size: 16.0,
                     font_weight: 400,
                     line_height: 1.0,
-                    text_align: TextAlign::default(),
-                    text_overflow: TextOverflow::default(),
+                    text_align: TextAlign::Left,
+                    text_overflow: TextOverflow::Clip,
                     text_direction: TextDirection::default(),
                     opacity: 1.0,
                     box_shadow: BoxShadow::default(),
@@ -524,7 +547,12 @@ mod tests {
                 content: DisplayPaintContent::None,
                 scrollbars: DisplayScrollbars::default(),
             },
-            clip: DisplayListClip { x: 0, y: 0, width: width as i32, height: height as i32 },
+            clip: DisplayListClip {
+                x: 0,
+                y: 0,
+                width: width as i32,
+                height: height as i32,
+            },
             kind: DisplayPaintCommandKind::Node,
         }
     }
@@ -534,7 +562,12 @@ mod tests {
         let cmds = vec![make_cmd(10.0, 20.0, 100.0, 50.0, 4.0)];
         assert_eq!(
             compute_blur_region(&cmds),
-            Some(DamageRect { x: 10, y: 20, width: 100, height: 50 })
+            Some(DamageRect {
+                x: 10,
+                y: 20,
+                width: 100,
+                height: 50
+            })
         );
     }
 
@@ -550,7 +583,12 @@ mod tests {
         let cmds = vec![make_cmd(-10.0, -5.0, 100.0, 80.0, 4.0)];
         assert_eq!(
             compute_blur_region(&cmds),
-            Some(DamageRect { x: 0, y: 0, width: 90, height: 75 })
+            Some(DamageRect {
+                x: 0,
+                y: 0,
+                width: 90,
+                height: 75
+            })
         );
     }
 
@@ -563,7 +601,12 @@ mod tests {
         ];
         assert_eq!(
             compute_blur_region(&cmds),
-            Some(DamageRect { x: 0, y: 0, width: 150, height: 150 })
+            Some(DamageRect {
+                x: 0,
+                y: 0,
+                width: 150,
+                height: 150
+            })
         );
     }
 }

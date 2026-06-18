@@ -34,11 +34,21 @@ Items owned by a milestone are listed with their milestone reference.
 
 ### P1 — renderer hot paths
 
+- [ ] Interaction frames still re-apply string style declarations per node (`apply_declaration_no_diagnostics` + theme defaults maps dominate the post-2026-06-10 toggle profile); folds into the typed/compiled declaration work → v1.23 and narrower invalidation → v1.18
+
 - [ ] Avoid flattening retained display-list subtrees into a new flat command buffer on each update; move toward segment/rope-style command storage → v1.21
 - [ ] `StyleNodeAttrs::from_node` re-splits class strings per restyle; cache split classes on the retained `WidgetNode` once attribute mutation goes through an invalidating API → v1.23
 - [ ] Replace per-node string/hash-heavy style matching with interned/typed node keys; remaining after first pass: interned tags, classes, attribute keys → v1.23
 - [ ] Improve text ellipsis clipping: compute truncation from shaped glyph advances instead of measuring substrings on first miss
 - [ ] Retain Taffy node state across layout passes; `build_taffy_tree` rebuilds a fresh TaffyTree every layout → v1.21
+- [ ] Affected-subtree template re-evaluation: `narrow_script_update` rebuilds the full tree (full template eval) then diffs; use `NodeServiceFieldDependencies` to re-evaluate only nodes whose tracked fields changed → v1.27
+- [ ] Generation-aware retained-tree diff: `RetainedWidgetTree::update` FNV-hashes every node's style + attribute strings per paint; skip clean subtrees using dirty bits → v1.27
+- [ ] Fuse the five per-frame `finalize_tree` annotation walks into one traversal; move hot annotations from string attributes to typed `WidgetNode` fields → v1.27
+
+### P1 — backend modules
+
+- [ ] Investigate `pw-dump --monitor` as a real volume event source for the pipewire-audio backend — `pw-mon` emits no `changed:` block for volume changes (verified with and without `--hide-params`), so the stream currently only signals client/object lifecycle, and volume detection leans on the safety poll
+- [ ] Audit the other exec-polling backends (pulseaudio-audio still polls 2× `pactl` at 100ms) for the same exec-storm pattern fixed in pipewire-audio on 2026-06-10
 
 ### P1 — presentation and memory (→ v1.20)
 
@@ -60,7 +70,9 @@ Items owned by a milestone are listed with their milestone reference.
 
 ## Completed (recent)
 
-- [x] `restyle_subtree_with_index` cloned full `ComputedStyle` (~60 fields) per node; replaced with 5-field `ParentInheritedStyle` — 2026-06-02
+- [x] Per-frame clone/parse batch from 2026-06-10 deep dive: (1) template expressions were re-parsed by the string interpreter on every evaluation — `eval_expr` now compiles to a memoized AST per expression string (thread-local cache, parse once per source string); (2) full `Theme` (token/defaults maps) was deep-cloned into `active_theme` on every tree build and retained restyle — now `Arc<Theme>` refreshed only when `theme_changed()` marks it stale, and the child-build/animation readers clone the Arc instead of the maps; (3) `runtime_state()` deep-cloned the whole script variable map per tree build — now an `Arc<ScriptState>` snapshot cached by a new `mutation_generation` counter (bumps on `set`, `set_host_value`, proxy register/unregister; safe because `Clone` drops proxies), `ScriptState` made `Sync` (Mutex snapshot cache, `Send + Sync` proxy closures); (4) added `[profile.release]` thin LTO + `codegen-units = 1` — the workspace had no release tuning at all — 2026-06-10
+- [x] Interaction CPU burst (~50% spikes on click): perf-profiled a popover toggle storm; three per-frame full-tree passes dominated — `parse_transition_shorthand` re-parsed the same shorthand strings per node per frame (14.5%, now memoized thread-locally), `record_runtime_style_diagnostics` re-resolved every node's style a second time per restyle frame (9%, now runs only on tree rebuild), and `publish_element_metrics` built a full per-element JSON snapshot into Luau state every paint even though no shipped module reads `refs`/`elements` (11%, now gated on script usage detected at compile/reload). Measured ~87ms CPU/toggle after vs ~418ms before on the same hardware state — 2026-06-10
+- [x] pipewire-audio backend exec storm: each `wpctl` run registered a PipeWire client, whose pw-mon Client added/removed event re-triggered `refresh_state()` → another `wpctl` — a self-sustaining loop (~22 spawns/sec, ~90% of a core in child CPU, plus ~6% in mesh-shell from constant wakeups). Fixed with a self-noise counter + batch classifier in `on_stream_batch` (refresh only on `changed:`/non-Client `added:`/unaccounted external client connects) and safety poll relaxed 100ms → 1000ms (250ms when pw-mon unavailable) — 2026-06-10
 - [x] `surface_id.clone()` on every render frame for LayerSurfaceConfig namespace; now only clones when config actually changes — 2026-06-02
 - [x] `format!("{:.2}")` allocated new String for slider value and scroll offsets every annotation; now writes into retained entry buffer — 2026-06-02
 - [x] All P0/P1 items from the 2026-05-27 shell performance audit and 2026-05-28 Skia canvas pass — see git log

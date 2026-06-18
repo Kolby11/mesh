@@ -78,7 +78,7 @@ end
     justify-content: center;
     align-items: center;
     padding: token(spacing.xs);
-    border-radius: token(radius.md);
+    border-radius: token(radius.full);
     transform: translateY(0px) scale(1);
     background: token(color.surface-container);
     color: token(color.on-surface);
@@ -89,14 +89,12 @@ end
     transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
                 color token(animation.duration.short) token(animation.curves.bezier.standard),
                 border-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate),
                 transform token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
 }
 
 .nav-button:hover {
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
-    border-radius: token(radius.md);
     transform: translateY(-1px) scale(1.04);
 }
 
@@ -104,7 +102,6 @@ end
 .nav-button:focus-visible {
     background: token(color.tertiary-container);
     color: token(color.on-tertiary-container);
-    border-radius: token(radius.md);
     transform: translateY(-1px) scale(1.03);
 }
 
@@ -112,7 +109,6 @@ end
     background: token(color.primary);
     color: token(color.on-primary);
     border-color: token(color.primary);
-    border-radius: token(radius.full);
     transform: translateY(0px) scale(0.94);
 }
 
@@ -140,8 +136,8 @@ end
 
 @container (max-width: 720px) {
     .nav-button {
-        width: 40px;
-        padding: token(spacing.xs);
+        width: 36px;
+        height: 36px;
     }
 }
 </style>

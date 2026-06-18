@@ -1,7 +1,8 @@
 <template>
   <button
     class="nav-button"
-    onclick={onThemeToggle}
+    onclick={onButtonClick}
+    aria-haspopup="true"
     title="{t(theme_tooltip_key)}"
     aria-label="{t(theme_tooltip_key)}"
   >
@@ -10,8 +11,10 @@
 </template>
 
 <script lang="luau">
+onActivate = nil
+
 theme_icon = "weather-clear-night"
-theme_tooltip_key = "nav.switch_light"
+theme_tooltip_key = "nav.select_theme"
 theme_is_dark = true
 
 local theme_ok, theme = pcall(function()
@@ -37,35 +40,24 @@ local function read_theme_is_dark()
             return string.find(current, "dark", 1, true) ~= nil
         end
     end
-
     return theme_is_dark
 end
 
-local function sync_theme_state()
-    theme_is_dark = read_theme_is_dark()
-end
-
 function render(self)
-    sync_theme_state()
+    theme_is_dark = read_theme_is_dark()
     if theme_is_dark then
         theme_icon = "weather-clear-night"
-        theme_tooltip_key = "nav.switch_light"
+        theme_tooltip_key = "nav.select_theme"
     else
         theme_icon = "weather-clear"
-        theme_tooltip_key = "nav.switch_dark"
+        theme_tooltip_key = "nav.select_theme"
     end
 end
 
-function onThemeToggle()
-    sync_theme_state()
-    local next_theme
-    if theme_is_dark then
-        next_theme = "mesh-default-light"
-    else
-        next_theme = "mesh-default-dark"
+function onButtonClick(event)
+    if type(onActivate) == "function" then
+        onActivate(event)
     end
-    theme_is_dark = not theme_is_dark
-    mesh.events.publish("shell.set-theme", { theme_id = next_theme })
 end
 </script>
 
@@ -77,7 +69,7 @@ end
     justify-content: center;
     align-items: center;
     padding: token(spacing.xs);
-    border-radius: token(radius.md);
+    border-radius: token(radius.full);
     transform: translateY(0px) scale(1);
     background: token(color.surface-container);
     color: token(color.on-surface);
@@ -88,14 +80,12 @@ end
     transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
                 color token(animation.duration.short) token(animation.curves.bezier.standard),
                 border-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate),
                 transform token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
 }
 
 .nav-button:hover {
     background: token(color.secondary-container);
     color: token(color.on-secondary-container);
-    border-radius: token(radius.md);
     transform: translateY(-1px) scale(1.04);
 }
 
@@ -103,7 +93,6 @@ end
 .nav-button:focus-visible {
     background: token(color.tertiary-container);
     color: token(color.on-tertiary-container);
-    border-radius: token(radius.md);
     transform: translateY(-1px) scale(1.03);
 }
 
@@ -111,7 +100,6 @@ end
     background: token(color.primary);
     color: token(color.on-primary);
     border-color: token(color.primary);
-    border-radius: token(radius.full);
     transform: translateY(0px) scale(0.94);
 }
 
@@ -123,12 +111,5 @@ end
     align-items: center;
     color: inherit;
     transition: color token(animation.duration.short) token(animation.curves.bezier.standard);
-}
-
-@container (max-width: 720px) {
-    .nav-button {
-        width: 40px;
-        padding: token(spacing.xs);
-    }
 }
 </style>

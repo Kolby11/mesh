@@ -17,6 +17,16 @@
       "path": "frontend/language-popover",
       "enabled": true
     },
+    "@mesh/theme-selector": {
+      "kind": "frontend",
+      "path": "frontend/theme-selector",
+      "enabled": true
+    },
+    "@mesh/quick-settings": {
+      "kind": "frontend",
+      "path": "frontend/quick-settings",
+      "enabled": true
+    },
     "@mesh/audio-interface": {
       "kind": "interface",
       "path": "interfaces/audio",
@@ -51,11 +61,22 @@
       "kind": "backend",
       "path": "backend/upower-power",
       "enabled": true
+    },
+    "@mesh/hyprland-interface": {
+      "kind": "interface",
+      "path": "interfaces/hyprland",
+      "enabled": true
+    },
+    "@mesh/hyprland-wm": {
+      "kind": "backend",
+      "path": "backend/hyprland-wm",
+      "enabled": true
     }
   },
   "providers": {
     "mesh.audio": "@mesh/pipewire-audio",
-    "mesh.power": "@mesh/upower-power"
+    "mesh.power": "@mesh/upower-power",
+    "mesh.hyprland": "@mesh/hyprland-wm"
   },
   "layout": {
     "entrypoint": "@mesh/navigation-bar:main"

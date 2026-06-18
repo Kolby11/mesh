@@ -3,12 +3,14 @@ use super::candidates::{
     backend_launch_candidates_from_graph, legacy_backend_candidates_from_discovery,
 };
 use super::{BackendLaunchCandidate, BackendRuntimeStatus};
+use rustix::fd::BorrowedFd;
 
 impl Shell {
     pub(in crate::shell) fn spawn_backend_modules(
         &mut self,
         runtime: &Runtime,
         tx: mpsc::UnboundedSender<ShellMessage>,
+        eventfd_fd: std::os::unix::io::RawFd,
     ) {
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let graph_path = workspace_root.join("config/module.json");
@@ -40,7 +42,7 @@ impl Shell {
                 }
                 for mut candidate in candidates {
                     self.apply_shell_runtime_settings(&mut candidate);
-                    self.spawn_backend_candidate(runtime, tx.clone(), candidate);
+                    self.spawn_backend_candidate(runtime, tx.clone(), candidate, eventfd_fd);
                 }
             }
             Err(err) => {
@@ -52,7 +54,7 @@ impl Shell {
                     legacy_backend_candidates_from_discovery(&self.modules, &self.config)
                 {
                     self.apply_shell_runtime_settings(&mut candidate);
-                    self.spawn_backend_candidate(runtime, tx.clone(), candidate);
+                    self.spawn_backend_candidate(runtime, tx.clone(), candidate, eventfd_fd);
                 }
             }
         }
@@ -84,6 +86,7 @@ impl Shell {
         runtime: &Runtime,
         tx: mpsc::UnboundedSender<ShellMessage>,
         candidate: BackendLaunchCandidate,
+        eventfd_fd: std::os::unix::io::RawFd,
     ) {
         self.stop_backend_runtime(&candidate.interface);
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -112,6 +115,8 @@ impl Shell {
                         {
                             break;
                         }
+                        let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
+                        let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
                     }
                     BackendServiceEvent::CommandResult(result) => {
                         let command = result.command;
@@ -129,6 +134,8 @@ impl Shell {
                             command,
                             result: payload,
                         });
+                        let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
+                        let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
                     }
                     BackendServiceEvent::InterfaceEvent(event) => {
                         let name = event.name;
@@ -146,6 +153,8 @@ impl Shell {
                             name,
                             payload,
                         });
+                        let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
+                        let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
                     }
                     BackendServiceEvent::Started { .. } => {
                         let _ = shell_tx.send(ShellMessage::BackendLifecycle {
@@ -155,6 +164,8 @@ impl Shell {
                             status: "running".to_string(),
                             message: "backend runtime started".to_string(),
                         });
+                        let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
+                        let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
                         tracing::info!(
                             interface = bridge_interface.as_str(),
                             provider_id = bridge_provider_id.as_str(),
@@ -169,6 +180,8 @@ impl Shell {
                             status: "init_failed".to_string(),
                             message: message.clone(),
                         });
+                        let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
+                        let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
                         tracing::warn!(
                             interface = bridge_interface.as_str(),
                             provider_id = bridge_provider_id.as_str(),
@@ -183,6 +196,8 @@ impl Shell {
                             status: "poll_failed".to_string(),
                             message: message.clone(),
                         });
+                        let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
+                        let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
                         tracing::warn!(
                             interface = bridge_interface.as_str(),
                             provider_id = bridge_provider_id.as_str(),
@@ -197,6 +212,8 @@ impl Shell {
                             status: "failed".to_string(),
                             message: message.clone(),
                         });
+                        let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
+                        let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
                         tracing::warn!(
                             interface = bridge_interface.as_str(),
                             provider_id = bridge_provider_id.as_str(),
@@ -211,6 +228,8 @@ impl Shell {
                             status: "stopped".to_string(),
                             message: "backend runtime stopped".to_string(),
                         });
+                        let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
+                        let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
                         tracing::info!(
                             interface = bridge_interface.as_str(),
                             provider_id = bridge_provider_id.as_str(),

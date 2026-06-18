@@ -186,7 +186,7 @@ fn phase44_selection_restyle_keeps_focused_text_payload() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 160);
-    component.paint(&theme, 240, 160, &mut buffer).unwrap();
+    component.paint(&theme, 240, 160, &mut buffer, 1.0).unwrap();
 
     let proof = component
         .last_focused_proof_snapshot()

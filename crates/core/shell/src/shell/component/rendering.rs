@@ -106,12 +106,22 @@ impl FrontendSurfaceComponent {
         );
     }
 
+    /// Capture the paint-time theme into `active_theme` if it changed since
+    /// the last capture. `theme_changed()` is the only path through which the
+    /// shell swaps the active theme, so the stale flag is a complete signal.
+    pub(super) fn refresh_active_theme(&self, theme: &Theme) {
+        if self.active_theme_stale.get() {
+            self.active_theme.replace(Arc::new(theme.clone()));
+            self.active_theme_stale.set(false);
+        }
+    }
+
     pub(super) fn build_tree(&mut self, theme: &Theme, width: u32, height: u32) -> WidgetNode {
         if self.render_hooks_pending {
             self.call_render_hooks();
             self.render_hooks_pending = false;
         }
-        self.active_theme.replace(theme.clone());
+        self.refresh_active_theme(theme);
         let root_state = self.runtime_state(self.id()).unwrap_or_default();
         let bound = LocaleBoundState::new(&root_state, &self.locale);
         {
@@ -155,7 +165,7 @@ impl FrontendSurfaceComponent {
         height: u32,
     ) -> Option<WidgetNode> {
         let tree = self.build_tree(theme, width, height);
-        let (mut affected, total) = self.retained_tree.narrow_script_diff(&tree)?;
+        let (affected, total) = self.retained_tree.narrow_script_diff(&tree)?;
         if affected.len() * 2 > total {
             return None;
         }
@@ -179,7 +189,7 @@ impl FrontendSurfaceComponent {
         dirty_types: ComponentDirtyFlags,
     ) -> Option<WidgetNode> {
         let mut tree = self.last_tree.take()?;
-        self.active_theme.replace(theme.clone());
+        self.refresh_active_theme(theme);
         self.finalize_tree(&mut tree, theme, width, height, "restyle", dirty_types);
         Some(tree)
     }
@@ -310,21 +320,41 @@ impl FrontendSurfaceComponent {
             .cached_restyle_rules
             .as_deref()
             .expect("cache still populated");
-        self.record_runtime_style_diagnostics(tree, restyle_rules, &resolver, context);
+        // The diagnostic pass re-resolves every node's style a second time to
+        // surface rule errors (bad animation references etc.). Those are
+        // properties of the rules and tree structure, so re-deriving them on
+        // every restyle frame (hover transitions, animations) only burns CPU;
+        // run the pass when the tree was rebuilt.
+        if trigger_kind == "rebuild" {
+            self.record_runtime_style_diagnostics(tree, restyle_rules, &resolver, context);
+        }
 
-        if !reused_retained_layout {
-            // Recompute layout after restyle so that pseudo-state and container-query style
-            // changes (display:none, width, height, etc.) are reflected in final layout
-            // bounds before hit-testing, accessibility publishing, and paint.
-            let layout_started = std::time::Instant::now();
-            let measurer = SharedTextMeasurer;
-            LayoutEngine::compute_with_intrinsic_cache_and_measurer(
-                tree,
-                width as f32,
-                height as f32,
-                &mut self.intrinsic_layout_cache,
-                Some(&measurer),
-            );
+        if tree.tag == "surface" {
+            tree.computed_style.width = mesh_core_elements::Dimension::Px(width as f32);
+            tree.computed_style.height = mesh_core_elements::Dimension::Px(height as f32);
+        }
+
+        let layout_work_required = !reused_retained_layout || !self.layout_state.valid;
+        // Enter the retained layout path on every finalized tree. On
+        // VISUAL_REPAINT-only frames `compute_incremental` updates retained
+        // styles and intentionally skips Taffy `compute_layout`; on invalid,
+        // structural, size, or LAYOUT-dirty frames it recomputes geometry.
+        let layout_started = std::time::Instant::now();
+        let measurer = SharedTextMeasurer;
+        let dirty_structural =
+            dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
+        let dirty_layout = dirty_types.contains(ComponentDirtyFlags::LAYOUT);
+        LayoutEngine::compute_incremental(
+            tree,
+            &mut self.layout_state,
+            width as f32,
+            height as f32,
+            dirty_layout,
+            dirty_structural,
+            &mut self.intrinsic_layout_cache,
+            Some(&measurer),
+        );
+        if layout_work_required {
             self.record_profiling_stage(
                 mesh_core_debug::ProfilingStage::Layout,
                 layout_started,

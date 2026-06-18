@@ -28,7 +28,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                     .collect();
                 let instance_key = format!("{host_instance_key}/local:{alias}");
                 let node = self.render_local_component(
-                    host,
+                    &entry.compiled.manifest,
                     alias,
                     &instance_key,
                     &props_json,

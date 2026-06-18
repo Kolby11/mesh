@@ -341,6 +341,7 @@ impl super::types::ShellComponent for RecordingComponent {
         _width: u32,
         _height: u32,
         _buffer: &mut mesh_core_render::PixelBuffer,
+        _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         Ok(())
     }
@@ -427,6 +428,7 @@ impl super::types::ShellComponent for FocusRecordingComponent {
         _width: u32,
         _height: u32,
         _buffer: &mut mesh_core_render::PixelBuffer,
+        _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         Ok(())
     }
@@ -553,6 +555,7 @@ impl super::types::ShellComponent for TransitionRecordingComponent {
         _width: u32,
         _height: u32,
         _buffer: &mut mesh_core_render::PixelBuffer,
+        _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         Ok(())
     }
@@ -1894,6 +1897,8 @@ fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
         ProfilingInvalidationSnapshot {
             full_rebuild: false,
             retained_path: true,
+            narrow_path: false,
+            affected_node_count: 0,
             retained_generation: 7,
             component: ComponentInvalidationCounts {
                 state: 1,

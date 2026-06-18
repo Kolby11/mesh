@@ -1763,7 +1763,9 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     let width = 960;
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     {
         let tree = component
             .last_tree
@@ -1842,7 +1844,9 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let activation_requests = component
         .handle_input(
@@ -1879,7 +1883,9 @@ fn navigation_language_button_publishes_locale_request_on_real_surface() {
             }),
         })
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component
         .last_tree
@@ -1911,7 +1917,9 @@ fn navigation_language_button_publishes_locale_request_on_real_surface() {
         )
         .unwrap();
     assert!(open_requests.is_empty());
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component
         .last_tree
@@ -2070,7 +2078,9 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
 
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -2158,7 +2168,9 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
             },
         )
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let hovered_tree = component
         .last_tree
         .as_ref()
@@ -2183,7 +2195,9 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
     );
 
     std::thread::sleep(Duration::from_millis(220));
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let settled_hover_tree = component
         .last_tree
         .as_ref()
@@ -2213,7 +2227,9 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
         component.pointer_down_key.as_deref(),
         Some(button_key.as_str())
     );
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let active_tree = component
         .last_tree
         .as_ref()
@@ -2226,7 +2242,9 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
         "active press should start the visible squircle-to-circle transition"
     );
     std::thread::sleep(Duration::from_millis(220));
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let settled_tree = component
         .last_tree
         .as_ref()
@@ -2269,7 +2287,9 @@ fn navigation_bar_pointer_click_updates_real_surface_focus_diagnostic() {
     let width = 960;
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component
         .last_tree
@@ -2326,7 +2346,7 @@ fn navigation_bar_real_surface_keeps_status_copy_non_selectable() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(420, 80);
-    component.paint(&theme, 420, 80, &mut buffer).unwrap();
+    component.paint(&theme, 420, 80, &mut buffer, 1.0).unwrap();
 
     let tree = component
         .last_tree
@@ -2355,7 +2375,9 @@ fn navigation_bar_keyboard_activation_opens_volume_surface_on_real_surface() {
     let width = 960;
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component
         .last_tree
@@ -2405,7 +2427,9 @@ fn navigation_bar_pointer_activation_opens_volume_surface_without_stealing_focus
     let width = 960;
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component
         .last_tree
@@ -2469,7 +2493,9 @@ fn navigation_bar_same_hover_volume_trigger_closes_popover_immediately() {
     let width = 960;
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component
         .last_tree
@@ -2564,7 +2590,9 @@ fn navigation_bar_volume_trigger_reopens_after_rapid_toggle_cycle() {
     let width = 960;
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component
         .last_tree
@@ -2642,7 +2670,9 @@ fn navigation_bar_volume_trigger_reopens_after_rapid_toggle_cycle() {
                 .unwrap();
         }
 
-        component.paint(&theme, width, height, &mut buffer).unwrap();
+        component
+            .paint(&theme, width, height, &mut buffer, 1.0)
+            .unwrap();
     }
 }
 
@@ -2654,7 +2684,9 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
     let width = 960;
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
 
     let tree = component
         .last_tree
@@ -2687,7 +2719,9 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
             },
         )
         .unwrap();
-    component.paint(&theme, width, height, &mut buffer).unwrap();
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
     let requests = component
         .handle_input(
             &theme,
@@ -2729,7 +2763,7 @@ fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 220);
-    component.paint(&theme, 320, 220, &mut buffer).unwrap();
+    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -2793,7 +2827,7 @@ fn audio_popover_volume_button_repeats_on_key_press_without_waiting_for_release(
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 220);
-    component.paint(&theme, 320, 220, &mut buffer).unwrap();
+    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -2891,7 +2925,7 @@ fn audio_popover_access_key_toggles_mute_on_real_surface() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 220);
-    component.paint(&theme, 320, 220, &mut buffer).unwrap();
+    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -2944,7 +2978,7 @@ fn audio_popover_access_key_toggles_mute_on_real_surface() {
             }),
         })
         .unwrap();
-    component.paint(&theme, 320, 220, &mut buffer).unwrap();
+    component.paint(&theme, 320, 220, &mut buffer, 1.0).unwrap();
     let tree = component
         .last_tree
         .as_ref()
@@ -3009,7 +3043,9 @@ fn navigation_bar_compact_width_hides_secondary_status_before_controls() {
 
     let theme = default_theme();
     let mut wide_buffer = PixelBuffer::new(920, 80);
-    component.paint(&theme, 920, 80, &mut wide_buffer).unwrap();
+    component
+        .paint(&theme, 920, 80, &mut wide_buffer, 1.0)
+        .unwrap();
     let wide_tree = component.last_tree.as_ref().expect("wide navigation tree");
     let mut wide_text = Vec::new();
     collect_text_content(wide_tree, &mut wide_text);
@@ -3026,7 +3062,7 @@ fn navigation_bar_compact_width_hides_secondary_status_before_controls() {
 
     let mut compact_buffer = PixelBuffer::new(240, 80);
     component
-        .paint(&theme, 240, 80, &mut compact_buffer)
+        .paint(&theme, 240, 80, &mut compact_buffer, 1.0)
         .unwrap();
     let compact_tree = component
         .last_tree
@@ -3054,7 +3090,7 @@ fn phase44_navigation_behavior_survives_focused_proof_path() {
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(960, 80);
-    component.paint(&theme, 960, 80, &mut buffer).unwrap();
+    component.paint(&theme, 960, 80, &mut buffer, 1.0).unwrap();
     assert!(
         component.last_focused_proof_snapshot().is_some(),
         "initial navigation paint should store focused proof evidence"
@@ -3071,7 +3107,7 @@ fn phase44_navigation_behavior_survives_focused_proof_path() {
             },
         )
         .unwrap();
-    component.paint(&theme, 960, 80, &mut buffer).unwrap();
+    component.paint(&theme, 960, 80, &mut buffer, 1.0).unwrap();
 
     assert!(
         component.last_focused_proof_snapshot().is_some(),

@@ -11,6 +11,8 @@
         "service.audio.read",
         "service.audio.control",
         "service.power.read",
+        "service.hyprland.read",
+        "service.hyprland.control",
         "theme.read",
         "locale.read",
         "locale.write"
@@ -26,7 +28,9 @@
     "dependencies": {
       "modules": {
         "@mesh/audio-popover": ">=0.1.0",
-        "@mesh/language-popover": ">=0.1.0"
+        "@mesh/language-popover": ">=0.1.0",
+        "@mesh/theme-selector": ">=0.1.0",
+        "@mesh/quick-settings": ">=0.1.0"
       },
       "icons": {
         "@mesh/icons-default": "*"
@@ -34,14 +38,16 @@
     },
     "iconRequirements": {
       "required": [
-        "settings",
+        "preferences-system",
+        "preferences-desktop-locale",
         "weather-clear-night",
         "weather-clear",
-        "language",
         "audio-volume-muted",
         "audio-volume-low",
         "audio-volume-medium",
-        "audio-volume-high"
+        "audio-volume-high",
+        "media-playback-start",
+        "window-close"
       ]
     },
     "entrypoints": {

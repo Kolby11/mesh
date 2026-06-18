@@ -357,6 +357,7 @@ impl ProfilingBackendStage {
 pub enum ProfilingStage {
     InputHandling,
     RuntimeUpdateHandling,
+    SchedulerIdle,
     TreeBuild,
     StyleRestyle,
     Layout,
@@ -377,6 +378,7 @@ impl ProfilingStage {
         match self {
             Self::InputHandling => "input_handling",
             Self::RuntimeUpdateHandling => "runtime_update_handling",
+            Self::SchedulerIdle => "scheduler_idle",
             Self::TreeBuild => "tree_build",
             Self::StyleRestyle => "style_restyle",
             Self::Layout => "layout",

@@ -1,0 +1,139 @@
+<template>
+  <row class="workspace-list">
+    <button class="{ws1_class}" onclick={onSwitch1} title="Workspace 1" aria-label="Workspace 1">
+      <text class="ws-num">1</text>
+    </button>
+    <button class="{ws2_class}" onclick={onSwitch2} title="Workspace 2" aria-label="Workspace 2">
+      <text class="ws-num">2</text>
+    </button>
+    <button class="{ws3_class}" onclick={onSwitch3} title="Workspace 3" aria-label="Workspace 3">
+      <text class="ws-num">3</text>
+    </button>
+    <button class="{ws4_class}" onclick={onSwitch4} title="Workspace 4" aria-label="Workspace 4">
+      <text class="ws-num">4</text>
+    </button>
+    <button class="{ws5_class}" onclick={onSwitch5} title="Workspace 5" aria-label="Workspace 5">
+      <text class="ws-num">5</text>
+    </button>
+  </row>
+</template>
+
+<script lang="luau">
+ws_active = 1
+ws1_class = "ws-btn ws-btn-active"
+ws2_class = "ws-btn"
+ws3_class = "ws-btn"
+ws4_class = "ws-btn"
+ws5_class = "ws-btn"
+
+local wm_ok, wm = pcall(require, "mesh.hyprland@>=1.0")
+if not wm_ok then
+    mesh.log.warn("[workspace-list] require mesh.hyprland failed: " .. tostring(wm))
+    wm = nil
+else
+    local switch_fn_type = "nil"
+    if type(wm) == "table" then
+        switch_fn_type = type(wm.switch_workspace)
+    end
+    mesh.log.info(string.format(
+        "[workspace-list] require ok, proxy=%s, switch_workspace=%s",
+        type(wm), switch_fn_type
+    ))
+end
+
+local function get_hyprland_state()
+    -- Try the proxy first, fall back to reading the global service payload
+    -- set by the runtime's apply_service_payload.
+    if wm_ok and wm then
+        return wm.active_workspace
+    end
+    local svc = __mesh_svc_hyprland
+    if svc then
+        return svc.active_workspace
+    end
+    return nil
+end
+
+local function sync_classes()
+    ws1_class = ws_active == 1 and "ws-btn ws-btn-active" or "ws-btn"
+    ws2_class = ws_active == 2 and "ws-btn ws-btn-active" or "ws-btn"
+    ws3_class = ws_active == 3 and "ws-btn ws-btn-active" or "ws-btn"
+    ws4_class = ws_active == 4 and "ws-btn ws-btn-active" or "ws-btn"
+    ws5_class = ws_active == 5 and "ws-btn ws-btn-active" or "ws-btn"
+end
+
+function render(self)
+    local active = get_hyprland_state()
+    if active then
+        local n = tonumber(active) or 1
+        if n ~= ws_active then
+            ws_active = n
+            sync_classes()
+        end
+    end
+end
+
+local function switch_to(n)
+    ws_active = n
+    sync_classes()
+    if wm_ok and wm and type(wm.switch_workspace) == "function" then
+        wm.switch_workspace(n)
+    else
+        mesh.events.publish("mesh.hyprland.switch_workspace", { id = n })
+    end
+end
+
+function onSwitch1() switch_to(1) end
+function onSwitch2() switch_to(2) end
+function onSwitch3() switch_to(3) end
+function onSwitch4() switch_to(4) end
+function onSwitch5() switch_to(5) end
+</script>
+
+<style>
+.workspace-list {
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.ws-btn {
+    width: 26px;
+    height: 26px;
+    justify-content: center;
+    align-items: center;
+    border-radius: token(radius.full);
+    background: transparent;
+    color: token(color.on-surface-variant);
+    border-width: 0;
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
+                color token(animation.duration.short) token(animation.curves.bezier.standard);
+}
+
+.ws-btn:hover {
+    background: token(color.surface-container-high);
+    color: token(color.on-surface);
+}
+
+.ws-btn-active {
+    background: token(color.primary);
+    color: token(color.on-primary);
+}
+
+.ws-btn-active:hover {
+    background: token(color.primary);
+    color: token(color.on-primary);
+}
+
+.ws-num {
+    font-size: 11px;
+    font-weight: 600;
+    color: inherit;
+}
+
+@container (max-width: 560px) {
+    .workspace-list {
+        display: none;
+    }
+}
+</style>

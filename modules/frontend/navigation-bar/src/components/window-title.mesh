@@ -1,0 +1,58 @@
+<template>
+  <row class="window-title-row">
+    <text class="wt-text">{window_title}</text>
+  </row>
+</template>
+
+<script lang="luau">
+window_title = "Desktop"
+
+local wm_ok, wm = pcall(require, "mesh.hyprland@>=1.0")
+if not wm_ok then wm = nil end
+
+function render(self)
+    if wm_ok and wm and wm.active_window then
+        local title = wm.active_window.title or ""
+        if title ~= "" then
+            window_title = #title > 36 and (string.sub(title, 1, 34) .. "…") or title
+            return
+        end
+    end
+    window_title = "Desktop"
+end
+</script>
+
+<style>
+.window-title-row {
+    align-items: center;
+    justify-content: center;
+    min-width: 60px;
+    max-width: 240px;
+    flex-shrink: 1;
+    padding-inline: token(spacing.sm);
+    height: 32px;
+    border-radius: token(radius.md);
+    background: token(color.surface-container);
+    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard);
+}
+
+.wt-text {
+    color: token(color.on-surface);
+    font-size: token(typography.size.sm);
+    font-weight: 500;
+    text-wrap: none;
+    opacity: 0.85;
+}
+
+@container (max-width: 900px) {
+    .window-title-row {
+        max-width: 160px;
+    }
+}
+
+@container (max-width: 720px) {
+    .window-title-row {
+        display: none;
+    }
+}
+</style>

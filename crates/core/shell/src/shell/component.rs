@@ -37,8 +37,8 @@ use runtime_tree::{
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::{
-    IntrinsicLayoutCache, LayoutEngine, NodeId, StyleContext, StyleResolver, VariableStore,
-    WidgetNode, element_snapshot_json,
+    IntrinsicLayoutCache, LayoutEngine, NodeId, PerSurfaceLayoutState, StyleContext, StyleResolver,
+    VariableStore, WidgetNode, element_snapshot_json,
 };
 use mesh_core_frontend::{
     CompiledFrontendModule, FrontendRenderMode, compile_frontend_module, root_accessibility_role,
@@ -362,6 +362,7 @@ pub(super) struct FrontendSurfaceComponent {
     interface_catalog: mesh_core_service::InterfaceCatalog,
     last_tree: Option<WidgetNode>,
     intrinsic_layout_cache: IntrinsicLayoutCache,
+    layout_state: PerSurfaceLayoutState,
     pub(super) retained_tree: RetainedWidgetTree,
     node_service_field_deps: NodeServiceFieldDependencies,
     retained_render_objects: RenderObjectTree,
@@ -486,6 +487,7 @@ impl FrontendSurfaceComponent {
             interface_catalog,
             last_tree: None,
             intrinsic_layout_cache: IntrinsicLayoutCache::default(),
+            layout_state: PerSurfaceLayoutState::default(),
             retained_tree: RetainedWidgetTree::default(),
             node_service_field_deps: NodeServiceFieldDependencies::default(),
             retained_render_objects: RenderObjectTree::default(),

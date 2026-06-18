@@ -52,59 +52,6 @@
 
 ## Phase Details
 
-### Phase 101: Per-Region Damage
-**Goal**: The compositor receives accurate per-dirty-rect damage information instead of a single unioned bounding rect on every frame commit
-**Depends on**: Phase 100 (opaque region hints — retained display list already in place)
-**Requirements**: DMGE-01, DMGE-02, DMGE-03
-**Success Criteria** (what must be TRUE):
-  1. A frame where only one widget changes causes `wl_surface::damage_buffer` to be called once with the widget's rect, not the full surface bounds
-  2. A frame with multiple dirty regions calls `damage_buffer` once per rect, capped at 16 calls total per commit
-  3. Debug overlay shows a per-frame damage rect count alongside existing damage metrics
-**Plans**: 1/1 done
-**Plans**:
-- [x] 101-01-PLAN.md — Per-region damage: Vec<DamageRect> end-to-end through wl_surface::damage_buffer
-
-### Phase 102: HiDPI / Fractional Scale
-**Goal**: Shell surfaces render at native physical pixel density on HiDPI displays; layout coordinates stay in logical CSS pixels throughout
-**Depends on**: Phase 101 (damage rects must be correctly scaled before commit)
-**Requirements**: HDPI-01, HDPI-02, HDPI-03, HDPI-04, HDPI-05
-**Success Criteria** (what must be TRUE):
-  1. On a 2× integer-scale display, text and icons appear sharp without upscaling artifacts
-  2. On a 1.5× fractional-scale display, `wp_viewporter` sets the destination to logical dimensions and the buffer is allocated at `ceil(logical × 1.5)` physical pixels
-  3. Plugging in or unplugging a HiDPI monitor (scale factor change) triggers a resize and full redraw with no stale pixels visible
-  4. On a compositor without `wp_fractional_scale_v1`, the `wl_output::scale` integer fallback keeps rendering correct
- **Plans**:
- - [x] 102-01-PLAN.md — Scale acquisition: bind wp_viewporter + wp_fractional_scale_v1, store scale: f32 on SurfaceEntry, implement scale handlers
- - [x] 102-02-PLAN.md — Physical pixel pipeline: PixelBuffer at ceil(logical×scale), wp_viewporter integration, damage rect scaling
- **UI hint**: yes
-
-### Phase 103: Compositor Blur Offload
-**Goal**: Surfaces with `backdrop-filter: blur(...)` nodes delegate blur rendering to the compositor on KDE; non-KDE compositors render a flat background without error
-**Depends on**: Phase 102 (scale factor must be established before blur region coordinates are correct)
-**Requirements**: BLUR-01, BLUR-02, BLUR-03, BLUR-04
-**Success Criteria** (what must be TRUE):
-  1. On KDE Plasma, a surface with `backdrop-filter: blur(8px)` shows compositor-driven background blur behind the affected region
-  2. On a non-KDE compositor (e.g., Sway), the same surface starts and renders normally with a flat background and no Wayland protocol errors in logs
-  3. A surface with no `backdrop-filter` nodes produces no `kde_blur` protocol calls during its commit sequence
-  4. Removing the CPU software blur path does not regress any existing test or visual output
-**Plans**: 3 plans
-
-Plans:
-- [x] 103-01-PLAN.md — Protocol infrastructure: wayland-protocols-plasma dep, KdeBlur state, optional global binding, commit-time protocol calls
-- [x] 103-02-PLAN.md — Blur region computation: walk display list for backdrop-filter nodes, compute logical-coordinate union rect, wire through present path
-- [x] 103-03-PLAN.md — CPU blur removal: make apply_backdrop_filter and push_backdrop_filter_command no-ops; keep function structure for future effects
-
-### Phase 103.1: Audit Gap Closure (INSERTED)
-**Goal**: Close the three gaps found by the v1.20 milestone audit: fix the blur region clear path (CR-01/BLUR-04), fix negative coordinate saturation in compute_blur_region (CR-02), fix damage_rect_count to report actual count not binary (DMGE-03), and produce Phase 103 VERIFICATION.md and VALIDATION.md
-**Depends on**: Phase 103
-**Requirements**: DMGE-03, BLUR-04 (re-verify BLUR-02)
-**Success Criteria** (what must be TRUE):
-  1. Removing `backdrop-filter` from a surface causes `kde_blur.set_region(None); kde_blur.commit()` to be emitted — the compositor stops blurring after the next commit
-  2. A `backdrop-filter` node with negative layout x/y coordinates produces a blur rect that is clipped to `x=0, y=0` with width/height reduced by the clipped amount, not a rect shifted to the surface origin
-  3. The debug overlay's damage rect count field shows the actual number of `DamageRect` entries passed to the present path (e.g., "3" for a 3-rect frame), not "0" or "1"
-  4. Phase 103 VERIFICATION.md exists with `status: passed`
-**Plans**: 1 plan
-
 ### Phase 104: Retained TaffyTree
 **Goal**: Layout geometry is computed by mutating a per-surface `TaffyTree` in place rather than rebuilding a fresh tree on every pass, so only dirty layout nodes pay geometry recomputation cost
 **Depends on**: Phase 103.1 (v1.20 fully shipped; no intra-v1.21 dependency)
@@ -119,11 +66,11 @@ Plans:
 
 Plans:
 **Wave 1**
-- [ ] 104-01-PLAN.md — Foundation: PerSurfaceLayoutState struct, remove_taffy_subtree post-order helper, compute_incremental entry point (fresh-build / VISUAL_REPAINT / LAYOUT paths)
+- [x] 104-01-PLAN.md — Foundation: PerSurfaceLayoutState struct, remove_taffy_subtree post-order helper, compute_incremental entry point (fresh-build / VISUAL_REPAINT / LAYOUT paths)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 104-02-PLAN.md — TREE_REBUILD structural diff keyed on _mesh_key plus 5 LAYOUT-05 parity tests
-- [ ] 104-03-PLAN.md — Shell wiring: layout_state field, compute_incremental call site in finalize_tree, theme/locale/source reset sites
+- [x] 104-02-PLAN.md — TREE_REBUILD structural diff keyed on _mesh_key plus 5 LAYOUT-05 parity tests
+- [x] 104-03-PLAN.md — Shell wiring: layout_state field, compute_incremental call site in finalize_tree, theme/locale/source reset sites
 
 ### Phase 105: Rope Display List
 **Goal**: The display list stores clean subtree command spans as shared references rather than copying bytes into parent vectors on each dirty update, reducing allocations on partial-dirty frames
@@ -159,7 +106,7 @@ Plans:
 | 102. HiDPI / Fractional Scale | v1.20 | 2/2 | Complete | 2026-06-10 |
 | 103. Compositor Blur Offload | v1.20 | 3/3 | Complete | 2026-06-17 |
 | 103.1. Audit Gap Closure (INSERTED) | v1.20 | 1/1 | Complete | 2026-06-18 |
-| 104. Retained TaffyTree | v1.21 | 0/? | Not started | - |
+| 104. Retained TaffyTree | v1.21 | 3/3 | Gaps found | - |
 | 105. Rope Display List | v1.21 | 0/? | Not started | - |
 | 106. Per-Stage Budget Profiling | v1.21 | 0/? | Not started | - |
 
