@@ -1,256 +1,227 @@
-# Features Research: MESH v1.20 Compositor Integration
+# Feature Research: MESH v1.21 Retained Layout & Display List
 
-**Domain:** Wayland compositor protocol integration for a shell framework
-**Researched:** 2026-06-10
-**Overall confidence:** HIGH for protocol mechanics and behavior; MEDIUM for compositor support matrices (cross-checked against known compositor changelogs and wayland.app protocol index; web search was unavailable due to API outage during research)
-
----
-
-## Summary
-
-This milestone adds three compositor-facing Wayland protocol features to MESH: HiDPI/fractional scale rendering, compositor-offloaded blur for backdrop-filter, and per-region damage reporting. All three are additive and protocol-gated — the shell must detect global availability at bind time, apply the feature when the compositor supports it, and fall back gracefully when it does not. None of the three requires changes to the module authoring surface; they are infrastructure improvements that make the shell look and perform better on capable compositors.
-
-The features are independent of each other. Per-region damage is the lowest risk (already partially implemented in the damage pipeline). HiDPI/fractional scale carries the most cross-cutting impact (affects render buffer sizing, SHM allocation, layout coordinate system, and surface configuration). Blur offload is the narrowest in scope (purely additive protocol attachment with no renderer coupling when unavailable).
+**Domain:** Retained-mode UI rendering — incremental layout tree mutation, rope-style command store, per-stage budget profiling
+**Researched:** 2026-06-18
+**Confidence:** HIGH for tree mutation semantics (Taffy API verified via Context7); HIGH for display list span contract (derived from current codebase + Mozilla Firefox retained display list published architecture); MEDIUM for rope/persistent-vector store design (pattern is clear from Flutter/WebRender, specific tradeoffs are judgment calls)
 
 ---
 
-## HiDPI / Fractional Scale
+## Context: What Already Exists
 
-### What It Does and User-Visible Outcome
+The existing MESH retained pipeline (v1.4–v1.5) already has:
+- Stable `_mesh_key` node IDs on `WidgetNode`
+- `RetainedDisplayList` with `HashMap<NodeId, RetainedPaintSubtree>` keyed subtree caching
+- `RetainedPaintSubtree` storing `Arc<[DisplayPaintCommand]>` and `Arc<[DisplayPaintCommandKind]>` per node
+- `RetainedCommandSpan` indexing into a flat `paint_commands: Arc<[DisplayPaintCommand]>` array for damage-range queries
+- `PaintSubtreeBuilder` that copies child commands into parent command vectors on each update
+- Typed dirty bits: `STYLE_ONLY / LAYOUT / PAINT / TEXT / TREE_REBUILD` per node (v1.18)
+- `ProfilingStage` enum with `Layout`, `RetainedDisplayListUpdate`, `PaintTraversal`, `TextShaping`, `Paint` stages
 
-Without HiDPI support, MESH renders at logical pixel density (1:1 logical-to-buffer pixels). On a 2x HiDPI display the compositor upscales the SHM buffer by 2x, producing blurry shell surfaces — text edges are fuzzy, icons look interpolated, and the panel looks visually softer than native GTK/Qt surfaces on the same desktop.
+The current `LayoutEngine::compute_taffy_layout_with_cache` **creates a fresh `TaffyTree` on every layout pass**, builds the full node-to-TaffyNodeId map from scratch, runs `compute_layout_with_measure`, then writes results back to `WidgetNode.layout`. This is the specific regression being fixed.
 
-With HiDPI support, MESH:
-1. Receives the output scale factor from the compositor (integer via `wl_output::scale` / `wl_surface::preferred_buffer_scale`, or fractional via `wp_fractional_scale_v1::preferred_scale`)
-2. Allocates the SHM buffer at physical pixel dimensions (`logical_size * scale_factor`)
-3. Renders the widget tree at full physical resolution (all measurements stay in logical pixels inside the renderer; only the output buffer is sized at physical pixels)
-4. Sets `wl_surface::set_buffer_scale(factor)` for integer scales, or uses `wp_viewporter::set_destination(logical_w, logical_h)` to tell the compositor the logical size for non-integer fractional scales
-5. Commits a crisp, natively-scaled buffer
-
-User-visible outcome: panel text and icons are sharp on 1.25x, 1.5x, 1.75x, and 2x displays. On a 4K display at 125% scaling (common on HiDPI laptops), the shell no longer looks blurry relative to native applications.
-
-### Protocol Mechanics
-
-Two parallel paths:
-
-**Integer scale (`wl_output::scale` + `wl_surface::set_buffer_scale`)**
-- Compositor emits `wl_output::scale(factor: int)` on output bind and on change
-- From Wayland 1.22+, `wl_surface::preferred_buffer_scale(factor: int)` is also emitted per surface (wl_surface version 6)
-- Client attaches buffer at `logical * factor` dimensions, calls `set_buffer_scale(factor)` before commit
-- This path is universally supported; all compositors that implement `wl_output` at version 2+ support it
-
-**Fractional scale (`wp_fractional_scale_v1` + `wp_viewporter`)**
-- `wp_fractional_scale_manager_v1` is a global; check at bind time
-- `wp_fractional_scale_v1::preferred_scale(scale: uint)` is emitted as `scale / 120` (e.g., 150 = 1.25x)
-- Client renders buffer at nearest integer multiple, then uses `wp_viewporter::set_destination(logical_w, logical_h)` to tell the compositor the intended logical size — compositor handles the fractional resampling
-- Preferred implementation: render at `ceil(scale * logical)` in buffer pixels, viewport back to logical dimensions. This avoids sub-pixel rendering artifacts.
-- `wp_viewporter` is a stable protocol; `wp_fractional_scale_v1` is staging
-
-### Table Stakes
-
-Rendering sharp on HiDPI displays is table stakes. Any shell surface that appears blurry on a HiDPI desktop looks broken relative to native GTK/Qt applications. This is not optional polish — it is a correctness requirement for usability on modern hardware.
-
-| Requirement | Why Table Stakes | Complexity |
-|-------------|-----------------|------------|
-| Render at native pixel density on integer-scale outputs | Blurry text/icons on 2x display is a visible defect | Medium — SHM reallocation, buffer size threading through render pipeline |
-| Fractional scale via wp_fractional_scale_v1 + wp_viewporter | Required for 125%/150%/175% scaling (common on HiDPI laptops) | Medium — adds a second scale path, needs viewporter attachment |
-| React to output scale changes at runtime | User can move surface to different monitor or change scaling in settings | Medium — event-driven reallocation, preserve surface continuity |
-| Keep logical coordinate system intact inside MESH | Module authors write in logical pixels; physical size is an output concern only | Architectural — coordinate space must not leak through to Luau or .mesh authoring |
-
-### Compositor Support Matrix
-
-| Compositor | `wl_output::scale` (integer) | `wl_surface::preferred_buffer_scale` | `wp_fractional_scale_v1` | `wp_viewporter` |
-|------------|------------------------------|--------------------------------------|--------------------------|-----------------|
-| KWin (KDE Plasma 6) | YES | YES | YES (Plasma 5.27+) | YES |
-| KWin (KDE Plasma 5.x) | YES | NO (added in KWin 6) | YES (5.27+) | YES |
-| Mutter (GNOME 45+) | YES | YES | YES (GNOME 45) | YES |
-| sway (wlroots 0.17+) | YES | YES | PARTIAL (advertised; experimental) | YES |
-| Hyprland | YES | YES | YES (first-class feature) | YES |
-| cosmic-comp (COSMIC DE) | YES | YES | YES | YES |
-| River (wlroots-based) | YES | YES | PARTIAL (wlroots version dependent) | YES |
-| Wayfire | YES | YES | PARTIAL (may have rendering artifacts) | YES |
-
-Confidence: HIGH for integer scale (universally supported). MEDIUM for fractional scale matrix (based on Plasma 5.27/GNOME 45 release notes and Hyprland documentation; wlroots compositor versions need verification against current releases).
-
-### Graceful Degradation
-
-- `wp_fractional_scale_manager_v1` absent: fall back to integer `wl_output::scale` path. Surface appears at correct integer scale; may look slightly soft at non-integer display scaling but is never wrong.
-- `wl_surface::preferred_buffer_scale` absent (old compositor): use `wl_output::scale` from whichever output the surface's center is on.
-- Surface spans multiple outputs with different scales: use the largest scale (avoids downscaling artifacts on the higher-DPI output).
-- Compositor sends scale = 1 or no scale event: render at 1:1 — identical to current behavior, zero regression.
-- No fallback should cause a crash or buffer mismatch. Worst outcome is a 1:1 buffer upscaled by the compositor, which is the current behavior.
-
-### Anti-Features
-
-| Anti-Feature | Why Avoid |
-|--------------|-----------|
-| Exposing scale factor to module authors as a settable property | Scale is determined by the compositor and output; user override would break rendering correctness |
-| Fractional buffer sizes (e.g., 1.25 * 100 = 125.0 as a float) | Always use integer physical buffer sizes; fractional coordinates cause sub-pixel misalignment |
-| Per-element DPI awareness in Luau scripts | Module authors work in logical pixels only; DPI is a rendering pipeline concern |
-| Using `wl_surface::damage` (surface coordinates) on scaled surfaces | Deprecated for scaled surfaces; `damage_buffer` in buffer coordinates must be used when buffer scale > 1 |
-| Rebuilding the entire SHM pool on every scale change | Scale changes are rare; reallocate the buffer but preserve other state |
+The current `PaintSubtreeBuilder::append_child` **copies child `Arc<[DisplayPaintCommand]>` slices into the parent's command vec** on each dirty update, even for clean children. This is the copy behavior the rope store replaces.
 
 ---
 
-## Compositor Blur Offload
+## Feature Landscape
 
-### What It Does and User-Visible Outcome
+### Table Stakes (Required for This Milestone to Be Correct)
 
-`backdrop-filter: blur(Npx)` in CSS blurs the content behind a transparent or translucent surface. Without compositor offload, blur behind shell surfaces is not achievable — Wayland clients cannot sample the compositor framebuffer behind them. With compositor offload, MESH attaches a blur region to the surface via protocol; the compositor applies a Gaussian blur pass to the composited framebuffer behind the surface region before compositing the client pixels on top.
+Features that, if missing, leave the retained pipeline with correctness holes or make the milestone's goals unachievable.
 
-User-visible outcome on supporting compositors: translucent panels and popovers show a frosted-glass effect. This is the visual style used by KDE Plasma, GNOME (via blur-my-shell), and macOS. A shell panel with `background: rgba(0,0,0,0.5)` and `backdrop-filter: blur(20px)` renders as a translucent frosted panel rather than a semi-transparent flat overlay.
+| Feature | Why Required | Complexity | Dependency |
+|---------|--------------|------------|------------|
+| Retain `TaffyTree` and `NodeId` map per surface across layout passes | Without this, the entire TaffyTree rebuild happens every frame; the milestone goal is impossible | MEDIUM | Needs `TaffyTree` stored on `FrontendSurfaceComponent` or equivalent render state, not local to `compute_taffy_layout_with_cache` |
+| In-place style mutation via `TaffyTree::set_style` for STYLE/PAINT-dirty nodes | Style changes that do not affect structural layout must update in-place; new tree rebuild on style-only changes defeats the purpose | LOW | Requires the `NodeId` map to be stable so dirty-bit annotations can look up the right `TaffyNodeId` |
+| Structural mutation via `add_child`/`remove_child`/`remove` for TREE_REBUILD nodes | Structural changes (child added/removed) must mutate in-place, not trigger full tree rebuild | MEDIUM | Requires reconciliation pass comparing WidgetNode children vs TaffyTree children and issuing minimum edit operations |
+| `TaffyTree::mark_dirty` propagation for LAYOUT-dirty subtrees | Layout changes on an interior node must invalidate its Taffy ancestors so layout re-runs only the affected subtree | LOW | Taffy already propagates `mark_dirty` to ancestors automatically; MESH just needs to call it at the right nodes |
+| `TaffyTree::remove` cleanup for nodes removed from WidgetNode tree | Orphaned Taffy nodes must be freed; otherwise the TaffyTree grows unboundedly across TREE_REBUILD cycles | MEDIUM | Needs a diff between the previous `NodeId→TaffyNodeId` map and the new WidgetNode tree to identify removed nodes |
+| Span ownership contract for retained command store | The display list must define which entity owns a command span, when that span is valid to reuse, and when it must be rebuilt | LOW | Mostly documentation and type-level enforcement of existing semantics |
+| Arc-based span sharing (no copy for clean subtrees) | The core value of a rope-style store: clean child spans are referenced, not copied into parent command vectors | HIGH | Requires changing `PaintSubtreeBuilder::append_child` to store `Arc` references to child command slices rather than copying them |
+| Damage rect computation from referenced spans, not flattened array positions | When spans are `Arc<[DisplayPaintCommand]>` references rather than index ranges, damage queries must still work correctly | MEDIUM | `RetainedCommandSpan` currently indexes into a flat array by position; rope-style sharing changes those positions each frame for unmodified children |
 
-User-visible outcome on non-supporting compositors: the surface renders with a flat/opaque background instead of the frosted effect. The surface must remain fully functional and visually coherent — it just lacks the visual flourish.
+### Differentiators (Valuable but Not Required for Correctness)
 
-### Protocol Mechanics
+Features that improve performance or observability beyond what the basic milestone requires.
 
-Three protocol layers exist, in order of maturity:
+| Feature | Value Proposition | Complexity | Notes |
+|---------|------------------|------------|-------|
+| Per-stage wall-clock budget pins for canonical workloads | Gives future optimization work a concrete target: "Layout must complete in ≤2ms on navigation-bar hover" | MEDIUM | Builds on existing `ProfilingStage` enum; adds budget thresholds per stage per workload |
+| Separate profiling stages for TaffyTree retention vs structural reconciliation | Distinguishes "layout cache hit" from "in-place style update" from "structural edit"; current `ProfilingStage::Layout` conflates all three | LOW | Add `TaffyRetainedLayout` and `TaffyStructuralReconcile` stages to the enum |
+| Span reuse rate as a debug metric | Exposes what fraction of command spans were reused vs rebuilt per frame; helps diagnose whether dirty-bit routing is working | LOW | Add `span_reuse_count` and `span_rebuild_count` to `DisplayListMetrics` — skeleton already exists |
+| Clean-subtree detection before reconciliation | Skip the Taffy child-diff for subtrees with no dirty descendants; avoids walking clean branches of a large tree | MEDIUM | Requires propagating "has any dirty descendant" up the WidgetNode tree during dirty-bit marking |
+| TaffyTree node count diagnostic | Report `tree.total_node_count()` in debug state to verify the tree is not leaking nodes between TREE_REBUILD cycles | LOW | One-line addition to `DebugSnapshot` |
+| Intrinsic text measurement cache surviving layout tree retention | The existing `IntrinsicLayoutCache` is currently local to each layout call; if the TaffyTree is retained, the cache should be too | LOW | Move `IntrinsicLayoutCache` to the same storage as the retained TaffyTree |
 
-**`org_kde_kwin_blur` (KDE-specific, stable, widely deployed)**
-- Bind `org_kde_kwin_blur_manager`; call `create(surface)` to get an `org_kde_kwin_blur` object
-- Call `set_region(wl_region)` to define the blur area in surface-local coordinates; null region = entire surface
-- Call `commit()` on the blur object to apply; the blur region is also double-buffered via `wl_surface::commit`
-- The compositor applies blur when the KWin blur effect is enabled in compositor settings
+### Anti-Features (Explicitly Out of Scope)
 
-**`ext-background-effect-v1` (freedesktop staging, newer, cross-compositor path)**
-- Bind `ext_background_effect_manager_v1`; compositor emits `capabilities` on bind with a `blur` flag
-- If `blur` capability is present: call `get_background_effect(surface)` to get `ext_background_effect_surface_v1`
-- Call `set_blur_region(wl_region)` with surface-local coordinates; double-buffered via `wl_surface::commit`
-- This is the correct cross-compositor path going forward; protocol adoption is newer than the KDE protocol
+Features that are commonly reached for but should not be built in this milestone.
 
-**Note on `wp_blur_v1`**: The milestone context references `wp_blur_v1` but this name does not correspond to a shipped freedesktop protocol as of the research date. The `ext-background-effect-v1` is the current staging candidate. MESH should target `ext-background-effect-v1` for the generic path and `org_kde_kwin_blur` for KDE compatibility.
-
-Confidence: HIGH for `org_kde_kwin_blur` mechanics. HIGH for `ext-background-effect-v1` (documented on wayland.app protocols index). MEDIUM for `wp_blur_v1` name — if this is a different protocol than `ext-background-effect-v1`, verification is needed before implementation.
-
-### Table Stakes vs Differentiator
-
-Compositor blur offload is a **differentiator**, not table stakes.
-
-- Table stakes: the surface functions and looks visually coherent without blur (flat background color is acceptable on any compositor)
-- Differentiator: frosted glass effect on compositors that support it; specifically required for a high-quality visual appearance on KDE Plasma
-
-Implementing it is worthwhile because `backdrop-filter: blur()` is already part of the `.mesh` CSS authoring surface — wiring the protocol makes the property work as expected on KDE Plasma instead of silently doing nothing.
-
-| Requirement | Classification | Complexity |
-|-------------|---------------|------------|
-| Wire `org_kde_kwin_blur` for KDE Plasma support | Differentiator but high-value | Low — simple protocol with a clear object lifecycle |
-| Wire `ext-background-effect-v1` for generic support | Differentiator + future-proofing | Low — same pattern as KDE protocol, slightly different lifecycle |
-| Graceful no-op fallback when neither global is available | Table stakes of the fallback | Trivial — no-op when globals absent at bind time |
-| Derive blur wl_region from CSS backdrop-filter layout region | Ties protocol to CSS authoring contract | Medium — requires tracking which nodes have backdrop-filter and computing their surface-local bounding rect |
-
-### Compositor Support Matrix
-
-| Compositor | `org_kde_kwin_blur` | `ext-background-effect-v1` |
-|------------|--------------------|-----------------------------|
-| KWin (KDE Plasma 5.12+) | YES — core KDE blur effect; works when blur is enabled in compositor settings | NO (protocol is newer than KWin implementations to date) |
-| Mutter (GNOME) | NO | NO — GNOME does not expose client-region blur |
-| sway | NO | NO |
-| Hyprland | YES — implements org_kde_kwin_blur for compatibility | PARTIAL — in active development |
-| cosmic-comp (COSMIC DE) | UNKNOWN | UNKNOWN |
-| River | NO | NO |
-| Wayfire | PARTIAL — requires blur plugin to be active | NO |
-
-Confidence: HIGH for KWin (core product feature with documented API). HIGH for sway/Mutter absence. MEDIUM for Hyprland (known org_kde_kwin_blur support; ext-background-effect status uncertain). LOW for COSMIC and Wayfire.
-
-### Graceful Degradation
-
-This is the most important behavioral constraint for blur:
-
-- If neither blur global is advertised at bind time: no blur is applied. Surfaces with `backdrop-filter: blur()` render with a flat background. The surface must remain functional and visually acceptable. Module authors should provide a fallback background-color token.
-- If the KDE blur global is present but the user has disabled the blur compositor effect in KWin settings: the blur region is submitted but the compositor silently ignores it. No error; surface composited without blur.
-- Blur region must be resubmitted on every surface resize and whenever the set of backdrop-filtered nodes changes geometry.
-- Never make blur a hard dependency of surface correctness. A shell that requires blur to look acceptable is a bad design.
-
-### Anti-Features
-
-| Anti-Feature | Why Avoid |
-|--------------|-----------|
-| CPU software blur fallback | Requires sampling the compositor framebuffer behind the surface, which is not available to Wayland clients. Any CPU "blur" would be fake — only the client's own pixels, not what's behind it |
-| Making `backdrop-filter: blur()` silently no-op with no diagnostics | Module authors should be able to discover via debug output whether blur is active on the current compositor |
-| Submitting blur region on every `wl_surface::commit` unconditionally | Only resubmit when the blur-covered geometry changes; the region is double-buffered and does not need to be re-sent when geometry is stable |
-| Separate Luau API surface for blur control | Blur is a CSS authoring concern; `backdrop-filter: blur(Npx)` in `.mesh` style blocks is the full author contract |
-| Hardcoding a blur radius in the protocol attachment | The radius implied by the CSS property should drive the protocol parameter where the protocol supports it |
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| Full browser-style DOM change-set diffing | Computes a minimal edit script (Myers diff) between the previous and new virtual tree; high implementation overhead for a non-browser toolkit where structural changes are rare | MESH uses stable `_mesh_key` IDs; a simple keyed reconciliation (match by ID, detect adds/removes) is sufficient |
+| Persistent immutable tree nodes (functional data structure) | Persistent vectors / structural sharing at the element level add memory overhead and complicate mutable style writeback | MESH `WidgetNode` tree is already mutable and stable-ID; retain the Taffy tree alongside it without changing WidgetNode ownership |
+| Per-pixel dirty tracking | Tracks which pixels changed at the pixel level; used by some GPU compositing engines but adds >10x memory overhead vs rect-based damage | The existing `DamageRect` + per-node paint dirty bits are the right granularity for a software renderer |
+| Command-level deduplication hashing | Hashing every `DisplayPaintCommand` to detect semantic equivalence between frames; already partially done via `DisplayListEntry::signature` and `primitive_signature()` | Extend the existing signature approach rather than adding a new hashing layer |
+| Separate rope crate dependency | Using `ropey` or `im` for the command store; these are text-oriented or general-purpose, not tuned for the display-list access pattern | The `Arc<[DisplayPaintCommand]>` pattern already in `RetainedPaintSubtree` is the right approach — it provides structural sharing without a new dependency |
+| Skia/Vello rendering integration | GPU backend is explicitly deferred per `PROJECT.md` key decisions | Keep the software painter path; profiling results from this milestone inform the GPU migration |
+| Full layout cache invalidation on any style property change | Forces relayout on opacity, color, shadow, or other paint-only properties that have no effect on box geometry | Use dirty-bit type to gate: `PAINT`-only dirty nodes call `set_style` but do NOT call `mark_dirty` for geometry (Taffy will not relayout them) |
+| Invalidating the retained TaffyTree when surface size changes | Surface resize is rare; the TaffyTree can be retained with a forced root-level `mark_dirty` and a single re-layout | Only fully rebuild the TaffyTree if the root node ID changes (indicating a component reload) |
 
 ---
 
-## Per-Region Damage
+## Feature Dependencies
 
-### What It Does and User-Visible Outcome
+```
+Retain TaffyTree per surface
+    └──enables──> In-place style mutation (set_style)
+    └──enables──> Structural mutation (add_child/remove/mark_dirty)
+    └──enables──> Intrinsic text cache retention
 
-On every surface commit, the Wayland client must report which rectangular regions of the buffer changed. The compositor uses this to avoid re-compositing unchanged regions — it can skip GPU texture uploads, skip scanout of unchanged display tiles on hardware overlays, and reduce memory bandwidth on tiled GPU architectures.
+In-place style mutation
+    └──requires──> Stable NodeId map (WidgetNode.id → TaffyNodeId)
+    └──requires──> MESH dirty-bit type to gate set_style vs mark_dirty correctly
 
-MESH currently calls `wl_surface::damage_buffer(0, 0, full_width, full_height)` — whole-surface damage — on every present. This is always correct but never optimal. The presentation layer already accepts a `DamageRect` parameter via `present_with_damage`, meaning the API shape is right; the gap is that the retained renderer unions all dirty paint regions into a single bounding rectangle before passing it upward, rather than preserving the list of individual dirty rects.
+Structural mutation
+    └──requires──> NodeId map diff (old map vs new WidgetNode tree)
+    └──requires──> TaffyTree::remove for orphaned nodes
 
-User-visible outcome: per-region damage is not directly visible. The benefit is reduced compositor GPU and memory bandwidth:
-- A shell panel where only a clock region updates every second damages a small rect, not the full surface
-- A notification that animates in from one edge damages only the growing notification area
-- A popover that is fully static between interaction events commits zero damage on frame-callback wakeups
+Arc-based span sharing (no copy for clean subtrees)
+    └──requires──> Span ownership contract documented
+    └──requires──> Damage queries work on referenced spans (not flat array positions)
 
-On compositors with hardware overlay support (KWin on AMD/Intel, Sway with DRM/KMS backend), accurate damage reduces scanout processing and can reduce idle power draw on battery-powered laptops.
+Per-stage budget pins
+    └──requires──> Retained layout implemented (so Layout stage reflects cache-hit cost)
+    └──requires──> Rope-style display list implemented (so RetainedDisplayListUpdate reflects span-reuse cost)
+```
 
-### Protocol Mechanics
+### Dependency Notes
 
-`wl_surface::damage_buffer(x, y, width, height)` is called once per damaged rectangle, before `wl_surface::commit`. Multiple calls accumulate additively for the upcoming commit. Coordinates are in buffer pixels (physical coordinates), not surface/logical coordinates.
-
-Rules:
-- Multiple `damage_buffer` calls before one commit mark the union of all those rects as damaged
-- Under-damaging (reporting less than actually changed) causes stale pixels — compositor may use a cached buffer region
-- Over-damaging (reporting more than changed) is always safe but wastes compositor bandwidth
-- The existing MESH code in `backend.rs` already calls `damage_buffer` with buffer coordinates — the upgrade is to call it multiple times with smaller rects instead of once with the full surface
-
-The `DamageRect` type in `mesh-core-render` is currently a single rectangle. For multi-rect damage: the type needs to become `Vec<DamageRect>` (or a `DamageSet`), and the retained renderer's dirty tracking needs to propagate individual per-node dirty rects rather than unioning them into a single bounding box before surfacing to the presentation layer.
-
-### Table Stakes
-
-Per-region damage is a **performance optimization**. It is table stakes for a production-quality retained renderer — any serious retained rendering pipeline tracks damage as a rect set — but is not user-visible on typical consumer hardware. The benefit is most pronounced on:
-- Low-power ARM hardware with limited memory buses
-- Compositors using hardware overlay planes (KWin on Intel/AMD, Sway with dmabuf backend)
-- Battery-powered laptops where framebuffer bandwidth contributes to idle power draw
-
-| Requirement | Classification | Complexity |
-|-------------|---------------|------------|
-| Track dirty paint regions as a rect set, not a single bounding box | Core pipeline improvement | Medium — `DamageRect` → `DamageSet` type; propagation through paint pipeline |
-| Pass rect set from renderer through presentation to `damage_buffer` calls | Plumbing | Low — presentation loop already calls `damage_buffer`; replace single call with a loop |
-| Conservative fallback: full-surface damage when rect set unavailable | Safety net | Trivial — current behavior preserved as fallback |
-| Cap rect set size (e.g., max 16 rects, merge adjacent/overlapping beyond that) | Performance guard | Low — prevents per-rect compositor overhead from exceeding savings |
-
-### Compositor Support Matrix
-
-`wl_surface::damage_buffer` is part of core Wayland (wl_surface version 4, available since 2016). Every compositor MESH targets supports it. There is no compatibility concern — this is not a protocol extension.
-
-| Compositor | `wl_surface::damage_buffer` | Uses damage for optimization |
-|------------|----------------------------|-----------------------------|
-| KWin | YES | YES — GPU texture update optimization |
-| Mutter | YES | YES — compositor damage tracking |
-| sway | YES | YES — wlroots DRM/KMS optimization |
-| Hyprland | YES | YES |
-| All others | YES | Varies by implementation |
-
-Confidence: HIGH — core Wayland protocol, universal support.
-
-### Anti-Features
-
-| Anti-Feature | Why Avoid |
-|--------------|-----------|
-| Using `wl_surface::damage` (surface coordinates) on scaled surfaces | Surface-coord damage is wrong at buffer scale > 1; always use `damage_buffer` in buffer coordinates |
-| Merging all dirty rects into a single bounding box before submission | Defeats the purpose of per-region damage when dirty areas are spatially separated (e.g., clock and network indicator both update simultaneously) |
-| Submitting zero damage with a buffer attach | Compositor may skip compositing entirely; any actual visual change requires at least one damage call |
-| Computing damage from pixel-level diff of two buffers | Per-frame pixel comparison is expensive and slow; damage must come from the retained tree's dirty markers, not pixel comparison |
-| Emitting more than ~16 rects per commit | Diminishing returns beyond ~16 rects; compositor per-rect overhead starts to exceed the savings; merge adjacent rects for dense dirty patterns |
+- **Retaining the TaffyTree requires retaining the NodeId map**: The `HashMap<NodeId, TaffyNodeId>` currently created per layout call must live alongside the `TaffyTree`. Both need to be stored on the surface render state.
+- **Structural mutation requires a diff of the NodeId map**: After building the new WidgetNode tree, nodes present in the old `NodeId→TaffyNodeId` map but absent from the new tree must be cleaned up via `TaffyTree::remove`. Nodes newly present in the WidgetNode tree must be created via `new_leaf_with_context` or `new_with_children`.
+- **Arc-based span sharing conflicts with the current flat array indexing**: `RetainedCommandSpan` stores `start/end` byte offsets into the flat `paint_commands: Arc<[DisplayPaintCommand]>` array. If child spans are referenced rather than copied, those offsets are no longer stable across frames. Either: (a) switch to a tree of `Arc` spans without a flat array, or (b) rebuild the flat array from the tree of spans as a final assembly step (maintaining the span index for damage queries). Option (b) preserves the existing damage-query contract with no caller changes.
+- **Budget pins depend on the stages they measure existing first**: Add `TaffyRetainedLayout` and `TaffyStructuralReconcile` sub-stages before pinning budgets.
 
 ---
 
-## Confidence Assessment
+## MVP Definition
 
-| Area | Confidence | Source |
-|------|------------|--------|
-| HiDPI protocol mechanics | HIGH | wayland.app protocol docs via context7 |
-| Integer scale compositor support | HIGH | Core Wayland protocol, universally supported |
-| Fractional scale compositor support matrix | MEDIUM | KDE/GNOME release notes; wlroots versions need on-target verification |
-| Blur protocol mechanics (KDE) | HIGH | wayland.app kde-blur protocol docs |
-| Blur protocol mechanics (ext-background-effect) | HIGH | wayland.app ext-background-effect-v1 docs |
-| wp_blur_v1 protocol name | MEDIUM-LOW | Name does not match any shipped freedesktop protocol; likely refers to ext-background-effect-v1 |
-| Blur compositor support matrix | MEDIUM (KDE), LOW (others) | KDE is well-documented; Hyprland/COSMIC status needs verification |
-| Per-region damage protocol mechanics | HIGH | Core Wayland protocol documentation |
-| Per-region damage compositor behavior | HIGH | Core protocol, no uncertainty |
-| MESH current damage/scale implementation state | HIGH | Direct codebase inspection |
+### This Milestone (v1.21 — Launch With)
+
+The minimum needed to deliver the milestone goals from `PROJECT.md`.
+
+- [ ] Retained `TaffyTree` and `NodeId` map stored per surface, surviving across layout passes — without this the milestone goal is not met
+- [ ] In-place style mutation (`set_style`) for style/paint-only dirty nodes — avoids rebuilding Taffy for common hover/focus/value changes
+- [ ] Structural reconciliation (add/remove/mark_dirty) for TREE_REBUILD-dirty nodes — handles list items appearing/disappearing
+- [ ] Orphaned-node cleanup via `TaffyTree::remove` — prevents memory growth
+- [ ] Arc-based span sharing: `PaintSubtreeBuilder::append_child` references child `Arc<[DisplayPaintCommand]>` instead of copying — the rope-style improvement
+- [ ] Final flat-array assembly from the span tree — preserves damage query contract for `select_paint_commands`
+- [ ] Per-stage budget profiling for canonical workloads (navigation-bar hover, audio-popover slider drag, backend update)
+
+### After Validation (v1.x)
+
+- [ ] Clean-subtree early-exit during structural reconciliation — trigger: profiling shows structural reconciliation dominating on large trees
+- [ ] `TaffyRetainedLayout` / `TaffyStructuralReconcile` as distinct `ProfilingStage` variants — trigger: debug tooling needs to distinguish cache-hit from structural-edit cost
+- [ ] Span reuse rate as a `DisplayListMetrics` field — trigger: investigation of frame-over-frame display list efficiency
+
+### Future Consideration (v2+)
+
+- [ ] GPU-backed paint commands using Skia or Vello — explicitly deferred per key decisions
+- [ ] Parallel layout across independent subtrees — no evidence this is needed at current tree sizes
+
+---
+
+## Feature Prioritization Matrix
+
+| Feature | User Value | Implementation Cost | Priority |
+|---------|------------|---------------------|----------|
+| Retain TaffyTree per surface | HIGH — eliminates per-frame full rebuild overhead | MEDIUM — requires restructuring layout engine ownership | P1 |
+| In-place style mutation for paint-only dirty nodes | HIGH — hover/focus is the most common interaction path | LOW — `set_style` exists; routing change only | P1 |
+| Structural reconciliation with cleanup | HIGH — prevents memory growth and enables list updates | MEDIUM — needs add/remove diff logic | P1 |
+| Arc span sharing (no-copy clean subtrees) | HIGH — eliminates the primary display list copy overhead | HIGH — requires changing `append_child` semantics and flat-array assembly | P1 |
+| Per-stage budget pins | MEDIUM — developer tooling only; no end-user impact | MEDIUM — workload design, threshold selection | P2 |
+| `TaffyRetainedLayout` profiling sub-stage | LOW — diagnostic granularity | LOW — enum addition | P2 |
+| Span reuse rate metric | LOW — debug metric | LOW — counter addition | P3 |
+| Intrinsic text cache retention | MEDIUM — avoids remeasuring unchanged text nodes on retained layout passes | LOW — move existing `IntrinsicLayoutCache` to surface state | P2 |
+
+---
+
+## How Reference Toolkits Handle These Problems
+
+### TaffyTree Retention (Taffy API)
+
+Taffy is designed for retained use. `TaffyTree<C>` carries `NodeId`-stable layout caches across frames. The correct call sequence after initial construction is:
+
+- Style change only: `tree.set_style(taffy_node, new_style)` — calls `mark_dirty` internally, does not rebuild tree structure
+- Child added: `tree.add_child(parent, new_leaf)` — calls `mark_dirty` on parent automatically
+- Child removed: `tree.remove_child(parent, child)` then optionally `tree.remove(child)` if the node is gone from the widget tree
+- Leaf with changed measurement context (text content changed): `tree.mark_dirty(leaf)` explicitly
+- Layout recompute: `tree.compute_layout_with_measure(root, available_space, measure_fn)` — only recomputes dirty subtrees; clean subtrees are cache hits
+
+Confidence: HIGH — verified via Context7 Taffy documentation.
+
+### Flutter Layer / Display List Model
+
+Flutter's `RenderObject` tree maintains a `Layer` tree alongside it. Clean subtrees retain their `Layer` references across frames. The `Layer` object holds an `EngineLayer` reference for GPU-side retention. `markNeedsPaint()` propagates up to the nearest `RepaintBoundary` ancestor, so only the dirty layer region is repainted. The `SceneBuilder` API accepts an `oldLayer` argument to enable GPU-side layer reuse.
+
+The MESH equivalent is: `RetainedPaintSubtree` acts like a Flutter `Layer`. A clean subtree's `Arc<[DisplayPaintCommand]>` is the MESH equivalent of a retained `EngineLayer`. The `_mesh_key` identity is the MESH equivalent of Flutter's `GlobalKey` / element identity.
+
+### Qt Quick Scene Graph
+
+Qt Quick's `QSGNode` tree is retained. `QQuickItem::updatePaintNode()` is called only on items that have `QQuickItem::update()` pending. Most `QSGNode` mutations (geometry, material) automatically call `markDirty()` with the appropriate flags (`DirtyGeometry`, `DirtyMaterial`, `DirtyNodeAdded`, `DirtyNodeRemoved`). The renderer traverses only dirty branches.
+
+The `DirtyNodeAdded` / `DirtyNodeRemoved` flags on `QSGNode` correspond to MESH's `TREE_REBUILD` dirty bit. Qt's approach is to mark nodes rather than diff a shadow tree — MESH already follows this with its per-node dirty bits.
+
+### Mozilla Firefox Retained Display Lists
+
+Firefox's Gecko retained display list works by building the display list only for changed subtrees and merging new segments into the retained list at the appropriate positions (identified by stable frame IDs similar to `_mesh_key`). The merge step replaces only the dirty segments, leaving clean segments in place. This is architecturally identical to the MESH `build_paint_subtree` reuse logic, with the difference that Firefox uses tree-position-indexed segments while MESH uses `NodeId`-keyed `RetainedPaintSubtree` entries.
+
+The Firefox approach does not use a rope data structure in the strict functional-persistence sense — it uses a mutable display list with in-place segment replacement, which is closer to the existing MESH `HashMap<NodeId, RetainedPaintSubtree>` approach. The "rope-style" framing in the MESH milestone context means sharing `Arc` slices between subtrees, not persistent vector semantics.
+
+---
+
+## Dirty-Flag Integration for Each Feature
+
+| Feature | Dirty Bit that Triggers It | What It Must NOT Do |
+|---------|---------------------------|---------------------|
+| In-place `set_style` on Taffy node | `PAINT` or `STYLE_ONLY` | Must NOT call `mark_dirty` for pure paint changes (color, opacity, shadow) that have no geometry effect |
+| In-place `set_style` + `mark_dirty` | `LAYOUT` | Must NOT rebuild Taffy tree structure; only updates style and propagates dirty up to ancestors |
+| Structural reconciliation (add/remove) | `TREE_REBUILD` | Must NOT leave orphaned `TaffyNodeId` entries in the map |
+| Arc span reuse | No dirty bit — clean subtree has no dirty bit set | Must NOT reuse a span if any node in the subtree has `PAINT`, `LAYOUT`, or `TEXT` dirty bit |
+| Full TaffyTree rebuild fallback | Root `TREE_REBUILD` with ID change (component reload) | Must still clean up the old `NodeId` map before discarding it |
+
+---
+
+## Profiling Granularity Required
+
+The milestone asks for "per-stage performance budget profiling for canonical shell workloads." The existing `ProfilingStage` enum already covers the necessary stages. What is missing is:
+
+1. **Budget thresholds per workload**: concrete numbers that define what "good" means for each canonical scenario. These numbers should be derived from measurement, not assumed. The milestone work is: measure current per-stage costs on canonical workloads, record them as baselines, then re-measure after retention improvements and confirm improvement.
+
+2. **Disambiguation within the `Layout` stage**: Currently `ProfilingStage::Layout` covers both TaffyTree construction and `compute_layout`. With retention, the construction cost disappears for cache-hit frames, making the two paths unequal. A sub-stage distinction helps future profiling.
+
+3. **Display list rebuild vs reuse framing**: `ProfilingStage::RetainedDisplayListUpdate` already exists. The metric that needs to be added is which fraction of subtrees hit the reuse path. This is `DisplayListMetrics::subtree_segments_reused` — already tracked. The budget work is to establish what the target reuse ratio should be under each canonical workload.
+
+**Canonical workloads to budget** (all already defined in existing benchmark scenarios):
+- Navigation-bar hover: expect Layout = cache hit (no geometry change), only PAINT dirty
+- Navigation-bar service update (audio backend emit): expect Layout = one or two LAYOUT-dirty nodes
+- Audio-popover slider drag: expect Layout = LAYOUT dirty on slider node chain only
+- Surface open (popover appears): expect TREE_REBUILD on the new popover subtree only
+- Backend-driven text update (clock tick): expect TEXT-dirty on the text leaf node only
+
+---
+
+## Sources
+
+- Taffy `TaffyTree` API — Context7 `/dioxuslabs/taffy` documentation (HIGH confidence)
+- MESH `crates/core/ui/elements/src/layout.rs` — current per-frame TaffyTree construction (direct codebase inspection)
+- MESH `crates/core/frontend/render/src/display_list.rs` — current `RetainedPaintSubtree`, `PaintSubtreeBuilder::append_child`, `RetainedCommandSpan` (direct codebase inspection)
+- MESH `crates/core/foundation/debug/src/lib.rs` — `ProfilingStage` enum (direct codebase inspection)
+- Flutter rendering architecture — [Inside Flutter](https://docs.flutter.dev/resources/inside-flutter), [Layer class Dart API](https://api.flutter.dev/flutter/rendering/Layer-class.html) (MEDIUM confidence — general architecture, not MESH-specific)
+- Qt Quick scene graph — [Qt Quick Scene Graph docs](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html), [QSGNode Class](https://doc.qt.io/qt-6/qsgnode.html) (HIGH confidence — official Qt docs)
+- Mozilla retained display lists — [Retained Display Lists Mozilla Gfx Blog](https://mozillagfx.wordpress.com/2018/01/09/retained-display-lists/) (MEDIUM confidence — 2018 article; approach aligns with MESH current design)
+
+---
+
+*Feature research for: MESH v1.21 Retained Layout & Display List*
+*Researched: 2026-06-18*

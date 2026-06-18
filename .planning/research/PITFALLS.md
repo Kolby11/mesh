@@ -1,116 +1,341 @@
-# Pitfalls Research: MESH v1.20 Compositor Integration
+# Pitfalls Research
 
-**Domain:** Adding Wayland compositor protocol integrations to an existing Rust shell framework
-**Researched:** 2026-06-10
-**Overall confidence:** HIGH — based on direct inspection of the MESH codebase, winit-wayland reference implementation, and protocol definitions in the cargo registry
-
----
-
-## Summary
-
-All three integrations share a common failure mode: they operate in a different coordinate space or unit than what the existing code already assumes. MESH's retained renderer, `PixelBuffer`, `DamageRect`, shell layout, and layer-shell surface sizes all currently live entirely in **logical pixels** with no scale factor in sight. Adding HiDPI, blur regions, and multi-rect damage requires careful boundary work to prevent silent corruption that only manifests on HiDPI screens, specific compositors, or after the first partial-damage frame.
-
-The most dangerous pitfall is scale factor amnesia during surface lifecycle events — configure, hide/remap, output-enter — where the existing code in `SurfaceEntry` and `CompositorHandler::scale_factor_changed` silently ignores the event. The current `scale_factor_changed` handler in `handlers.rs` is an empty no-op; every downstream assumption will be wrong the moment a scale event arrives and nothing stores it.
+**Domain:** Retrofitting retained Taffy layout tree and rope-style display list onto an existing incremental shell UI framework
+**Researched:** 2026-06-18
+**Confidence:** HIGH — grounded in actual MESH source code (layout.rs, display_list.rs, runtime_tree.rs, component.rs) plus verified Taffy 0.10.1 API behavior from Context7
 
 ---
 
-## HiDPI / Fractional Scale Pitfalls
+## Critical Pitfalls
 
-| Pitfall | Warning Sign | Prevention | Phase |
-|---------|-------------|------------|-------|
-| **Buffer allocated at logical size, rendered at logical size, but viewporter destination set to logical size** — net result is compositor upscaling the buffer (blurry) | UI looks blurry on HiDPI; pixel-perfect text disappears | `PixelBuffer::new(width * scale, height * scale)` for the buffer; `wp_viewport.set_destination(logical_width, logical_height)` for the compositor to downscale correctly | HiDPI implementation phase |
-| **Forgetting `wl_surface::set_buffer_scale` is wrong when viewporter is used** — calling both `set_buffer_scale` and `wp_viewport.set_destination` together is a protocol error that causes undefined compositor behavior | Compositor crash or garbled surface on some compositors; works on others | When `wp_fractional_scale_v1` is active, use only the viewporter path. Only call `set_buffer_scale` when the compositor does not advertise the fractional scale global (integer-scale fallback path). The winit-wayland reference code at `window/state.rs:1056` gates this explicitly | HiDPI implementation phase |
-| **scale_factor_changed in CompositorHandler is an empty no-op** — the current handler stores nothing; surfaces never learn the scale | No crash; UI silently renders at 1x even on a 2x display | Implement the handler to store the scale per surface in `SurfaceEntry` and trigger a repaint. Also wire `preferred_scale` from `wp_fractional_scale_v1::Event::PreferredScale` (denominator is 120, as in winit's `SCALE_DENOMINATOR`) into the same per-surface field | HiDPI implementation phase |
-| **Scale event arrives before the first configure** — the fractional scale preferred event is specified to arrive before the first configure; if the code processes configure before applying the stored scale, the first frame is rendered at 1x then immediately redrawn | One-frame 1x flash or wrongly-sized initial SHM buffer allocation | Store the pending scale in `SurfaceEntry` at global-bind time; apply it when `copy_into_shm_buffer` actually runs, not on configure | HiDPI implementation phase |
-| **DamageRect coordinates are in logical pixels but damage_buffer expects buffer pixels** — the current `attach_shm_buffer` calls `wl_surface.damage_buffer(damage.x, damage.y, damage.width, damage.height)` treating `DamageRect` as buffer-pixel coordinates. At scale 1.0 these are the same. At scale 1.5 or 2.0 the damage region undershoots by `scale` factor and the compositor leaves stale pixels outside the reported region | Stale pixel artifacts at surface edges after partial updates on HiDPI | Scale the `DamageRect` by the buffer scale factor before passing it to `damage_buffer`. Use `damage_buffer` (buffer pixels), not `damage` (logical pixels) — the current code already uses `damage_buffer` which is correct, but the coordinates fed into it must be in buffer pixels | HiDPI implementation phase |
-| **PixelBuffer stride mismatch after scale factor change** — if the buffer was previously created at logical size and the scale factor changes, `copy_into_shm_buffer` compares `ShmPoolConfig {width, height, stride}` to the stored config; a scale change with unchanged logical size will reuse the wrong-size pool | Garbled rendering after monitor hotplug or scale change | When scale changes, invalidate the `shm_pool_config` by resizing or reconstructing `SurfaceEntry::shm_buffers`. Treat scale factor change the same as size change for buffer pool purposes | HiDPI implementation phase |
-| **Fractional rounding produces a buffer 1 pixel too small** — computing `(logical_size * scale_numerator / 120).round()` vs `(logical_size * scale_numerator / 120).ceil()` at 150% on a 1px-wide surface can produce a buffer that is 1 pixel short of covering the viewporter destination | Single-pixel gap at surface edge with translucent compositor background bleeding through | Use `ceil` when computing buffer dimensions from fractional scale, not `round`. A 1px over-allocation is always safe; a 1px under-allocation leaves uninitialized compositor memory visible | HiDPI implementation phase |
-| **wp_fractional_scale_v1 and wp_viewporter are separate global binds** — both must be negotiated independently. Binding one but not the other leaves the surface broken without any error | Surface renders at 1x even after scale event, no protocol error | Bind both `WpFractionalScaleManagerV1` and `WpViewporter` as optional globals in `LayerShellBackend::new()`, paired; if either is unavailable fall back to integer `wl_output::scale` | HiDPI implementation phase |
-| **surface_enter/surface_leave handlers are empty** — when a surface moves to an output with a different scale, the `surface_enter` handler should update per-surface scale | Wrong scale after moving between monitors | Implement `surface_enter` and `surface_leave` to update `SurfaceEntry::scale` and trigger a repaint | HiDPI implementation phase |
+### Pitfall 1: TaffyTree::remove Does Not Recursively Remove Descendants
 
----
+**What goes wrong:**
+When a widget subtree is deleted from the MESH `WidgetNode` tree, the corresponding `TaffyNodeId`s for all descendant nodes must be removed from the retained `TaffyTree`. If you call `tree.remove(parent_taffy_id)`, Taffy removes the parent but **leaves all descendants as orphaned root nodes** that consume memory indefinitely. The `total_node_count()` keeps growing every frame a new subtree is inserted in place of an old one.
 
-## Compositor Blur Offload Pitfalls
+**Why it happens:**
+Taffy's documented behavior for `remove()` is: detach from parent, clear `parent` pointer of direct children, keep descendants in tree as orphans. Engineers coming from arena allocators expect "remove the subtree" semantics — Taffy does not provide this.
 
-| Pitfall | Warning Sign | Prevention | Phase |
-|---------|-------------|------------|-------|
-| **Blur region coordinates are in logical (surface) pixels, not buffer pixels** — `org_kde_kwin_blur` takes a `wl_region` and the region is in surface-local coordinates. At scale 2x, passing buffer-pixel coordinates makes the blur region cover only one quarter of the intended area | Blur appears in wrong position or covers wrong region on HiDPI | Always compute blur regions in logical pixels. If the blur region is derived from `DamageRect` or `PixelBuffer` coordinates that have been scaled up, divide back to logical before creating the `wl_region` | Blur implementation phase |
-| **Blur object must be committed after region changes** — `org_kde_kwin_blur::commit()` is a separate call. Without it, blur region changes are silently ignored by the compositor. The winit reference code calls `blur.commit()` immediately after creating the blur object but does not re-commit on region update | Blur region stuck at initial value despite `set_region` calls | Call `blur.commit()` after every `blur.set_region(...)` and after `blur.set_region(None)` (full-surface blur). The commit is separate from `wl_surface::commit` | Blur implementation phase |
-| **wp_blur_v1 does not exist in the wild** — as of 2025-2026, `wp_blur_v1` is a proposed protocol that no production compositor ships. KDE Plasma ships `org_kde_kwin_blur` only; GNOME has no blur protocol at all | Implementation targets `wp_blur_v1` exclusively and never activates on any real system | Treat `org_kde_kwin_blur` as the primary path and `wp_blur_v1` as an optional future extension. Bind both at startup as optional globals. If neither is available, fall back to CPU blur in the MESH renderer | Blur implementation phase |
-| **wayland-protocols-plasma is not yet a direct MESH dependency** — `org_kde_kwin_blur` lives in `wayland-protocols-plasma`, which is present in the cargo registry (0.3.12) but is not in any MESH Cargo.toml. Adding it is required before writing the binding | Build error with no other symptom | Add `wayland-protocols-plasma = { version = "0.3", features = ["client"] }` to `mesh-core-presentation/Cargo.toml` | Blur implementation phase |
-| **Blur region must be re-sent on every surface remap** — after `entry.hide()` detaches the buffer and later re-attaches it, the compositor treats it as a new surface configuration. Blur protocol state is not preserved across null-buffer commits on some compositors | Blur disappears after surface toggle (e.g. launcher open/close) | Store blur config per `SurfaceEntry`; re-apply the blur object and commit it as part of the present path after any remap, alongside the existing opaque region update in `update_opaque_region` | Blur implementation phase |
-| **Calling unset() without checking if blur was ever set** — `OrgKdeKwinBlurManager::unset(surface)` on a surface that never had blur set is a no-op on some compositors and a protocol error on others | Intermittent protocol error log; works on one compositor, fails on another | Only call `unset` if the surface currently has an active `OrgKdeKwinBlur` object; track this per `SurfaceEntry` | Blur implementation phase |
-| **CPU blur still runs when compositor blur is active** — if the MESH renderer's existing `backdrop-filter: blur(...)` CPU Skia path remains active while the compositor blur protocol is also wired, the client blurs its own pixels before sending them, and the compositor then blurs those pre-blurred pixels | Double-blurred, unusably soft appearance on KDE | Add a `compositor_blur_active` flag per surface; when it is set, the render path for `backdrop-filter: blur()` should skip the CPU Skia blur and render the region as transparent instead | Blur implementation phase |
+**How to avoid:**
+Before calling `tree.remove(taffy_id)`, walk the MESH `WidgetNode` subtree being deleted and collect all descendant `TaffyNodeId`s from the `widget_id → taffy_id` map. Call `tree.remove(taffy_id)` for each in **leaf-first, post-order** traversal so children are detached before parents. In the `node_id → taffy_id` bidirectional map, erase all entries for the removed subtree at the same time.
 
----
+```rust
+fn remove_taffy_subtree(
+    node: &WidgetNode,
+    taffy: &mut TaffyTree<NodeId>,
+    id_map: &mut HashMap<NodeId, TaffyNodeId>,
+) {
+    // Post-order: children first
+    for child in &node.children {
+        remove_taffy_subtree(child, taffy, id_map);
+    }
+    if let Some(taffy_id) = id_map.remove(&node.id) {
+        let _ = taffy.remove(taffy_id); // parent detachment is automatic
+    }
+}
+```
 
-## Per-Region Damage Pitfalls
+**Warning signs:**
+- `TaffyTree::total_node_count()` grows across frames even when the widget tree size is stable
+- Memory usage grows monotonically during widget-replacing operations (e.g., list rebuilds, tab switches)
+- Layout pass takes progressively longer due to accumulating ghost nodes
 
-| Pitfall | Warning Sign | Prevention | Phase |
-|---------|-------------|------------|-------|
-| **damage_buffer vs damage coordinate system confusion** — `wl_surface::damage` takes logical pixels; `wl_surface::damage_buffer` takes buffer pixels. MESH already correctly calls `damage_buffer` in `attach_shm_buffer`. If multi-rect damage is added and any rect is produced by a code path that uses logical coordinates, it will be wrong by the scale factor | Partial repaints miss damaged areas or mark too much on HiDPI | All `damage_buffer` calls must use buffer-space coordinates. Audit every site that constructs a `DamageRect` to confirm it is in buffer pixels before it reaches `attach_shm_buffer`. Add a type wrapper (`BufferDamageRect` vs `LogicalDamageRect`) to make the distinction compile-time-checked | Multi-rect damage phase |
-| **union_damage flattening defeats multi-rect** — the current `copy_into_shm_buffer` path calls `union_damage` on pending slots, collapsing multiple pending rects to one bounding box per buffer. Moving to multi-rect damage requires tracking a `Vec<DamageRect>` per slot, not a single `Option<DamageRect>` | Multi-rect damage API exists but intermediate pending damage is still a single bounding box, recovering only partial benefit | Replace `SurfaceShmBuffer::pending_damage: Option<DamageRect>` with `Vec<DamageRect>`. Union logic for pending slots must union the rect lists. The `copy_bgra_damage_to_canvas` copy path must iterate over the list of rects | Multi-rect damage phase |
-| **Sending too many damage rects degrades compositor performance** — `wl_surface::damage_buffer` is a stateful call and calling it N times per commit with N very small rects adds compositor overhead. On Weston and KWin, more than ~32 rects per commit starts to cost more than a single bounding rect | Performance regression on compositors with many small dirty regions | Cap multi-rect damage at a maximum count (e.g. 16–32 rects). If the retained display list produces more dirty rects than the cap, fall back to a single bounding-box damage call. Measure before and after | Multi-rect damage phase |
-| **Empty damage commit skips frame but compositor still holds the buffer** — if no damage is reported (zero damage rects), the existing code still calls `wl_surface.frame()` and `commit()`. Without a `damage_buffer` call, the compositor may not actually scan out the new buffer. Some compositors silently drop the commit; others present stale content | No visual update even though the buffer was committed | Always call `damage_buffer` at least once per commit with a non-empty rect. If the damage list is empty, skip the commit entirely rather than committing without damage | Multi-rect damage phase |
-| **Pending damage accumulation order matters for SHM buffer rotation** — the current 2-deep buffer pool (`SHM_BUFFER_POOL_DEPTH = 2`) unions damage across frames into `pending_damage` per slot to account for the fact that the previous-slot's buffer may be a frame behind. With `Vec<DamageRect>` pending damage this still works, but the union must be per-rect-list, not per-single-rect | After switching to Vec damage, some rects in the second slot are not fully refreshed, causing single-pixel flickering on partial-damage frames | When converting `Option<DamageRect>` accumulation to `Vec<DamageRect>`, keep the union-across-slots logic: for each slot, append the new frame's rects to its existing pending list rather than replacing it. Deduplicate or merge overlapping rects before copying | Multi-rect damage phase |
-| **Damage tracking at display-list level is per-entry, but painting at surface level needs buffer-space coords** — the `DisplayList::compute_damage` result in `display_list.rs` returns a single `DamageRect` in layout space; the entries individually store `bounds: DamageRect` also in layout space. If scale factor is >1, these must be converted to buffer pixels before being reported as damage | Damage region is correct at 1x, wrong at 2x — undercovers on HiDPI, leaving stale pixels | When extracting multi-rect damage from `DisplayList` entries, apply the surface scale factor before creating the `Vec<DamageRect>` passed to `attach_shm_buffer`. This conversion must happen at the shell/presentation boundary, not inside the display list | Multi-rect damage phase |
+**Phase to address:** Retained TaffyTree phase (first phase of v1.21)
 
 ---
 
-## Integration Pitfalls (Cross-Cutting)
+### Pitfall 2: Style-Only Dirty Path Must Still Call mark_dirty Before compute_layout
 
-### Single source of truth for scale factor
+**What goes wrong:**
+MESH's `STYLE_ONLY` dirty path (currently `ComponentDirtyFlags::STYLE | PAINT` without `LAYOUT`) correctly skips layout recomputation for pure color/opacity/font changes that don't affect geometry. When the retained `TaffyTree` is introduced, the old behavior of rebuilding the tree from scratch each frame meant stale Taffy state was never a problem. With a retained tree, if a `STYLE` change affects a property that Taffy uses (flexbox gap, padding, border-width, font-size driving text measurement) and `set_style()` or `mark_dirty()` is not called, `compute_layout` returns cached layout data that no longer reflects the node's current style.
 
-The existing `State` struct holds no per-surface scale. `CompositorHandler::scale_factor_changed` is empty, `OutputHandler::update_output` is empty, `surface_enter` is empty. All three integrations need scale to be authoritative. Whoever adds scale first (HiDPI phase) must put it in `SurfaceEntry` — not in a separate map, not as a global field on `State` (multiple outputs can have different scales). All later work (damage rects, blur regions) must read from `SurfaceEntry::scale_factor: f64`.
+**Why it happens:**
+The style-property-to-layout-impact mapping is not bijective. Engineers classify `padding` as a "style" property for paint purposes (changes box fill) but it is also a layout input. Without calling `tree.set_style(taffy_id, updated_style)` the dirty bit says "no layout needed" but Taffy's internal cache disagrees with what the current `ComputedStyle` now says.
 
-**Warning sign:** Any field called `global_scale` or `state.scale` that is not per-surface.
+**How to avoid:**
+When applying a style update to the retained tree, always call `tree.set_style(taffy_id, taffy_style_for_node(node, &mut report))` regardless of whether MESH considers it layout-affecting. `set_style` calls `mark_dirty` internally (HIGH confidence from Context7 docs). Taffy's internal dirty propagation to ancestors means only affected subtrees are re-solved on the next `compute_layout`. The cost of `set_style` on a clean tree is negligible compared to a full rebuild.
 
-**Phase:** Must be established in the HiDPI phase; blur and multi-rect damage phases must not re-derive scale independently.
+Alternatively, create an explicit Taffy-affecting property set and gate the `set_style` call on membership in that set:
+```rust
+fn taffy_style_affecting(old: &ComputedStyle, new: &ComputedStyle) -> bool {
+    old.width != new.width
+        || old.height != new.height
+        || old.padding != new.padding
+        || old.margin != new.margin
+        || old.gap != new.gap
+        || old.flex_grow != new.flex_grow
+        || old.font_size != new.font_size  // text measurement changes
+        || old.display != new.display
+        || old.position != new.position
+        || old.flex_direction != new.flex_direction
+}
+```
 
-### Protocol availability and graceful degradation
+**Warning signs:**
+- Visual geometry mismatches after animations that change `padding` or `font-size`
+- A component renders correctly on first load, then layout drifts after a CSS animation completes
+- `STYLE`-flagged dirty cycles produce correct paint but wrong hit-testing (hit boxes lag behind visual)
+- `tree.dirty(taffy_id)` returns `false` but the rendered layout visually disagrees with the current style
 
-None of the three protocols is universally available. `wp_fractional_scale_v1` requires the explicit Wayland global; `org_kde_kwin_blur` is KDE-only; `wp_viewporter` is near-universal but still optional. The existing pattern in `LayerShellBackend::new()` for optional globals (`ActivationState::bind(&globals, &qh).ok()`) is correct — use `Option<Manager>` for all three new globals and silently skip protocol work when they are absent.
+**Phase to address:** Retained TaffyTree phase — define the style-to-Taffy-impact mapping before wiring the retained path.
 
-**Warning sign:** Unwrapping a newly bound global instead of using `.ok()` or checking `Option`.
+---
 
-**Phase:** All phases.
+### Pitfall 3: Rope Subtree Span Invalidation After z-index Reorder
 
-### wl_surface::commit applies all pending state atomically
+**What goes wrong:**
+The existing `RetainedDisplayList` stores `RetainedPaintSubtree` per node keyed by `NodeId`. When z-index changes cause `compute_child_order` to produce a different paint order, the existing `child_order: Option<Arc<[usize]>>` inside each `RetainedPaintSubtree` becomes stale. A rope-style extension that references child spans by offset assumes sibling order is stable — a z-index change invalidates that assumption for every ancestor of the reordered node, not just the reordered node itself.
 
-`wl_surface::commit` applies pending state for ALL double-buffered properties in one atomic step: buffer, damage, input region, opaque region, blur region, viewport destination. The existing `attach_shm_buffer` commits in order: `damage_buffer`, `buffer.attach_to`, `frame`, `commit`. Adding blur or viewporter calls must happen before the `commit()` call on the same `wl_surface`, not after. Setting the viewporter destination or blur region after `commit()` queues it for the next frame, causing a one-frame lag.
+**Why it happens:**
+z-index reordering is a paint-only change: no geometry changes, so `LAYOUT` is not dirty. MESH's `PAINT` dirty flag fires but affects only the local subtree. A rope segment for an ancestor node stores its children's command spans by their previous paint order; after reorder, those offset ranges map to the wrong commands.
 
-**Warning sign:** `viewport.set_destination(...)` or `blur.commit()` placed after `layer_surface.commit()` in `attach_shm_buffer`.
+**How to avoid:**
+When any node in a subtree has a dirty `PAINT` flag and the previous and current `child_order` arrays differ, mark the entire parent chain up to the surface root as needing span recomputation. In practice: compare `old_child_order` to `new_child_order` during the dirty-node walk and if they differ, add the parent to the dirty set. This is already partially handled by `collect_dirty_ancestor_ids` — the gap is that the current code only walks ancestors of `dirty_node_ids` when deciding to rebuild, but z-index changes must also trigger ancestor span recomputation even when the z-reordered node's content is clean.
 
-**Phase:** All phases; reviewed during each new protocol integration.
+Alternatively, store the `child_order` as part of the rope segment's identity hash — any order change causes the segment to be rebuilt rather than reused.
 
-### SHM buffer pool size vs HiDPI memory
+**Warning signs:**
+- After a z-index CSS animation, sibling nodes paint in the wrong stacking order without a full surface redraw
+- `entries_reused` metric stays high while visual stacking is wrong
+- The discrepancy only appears for a frame or two then self-corrects when a broader dirty fallback fires
 
-At scale 2x, a 1920x32 panel surface becomes a 3840x64 buffer: 983 040 bytes instead of 245 760. The initial `SlotPool::new(256 * 256 * 4, &shm)` pool (262 144 bytes) is smaller than one 2x-scaled frame for a full-width panel. The pool grows on demand but fails silently if the initial size is below one buffer.
+**Phase to address:** Rope display list phase — before wiring span-level reuse, audit the child_order invalidation path.
 
-**Warning sign:** `BufferAlloc` error on first present at 2x scale.
+---
 
-**Phase:** HiDPI implementation phase — increase or make the initial pool size scale-aware, or rely on `SlotPool`'s on-demand growth and verify no allocation error path returns early silently.
+### Pitfall 4: Orphaned TaffyNodeId After TREE_REBUILD Causes Silent Lookup Failures
 
-### configure → scale ordering on surface creation
+**What goes wrong:**
+When `ComponentDirtyFlags::TREE_REBUILD` fires (full Luau re-evaluation), the `WidgetNode` tree is rebuilt from scratch with new `NodeId` values (monotonically increasing via `NEXT_NODE_ID`). If the retained `TaffyTree` keeps the old `TaffyNodeId` entries and a new `widget_id → taffy_id` map is computed by diffing, there is a race window where the old `taffy_id` is still in the `TaffyTree` but the MESH `WidgetNode` with the same logical identity has a different `NodeId`. The diff will correctly create new nodes for new IDs but any lookup by `_mesh_key` (the stable author key) that is used to match old TaffyNodeIds to new WidgetNode IDs must tolerate the transition — stale entries in the bidirectional map will silently return wrong geometry.
 
-The layer-shell configure event arrives asynchronously. The current `wait_for_surface_configure` spins up to 10 roundtrips. With fractional scale, the `preferred_scale` event from `wp_fractional_scale_v1` should arrive before the configure (per protocol spec), but this is compositor-implementation-defined. Treat scale as mutable after configure: always read `SurfaceEntry::scale_factor` at render time, not at configure time.
+**Why it happens:**
+MESH uses `NodeId` (a monotonically incrementing u64) for identity within a single frame's tree, and uses `_mesh_key` (an author-provided string) as the stable cross-frame identity for retained rendering. The retained tree's `node_id → taffy_id` map is keyed by the ephemeral `NodeId`, not the stable `_mesh_key`. After TREE_REBUILD, old `NodeId` values are not reused, so the old map entries are dead weight. If the transition code path that handles TREE_REBUILD does not flush the old map and rebuild it from `_mesh_key`-based matching, lookups silently hit stale entries for nodes whose `_mesh_key` survived but whose `NodeId` changed.
 
-**Warning sign:** Scale factor is captured once in the configure handler and never updated.
+**How to avoid:**
+Use `_mesh_key` as the primary key for the retained Taffy map, not `NodeId`. Store `HashMap<String, TaffyNodeId>` keyed on `_mesh_key`. For nodes without a `_mesh_key`, fall back to structural position (parent key + child index). On TREE_REBUILD, diff the old and new `_mesh_key` sets: create new TaffyNodeIds for new keys, call `remove_taffy_subtree` for dropped keys, update style for surviving keys. This eliminates the stale-NodeId problem at the cost of slightly more complex diffing.
 
-**Phase:** HiDPI implementation phase.
+```rust
+// Key type: stable author identity, not ephemeral NodeId
+type TaffyMap = HashMap<MeshKey, TaffyNodeId>;
 
-### hide() clears configured state — all protocol objects must survive it
+fn mesh_key(node: &WidgetNode, parent_key: &str, child_index: usize) -> MeshKey {
+    node.attributes
+        .get("_mesh_key")
+        .map(|k| MeshKey::Author(k.clone()))
+        .unwrap_or_else(|| MeshKey::Positional(format!("{parent_key}/{child_index}")))
+}
+```
 
-`SurfaceEntry::hide()` calls `wl_surface.attach(None, 0, 0)` and sets `configured = false`. The blur `OrgKdeKwinBlur` object and the viewporter `WpViewport` object are tied to the `wl_surface` lifetime, not the buffer lifetime. They survive `hide()` and must not be destroyed on hide. They should only be destroyed when the `SurfaceEntry` itself is dropped.
+**Warning signs:**
+- Layout is correct immediately after a full page load, then drifts after any Luau script update that triggers TREE_REBUILD
+- `write_taffy_layout` writes geometry to `WidgetNode` but values are from the previous tree's nodes
+- Nodes with author-assigned `_mesh_key` display correct layout while adjacent nodes without keys show wrong sizes
 
-**Warning sign:** `blur.release()` or `viewport.destroy()` called inside `hide()`.
+**Phase to address:** Retained TaffyTree phase — the key scheme must be designed before wiring any retained path.
 
-**Phase:** Both blur and HiDPI phases.
+---
 
-### No wp_blur_v1 crate exists yet
+### Pitfall 5: Rope Segment Reuse Across Scroll Position Changes Produces Stale Clip Offsets
 
-The v1.20 milestone spec mentions `wp_blur_v1` alongside `org_kde_kwin_blur_v1`. As of the available registry contents, `wp_blur_v1` is not in `wayland-protocols` 0.32.12 or any available crate. `wayland-protocols-plasma` 0.3.12 provides `org_kde_kwin_blur`. Do not block the blur feature on `wp_blur_v1` availability — ship the KDE path, add a feature flag for `wp_blur_v1` when it lands.
+**What goes wrong:**
+`RetainedPaintSubtree` stores `DisplayPaintCommand` with absolute screen coordinates including scroll offsets baked into `layout.x` / `layout.y`. When a scrollable container's scroll position changes, every descendant's absolute position changes — but if the scroll container's subtree is considered "clean" (no style or layout dirty bits), the rope segment is reused verbatim. The display commands then paint children at the wrong positions.
 
-**Warning sign:** Implementation phase blocked waiting for `wp_blur_v1` crate.
+**Why it happens:**
+Scroll offset is stored as `_mesh_scroll_x` / `_mesh_scroll_y` attributes on the container node. These are runtime attributes, not CSS properties, so they do not flow through the `ComputedStyle` dirty mechanism. When scroll position updates, the attribute changes but does not currently fire `LAYOUT` dirty — only the paint traversal knows to re-apply the offset. With a retained paint subtree keyed on `NodeId` that uses the previous frame's baked coordinates, the scroll update is invisible to the reuse decision.
 
-**Phase:** Blur implementation phase — acknowledge this scope difference at phase start.
+**How to avoid:**
+Scroll offset changes must dirty the entire subtree of the scrolling container at the display-list level. Add a scroll-offset change detector in the retained tree update path: before deciding to reuse a subtree, compare the current `_mesh_scroll_x` / `_mesh_scroll_y` of the node against the previous frame's values. If they differ, force-rebuild the subtree and add the scroll container to the dirty ancestors set. Alternatively, do not bake scroll offsets into `DisplayPaintCommand.node.layout` at storage time — instead store layout-relative coordinates and apply the scroll transform during the paint traversal (not during command storage). This is the architecturally cleaner approach and eliminates the scroll-offset staleness class entirely at the cost of a slightly more complex painter path.
+
+**Warning signs:**
+- Scrollable lists repaint with children stuck at their pre-scroll positions for one frame
+- `entries_reused` is high in the metrics during active scroll drag
+- The issue only appears at 60fps under scroll (fast dirty resolution masks it at lower frame rates)
+
+**Phase to address:** Rope display list phase — design coordinate storage (absolute vs. relative) as the first architectural decision.
+
+---
+
+### Pitfall 6: Profiling Overhead Inserted Into the Hot Layout/Paint Path
+
+**What goes wrong:**
+Per-stage budget profiling requires timestamps at the start and end of each `ProfilingStage`. If the timestamp calls are not properly gated behind the existing `profiling_enabled` flag, or if the timer infrastructure allocates on every call, the profiling code adds measurable overhead to the very paths being measured. A common mistake is inserting `std::time::Instant::now()` unconditionally in the layout loop and then checking the flag before recording — `Instant::now()` on Linux is a syscall that takes ~20ns each call; at 200 nodes per frame that is 4µs of overhead per frame even when profiling is off.
+
+**Why it happens:**
+Budget profiling is added after the feature works, as a second pass. Engineers instrument every stage entry point for completeness but forget to gate the timestamp acquisition itself, only gating the aggregation.
+
+**How to avoid:**
+Wrap both the `Instant::now()` call and the delta recording behind the flag:
+
+```rust
+macro_rules! stage_start {
+    ($debug:expr, $stage:expr) => {
+        if $debug.profiling_enabled { Some(std::time::Instant::now()) } else { None }
+    };
+}
+macro_rules! stage_end {
+    ($debug:expr, $stage:expr, $start:expr) => {
+        if let Some(t) = $start {
+            $debug.record_stage_time($stage, t.elapsed());
+        }
+    };
+}
+```
+
+For the layout loop specifically, check the flag once before entering the loop and use a `Duration::ZERO` accumulator path when off. Do not add per-node profiling unless a node-level breakdown is explicitly needed — per-node timestamps in a 200-node tree would add 400 `Instant::now()` calls per frame.
+
+**Warning signs:**
+- Baseline frame time increases after adding profiling even when the debug overlay is closed
+- Profiling overhead itself appears as noise in the `Layout` stage timing
+- Flamegraph shows `clock_gettime` syscalls proportional to tree size rather than proportional to dirty node count
+
+**Phase to address:** Per-stage budget profiling phase — design the gating pattern before instrumenting.
+
+---
+
+### Pitfall 7: Rope Dirty Fallback Threshold Misaligned With Existing >50% Threshold
+
+**What goes wrong:**
+`RetainedDisplayList::local_reuse_decision` already has a `dirty_node_ids.len() > broad_limit` fallback that forces a full rebuild when more than ~50% of subtrees are dirty. The rope-style extension will add a second threshold decision at the command-span level. If the two thresholds are tuned independently, they can produce inconsistent behavior: the display list decides to do a partial update but the span-level rope decides to fall back to full, or vice versa. This causes metrics reporting that misrepresents what actually happened.
+
+**Why it happens:**
+Two independent fallback decisions for the same dirty set. The display list's decision is made in `local_reuse_decision` before `build_paint_subtree`; the rope's span-level decision would be made during span assembly. They share the same `dirty_node_ids` input but apply different thresholds and reason about different granularities.
+
+**How to avoid:**
+Make the rope span-level fallback read the same decision that `local_reuse_decision` already computed rather than computing a second threshold. Thread the `LocalReuseDecision` enum through to span assembly so the span path always agrees with the subtree path. If the display list decided `FallbackFull`, spans must also use full rebuild. The fallback threshold is a single policy decision, not two.
+
+**Warning signs:**
+- `full_fallback_count` and `broad_dirty_fallback_count` are both zero but span reuse is also zero — indicates an untracked third fallback path
+- The `filtered_commands_skipped` metric diverges from what the dirty summary predicts
+- Debug inspector shows "partial update" in display list metrics but "full surface damage" in paint metrics
+
+**Phase to address:** Rope display list phase — unify the fallback decision point before both layers exist separately.
+
+---
+
+### Pitfall 8: TaffyTree Retained Across Surface Resize Serves Stale Available Space
+
+**What goes wrong:**
+The retained `TaffyTree` is keyed per surface. When a surface resizes (anchor changes, user drags a panel, `SurfaceSizePolicy::ContentMeasured` adjusts size), the available space passed to `compute_layout_with_measure` changes but the retained Taffy tree's internal layout cache was computed for the old available space. Taffy's `mark_dirty` propagates from a changed node upward to ancestors but it does not propagate downward to children. A surface resize requires re-solving the root with the new available space — but if no node is marked dirty, Taffy returns cached results computed for the old dimensions.
+
+**Why it happens:**
+`compute_layout(root, new_available_space)` in Taffy will recompute if the root is dirty or if `available_space` changes relative to the stored cache. The key is whether Taffy internally treats an `available_space` change as requiring a recompute. Per Taffy's behavior, it does not automatically re-dirty the root when only the available space changes — the root must be explicitly marked dirty or the whole tree rebuilt. Engineers relying on Taffy to "notice" the new available space are mistaken.
+
+**How to avoid:**
+When the surface's logical size changes (detected by comparing current `(width, height)` to the previously stored dimensions), call `tree.mark_dirty(root_taffy_id)` explicitly before `compute_layout_with_measure`. Alternatively, compare the `available_space` argument to the previous frame's value and if it differs, force a root mark_dirty regardless of other dirty bits. This is cheap — mark_dirty on the root propagates in O(1).
+
+```rust
+if self.last_available_width != available_width
+    || self.last_available_height != available_height
+{
+    if let Some(root_taffy_id) = self.taffy_root {
+        let _ = self.taffy.mark_dirty(root_taffy_id);
+    }
+    self.last_available_width = available_width;
+    self.last_available_height = available_height;
+}
+```
+
+**Warning signs:**
+- After a surface anchor changes or window is resized, widgets maintain their old sizes for one or more frames
+- Nodes with `width: 100%` or `flex-grow: 1` show incorrect sizes after resize
+- `ContentMeasured` surfaces grow/shrink but children don't reflow to the new constraint
+
+**Phase to address:** Retained TaffyTree phase — add available-space change detection as a required invariant check.
+
+---
+
+## Technical Debt Patterns
+
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Keep `widget_id → taffy_id` as `HashMap<NodeId, TaffyNodeId>` (ephemeral key) instead of `_mesh_key` | Simpler initial implementation | TREE_REBUILD silently serves stale layout; requires full map flush on every script invalidation | Only if TREE_REBUILD always fully rebuilds the Taffy tree too (negating retention benefit) |
+| Skip `remove_taffy_subtree` on TREE_REBUILD (just call `TaffyTree::new()`) | Avoids subtree-walk logic | Memory-safe but loses all retention benefit for full rebuilds; the retained tree helps nothing on the most common invalidation path | Acceptable as a v1 starting point if TREE_REBUILD fallback is explicitly flagged as a perf gap to close |
+| Bake absolute scroll-offset coordinates into rope segments | Simpler command storage | Scroll changes cause full subtree invalidation defeating rope reuse for any scrollable content | Never for scrollable content; acceptable if MESH surfaces never scroll (they currently do) |
+| Always call `set_style` on every node every frame (no dirty check) | Eliminates stale-style bug class | Taffy's `set_style` calls `mark_dirty` which propagates to all ancestors; at 200 nodes this is 200 ancestor walks per frame | Only during initial integration; remove before shipping |
+| Single global profiling timestamp per frame for each stage | Zero per-node overhead | Cannot attribute budget overruns to specific subtrees or node types | Acceptable for milestone 1 budget profiling; per-subtree later |
+
+---
+
+## Integration Gotchas
+
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| `TaffyTree::remove` | Calling remove on a subtree root and assuming descendants are cleaned up | Walk the MESH subtree post-order, remove leaf TaffyNodeIds first, then parents |
+| `mark_dirty` propagation | Assuming dirty propagates downward to children | `mark_dirty` propagates upward to ancestors only; children must be marked separately if their constraints change |
+| `set_style` on style-only changes | Skipping `set_style` for non-geometric style properties | Call `set_style` any time `ComputedStyle` changes — Taffy determines internally if it affects layout |
+| `_mesh_scroll_x` / `_mesh_scroll_y` attributes | Treating scroll as a style change that flows through ComputedStyle dirty | Scroll position changes bypass the ComputedStyle path; must be tracked separately for retained coordinate validity |
+| Rope segment `child_order` | Treating z-index paint order as paint-only, not span-structure-affecting | z-index reorder invalidates all ancestor span offsets; propagate dirty to ancestors on order change |
+| `SCRIPT_NARROW` path | Assuming narrow script updates are always geometry-preserving | `SCRIPT_NARROW` can change text content, which changes text measurement, which changes layout geometry — must re-run Taffy for affected text nodes |
+
+---
+
+## Performance Traps
+
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| Unconditional `set_style` on every node per frame | Layout stage time is O(node count) even when nothing changed | Gate `set_style` calls on style diff; only call when `taffy_style_affecting()` returns true | Immediately with 100+ node trees |
+| `Instant::now()` outside profiling gate | Baseline frame time increases by 2-5µs per 100 nodes even with profiling off | Macro-gate both the `Instant::now()` acquisition and the delta record | At any tree size in production |
+| Rope segment clones for ancestor traversal | GC pressure from `Arc<[DisplayPaintCommand]>` clone-on-read during dirty ancestor walk | Use span index ranges into a flat command buffer instead of per-node `Arc` clones | At tree depth > 8 or > 50 dirty nodes |
+| Full `TaffyTree::new()` on every TREE_REBUILD | Retaining the tree is never cheaper than rebuilding for the most common invalidation path | Use `_mesh_key`-based diffing so TREE_REBUILD preserves stable subtrees | Immediately — TREE_REBUILD fires on every script event without this |
+
+---
+
+## "Looks Done But Isn't" Checklist
+
+- [ ] **Retained TaffyTree:** Verify `TaffyTree::total_node_count()` is stable across 1000 frames of a list that inserts/removes items — if it grows, `remove_taffy_subtree` is incomplete
+- [ ] **Stale style:** Verify that a CSS animation changing `padding` over 500ms produces correctly reflowing siblings at every keyframe, not just the first and last
+- [ ] **Scroll rope:** Verify that fast-scrolling a list (> 5 items/frame) produces zero stale-position paint artifacts
+- [ ] **Surface resize:** Verify that switching a surface from `anchor: top` to `anchor: bottom` (which changes available height) immediately produces correct child geometry, not one-frame-stale geometry
+- [ ] **TREE_REBUILD identity:** Verify that a `_mesh_key`-tagged node that survives a TREE_REBUILD cycle does not cause Taffy to run a full layout solve for its unchanged subtree
+- [ ] **Profiling overhead:** Verify that enabling then disabling profiling does not leave any unconditional timing code active; measure baseline frame time with and without the profiling feature compiled in
+- [ ] **z-index reorder:** Verify that animating `z-index` between two siblings produces correct stacking every frame, not only on the first and last frame of the animation
+
+---
+
+## Recovery Strategies
+
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| Orphaned TaffyNodeId memory leak | MEDIUM | Add `remove_taffy_subtree` post-order walk; audit all call sites that remove MESH nodes to ensure they go through the walk |
+| Stale style → wrong layout geometry | MEDIUM | Switch to unconditional `set_style` on every style update as a safe fallback; optimize with diff later |
+| Stale scroll coordinates in rope | HIGH | Switch coordinate storage to layout-relative (remove scroll offset from stored commands); requires touching all command readers |
+| TREE_REBUILD key confusion (NodeId vs _mesh_key) | HIGH | Refactor `TaffyMap` key type before any retained behavior is production-wired; cannot be patched incrementally |
+| Misaligned fallback thresholds | LOW | Thread `LocalReuseDecision` through to span assembly; single-site fix |
+| Profiling overhead in production | LOW | Wrap `Instant::now()` in gate macro; search for unchecked `Instant::now()` calls in the layout/paint path |
+| Surface resize serving stale available space | LOW | Add available-space change detector before `compute_layout_with_measure`; one-site fix |
+
+---
+
+## Pitfall-to-Phase Mapping
+
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| TaffyTree::remove not recursive | Retained TaffyTree phase | `total_node_count()` stable over 1000-frame list insert/remove stress test |
+| Style-only dirty misses mark_dirty | Retained TaffyTree phase | CSS padding animation regression test at all keyframes |
+| z-index reorder invalidates ancestor spans | Rope display list phase | z-index animation correctness test every frame, not just first/last |
+| Orphaned TaffyNodeId after TREE_REBUILD | Retained TaffyTree phase | TREE_REBUILD under script event stress, verify no memory growth |
+| Stale scroll coordinates in rope | Rope display list phase | Scroll stress test: 100 fast-scroll frames, zero stale-position artifacts |
+| Profiling overhead off-path | Per-stage budget profiling phase | Frame time regression test: baseline must not change with profiling compiled in but disabled |
+| Rope fallback threshold mismatch | Rope display list phase | Verify `full_fallback_count + subtree_segments_reused + subtree_segments_rebuilt` accounts for 100% of nodes each frame |
+| Surface resize stale available space | Retained TaffyTree phase | Anchor-switch test: immediate correct geometry on frame after resize |
+| _mesh_key vs NodeId map key confusion | Retained TaffyTree phase (design step 1) | TREE_REBUILD cycle preserves stable-key nodes without full Taffy re-solve |
+
+---
+
+## Sources
+
+- Taffy 0.10.1 API — `TaffyTree::remove` orphans children: verified via Context7 `/dioxuslabs/taffy`; HIGH confidence
+- Taffy 0.10.1 API — `TaffyTree::set_style` automatically calls `mark_dirty`: verified via Context7 `/dioxuslabs/taffy`; HIGH confidence
+- Taffy 0.10.1 API — `mark_dirty` propagates upward to ancestors only, not downward: verified via Context7 `/dioxuslabs/taffy`; HIGH confidence
+- MESH `ComponentDirtyFlags` and `TREE_REBUILD` definition: `crates/core/shell/src/shell/component.rs` lines 67-125
+- MESH retained display list span/subtree structure: `crates/core/frontend/render/src/display_list.rs`
+- MESH `build_taffy_tree` full rebuild per frame: `crates/core/ui/elements/src/layout.rs` lines 206-272
+- MESH scroll offset as runtime attributes `_mesh_scroll_x` / `_mesh_scroll_y`: `display_list.rs` attribute reads in `collect_display_entries` and `build_paint_subtree`
+- MESH `RetainedNodeDirtyFlags` and `RetainedTreeDirtySummary`: `crates/core/shell/src/shell/component/runtime_tree.rs`
+- MESH `ProfilingStage` enum: `crates/core/foundation/debug/src/lib.rs` lines 357-396
+- MESH `local_reuse_decision` 50% broad-dirty threshold: `display_list.rs` line 1219
+- SlotMap generational index stale-key detection: [Generational indices guide](https://lucassardois.medium.com/generational-indices-guide-8e3c5f7fd594)
+
+---
+*Pitfalls research for: Adding retained Taffy layout tree and rope-style display list to MESH v1.21*
+*Researched: 2026-06-18*
