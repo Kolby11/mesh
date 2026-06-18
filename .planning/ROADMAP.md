@@ -38,7 +38,7 @@
 
 - [x] **Phase 101: Per-Region Damage** — Thread `Vec<DamageRect>` from the retained renderer through to `wl_surface::damage_buffer` calls, replacing the single unioned rect commit (completed 2026-06-10)
 - [x] **Phase 102: HiDPI / Fractional Scale** — Wire `wl_output::scale` and `wp_fractional_scale_v1` as authoritative scale sources; allocate `PixelBuffer` at physical pixels; pair with `wp_viewporter` for non-integer ratios (completed 2026-06-10)
-- [ ] **Phase 103: Compositor Blur Offload** — Bind `org_kde_kwin_blur` optionally; send `kde_blur.set_region` + `kde_blur.commit` per surface with `backdrop-filter` nodes before each `wl_surface.commit`
+- [x] **Phase 103: Compositor Blur Offload** — Bind `org_kde_kwin_blur` optionally; send `kde_blur.set_region` + `kde_blur.commit` per surface with `backdrop-filter` nodes before each `wl_surface.commit` (completed 2026-06-17)
 
 ## Phase Details
 
@@ -80,9 +80,9 @@
 **Plans**: 3 plans
 
 Plans:
-- [ ] 103-01-PLAN.md — Protocol infrastructure: wayland-protocols-plasma dep, KdeBlur state, optional global binding, commit-time protocol calls
-- [ ] 103-02-PLAN.md — Blur region computation: walk display list for backdrop-filter nodes, compute logical-coordinate union rect, wire through present path
-- [ ] 103-03-PLAN.md — CPU blur removal: make apply_backdrop_filter and push_backdrop_filter_command no-ops; keep function structure for future effects
+- [x] 103-01-PLAN.md — Protocol infrastructure: wayland-protocols-plasma dep, KdeBlur state, optional global binding, commit-time protocol calls
+- [x] 103-02-PLAN.md — Blur region computation: walk display list for backdrop-filter nodes, compute logical-coordinate union rect, wire through present path
+- [x] 103-03-PLAN.md — CPU blur removal: make apply_backdrop_filter and push_backdrop_filter_command no-ops; keep function structure for future effects
 
 ## Progress
 
@@ -95,7 +95,7 @@ Plans:
 | 100. Opaque Region Hints | v1.19 | 2/2 | Complete | 2026-06-09 |
 | 101. Per-Region Damage | v1.20 | 1/1 | Complete   | 2026-06-10 |
 | 102. HiDPI / Fractional Scale | v1.20 | 2/2 | Complete   | 2026-06-10 |
-| 103. Compositor Blur Offload | v1.20 | 0/3 | Not started | - |
+| 103. Compositor Blur Offload | v1.20 | 3/3 | Complete   | 2026-06-17 |
 
 ---
 
