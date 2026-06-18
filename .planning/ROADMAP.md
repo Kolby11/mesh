@@ -118,7 +118,10 @@ Plans:
 **Plans**: 3 plans (2 waves)
 
 Plans:
+**Wave 1**
 - [ ] 104-01-PLAN.md — Foundation: PerSurfaceLayoutState struct, remove_taffy_subtree post-order helper, compute_incremental entry point (fresh-build / VISUAL_REPAINT / LAYOUT paths)
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 104-02-PLAN.md — TREE_REBUILD structural diff keyed on _mesh_key plus 5 LAYOUT-05 parity tests
 - [ ] 104-03-PLAN.md — Shell wiring: layout_state field, compute_incremental call site in finalize_tree, theme/locale/source reset sites
 
