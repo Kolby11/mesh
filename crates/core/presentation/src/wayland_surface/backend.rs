@@ -94,6 +94,7 @@ pub(super) struct SurfaceEntry {
     pub(super) viewport: Option<WpViewport>,
     pub(super) kde_blur: Option<OrgKdeKwinBlur>,
     pub(super) blur_region: Option<DamageRect>,
+    pub(super) blur_committed: bool,
 }
 
 struct SurfaceConfigHasher(u64);
@@ -142,6 +143,7 @@ impl SurfaceEntry {
             viewport: None,
             kde_blur: None,
             blur_region: None,
+            blur_committed: false,
         }
     }
 
@@ -801,6 +803,15 @@ impl LayerShellBackend {
             if let Some(entry) = self.state.surfaces.get_mut(surface_id)
                 && entry.configured
             {
+                // Clear compositor blur before hiding (WR-01 / BLUR-04).
+                if let Some(ref kde_blur) = entry.kde_blur {
+                    if entry.blur_committed {
+                        kde_blur.set_region(None);
+                        kde_blur.commit();
+                        entry.blur_committed = false;
+                    }
+                }
+                entry.blur_region = None;
                 entry.hide();
             }
             self.dispatch_pending()?;
@@ -872,19 +883,29 @@ impl LayerShellBackend {
             physical_h,
             shm_copy_damage,
         )?;
-        // Commit kde_blur region before wl_surface commit (BLUR-02, BLUR-04)
+        // Commit kde_blur region before wl_surface commit (BLUR-02, BLUR-04, CR-01)
         if let Some(ref kde_blur) = entry.kde_blur {
-            if let Some(region_rect) = entry.blur_region {
-                if let Ok(region) = Region::new(&state.compositor_state) {
-                    region.add(
-                        region_rect.x as i32,
-                        region_rect.y as i32,
-                        region_rect.width as i32,
-                        region_rect.height as i32,
-                    );
-                    kde_blur.set_region(Some(region.wl_region()));
-                    kde_blur.commit();
+            match entry.blur_region {
+                Some(region_rect) => {
+                    if let Ok(region) = Region::new(&state.compositor_state) {
+                        region.add(
+                            region_rect.x as i32,
+                            region_rect.y as i32,
+                            region_rect.width as i32,
+                            region_rect.height as i32,
+                        );
+                        kde_blur.set_region(Some(region.wl_region()));
+                        kde_blur.commit();
+                        entry.blur_committed = true;
+                    }
                 }
+                None if entry.blur_committed => {
+                    // Clear the compositor's blur region when backdrop-filter is removed (CR-01).
+                    kde_blur.set_region(None);
+                    kde_blur.commit();
+                    entry.blur_committed = false;
+                }
+                None => {}
             }
         }
         entry.attach_shm_buffer(

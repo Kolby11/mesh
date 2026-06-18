@@ -150,7 +150,9 @@ impl PresentationEngine {
 
     /// Set the logical-coordinate blur region for a surface.
     /// Only meaningful on Wayland backends with `org_kde_kwin_blur` support.
-    /// Pass `None` to skip blur protocol calls for this frame (BLUR-04).
+    /// Pass `None` to clear any previously committed blur region from the
+    /// compositor. No protocol calls are emitted if no blur region has ever
+    /// been set for this surface.
     pub fn update_blur_region(
         &mut self,
         surface_id: &str,

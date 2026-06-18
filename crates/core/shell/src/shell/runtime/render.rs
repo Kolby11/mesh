@@ -438,12 +438,15 @@ fn compute_blur_region(commands: &[DisplayPaintCommand]) -> Option<DamageRect> {
         if cmd.node.style.backdrop_filter.blur_radius <= 0.0 {
             continue;
         }
-        let rect = DamageRect {
-            x: cmd.node.layout.x as u32,
-            y: cmd.node.layout.y as u32,
-            width: (cmd.node.layout.width as u32).max(1),
-            height: (cmd.node.layout.height as u32).max(1),
-        };
+        // Clamp negative origins to 0 and shrink dimensions by the clipped leading
+        // edge to avoid silently snapping partially off-screen nodes to (0,0) (CR-02).
+        let raw_x = cmd.node.layout.x;
+        let raw_y = cmd.node.layout.y;
+        let x = raw_x.max(0.0) as u32;
+        let y = raw_y.max(0.0) as u32;
+        let width = ((cmd.node.layout.width + raw_x.min(0.0)).max(0.0) as u32).max(1);
+        let height = ((cmd.node.layout.height + raw_y.min(0.0)).max(0.0) as u32).max(1);
+        let rect = DamageRect { x, y, width, height };
         union = Some(match union {
             None => rect,
             Some(current) => {
@@ -467,6 +470,102 @@ fn compute_blur_region(commands: &[DisplayPaintCommand]) -> Option<DamageRect> {
         });
     }
     union
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mesh_core_render::{
+        DamageRect, DisplayListClip, DisplayPaintCommand, DisplayPaintCommandKind,
+        DisplayPaintNode,
+    };
+    use mesh_core_elements::{
+        BoxShadow, LayoutRect, VisualFilter,
+        style::{
+            BackgroundPaint, Color, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
+        },
+    };
+    use std::sync::Arc;
+
+    fn make_cmd(x: f32, y: f32, width: f32, height: f32, blur_radius: f32) -> DisplayPaintCommand {
+        use mesh_core_render::display_list::{
+            DisplayPaintContent, DisplayPaintStyle, DisplayScrollbars,
+        };
+        DisplayPaintCommand {
+            node: DisplayPaintNode {
+                id: 1,
+                layout: LayoutRect { x, y, width, height },
+                style: DisplayPaintStyle {
+                    background_color: Color { r: 0, g: 0, b: 0, a: 0 },
+                    background_paint: BackgroundPaint::None,
+                    border_color: Color { r: 0, g: 0, b: 0, a: 0 },
+                    border_width: Edges::default(),
+                    border_radius: 0.0,
+                    color: Color { r: 0, g: 0, b: 0, a: 255 },
+                    padding: Edges::default(),
+                    overflow_x: Overflow::Visible,
+                    overflow_y: Overflow::Visible,
+                    font_family: Arc::from(""),
+                    font_size: 16.0,
+                    font_weight: 400,
+                    line_height: 1.0,
+                    text_align: TextAlign::default(),
+                    text_overflow: TextOverflow::default(),
+                    text_direction: TextDirection::default(),
+                    opacity: 1.0,
+                    box_shadow: BoxShadow::default(),
+                    filter: VisualFilter::NONE,
+                    backdrop_filter: VisualFilter { blur_radius },
+                    icon_fill: None,
+                    icon_weight: None,
+                    icon_grade: None,
+                    icon_optical_size: None,
+                },
+                content: DisplayPaintContent::None,
+                scrollbars: DisplayScrollbars::default(),
+            },
+            clip: DisplayListClip { x: 0, y: 0, width: width as i32, height: height as i32 },
+            kind: DisplayPaintCommandKind::Node,
+        }
+    }
+
+    #[test]
+    fn test_compute_blur_region_single_node() {
+        let cmds = vec![make_cmd(10.0, 20.0, 100.0, 50.0, 4.0)];
+        assert_eq!(
+            compute_blur_region(&cmds),
+            Some(DamageRect { x: 10, y: 20, width: 100, height: 50 })
+        );
+    }
+
+    #[test]
+    fn test_compute_blur_region_no_blur_nodes() {
+        let cmds = vec![make_cmd(0.0, 0.0, 100.0, 100.0, 0.0)];
+        assert_eq!(compute_blur_region(&cmds), None);
+    }
+
+    #[test]
+    fn test_compute_blur_region_negative_coords() {
+        // x=-10, y=-5, w=100, h=80 → x=0, y=0, width=90, height=75
+        let cmds = vec![make_cmd(-10.0, -5.0, 100.0, 80.0, 4.0)];
+        assert_eq!(
+            compute_blur_region(&cmds),
+            Some(DamageRect { x: 0, y: 0, width: 90, height: 75 })
+        );
+    }
+
+    #[test]
+    fn test_compute_blur_region_two_disjoint_nodes() {
+        // (0,0,50,50) union (100,100,50,50) → (0,0,150,150)
+        let cmds = vec![
+            make_cmd(0.0, 0.0, 50.0, 50.0, 4.0),
+            make_cmd(100.0, 100.0, 50.0, 50.0, 4.0),
+        ];
+        assert_eq!(
+            compute_blur_region(&cmds),
+            Some(DamageRect { x: 0, y: 0, width: 150, height: 150 })
+        );
+    }
 }
 
 fn compute_opaque_rect_for_root(
