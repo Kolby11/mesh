@@ -3,9 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.21
 milestone_name: Retained Layout & Display List
 status: planning
-stopped_at: ""
-last_updated: "2026-06-18T00:00:00.000Z"
-last_activity: "2026-06-18 — v1.20 Compositor Integration archived"
+last_updated: "2026-06-18T15:02:08.288Z"
+last_activity: 2026-06-18
 progress:
   total_phases: 0
   completed_phases: 0
@@ -25,12 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-06-18)
 
 ## Current Position
 
-Phase: not yet defined
-Status: v1.20 archived; ready to start v1.21 milestone planning
-
-```
-Progress [----------] 0% (0 phases)
-```
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-18 — Milestone v1.21 started
 
 ## Accumulated Context
 
