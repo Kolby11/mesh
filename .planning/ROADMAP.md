@@ -44,6 +44,12 @@
 
 </details>
 
+### v1.21 Retained Layout & Display List (Phases 104-106)
+
+- [ ] **Phase 104: Retained TaffyTree** — Per-surface `TaffyTree` and `_mesh_key → TaffyNodeId` map retained across frames; STYLE-only and LAYOUT-dirty nodes mutate in place; structural changes use `_mesh_key` as the stable identity key
+- [ ] **Phase 105: Rope Display List** — `RopeNode` enum references existing `Arc<[DisplayPaintCommand]>` slices for clean subtrees; final flat-array assembly preserved; scroll offsets stored layout-relative
+- [ ] **Phase 106: Per-Stage Budget Profiling** — `ProfilingStage::LayoutRetained` variant with profiling-gated acquisition; per-stage budget constants with `tracing::warn!` on overrun; baseline measurements across canonical workloads
+
 ## Phase Details
 
 ### Phase 101: Per-Region Damage
@@ -99,6 +105,39 @@ Plans:
   4. Phase 103 VERIFICATION.md exists with `status: passed`
 **Plans**: 1 plan
 
+### Phase 104: Retained TaffyTree
+**Goal**: Layout geometry is computed by mutating a per-surface `TaffyTree` in place rather than rebuilding a fresh tree on every pass, so only dirty layout nodes pay geometry recomputation cost
+**Depends on**: Phase 103.1 (v1.20 fully shipped; no intra-v1.21 dependency)
+**Requirements**: LAYOUT-01, LAYOUT-02, LAYOUT-03, LAYOUT-04, LAYOUT-05
+**Success Criteria** (what must be TRUE):
+  1. A frame that changes only a node's color (STYLE-only dirty) calls `taffy.set_style` on the affected node and skips `taffy.compute_layout` for all siblings — the full tree is not rebuilt
+  2. A frame that adds or removes a widget uses `_mesh_key` (not `TaffyNodeId`) as the stable identity so retained geometry for unchanged siblings survives the structural change
+  3. A subtree removal triggers a post-order descendant walk that removes all children before the parent node, leaving the `TaffyTree` in a valid state
+  4. Layout output (x, y, width, height per node) is pixel-equivalent to the previous per-frame-rebuild approach across style-only, layout-dirty, and full tree-rebuild scenarios
+  5. A `TREE_REBUILD` frame does not produce stale geometry — all layout rects reflect the current widget tree after the pass
+**Plans**: TBD
+
+### Phase 105: Rope Display List
+**Goal**: The display list stores clean subtree command spans as shared references rather than copying bytes into parent vectors on each dirty update, reducing allocations on partial-dirty frames
+**Depends on**: Phase 104 (correct `LayoutRect` values from retained Taffy are required for layout-relative scroll offset storage)
+**Requirements**: ROPE-01, ROPE-02, ROPE-03
+**Success Criteria** (what must be TRUE):
+  1. A frame where a scrollable container's child is dirty reuses the unchanged sibling subtrees' `Arc<[DisplayPaintCommand]>` slices without cloning command bytes into the parent vector
+  2. The final assembled contiguous paint command array is structurally identical to the pre-rope output — damage-rect queries and painter iteration produce the same results as before
+  3. Scrolling a container with partially dirty children does not produce stale absolute coordinates — scroll offset is stored layout-relative in each rope segment and resolved at assembly time
+**Plans**: TBD
+
+### Phase 106: Per-Stage Budget Profiling
+**Goal**: The profiling system tracks retained layout time per surface and emits observable warnings when individual stages exceed their defined budgets, giving concrete baseline measurements before and after the v1.21 retention changes
+**Depends on**: Phase 105 (retained paths must exist before meaningful per-stage budget data can be captured)
+**Requirements**: PERF-01, PERF-02, PERF-03
+**Success Criteria** (what must be TRUE):
+  1. The debug overlay shows a `LayoutRetained` stage timing entry alongside existing profiling stages when profiling is enabled
+  2. In a debug build, a frame where layout retention exceeds its defined budget causes a `tracing::warn!` log line naming the stage, the measured duration, and the budget threshold — release builds emit nothing
+  3. Profiling timer acquisition (`Instant::now()`) is guarded by the `profiling_enabled` flag so frames with profiling disabled pay zero clock cost for layout stage timing
+  4. A captured baseline table shows measured durations for hover, backend update, slider drag, surface open, and clock tick workloads both before and after the Phase 104-105 retention changes
+**Plans**: TBD
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -112,33 +151,13 @@ Plans:
 | 102. HiDPI / Fractional Scale | v1.20 | 2/2 | Complete | 2026-06-10 |
 | 103. Compositor Blur Offload | v1.20 | 3/3 | Complete | 2026-06-17 |
 | 103.1. Audit Gap Closure (INSERTED) | v1.20 | 1/1 | Complete | 2026-06-18 |
+| 104. Retained TaffyTree | v1.21 | 0/? | Not started | - |
+| 105. Rope Display List | v1.21 | 0/? | Not started | - |
+| 106. Per-Stage Budget Profiling | v1.21 | 0/? | Not started | - |
 
 ---
 
 ## Backlog
-
-### v1.21 — Retained Layout & Display List
-
-**Goal:** Retain Taffy layout state across passes and move toward rope-style
-display-list storage so unchanged subtrees are referenced rather than copied.
-
-**Scope:**
-
-- Retain Taffy `TaffyTree` and node-id maps per surface; mutate in place on
-  structural changes instead of rebuilding a fresh tree every layout pass.
-
-- Replace flattened display-list command-vector rebuilds with immutable command
-  segments or a rope-style retained command store so clean child spans are
-  referenced, not copied into parent vectors on each dirty update.
-
-- Add performance profiles for canonical shell workloads (idle shell, pointer
-  move, text update from backend, scrolling, large icon grid, animation, theme
-  reload, resize) to pin per-stage budgets.
-
-**Priority:** medium — Taffy retention and display-list rope are the next
-major layout/render throughput gains after invalidation is narrowed.
-
----
 
 ### v1.22 — Shell Features: Settings, Positioning, Popups
 

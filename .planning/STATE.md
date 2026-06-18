@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-06-18T15:02:08.288Z"
 last_activity: 2026-06-18
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,20 +20,43 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-06-18)
 
 **Core value:** MESH should let plugin authors build distinctive shell UI and service integrations while the shell stays observable, deterministic, and responsive on real interaction paths.
-**Current focus:** v1.21 Retained Layout & Display List — planning
+**Current focus:** v1.21 Retained Layout & Display List — Phase 104 next
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 104 (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-18 — Milestone v1.21 started
+Status: Roadmap defined; ready for Phase 104 planning
+Last activity: 2026-06-18 — Roadmap created (3 phases, 11 requirements mapped)
+
+```
+Progress: [░░░░░░░░░░░░░░░░░░░░] 0% (0/3 phases)
+```
+
+## Performance Metrics
+
+| Metric | Value |
+|--------|-------|
+| Requirements defined | 11 |
+| Requirements mapped | 11/11 |
+| Phases defined | 3 |
+| Phases complete | 0 |
 
 ## Accumulated Context
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table. v1.20 decisions archived in milestones/v1.20-ROADMAP.md.
+
+### Architecture Notes (v1.21)
+
+- `PerSurfaceLayoutState` belongs in `layout.rs` (`mesh-core-elements`) or on `FrontendSurfaceComponent`
+- `RopeNode` enum belongs in `display_list.rs` (`mesh-core-render`)
+- `ProfilingStage::LayoutRetained` belongs in `mesh-core-debug`
+- `rpds 1.2.0` workspace dep needed for rope phase (if `rpds::Vector` is used); `profiling 1.0.17` for profiling phase
+- `_mesh_key` (not `TaffyNodeId`) is the stable retained-map key — critical design constraint
+- `remove_taffy_subtree` must post-order walk descendants; Taffy does not recursively remove
+- Profiling timer acquisition (`Instant::now()`) must be gated behind `profiling_enabled` flag — not just the recording step
 
 ### Blockers/Concerns
 
@@ -52,5 +75,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-06-18
-Stopped at: v1.20 archived; v1.21 planning not yet started
+Stopped at: Roadmap created for v1.21; Phase 104 ready for planning
 Resume file: None

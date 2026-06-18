@@ -52,23 +52,23 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LAYOUT-01 | — | Pending |
-| LAYOUT-02 | — | Pending |
-| LAYOUT-03 | — | Pending |
-| LAYOUT-04 | — | Pending |
-| LAYOUT-05 | — | Pending |
-| ROPE-01 | — | Pending |
-| ROPE-02 | — | Pending |
-| ROPE-03 | — | Pending |
-| PERF-01 | — | Pending |
-| PERF-02 | — | Pending |
-| PERF-03 | — | Pending |
+| LAYOUT-01 | Phase 104 | Pending |
+| LAYOUT-02 | Phase 104 | Pending |
+| LAYOUT-03 | Phase 104 | Pending |
+| LAYOUT-04 | Phase 104 | Pending |
+| LAYOUT-05 | Phase 104 | Pending |
+| ROPE-01 | Phase 105 | Pending |
+| ROPE-02 | Phase 105 | Pending |
+| ROPE-03 | Phase 105 | Pending |
+| PERF-01 | Phase 106 | Pending |
+| PERF-02 | Phase 106 | Pending |
+| PERF-03 | Phase 106 | Pending |
 
 **Coverage:**
 - v1.21 requirements: 11 total
-- Mapped to phases: 0 (populated by roadmapper)
-- Unmapped: 11 ⚠️
+- Mapped to phases: 11 (100%)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-18*
-*Last updated: 2026-06-18 — initial milestone definition*
+*Last updated: 2026-06-18 — traceability populated by roadmapper*
