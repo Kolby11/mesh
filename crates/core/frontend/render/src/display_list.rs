@@ -884,6 +884,9 @@ impl RetainedDisplayList {
             full_fallback_count,
             broad_dirty_fallback_count,
             damage_rect,
+            // DisplayListMetrics tracks the display-list-level merged damage rect (0 or 1).
+            // RetainedPaintSnapshot overrides this with effective_damage.damage_rect_count()
+            // which returns the actual per-frame Vec<DamageRect> count (DMGE-03).
             damage_rect_count: u64::from(damage_area > 0),
             damage_area,
             surface_area,
@@ -943,6 +946,9 @@ impl RetainedDisplayList {
             full_fallback_count: 0,
             broad_dirty_fallback_count: 0,
             damage_rect,
+            // DisplayListMetrics tracks the display-list-level merged damage rect (0 or 1).
+            // RetainedPaintSnapshot overrides this with effective_damage.damage_rect_count()
+            // which returns the actual per-frame Vec<DamageRect> count (DMGE-03).
             damage_rect_count: u64::from(damage_area > 0),
             damage_area,
             surface_area,
