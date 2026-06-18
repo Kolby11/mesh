@@ -1,5 +1,30 @@
 # MESH Milestones
 
+## v1.20 Compositor Integration (Shipped: 2026-06-18)
+
+**Phases completed:** 4 phases (101, 102, 103, 103.1), 7 plans
+**Requirements:** 12/12 satisfied
+**Audit:** gaps_found → closed by Phase 103.1 ([archive](milestones/v1.20-MILESTONE-AUDIT.md))
+**Commits:** 82 | **Files:** 119 changed (+13,952 / -1,267) | **Timeline:** 8 days
+
+**Key accomplishments:**
+
+- Threaded `Vec<DamageRect>` from component paint through 9 integration points to per-rect `wl_surface::damage_buffer` calls with 16-rect cap and union fallback, replacing single unioned damage that forced full compositor recompositing
+- HiDPI scale acquisition: `scale: f32` on `SurfaceEntry` updated by both `wl_output::scale` integer and `wp_fractional_scale_v1` fractional compositor events; both protocols bound as `Option` for graceful fallback
+- Physical pixel pipeline: `PixelBuffer` allocated at `ceil(logical × scale)`; `wp_viewporter` sets destination for fractional scale compositing; damage rects scaled logical→physical at single attachment boundary; 512 MB buffer cap
+- Compositor blur offload: `org_kde_kwin_blur` bound as optional global; `kde_blur.set_region` + `kde_blur.commit` before `wl_surface.commit` for `backdrop-filter: blur(...)` nodes; blur region cleared on backdrop-filter removal via `blur_committed` guard
+- CPU software blur removed: `apply_backdrop_filter` and `push_backdrop_filter_command` are no-ops; call sites preserved for future compositor re-wiring; `backdrop-filter` data still flows through display list for protocol use
+- Audit gap closure (Phase 103.1): fixed blur-never-cleared bug (CR-01), negative coord saturation (CR-02), confirmed `damage_rect_count` data path correct, produced Phase 103 verification artifacts
+
+**Known deferred items:** Phase 101 VALIDATION.md is a partial stub; `ext_background_effect_v1` deferred; widget-level opaque rect analysis (OPAQUE-02) carried from v1.19.
+
+**Archive artifacts:**
+- `.planning/milestones/v1.20-ROADMAP.md`
+- `.planning/milestones/v1.20-REQUIREMENTS.md`
+- `.planning/milestones/v1.20-MILESTONE-AUDIT.md`
+
+---
+
 ## v1.16 Element Library (Shipped: 2026-05-26)
 
 **Phases completed:** 6 phases, 18 plans, 9 tasks

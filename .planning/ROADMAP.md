@@ -2,7 +2,7 @@
 
 ## Milestones
 
-- 🔄 **v1.20 Compositor Integration** — Phases 101-103 in progress
+- ✅ **v1.20 Compositor Integration** — Phases 101-103.1 shipped 2026-06-18 ([archive](milestones/v1.20-ROADMAP.md), [audit](milestones/v1.20-MILESTONE-AUDIT.md))
 - ✅ **v1.19 Performance: Event-Driven Frame Scheduler** — Phases 99-100 shipped 2026-06-09 ([archive](milestones/v1.19-ROADMAP.md), [audit](v1.19-MILESTONE-AUDIT.md))
 - ✅ **v1.18 Performance: Smart Invalidation** — Phases 96-98 shipped 2026-06-09 ([archive](milestones/v1.18-ROADMAP.md), [audit](milestones/v1.18-MILESTONE-AUDIT.md))
 - ✅ **v1.17 Performance: Scripting VM Consolidation** — Phases 92-95 shipped 2026-06-07 ([archive](milestones/v1.17-ROADMAP.md), [audit](v1.17-MILESTONE-AUDIT.md))
@@ -34,12 +34,15 @@
 
 </details>
 
-### v1.20 Compositor Integration
+<details>
+<summary>✅ v1.20 Compositor Integration (Phases 101-103.1) — SHIPPED 2026-06-18</summary>
 
 - [x] **Phase 101: Per-Region Damage** — Thread `Vec<DamageRect>` from the retained renderer through to `wl_surface::damage_buffer` calls, replacing the single unioned rect commit (completed 2026-06-10)
 - [x] **Phase 102: HiDPI / Fractional Scale** — Wire `wl_output::scale` and `wp_fractional_scale_v1` as authoritative scale sources; allocate `PixelBuffer` at physical pixels; pair with `wp_viewporter` for non-integer ratios (completed 2026-06-10)
 - [x] **Phase 103: Compositor Blur Offload** — Bind `org_kde_kwin_blur` optionally; send `kde_blur.set_region` + `kde_blur.commit` per surface with `backdrop-filter` nodes before each `wl_surface.commit` (completed 2026-06-17)
 - [x] **Phase 103.1: Audit Gap Closure** — Fix CR-01 (blur region not cleared on backdrop-filter removal), CR-02 (negative coord cast in compute_blur_region), and DMGE-03 (damage_rect_count reports binary not count); add Phase 103 VERIFICATION.md and VALIDATION.md (INSERTED) (completed 2026-06-18)
+
+</details>
 
 ## Phase Details
 
@@ -105,10 +108,10 @@ Plans:
 | 98. Narrow Invalidation & Event Routing | v1.18 | 3/3 | Complete | 2026-06-09 |
 | 99. Event-Driven Wayland Dispatch | v1.19 | 4/4 | Complete | 2026-06-09 |
 | 100. Opaque Region Hints | v1.19 | 2/2 | Complete | 2026-06-09 |
-| 101. Per-Region Damage | v1.20 | 1/1 | Complete   | 2026-06-10 |
-| 102. HiDPI / Fractional Scale | v1.20 | 2/2 | Complete   | 2026-06-10 |
-| 103. Compositor Blur Offload | v1.20 | 3/3 | Complete   | 2026-06-17 |
-| 103.1. Audit Gap Closure (INSERTED) | v1.20 | 1/1 | Complete   | 2026-06-18 |
+| 101. Per-Region Damage | v1.20 | 1/1 | Complete | 2026-06-10 |
+| 102. HiDPI / Fractional Scale | v1.20 | 2/2 | Complete | 2026-06-10 |
+| 103. Compositor Blur Offload | v1.20 | 3/3 | Complete | 2026-06-17 |
+| 103.1. Audit Gap Closure (INSERTED) | v1.20 | 1/1 | Complete | 2026-06-18 |
 
 ---
 

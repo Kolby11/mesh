@@ -225,6 +225,52 @@
 
 ---
 
+## Milestone: v1.20 — Compositor Integration
+
+**Shipped:** 2026-06-18
+**Phases:** 4 (101, 102, 103, 103.1 inserted) | **Plans:** 7 | **Commits:** 82
+
+### What Was Built
+
+- Per-region `Vec<DamageRect>` through present path with 16-rect cap and union fallback — compositor receives per-dirty-rect damage instead of full surface
+- HiDPI / fractional scale: authoritative `scale: f32` on `SurfaceEntry`; physical `PixelBuffer` allocation; `wp_viewporter` for fractional ratios; damage rect logical-to-physical scaling at single attachment boundary
+- KDE compositor blur offload: optional `org_kde_kwin_blur` global; `set_region`+`commit` before `wl_surface.commit`; correct clear-on-removal behavior via `blur_committed` guard
+- CPU software blur removed; `backdrop-filter` data still flows for compositor protocol use
+- Phase 103.1 (inserted): closed three audit gaps before archiving — blur never-cleared bug, negative coord saturation, `damage_rect_count` path verification
+
+### What Worked
+
+- Phase sequencing (damage → HiDPI → blur) made each phase self-contained: damage established the per-rect pipeline, HiDPI established the physical coordinate system, blur used both.
+- The milestone audit caught real issues (CR-01 blur-never-cleared was a genuine correctness bug) and created a compact closure phase rather than deferring them.
+- Threat model clamping (1..=3 integer, 60..=480 fractional) applied at protocol event boundaries stopped malicious compositor values before they could affect allocation math.
+- Extracting `protocol_damage_rects` as a pure function made the 16-rect cap independently testable without Wayland event infrastructure.
+
+### What Was Inefficient
+
+- Phase 103 was marked complete without a VERIFICATION.md or VALIDATION.md — the audit had to catch this and Phase 103.1 was needed to produce them, adding overhead that a closure step in the original plan would have avoided.
+- The audit file's `gaps_found` status was preserved as stale after Phase 103.1 closed all gaps — future milestone completion should update the audit status rather than leaving the original file immutable.
+- Some REQUIREMENTS.md checkboxes were not updated as verification evidence was produced, requiring a manual pass at archive time.
+
+### Patterns Established
+
+- Audit-inserted phases (e.g., 103.1) are a first-class mechanism for closing gaps before archiving; they keep the original phase summaries clean while recording gap closure explicitly.
+- Verification and validation artifacts should be part of each plan's done criteria, not post-hoc additions.
+- For Wayland protocol work: bind as `Option` + guard at call sites is the correct pattern for optional protocol support — non-KDE compositors produce zero protocol errors.
+
+### Key Lessons
+
+1. Protocol work has discrete completion levels: bind, wire data, handle all state transitions (including clear/remove paths). Only the third level is "done" — CR-01 showed that the `None` branch was systematically skipped.
+2. Verification artifacts should be produced before a phase is declared complete, not discovered missing at milestone audit.
+3. Inserting a closure phase after audit gaps are identified is faster and cleaner than leaving gaps as tech debt in the next milestone.
+
+### Cost Observations
+
+- Model mix: not tracked.
+- Sessions: audit session plus Phase 103.1 gap closure, prior phase execution sessions.
+- Notable: Phase 103.1 closure was fast (~25 min) because the audit already enumerated exactly what to fix; well-structured audit output pays off at closure.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution

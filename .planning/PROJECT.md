@@ -10,6 +10,15 @@ MESH should let plugin authors build distinctive shell UI and service integratio
 
 ## Current State
 
+`v1.20 Compositor Integration` shipped on 2026-06-18.
+
+The project now has compositor protocol integration with:
+
+- Per-region damage: `Vec<DamageRect>` threaded through 9 integration points from component paint to `wl_surface::damage_buffer` with a 16-rect cap and union fallback — unchanged pixels never re-uploaded
+- HiDPI / fractional scale: `scale: f32` on `SurfaceEntry` from compositor events; `PixelBuffer` allocated at `ceil(logical × scale)` physical pixels; `wp_viewporter` sets destination for non-integer ratios; 512 MB buffer cap; damage rects scaled logical→physical at the single attach boundary
+- Compositor blur offload: `org_kde_kwin_blur` bound as optional global; `kde_blur.set_region` + `kde_blur.commit` before `wl_surface.commit` for surfaces with `backdrop-filter: blur(...)`; CPU software blur removed (no-ops with call sites preserved); region cleared when backdrop-filter is removed
+- 12/12 requirements satisfied ([archive](milestones/v1.20-ROADMAP.md), [audit](milestones/v1.20-MILESTONE-AUDIT.md))
+
 `v1.19 Performance: Event-Driven Frame Scheduler` shipped on 2026-06-09.
 
 The project now also has an event-driven shell loop with:
@@ -21,7 +30,7 @@ The project now also has an event-driven shell loop with:
 - `wl_surface::set_opaque_region` sent from the present path with conservative root-background-only opaque rect computation
 - Zero new crate dependencies — all work uses existing `rustix::event::eventfd`/`poll`, `smithay-client-toolkit`, and `wayland-client`
 - Full workspace build: zero errors; 9/9 presentation tests pass, 8/8 presentation tests pass, 2 pre-existing shell test failures
-- 6/6 requirements satisfied ([audit](v1.19-MILESTONE-AUDIT.md))
+- 6/6 requirements satisfied ([audit](milestones/v1.19-MILESTONE-AUDIT.md))
 
 `v1.18 Performance: Smart Invalidation` shipped on 2026-06-09.
 
@@ -234,7 +243,18 @@ The project now also has a class-like module object contract with:
 - Backend `mesh.service.emit_event(...)` transport through shell payload validation into frontend `proxy.events.Name` subscribers.
 - Bundled audio/navigation proof for typed `VolumeChanged` backend-to-frontend event delivery.
 
-## Last Shipped Milestone: v1.19 Performance: Event-Driven Frame Scheduler
+## Last Shipped Milestone: v1.20 Compositor Integration
+
+**Goal:** Use Wayland compositor protocols to offload work and support HiDPI displays without upscaling.
+
+**Shipped features:**
+- Per-region damage: `Vec<DamageRect>` through present path with 16-rect cap and union fallback
+- HiDPI / fractional scale: physical pixel allocation, `wp_viewporter` for fractional ratios, integer `wl_output::scale` fallback
+- Compositor blur offload: optional `org_kde_kwin_blur` binding with correct clear-on-removal behavior
+- CPU software blur removed; `backdrop-filter` data still flows through display list for compositor protocol use
+- 12/12 requirements satisfied ([archive](milestones/v1.20-ROADMAP.md), [audit](milestones/v1.20-MILESTONE-AUDIT.md))
+
+## Previous Shipped Milestone: v1.19 Performance: Event-Driven Frame Scheduler
 
 **Goal:** Replace the fixed 16 ms shell loop sleep with a deadline-driven scheduler that blocks on real Wayland/frame-callback wakeups, eliminating idle CPU burn.
 
@@ -245,7 +265,7 @@ The project now also has a class-like module object contract with:
 - Dev-window backend preserved with `std::thread::sleep` path via `supports_blocking_dispatch()` gate
 - `wl_surface::set_opaque_region` from present path with conservative root-background-only opaque rect computation
 - Zero new crate dependencies
-- 6/6 requirements satisfied ([audit](v1.19-MILESTONE-AUDIT.md))
+- 6/6 requirements satisfied ([audit](milestones/v1.19-MILESTONE-AUDIT.md))
 
 ## Previous Shipped Milestone: v1.18 Performance: Smart Invalidation
 
@@ -257,7 +277,7 @@ The project now also has a class-like module object contract with:
 - Service event routing restricted to components whose runtimes read the changed fields
 - `>50%` affected-nodes threshold triggers `TREE_REBUILD` fallback
 - Pixel-equivalence testing gates all phases
-- 16/16 requirements satisfied; audit: `.planning/v1.18-MILESTONE-AUDIT.md`
+- 16/16 requirements satisfied; audit: `.planning/milestones/v1.18-MILESTONE-AUDIT.md`
 
 ## Previous Shipped Milestone: v1.17 Performance: Scripting VM Consolidation
 
@@ -341,15 +361,16 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 - `v1.12 Phase 67`: Service proxy method dispatch and backend command results now have a shell-visible method call lane.
 - `v1.12 Phase 68`: Interface and module events now support runtime subscriptions, local emits, and backend-to-frontend event transport.
 - `v1.12 Phase 69`: Bundled audio/navigation modules prove the class-like module object model with typed `VolumeChanged` event delivery.
+- `v1.20`: Per-region damage reduces compositor recompositing by sending per-dirty-rect `damage_buffer` calls; HiDPI surfaces render at native physical pixel density; KDE blur offload delegates `backdrop-filter: blur(...)` to the compositor on KDE Plasma while non-KDE compositors get a flat background.
 
-## Current Milestone: v1.20 — Compositor Integration
+## Current Milestone: v1.21 — Retained Layout & Display List
 
-**Goal:** Use Wayland compositor protocols to offload work and support HiDPI displays without upscaling.
+**Goal:** Retain Taffy layout state across passes and move toward rope-style display-list storage so unchanged subtrees are referenced rather than copied.
 
 **Target features:**
-- HiDPI / fractional scale — plumb `wl_output::scale` / `wp_fractional_scale_v1` to each surface; render at native pixel density; `wp_viewporter` for non-integer ratios
-- Compositor blur offload — wire `wp_blur_v1` / `org_kde_kwin_blur_v1` so `backdrop-filter` blur runs in the compositor on supporting compositors instead of CPU Skia
-- Per-region damage — track damage as multiple rects deeper in the retained renderer so presentation commits per-region damage instead of whole-surface damage
+- Retain `TaffyTree` and node-id maps per surface; mutate in place on structural changes instead of rebuilding a fresh tree every layout pass
+- Rope-style retained command store so clean child spans are referenced, not copied into parent vectors on each dirty update
+- Performance profiles for canonical shell workloads to pin per-stage budgets
 
 ### Active
 
@@ -419,6 +440,12 @@ Phase 45 of v1.8 is complete. MESH now has a phased and reversible broad rendere
 | Lua VMs should pool per-thread instead of allocate per-component | A per-thread `LuaVmPool` with `_ENV`-based isolation eliminates the largest per-component startup/memory cost while preserving sandbox guarantees; `ChunkCache` shares compiled source across runtimes | Shipped in v1.17 |
 | Per-component `_ENV` tables use metatable fallthrough to shared globals | `{ __index = lua.globals() }` pattern gives each component a private namespace (writes stay local) while stdlib reads fall through to the immutable pool VM globals | Shipped in v1.17 |
 | `env_table::pairs()` iteration replaces `pool_baseline_globals` filter | Since `pairs()` only returns directly-set keys (not `__index` fallthrough entries), stdlib keys are naturally excluded from reactive state sync — the Phase 93 baseline globals snapshot is documentation, not an active runtime filter | Shipped in v1.17 |
+| Use `org_kde_kwin_blur` not `wp_blur_v1` | No shipping compositor implements `wp_blur_v1` as of 2026-06; KDE Plasma ships `org_kde_kwin_blur` | Shipped in v1.20 |
+| No CPU software blur fallback | Clients cannot read the compositor framebuffer; software blur is a fake effect on client pixels only | Shipped in v1.20 |
+| Damage rects capped at 16 per frame | Bounds protocol overhead while covering typical dirty patterns | Shipped in v1.20 |
+| Phase order: damage → HiDPI → blur | Scale must be authoritative before blur region coordinates are correct | Shipped in v1.20 |
+| Scale factor clamped: 1..=3 (integer) and 60..=480 (fractional) | Threat model — malicious compositor cannot trigger OOM via scale | Shipped in v1.20 |
+| SHM copy region stays unioned; per-rect `damage_buffer` only for protocol | Wayland SHM requires one contiguous copy; splitting copy regions adds complexity with no benefit | Shipped in v1.20 |
 
 <details>
 <summary>Archived milestone framing</summary>
@@ -465,4 +492,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-10 — Milestone v1.20 started*
+*Last updated: 2026-06-18 — Milestone v1.20 Compositor Integration shipped*
