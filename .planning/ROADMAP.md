@@ -115,7 +115,12 @@ Plans:
   3. A subtree removal triggers a post-order descendant walk that removes all children before the parent node, leaving the `TaffyTree` in a valid state
   4. Layout output (x, y, width, height per node) is pixel-equivalent to the previous per-frame-rebuild approach across style-only, layout-dirty, and full tree-rebuild scenarios
   5. A `TREE_REBUILD` frame does not produce stale geometry — all layout rects reflect the current widget tree after the pass
-**Plans**: TBD
+**Plans**: 3 plans (2 waves)
+
+Plans:
+- [ ] 104-01-PLAN.md — Foundation: PerSurfaceLayoutState struct, remove_taffy_subtree post-order helper, compute_incremental entry point (fresh-build / VISUAL_REPAINT / LAYOUT paths)
+- [ ] 104-02-PLAN.md — TREE_REBUILD structural diff keyed on _mesh_key plus 5 LAYOUT-05 parity tests
+- [ ] 104-03-PLAN.md — Shell wiring: layout_state field, compute_incremental call site in finalize_tree, theme/locale/source reset sites
 
 ### Phase 105: Rope Display List
 **Goal**: The display list stores clean subtree command spans as shared references rather than copying bytes into parent vectors on each dirty update, reducing allocations on partial-dirty frames
