@@ -569,8 +569,8 @@ impl FrontendRenderEngine {
     pub fn render_tooltip(
         &self,
         text: &str,
-        cursor_x: f32,
-        cursor_y: f32,
+        paint_x: f32,
+        paint_y: f32,
         buffer: &mut PixelBuffer,
         scale: f32,
     ) {
@@ -587,10 +587,30 @@ impl FrontendRenderEngine {
             (text_w.ceil() as i32 + pad_h * 2).min((max_text_w + pad_h as f32 * 2.0) as i32);
         let box_h = (text_h.ceil() as i32 + pad_v * 2).max((font_size + pad_v as f32 * 2.0) as i32);
 
-        let cx = ((cursor_x + 14.0) * scale) as i32;
-        let cy = ((cursor_y + 18.0) * scale) as i32;
-        let tx = cx.min(buffer.width as i32 - box_w - 6).max(4);
-        let ty = cy.min(buffer.height as i32 - box_h - 6).max(4);
+        let opacity = self.tooltip_opacity();
+
+        // Expand animation: scale the drawn box from scale_from → 1.0.
+        // The box is anchored at its top edge (element-closest side for bottom
+        // placement) so it grows downward and outward from the element.
+        let scale_from = self.tooltip_scale_from();
+        let anim_scale = if scale_from > 0.0 {
+            scale_from + (1.0 - scale_from) * opacity
+        } else {
+            1.0
+        };
+        let draw_w = ((box_w as f32) * anim_scale) as i32;
+        let draw_h = ((box_h as f32) * anim_scale) as i32;
+
+        let tx_raw = if self.tooltip_center_x() {
+            // paint_x is the horizontal center of the element; center the
+            // (possibly scaled) box around it.
+            ((paint_x) * scale) as i32 - draw_w / 2
+        } else {
+            ((paint_x) * scale) as i32
+        };
+        let tx = tx_raw.min(buffer.width as i32 - draw_w - 6).max(4);
+        let ty = ((paint_y) * scale) as i32;
+        let ty = ty.min(buffer.height as i32 - draw_h - 6).max(4);
 
         let full_clip = ClipRect {
             x: 0,
@@ -600,34 +620,61 @@ impl FrontendRenderEngine {
         };
 
         let colors = self.tooltip_colors();
-        let bg = colors.background;
-        let border = colors.border;
-        let text_color = colors.foreground;
-        let radius = (6.0 * scale).max(3.0);
+        let apply_opacity =
+            |c: mesh_core_elements::style::Color| mesh_core_elements::style::Color {
+                r: c.r,
+                g: c.g,
+                b: c.b,
+                a: (c.a as f32 * opacity) as u8,
+            };
+        let bg = apply_opacity(colors.background);
+        let border = apply_opacity(colors.border);
+        let text_color = apply_opacity(colors.foreground);
+        let radius = ((6.0 * scale) * anim_scale).max(1.0);
 
-        self.fill_rounded_rect_clipped(
+        // Isolate tooltip chrome so rounded-corner antialiasing is resolved
+        // against a transparent layer before compositing onto panel content.
+        let layer_bounds = ClipRect {
+            x: tx - 1,
+            y: ty - 1,
+            width: draw_w + 2,
+            height: draw_h + 2,
+        };
+        self.execute_painter_commands(
             buffer,
-            ClipRect {
-                x: tx - 1,
-                y: ty - 1,
-                width: box_w + 2,
-                height: box_h + 2,
-            },
-            radius + 1.0,
-            border,
-            full_clip,
+            &[
+                PainterCommand::PushLayer(PainterLayer {
+                    bounds: layer_bounds,
+                    opacity: 1.0,
+                    blend_mode: PainterBlendMode::SrcOver,
+                    filter: PainterFilter::None,
+                }),
+                PainterCommand::DrawRoundedRect {
+                    rect: layer_bounds,
+                    radius: radius + 1.0,
+                    paint: PainterPaint::fill(border),
+                    clip: full_clip,
+                },
+                PainterCommand::DrawRoundedRect {
+                    rect: ClipRect {
+                        x: tx,
+                        y: ty,
+                        width: draw_w,
+                        height: draw_h,
+                    },
+                    radius,
+                    paint: PainterPaint::fill(bg),
+                    clip: full_clip,
+                },
+                PainterCommand::PopLayer,
+            ],
         );
-        self.fill_rounded_rect_clipped(
-            buffer,
-            ClipRect {
-                x: tx,
-                y: ty,
-                width: box_w,
-                height: box_h,
-            },
-            radius,
-            bg,
-            full_clip,
+        // Clip text to the scaled box so it doesn't bleed outside during grow.
+        let text_clip = (
+            tx.max(0) as u32,
+            ty.max(0) as u32,
+            (tx + draw_w).max(0) as u32,
+            (ty + draw_h).max(0) as u32,
         );
         self.text_renderer.render_clipped(
             text,
@@ -640,7 +687,7 @@ impl FrontendRenderEngine {
             buffer,
             (tx + pad_h) as u32,
             (ty + pad_v) as u32,
-            (0, 0, buffer.width, buffer.height),
+            text_clip,
             Some(max_text_w),
         );
     }

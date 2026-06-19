@@ -24,6 +24,7 @@
         "audio-volume-medium": "hicolor/audio-volume-medium",
         "audio-volume-high": "hicolor/audio-volume-high",
         "battery-empty": "hicolor/battery-empty",
+        "battery-caution": "hicolor/battery-caution",
         "battery-low": "hicolor/battery-low",
         "battery-good": "hicolor/battery-good",
         "battery-full": "hicolor/battery-full",

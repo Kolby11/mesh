@@ -21,10 +21,12 @@
 
       <ViewTabs
         onOverview={showOverview}
+        onModules={showModules}
         onSurfaces={showSurfaces}
         onBackendServices={showBackendServices}
         onBenchmark={showBenchmark}
         overview_indicator_hidden={overview_indicator_hidden}
+        modules_indicator_hidden={modules_indicator_hidden}
         surfaces_indicator_hidden={surfaces_indicator_hidden}
         backend_services_indicator_hidden={backend_services_indicator_hidden}
         benchmark_indicator_hidden={benchmark_indicator_hidden}
@@ -52,6 +54,48 @@
           layout_bounds_button_label={layout_bounds_button_label}
           layout_bounds_button_text={layout_bounds_button_text}
           layout_bounds_value={layout_bounds_value}
+        />
+
+        <ModulesView
+          hidden={modules_hidden}
+          state_copy={modules_state_copy}
+          empty_hidden={modules_empty_hidden}
+          row1_hidden={module_row_1_hidden}
+          row1_module_id={module_row_1_module_id}
+          row1_kind_label={module_row_1_kind_label}
+          row1_status_label={module_row_1_status_label}
+          row1_uses_interfaces={module_row_1_uses_interfaces}
+          row1_uses_resources={module_row_1_uses_resources}
+          row1_provides_interfaces={module_row_1_provides_interfaces}
+          row1_provides_resources={module_row_1_provides_resources}
+          row1_health_label={module_row_1_health_label}
+          row2_hidden={module_row_2_hidden}
+          row2_module_id={module_row_2_module_id}
+          row2_kind_label={module_row_2_kind_label}
+          row2_status_label={module_row_2_status_label}
+          row2_uses_interfaces={module_row_2_uses_interfaces}
+          row2_uses_resources={module_row_2_uses_resources}
+          row2_provides_interfaces={module_row_2_provides_interfaces}
+          row2_provides_resources={module_row_2_provides_resources}
+          row2_health_label={module_row_2_health_label}
+          row3_hidden={module_row_3_hidden}
+          row3_module_id={module_row_3_module_id}
+          row3_kind_label={module_row_3_kind_label}
+          row3_status_label={module_row_3_status_label}
+          row3_uses_interfaces={module_row_3_uses_interfaces}
+          row3_uses_resources={module_row_3_uses_resources}
+          row3_provides_interfaces={module_row_3_provides_interfaces}
+          row3_provides_resources={module_row_3_provides_resources}
+          row3_health_label={module_row_3_health_label}
+          row4_hidden={module_row_4_hidden}
+          row4_module_id={module_row_4_module_id}
+          row4_kind_label={module_row_4_kind_label}
+          row4_status_label={module_row_4_status_label}
+          row4_uses_interfaces={module_row_4_uses_interfaces}
+          row4_uses_resources={module_row_4_uses_resources}
+          row4_provides_interfaces={module_row_4_provides_interfaces}
+          row4_provides_resources={module_row_4_provides_resources}
+          row4_health_label={module_row_4_health_label}
         />
 
         <SurfacesView
@@ -172,6 +216,7 @@
 <script lang="luau">
 import BackendServicesView from "./components/backend-services-view.mesh"
 import BenchmarkView from "./components/benchmark-view.mesh"
+import ModulesView from "./components/modules-view.mesh"
 import OverviewView from "./components/overview-view.mesh"
 import SurfacesView from "./components/surfaces-view.mesh"
 import ViewTabs from "./components/view-tabs.mesh"
@@ -182,10 +227,12 @@ if not debug_ok then debug_service = nil end
 active_view = "overview"
 last_service_active_view = ""
 overview_hidden = false
+modules_hidden = true
 surfaces_hidden = true
 backend_hidden = true
 benchmark_hidden = true
 overview_indicator_hidden = false
+modules_indicator_hidden = true
 surfaces_indicator_hidden = true
 backend_services_indicator_hidden = true
 benchmark_indicator_hidden = true
@@ -211,6 +258,46 @@ active_surface_count = "0"
 backend_count = "0"
 shell_stage_label = "No recent samples yet"
 shell_render_label = "Total surface render: --"
+
+modules_state_copy = "Installed module contracts show declared dependencies, contributions, resources, and graph diagnostics."
+modules_empty = true
+modules_empty_hidden = false
+module_row_1_hidden = true
+module_row_1_module_id = ""
+module_row_1_kind_label = ""
+module_row_1_status_label = ""
+module_row_1_uses_interfaces = ""
+module_row_1_uses_resources = ""
+module_row_1_provides_interfaces = ""
+module_row_1_provides_resources = ""
+module_row_1_health_label = ""
+module_row_2_hidden = true
+module_row_2_module_id = ""
+module_row_2_kind_label = ""
+module_row_2_status_label = ""
+module_row_2_uses_interfaces = ""
+module_row_2_uses_resources = ""
+module_row_2_provides_interfaces = ""
+module_row_2_provides_resources = ""
+module_row_2_health_label = ""
+module_row_3_hidden = true
+module_row_3_module_id = ""
+module_row_3_kind_label = ""
+module_row_3_status_label = ""
+module_row_3_uses_interfaces = ""
+module_row_3_uses_resources = ""
+module_row_3_provides_interfaces = ""
+module_row_3_provides_resources = ""
+module_row_3_health_label = ""
+module_row_4_hidden = true
+module_row_4_module_id = ""
+module_row_4_kind_label = ""
+module_row_4_status_label = ""
+module_row_4_uses_interfaces = ""
+module_row_4_uses_resources = ""
+module_row_4_provides_interfaces = ""
+module_row_4_provides_resources = ""
+module_row_4_health_label = ""
 
 surfaces_state_copy = "Surface timing rows stay visible even when no recent work has been recorded."
 surfaces_empty = true
@@ -320,10 +407,12 @@ end
 
 local function sync_view_state()
     overview_hidden = active_view ~= "overview"
+    modules_hidden = active_view ~= "modules"
     surfaces_hidden = active_view ~= "surfaces"
     backend_hidden = active_view ~= "backend_services"
     benchmark_hidden = active_view ~= "benchmark"
     overview_indicator_hidden = active_view ~= "overview"
+    modules_indicator_hidden = active_view ~= "modules"
     surfaces_indicator_hidden = active_view ~= "surfaces"
     backend_services_indicator_hidden = active_view ~= "backend_services"
     benchmark_indicator_hidden = active_view ~= "benchmark"
@@ -331,7 +420,7 @@ end
 
 local function service_view_id(value)
     local view = tostring(value or "")
-    if view == "overview" or view == "surfaces" or view == "backend_services" or view == "benchmark" then
+    if view == "overview" or view == "modules" or view == "surfaces" or view == "backend_services" or view == "benchmark" then
         return view
     end
     return nil
@@ -471,6 +560,223 @@ local function safe_string(value, fallback)
         return value
     end
     return fallback
+end
+
+local function join_limited(values, limit)
+    if type(values) ~= "table" or #values == 0 then
+        return "none"
+    end
+    local parts = {}
+    local max_count = math.min(#values, limit)
+    for index = 1, max_count do
+        parts[index] = tostring(values[index])
+    end
+    local joined = table.concat(parts, ", ")
+    if #values > limit then
+        return string.format("%s +%d", joined, #values - limit)
+    end
+    return joined
+end
+
+local function list_label(label, values)
+    return string.format("%s: %s", label, join_limited(values, 3))
+end
+
+local function combined_resources(entry)
+    if type(entry) ~= "table" then
+        return "Resources: none"
+    end
+    local uses = entry.uses
+    if type(uses) ~= "table" then
+        uses = entry
+    end
+    local parts = {}
+    if type(uses.icon_packs) == "table" and #uses.icon_packs > 0 then
+        parts[#parts + 1] = "icons " .. join_limited(uses.icon_packs, 2)
+    end
+    if type(uses.i18n_packs) == "table" and #uses.i18n_packs > 0 then
+        parts[#parts + 1] = "i18n " .. join_limited(uses.i18n_packs, 2)
+    end
+    if type(uses.theme_packs) == "table" and #uses.theme_packs > 0 then
+        parts[#parts + 1] = "themes " .. join_limited(uses.theme_packs, 2)
+    end
+    if type(uses.font_packs) == "table" and #uses.font_packs > 0 then
+        parts[#parts + 1] = "fonts " .. join_limited(uses.font_packs, 2)
+    end
+    if #parts == 0 then
+        return "Resources: none"
+    end
+    return "Resources: " .. table.concat(parts, "; ")
+end
+
+local function provided_interfaces_label(entry)
+    local interfaces = {}
+    local provides = nil
+    if type(entry) == "table" then
+        provides = entry.provides
+        if type(provides) ~= "table" then
+            provides = entry
+        end
+    end
+    if type(provides) == "table" and type(provides.interfaces) == "table" then
+        for _, interface_name in ipairs(provides.interfaces) do
+            interfaces[#interfaces + 1] = interface_name
+        end
+    end
+    return list_label("Interfaces", interfaces)
+end
+
+local function provided_resources_label(entry)
+    if type(entry) ~= "table" then
+        return "Resources: none"
+    end
+    local provides = entry.provides
+    if type(provides) ~= "table" then
+        provides = entry
+    end
+    local parts = {}
+    if type(provides.settings) == "table" and #provides.settings > 0 then
+        parts[#parts + 1] = "settings " .. join_limited(provides.settings, 2)
+    end
+    if type(provides.i18n) == "table" and #provides.i18n > 0 then
+        parts[#parts + 1] = "i18n " .. join_limited(provides.i18n, 2)
+    end
+    if type(provides.required_icons) == "table" and #provides.required_icons > 0 then
+        parts[#parts + 1] = "icons " .. join_limited(provides.required_icons, 2)
+    end
+    if #parts == 0 then
+        return "Resources: none"
+    end
+    return "Resources: " .. table.concat(parts, "; ")
+end
+
+local function module_health_label(entry)
+    if type(entry) ~= "table" then
+        return "Health: unavailable"
+    end
+    if type(entry.diagnostics) == "table" and #entry.diagnostics > 0 then
+        return "Diagnostics: " .. join_limited(entry.diagnostics, 2)
+    end
+    if entry.enabled then
+        return "Diagnostics: clear"
+    end
+    return "Diagnostics: disabled"
+end
+
+local function module_interface_uses_label(entry)
+    if type(entry) ~= "table" then
+        return "Interfaces: none"
+    end
+    local uses = entry.uses
+    if type(uses) ~= "table" then
+        uses = entry
+    end
+    local required = list_size(uses.interfaces)
+    local optional = list_size(uses.optional_interfaces)
+    if required == 0 and optional == 0 then
+        return "Interfaces: none"
+    end
+    if optional == 0 then
+        return list_label("Interfaces", uses.interfaces)
+    end
+    if required == 0 then
+        return list_label("Optional interfaces", uses.optional_interfaces)
+    end
+    return string.format(
+        "Interfaces: %s; optional %s",
+        join_limited(uses.interfaces, 2),
+        join_limited(uses.optional_interfaces, 2)
+    )
+end
+
+local function set_module_slot(slot, hidden, module_id, kind_label, status_label, uses_interfaces, uses_resources, provides_interfaces, provides_resources, health_label)
+    if slot == 1 then
+        module_row_1_hidden = hidden
+        module_row_1_module_id = module_id
+        module_row_1_kind_label = kind_label
+        module_row_1_status_label = status_label
+        module_row_1_uses_interfaces = uses_interfaces
+        module_row_1_uses_resources = uses_resources
+        module_row_1_provides_interfaces = provides_interfaces
+        module_row_1_provides_resources = provides_resources
+        module_row_1_health_label = health_label
+        return
+    end
+    if slot == 2 then
+        module_row_2_hidden = hidden
+        module_row_2_module_id = module_id
+        module_row_2_kind_label = kind_label
+        module_row_2_status_label = status_label
+        module_row_2_uses_interfaces = uses_interfaces
+        module_row_2_uses_resources = uses_resources
+        module_row_2_provides_interfaces = provides_interfaces
+        module_row_2_provides_resources = provides_resources
+        module_row_2_health_label = health_label
+        return
+    end
+    if slot == 3 then
+        module_row_3_hidden = hidden
+        module_row_3_module_id = module_id
+        module_row_3_kind_label = kind_label
+        module_row_3_status_label = status_label
+        module_row_3_uses_interfaces = uses_interfaces
+        module_row_3_uses_resources = uses_resources
+        module_row_3_provides_interfaces = provides_interfaces
+        module_row_3_provides_resources = provides_resources
+        module_row_3_health_label = health_label
+        return
+    end
+    module_row_4_hidden = hidden
+    module_row_4_module_id = module_id
+    module_row_4_kind_label = kind_label
+    module_row_4_status_label = status_label
+    module_row_4_uses_interfaces = uses_interfaces
+    module_row_4_uses_resources = uses_resources
+    module_row_4_provides_interfaces = provides_interfaces
+    module_row_4_provides_resources = provides_resources
+    module_row_4_health_label = health_label
+end
+
+local function module_slot(slot, entry)
+    if entry == nil then
+        set_module_slot(slot, true, "", "", "", "", "", "", "", "")
+        return
+    end
+    local module_id = tostring(entry.module_id or "unknown-module")
+    local kind_label = tostring(entry.kind or "module")
+    local status_label = "Enabled"
+    if not entry.enabled then
+        status_label = "Disabled"
+    end
+    set_module_slot(
+        slot,
+        false,
+        module_id,
+        kind_label,
+        status_label,
+        module_interface_uses_label(entry),
+        combined_resources(entry),
+        provided_interfaces_label(entry),
+        provided_resources_label(entry),
+        module_health_label(entry)
+    )
+end
+
+local function sync_module_rows()
+    local graph = nil
+    if debug_service and type(debug_service.module_graph) == "table" then
+        graph = debug_service.module_graph
+    end
+    modules_empty = list_size(graph) == 0
+    modules_empty_hidden = not modules_empty
+    modules_state_copy = string.format(
+        "%s installed graph entries expose declared dependencies, contributions, resources, and diagnostics.",
+        tostring(list_size(graph))
+    )
+    module_slot(1, graph and graph[1] or nil)
+    module_slot(2, graph and graph[2] or nil)
+    module_slot(3, graph and graph[3] or nil)
+    module_slot(4, graph and graph[4] or nil)
 end
 
 local function fallback_benchmark_status()
@@ -706,6 +1012,11 @@ function showOverview()
     sync_view_state()
 end
 
+function showModules()
+    active_view = "modules"
+    sync_view_state()
+end
+
 function showSurfaces()
     active_view = "surfaces"
     sync_view_state()
@@ -789,6 +1100,7 @@ function onRender()
         backend_slot(1, nil, nil)
         backend_slot(2, nil, nil)
         backend_slot(3, nil, nil)
+        sync_module_rows()
         sync_benchmark_rows()
         return
     end
@@ -872,6 +1184,7 @@ function onRender()
     backend_state_copy = "Runtime health and stage timing stay separated so lifecycle issues do not read like performance cost."
     sync_view_state()
     sync_overview_state_flags()
+    sync_module_rows()
 
     surface_slot(1, surface_samples and surface_samples[1] or nil)
     surface_slot(2, surface_samples and surface_samples[2] or nil)

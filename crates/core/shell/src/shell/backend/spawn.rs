@@ -12,10 +12,10 @@ impl Shell {
         tx: mpsc::UnboundedSender<ShellMessage>,
         eventfd_fd: std::os::unix::io::RawFd,
     ) {
-        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let graph_path = workspace_root.join("config/module.json");
-        match load_installed_module_graph(&graph_path) {
+        let graph_path = self.installed_module_graph_path();
+        match self.load_installed_module_graph_cached() {
             Ok(graph) => {
+                let graph = graph.clone();
                 let (candidates, statuses) = backend_launch_candidates_from_graph(
                     &graph,
                     &self.modules,

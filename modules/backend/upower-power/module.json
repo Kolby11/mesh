@@ -6,17 +6,13 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "backend",
-    "capabilities": {
-      "required": [
-        "exec.upower",
-        "service.power.read"
-      ]
-    },
-    "i18n": {
-      "defaultLocale": "en",
-      "supportedLocales": ["en"]
-    },
-    "dependencies": {
+    "uses": {
+      "modules": {
+        "@mesh/power-interface": ">=1.0.0, <2.0.0"
+      },
+      "capabilities": [
+        "exec.upower"
+      ],
       "binaries": [
         {
           "name": "upower",
@@ -30,9 +26,11 @@
         }
       ]
     },
-    "entrypoints": {
-      "main": "src/main.luau"
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en"]
     },
+    "entry": "src/main.luau",
     "implements": [
       {
         "interface": "mesh.power",

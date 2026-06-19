@@ -365,6 +365,7 @@ pub struct Shell {
     pub diagnostics: DiagnosticsCollector,
     pub services: ServiceRegistry,
     pub interfaces: InterfaceRegistry,
+    installed_module_graph: Option<InstalledModuleGraph>,
     modules: HashMap<String, ModuleInstance>,
     module_dirs: Vec<PathBuf>,
     core: ShellCoreState,

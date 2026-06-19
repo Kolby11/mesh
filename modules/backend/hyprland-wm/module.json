@@ -6,23 +6,18 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "backend",
-    "capabilities": {
-      "required": [
+    "uses": {
+      "modules": {
+        "@mesh/hyprland-interface": ">=1.0.0, <2.0.0"
+      },
+      "capabilities": [
         "exec.hyprctl",
-        "exec.sh",
-        "service.hyprland.read"
+        "exec.sh"
       ],
-      "optional": [
+      "optionalCapabilities": [
         "exec.socat",
-        "exec.nc",
-        "service.hyprland.control"
-      ]
-    },
-    "i18n": {
-      "defaultLocale": "en",
-      "supportedLocales": ["en"]
-    },
-    "dependencies": {
+        "exec.nc"
+      ],
       "binaries": [
         {
           "name": "hyprctl",
@@ -56,9 +51,11 @@
         }
       ]
     },
-    "entrypoints": {
-      "main": "src/main.luau"
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en"]
     },
+    "entry": "src/main.luau",
     "implements": [
       {
         "interface": "mesh.hyprland",

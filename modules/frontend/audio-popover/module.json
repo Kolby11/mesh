@@ -1,150 +1,44 @@
 {
-  "id": "@mesh/audio-popover",
-  "name": "Audio Popover",
+  "name": "@mesh/audio-popover",
   "version": "0.1.0",
-  "type": "surface",
-  "api_version": "0.1",
   "description": "Compact audio controls surface anchored from the navigation bar.",
-  "authors": [
-    "MESH Project"
-  ],
-  "compatibility": {
-    "mesh": ">=0.1.0",
-    "compositors": [
-      "wlr-layer-shell-v1"
-    ]
-  },
-  "capabilities": {
-    "required": [
-      "shell.surface",
-      "service.audio.read",
-      "service.audio.control",
-      "locale.read"
-    ]
-  },
-  "dependencies": {
-    "icon_packs": {
-      "required": [
-        "@mesh/icons-default"
-      ]
-    }
-  },
-  "icon_requirements": {
-    "required": [
-      "audio-volume-muted",
-      "audio-volume-low",
-      "audio-volume-medium",
-      "audio-volume-high"
-    ]
-  },
-  "entrypoints": {
-    "main": "src/main.mesh"
-  },
-  "keybinds": {
-    "toggle_mute": {
-      "label": "Toggle mute",
-      "description": "Toggle audio mute from the focused audio popover",
-      "category": "Audio",
-      "trigger": {
-        "kind": "access_key",
-        "key": "m"
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "uses": {
+      "interfaces": {
+        "mesh.audio": ">=1.0"
       },
-      "localized_triggers": {
-        "sk": {
-          "kind": "access_key",
-          "key": "s"
-        }
+      "capabilities": [
+        "shell.surface",
+        "service.audio.read",
+        "service.audio.control"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "left",
+      "layer": "overlay",
+      "width": 40,
+      "height": 200,
+      "exclusive_zone": 0,
+      "keyboard_mode": "on_demand",
+      "visible_on_start": false,
+      "size": "content_measured",
+      "prefers_content_children_sizing": true,
+      "min_width": 36,
+      "max_width": 48,
+      "min_height": 180,
+      "max_height": 260,
+      "display_transition": {
+        "show_ms": 120,
+        "hide_ms": 120
       }
+    },
+    "accessibility": {
+      "role": "dialog",
+      "label": "Audio controls",
+      "description": "Compact audio controls popover"
     }
-  },
-  "settings": {
-    "namespace": "@mesh/audio-popover",
-    "schema": {
-      "surface": {
-        "type": "object",
-        "description": "Placement and sizing for the audio popover surface.",
-        "properties": {
-          "anchor": {
-            "type": "enum",
-            "values": [
-              "top",
-              "bottom",
-              "left",
-              "right"
-            ],
-            "default": "left",
-            "description": "Screen edge this surface anchors to."
-          },
-          "layer": {
-            "type": "enum",
-            "values": [
-              "background",
-              "bottom",
-              "top",
-              "overlay"
-            ],
-            "default": "overlay",
-            "description": "Layer-shell stacking layer."
-          },
-          "width": {
-            "type": "integer",
-            "default": 280,
-            "min": 160,
-            "max": 7680,
-            "description": "Surface width in pixels."
-          },
-          "height": {
-            "type": "integer",
-            "default": 164,
-            "min": 96,
-            "max": 1080,
-            "description": "Surface height in pixels."
-          },
-          "exclusive_zone": {
-            "type": "integer",
-            "default": 0,
-            "min": 0,
-            "max": 256,
-            "description": "Reserved compositor space in pixels."
-          },
-          "keyboard_mode": {
-            "type": "enum",
-            "values": [
-              "none",
-              "exclusive",
-              "on_demand"
-            ],
-            "default": "on_demand",
-            "description": "Keyboard interactivity policy for the surface. The popover contains focusable controls (slider, buttons), so it requests keyboard on click and releases it when the user clicks away."
-          },
-          "visible_on_start": {
-            "type": "boolean",
-            "default": false,
-            "description": "Whether this surface starts visible when Mesh boots."
-          },
-          "display_transition": {
-            "type": "object",
-            "default": {
-              "show_ms": 120,
-              "hide_ms": 120
-            },
-            "description": "Display transition durations for mapping and unmapping this surface."
-          }
-        }
-      }
-    }
-  },
-  "surface_layout": {
-    "size_policy": "content_measured",
-    "prefers_content_children_sizing": true,
-    "min_width": 280,
-    "max_width": 360,
-    "min_height": 176,
-    "max_height": 260
-  },
-  "accessibility": {
-    "role": "dialog",
-    "label": "Audio controls",
-    "description": "Compact audio controls popover"
   }
 }

@@ -278,8 +278,7 @@ pub(crate) struct PainterLayer {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ActivePainterLayer {
-    opacity_alpha: u16,
-    filter: PainterFilter,
+    save_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -500,14 +499,19 @@ impl SkiaPaintBackend {
                     {
                         continue;
                     }
-                    let effective = ActivePainterLayer::from_layer(*layer, layer_stack.last());
-                    layer_stack.push(effective);
+                    if let Some(active) =
+                        self.push_layer_command(canvas, *layer, clip_stack.last().copied())
+                    {
+                        layer_stack.push(active);
+                    }
                 }
                 PainterCommand::PopLayer => {
-                    layer_stack.pop();
+                    if let Some(layer) = layer_stack.pop() {
+                        canvas.restore_to_count(layer.save_count);
+                    }
                 }
                 PainterCommand::DrawRect { rect, paint, clip } => {
-                    let paint = layer_paint(*paint, &layer_stack);
+                    let paint = *paint;
                     self.diagnose_unsupported_paint(paint, diagnostics);
                     self.draw_rect_command(
                         canvas,
@@ -522,7 +526,7 @@ impl SkiaPaintBackend {
                     paint,
                     clip,
                 } => {
-                    let paint = layer_paint(*paint, &layer_stack);
+                    let paint = *paint;
                     self.diagnose_unsupported_paint(paint, diagnostics);
                     self.draw_rounded_rect_command(
                         canvas,
@@ -533,7 +537,7 @@ impl SkiaPaintBackend {
                     );
                 }
                 PainterCommand::DrawPath { path, paint, clip } => {
-                    let paint = layer_paint(*paint, &layer_stack);
+                    let paint = *paint;
                     self.diagnose_unsupported_paint(paint, diagnostics);
                     self.draw_path_command(canvas, path, paint, effective_clip(*clip, &clip_stack));
                 }
@@ -551,7 +555,7 @@ impl SkiaPaintBackend {
                     paint,
                     clip,
                 } => {
-                    let paint = layer_paint(*paint, &layer_stack);
+                    let paint = *paint;
                     self.draw_image_command(
                         canvas,
                         image,
@@ -631,6 +635,48 @@ impl SkiaPaintBackend {
                 },
             }
         }
+    }
+
+    fn push_layer_command(
+        &self,
+        canvas: &Canvas,
+        layer: PainterLayer,
+        current_clip: Option<ClipRect>,
+    ) -> Option<ActivePainterLayer> {
+        let bounds = current_clip
+            .map(|clip| intersect_clip(layer.bounds, clip))
+            .unwrap_or(layer.bounds);
+        if bounds.width <= 0 || bounds.height <= 0 {
+            return None;
+        }
+
+        let mut paint = skia_safe::Paint::default();
+        paint.set_alpha_f(layer.opacity.clamp(0.0, 1.0));
+        paint.set_blend_mode(skia_safe::BlendMode::SrcOver);
+
+        if let PainterFilter::Blur(filter) = layer.filter
+            && filter.blur_radius > 0.0
+            && let Some(image_filter) = image_filters::blur(
+                (
+                    blur_radius_to_sigma(filter.blur_radius),
+                    blur_radius_to_sigma(filter.blur_radius),
+                ),
+                Some(TileMode::Decal),
+                None,
+                None,
+            )
+        {
+            paint.set_image_filter(image_filter);
+        }
+
+        let bounds = Rect::from_xywh(
+            bounds.x as f32,
+            bounds.y as f32,
+            bounds.width as f32,
+            bounds.height as f32,
+        );
+        let save_count = canvas.save_layer(&SaveLayerRec::default().bounds(&bounds).paint(&paint));
+        Some(ActivePainterLayer { save_count })
     }
 
     fn diagnose_unsupported_paint(
@@ -1316,42 +1362,6 @@ fn effective_clip(clip: ClipRect, clip_stack: &[ClipRect]) -> ClipRect {
         .copied()
         .map(|current| intersect_clip(clip, current))
         .unwrap_or(clip)
-}
-
-impl ActivePainterLayer {
-    fn from_layer(layer: PainterLayer, parent: Option<&ActivePainterLayer>) -> Self {
-        let parent_opacity = parent.map_or(1.0, |layer| layer.opacity_alpha as f32 / 255.0);
-        let opacity_alpha =
-            ((parent_opacity * layer.opacity.clamp(0.0, 1.0) * 255.0).round() as u16).min(255);
-        let filter = parent
-            .filter(|layer| !matches!(layer.filter, PainterFilter::None))
-            .map(|layer| layer.filter)
-            .unwrap_or(layer.filter);
-        Self {
-            opacity_alpha,
-            filter,
-        }
-    }
-
-    fn apply_to_paint(self, mut paint: PainterPaint) -> PainterPaint {
-        if self.opacity_alpha < 255 {
-            paint.color.a =
-                (((paint.color.a as u16) * self.opacity_alpha + 127) / 255).min(255) as u8;
-        }
-        if let PainterFilter::Blur(filter) = self.filter
-            && paint.filter.is_none()
-        {
-            paint.filter = filter;
-        }
-        paint
-    }
-}
-
-fn layer_paint(paint: PainterPaint, layer_stack: &[ActivePainterLayer]) -> PainterPaint {
-    if let Some(layer) = layer_stack.last() {
-        return layer.apply_to_paint(paint);
-    }
-    paint
 }
 
 fn skia_path(path: &PainterPath) -> Option<SkiaPath> {

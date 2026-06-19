@@ -12,6 +12,7 @@ use mesh_core_module::manifest::{
 };
 use mesh_core_module::{ExportsSection, Manifest, ModuleSection, ModuleType};
 use mesh_core_scripting::ScriptContext;
+use mesh_core_service::contract::ContractStateField;
 use mesh_core_service::{
     ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract, InterfaceMethod,
     InterfaceProvider, parse_contract_version,
@@ -176,7 +177,68 @@ pub(super) fn debug_catalog() -> InterfaceCatalog {
         interface: "mesh.debug".into(),
         version: parse_contract_version("1.0").unwrap(),
         file_path: PathBuf::from("<test>"),
-        state_fields: Vec::new(),
+        state_fields: vec![
+            ContractStateField {
+                name: "overlay_enabled".into(),
+                field_type: "boolean".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "layout_bounds_enabled".into(),
+                field_type: "boolean".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "profiling_enabled".into(),
+                field_type: "boolean".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "profiling_session_id".into(),
+                field_type: "integer".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "active_view".into(),
+                field_type: "string".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "modules".into(),
+                field_type: "array".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "module_graph".into(),
+                field_type: "array".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "interfaces".into(),
+                field_type: "array".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "backend_runtimes".into(),
+                field_type: "array".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "active_surfaces".into(),
+                field_type: "array".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "benchmarks".into(),
+                field_type: "object".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "profiling".into(),
+                field_type: "object".into(),
+                description: None,
+            },
+        ],
         methods: Vec::new(),
         events: Vec::new(),
         types: HashMap::new(),
@@ -562,6 +624,14 @@ pub(super) fn real_frontend_module_component(
                 parse_component(include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
                     "/../../../modules/frontend/debug-inspector/src/components/overview-view.mesh"
+                )))
+                .unwrap(),
+            ),
+            (
+                "ModulesView".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/debug-inspector/src/components/modules-view.mesh"
                 )))
                 .unwrap(),
             ),

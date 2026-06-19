@@ -133,6 +133,8 @@ const SUPPORTED_CSS_PROPERTIES: &[&str] = &[
     "box-shadow",
     "filter",
     "backdrop-filter",
+    "tooltip-anchor",
+    "tooltip-offset",
 ];
 
 const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
@@ -651,6 +653,16 @@ const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
         category: "font",
         status: StyleProfileStatus::OutOfScope,
     },
+    StyleProfileProperty {
+        property: "tooltip-anchor",
+        category: "tooltip",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "tooltip-offset",
+        category: "tooltip",
+        status: StyleProfileStatus::Implemented,
+    },
 ];
 
 pub fn supported_css_properties() -> &'static [&'static str] {
@@ -678,6 +690,43 @@ pub fn style_profile_status(property: &str) -> Option<StyleProfileStatus> {
 
 pub fn is_transition_safe_keyframe_property(property: &str) -> bool {
     mesh_core_component::style::is_transition_safe_keyframe_property(property)
+}
+
+/// Where a tooltip should appear relative to the hovered element.
+///
+/// Set via the `tooltip-anchor` CSS property. Elements use this to declare
+/// their preferred tooltip placement. The shell applies screen-edge avoidance
+/// automatically — if the preferred placement would overflow, it flips to the
+/// opposite side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TooltipAnchor {
+    /// Use the shell's global default positioning strategy.
+    #[default]
+    Auto,
+    /// Centered below the element (preferred), flipping above on overflow.
+    Bottom,
+    /// Centered above the element (preferred), flipping below on overflow.
+    Top,
+    /// Left of the element (preferred), flipping right on overflow.
+    Left,
+    /// Right of the element (preferred), flipping left on overflow.
+    Right,
+    /// Place the tooltip near the cursor.
+    Cursor,
+}
+
+impl TooltipAnchor {
+    pub fn from_css(value: &str) -> Option<Self> {
+        match value.trim() {
+            "auto" => Some(Self::Auto),
+            "bottom" => Some(Self::Bottom),
+            "top" => Some(Self::Top),
+            "left" => Some(Self::Left),
+            "right" => Some(Self::Right),
+            "cursor" => Some(Self::Cursor),
+            _ => None,
+        }
+    }
 }
 
 /// Fully resolved style for a widget node.
@@ -743,6 +792,12 @@ pub struct ComputedStyle {
     pub icon_weight: Option<f32>,
     pub icon_grade: Option<f32>,
     pub icon_optical_size: Option<f32>,
+    /// Per-element tooltip placement override. Set via the `tooltip-anchor`
+    /// CSS property. `Auto` defers to the shell's global default.
+    pub tooltip_anchor: TooltipAnchor,
+    /// Per-element tooltip offset override in CSS pixels (horizontal, vertical).
+    /// Set via the `tooltip-offset` CSS property. `None` uses the shell default.
+    pub tooltip_offset: Option<(f32, f32)>,
 }
 
 impl Default for ComputedStyle {
@@ -802,6 +857,8 @@ impl Default for ComputedStyle {
             icon_weight: None,
             icon_grade: None,
             icon_optical_size: None,
+            tooltip_anchor: TooltipAnchor::Auto,
+            tooltip_offset: None,
         }
     }
 }

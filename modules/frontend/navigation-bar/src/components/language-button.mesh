@@ -6,23 +6,27 @@
     title="{t('nav.language_menu')}"
     aria-label="{t('nav.language_menu')}"
   >
-    <icon class="nav-button-glyph" name="preferences-desktop-locale" size="18" />
+    <label class="language-label">{current_locale_label}</label>
   </button>
 </template>
 
 <script lang="luau">
 onActivate = nil
+current_locale_label = "EN"
 
-local function locale_is_slovak(locale)
-    return locale == "sk" or string.find(locale or "", "sk-", 1, true) == 1
-end
-
-local function current_locale()
+local function locale_code()
     local locale = mesh.locale.current()
     if type(locale) ~= "string" or locale == "" then
         return "en"
     end
     return locale
+end
+
+local function locale_label(locale)
+    if locale == "sk" or string.find(locale or "", "sk-", 1, true) == 1 then
+        return "SK"
+    end
+    return "EN"
 end
 
 local function stored_locale(storage)
@@ -38,10 +42,11 @@ function init(self)
     if locale ~= nil then
         mesh.locale.set(locale)
     end
+    current_locale_label = locale_label(locale or locale_code())
 end
 
 function render(self)
-    -- kept for reactive re-render when locale changes
+    current_locale_label = locale_label(locale_code())
 end
 </script>
 
@@ -87,13 +92,13 @@ end
     transform: translateY(0px) scale(0.94);
 }
 
-.nav-button-glyph {
-    width: 24px;
-    height: 24px;
-    flex-shrink: 0;
-    justify-content: center;
-    align-items: center;
+.language-label {
     color: inherit;
+    font-size: token(typography.size.sm);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.05em;
+    user-select: none;
     transition: color token(animation.duration.short) token(animation.curves.bezier.standard);
 }
 </style>

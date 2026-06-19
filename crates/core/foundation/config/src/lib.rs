@@ -26,6 +26,8 @@ pub struct ShellSettings {
     pub keyboard: KeyboardSettings,
     #[serde(default)]
     pub icons: IconSettings,
+    #[serde(default)]
+    pub tooltip: TooltipSettings,
     /// Per-module user-side overrides (icons, etc.). Keyed by module id.
     #[serde(default)]
     pub modules: HashMap<String, ModuleSettingsOverrides>,
@@ -153,6 +155,107 @@ impl Default for I18nSettings {
             fallback_locale: default_fallback_locale(),
         }
     }
+}
+
+/// Global tooltip behavior settings.
+///
+/// These control the default tooltip positioning, animation, and timing for
+/// all shell components. Individual elements can override the positioning
+/// strategy via the `tooltip-anchor` CSS property.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TooltipSettings {
+    /// Default positioning strategy when the element does not specify
+    /// `tooltip-anchor`. Accepted values: `"auto"`, `"bottom"`, `"top"`,
+    /// `"left"`, `"right"`, `"cursor"`.
+    ///
+    /// - `"auto"` picks `"bottom"` and flips when it would overflow.
+    /// - `"bottom"` / `"top"` / `"left"` / `"right"` place the tooltip at
+    ///   the corresponding edge of the hovered element, flipping when needed.
+    /// - `"cursor"` places the tooltip near the cursor position.
+    #[serde(default = "default_tooltip_position")]
+    pub position: String,
+
+    /// Delay in milliseconds before the tooltip appears after hover starts.
+    #[serde(default = "default_tooltip_delay_ms")]
+    pub delay_ms: u64,
+
+    /// Duration in milliseconds of the tooltip fade-in animation.
+    #[serde(default = "default_tooltip_fade_in_ms")]
+    pub fade_in_ms: u64,
+
+    /// Gap in pixels between the tooltip and the hovered element.
+    #[serde(default = "default_tooltip_gap")]
+    pub gap: f32,
+
+    /// Horizontal offset from the cursor when using cursor positioning.
+    #[serde(default = "default_tooltip_cursor_offset_x")]
+    pub cursor_offset_x: f32,
+
+    /// Vertical offset from the cursor when using cursor positioning.
+    #[serde(default = "default_tooltip_cursor_offset_y")]
+    pub cursor_offset_y: f32,
+
+    /// Pixels the tooltip slides along its placement axis during fade-in.
+    /// Only used when `animation` is `"slide"` or `"slide-fade"`.
+    #[serde(default = "default_tooltip_slide_in_px")]
+    pub slide_in_px: f32,
+
+    /// Enter animation style. Accepted values:
+    /// - `"expand"` — box scales from `expand_from` to 1.0 (default)
+    /// - `"slide"` — translates along the placement axis
+    /// - `"fade"` — opacity only
+    /// - `"none"` — instant
+    #[serde(default = "default_tooltip_animation")]
+    pub animation: String,
+
+    /// Starting scale factor for the `"expand"` animation (0.0–1.0).
+    /// 0.85 means the box starts at 85 % of its full size and grows to 100 %.
+    #[serde(default = "default_tooltip_expand_from")]
+    pub expand_from: f32,
+}
+
+impl Default for TooltipSettings {
+    fn default() -> Self {
+        Self {
+            position: default_tooltip_position(),
+            delay_ms: default_tooltip_delay_ms(),
+            fade_in_ms: default_tooltip_fade_in_ms(),
+            gap: default_tooltip_gap(),
+            cursor_offset_x: default_tooltip_cursor_offset_x(),
+            cursor_offset_y: default_tooltip_cursor_offset_y(),
+            slide_in_px: default_tooltip_slide_in_px(),
+            animation: default_tooltip_animation(),
+            expand_from: default_tooltip_expand_from(),
+        }
+    }
+}
+
+fn default_tooltip_position() -> String {
+    "bottom".into()
+}
+fn default_tooltip_delay_ms() -> u64 {
+    300
+}
+fn default_tooltip_fade_in_ms() -> u64 {
+    150
+}
+fn default_tooltip_gap() -> f32 {
+    6.0
+}
+fn default_tooltip_cursor_offset_x() -> f32 {
+    14.0
+}
+fn default_tooltip_cursor_offset_y() -> f32 {
+    18.0
+}
+fn default_tooltip_slide_in_px() -> f32 {
+    4.0
+}
+fn default_tooltip_animation() -> String {
+    "expand".into()
+}
+fn default_tooltip_expand_from() -> f32 {
+    0.85
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -371,6 +474,7 @@ fn merge_shell_settings(base: &mut ShellSettings, overrides: ShellSettings) {
     base.i18n = overrides.i18n;
     base.sounds = overrides.sounds;
     base.keyboard = overrides.keyboard;
+    base.tooltip = overrides.tooltip;
     if overrides.icons != IconSettings::default() {
         base.icons = overrides.icons;
     }
@@ -766,5 +870,33 @@ mod tests {
             settings.keyboard.surface_shortcuts.is_empty(),
             "module-owned defaults should remain the fallback when shell overrides are absent"
         );
+    }
+
+    #[test]
+    fn tooltip_settings_overrides_merge_into_shell_settings() {
+        let mut base = ShellSettings::default();
+        let overrides = ShellSettings {
+            tooltip: TooltipSettings {
+                position: "cursor".into(),
+                delay_ms: 25,
+                fade_in_ms: 0,
+                gap: 10.0,
+                cursor_offset_x: 3.0,
+                cursor_offset_y: 4.0,
+                slide_in_px: 0.0,
+                animation: "none".into(),
+                expand_from: 0.85,
+            },
+            ..ShellSettings::default()
+        };
+
+        merge_shell_settings(&mut base, overrides);
+
+        assert_eq!(base.tooltip.position, "cursor");
+        assert_eq!(base.tooltip.delay_ms, 25);
+        assert_eq!(base.tooltip.fade_in_ms, 0);
+        assert_eq!(base.tooltip.gap, 10.0);
+        assert_eq!(base.tooltip.cursor_offset_x, 3.0);
+        assert_eq!(base.tooltip.cursor_offset_y, 4.0);
     }
 }

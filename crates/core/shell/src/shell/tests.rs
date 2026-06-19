@@ -146,8 +146,8 @@ fn module_instance(id: &str, entrypoint: Option<&str>) -> (tempfile::TempDir, Mo
     let instance = ModuleInstance::new(
         manifest,
         dir.path().to_path_buf(),
-        dir.path().join("package.json"),
-        ManifestSource::LegacyModuleJson,
+        dir.path().join("module.json"),
+        ManifestSource::CanonicalModuleJson,
     );
     (dir, instance)
 }
@@ -162,15 +162,22 @@ fn test_config() -> ShellConfig {
 fn loaded_module(json: &str) -> LoadedModuleManifest {
     LoadedModuleManifest {
         manifest: ModuleManifest::from_json_str(json).unwrap(),
-        path: PathBuf::from("<test>/package.json"),
-        source: ModuleManifestSource::LegacyPackageJson,
+        path: PathBuf::from("<test>/module.json"),
+        source: ModuleManifestSource::CanonicalModuleJson,
         diagnostics: Vec::new(),
     }
 }
 
 fn graph_from_json(root: &str, modules: Vec<&str>) -> InstalledModuleGraph {
+    let root = format!(
+        r#"{{
+              "name": "@mesh/test-config",
+              "version": "0.1.0",
+              "mesh": {root}
+            }}"#
+    );
     InstalledModuleGraph::from_parts(
-        RootModuleGraphManifest::from_json_str(root).unwrap(),
+        RootModuleGraphManifest::from_json_str(&root).unwrap(),
         modules.into_iter().map(loaded_module).collect(),
     )
     .unwrap()
@@ -743,6 +750,152 @@ fn debug_snapshot_exposes_module_object_instances() {
             && entry.version.as_deref() == Some("1.0")
             && entry.lifecycle == "running"
     }));
+}
+
+#[test]
+fn debug_snapshot_exposes_installed_module_graph_contracts() {
+    let mut shell = Shell::new();
+    shell.discover_modules();
+
+    let snapshot = shell.build_debug_snapshot();
+    let navigation = snapshot
+        .module_graph
+        .iter()
+        .find(|entry| entry.module_id == "@mesh/navigation-bar")
+        .expect("navigation module graph entry");
+
+    assert!(navigation.uses_interfaces.contains(&"mesh.audio".into()));
+    assert!(navigation.uses_interfaces.contains(&"mesh.power".into()));
+    assert!(
+        navigation
+            .uses_optional_interfaces
+            .contains(&"mesh.brightness".into())
+    );
+    assert!(
+        navigation
+            .uses_icon_packs
+            .contains(&"@mesh/icons-default".into())
+    );
+    assert!(
+        navigation
+            .provides_settings
+            .contains(&"@mesh/navigation-bar".into())
+    );
+    assert!(
+        navigation
+            .provides_i18n
+            .iter()
+            .any(|entry| entry == "en:config/i18n/en.json")
+    );
+    assert!(
+        navigation
+            .required_icons
+            .contains(&"battery-caution".into())
+    );
+
+    let debug_payload = shell
+        .latest_service_state
+        .get(mesh_core_debug::DEBUG_INTERFACE)
+        .expect("debug snapshot should backfill mesh.debug latest state");
+    assert!(
+        debug_payload.state["module_graph"]
+            .as_array()
+            .is_some_and(|entries| entries.iter().any(|entry| {
+                entry["module_id"] == serde_json::json!("@mesh/navigation-bar")
+                    && entry["uses"]["interfaces"]
+                        .as_array()
+                        .is_some_and(|interfaces| {
+                            interfaces.contains(&serde_json::json!("mesh.audio"))
+                        })
+            }))
+    );
+}
+
+#[test]
+fn debug_snapshot_resolves_module_graph_layout_label_with_active_locale() {
+    let graph = graph_from_json(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/panel": { "kind": "frontend", "path": "@mesh/panel", "enabled": true }
+              },
+              "layout": { "entrypoint": "@mesh/panel:main" }
+            }"#,
+        vec![
+            r#"{
+                  "name": "@mesh/panel",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "frontend",
+                    "entry": "src/main.mesh",
+                    "provides": {
+                      "layout": [
+                        {
+                          "id": "main",
+                          "entrypoint": "src/main.mesh",
+                          "label": { "t": "layout.main.label", "fallback": "Main panel" }
+                        }
+                      ]
+                    },
+                    "surfaceLayout": { "size_policy": "fixed" },
+                    "accessibility": { "role": "toolbar" }
+                  }
+                }"#,
+        ],
+    );
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph);
+    shell
+        .locale
+        .load_translations(mesh_core_locale::TranslationSet {
+            locale: "sk".into(),
+            messages: HashMap::from([("layout.main.label".into(), "Hlavny panel".into())]),
+        });
+    shell.locale.set_locale("sk");
+
+    let snapshot = shell.build_debug_snapshot();
+    let panel = snapshot
+        .module_graph
+        .iter()
+        .find(|entry| entry.module_id == "@mesh/panel")
+        .expect("panel module graph entry");
+
+    assert_eq!(panel.surface_layout_label.as_deref(), Some("Hlavny panel"));
+    assert_eq!(
+        panel.surface_layout_label_key.as_deref(),
+        Some("layout.main.label")
+    );
+    assert_eq!(
+        panel.surface_layout_label_fallback.as_deref(),
+        Some("Main panel")
+    );
+
+    let debug_payload = shell
+        .latest_service_state
+        .get(mesh_core_debug::DEBUG_INTERFACE)
+        .expect("debug snapshot should backfill mesh.debug latest state");
+    let panel_json = debug_payload.state["module_graph"]
+        .as_array()
+        .and_then(|entries| {
+            entries
+                .iter()
+                .find(|entry| entry["module_id"] == serde_json::json!("@mesh/panel"))
+        })
+        .expect("panel module graph JSON entry");
+    assert_eq!(
+        panel_json["surface"]["layout_label"],
+        serde_json::json!("Hlavny panel")
+    );
+    assert_eq!(
+        panel_json["surface"]["layout_label_key"],
+        serde_json::json!("layout.main.label")
+    );
+    assert_eq!(
+        panel_json["surface"]["layout_label_fallback"],
+        serde_json::json!("Main panel")
+    );
 }
 
 #[test]
@@ -1578,13 +1731,17 @@ required = ["service.example.read"]
     .unwrap();
     let root = RootModuleGraphManifest::from_json_str(
         r#"{
-              "schemaVersion": 1,
-              "modulesDir": "modules",
-              "modules": {
-                "@mesh/example-interface": { "kind": "interface", "path": "@mesh/example-interface", "enabled": true },
-                "@mesh/example-backend": { "kind": "backend", "path": "@mesh/example-backend", "enabled": true }
-              },
-              "providers": { "mesh.example": "@mesh/example-backend" }
+              "name": "@mesh/test-config",
+              "version": "0.1.0",
+              "mesh": {
+                "schemaVersion": 1,
+                "modulesDir": "modules",
+                "modules": {
+                  "@mesh/example-interface": { "kind": "interface", "path": "@mesh/example-interface", "enabled": true },
+                  "@mesh/example-backend": { "kind": "backend", "path": "@mesh/example-backend", "enabled": true }
+                },
+                "providers": { "mesh.example": "@mesh/example-backend" }
+              }
             }"#,
     )
     .unwrap();
@@ -4077,7 +4234,7 @@ fn service_contract_provider_declaration_requires_provider_pair() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
-                    "provides": [{ "interface": "mesh.audio", "provider": "test" }]
+                    "implements": [{ "interface": "mesh.audio", "provider": "test" }]
                   }
                 }"#,
         ],
@@ -4110,7 +4267,7 @@ fn service_contract_provider_declaration_requires_provider_pair() {
 }
 
 #[test]
-fn backend_lifecycle_reports_explicit_missing_provider_capability() {
+fn backend_lifecycle_accepts_provider_without_consumer_capabilities() {
     let graph = graph_from_json(
         r#"{
               "schemaVersion": 1,
@@ -4128,7 +4285,7 @@ fn backend_lifecycle_reports_explicit_missing_provider_capability() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
-                    "provides": [{ "interface": "mesh.example", "provider": "test" }]
+                    "implements": [{ "interface": "mesh.example", "provider": "test" }]
                   }
                 }"#,
         ],
@@ -4144,17 +4301,17 @@ fn backend_lifecycle_reports_explicit_missing_provider_capability() {
     let (candidates, statuses) =
         backend_launch_candidates_from_graph(&graph, &modules, &test_config(), &interfaces);
 
-    assert!(candidates.is_empty());
-    assert!(statuses.iter().any(|status| {
-        status.status == "missing_capability"
-            && status.interface == "mesh.example"
-            && status.provider_id.as_deref() == Some("@mesh/backend")
-            && status.message.contains("service.example.read")
-    }));
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].interface, "mesh.example");
+    assert!(
+        statuses
+            .iter()
+            .all(|status| status.status != "missing_capability")
+    );
 }
 
 #[test]
-fn backend_lifecycle_accepts_explicit_provider_capability() {
+fn backend_lifecycle_accepts_valid_provider_with_contract() {
     let graph = graph_from_json(
         r#"{
               "schemaVersion": 1,
@@ -4171,15 +4328,15 @@ fn backend_lifecycle_accepts_explicit_provider_capability() {
                   "mesh": {
                     "apiVersion": "0.1",
                     "kind": "backend",
-                    "capabilities": { "required": ["service.example.read"] },
+                    "capabilities": { "required": ["exec.example"] },
                     "entrypoints": { "main": "src/main.luau" },
-                    "provides": [{ "interface": "mesh.example", "provider": "test" }]
+                    "implements": [{ "interface": "mesh.example", "provider": "test" }]
                   }
                 }"#,
         ],
     );
     let (_dir, mut module) = module_instance("@mesh/backend", Some("src/main.luau"));
-    module.manifest.capabilities.required = vec!["service.example.read".to_string()];
+    module.manifest.capabilities.required = vec!["exec.example".to_string()];
     let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
     let interfaces = InterfaceRegistry::new();
     let mut contract = test_contract("mesh.example");
@@ -4192,10 +4349,7 @@ fn backend_lifecycle_accepts_explicit_provider_capability() {
 
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].interface, "mesh.example");
-    assert_eq!(
-        candidates[0].capabilities,
-        vec!["service.example.read".to_string()]
-    );
+    assert_eq!(candidates[0].capabilities, vec!["exec.example".to_string()]);
     assert!(
         statuses
             .iter()
@@ -4523,11 +4677,13 @@ fn launcher_content_size_ignores_root_surface_bounds() {
 
     let launcher_layout = SurfaceLayoutSection {
         size_policy: Some("content_measured".into()),
+        keyboard_mode: Some("on_demand".into()),
         prefers_content_children_sizing: Some(true),
         min_width: Some(320),
         max_width: Some(640),
         min_height: Some(180),
         max_height: Some(420),
+        ..Default::default()
     };
     assert_eq!(
         measure_content_size(&root, 640, 360, Some(&launcher_layout)),
@@ -4573,12 +4729,15 @@ fn installed_module_graph_exposes_shell_package_choices() {
             .any(|icon_pack| icon_pack.module_id == "@mesh/icons-default")
     );
     assert!(graph.active_provider("mesh.network").is_none());
-    assert!(graph.active_provider("mesh.power").is_none());
+    assert_eq!(
+        graph.active_provider("mesh.power").unwrap().module_id,
+        "@mesh/upower-power"
+    );
     assert_eq!(
         graph.backend_providers_for_interface("mesh.network").len(),
         0
     );
-    assert_eq!(graph.backend_providers_for_interface("mesh.power").len(), 0);
+    assert_eq!(graph.backend_providers_for_interface("mesh.power").len(), 1);
     assert!(
         graph
             .frontend_modules()
@@ -4649,9 +4808,13 @@ fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
     .unwrap();
     let (_pipewire_dir, pipewire) = module_instance("@mesh/pipewire-audio", Some("src/main.luau"));
     let (_pulse_dir, pulse) = module_instance("@mesh/pulseaudio-audio", Some("src/main.luau"));
+    let (_upower_dir, upower) = module_instance("@mesh/upower-power", Some("src/main.luau"));
+    let (_hyprland_dir, hyprland) = module_instance("@mesh/hyprland-wm", Some("src/main.luau"));
     let modules = HashMap::from([
         ("@mesh/pipewire-audio".to_string(), pipewire),
         ("@mesh/pulseaudio-audio".to_string(), pulse),
+        ("@mesh/upower-power".to_string(), upower),
+        ("@mesh/hyprland-wm".to_string(), hyprland),
     ]);
 
     let (candidates, statuses) = backend_launch_candidates_from_graph(
@@ -4666,7 +4829,7 @@ fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
             .iter()
             .all(|status| status.status != "invalid_manifest")
     );
-    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates.len(), 3);
     let audio = candidates
         .iter()
         .find(|candidate| candidate.interface == "mesh.audio")
@@ -4677,7 +4840,14 @@ fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
     assert!(
         candidates
             .iter()
-            .all(|candidate| candidate.interface == "mesh.audio")
+            .any(|candidate| candidate.interface == "mesh.power"
+                && candidate.module_id == "@mesh/upower-power")
+    );
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.interface == "mesh.hyprland"
+                && candidate.module_id == "@mesh/hyprland-wm")
     );
     assert!(
         !candidates
@@ -4704,7 +4874,7 @@ fn backend_lifecycle_rejects_missing_backend_entrypoint_before_launch() {
                   "mesh": {
                     "apiVersion": "0.1",
                     "kind": "backend",
-                    "provides": [{ "interface": "mesh.audio", "provider": "test" }]
+                    "implements": [{ "interface": "mesh.audio", "provider": "test" }]
                   }
                 }"#,
         ],
@@ -4755,7 +4925,7 @@ fn backend_lifecycle_excludes_disabled_backend_modules() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
-                    "provides": [{ "interface": "mesh.audio", "provider": "test" }]
+                    "implements": [{ "interface": "mesh.audio", "provider": "test" }]
                   }
                 }"#,
         ],
@@ -4805,7 +4975,7 @@ fn backend_lifecycle_reports_frontend_requirement_without_active_provider() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
-                    "provides": [{ "interface": "mesh.audio", "provider": "test" }]
+                    "implements": [{ "interface": "mesh.audio", "provider": "test" }]
                   }
                 }"#,
         ],
@@ -4820,10 +4990,13 @@ fn backend_lifecycle_reports_frontend_requirement_without_active_provider() {
         &InterfaceRegistry::new(),
     );
 
-    assert!(candidates.is_empty());
-    assert!(statuses.iter().any(|status| {
-        status.status == "no_active_provider" && status.interface == "mesh.audio"
-    }));
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].interface, "mesh.audio");
+    assert!(
+        statuses
+            .iter()
+            .all(|status| status.status != "no_active_provider")
+    );
 }
 
 #[test]

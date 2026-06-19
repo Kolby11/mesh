@@ -6,6 +6,12 @@
         <box class="view-tab-indicator" hidden={overview_indicator_hidden} />
       </column>
     </tab>
+    <tab class="view-tab" onactivate={onModules} onclick={onModules}>
+      <column class="view-tab-copy">
+        <text class="view-tab-label">Modules</text>
+        <box class="view-tab-indicator" hidden={modules_indicator_hidden} />
+      </column>
+    </tab>
     <tab class="view-tab" onactivate={onSurfaces} onclick={onSurfaces}>
       <column class="view-tab-copy">
         <text class="view-tab-label">Surfaces</text>
@@ -14,13 +20,13 @@
     </tab>
     <tab class="view-tab" onactivate={onBackendServices} onclick={onBackendServices}>
       <column class="view-tab-copy">
-        <text class="view-tab-label">Backend services</text>
+        <text class="view-tab-label">Backends</text>
         <box class="view-tab-indicator" hidden={backend_services_indicator_hidden} />
       </column>
     </tab>
     <tab class="view-tab" onactivate={onBenchmark} onclick={onBenchmark}>
       <column class="view-tab-copy">
-        <text class="view-tab-label">Benchmark</text>
+        <text class="view-tab-label">Bench</text>
         <box class="view-tab-indicator" hidden={benchmark_indicator_hidden} />
       </column>
     </tab>
@@ -33,15 +39,15 @@
 <style>
 .view-tabs {
     width: 100%;
-    gap: token(spacing.xs);
-    flex-wrap: wrap;
+    gap: 2px;
+    flex-wrap: nowrap;
 }
 
 .view-tab {
     min-width: 0;
     flex-grow: 1;
-    padding-inline: token(spacing.sm);
-    padding-block: token(spacing.sm);
+    padding-inline: token(spacing.xs);
+    padding-block: token(spacing.xs);
     border-radius: token(radius.md);
     background: token(color.surface-container);
     border-width: 1px;

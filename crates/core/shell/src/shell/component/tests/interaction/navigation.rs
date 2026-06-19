@@ -953,6 +953,40 @@ fn keyboard_shortcuts_manifest_declaration_wins_over_legacy_settings_same_id() {
     assert_eq!(resolved[0].keybind_id, "mute");
     assert_eq!(resolved[0].key, "m");
     assert_eq!(resolved[0].source, KeybindResolutionSource::ModuleDefault);
+    assert_keybind_diagnostic(
+        &component,
+        "mute",
+        "legacy settings shortcut is ignored because mesh.keybinds declares this action",
+    );
+}
+
+#[test]
+fn keyboard_shortcuts_legacy_settings_only_declaration_is_migration_diagnostic() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+    );
+    component.settings_json = serde_json::json!({
+        "keyboard": {
+            "shortcuts": {
+                "mute": {
+                    "key": "z"
+                }
+            }
+        }
+    });
+
+    let resolved =
+        component.resolved_surface_shortcuts(&mesh_core_config::KeyboardSettings::default());
+
+    assert!(resolved.is_empty());
+    assert_keybind_diagnostic(
+        &component,
+        "mute",
+        "legacy settings shortcut declarations are migration-only; declare this action in mesh.keybinds",
+    );
 }
 
 #[test]

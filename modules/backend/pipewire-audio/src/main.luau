@@ -137,6 +137,23 @@ local function emit_volume_changed(self)
     end
 end
 
+local function wpctl_with_sink_fallback(args)
+    local result = wpctl(args)
+    if result.success or not (result.stderr and result.stderr:find("not a valid ID", 1, true)) then
+        return result
+    end
+    local sink_id = resolve_sink_id()
+    if not sink_id then
+        return result
+    end
+    debug_info("@DEFAULT_AUDIO_SINK@ alias failed; retrying with resolved sink id=" .. sink_id)
+    local fallback_args = {}
+    for _, arg in ipairs(args) do
+        table.insert(fallback_args, arg == "@DEFAULT_AUDIO_SINK@" and sink_id or arg)
+    end
+    return wpctl(fallback_args)
+end
+
 local function clamp_percent(percent)
     percent = tonumber(percent) or 0
     return math.max(0, math.min(100, percent))
@@ -256,30 +273,18 @@ end
 
 function on_command_volume_up(self)
     debug_info("received volume_up()")
-    local sink_id = resolve_sink_id()
-    if not sink_id then
-        refresh_state()
-        debug_warn("volume_up failed: no sink id")
-        return { ok = false, error = "audio sink unavailable" }
-    end
-    local volume = wpctl({ "set-volume", sink_id, "5%+" })
-    local mute = wpctl({ "set-mute", sink_id, "0" })
+    local volume = wpctl_with_sink_fallback({ "set-volume", "@DEFAULT_AUDIO_SINK@", "5%+" })
+    local mute = wpctl_with_sink_fallback({ "set-mute", "@DEFAULT_AUDIO_SINK@", "0" })
     refresh_state()
-    emit_volume_changed(self)
+    maybe_emit_volume_changed(self)
     return { ok = volume.success and mute.success, error = volume.stderr ~= "" and volume.stderr or mute.stderr }
 end
 
 function on_command_volume_down(self)
     debug_info("received volume_down()")
-    local sink_id = resolve_sink_id()
-    if not sink_id then
-        refresh_state()
-        debug_warn("volume_down failed: no sink id")
-        return { ok = false, error = "audio sink unavailable" }
-    end
-    local result = wpctl({ "set-volume", sink_id, "5%-" })
+    local result = wpctl_with_sink_fallback({ "set-volume", "@DEFAULT_AUDIO_SINK@", "5%-" })
     refresh_state()
-    emit_volume_changed(self)
+    maybe_emit_volume_changed(self)
     return { ok = result.success, error = result.stderr }
 end
 
@@ -287,29 +292,22 @@ function on_command_set_volume(self)
     local payload = mesh.service.payload()
     local percent = command_percent_from_payload(payload)
     debug_info("received set_volume payload volume=" .. tostring(payload.volume) .. " percent=" .. tostring(percent))
-    local sink_id = resolve_sink_id()
-    if not sink_id then
+    local result = wpctl_with_sink_fallback({ "set-volume", "@DEFAULT_AUDIO_SINK@", tostring(percent) .. "%" })
+    if not result.success then
         refresh_state()
-        debug_warn("set_volume failed: no sink id")
-        return { ok = false, error = "audio sink unavailable" }
+        debug_warn("set_volume failed: " .. (result.stderr or "unknown error"))
+        return { ok = false, error = result.stderr }
     end
-    local result = wpctl({ "set-volume", sink_id, tostring(percent) .. "%" })
     refresh_state()
-    emit_volume_changed(self)
-    return { ok = result.success, error = result.stderr }
+    maybe_emit_volume_changed(self)
+    return { ok = true }
 end
 
 function on_command_toggle_mute(self)
     debug_info("received toggle_mute()")
-    local sink_id = resolve_sink_id()
-    if not sink_id then
-        refresh_state()
-        debug_warn("toggle_mute failed: no sink id")
-        return { ok = false, error = "audio sink unavailable" }
-    end
-    local result = wpctl({ "set-mute", sink_id, "toggle" })
+    local result = wpctl_with_sink_fallback({ "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle" })
     refresh_state()
-    emit_volume_changed(self)
+    maybe_emit_volume_changed(self)
     return { ok = result.success, error = result.stderr }
 end
 
@@ -317,15 +315,9 @@ function on_command_set_muted(self)
     local payload = mesh.service.payload()
     local muted = payload.muted == true
     debug_info("received set_muted(" .. tostring(muted) .. ")")
-    local sink_id = resolve_sink_id()
-    if not sink_id then
-        refresh_state()
-        debug_warn("set_muted failed: no sink id")
-        return { ok = false, error = "audio sink unavailable" }
-    end
-    local result = wpctl({ "set-mute", sink_id, muted and "1" or "0" })
+    local result = wpctl_with_sink_fallback({ "set-mute", "@DEFAULT_AUDIO_SINK@", muted and "1" or "0" })
     refresh_state()
-    emit_volume_changed(self)
+    maybe_emit_volume_changed(self)
     return { ok = result.success, error = result.stderr }
 end
 

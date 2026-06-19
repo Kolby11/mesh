@@ -221,6 +221,128 @@ fn debug_inspector_surfaces_view_renders_retained_paint_filtering_counters() {
 }
 
 #[test]
+fn debug_inspector_modules_view_renders_uses_provides_graph() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.debug".into(),
+            source_module: "@mesh/core-debug".into(),
+            payload: serde_json::json!({
+                "overlay_enabled": true,
+                "profiling_enabled": false,
+                "profiling_session_id": 31,
+                "active_view": "modules",
+                "modules": [{ "id": "@mesh/navigation-bar" }],
+                "module_graph": [
+                    {
+                        "module_id": "@mesh/navigation-bar",
+                        "kind": "frontend",
+                        "enabled": true,
+                        "path": "modules/frontend/navigation-bar/module.json",
+                        "uses": {
+                            "modules": ["@mesh/audio-popover"],
+                            "interfaces": ["mesh.audio", "mesh.power"],
+                            "optional_interfaces": ["mesh.brightness"],
+                            "icon_packs": ["@mesh/icons-default"],
+                            "i18n_packs": [],
+                            "theme_packs": [],
+                            "font_packs": []
+                        },
+                        "capabilities": ["shell.surface"],
+                        "optional_capabilities": [],
+                        "provides": {
+                            "interfaces": [],
+                            "settings": ["@mesh/navigation-bar"],
+                            "i18n": ["en:config/i18n/en.json"],
+                            "required_icons": ["battery-caution", "audio-volume-high"],
+                            "optional_icons": []
+                        },
+                        "diagnostics": []
+                    },
+                    {
+                        "module_id": "@mesh/pipewire-audio",
+                        "kind": "backend",
+                        "enabled": true,
+                        "path": "modules/backend/pipewire-audio/module.json",
+                        "uses": {
+                            "modules": [],
+                            "interfaces": [],
+                            "optional_interfaces": [],
+                            "icon_packs": [],
+                            "i18n_packs": [],
+                            "theme_packs": [],
+                            "font_packs": []
+                        },
+                        "capabilities": ["service.audio.read"],
+                        "optional_capabilities": [],
+                        "provides": {
+                            "interfaces": ["mesh.audio"],
+                            "settings": [],
+                            "i18n": [],
+                            "required_icons": [],
+                            "optional_icons": []
+                        },
+                        "diagnostics": ["optional backend mesh.brightness has no active provider"]
+                    }
+                ],
+                "interfaces": [],
+                "backend_runtimes": [],
+                "active_surfaces": ["@mesh/debug-inspector"],
+                "benchmarks": {
+                    "scenarios": []
+                },
+                "profiling": serde_json::Value::Null
+            }),
+        })
+        .unwrap();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(360, 720);
+    component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showModules", &[])
+        .unwrap();
+    component.paint(&theme, 360, 720, &mut buffer, 1.0).unwrap();
+
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|line| line == "Modules"));
+    assert!(text.iter().any(|line| line == "@mesh/navigation-bar"));
+    assert!(
+        text.iter()
+            .any(|line| line.contains("Interfaces: mesh.audio, mesh.power"))
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("optional mesh.brightness"))
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("Resources: icons @mesh/icons-default"))
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("settings @mesh/navigation-bar"))
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("icons battery-caution"))
+    );
+    assert!(text.iter().any(|line| line == "Diagnostics: clear"));
+    assert!(text.iter().any(|line| line == "@mesh/pipewire-audio"));
+    assert!(text.iter().any(|line| line == "Interfaces: mesh.audio"));
+    assert!(
+        text.iter()
+            .any(|line| line.contains("optional backend mesh.brightness"))
+    );
+    assert!(
+        runtime_value(&component, "active_view")
+            .and_then(|value| value.as_str().map(str::to_string))
+            .as_deref()
+            == Some("modules")
+    );
+}
+
+#[test]
 fn debug_inspector_benchmark_view_renders_five_rows_when_profiling_off() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
     component

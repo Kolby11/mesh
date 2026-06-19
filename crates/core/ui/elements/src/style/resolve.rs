@@ -1638,6 +1638,24 @@ fn apply_declaration(
         "--icon-optical-size" => {
             style.icon_optical_size = Some(resolver.resolve_number_with_variables(value, variables))
         }
+        "tooltip-anchor" => {
+            let resolved = resolver.resolve_value_with_variables_mode(value, variables, false);
+            if let Some(anchor) = TooltipAnchor::from_css(&resolved) {
+                style.tooltip_anchor = anchor;
+            }
+        }
+        "tooltip-offset" => {
+            let resolved = resolver.resolve_value_with_variables_mode(value, variables, false);
+            let parts: Vec<&str> = resolved.split_whitespace().collect();
+            if parts.len() == 2 {
+                if let (Ok(x), Ok(y)) = (
+                    parts[0].trim_end_matches("px").parse::<f32>(),
+                    parts[1].trim_end_matches("px").parse::<f32>(),
+                ) {
+                    style.tooltip_offset = Some((x, y));
+                }
+            }
+        }
         _ if property.starts_with("--") => {}
         _ => {
             tracing::warn!("unsupported CSS property '{}'", property);

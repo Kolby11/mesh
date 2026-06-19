@@ -48,6 +48,33 @@ pub fn set_tooltip_paint_colors(colors: TooltipPaintColors) {
     });
 }
 
+/// Set the opacity used by the next tooltip paint on this thread's renderer.
+/// The shell calls this to animate tooltip fade-in.
+pub fn set_tooltip_paint_opacity(opacity: f32) {
+    FRONTEND_RENDERER.with(|engine| {
+        engine.borrow().set_tooltip_opacity(opacity);
+    });
+}
+
+/// When `centered` is true the next tooltip paint treats its X coordinate as
+/// the horizontal center of the tooltip box rather than the left edge.
+/// The shell sets this for element-anchored placements (bottom/top) so the
+/// tooltip is centered under or over the hovered element.
+pub fn set_tooltip_center_x(centered: bool) {
+    FRONTEND_RENDERER.with(|engine| {
+        engine.borrow().set_tooltip_center_x(centered);
+    });
+}
+
+/// Set the starting scale factor for the `"expand"` tooltip animation.
+/// 0.0 disables scale (pure fade/slide). Values like 0.85 start the box at
+/// 85 % of its full size and grow it to 100 % over the fade-in duration.
+pub fn set_tooltip_scale_from(scale_from: f32) {
+    FRONTEND_RENDERER.with(|engine| {
+        engine.borrow().set_tooltip_scale_from(scale_from);
+    });
+}
+
 pub fn paint_frontend_tree(
     tree: &mesh_core_elements::WidgetNode,
     buffer: &mut PixelBuffer,

@@ -72,6 +72,14 @@ the inline module section in the system file - that's the override direction.
       }
     }
   },
+  "tooltip": {
+    "position": "auto",
+    "delay_ms": 300,
+    "fade_in_ms": 150,
+    "gap": 6,
+    "cursor_offset_x": 14,
+    "cursor_offset_y": 18
+  },
 
   "interfaces": {
     "mesh.audio":   { "pin": "@mesh/pipewire-audio" },
@@ -153,6 +161,38 @@ override. Unsafe overrides that would take shell-owned traversal, activation,
 cancel, or selection-copy behavior are also ignored with diagnostics. Resolved
 bindings remain focused-surface scoped and appear in accessibility shortcut
 metadata and the `mesh.debug.keybinds` payload.
+
+## Tooltip settings
+
+Shell-owned tooltip defaults live under the top-level `tooltip` object.
+
+- `position` controls the default placement for elements without
+  `tooltip-anchor`. Supported values are `auto`, `bottom`, `top`, `left`,
+  `right`, and `cursor`. `auto` resolves to `bottom` and flips near screen
+  edges.
+- `delay_ms` controls how long hover must remain stable before the tooltip
+  appears.
+- `fade_in_ms` controls the tooltip fade-in duration. Set it to `0` to disable
+  fade-in.
+- `gap` controls the distance between the tooltip and the hovered element when
+  using element-relative positioning.
+- `cursor_offset_x` and `cursor_offset_y` control the offset when `position`
+  resolves to `cursor`.
+
+Example override:
+
+```json
+{
+  "tooltip": {
+    "position": "bottom",
+    "delay_ms": 200,
+    "fade_in_ms": 100,
+    "gap": 8,
+    "cursor_offset_x": 12,
+    "cursor_offset_y": 16
+  }
+}
+```
 
 ## Keys, namespaces, and validation
 

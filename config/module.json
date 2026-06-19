@@ -1,84 +1,20 @@
 {
-  "schemaVersion": 1,
-  "modulesDir": "../modules",
-  "modules": {
-    "@mesh/navigation-bar": {
-      "kind": "frontend",
-      "path": "frontend/navigation-bar",
-      "enabled": true
+  "name": "@mesh/local-config",
+  "version": "0.1.0",
+  "private": true,
+  "mesh": {
+    "schemaVersion": 1,
+    "modulesDir": "../modules",
+    "disabled": [
+      "@mesh/text-selection-proof",
+      "@mesh/debug-inspector",
+      "@mesh/icons-material-symbols"
+    ],
+    "providers": {
+      "mesh.audio": "@mesh/pipewire-audio"
     },
-    "@mesh/audio-popover": {
-      "kind": "frontend",
-      "path": "frontend/audio-popover",
-      "enabled": true
-    },
-    "@mesh/language-popover": {
-      "kind": "frontend",
-      "path": "frontend/language-popover",
-      "enabled": true
-    },
-    "@mesh/theme-selector": {
-      "kind": "frontend",
-      "path": "frontend/theme-selector",
-      "enabled": true
-    },
-    "@mesh/quick-settings": {
-      "kind": "frontend",
-      "path": "frontend/quick-settings",
-      "enabled": true
-    },
-    "@mesh/audio-interface": {
-      "kind": "interface",
-      "path": "interfaces/audio",
-      "enabled": true
-    },
-    "@mesh/power-interface": {
-      "kind": "interface",
-      "path": "interfaces/power",
-      "enabled": true
-    },
-    "@mesh/icons-default": {
-      "kind": "icon-pack",
-      "path": "icon-packs/default",
-      "enabled": true
-    },
-    "@mesh/text-selection-proof": {
-      "kind": "frontend",
-      "path": "frontend/text-selection-proof",
-      "enabled": false
-    },
-    "@mesh/pipewire-audio": {
-      "kind": "backend",
-      "path": "backend/pipewire-audio",
-      "enabled": true
-    },
-    "@mesh/pulseaudio-audio": {
-      "kind": "backend",
-      "path": "backend/pulseaudio-audio",
-      "enabled": true
-    },
-    "@mesh/upower-power": {
-      "kind": "backend",
-      "path": "backend/upower-power",
-      "enabled": true
-    },
-    "@mesh/hyprland-interface": {
-      "kind": "interface",
-      "path": "interfaces/hyprland",
-      "enabled": true
-    },
-    "@mesh/hyprland-wm": {
-      "kind": "backend",
-      "path": "backend/hyprland-wm",
-      "enabled": true
+    "layout": {
+      "entrypoint": "@mesh/navigation-bar:main"
     }
-  },
-  "providers": {
-    "mesh.audio": "@mesh/pipewire-audio",
-    "mesh.power": "@mesh/upower-power",
-    "mesh.hyprland": "@mesh/hyprland-wm"
-  },
-  "layout": {
-    "entrypoint": "@mesh/navigation-bar:main"
   }
 }

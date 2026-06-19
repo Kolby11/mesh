@@ -220,6 +220,13 @@ pub struct MeshModuleSection {
     pub icon_requirements: manifest::IconRequirementsSection,
     #[serde(default)]
     pub accessibility: Option<manifest::AccessibilitySection>,
+    /// Compact author-facing surface block. Core ships the canonical surface
+    /// schema; authors declare only deltas here. Normalized into
+    /// `surface_layout`, the single typed runtime home.
+    #[serde(default)]
+    pub surface: Option<manifest::SurfaceLayoutSection>,
+    /// Legacy non-user renderer hints. Superseded by `surface`; kept so older
+    /// manifests still parse. When `surface` is present it wins.
     #[serde(default, rename = "surfaceLayout", alias = "surface_layout")]
     pub surface_layout: Option<manifest::SurfaceLayoutSection>,
     #[serde(default)]
@@ -247,6 +254,13 @@ impl MeshModuleSection {
                 entrypoint: entry.clone(),
                 label: None,
             });
+        }
+        // The compact `mesh.surface` block is the canonical author surface for
+        // surface placement/sizing/policy. It supersedes the legacy
+        // `mesh.surfaceLayout` key: when present it becomes `surface_layout`,
+        // the single typed runtime home read by `surface_layout_from_manifest`.
+        if let Some(surface) = self.surface.take() {
+            self.surface_layout = Some(surface);
         }
         self.dependencies.merge_uses(&self.uses);
         merge_unique(&mut self.capabilities.required, &self.uses.capabilities);
@@ -280,18 +294,18 @@ impl MeshModuleSection {
         self.uses.validate()?;
         if let Some(interface) = &self.interface {
             interface.validate()?;
-            if self.kind == ModuleKind::Interface {
-                if interface.version.is_none() {
-                    return Err(ModuleManifestError::Validation(
-                        "interface modules must declare mesh.interface.version".into(),
-                    ));
-                }
-                if interface.file.is_none() {
-                    return Err(ModuleManifestError::Validation(
-                        "interface modules must declare mesh.interface.file".into(),
-                    ));
-                }
+            if self.kind == ModuleKind::Interface && interface.version.is_none() {
+                return Err(ModuleManifestError::Validation(
+                    "interface modules must declare mesh.interface.version".into(),
+                ));
             }
+            // `mesh.interface.file` (the contract TOML) is optional for v0: an
+            // interface module may ship only name/version/domain and let the
+            // contract be inferred from the provider's emitted state. When a
+            // file is declared but absent on disk, the graph still reports
+            // `missing_interface_contract_file`; contract-based validation
+            // (capabilities, events) simply does not apply until a contract
+            // file exists.
         }
         if self.kind == ModuleKind::Library && !self.capabilities.required.is_empty() {
             return Err(ModuleManifestError::Validation(

@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_interaction::find_tooltip_text_by_key;
 
 fn assert_phase44_focused_proof_snapshot(component: &FrontendSurfaceComponent, label: &str) {
     let snapshot = component

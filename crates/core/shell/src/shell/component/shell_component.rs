@@ -16,8 +16,7 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn mount(&mut self, ctx: ComponentContext) -> Result<Vec<CoreRequest>, ComponentError> {
         self.diagnostics = Some(ctx.diagnostics);
-        self.load_module_i18n();
-        self.load_catalog_i18n();
+        self.load_graph_i18n_catalogs();
         self.record_declared_missing_icon_diagnostics();
         self.init_root_runtime()?;
         self.render_hooks_pending = true;
@@ -218,18 +217,38 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn wants_tick(&self) -> bool {
-        self.hover_start.is_some() && !self.tooltip_visible
+        let tooltip_delay_pending = self.hover_start.is_some() && !self.tooltip_visible;
+        let tooltip_fade_pending = self.tooltip_visible
+            && self
+                .tooltip_appeared_at
+                .is_some_and(|appeared| appeared.elapsed() < self.tooltip_fade_duration());
+        tooltip_delay_pending
+            || tooltip_fade_pending
             || !self.pending_surface_states.borrow().is_empty()
     }
 
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
+        if self.hover_start.is_some() {
+            self.refresh_tooltip_settings();
+        }
+
+        let tooltip_delay = Duration::from_millis(self.tooltip_settings.delay_ms);
+        let tooltip_fade_duration = self.tooltip_fade_duration();
+
         // Trigger a repaint once the tooltip delay has elapsed so the tooltip appears.
         if let Some(start) = self.hover_start {
-            if start.elapsed() >= TOOLTIP_DELAY && !self.tooltip_visible {
+            if start.elapsed() >= tooltip_delay && !self.tooltip_visible {
                 self.tooltip_visible = true;
+                self.tooltip_appeared_at = Some(std::time::Instant::now());
                 if !self.dirty && !self.style_only_dirty {
                     self.invalidate_paint();
                 }
+            }
+        }
+        // Keep repainting while the tooltip is fading in.
+        if let Some(appeared) = self.tooltip_appeared_at {
+            if self.tooltip_visible && appeared.elapsed() < tooltip_fade_duration {
+                self.invalidate_paint();
             }
         }
 
@@ -321,6 +340,8 @@ impl ShellComponent for FrontendSurfaceComponent {
             requested_height.max(1)
         };
         self.observe_surface_size(content_width, content_height);
+        let paint_width = width.max(content_width).max(1);
+        let paint_height = height.max(content_height).max(1);
         let use_retained_style_path = !requires_tree_rebuild
             && can_use_retained_path
             && self.last_tree.is_some()
@@ -363,19 +384,93 @@ impl ShellComponent for FrontendSurfaceComponent {
             Some("rebuild"),
         );
 
+        if self.tooltip_visible {
+            self.refresh_tooltip_settings_from_theme(theme);
+        }
+
         let tooltip = if self.tooltip_visible {
             self.hovered_key
                 .as_ref()
-                .and_then(|hovered_key| find_tooltip_text_by_key(&tree, hovered_key))
-                .map(|text| {
-                    let (cx, cy) = self.hovered_pos;
-                    (text, cx, cy)
+                .and_then(|hovered_key| find_tooltip_by_key(&tree, hovered_key))
+                .map(|(owner_key, text)| {
+                    let fade_in_ms = self.tooltip_settings.fade_in_ms as f64;
+                    let opacity = self
+                        .tooltip_appeared_at
+                        .map(|appeared| {
+                            if fade_in_ms <= f64::EPSILON {
+                                return 1.0;
+                            }
+                            let elapsed = appeared.elapsed().as_millis() as f64;
+                            (elapsed / fade_in_ms).min(1.0) as f32
+                        })
+                        .unwrap_or(1.0);
+
+                    // Inherited tooltips use the owner for placement and style
+                    // so a titled button still anchors below the button when a
+                    // child icon receives pointer hover.
+                    let owner_node = find_node_by_key(&tree, &owner_key);
+                    let element_anchor = owner_node
+                        .map(|node| node.computed_style.tooltip_anchor)
+                        .unwrap_or_default();
+                    let anchor = tooltip::effective_anchor(element_anchor, &self.tooltip_settings);
+
+                    let element_offset =
+                        owner_node.and_then(|node| node.computed_style.tooltip_offset);
+                    let element_bounds = find_node_bounds_by_key(&tree, &owner_key, 0.0, 0.0)
+                        .or(self.hovered_element_bounds);
+
+                    let placement = tooltip::compute_tooltip_placement(
+                        anchor,
+                        element_bounds,
+                        self.hovered_pos,
+                        (TOOLTIP_OVERLAY_WIDTH as f32, TOOLTIP_OVERLAY_HEIGHT as f32),
+                        (paint_width as f32, paint_height as f32),
+                        opacity,
+                        &self.tooltip_settings,
+                    );
+
+                    let base_x = placement.paint_x + element_offset.map(|(x, _)| x).unwrap_or(0.0);
+                    let base_y = placement.paint_y + element_offset.map(|(_, y)| y).unwrap_or(0.0);
+
+                    // Slide animation: the tooltip moves along its placement axis
+                    // from an offset position toward its final position as it fades
+                    // in. For "bottom" the tooltip starts further below and slides
+                    // up; for "top" it starts further above and slides down, etc.
+                    let slide = self.tooltip_settings.slide_in_px * (1.0 - placement.opacity);
+                    let (paint_x, paint_y) = match anchor {
+                        tooltip::ResolvedAnchor::Bottom => (base_x, base_y + slide),
+                        tooltip::ResolvedAnchor::Top => (base_x, base_y - slide),
+                        tooltip::ResolvedAnchor::Right => (base_x + slide, base_y),
+                        tooltip::ResolvedAnchor::Left => (base_x - slide, base_y),
+                        tooltip::ResolvedAnchor::Cursor => (base_x, base_y),
+                    };
+
+                    // Set per-frame tooltip rendering hints.
+                    mesh_core_render::set_tooltip_paint_opacity(placement.opacity);
+                    let center_x = matches!(
+                        anchor,
+                        tooltip::ResolvedAnchor::Bottom | tooltip::ResolvedAnchor::Top
+                    );
+                    mesh_core_render::set_tooltip_center_x(center_x);
+                    let scale_from = match self.tooltip_settings.animation.as_str() {
+                        "expand" => self.tooltip_settings.expand_from,
+                        _ => 0.0,
+                    };
+                    mesh_core_render::set_tooltip_scale_from(scale_from);
+
+                    (text, paint_x, paint_y)
                 })
         } else {
             None
         };
 
         let surface_damage = DamageRect {
+            x: 0,
+            y: 0,
+            width: paint_width,
+            height: paint_height,
+        };
+        let content_damage = DamageRect {
             x: 0,
             y: 0,
             width: content_width.max(1),
@@ -410,7 +505,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             Some("rebuild"),
         );
         let current_tooltip_damage =
-            tooltip_damage_rect(tooltip.as_ref(), content_width, content_height);
+            tooltip_damage_rect(tooltip.as_ref(), paint_width, paint_height);
         let mut tooltip_damage_rects = std::mem::take(&mut self.tooltip_damage_scratch);
         damage_rects_from_options_into(
             [current_tooltip_damage, self.last_tooltip_damage],
@@ -423,7 +518,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             &tree,
             self.retained_render_objects.dirty_node_ids(),
             &self.last_visual_damage,
-            surface_damage,
+            content_damage,
             &mut dirty_node_visual_damage_rects,
         );
         let mut visual_damage_rects = std::mem::take(&mut self.visual_damage_scratch);
@@ -644,7 +739,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         // When effective_damage.rects is empty, leave last_present_damage_rects unchanged
         // (accumulates across immediate-rerender passes, matching old merge_optional_damage behaviour)
-        self.last_visual_damage = collect_visual_damage_rects(&tree, surface_damage);
+        self.last_visual_damage = collect_visual_damage_rects(&tree, content_damage);
         let traversal_micros = paint_metrics
             .traversal_micros
             .saturating_sub(paint_metrics.text.shaping_micros)
@@ -966,6 +1061,73 @@ impl FrontendSurfaceComponent {
         self.retained_display_list.paint_commands()
     }
 
+    fn refresh_tooltip_settings(&mut self) {
+        if let Ok(settings) = mesh_core_config::load_shell_settings() {
+            self.tooltip_settings = settings.tooltip;
+        }
+    }
+
+    /// Like `refresh_tooltip_settings` but also merges theme component
+    /// defaults for `"tooltip"`. Called from `paint()` which has access to the
+    /// active theme. Token references such as `token(animation.duration.short)`
+    /// are resolved against the theme's token map.
+    fn refresh_tooltip_settings_from_theme(&mut self, theme: &Theme) {
+        self.refresh_tooltip_settings();
+        let Some(defaults) = theme.component_defaults("tooltip") else {
+            return;
+        };
+
+        let resolve = |raw: &str| -> String {
+            if let Some(token_name) =
+                raw.strip_prefix("token(").and_then(|s| s.strip_suffix(")"))
+            {
+                if let Some(val) = theme.token(token_name) {
+                    return val.to_string();
+                }
+            }
+            raw.to_string()
+        };
+
+        let parse_f64 = |key: &str| -> Option<f64> {
+            defaults
+                .get(key)
+                .map(|v| resolve(v))
+                .and_then(|s| s.trim().parse::<f64>().ok())
+        };
+        let parse_str = |key: &str| -> Option<String> {
+            defaults.get(key).map(|v| resolve(v))
+        };
+
+        if let Some(v) = parse_str("position") {
+            self.tooltip_settings.position = v;
+        }
+        if let Some(v) = parse_f64("delay") {
+            self.tooltip_settings.delay_ms = v as u64;
+        }
+        if let Some(v) = parse_f64("animation-duration") {
+            self.tooltip_settings.fade_in_ms = v as u64;
+        }
+        if let Some(v) = parse_str("animation") {
+            self.tooltip_settings.animation = v;
+        }
+        if let Some(v) = parse_f64("expand-from") {
+            self.tooltip_settings.expand_from = v as f32;
+        }
+        if let Some(v) = parse_f64("gap") {
+            self.tooltip_settings.gap = v as f32;
+        }
+        if let Some(v) = parse_f64("cursor-offset-x") {
+            self.tooltip_settings.cursor_offset_x = v as f32;
+        }
+        if let Some(v) = parse_f64("cursor-offset-y") {
+            self.tooltip_settings.cursor_offset_y = v as f32;
+        }
+    }
+
+    fn tooltip_fade_duration(&self) -> Duration {
+        Duration::from_millis(self.tooltip_settings.fade_in_ms)
+    }
+
     fn handle_interface_event(
         &mut self,
         event: &ServiceEvent,
@@ -1163,13 +1325,13 @@ fn tooltip_damage_rect(
     surface_width: u32,
     surface_height: u32,
 ) -> Option<DamageRect> {
-    let (_, cursor_x, cursor_y) = tooltip?;
+    let (_, paint_x, paint_y) = tooltip?;
     let width = TOOLTIP_OVERLAY_WIDTH.min(surface_width.max(1));
     let height = TOOLTIP_OVERLAY_HEIGHT.min(surface_height.max(1));
     let max_x = surface_width.saturating_sub(width).saturating_sub(6);
     let max_y = surface_height.saturating_sub(height).saturating_sub(6);
-    let x = (((*cursor_x + 14.0).round() as i32).max(4) as u32).min(max_x);
-    let y = (((*cursor_y + 18.0).round() as i32).max(4) as u32).min(max_y);
+    let x = ((*paint_x).round() as u32).min(max_x).max(4);
+    let y = ((*paint_y).round() as u32).min(max_y).max(4);
     Some(DamageRect {
         x,
         y,

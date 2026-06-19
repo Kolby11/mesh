@@ -5,71 +5,34 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "frontend",
-    "capabilities": {
-      "required": [
+    "uses": {
+      "interfaces": {
+        "mesh.audio": ">=1.0",
+        "mesh.power": ">=1.0",
+        "mesh.theme": ">=1.0"
+      },
+      "optionalInterfaces": {
+        "mesh.brightness": ">=1.0"
+      },
+      "capabilities": [
         "shell.surface",
         "service.audio.read",
         "service.audio.control",
+        "service.power.read",
         "theme.read",
         "locale.read",
         "locale.write"
       ]
     },
-    "entrypoints": {
-      "main": "src/main.mesh"
-    },
-    "contributes": {
-      "settings": {
-        "namespace": "@mesh/quick-settings",
-        "schema": {
-          "surface": {
-            "type": "object",
-            "description": "Placement and sizing for the quick settings panel.",
-            "properties": {
-              "anchor": {
-                "type": "enum",
-                "values": ["top", "bottom", "left", "right"],
-                "default": "top",
-                "description": "Screen edge anchor."
-              },
-              "layer": {
-                "type": "enum",
-                "values": ["background", "bottom", "top", "overlay"],
-                "default": "overlay",
-                "description": "Layer-shell stacking layer."
-              },
-              "width": {
-                "type": "integer",
-                "default": 0,
-                "min": 0,
-                "max": 600,
-                "description": "Surface width in pixels. Use 0 for content-measured width."
-              },
-              "height": {
-                "type": "integer",
-                "default": 0,
-                "min": 0,
-                "max": 800,
-                "description": "Surface height in pixels. Use 0 for content-measured height."
-              },
-              "keyboard_mode": {
-                "type": "enum",
-                "values": ["none", "on_demand"],
-                "default": "on_demand",
-                "description": "Keyboard interactivity policy."
-              },
-              "visible_on_start": {
-                "type": "boolean",
-                "default": false,
-                "description": "Whether this surface starts visible."
-              }
-            }
-          }
-        }
-      }
-    },
-    "surfaceLayout": {
-      "size_policy": "content_measured"
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "top",
+      "layer": "overlay",
+      "width": 0,
+      "height": 0,
+      "keyboard_mode": "on_demand",
+      "visible_on_start": false,
+      "size": "content_measured"
     },
     "accessibility": {
       "role": "dialog"

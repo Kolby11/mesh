@@ -6,22 +6,17 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "backend",
-    "capabilities": {
-      "required": [
-        "exec.wpctl",
-        "service.audio.read",
-        "service.audio.control"
+    "uses": {
+      "modules": {
+        "@mesh/audio-interface": ">=1.0.0, <2.0.0"
+      },
+      "capabilities": [
+        "exec.wpctl"
       ],
-      "optional": [
+      "optionalCapabilities": [
         "exec.aplay",
         "exec.pw-mon"
-      ]
-    },
-    "i18n": {
-      "defaultLocale": "en",
-      "supportedLocales": ["en"]
-    },
-    "dependencies": {
+      ],
       "binaries": [
         {
           "name": "wpctl",
@@ -54,9 +49,11 @@
         }
       ]
     },
-    "entrypoints": {
-      "main": "src/main.luau"
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en"]
     },
+    "entry": "src/main.luau",
     "implements": [
       {
         "interface": "mesh.audio",

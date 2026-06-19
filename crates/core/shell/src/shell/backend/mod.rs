@@ -11,6 +11,8 @@ pub(in crate::shell) use candidates::backend_launch_candidates_from_graph;
 pub(in crate::shell) enum BackendRuntimeStatus {
     NoActiveProvider,
     UnmetBackendRequirement,
+    OptionalBackendUnavailable,
+    OptionalBackendInactive,
     InvalidManifest,
     MissingCapability,
     MissingEntrypoint,
@@ -27,6 +29,8 @@ impl BackendRuntimeStatus {
         match self {
             Self::NoActiveProvider => "no_active_provider",
             Self::UnmetBackendRequirement => "unmet_backend_requirement",
+            Self::OptionalBackendUnavailable => "optional_backend_unavailable",
+            Self::OptionalBackendInactive => "optional_backend_inactive",
             Self::InvalidManifest => "invalid_manifest",
             Self::MissingCapability => "missing_capability",
             Self::MissingEntrypoint => "missing_entrypoint",
@@ -43,6 +47,8 @@ impl BackendRuntimeStatus {
         match status {
             "no_active_provider" => Self::NoActiveProvider,
             "unmet_backend_requirement" => Self::UnmetBackendRequirement,
+            "optional_backend_unavailable" => Self::OptionalBackendUnavailable,
+            "optional_backend_inactive" => Self::OptionalBackendInactive,
             "invalid_manifest" => Self::InvalidManifest,
             "missing_capability" => Self::MissingCapability,
             "missing_entrypoint" => Self::MissingEntrypoint,

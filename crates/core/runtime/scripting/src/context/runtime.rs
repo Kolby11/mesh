@@ -936,6 +936,7 @@ impl ScriptContext {
         mesh.set("log", mesh_log).map_err(lua_err)?;
         mesh.set("popover", mesh_popover).map_err(lua_err)?;
         mesh.set("locale", mesh_locale).map_err(lua_err)?;
+        let mesh_for_require = mesh.clone();
         globals.set("mesh", mesh).map_err(lua_err)?;
         globals
             .set("__mesh_request_redraw", false)
@@ -956,7 +957,7 @@ impl ScriptContext {
                     return create_i18n_library(lua);
                 }
 
-                if let Some(host_api) = resolve_host_api(lua, &module)? {
+                if let Some(host_api) = resolve_host_api(&mesh_for_require, &module)? {
                     return Ok(host_api);
                 }
 
@@ -1134,6 +1135,28 @@ impl ScriptContext {
                     }
                 }
             }
+            let known = self
+                .user_global_keys
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>();
+            let new_user_globals: Vec<(String, LuaValue)> = self
+                .env()
+                .pairs::<String, LuaValue>()
+                .filter_map(|result| result.ok())
+                .filter(|(key, value)| {
+                    !known.contains(key)
+                        && !key.starts_with("__")
+                        && !self.builtin_globals.contains(key)
+                        && !matches!(value, LuaValue::Function(_))
+                })
+                .collect();
+            for (name, lua_value) in new_user_globals {
+                if let Ok(value) = self.lua().from_value::<Value>(lua_value) {
+                    self.state.set(name.clone(), value);
+                    self.user_global_keys.push(name);
+                }
+            }
         }
 
         self.sync_module_exports_from_lua();
@@ -1292,11 +1315,13 @@ fn create_i18n_library(lua: &Lua) -> mlua::Result<Table> {
     Ok(exports)
 }
 
-fn resolve_host_api(lua: &Lua, module: &str) -> mlua::Result<Option<Table>> {
+fn resolve_host_api(mesh: &Table, module: &str) -> mlua::Result<Option<Table>> {
+    if module.contains('@') {
+        return Ok(None);
+    }
     let Some(api_name) = module.strip_prefix("mesh.") else {
         return Ok(None);
     };
-    let mesh = lua.globals().get::<Table>("mesh")?;
     match api_name {
         "events" | "ui" | "log" | "popover" | "locale" => mesh.get(api_name).map(Some),
         _ => Ok(None),

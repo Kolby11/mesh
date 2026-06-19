@@ -82,11 +82,57 @@ impl TooltipPaintColors {
     };
 }
 
+/// Where a tooltip should appear relative to the hovered element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TooltipAnchor {
+    /// Centered below the element (default)
+    #[default]
+    BottomCenter,
+    /// Centered above the element
+    TopCenter,
+    /// Centered to the left of the element
+    LeftCenter,
+    /// Centered to the right of the element
+    RightCenter,
+    /// Offset from cursor (legacy behavior: cursor + (14, 18))
+    CursorBottomRight,
+    /// Follows the cursor as it moves within the element
+    CursorFollow,
+}
+
+/// Pre-computed positioning, sizing, and animation state for a tooltip frame.
+#[derive(Debug, Clone)]
+pub struct TooltipRenderState {
+    pub text: String,
+    pub anchor: TooltipAnchor,
+    /// Bounding box of the hovered element in surface coordinates: (left, top, right, bottom).
+    pub element_bounds: Option<(f32, f32, f32, f32)>,
+    /// Cursor position in surface coordinates.
+    pub cursor_x: f32,
+    pub cursor_y: f32,
+    /// Final pixel position of the tooltip top-left corner after positioning and flipping.
+    pub paint_x: i32,
+    pub paint_y: i32,
+    /// Measured width and height of the tooltip box in pixels.
+    pub box_w: i32,
+    pub box_h: i32,
+    /// Opacity for fade-in animation (0.0 = invisible, 1.0 = fully opaque).
+    pub opacity: f32,
+}
+
 pub struct FrontendRenderEngine {
     paint_backend: Box<dyn PaintBackend>,
     painter_diagnostics: Mutex<Vec<PainterDiagnostic>>,
     text_renderer: SharedTextMeasurer,
     tooltip_colors: Cell<TooltipPaintColors>,
+    tooltip_opacity: Cell<f32>,
+    /// When true, `paint_x` passed to `render_tooltip` is the horizontal
+    /// center of the tooltip box rather than its left edge.
+    tooltip_center_x: Cell<bool>,
+    /// Starting scale factor for the `"expand"` animation (0.0 = no scale).
+    /// The box is rendered at `scale_from + (1.0 - scale_from) * opacity` of
+    /// its full size, anchored at the element-closest edge.
+    tooltip_scale_from: Cell<f32>,
     render_scratch: RefCell<RenderScratch>,
 }
 
@@ -130,6 +176,9 @@ impl FrontendRenderEngine {
             painter_diagnostics: Mutex::new(Vec::new()),
             text_renderer: SharedTextMeasurer,
             tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
+            tooltip_opacity: Cell::new(1.0),
+            tooltip_center_x: Cell::new(false),
+            tooltip_scale_from: Cell::new(0.0),
             render_scratch: RefCell::new(RenderScratch::default()),
         }
     }
@@ -141,6 +190,9 @@ impl FrontendRenderEngine {
             painter_diagnostics: Mutex::new(Vec::new()),
             text_renderer: SharedTextMeasurer,
             tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
+            tooltip_opacity: Cell::new(1.0),
+            tooltip_center_x: Cell::new(false),
+            tooltip_scale_from: Cell::new(0.0),
             render_scratch: RefCell::new(RenderScratch::default()),
         }
     }
@@ -149,8 +201,32 @@ impl FrontendRenderEngine {
         self.tooltip_colors.set(colors);
     }
 
+    pub fn set_tooltip_opacity(&self, opacity: f32) {
+        self.tooltip_opacity.set(opacity.clamp(0.0, 1.0));
+    }
+
+    pub fn set_tooltip_center_x(&self, centered: bool) {
+        self.tooltip_center_x.set(centered);
+    }
+
+    pub fn set_tooltip_scale_from(&self, scale_from: f32) {
+        self.tooltip_scale_from.set(scale_from.clamp(0.0, 1.0));
+    }
+
     pub(super) fn tooltip_colors(&self) -> TooltipPaintColors {
         self.tooltip_colors.get()
+    }
+
+    pub(super) fn tooltip_opacity(&self) -> f32 {
+        self.tooltip_opacity.get()
+    }
+
+    pub(super) fn tooltip_center_x(&self) -> bool {
+        self.tooltip_center_x.get()
+    }
+
+    pub(super) fn tooltip_scale_from(&self) -> f32 {
+        self.tooltip_scale_from.get()
     }
 
     pub fn paint_backend_id(&self) -> &'static str {

@@ -1,7 +1,7 @@
 use super::{
-    InterfaceRelationship, ModuleKind, ModuleManifest, ModuleManifestDiagnostic,
-    ModuleManifestError, PathContribution, RootModuleGraphManifest, dependency_spec_to_string,
-    parse_module_entrypoint, validate_relative_path,
+    InstalledModuleEntry, InterfaceRelationship, ModuleKind, ModuleManifest,
+    ModuleManifestDiagnostic, ModuleManifestError, PathContribution, RootModuleGraphManifest,
+    dependency_spec_to_string, parse_module_entrypoint, validate_relative_path,
 };
 use crate::manifest;
 use std::collections::HashMap;
@@ -36,7 +36,7 @@ pub struct InstalledModuleGraph {
 
 impl InstalledModuleGraph {
     pub fn from_parts(
-        root: RootModuleGraphManifest,
+        mut root: RootModuleGraphManifest,
         modules: Vec<LoadedModuleManifest>,
     ) -> Result<Self, ModuleManifestError> {
         root.validate()?;
@@ -143,6 +143,22 @@ impl InstalledModuleGraph {
                     .cmp(&a.priority)
                     .then_with(|| a.module_id.cmp(&b.module_id))
             });
+        }
+
+        // Auto-select a provider when exactly one enabled backend implements an
+        // interface and the root graph names none. This removes the need to
+        // hand-write a `providers` entry for the common single-provider case.
+        // `backend_providers` only holds enabled providers, so a length of one
+        // means a sole implementer. Explicit root selections always win, and
+        // interfaces with multiple providers still require an explicit choice.
+        for (interface, providers) in &backend_providers {
+            if root.providers.contains_key(interface) {
+                continue;
+            }
+            if let [sole] = providers.as_slice() {
+                root.providers
+                    .insert(interface.clone(), sole.module_id.clone());
+            }
         }
 
         for (interface, module_id) in &root.providers {
@@ -541,6 +557,8 @@ struct InterfaceContractCapabilityToml {
 struct InterfaceContractCapabilitySection {
     #[serde(default)]
     required: Vec<String>,
+    #[serde(default)]
+    optional: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -1221,20 +1239,32 @@ fn build_graph_diagnostics(
                 });
             }
         }
+        // A backend provider implements an interface; it must not restate the
+        // interface's consumer capabilities (`service.<domain>.read/control`).
+        // Those are powers for frontends/automation that *consume* the contract.
+        // Providers request only generic host powers (exec.*, dbus.*, net.*).
+        // Restating them is the drift that made these capabilities meaningless,
+        // so flag each one with a concrete "remove it" action.
         if let Some(capabilities) = contract_capabilities.get(&provider.interface) {
-            for required in &capabilities.required {
-                if !provider
-                    .required_capabilities
-                    .iter()
-                    .any(|cap| cap == required)
-                {
+            let consumer_capabilities: std::collections::HashSet<&str> = capabilities
+                .required
+                .iter()
+                .chain(capabilities.optional.iter())
+                .map(String::as_str)
+                .collect();
+            for capability in provider
+                .required_capabilities
+                .iter()
+                .chain(provider.optional_capabilities.iter())
+            {
+                if consumer_capabilities.contains(capability.as_str()) {
                     diagnostics.push(ModuleGraphDiagnostic {
                         module_id: provider.module_id.clone(),
                         contribution_id: Some(provider.source.scoped_id.clone()),
-                        status: "missing_provider_required_capability".into(),
+                        status: "provider_declares_consumer_capability".into(),
                         message: format!(
-                            "backend provider {} implements {} but does not declare required interface capability {required}",
-                            provider.module_id, provider.interface
+                            "backend provider {} implements {} and should not declare consumer capability {capability}; remove it — providers request only host powers (exec.*, dbus.*, net.*), while {capability} is for modules that consume {}",
+                            provider.module_id, provider.interface, provider.interface
                         ),
                     });
                 }
@@ -2084,7 +2114,7 @@ pub struct ContributedIconPack {
 pub fn load_installed_module_graph(
     root_module_graph_path: &Path,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
-    let root = RootModuleGraphManifest::from_path(root_module_graph_path)?;
+    let mut root = RootModuleGraphManifest::from_path(root_module_graph_path)?;
     let root_dir = root_module_graph_path.parent().ok_or_else(|| {
         ModuleManifestError::Validation(format!(
             "root module graph path must have a parent directory: {}",
@@ -2094,11 +2124,66 @@ pub fn load_installed_module_graph(
     let modules_dir = root_dir.join(&root.modules_dir);
     let mut modules = Vec::new();
 
-    for entry in root.modules.values() {
-        modules.push(load_module_manifest(&modules_dir.join(&entry.path))?);
+    if root.modules.is_empty() {
+        // Auto-discovery: the root graph lists no modules, so scan `modulesDir`
+        // for `module.json` files and build the installed set from the modules'
+        // own manifests (each declares its `name` and `kind`). The root file
+        // then only holds decisions — `disabled`, `providers`, `layout`,
+        // `theme`. A discovered module is enabled unless named in `disabled`.
+        for module_dir in discover_module_dirs(&modules_dir) {
+            let loaded = load_module_manifest(&module_dir)?;
+            let name = loaded.manifest.name.clone();
+            let kind = loaded.manifest.mesh.kind;
+            let relative = module_dir
+                .strip_prefix(&modules_dir)
+                .unwrap_or(&module_dir)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let enabled = !root.disabled.iter().any(|disabled| disabled == &name);
+            root.modules.insert(
+                name,
+                InstalledModuleEntry {
+                    kind,
+                    path: relative,
+                    enabled,
+                },
+            );
+            modules.push(loaded);
+        }
+    } else {
+        for entry in root.modules.values() {
+            modules.push(load_module_manifest(&modules_dir.join(&entry.path))?);
+        }
     }
 
     InstalledModuleGraph::from_parts(root, modules)
+}
+
+/// Recursively find directories under `modules_dir` that contain a
+/// `module.json`. Descent stops once a `module.json` is found, so nested
+/// resources inside a module are never treated as separate modules. Results are
+/// sorted for deterministic ordering.
+fn discover_module_dirs(modules_dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    discover_module_dirs_into(modules_dir, &mut found);
+    found.sort();
+    found
+}
+
+fn discover_module_dirs_into(dir: &Path, found: &mut Vec<PathBuf>) {
+    if dir.join("module.json").is_file() {
+        found.push(dir.to_path_buf());
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            discover_module_dirs_into(&path, found);
+        }
+    }
 }
 
 pub fn load_module_manifest(

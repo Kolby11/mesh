@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use mesh_core_frontend::{CompiledFrontendModule, compile_frontend_module};
 use mesh_core_module::ModuleType;
 use mesh_core_module::lifecycle::ModuleInstance;
+use mesh_core_module::package::InstalledModuleGraph;
 
 use crate::shell::ShellRunError;
 
@@ -31,6 +32,7 @@ pub(super) struct ResolvedSlotContribution {
 impl FrontendCatalog {
     pub(in crate::shell) fn from_modules(
         modules: &HashMap<String, ModuleInstance>,
+        graph: Option<&InstalledModuleGraph>,
     ) -> Result<Self, ShellRunError> {
         let mut module_ids: Vec<String> = modules.keys().cloned().collect();
         module_ids.sort();
@@ -126,6 +128,11 @@ impl FrontendCatalog {
                     ),
                 });
             }
+            if let Some(graph) = graph {
+                catalog
+                    .validate_interface_imports(module_id, &entry.compiled, graph)
+                    .map_err(|message| ShellRunError::FrontendComposition { message })?;
+            }
         }
 
         Ok(catalog)
@@ -176,7 +183,9 @@ impl FrontendCatalog {
             .iter()
             .any(|dependency_id| dependency_id == module_id)
         {
-            return Err("target module is not a required dependency".into());
+            return Err(format!(
+                "target module '{module_id}' is not declared in mesh.uses.modules as a required module dependency"
+            ));
         }
         let Some(entry) = self.modules.get(module_id) else {
             return Err("target module is not loaded".into());
@@ -189,6 +198,32 @@ impl FrontendCatalog {
         }
     }
 
+    fn validate_interface_imports(
+        &self,
+        module_id: &str,
+        compiled: &CompiledFrontendModule,
+        graph: &InstalledModuleGraph,
+    ) -> Result<(), String> {
+        let Some(requirements) = graph.requirements_for_frontend(module_id) else {
+            return Ok(());
+        };
+        let declared = requirements
+            .backend
+            .keys()
+            .chain(requirements.optional_backend.keys())
+            .collect::<std::collections::HashSet<_>>();
+
+        for interface in compiled_interface_imports(compiled) {
+            if !declared.contains(&interface) {
+                return Err(format!(
+                    "module '{module_id}' imports interface '{interface}' but does not declare it in mesh.uses.interfaces or mesh.uses.optionalInterfaces"
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     pub(super) fn imported_component_module_id(
         &self,
         host: &mesh_core_module::Manifest,
@@ -199,10 +234,31 @@ impl FrontendCatalog {
         };
         let Some(module_id) = entry.compiled.module_component_imports.get(alias) else {
             return Err(format!(
-                "no explicit module import for component alias '{alias}'"
+                "no explicit component import for alias '{alias}'; add a script import such as local {alias} = require(\"@scope/module\")"
             ));
         };
         self.validate_component_module_import(host, module_id)?;
         Ok(module_id.clone())
     }
+}
+
+fn compiled_interface_imports(
+    compiled: &CompiledFrontendModule,
+) -> std::collections::HashSet<String> {
+    compiled
+        .local_components
+        .values()
+        .chain(std::iter::once(&compiled.component))
+        .flat_map(|component| {
+            component
+                .imports
+                .iter()
+                .filter_map(|import| match &import.target {
+                    mesh_core_component::ComponentImportTarget::InterfaceApi {
+                        interface, ..
+                    } => Some(interface.clone()),
+                    _ => None,
+                })
+        })
+        .collect()
 }

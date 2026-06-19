@@ -42,7 +42,7 @@ that the old and new names are interchangeable.
 | ----------------- | -------- | --------------------- | ----------- | --------- |
 | package | Docs, Rust type names, manifest loader names, planning artifacts | module | replace | Rename public docs and diagnostics first; later phases can rename runtime types when practical. |
 | plugin | Older planning language and some developer-facing descriptions | module | replace | Remove from public author docs unless describing historical artifacts. |
-| package.json | Current author docs, root installed graph config, bundled backend manifests | module.json | internal-only migration | Phase 38 defines and implements the canonical manifest path, then migrates shipped artifacts before old loader removal. |
+| package.json | Historical author docs, root installed graph config, bundled backend manifests | module.json | remove | Canonical module loading rejects this path; migrate artifacts to module.json. |
 | plugin.json | Older concept drafts or third-party vocabulary risk | module.json | remove | Reject or document only as an unsupported historical name if encountered. |
 | trait | Earlier extensibility docs and `mesh-core-service` framing | interface | replace | Public docs should say interface; runtime/code names can be inventoried for later rename. |
 | service category | Earlier backend/service grouping language | interface domain or module kind | replace | Use interface domain when grouping contracts; use module kind when describing installable roles. |
@@ -96,7 +96,7 @@ they are reference modules that use the same model third-party authors use.
 | `crates/core/extension/module/src/package/module_manifest.rs` | `RootPackageManifest` | `RootModuleGraphManifest` | replaced | Phase 38 | Keep root enabled-module graph, active providers, and layout entrypoint selection. |
 | `crates/core/extension/module/src/manifest/model.rs` | `PackageSection` | `ModuleSection` | replaced | Phase 38 | Preserve normalized identity, version, module kind, API version, and metadata. |
 | `crates/core/extension/module/src/package/*.rs` | `PackageManifestError` | `ModuleManifestError` | replaced | Phase 38 | Keep actionable validation, JSON, and IO diagnostics with module id and field path where available. |
-| author docs and shipped manifests | `package.json` | `module.json` | internal-only migration | Phase 38 | Load old artifacts only as an internal migration path until they are migrated. |
+| author docs and shipped manifests | `package.json` | `module.json` | remove | Phase 38 | Reject old artifacts and require canonical module.json. |
 | author docs and future manifests | `module.json` | `module.json` | already canonical | Phase 38 | Make this the author-facing manifest name for new examples and diagnostics. |
 | historical manifest risk | `plugin.json` | none | remove | Phase 40 | Do not present plugin naming as supported vocabulary. |
 | legacy provider declarations | `provides` | `implements` or `contributes.providers` | internal-only migration | Phase 38 and Phase 39 | Preserve backend provider declarations while diagnostics guide authors to canonical fields. |
@@ -114,10 +114,11 @@ they are reference modules that use the same model third-party authors use.
 
 Phase 38 should define `module.json` as the canonical author-facing manifest
 and move runtime normalization toward module-named structs and diagnostics.
-Any old manifest loader should be described as internal-only migration loaders,
-not public compatibility aliases. The normalization path must preserve active
-provider declarations, interface declarations, keybind declarations,
-capabilities, dependencies, entrypoints, settings, and resource requirements.
+Old manifest loaders should be removed or described as rejected historical
+inputs, not public compatibility aliases. The canonical normalization path must
+preserve active provider declarations, interface declarations, keybind
+declarations, capabilities, dependencies, entrypoints, settings, and resource
+requirements.
 
 ### Phase 39: Contribution And Interface Index
 
@@ -133,9 +134,8 @@ service-specific Rust branches.
 Phase 40 should migrate bundled docs, examples, and diagnostics away from old
 public names. Diagnostics should say `replace with` or `remove`, not `alias`.
 The replacement/removal diagnostics contract lives in the module-system author
-docs and should remain aligned with runtime loader diagnostics. If old loaders
-or fields still exist internally for sequencing, they should be visible as
-migration warnings with removal targets and exact field paths.
+docs and should remain aligned with runtime loader diagnostics. Old loader
+paths and legacy top-level fields should fail with exact replacement guidance.
 Resource lookup aliases and operating-system package names remain separate
 mechanics, not vocabulary aliases.
 

@@ -59,119 +59,62 @@ pub fn generic_surface_layout_fallback() -> SurfaceLayoutSettings {
     }
 }
 
+/// Resolve a surface's baseline layout from its manifest.
+///
+/// Core owns the canonical defaults (`generic_surface_layout_fallback`). The
+/// module's compact `mesh.surface` block (normalized into `surface_layout`)
+/// overrides only the fields it declares. User overrides from
+/// `config/settings.json` are applied on top of this in
+/// `load_frontend_module_settings`.
 pub fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayoutSettings {
     let mut layout = generic_surface_layout_fallback();
 
-    let props = manifest
-        .settings
-        .as_ref()
-        .and_then(|s| s.inline_schema.as_ref())
-        .and_then(|schema| schema.pointer("/surface/properties"))
-        .and_then(|v| v.as_object());
+    let Some(surface) = &manifest.surface_layout else {
+        return layout;
+    };
 
-    if let Some(props) = props {
-        if let Some(edge) = props
-            .get("anchor")
-            .and_then(|p| p.get("default"))
-            .and_then(serde_json::Value::as_str)
-            .and_then(parse_surface_edge)
-        {
-            layout.edge = edge;
-        }
-        if let Some(layer) = props
-            .get("layer")
-            .and_then(|p| p.get("default"))
-            .and_then(serde_json::Value::as_str)
-            .and_then(parse_surface_layer)
-        {
-            layout.layer = layer;
-        }
-        if let Some(width) = props
-            .get("width")
-            .and_then(|p| p.get("default"))
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|v| u32::try_from(v).ok())
-        {
-            layout.width = width;
-        }
-        if let Some(height) = props
-            .get("height")
-            .and_then(|p| p.get("default"))
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|v| u32::try_from(v).ok())
-        {
-            layout.height = height;
-        }
-        if let Some(zone) = props
-            .get("exclusive_zone")
-            .and_then(|p| p.get("default"))
-            .and_then(serde_json::Value::as_i64)
-            .and_then(|v| i32::try_from(v).ok())
-        {
-            layout.exclusive_zone = zone;
-        }
-        if let Some(mode) = props
-            .get("keyboard_mode")
-            .and_then(|p| p.get("default"))
-            .and_then(serde_json::Value::as_str)
-            .and_then(parse_keyboard_mode)
-        {
-            layout.keyboard_mode = mode;
-        }
-        if let Some(visible) = props
-            .get("visible_on_start")
-            .and_then(|p| p.get("default"))
-            .and_then(serde_json::Value::as_bool)
-        {
-            layout.visible_on_start = visible;
-        }
-        if let Some(v) = props
-            .get("margin_top")
-            .and_then(|p| p.get("default"))
-            .and_then(serde_json::Value::as_i64)
-            .and_then(|v| i32::try_from(v).ok())
-        {
-            layout.margin_top = v;
-        }
-        if let Some(v) = props
-            .get("margin_right")
-            .and_then(|p| p.get("default"))
-            .and_then(serde_json::Value::as_i64)
-            .and_then(|v| i32::try_from(v).ok())
-        {
-            layout.margin_right = v;
-        }
-        if let Some(v) = props
-            .get("margin_bottom")
-            .and_then(|p| p.get("default"))
-            .and_then(serde_json::Value::as_i64)
-            .and_then(|v| i32::try_from(v).ok())
-        {
-            layout.margin_bottom = v;
-        }
-        if let Some(v) = props
-            .get("margin_left")
-            .and_then(|p| p.get("default"))
-            .and_then(serde_json::Value::as_i64)
-            .and_then(|v| i32::try_from(v).ok())
-        {
-            layout.margin_left = v;
-        }
-        if let Some(display_transition) = props
-            .get("display_transition")
-            .and_then(|p| p.get("default"))
-            .and_then(parse_display_transition)
-        {
-            layout.display_transition = display_transition;
-        }
+    if let Some(edge) = surface.anchor.as_deref().and_then(parse_surface_edge) {
+        layout.edge = edge;
     }
-
-    if let Some(sl) = &manifest.surface_layout {
-        layout.size_policy = match sl.size_policy.as_deref() {
-            Some("content_measured") => SurfaceSizePolicy::ContentMeasured,
-            _ => SurfaceSizePolicy::Fixed,
+    if let Some(layer) = surface.layer.as_deref().and_then(parse_surface_layer) {
+        layout.layer = layer;
+    }
+    if let Some(width) = surface.width {
+        layout.width = width;
+    }
+    if let Some(height) = surface.height {
+        layout.height = height;
+    }
+    if let Some(zone) = surface.exclusive_zone {
+        layout.exclusive_zone = zone;
+    }
+    if let Some(mode) = surface
+        .keyboard_mode
+        .as_deref()
+        .and_then(parse_keyboard_mode)
+    {
+        layout.keyboard_mode = mode;
+    }
+    if let Some(visible) = surface.visible_on_start {
+        layout.visible_on_start = visible;
+    }
+    if let Some(margins) = &surface.margins {
+        layout.margin_top = margins.top;
+        layout.margin_right = margins.right;
+        layout.margin_bottom = margins.bottom;
+        layout.margin_left = margins.left;
+    }
+    if let Some(transition) = &surface.display_transition {
+        layout.display_transition = SurfaceDisplayTransition {
+            show_ms: transition.show_ms,
+            hide_ms: transition.hide_ms,
         };
     }
+
+    layout.size_policy = match surface.size_policy.as_deref() {
+        Some("content_measured") => SurfaceSizePolicy::ContentMeasured,
+        _ => SurfaceSizePolicy::Fixed,
+    };
 
     layout
 }
@@ -332,5 +275,123 @@ pub fn parse_keyboard_mode(value: &str) -> Option<KeyboardMode> {
         "exclusive" => Some(KeyboardMode::Exclusive),
         "on_demand" | "ondemand" | "on-demand" => Some(KeyboardMode::OnDemand),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mesh_core_module::manifest::{Manifest, ModuleSection, ModuleType, SurfaceLayoutSection};
+    use std::collections::HashMap;
+    use std::fs;
+
+    fn manifest_with_surface_layout(surface_layout: SurfaceLayoutSection) -> Manifest {
+        Manifest {
+            package: ModuleSection {
+                id: "@mesh/test".into(),
+                name: None,
+                version: "0.1.0".into(),
+                module_type: ModuleType::Surface,
+                api_version: "0.1".into(),
+                license: None,
+                description: None,
+                authors: Vec::new(),
+                repository: None,
+            },
+            compatibility: Default::default(),
+            dependencies: Default::default(),
+            capabilities: Default::default(),
+            entrypoints: Default::default(),
+            accessibility: None,
+            settings: None,
+            keybinds: Default::default(),
+            i18n: None,
+            theme: None,
+            service: None,
+            provides: Vec::new(),
+            interface: None,
+            extensions: Vec::new(),
+            exports: Default::default(),
+            provides_slots: HashMap::new(),
+            slot_contributions: HashMap::new(),
+            assets: None,
+            icons: None,
+            icon_pack: None,
+            icon_requirements: Default::default(),
+            translations: HashMap::new(),
+            surface_layout: Some(surface_layout),
+        }
+    }
+
+    #[test]
+    fn manifest_surface_layout_sets_keyboard_mode_default() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
+            size_policy: Some("content_measured".into()),
+            keyboard_mode: Some("on_demand".into()),
+            prefers_content_children_sizing: Some(true),
+            ..Default::default()
+        });
+
+        let layout = surface_layout_from_manifest(&manifest);
+
+        assert_eq!(layout.size_policy, SurfaceSizePolicy::ContentMeasured);
+        assert_eq!(layout.keyboard_mode, KeyboardMode::OnDemand);
+    }
+
+    #[test]
+    fn user_settings_override_manifest_keyboard_mode_default() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
+            size_policy: Some("fixed".into()),
+            keyboard_mode: Some("on_demand".into()),
+            ..Default::default()
+        });
+        let raw = serde_json::json!({
+            "surface": {
+                "keyboard_mode": "exclusive"
+            }
+        });
+        let path = std::env::temp_dir().join(format!(
+            "mesh-surface-config-test-{}-settings.json",
+            std::process::id()
+        ));
+        fs::write(&path, raw.to_string()).expect("write test settings");
+
+        let settings = load_frontend_module_settings(&path, &manifest);
+        fs::remove_file(&path).ok();
+
+        assert_eq!(settings.layout.keyboard_mode, KeyboardMode::Exclusive);
+    }
+
+    #[test]
+    fn compact_surface_block_resolves_editable_defaults() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
+            anchor: Some("bottom".into()),
+            layer: Some("overlay".into()),
+            width: Some(0),
+            height: Some(48),
+            exclusive_zone: Some(48),
+            visible_on_start: Some(true),
+            keyboard_mode: Some("none".into()),
+            size_policy: Some("fixed".into()),
+            ..Default::default()
+        });
+
+        let layout = surface_layout_from_manifest(&manifest);
+
+        assert_eq!(layout.edge, Edge::Bottom);
+        assert_eq!(layout.layer, Layer::Overlay);
+        assert_eq!(layout.width, 0);
+        assert_eq!(layout.height, 48);
+        assert_eq!(layout.exclusive_zone, 48);
+        assert!(layout.visible_on_start);
+        assert_eq!(layout.keyboard_mode, KeyboardMode::None);
+        assert_eq!(layout.size_policy, SurfaceSizePolicy::Fixed);
+    }
+
+    #[test]
+    fn unset_surface_layout_uses_core_defaults() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
+        let layout = surface_layout_from_manifest(&manifest);
+        assert_eq!(layout, generic_surface_layout_fallback());
     }
 }

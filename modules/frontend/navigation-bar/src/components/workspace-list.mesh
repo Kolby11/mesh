@@ -79,7 +79,7 @@ local function switch_to(n)
     if wm_ok and wm and type(wm.switch_workspace) == "function" then
         wm.switch_workspace(n)
     else
-        mesh.events.publish("mesh.hyprland.switch_workspace", { id = n })
+        mesh.log.warn("[workspace-list] mesh.hyprland switch_workspace method is unavailable")
     end
 end
 

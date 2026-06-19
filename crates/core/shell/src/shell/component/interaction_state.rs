@@ -82,6 +82,8 @@ impl FrontendSurfaceComponent {
                 self.hovered_path.clear();
                 self.hover_start = None;
                 self.tooltip_visible = false;
+                self.hovered_element_bounds = None;
+                self.tooltip_appeared_at = None;
             }
         }
 

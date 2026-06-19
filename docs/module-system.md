@@ -11,15 +11,14 @@ This gives users one workflow whether they are building UI, a backend service,
 a theme, an icon pack, or a shared library.
 
 Canonical vocabulary lives in [MESH Module Vocabulary](module-vocabulary.md).
-`module.json` is the canonical author-facing manifest name. `package.json` is
-an old term listed in the vocabulary inventory, and any temporary loader for it
-is an internal-only migration path rather than public author vocabulary.
+`module.json` is the only supported author-facing manifest name. Historical
+`package.json`, `mesh.toml`, and old top-level `id/type/api_version`
+`module.json` manifests are rejected with migration diagnostics.
 
 ## Principles
 
 1. **One module model.** Every installable thing is a module with
-   `module.json`. Temporary loaders for old manifest names are internal-only
-   migration paths, but new docs and examples use `module.json`.
+   canonical `module.json`.
 2. **Interfaces are data, not code.** Service APIs live in interface modules
    such as `@mesh/audio-interface`. The Rust core validates and routes calls;
    it does not know audio, network, power, or media behavior.
@@ -138,52 +137,411 @@ the module and its release metadata, such as `name`, `version`, `description`,
 - Do not use top-level `type` for module kind; use `mesh.kind`.
 - Do not use top-level `id`; use npm's top-level `name`.
 - Do not put MESH dependency objects in top-level `dependencies`; use
-  `mesh.dependencies`.
+  `mesh.uses`.
 - Do not put capabilities, providers, entrypoints, settings, themes, or binary
   requirements at the top level.
+- Use `mesh.uses` for dependencies, resource requirements, binaries, and
+  capabilities.
+- Use `mesh.provides` for layout entries, settings schemas, i18n catalogs,
+  libraries, and concrete resource contributions.
+- Use `mesh.implements` only for backend provider implementations of
+  interface contracts.
 
 Package managers can be used as development/distribution tooling around these
 files. They are not the authority for MESH behavior. MESH reads the
 `mesh` section, validates capabilities and native requirements, resolves
 interface providers, and decides which modules are enabled.
 
+Minimal frontend:
+
+```json
+{
+  "name": "@alice/panel",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "entry": "src/main.mesh",
+    "uses": {
+      "interfaces": { "mesh.audio": ">=1.0" },
+      "resources": { "icons": ["@mesh/icons-default"] },
+      "capabilities": ["shell.surface", "service.audio.read"]
+    },
+    "provides": {
+      "settings": { "namespace": "@alice/panel", "schema": {} }
+    }
+  }
+}
+```
+
+`mesh.entry` fills `entrypoints.main`. For simple frontend modules it also
+creates a default `main` layout contribution unless `mesh.provides.layout`
+already lists explicit entries.
+
 ## Migration Diagnostics
 
-Old manifest file names are replacement or removal targets, not public
-author-facing aliases. When an old name is still accepted, it is an
-internal migration input that emits a warning and should be replaced before
-publishing a module.
+Old manifest file names and top-level manifest shapes are replacement or
+removal targets, not public author-facing aliases. They are no longer accepted
+as compatibility inputs.
 
 | Input | Severity | Author action | Runtime behavior |
 | ----- | -------- | ------------- | ---------------- |
-| `package.json` | warning | replace package.json with module.json | Loads after normalizing the legacy package manifest shape. |
-| legacy `module.json` with `id/type/api_version` | warning | replace legacy module.json fields with name/version/mesh | Loads after normalizing the legacy module manifest shape. |
-| `mesh.toml` | warning | replace mesh.toml with module.json | Loads after normalizing the legacy TOML manifest shape. |
+| `package.json` | error | rename package.json to module.json and use canonical `name/version/mesh` | Fails manifest loading. |
+| legacy `module.json` with `id/type/api_version` | error | replace legacy fields with `name`, `version`, and `mesh` | Fails manifest loading. |
+| `mesh.toml` | error | replace mesh.toml with canonical module.json | Fails manifest loading. |
 | `plugin.json` | error | remove plugin.json or replace it with module.json | Fails manifest loading. |
 | multiple manifest files | error | keep canonical module.json and remove the old manifest file | Fails manifest loading until the ambiguous old file is removed. |
 
 The root installed-module graph follows the same rule. `config/module.json`
-uses the root graph shape directly because it is not an installable module:
+uses the root graph shape directly because it is not an installable module.
+
+The installed set is **auto-discovered** from `modulesDir`: when the root graph
+lists no `modules`, the loader scans the directory for `module.json` files and
+builds the installed set from each module's own manifest (which already declares
+its `name` and `kind`). The root file then holds **decisions only** — which
+modules are `disabled`, the active `providers`, the layout `entrypoint`, and the
+active `theme`. A discovered module is enabled unless named in `disabled`, and a
+single-implementer interface needs no `providers` entry (it is auto-selected):
 
 ```json
 {
   "schemaVersion": 1,
   "modulesDir": "../modules",
-  "modules": {
-    "@mesh/panel": {
-      "kind": "frontend",
-      "path": "frontend/panel",
-      "enabled": true
-    }
-  },
+  "disabled": ["@mesh/text-selection-proof", "@mesh/debug-inspector"],
   "providers": {
     "mesh.audio": "@mesh/pipewire-audio"
   },
   "layout": {
-    "entrypoint": "@mesh/panel:main"
+    "entrypoint": "@mesh/navigation-bar:main"
   }
 }
 ```
+
+An explicit `modules` map is still honored for full manual control (each entry
+gives `kind`, `path`, `enabled`); when present, auto-discovery is skipped and the
+`disabled` list does not apply. The decisions-only form above is preferred.
+
+## Author Workflow Examples
+
+These examples show the canonical authoring shape. Runtime structs still keep
+some older internal names so shipped behavior can migrate incrementally, but
+new manifests should use `mesh.uses`, `mesh.provides`, and `mesh.implements`.
+
+### Frontend Surface
+
+Frontend modules contribute UI entrypoints and consume interface contracts.
+They declare component-module imports, interfaces, resource packs, capabilities,
+settings, i18n catalogs, icon requirements, keybinds, and layout entries in one
+manifest:
+
+```json
+{
+  "name": "@alice/volume-panel",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "entry": "src/main.mesh",
+    "uses": {
+      "modules": { "@alice/volume-popover": ">=0.1.0" },
+      "interfaces": { "mesh.audio": ">=1.0" },
+      "resources": { "icons": ["@mesh/icons-default"] },
+      "capabilities": ["shell.surface", "service.audio.read", "service.audio.control"],
+      "iconRequirements": {
+        "required": ["audio-volume-muted", "audio-volume-high"]
+      }
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en"]
+    },
+    "keybinds": {
+      "mute": {
+        "label": { "t": "keybind.mute.label", "fallback": "Mute audio" },
+        "trigger": { "kind": "shortcut", "key": "m" }
+      }
+    },
+    "provides": {
+      "layout": [
+        { "id": "main", "entrypoint": "src/main.mesh", "label": "Volume Panel" }
+      ],
+      "settings": { "namespace": "@alice/volume-panel", "schema": {} },
+      "i18n": [
+        { "id": "en", "locale": "en", "path": "config/i18n/en.json" }
+      ]
+    },
+    "surface": {
+      "anchor": "top",
+      "height": 56,
+      "size": "fixed"
+    },
+    "accessibility": { "role": "toolbar" }
+  }
+}
+```
+
+`require("@alice/volume-popover")` must be declared in `mesh.uses.modules`.
+`require("mesh.audio@>=1.0")` must be declared in `mesh.uses.interfaces`.
+Optional contracts use `mesh.uses.optionalInterfaces` and should be imported
+with `pcall(require, ...)` in Luau.
+The manifest validator keeps these buckets separate: module/resource
+dependencies must be module ids like `@scope/name`, interface dependencies must
+be dotted contract names like `mesh.audio`, and capabilities must be host-power
+names like `service.audio.read` or `exec.hyprctl`.
+
+Frontend modules with a main `.mesh` entrypoint also form a surface contract.
+The installed graph records that contract as one typed frontend surface record:
+main entrypoint, optional settings namespace, accessibility role/label, and
+surface sizing policy. If an enabled frontend declares a main entrypoint but
+omits `mesh.surface` or `mesh.accessibility`, graph diagnostics emit
+`missing_frontend_surface_layout` or `missing_frontend_accessibility` so module
+authors see the incomplete surface metadata before settings/debug UI has to
+guess.
+
+#### Surface configuration (`mesh.surface`)
+
+Core ships the canonical surface schema and its defaults; a frontend declares
+**only the fields it wants to override** in one compact `mesh.surface` block.
+There is no need to hand-write a `settings.schema.surface` properties block or a
+separate `mesh.surfaceLayout` section — both are replaced by `mesh.surface`.
+
+```json
+"surface": {
+  "anchor": "top",
+  "layer": "top",
+  "width": 0,
+  "height": 56,
+  "exclusive_zone": 56,
+  "keyboard_mode": "none",
+  "visible_on_start": true,
+  "size": "fixed"
+}
+```
+
+Fields split by audience, but they live in one place:
+
+- **User-editable defaults:** `anchor`, `layer`, `width`, `height`,
+  `exclusive_zone`, `keyboard_mode`, `visible_on_start`, `margins`,
+  `display_transition`. The shell can generate settings UI for these from the
+  core base schema, and user `config/settings.json` `surface.*` overrides apply
+  on top.
+- **Renderer policy (not user-editable):** `size` (`fixed` |
+  `content_measured`), `prefers_content_children_sizing`, and the
+  `min_*`/`max_*` clamps.
+
+Any field the author omits falls back to the core default. `mesh.surfaceLayout`
+remains accepted as a legacy alias so older manifests still parse, but new
+modules should use `mesh.surface`.
+
+### Backend Provider
+
+Backend providers implement interfaces and declare native runtime health inputs
+as dependencies:
+
+```json
+{
+  "name": "@alice/lmsensors",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "entry": "src/main.luau",
+    "uses": {
+      "modules": { "@alice/thermal-interface": ">=1.0.0" },
+      "capabilities": ["exec.sensors"],
+      "binaries": [
+        {
+          "name": "sensors",
+          "reason": "Read thermal sensor data from lm-sensors.",
+          "packages": { "debian": "lm-sensors", "arch": "lm_sensors" }
+        }
+      ]
+    },
+    "implements": [
+      {
+        "interface": "alice.thermal",
+        "version": "1.0",
+        "baseModule": "@alice/thermal-interface",
+        "provider": "lmsensors",
+        "label": "lm-sensors",
+        "priority": 100
+      }
+    ],
+    "provides": {
+      "settings": { "namespace": "@alice/lmsensors", "schema": {} }
+    }
+  }
+}
+```
+
+Required binaries missing from `PATH` produce graph diagnostics. Optional
+binaries should set `"optional": true`; they are health hints, not load
+blockers.
+
+### Interface Module
+
+Interface modules are data-only contract packages:
+
+```json
+{
+  "name": "@alice/thermal-interface",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "alice.thermal",
+      "version": "1.0",
+      "file": "interface.toml",
+      "domain": "thermal",
+      "relationship": "base"
+    },
+    "provides": {
+      "settings": { "namespace": "alice.thermal", "schema": {} }
+    }
+  }
+}
+```
+
+The graph reports `missing_interface_contract_file` if the declared contract
+file is absent.
+
+`mesh.interface.file` is **optional** for v0. An interface module may ship only
+`name`/`version`/`domain` and let the contract be inferred from the provider's
+emitted state; contract-based validation (capabilities, events) applies only
+once a contract file exists. This also means a backend can implement an
+interface with no separate interface module at all — declare the interface name
+in `mesh.implements` (no `baseModule`), and the sole-implementer auto-selection
+makes it the active provider. Promote it to a full interface module with a
+contract file once it is worth sharing and stabilizing.
+
+### Library Module
+
+Libraries contribute importable Luau code. They must not declare required
+capabilities because consuming modules request host power themselves:
+
+```json
+{
+  "name": "@alice/backend-kit",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "library",
+    "provides": {
+      "libraries": [
+        { "namespace": "@alice/backend-kit", "path": "lib/" }
+      ]
+    }
+  }
+}
+```
+
+Consumers declare the library under `mesh.uses.modules` and import files with
+`require("@alice/backend-kit/result")` or the module namespace pattern exposed
+by that library.
+
+### Icon Pack
+
+Icon packs are ordinary modules that map semantic icon names to concrete theme
+assets. They must use `mesh.kind: "icon-pack"`; other module kinds cannot
+declare `mesh.icon_pack`.
+
+```json
+{
+  "name": "@alice/icons",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "icon-pack",
+    "icon_pack": {
+      "id": "alice",
+      "mappings": {
+        "audio-volume-high": "hicolor/audio-volume-high",
+        "battery-full": "hicolor/battery-full"
+      }
+    }
+  }
+}
+```
+
+Frontend modules depend on icon packs through `mesh.uses.resources.icons` and
+declare semantic names through `mesh.uses.iconRequirements` or
+`mesh.iconRequirements`. Required names are a hard authoring contract:
+`missing_required_icon` is emitted when no enabled icon pack maps the semantic
+name. Optional names are still checked and reported as `missing_optional_icon`
+so settings/debug UI can explain degraded affordances without treating the
+module as incomplete.
+
+Multiple icon-pack modules can be installed and enabled at once. Frontend
+modules name the packs they prefer by module id, while user settings can choose
+or reorder the effective pack chain without frontend code importing a concrete
+theme package.
+
+### Language Pack
+
+Language packs contribute concrete translation catalogs:
+
+```json
+{
+  "name": "@alice/sk-language",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "language-pack",
+    "provides": {
+      "i18n": [
+        { "id": "sk", "locale": "sk", "path": "i18n/sk.json" }
+      ]
+    }
+  }
+}
+```
+
+Font packs, theme packs, and language packs follow the same ordinary-module
+pattern as icon packs: install the module, enable it in the root graph, and let
+consumers depend on the semantic resource id instead of importing files from a
+concrete package. Pack-specific contribution fields are kind-scoped:
+`mesh.provides.fonts` belongs to `font-pack` modules,
+`mesh.provides.themes` belongs to `theme` modules, and `mesh.provides.icons` /
+`mesh.icon_pack` belong to `icon-pack` modules. Bundled `mesh.provides.i18n`
+catalogs remain valid on normal modules for module-local translations; a
+standalone `language-pack` uses the same catalog contribution shape.
+
+Module-owned bundled catalogs can also be listed in the producing frontend's
+or interface's `mesh.provides.i18n` block. `mesh.i18n.defaultLocale` controls
+the fallback catalog used for diagnostics.
+
+### Theme Pack
+
+Theme packs contribute theme modes:
+
+```json
+{
+  "name": "@alice/theme",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "provides": {
+      "themes": [
+        {
+          "id": "alice",
+          "label": "Alice",
+          "default_mode": "dark",
+          "modes": {
+            "dark": "themes/dark.json",
+            "light": "themes/light.json"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+Theme mode paths are validated as package-relative paths. Future resource-pack
+kinds should follow the same `mesh.uses.resources.*` and `mesh.provides.*`
+pattern.
 
 ## Extend or Add a MESH Module
 
@@ -192,8 +550,9 @@ Use the shipped audio/navigation path as the authoring model:
 1. Start with a canonical `module.json` and put all MESH behavior under
    `mesh`.
 2. Make the UI a frontend module. `@mesh/navigation-bar` declares
-   `mesh.kind: "frontend"`, contributes its `main` layout entrypoint, and
-   declares `mesh.keybinds.mute` plus icon requirements.
+   `mesh.kind: "frontend"`, uses interface/resource dependencies, contributes
+   its `main` layout entrypoint, and declares `mesh.keybinds.mute` plus icon
+   requirements.
 3. For frontend modules, renderer migration expectations live in [the .mesh renderer contract](frontend/renderer-contract.md); module authors should not depend on proof snapshots, candidate renderer crates, or browser DOM behavior.
 4. Depend on an interface contract, not a backend module ID. The navigation
    volume control imports `mesh.audio@>=1.0`; it does not import
@@ -208,10 +567,10 @@ Use the shipped audio/navigation path as the authoring model:
 7. Select active providers in the root graph. `config/module.json` enables the
    shipped modules, keeps both audio providers available, and selects
    `@mesh/pipewire-audio` as the active `mesh.audio` provider.
-8. Put layout, settings, keybinds, icons, and resources in contributions or
-   requirements. The installed graph preserves those records so the shell can
-   apply user overrides and validate module gaps without re-reading arbitrary
-   source files.
+8. Put dependencies and host powers in `mesh.uses`; put layout, settings,
+   i18n, libraries, and concrete resources in `mesh.provides`. The installed
+   graph preserves those records so the shell can apply user overrides and
+   validate module gaps without re-reading arbitrary source files.
 9. Treat diagnostics as part of the workflow. Missing providers, missing icon
    requirements, unresolved resources, settings schema gaps, and ambiguous
    legacy manifests should be reported as diagnostics with a concrete author
@@ -232,17 +591,13 @@ PulseAudio behavior stays in Luau backend provider modules.
       "defaultLocale": "en",
       "supportedLocales": ["en", "sk"]
     },
-    "entrypoints": {
-      "main": "src/main.luau"
-    },
-    "capabilities": {
-      "required": ["exec.sensors"]
-    },
-    "dependencies": {
+    "entry": "src/main.luau",
+    "uses": {
       "modules": {
         "@alice/thermal-interface": ">=1.0.0, <2.0.0",
         "@mesh/backend-kit": ">=0.1.0"
       },
+      "capabilities": ["exec.sensors"],
       "binaries": [
         {
           "name": "sensors",
@@ -253,12 +608,14 @@ PulseAudio behavior stays in Luau backend provider modules.
     "implements": [
       {
         "interface": "alice.thermal",
+        "version": "1.0",
+        "baseModule": "@alice/thermal-interface",
         "provider": "lmsensors",
         "label": "lm-sensors",
         "priority": 100
       }
     ],
-    "contributes": {
+    "provides": {
       "settings": {
         "namespace": "@alice/lmsensors",
         "schema": {}
@@ -288,9 +645,27 @@ import.
 `mesh.i18n.supportedLocales` declares the locales a module can support so an
 installer can choose which language assets to fetch or enable with the module.
 `mesh.i18n.defaultLocale` is the module's own fallback locale and should be
-included in `supportedLocales`. Bundled translation files are still listed
-under `mesh.contributes.i18n`; supported locales are install metadata, while
-contributions are concrete files available in this package.
+included in `supportedLocales`. Bundled translation files are listed under
+`mesh.provides.i18n`; supported locales are install metadata, while
+provided catalogs are concrete files available in this package.
+
+### Frontend Surface Contracts
+
+Frontend authoring remains one `module.json` contract, not a separate settings
+file per concern. Use `mesh.entry` or `mesh.entrypoints.main` for the `.mesh`
+surface entrypoint, `mesh.provides.settings` for the settings schema namespace,
+`mesh.surfaceLayout` for non-user sizing/layout policy, and
+`mesh.accessibility` for the root role and label. The graph keeps these fields
+as a single frontend surface record while preserving the existing typed indexes
+for interfaces, icon requirements, i18n catalogs, keybinds, settings schemas,
+and component-module dependencies.
+
+`mesh.surfaceLayout.keyboard_mode` declares the module default keyboard
+interactivity policy: `none`, `on_demand`, or `exclusive`. User settings may
+override that default per module, and temporary runtime focus transfers may
+override it while a popover owns focus. The durable manifest/settings contract
+describes policy only; the shell remains the owner of current keyboard focus
+state.
 
 ### Keybind Contributions
 
@@ -325,7 +700,7 @@ module's catalogs:
         "trigger": { "kind": "shortcut", "key": "m" }
       }
     },
-    "contributes": {
+    "provides": {
       "i18n": [
         { "id": "en", "locale": "en", "path": "config/i18n/en.json" },
         { "id": "sk", "locale": "sk", "path": "config/i18n/sk.json" }
@@ -341,7 +716,7 @@ locale do not provide the key. Missing keys are non-fatal diagnostics that
 include the module id, field path, key, and fallback.
 
 Use `mesh.i18n` to declare the module's locale support and fallback locale.
-Use `mesh.contributes.i18n` to list bundled catalog files. Use field-local
+Use `mesh.provides.i18n` to list bundled catalog files. Use field-local
 localized text objects only for the fields that should be catalog-backed;
 plain labels such as `"Navigation Bar"` remain valid literal strings.
 
@@ -357,6 +732,34 @@ missing runtime subscribers, and unsafe overrides are reported through
 non-fatal component diagnostics. Resolved bindings are also exposed as
 accessibility keyboard shortcut metadata on subscribed controls and as
 structured `mesh.debug.keybinds` entries for debug consumers.
+The installed graph also scans static `.mesh` templates for keybind
+subscriptions. A node using `keybind="{this.keybinds.mute.id}"` or
+`keybind="mute"` must have a matching `mesh.keybinds.mute` declaration and an
+`onkeybind` handler, otherwise graph diagnostics emit
+`undeclared_keybind_subscription` or `keybind_subscription_missing_handler`.
+Legacy `settings.json` shortcut declarations are migration-only. They can no
+longer create keybind actions by themselves; the action must exist in
+`mesh.keybinds`, and any legacy setting for the same id is reported as ignored
+so authors migrate labels, categories, default triggers, localized triggers,
+and scope into the manifest.
+
+### Popover Focus Ownership
+
+Open popovers through `mesh.popover.activate(surface_id, event, options)` from
+the trigger control's click/key handler. Pass the original event whenever the
+popover should participate in keyboard return focus: the shell extracts
+`event.surface.id` and the trigger node key from `event.current` /
+`event.current_target`, stores that trigger relationship, and can transfer Tab
+focus into the popover. `options.focus` controls whether activation immediately
+focuses the popover; omit it or set `true` for keyboard-owned popovers, and set
+`false` for pointer-first popovers where the first click should land inside the
+opened surface.
+
+When focus is transferred into a popover, the shell records return focus as
+`(trigger_surface, trigger_key)` and marks the popover to close on focus leave.
+Modules should call `mesh.popover.hide(surface_id)` for explicit dismiss
+actions, but they should not maintain their own durable focus ownership state;
+the shell owns keyboard focus, return focus, and close-on-focus-leave behavior.
 
 ## Interface Modules
 
@@ -390,7 +793,7 @@ Recommended `module.json`:
       "domain": "audio",
       "relationship": "base"
     },
-    "contributes": {
+    "provides": {
       "settings": {
         "namespace": "mesh.audio",
         "schema": {
@@ -509,6 +912,14 @@ declare the interface it implements, then requests only the generic host powers
 it needs, such as `exec.wpctl`, `exec.pactl`, `exec.aplay`, `dbus.system`, or
 `net.http`.
 
+The interface contract's `[capabilities]` (`required`/`optional`) are the
+**consumer** capabilities. The graph checks them against frontends that consume
+the interface. It does not require providers to declare them — and if a provider
+*does* declare a consumer capability for an interface it implements, the graph
+emits `provider_declares_consumer_capability` with a concrete action to remove
+it. This keeps capability declarations meaningful instead of drifting into
+copy-pasted noise.
+
 Example:
 
 ```luau
@@ -559,6 +970,10 @@ end
 The core should validate that emitted state and command handlers match the
 interface contract. The backend should focus on translating the system into
 that contract.
+Compatibility `mesh.service.emit_event("EventName", payload)` calls are still
+accepted, but static event names are validated against the provider's interface
+TOML. If a backend emits an event that is not declared under `[[events]]`, the
+installed graph reports `undeclared_interface_event_emit`.
 
 ## Frontend Workflow
 
@@ -600,6 +1015,28 @@ Rules:
 - Keep display derivation in the frontend script.
 - Use libraries for formatting and common UI behavior.
 - Publish shell events with `mesh.events`; mutate services with proxy methods.
+
+`mesh.events.publish("shell.*", ...)` is reserved for shell-owned commands such
+as positioning, popovers, debug toggles, and theme selection. Interface-domain
+commands must go through the required interface proxy, for example
+`wm.switch_workspace(1)` rather than publishing
+`mesh.hyprland.switch_workspace`. Static `.mesh` sources that publish
+`mesh.*` channels now receive `raw_interface_domain_event_publish` graph
+diagnostics.
+
+Declared shell-owned channels are:
+
+- `shell.show-surface`, `shell.hide-surface`, `shell.toggle-surface`
+- `shell.position-surface`, `shell.activate-popover`
+- `shell.set-theme`, `shell.set-locale`
+- `shell.toggle-debug-overlay`, `shell.toggle-debug-layout-bounds`,
+  `shell.toggle-debug-profiling`, `shell.run-debug-benchmark`
+- `shell.brightness-down`, `shell.brightness-up`, `shell.set-brightness`
+- `shell.toggle-calendar`
+
+Static `.mesh` sources that publish another `shell.*` channel receive
+`unknown_shell_event_publish` until the shell namespace is extended
+deliberately.
 
 ### Frontend Theme Contributions
 
@@ -689,7 +1126,7 @@ Recommended manifest:
   "mesh": {
     "apiVersion": "0.1",
     "kind": "library",
-    "contributes": {
+    "provides": {
       "libraries": [
         {
           "namespace": "@mesh/backend-kit",
@@ -733,24 +1170,22 @@ branches.
 
 ## Dependency Vocabulary
 
-Use kinded dependencies inside `mesh.dependencies`:
+Use kinded dependencies inside `mesh.uses`:
 
 ```json
 {
   "mesh": {
-    "dependencies": {
+    "uses": {
       "modules": {
         "@mesh/audio-interface": ">=1.0.0, <2.0.0",
         "@mesh/backend-kit": ">=0.1.0"
       },
-      "backend": {
+      "interfaces": {
         "mesh.audio": ">=1.0"
       },
-      "themes": {
-        "@mesh/shell-theme": ">=0.1.0"
-      },
-      "icons": {
-        "@mesh/material-icons": ">=0.1.0"
+      "resources": {
+        "themes": ["@mesh/shell-theme"],
+        "icons": ["@mesh/material-icons"]
       }
     }
   }
@@ -760,10 +1195,12 @@ Use kinded dependencies inside `mesh.dependencies`:
 Interpretation:
 
 - `modules` means package-level dependency.
-- `backend` means "I need a provider for this interface."
-- `themes`, `icons`, `fonts`, and `i18n` are resource dependencies.
+- `interfaces` means "I need a provider for this interface."
+- `optionalInterfaces` means "I can use this interface when available."
+- `resources.themes`, `resources.icons`, `resources.fonts`, and
+  `resources.i18n` are resource dependencies.
 - System dependencies such as binaries and native libraries should remain
-  detected, not installed.
+  detected, not installed; declare runtime binaries in `mesh.uses.binaries`.
 
 ## Provider Selection
 
@@ -778,19 +1215,27 @@ is selected by the root package graph:
 }
 ```
 
+When exactly one enabled backend implements an interface, the graph
+**auto-selects it** — the root graph only needs a `providers` entry for
+interfaces with more than one implementer (where the choice is genuinely the
+user's). In the shipped graph, `mesh.audio` has two providers (PipeWire and
+PulseAudio) and is selected explicitly, while single-provider interfaces such as
+`mesh.power` and `mesh.hyprland` are resolved automatically and need no entry.
+
 The graph should:
 
 - keep all installed providers visible,
 - validate that the selected module is enabled and implements the interface,
-- use priority only as an initial default,
+- auto-select the sole implementer when the root graph names none,
+- require an explicit choice when several modules implement one interface,
 - surface missing or failed providers through health diagnostics,
 - preserve contract-level settings across provider swaps.
 
 The installed graph also exposes non-fatal compatibility diagnostics for
 resource and settings contribution mismatches. Missing icon/font/language/theme
-packs, required semantic icons that no enabled icon pack maps, and duplicate
-settings namespaces should be visible to tools and settings UI without blocking
-unrelated modules from loading.
+packs, required or optional semantic icons that no enabled icon pack maps, and
+duplicate settings namespaces should be visible to tools and settings UI without
+blocking unrelated modules from loading.
 
 ## Extending Existing Interfaces
 
@@ -815,7 +1260,7 @@ model.
 
 1. Treat `module.json` plus `mesh` as the target manifest.
 2. Treat `package.json`, legacy `module.json` with `id/type/api_version`, and
-   `mesh.toml` as internal migration inputs only.
+   `mesh.toml` as rejected historical inputs that must be replaced.
 3. Replace old public names with the canonical vocabulary in diagnostics, docs,
    tests, and examples. Do not describe old manifest names as interchangeable
    with `module.json`.

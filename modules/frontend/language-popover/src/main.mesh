@@ -139,12 +139,16 @@ end
     border-radius: token(radius.md);
 }
 
-.language-option:active,
-.language-option-selected {
+.language-option:active {
     background: token(color.primary);
     color: token(color.on-primary);
     border-color: token(color.primary);
     border-radius: token(radius.full);
+}
+
+.language-option-selected {
+    background: token(color.secondary-container);
+    color: token(color.on-secondary-container);
 }
 
 .language-option-text {

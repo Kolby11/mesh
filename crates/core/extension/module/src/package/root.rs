@@ -14,6 +14,10 @@ pub struct RootModuleGraphManifest {
     pub modules_dir: String,
     #[serde(default)]
     pub modules: HashMap<String, InstalledModuleEntry>,
+    /// Modules to keep disabled when the installed set is auto-discovered from
+    /// `modulesDir` (i.e. when `modules` is empty). Decisions, not inventory.
+    #[serde(default)]
+    pub disabled: Vec<String>,
     #[serde(default)]
     pub providers: HashMap<String, String>,
     #[serde(default)]
@@ -29,7 +33,7 @@ impl RootModuleGraphManifest {
                 path: PathBuf::from("<inline>"),
                 source,
             })?;
-        let manifest = parsed.into_manifest();
+        let manifest = parsed.into_manifest()?;
         manifest.validate()?;
         Ok(manifest)
     }
@@ -44,7 +48,7 @@ impl RootModuleGraphManifest {
                 path: path.to_path_buf(),
                 source,
             })?;
-        let manifest = parsed.into_manifest();
+        let manifest = parsed.into_manifest()?;
         manifest.validate()?;
         Ok(manifest)
     }
@@ -79,42 +83,26 @@ impl RootModuleGraphManifest {
 #[serde(rename_all = "camelCase")]
 struct RootModuleGraphJson {
     #[serde(default)]
-    schema_version: Option<u32>,
-    #[serde(default)]
-    modules_dir: Option<String>,
-    #[serde(default)]
-    modules: HashMap<String, InstalledModuleEntry>,
-    #[serde(default)]
-    providers: HashMap<String, String>,
-    #[serde(default)]
-    layout: Option<RootLayoutSelection>,
-    #[serde(default)]
-    theme: Option<RootThemeSelection>,
-    #[serde(default)]
     mesh: Option<RootMeshSection>,
 }
 
 impl RootModuleGraphJson {
-    fn into_manifest(self) -> RootModuleGraphManifest {
-        if let Some(mesh) = self.mesh {
-            return RootModuleGraphManifest {
-                schema_version: mesh.schema_version,
-                modules_dir: mesh.modules_dir,
-                modules: mesh.modules,
-                providers: mesh.providers,
-                layout: mesh.layout,
-                theme: mesh.theme,
-            };
-        }
+    fn into_manifest(self) -> Result<RootModuleGraphManifest, ModuleManifestError> {
+        let Some(mesh) = self.mesh else {
+            return Err(ModuleManifestError::Validation(
+                "root module graph must use canonical name/version/mesh shape".into(),
+            ));
+        };
 
-        RootModuleGraphManifest {
-            schema_version: self.schema_version.unwrap_or(1),
-            modules_dir: self.modules_dir.unwrap_or_else(default_modules_dir),
-            modules: self.modules,
-            providers: self.providers,
-            layout: self.layout,
-            theme: self.theme,
-        }
+        Ok(RootModuleGraphManifest {
+            schema_version: mesh.schema_version,
+            modules_dir: mesh.modules_dir,
+            modules: mesh.modules,
+            disabled: mesh.disabled,
+            providers: mesh.providers,
+            layout: mesh.layout,
+            theme: mesh.theme,
+        })
     }
 }
 
@@ -127,6 +115,8 @@ struct RootMeshSection {
     modules_dir: String,
     #[serde(default)]
     modules: HashMap<String, InstalledModuleEntry>,
+    #[serde(default)]
+    disabled: Vec<String>,
     #[serde(default)]
     providers: HashMap<String, String>,
     #[serde(default)]

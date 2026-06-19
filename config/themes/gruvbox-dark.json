@@ -5,6 +5,16 @@
     "components": {
       "base": {
         "transition": "background-color token(animation.duration.short) token(animation.curves.bezier.standard), color token(animation.duration.short) token(animation.curves.bezier.standard), border-color token(animation.duration.short) token(animation.curves.bezier.standard), opacity token(animation.duration.medium) token(animation.curves.bezier.standard), border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate), border-width token(animation.duration.medium) token(animation.curves.bezier.standard), width token(animation.duration.medium) token(animation.curves.bezier.standard), height token(animation.duration.medium) token(animation.curves.bezier.standard), padding token(animation.duration.medium) token(animation.curves.bezier.standard), margin token(animation.duration.medium) token(animation.curves.bezier.standard), transform token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate)"
+      },
+      "tooltip": {
+        "position": "bottom",
+        "delay": "300",
+        "animation-duration": "token(animation.duration.short)",
+        "animation": "expand",
+        "expand-from": "0.85",
+        "gap": "6",
+        "cursor-offset-x": "14",
+        "cursor-offset-y": "18"
       }
     }
   },

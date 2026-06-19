@@ -69,26 +69,26 @@ impl FrontendSurfaceComponent {
         (width, height)
     }
 
-    pub(super) fn tooltip_overlay_extra_for_content(width: u32) -> (u32, u32) {
-        if width < TOOLTIP_OVERLAY_WIDTH {
-            (
-                TOOLTIP_OVERLAY_WIDTH.saturating_sub(width),
-                TOOLTIP_OVERLAY_HEIGHT,
-            )
+    pub(super) fn tooltip_overlay_extra_for_content(width: u32, height: u32) -> (u32, u32) {
+        let extra_w = if width > 0 && width < TOOLTIP_OVERLAY_WIDTH {
+            TOOLTIP_OVERLAY_WIDTH.saturating_sub(width)
         } else {
-            (0, 0)
-        }
+            0
+        };
+        let extra_h = if height > 0 {
+            TOOLTIP_OVERLAY_HEIGHT
+        } else {
+            0
+        };
+        (extra_w, extra_h)
     }
 
     pub(super) fn render_layout(&self, surface: &mut dyn ShellSurface) {
         surface.anchor(self.surface_layout.edge);
         surface.set_layer(self.surface_layout.layer);
         let (width, height) = self.requested_layout_size();
-        let (tooltip_extra_width, tooltip_extra_height) = if width == 0 {
-            (0, 0)
-        } else {
-            Self::tooltip_overlay_extra_for_content(width)
-        };
+        let (tooltip_extra_width, tooltip_extra_height) =
+            Self::tooltip_overlay_extra_for_content(width, height);
         surface.set_size(
             width.saturating_add(tooltip_extra_width),
             height.saturating_add(tooltip_extra_height),

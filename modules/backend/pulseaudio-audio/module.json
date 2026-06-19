@@ -5,20 +5,16 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "backend",
-    "capabilities": {
-      "required": [
-        "exec.pactl",
-        "service.audio.read",
-        "service.audio.control"
-      ],
-      "optional": [
-        "exec.aplay"
-      ]
-    },
-    "dependencies": {
+    "uses": {
       "modules": {
         "@mesh/audio-interface": ">=1.0.0, <2.0.0"
       },
+      "capabilities": [
+        "exec.pactl"
+      ],
+      "optionalCapabilities": [
+        "exec.aplay"
+      ],
       "binaries": [
         {
           "name": "pactl",
@@ -41,9 +37,7 @@
         }
       ]
     },
-    "entrypoints": {
-      "main": "src/main.luau"
-    },
+    "entry": "src/main.luau",
     "implements": [
       {
         "interface": "mesh.audio",

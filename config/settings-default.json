@@ -24,5 +24,14 @@
       "ArrowUp"
     ],
     "surface_shortcuts": {}
+  },
+  "tooltip": {
+    "position": "bottom",
+    "delay_ms": 300,
+    "fade_in_ms": 150,
+    "gap": 6.0,
+    "cursor_offset_x": 14.0,
+    "cursor_offset_y": 18.0,
+    "slide_in_px": 4.0
   }
 }

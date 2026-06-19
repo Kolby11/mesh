@@ -9,9 +9,9 @@ use super::types::{
 use mesh_core_interaction::{
     annotate_overflow_tree, collect_focus_traversal, find_click_handler, find_event_handler,
     find_focusable_at, find_node_bounds_by_key, find_node_by_key, find_node_path_at,
-    find_scrollable_at, find_tooltip_by_key, find_tooltip_text_by_key, is_input_key, is_slider_key,
-    measure_content_size, namespace_event_handlers, next_focus_target, node_is_source,
-    parse_namespaced_handler, scroll_limits, source_element_tag,
+    find_scrollable_at, find_tooltip_by_key, is_input_key, is_slider_key, measure_content_size,
+    namespace_event_handlers, next_focus_target, node_is_source, parse_namespaced_handler,
+    scroll_limits, source_element_tag,
 };
 mod animation;
 mod catalog;
@@ -23,6 +23,7 @@ mod rendering;
 mod runtime;
 mod runtime_tree;
 mod shell_component;
+mod tooltip;
 
 use animation::StyleAnimation;
 pub(in crate::shell) use catalog::FrontendCatalog;
@@ -35,6 +36,7 @@ use runtime_tree::{
 };
 
 use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_config::TooltipSettings;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::{
     IntrinsicLayoutCache, LayoutEngine, NodeId, PerSurfaceLayoutState, StyleContext, StyleResolver,
@@ -60,9 +62,8 @@ use mesh_core_render::{
     RenderObjectTree, RetainedDisplayList, SharedTextMeasurer, TextCacheMetrics, TextRenderer,
 };
 
-const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
-const TOOLTIP_OVERLAY_WIDTH: u32 = 260;
-const TOOLTIP_OVERLAY_HEIGHT: u32 = 96;
+const TOOLTIP_OVERLAY_WIDTH: u32 = 240;
+const TOOLTIP_OVERLAY_HEIGHT: u32 = 80;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -344,6 +345,10 @@ pub(super) struct FrontendSurfaceComponent {
     hovered_pos: (f32, f32),
     hover_start: Option<std::time::Instant>,
     tooltip_visible: bool,
+    /// Bounding box of the currently hovered element: (left, top, right, bottom).
+    hovered_element_bounds: Option<(f32, f32, f32, f32)>,
+    /// Timestamp when the current tooltip became visible (for fade-in animation timing).
+    tooltip_appeared_at: Option<std::time::Instant>,
     last_tooltip_damage: Option<DamageRect>,
     runtimes: Arc<Mutex<HashMap<String, EmbeddedFrontendRuntime>>>,
     render_stack: RefCell<Vec<String>>,
@@ -393,6 +398,9 @@ pub(super) struct FrontendSurfaceComponent {
     last_visual_damage: HashMap<NodeId, DamageRect>,
     tooltip_damage_scratch: Vec<DamageRect>,
     dirty_node_visual_damage_scratch: Vec<DamageRect>,
+    /// Current tooltip configuration from shell settings. Refreshed while a
+    /// tooltip hover is active so settings changes apply without remounting.
+    tooltip_settings: TooltipSettings,
     visual_damage_scratch: Vec<DamageRect>,
     effective_damage_scratch: Vec<DamageRect>,
     /// Cached aggregate of restyle rules collected from `compiled.component`
@@ -477,6 +485,8 @@ impl FrontendSurfaceComponent {
             hovered_pos: (0.0, 0.0),
             hover_start: None,
             tooltip_visible: false,
+            hovered_element_bounds: None,
+            tooltip_appeared_at: None,
             last_tooltip_damage: None,
             runtimes: Arc::new(Mutex::new(HashMap::new())),
             render_stack: RefCell::new(Vec::new()),
@@ -512,6 +522,7 @@ impl FrontendSurfaceComponent {
             last_visual_damage: HashMap::new(),
             tooltip_damage_scratch: Vec::new(),
             dirty_node_visual_damage_scratch: Vec::new(),
+            tooltip_settings: TooltipSettings::default(),
             visual_damage_scratch: Vec::new(),
             effective_damage_scratch: Vec::new(),
             cached_restyle_rules: None,

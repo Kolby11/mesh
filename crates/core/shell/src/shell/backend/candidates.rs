@@ -103,8 +103,10 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph(
                 provider_id: Some(active_provider.module_id.clone()),
                 status: "missing_binary",
                 message: format!(
-                    "backend provider {} requires unavailable binary {}",
-                    active_provider.module_id, binary.name
+                    "backend provider {} requires unavailable binary {}{}",
+                    active_provider.module_id,
+                    binary.name,
+                    binary_package_hint(binary)
                 ),
             });
             continue;
@@ -189,10 +191,71 @@ fn backend_requirement_statuses(graph: &InstalledModuleGraph) -> Vec<BackendLife
                         frontend.id
                     ),
                 });
+            } else if let Some(record) = graph.health().iter().find(|record| {
+                record.module_id == frontend.id
+                    && record.interface.as_deref() == Some(interface.as_str())
+                    && record.status == "required_interface_unavailable"
+            }) {
+                statuses.push(BackendLifecycleStatusRecord {
+                    interface: interface.clone(),
+                    provider_id: record.provider_id.clone(),
+                    status: "unmet_backend_requirement",
+                    message: record.message.clone(),
+                });
+            }
+        }
+        for interface in requirements.optional_backend.keys() {
+            if graph.backend_providers_for_interface(interface).is_empty() {
+                statuses.push(BackendLifecycleStatusRecord {
+                    interface: interface.clone(),
+                    provider_id: Some(frontend.id.clone()),
+                    status: "optional_backend_unavailable",
+                    message: format!(
+                        "frontend module {} can use optional {interface}, but no enabled backend provider is installed",
+                        frontend.id
+                    ),
+                });
+            } else if graph.active_provider(interface).is_none() {
+                statuses.push(BackendLifecycleStatusRecord {
+                    interface: interface.clone(),
+                    provider_id: Some(frontend.id.clone()),
+                    status: "optional_backend_inactive",
+                    message: format!(
+                        "frontend module {} can use optional {interface}, but no active provider is selected",
+                        frontend.id
+                    ),
+                });
+            } else if let Some(record) = graph.health().iter().find(|record| {
+                record.module_id == frontend.id
+                    && record.interface.as_deref() == Some(interface.as_str())
+                    && record.status == "optional_interface_unavailable"
+            }) {
+                statuses.push(BackendLifecycleStatusRecord {
+                    interface: interface.clone(),
+                    provider_id: record.provider_id.clone(),
+                    status: "optional_backend_unavailable",
+                    message: record.message.clone(),
+                });
             }
         }
     }
     statuses
+}
+
+fn binary_package_hint(binary: &mesh_core_module::manifest::BinaryDependency) -> String {
+    if binary.packages.is_empty() {
+        return String::new();
+    }
+    let mut packages = binary.packages.iter().collect::<Vec<_>>();
+    packages.sort_by(|(left, _), (right, _)| left.cmp(right));
+    format!(
+        "; install package {}",
+        packages
+            .into_iter()
+            .map(|(manager, package)| format!("{manager}:{package}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 fn validate_backend_provider_contract(
@@ -206,14 +269,14 @@ fn validate_backend_provider_contract(
         return None;
     }
 
-    let Some(contract) = resolution.contract.as_ref() else {
+    if resolution.contract.is_none() {
         return Some(BackendLifecycleStatusRecord {
             interface: canonical_interface_name(interface),
             provider_id: Some(provider_id.to_string()),
             status: "invalid_manifest",
             message: format!("active provider {provider_id} has no interface contract"),
         });
-    };
+    }
 
     if !interfaces
         .providers_for(interface)
@@ -227,22 +290,6 @@ fn validate_backend_provider_contract(
             message: format!(
                 "active provider {provider_id} is not registered for interface {}",
                 canonical_interface_name(interface)
-            ),
-        });
-    }
-
-    if let Some(required) = contract.capabilities.required.iter().find(|required| {
-        !provider
-            .required_capabilities
-            .iter()
-            .any(|capability| capability == *required)
-    }) {
-        return Some(BackendLifecycleStatusRecord {
-            interface: canonical_interface_name(interface),
-            provider_id: Some(provider_id.to_string()),
-            status: "missing_capability",
-            message: format!(
-                "active provider {provider_id} does not declare required capability {required}"
             ),
         });
     }

@@ -160,6 +160,75 @@ fn module_manifest_parses_backend_module_json() {
 }
 
 #[test]
+fn compact_surface_block_normalizes_into_surface_layout() {
+    let content = r#"
+{
+  "name": "@mesh/panel",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "bottom",
+      "layer": "overlay",
+      "height": 48,
+      "keyboard_mode": "on_demand",
+      "visible_on_start": true,
+      "size": "content_measured",
+      "display_transition": { "show_ms": 120, "hide_ms": 90 }
+    }
+  }
+}
+"#;
+    let manifest = ModuleManifest::from_json_str(content).unwrap();
+    // The compact `mesh.surface` block is moved into the single typed
+    // `surface_layout` home during normalization.
+    assert!(manifest.mesh.surface.is_none());
+    let surface = manifest
+        .mesh
+        .surface_layout
+        .expect("surface_layout populated from compact block");
+    assert_eq!(surface.anchor.as_deref(), Some("bottom"));
+    assert_eq!(surface.layer.as_deref(), Some("overlay"));
+    assert_eq!(surface.height, Some(48));
+    assert_eq!(surface.keyboard_mode.as_deref(), Some("on_demand"));
+    assert_eq!(surface.visible_on_start, Some(true));
+    // `size` is the compact-block alias for the internal `size_policy` field.
+    assert_eq!(surface.size_policy.as_deref(), Some("content_measured"));
+    let transition = surface
+        .display_transition
+        .expect("display transition parsed");
+    assert_eq!(transition.show_ms, 120);
+    assert_eq!(transition.hide_ms, 90);
+}
+
+#[test]
+fn interface_module_without_contract_file_is_valid() {
+    // v0: an interface module may ship only name/version/domain and infer the
+    // contract from emitted state — no `interface.toml` required.
+    let content = r#"
+{
+  "name": "@me/cputemp-interface",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "me.cputemp",
+      "version": "1.0",
+      "domain": "thermal"
+    }
+  }
+}
+"#;
+    let manifest = ModuleManifest::from_json_str(content).unwrap();
+    let interface = manifest.mesh.interface.unwrap();
+    assert_eq!(interface.name, "me.cputemp");
+    assert!(interface.file.is_none());
+}
+
+#[test]
 fn module_package_manifest_parses_interface_relationship_metadata() {
     let content = r#"
 {
@@ -896,6 +965,44 @@ fn shipped_module_graph_loads_repo_module_fixture() {
 }
 
 #[test]
+fn load_installed_module_graph_auto_discovers_modules() {
+    let root = temp_dir("auto-discovery-test");
+    let config_dir = root.join("config");
+    let modules_dir = root.join("modules");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::create_dir_all(modules_dir.join("frontend/panel")).unwrap();
+    fs::create_dir_all(modules_dir.join("backend/audio")).unwrap();
+
+    fs::write(
+        modules_dir.join("frontend/panel/module.json"),
+        r#"{ "name": "@me/panel", "version": "0.1.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "entry": "src/main.mesh", "surface": { "anchor": "top" }, "accessibility": { "role": "toolbar" } } }"#,
+    )
+    .unwrap();
+    fs::write(
+        modules_dir.join("backend/audio/module.json"),
+        r#"{ "name": "@me/audio-backend", "version": "0.1.0", "mesh": { "apiVersion": "0.1", "kind": "backend", "entry": "src/main.luau", "implements": [{ "interface": "me.audio", "version": "1.0", "provider": "demo" }] } }"#,
+    )
+    .unwrap();
+
+    // Decisions-only root graph: no `modules` inventory, one disabled module.
+    fs::write(
+        config_dir.join("module.json"),
+        r#"{ "name": "@me/config", "version": "0.1.0", "mesh": { "schemaVersion": 1, "modulesDir": "../modules", "disabled": ["@me/audio-backend"] } }"#,
+    )
+    .unwrap();
+
+    let graph = load_installed_module_graph(&config_dir.join("module.json")).unwrap();
+
+    // Both modules are discovered from disk without a `modules` map...
+    assert!(graph.module("@me/panel").unwrap().enabled);
+    // ...and the `disabled` decision is honored.
+    assert!(!graph.module("@me/audio-backend").unwrap().enabled);
+    let frontends = graph.frontend_modules();
+    assert_eq!(frontends.len(), 1);
+    assert_eq!(frontends[0].id, "@me/panel");
+}
+
+#[test]
 fn shipped_module_graph_preserves_navigation_localized_keybind_text() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
@@ -1054,6 +1161,7 @@ fn loaded_module(
                 icon_pack: None,
                 icon_requirements: crate::manifest::IconRequirementsSection::default(),
                 accessibility: None,
+                surface: None,
                 surface_layout: None,
                 theme: None,
                 experimental: serde_json::Value::Null,
@@ -1076,9 +1184,8 @@ fn declare_frontend_surface_contract(module: &mut LoadedModuleManifest) {
         keyboard_mode: Some("on_demand".into()),
         prefers_content_children_sizing: Some(true),
         min_width: Some(320),
-        max_width: None,
         min_height: Some(120),
-        max_height: None,
+        ..Default::default()
     });
 }
 
@@ -1103,6 +1210,7 @@ fn root_with_modules(
                 )
             })
             .collect(),
+        disabled: Vec::new(),
         providers: providers
             .iter()
             .map(|(interface, module_id)| ((*interface).into(), (*module_id).into()))
@@ -1592,6 +1700,65 @@ fn installed_module_graph_returns_explicit_active_provider() {
         graph.active_provider("mesh.audio").unwrap().module_id,
         "@mesh/pipewire-audio"
     );
+}
+
+#[test]
+fn installed_module_graph_auto_selects_sole_provider() {
+    // No explicit `providers` entry, exactly one enabled implementer.
+    let root = root_with_modules(&[("@mesh/pipewire-audio", ModuleKind::Backend)], &[], None);
+    let modules = vec![audio_modules().remove(0)];
+    let graph = InstalledModuleGraph::from_parts(root, modules).unwrap();
+    assert_eq!(
+        graph.active_provider("mesh.audio").unwrap().module_id,
+        "@mesh/pipewire-audio"
+    );
+}
+
+#[test]
+fn installed_module_graph_does_not_auto_select_among_multiple_providers() {
+    // Two implementers and no explicit selection: the choice stays unresolved.
+    let root = root_with_modules(
+        &[
+            ("@mesh/pipewire-audio", ModuleKind::Backend),
+            ("@mesh/pulseaudio-audio", ModuleKind::Backend),
+        ],
+        &[],
+        None,
+    );
+    let graph = InstalledModuleGraph::from_parts(root, audio_modules()).unwrap();
+    assert!(graph.active_provider("mesh.audio").is_none());
+    assert_eq!(graph.backend_providers_for_interface("mesh.audio").len(), 2);
+}
+
+#[test]
+fn installed_module_graph_supports_backend_without_interface_module() {
+    // A standalone backend implements an interface with no separate interface
+    // module and no contract file. The graph builds clean, auto-selects the
+    // sole provider, and emits no contract/interface-module diagnostics.
+    let root = root_with_modules(&[("@me/cputemp-backend", ModuleKind::Backend)], &[], None);
+    let backend = loaded_module(
+        "@me/cputemp-backend",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "me.cputemp".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider: Some("lmsensors".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+    let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
+    assert_eq!(
+        graph.active_provider("me.cputemp").unwrap().module_id,
+        "@me/cputemp-backend"
+    );
+    assert!(graph.diagnostics().iter().all(|diagnostic| {
+        diagnostic.status != "missing_interface_contract_file"
+            && diagnostic.status != "missing_provider_interface_module_dependency"
+    }));
 }
 
 #[test]
@@ -2377,6 +2544,7 @@ fn disabled_modules_remain_catalog_nodes_but_not_runtime_contributions() {
             )
         })
         .collect(),
+        disabled: Vec::new(),
         providers: HashMap::new(),
         layout: None,
         theme: None,
@@ -3644,13 +3812,14 @@ fn graph_health_marks_frontend_required_interface_unavailable_when_active_provid
 }
 
 #[test]
-fn graph_diagnostics_report_backend_provider_missing_interface_required_capability() {
+fn graph_diagnostics_flag_backend_provider_restating_consumer_capability() {
     let dir = temp_dir("interface-capability-backend-test");
     fs::write(
         dir.join("interface.toml"),
         r#"
 [capabilities]
 required = ["service.example.read"]
+optional = ["service.example.control"]
 "#,
     )
     .unwrap();
@@ -3679,7 +3848,7 @@ required = ["service.example.read"]
         relationship: Some(InterfaceRelationship::Base),
         reason: None,
     });
-    let backend = loaded_module(
+    let mut backend = loaded_module(
         "@mesh/example-backend",
         ModuleKind::Backend,
         MeshDependencies::default(),
@@ -3693,14 +3862,41 @@ required = ["service.example.read"]
         }],
         MeshContributes::default(),
     );
+    // The provider restates the interface's consumer capabilities (read +
+    // control) on top of its legitimate host power (exec.example).
+    backend.manifest.mesh.capabilities.required =
+        vec!["exec.example".into(), "service.example.read".into()];
+    backend.manifest.mesh.capabilities.optional = vec!["service.example.control".into()];
 
     let graph = InstalledModuleGraph::from_parts(root, vec![interface, backend]).unwrap();
 
-    assert!(graph.diagnostics().iter().any(|diagnostic| {
-        diagnostic.module_id == "@mesh/example-backend"
-            && diagnostic.status == "missing_provider_required_capability"
-            && diagnostic.message.contains("service.example.read")
-    }));
+    let flagged: Vec<&str> = graph
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.module_id == "@mesh/example-backend"
+                && diagnostic.status == "provider_declares_consumer_capability"
+        })
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+
+    // Both the required and optional consumer capabilities are flagged.
+    assert!(
+        flagged
+            .iter()
+            .any(|message| message.contains("service.example.read"))
+    );
+    assert!(
+        flagged
+            .iter()
+            .any(|message| message.contains("service.example.control"))
+    );
+    // The generic host power is not flagged — providers legitimately request it.
+    assert!(
+        !flagged
+            .iter()
+            .any(|message| message.contains("exec.example"))
+    );
 }
 
 #[test]

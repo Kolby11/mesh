@@ -29,6 +29,7 @@
   "nav.brightness": "Brightness",
   "nav.brightness_up": "Increase brightness",
   "nav.brightness_down": "Decrease brightness",
+  "nav.live": "Live",
   "nav.now_playing": "Now playing",
   "keybind.mute.label": "Mute audio",
   "keybind.mute.description": "Toggle audio mute",

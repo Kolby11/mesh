@@ -1,49 +1,46 @@
 {
-  "id": "@mesh/icons-material-symbols",
-  "name": "Material Symbols (Rounded)",
+  "name": "@mesh/icons-material-symbols",
   "version": "0.1.0",
-  "type": "icon-pack",
-  "api_version": "0.1",
   "description": "Maps shell logical icon names to Material Symbols Rounded glyphs. Requires the 'Material Symbols Rounded' variable font installed via fontconfig (e.g. nixpkgs material-symbols, AUR ttf-material-symbols, or Google's release tarball). Supports CSS --icon-fill / --icon-weight / --icon-grade / --icon-optical-size on icons rendered through this pack.",
-  "authors": [
-    "MESH Project"
-  ],
-  "compatibility": {
-    "mesh": ">=0.1.0"
-  },
-  "icon_pack": {
-    "id": "material-rounded",
-    "requires": {
-      "fonts": [
-        {
-          "alias": "ms",
-          "family": "Material Symbols Rounded",
-          "version": ">=4.0",
-          "glyph_map": "codepoints.json"
-        }
-      ]
-    },
-    "axes": {
-      "fill": true,
-      "weight": true,
-      "grade": true,
-      "optical_size": true
-    },
-    "mappings": {
-      "settings": "ms/settings",
-      "audio-volume-muted": "ms/volume_off",
-      "audio-volume-low": "ms/volume_mute",
-      "audio-volume-medium": "ms/volume_down",
-      "audio-volume-high": "ms/volume_up",
-      "battery-empty": "ms/battery_0_bar",
-      "battery-low": "ms/battery_2_bar",
-      "battery-good": "ms/battery_4_bar",
-      "battery-full": "ms/battery_full",
-      "wifi": "ms/wifi",
-      "bluetooth": "ms/bluetooth",
-      "close": "ms/close",
-      "weather-clear": "ms/wb_sunny",
-      "weather-clear-night": "ms/clear_night"
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "icon-pack",
+    "icon_pack": {
+      "id": "material-rounded",
+      "requires": {
+        "fonts": [
+          {
+            "alias": "ms",
+            "family": "Material Symbols Rounded",
+            "version": ">=4.0",
+            "glyph_map": "codepoints.json"
+          }
+        ]
+      },
+      "axes": {
+        "fill": true,
+        "weight": true,
+        "grade": true,
+        "optical_size": true
+      },
+      "mappings": {
+        "settings": "ms/settings",
+        "audio-volume-muted": "ms/volume_off",
+        "audio-volume-low": "ms/volume_mute",
+        "audio-volume-medium": "ms/volume_down",
+        "audio-volume-high": "ms/volume_up",
+        "battery-empty": "ms/battery_0_bar",
+        "battery-caution": "ms/battery_alert",
+        "battery-low": "ms/battery_2_bar",
+        "battery-good": "ms/battery_4_bar",
+        "battery-full": "ms/battery_full",
+        "wifi": "ms/wifi",
+        "bluetooth": "ms/bluetooth",
+        "close": "ms/close",
+        "language": "ms/language",
+        "weather-clear": "ms/wb_sunny",
+        "weather-clear-night": "ms/clear_night"
+      }
     }
   }
 }

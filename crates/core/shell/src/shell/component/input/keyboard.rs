@@ -196,9 +196,16 @@ impl FrontendSurfaceComponent {
                 .iter()
                 .any(|declaration| declaration.keybind_id == legacy.keybind_id)
             {
+                self.record_keybind_diagnostic(
+                    &legacy.keybind_id,
+                    "legacy settings shortcut is ignored because mesh.keybinds declares this action",
+                );
                 continue;
             }
-            declarations.push(legacy);
+            self.record_keybind_diagnostic(
+                &legacy.keybind_id,
+                "legacy settings shortcut declarations are migration-only; declare this action in mesh.keybinds",
+            );
         }
         declarations.sort_by(|left, right| left.keybind_id.cmp(&right.keybind_id));
         declarations

@@ -1322,6 +1322,44 @@ fn skia_effect_layer_blur_expands_painted_pixels() {
 }
 
 #[test]
+fn tooltip_chrome_is_drawn_inside_painter_layer() {
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let mut buffer = PixelBuffer::new(96, 48);
+
+    engine.render_tooltip("Audio", 20.0, 10.0, &mut buffer, 1.0);
+
+    let commands = recorded.recorded_commands();
+    let classes = painter_command_classes(&commands);
+    assert!(
+        classes.windows(4).any(|window| window
+            == [
+                "push_layer",
+                "draw_rounded_rect",
+                "draw_rounded_rect",
+                "pop_layer",
+            ]),
+        "{classes:?}"
+    );
+}
+
+#[test]
+fn tooltip_rounded_corner_outside_shape_stays_transparent_to_underlay() {
+    let engine = FrontendRenderEngine::new();
+    let mut buffer = PixelBuffer::new(96, 48);
+    buffer.clear(Color::WHITE);
+
+    engine.render_tooltip("Audio", 20.0, 10.0, &mut buffer, 1.0);
+
+    assert_eq!(
+        pixel(&buffer, 19, 9),
+        Color::WHITE,
+        "tooltip chrome layer must not prefill pixels outside the rounded corner"
+    );
+}
+
+#[test]
 fn skia_effect_linear_gradient_draws_top_and_bottom_colors() {
     let mut buffer = PixelBuffer::new(8, 12);
     let mut diagnostics = Vec::new();

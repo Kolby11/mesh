@@ -216,6 +216,13 @@ impl FrontendSurfaceComponent {
                         });
                     self.hovered_key = new_key.clone();
                     self.hovered_path = new_path;
+                    // Store the hovered element's bounds for tooltip positioning.
+                    // Use the tooltip owner's bounds when available; fall back to
+                    // the hovered node itself.
+                    let tooltip_owner_key = next_tooltip.as_ref().map(|(owner, _)| owner.as_str());
+                    let bounds_key = tooltip_owner_key.or(new_key.as_deref());
+                    self.hovered_element_bounds =
+                        bounds_key.and_then(|k| find_node_bounds_by_key(&tree, k, 0.0, 0.0));
                     // Preserve an already-running tooltip when moving between a
                     // tooltip owner and descendants that inherit that tooltip.
                     if same_tooltip_owner {
@@ -226,6 +233,7 @@ impl FrontendSurfaceComponent {
                     } else {
                         self.hover_start = next_tooltip.map(|_| std::time::Instant::now());
                         self.tooltip_visible = false;
+                        self.tooltip_appeared_at = None;
                     }
                     // Hover changes don't mutate script state — flag the surface
                     // for a style-only repaint so paint() can reuse the cached
@@ -242,6 +250,8 @@ impl FrontendSurfaceComponent {
                     self.hovered_path.clear();
                     self.hover_start = None;
                     self.tooltip_visible = false;
+                    self.hovered_element_bounds = None;
+                    self.tooltip_appeared_at = None;
                     self.invalidate_interaction_restyle();
                 }
             }

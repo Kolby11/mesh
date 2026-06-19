@@ -80,6 +80,16 @@
         }
       }
     },
+    "surface": {
+      "anchor": "top",
+      "layer": "top",
+      "width": 0,
+      "height": 56,
+      "exclusive_zone": 56,
+      "keyboard_mode": "none",
+      "visible_on_start": true,
+      "size": "fixed"
+    },
     "provides": {
       "i18n": [
         {
@@ -103,70 +113,6 @@
       "settings": {
         "namespace": "@mesh/navigation-bar",
         "schema": {
-          "surface": {
-            "type": "object",
-            "description": "Placement and sizing for the navigation bar surface.",
-            "properties": {
-              "anchor": {
-                "type": "enum",
-                "values": [
-                  "top",
-                  "bottom",
-                  "left",
-                  "right"
-                ],
-                "default": "top",
-                "description": "Screen edge this surface anchors to."
-              },
-              "layer": {
-                "type": "enum",
-                "values": [
-                  "background",
-                  "bottom",
-                  "top",
-                  "overlay"
-                ],
-                "default": "top",
-                "description": "Layer-shell stacking layer."
-              },
-              "width": {
-                "type": "integer",
-                "default": 0,
-                "min": 0,
-                "max": 7680,
-                "description": "Surface width in pixels. Use 0 to span the full output width."
-              },
-              "height": {
-                "type": "integer",
-                "default": 56,
-                "min": 32,
-                "max": 160,
-                "description": "Surface height in pixels."
-              },
-              "exclusive_zone": {
-                "type": "integer",
-                "default": 56,
-                "min": 0,
-                "max": 256,
-                "description": "Reserved compositor space in pixels."
-              },
-              "keyboard_mode": {
-                "type": "enum",
-                "values": [
-                  "none",
-                  "exclusive",
-                  "on_demand"
-                ],
-                "default": "none",
-                "description": "Keyboard interactivity policy for the surface."
-              },
-              "visible_on_start": {
-                "type": "boolean",
-                "default": true,
-                "description": "Whether this surface starts visible when Mesh boots."
-              }
-            }
-          },
           "keyboard": {
             "type": "object",
             "description": "Focused-surface keyboard defaults for the navigation bar. The manifest keybinds section declares keybind ids and default triggers; frontend components subscribe handlers to those ids.",
@@ -179,10 +125,6 @@
           }
         }
       }
-    },
-    "surfaceLayout": {
-      "size_policy": "fixed",
-      "keyboard_mode": "none"
     },
     "accessibility": {
       "role": "toolbar"

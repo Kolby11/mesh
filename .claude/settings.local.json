@@ -111,7 +111,13 @@
       "Bash(journalctl --user -n 20 --no-pager)",
       "Skill(gsd-audit-milestone)",
       "Skill(gsd-new-milestone)",
-      "Bash(node /home/kolby/.claude/get-shit-done/bin/gsd-tools.cjs gap-analysis --phase-dir .planning/phases/104-retained-taffytree)"
+      "Bash(node /home/kolby/.claude/get-shit-done/bin/gsd-tools.cjs gap-analysis --phase-dir .planning/phases/104-retained-taffytree)",
+      "Bash(sed -n '1070,1075p' crates/core/extension/module/src/package/tests.rs)",
+      "Bash(sed -n '1848,1855p' crates/core/extension/module/src/package/tests.rs)",
+      "Bash(cargo fmt *)",
+      "Bash(sed -n '/struct InterfaceContractCapabilitySection/,/^}/p' crates/core/extension/module/src/package/installed_graph.rs)",
+      "Bash(sed -n '118,128p' crates/core/extension/module/src/package/installed_graph.rs)",
+      "Bash(xargs ls -la)"
     ]
   }
 }
