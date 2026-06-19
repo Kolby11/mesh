@@ -1078,9 +1078,7 @@ impl FrontendSurfaceComponent {
         };
 
         let resolve = |raw: &str| -> String {
-            if let Some(token_name) =
-                raw.strip_prefix("token(").and_then(|s| s.strip_suffix(")"))
-            {
+            if let Some(token_name) = raw.strip_prefix("token(").and_then(|s| s.strip_suffix(")")) {
                 if let Some(val) = theme.token(token_name) {
                     return val.to_string();
                 }
@@ -1094,9 +1092,7 @@ impl FrontendSurfaceComponent {
                 .map(|v| resolve(v))
                 .and_then(|s| s.trim().parse::<f64>().ok())
         };
-        let parse_str = |key: &str| -> Option<String> {
-            defaults.get(key).map(|v| resolve(v))
-        };
+        let parse_str = |key: &str| -> Option<String> { defaults.get(key).map(|v| resolve(v)) };
 
         if let Some(v) = parse_str("position") {
             self.tooltip_settings.position = v;

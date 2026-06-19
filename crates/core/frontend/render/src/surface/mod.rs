@@ -155,7 +155,14 @@ pub fn paint_frontend_tree_at_for_module_with_text_metrics_clipped(
             tree, buffer, scale, offset_x, offset_y, clip, module_id,
         );
         if let Some((tooltip_text, x, y)) = tooltip {
-            engine.render_tooltip(tooltip_text, x + offset_x, y + offset_y, buffer, scale);
+            engine.render_tooltip_clipped(
+                tooltip_text,
+                x + offset_x,
+                y + offset_y,
+                buffer,
+                scale,
+                Some(clip),
+            );
         }
         engine.text_cache_metrics()
     })
@@ -188,7 +195,14 @@ pub fn paint_frontend_tree_at_for_module_with_text_metrics_clipped_filtered(
             module_id,
         );
         if let Some((tooltip_text, x, y)) = tooltip {
-            engine.render_tooltip(tooltip_text, x + offset_x, y + offset_y, buffer, scale);
+            engine.render_tooltip_clipped(
+                tooltip_text,
+                x + offset_x,
+                y + offset_y,
+                buffer,
+                scale,
+                Some(clip),
+            );
         }
         engine.text_cache_metrics()
     })
@@ -221,7 +235,7 @@ pub fn paint_display_list_for_module_with_profiling_metrics(
             .as_micros()
             .min(u128::from(u64::MAX)) as u64;
         if let Some((tooltip_text, x, y)) = tooltip {
-            engine.render_tooltip(tooltip_text, x, y, buffer, scale);
+            engine.render_tooltip_clipped(tooltip_text, x, y, buffer, scale, clip);
         }
         let raster = profiling::raster_metrics();
         PaintProfilingMetrics {
@@ -264,7 +278,7 @@ pub fn paint_selected_display_list_for_module_with_profiling_metrics(
             .as_micros()
             .min(u128::from(u64::MAX)) as u64;
         if let Some((tooltip_text, x, y)) = tooltip {
-            engine.render_tooltip(tooltip_text, x, y, buffer, scale);
+            engine.render_tooltip_clipped(tooltip_text, x, y, buffer, scale, clip);
         }
         let raster = profiling::raster_metrics();
         PaintProfilingMetrics {

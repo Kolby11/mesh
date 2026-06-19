@@ -1360,6 +1360,27 @@ fn tooltip_rounded_corner_outside_shape_stays_transparent_to_underlay() {
 }
 
 #[test]
+fn tooltip_clipped_repaint_does_not_mutate_pixels_outside_damage() {
+    let engine = FrontendRenderEngine::new();
+    let mut buffer = PixelBuffer::new(96, 48);
+    let underlay = Color::from_hex("#224466").unwrap();
+    buffer.clear(underlay);
+
+    engine.render_tooltip_clipped("Audio", 20.0, 10.0, &mut buffer, 1.0, Some((24, 12, 8, 8)));
+
+    assert_eq!(
+        pixel(&buffer, 23, 16),
+        underlay,
+        "tooltip paint must not touch pixels left of the clipped damage rect"
+    );
+    assert_eq!(
+        pixel(&buffer, 40, 16),
+        underlay,
+        "tooltip paint must not touch pixels right of the clipped damage rect"
+    );
+}
+
+#[test]
 fn skia_effect_linear_gradient_draws_top_and_bottom_colors() {
     let mut buffer = PixelBuffer::new(8, 12);
     let mut diagnostics = Vec::new();

@@ -574,6 +574,18 @@ impl FrontendRenderEngine {
         buffer: &mut PixelBuffer,
         scale: f32,
     ) {
+        self.render_tooltip_clipped(text, paint_x, paint_y, buffer, scale, None);
+    }
+
+    pub fn render_tooltip_clipped(
+        &self,
+        text: &str,
+        paint_x: f32,
+        paint_y: f32,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        clip: Option<(u32, u32, u32, u32)>,
+    ) {
         let font_size = 12.0 * scale;
         let pad_h = (8.0 * scale) as i32;
         let pad_v = (5.0 * scale) as i32;
@@ -618,6 +630,22 @@ impl FrontendRenderEngine {
             width: buffer.width as i32,
             height: buffer.height as i32,
         };
+        let tooltip_clip = clip
+            .map(|clip| {
+                intersect_clip(
+                    full_clip,
+                    ClipRect {
+                        x: clip.0 as i32,
+                        y: clip.1 as i32,
+                        width: clip.2 as i32,
+                        height: clip.3 as i32,
+                    },
+                )
+            })
+            .unwrap_or(full_clip);
+        if tooltip_clip.width <= 0 || tooltip_clip.height <= 0 {
+            return;
+        }
 
         let colors = self.tooltip_colors();
         let apply_opacity =
@@ -640,11 +668,15 @@ impl FrontendRenderEngine {
             width: draw_w + 2,
             height: draw_h + 2,
         };
+        let clipped_layer_bounds = intersect_clip(layer_bounds, tooltip_clip);
+        if clipped_layer_bounds.width <= 0 || clipped_layer_bounds.height <= 0 {
+            return;
+        }
         self.execute_painter_commands(
             buffer,
             &[
                 PainterCommand::PushLayer(PainterLayer {
-                    bounds: layer_bounds,
+                    bounds: clipped_layer_bounds,
                     opacity: 1.0,
                     blend_mode: PainterBlendMode::SrcOver,
                     filter: PainterFilter::None,
@@ -653,7 +685,7 @@ impl FrontendRenderEngine {
                     rect: layer_bounds,
                     radius: radius + 1.0,
                     paint: PainterPaint::fill(border),
-                    clip: full_clip,
+                    clip: tooltip_clip,
                 },
                 PainterCommand::DrawRoundedRect {
                     rect: ClipRect {
@@ -664,17 +696,26 @@ impl FrontendRenderEngine {
                     },
                     radius,
                     paint: PainterPaint::fill(bg),
-                    clip: full_clip,
+                    clip: tooltip_clip,
                 },
                 PainterCommand::PopLayer,
             ],
         );
         // Clip text to the scaled box so it doesn't bleed outside during grow.
+        let text_clip = intersect_clip(
+            tooltip_clip,
+            ClipRect {
+                x: tx,
+                y: ty,
+                width: draw_w,
+                height: draw_h,
+            },
+        );
         let text_clip = (
-            tx.max(0) as u32,
-            ty.max(0) as u32,
-            (tx + draw_w).max(0) as u32,
-            (ty + draw_h).max(0) as u32,
+            text_clip.x.max(0) as u32,
+            text_clip.y.max(0) as u32,
+            (text_clip.x + text_clip.width).max(0) as u32,
+            (text_clip.y + text_clip.height).max(0) as u32,
         );
         self.text_renderer.render_clipped(
             text,
