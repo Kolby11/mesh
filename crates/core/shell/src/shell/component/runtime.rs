@@ -432,7 +432,7 @@ impl FrontendSurfaceComponent {
         handler: &str,
         args: &[serde_json::Value],
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        let (instance_key, handler_name, component_id) =
+        let (instance_key, raw_handler_name, component_id) =
             if let Some((instance_key, handler_name)) = parse_namespaced_handler(handler) {
                 let component_id = self
                     .runtimes
@@ -454,11 +454,13 @@ impl FrontendSurfaceComponent {
                 )
             };
 
+        let (handler_name, merged_args) = unpack_handler_args(&raw_handler_name, args);
+
         let mut runtimes = self.runtimes.lock().unwrap();
         let Some(runtime) = runtimes.get_mut(&instance_key) else {
             return Ok(Vec::new());
         };
-        if let Err(source) = runtime.script_ctx.call_handler(&handler_name, args) {
+        if let Err(source) = runtime.script_ctx.call_handler(&handler_name, &merged_args) {
             let error_message = source.to_string();
             tracing::warn!(
                 component_id = %component_id,
@@ -551,6 +553,26 @@ impl FrontendSurfaceComponent {
 
         (state_dirty, events)
     }
+}
+
+/// If `handler_name` is a JSON object with `h` and `a` fields, unpack it into
+/// the real handler name and pre-bound arguments. Otherwise, return as-is.
+/// Pre-bound args are prepended to the event args.
+fn unpack_handler_args(
+    handler_name: &str,
+    event_args: &[serde_json::Value],
+) -> (String, Vec<serde_json::Value>) {
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(handler_name) {
+        if let (Some(h), Some(a)) = (
+            parsed.get("h").and_then(serde_json::Value::as_str),
+            parsed.get("a").and_then(serde_json::Value::as_array),
+        ) {
+            let mut merged: Vec<serde_json::Value> = a.clone();
+            merged.extend_from_slice(event_args);
+            return (h.to_string(), merged);
+        }
+    }
+    (handler_name.to_string(), event_args.to_vec())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

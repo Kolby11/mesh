@@ -270,6 +270,7 @@ impl SurfaceEntry {
         physical_width: u32,
         physical_height: u32,
         damage_rects: &[DamageRect],
+        copy_damage: DamageRect,
         scale: f32,
     ) {
         let buffer = &self.shm_buffers[index].buffer;
@@ -282,10 +283,23 @@ impl SurfaceEntry {
             .collect();
 
         // Clip scaled rects to physical buffer bounds (T-102-06)
-        let clipped_damage: Vec<DamageRect> = physical_damage
+        let mut clipped_damage: Vec<DamageRect> = physical_damage
             .iter()
             .map(|r| clip_damage_rect_to_buffer(*r, physical_width, physical_height))
             .collect();
+
+        // The region actually copied into THIS shm buffer (`copy_damage`, already
+        // in physical coordinates) can be larger than the current frame's damage:
+        // a buffer that was busy across earlier frames accumulates their damage in
+        // `pending_damage` and refreshes all of it on reuse. The compositor only
+        // re-composites the regions we report here, so we must include the full
+        // copied region — otherwise the stale pixels outside `damage_rects` keep
+        // showing the previous buffer's content (the transparent rectangular cutout).
+        clipped_damage.push(clip_damage_rect_to_buffer(
+            copy_damage,
+            physical_width,
+            physical_height,
+        ));
 
         // Emit damage_buffer calls with physical coordinates
         for rect in protocol_damage_rects(&clipped_damage, physical_width, physical_height) {
@@ -895,7 +909,7 @@ impl LayerShellBackend {
                 // the skip gate in render.rs), upload the full buffer.
                 Some(full_damage(physical_w, physical_h))
             });
-        let (buffer_index, _copy_damage) = entry.copy_into_shm_buffer(
+        let (buffer_index, copy_damage) = entry.copy_into_shm_buffer(
             pool,
             &buffer.data,
             physical_w,
@@ -935,6 +949,7 @@ impl LayerShellBackend {
             physical_w,
             physical_h,
             damage_rects,
+            copy_damage,
             scale,
         );
 
@@ -972,6 +987,39 @@ impl LayerShellBackend {
             rect.height as i32,
         );
         wl_surface.set_opaque_region(Some(region.wl_region()));
+    }
+
+    /// Restrict the surface's input (pointer/touch) region to `input_rect` in
+    /// surface-local logical coordinates. Surfaces allocate extra buffer space
+    /// below/around their content for tooltip overlays; without an explicit
+    /// input region the compositor routes clicks over that whole extra area to
+    /// this surface, creating a dead zone where clicks never reach the windows
+    /// underneath. `None` resets to the default (whole-surface input).
+    pub(crate) fn update_input_region(
+        &mut self,
+        surface_id: &str,
+        input_rect: Option<DamageRect>,
+    ) {
+        let Some(entry) = self.state.surfaces.get(surface_id) else {
+            return;
+        };
+        let wl_surface = entry.layer_surface.wl_surface();
+
+        let Some(rect) = input_rect.filter(|r| r.width > 0 && r.height > 0) else {
+            wl_surface.set_input_region(None);
+            return;
+        };
+
+        let Ok(region) = Region::new(&self.state.compositor_state) else {
+            return;
+        };
+        region.add(
+            rect.x as i32,
+            rect.y as i32,
+            rect.width as i32,
+            rect.height as i32,
+        );
+        wl_surface.set_input_region(Some(region.wl_region()));
     }
 
     /// Set the logical-coordinate blur region for a surface.

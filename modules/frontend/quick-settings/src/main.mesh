@@ -189,7 +189,7 @@ end
 .qs-shell {
     width: 100%;
     height: 100%;
-    padding: token(spacing.xs) token(spacing.sm) token(spacing.sm) token(spacing.sm);
+    padding: token(spacing.xs);
     background: transparent;
     opacity: 1;
     transition: opacity token(animation.duration.short) token(animation.curves.bezier.standard);

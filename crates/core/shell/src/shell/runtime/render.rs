@@ -293,6 +293,24 @@ impl Shell {
                     self.presentation_engine
                         .update_opaque_region(&surface_id, opaque_rect);
                 }
+                // The surface buffer is padded (TOOLTIP_OVERLAY_*) so tooltips can render
+                // outside the content box, but `known_surface_size` reflects that inflated
+                // size. Restrict pointer input to the component's true content rect so
+                // clicks over the padding pass through to the windows beneath instead of
+                // hitting a dead zone below the bar.
+                if let Some((content_w, content_h)) =
+                    self.components[index].component.content_input_size()
+                {
+                    self.presentation_engine.update_input_region(
+                        &surface_id,
+                        Some(DamageRect {
+                            x: 0,
+                            y: 0,
+                            width: content_w,
+                            height: content_h,
+                        }),
+                    );
+                }
                 // Compute and set blur region from display list backdrop-filter nodes
                 let blur_region = compute_blur_region(commands);
                 self.presentation_engine

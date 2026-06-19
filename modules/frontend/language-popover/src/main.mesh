@@ -1,30 +1,32 @@
 <template>
-  <popover class="language-popover-shell" aria-label="{t('language.choose')}">
+  <popover class="language-popover-shell">
     <column class="language-popover">
-      <button
-        class="{english_button_class}"
-        onclick={onSelectEnglish}
-        aria-label="{t('language.english')}"
-      >
-        <text class="language-option-text">{t('language.english')}</text>
-      </button>
-      <button
-        class="{slovak_button_class}"
-        onclick={onSelectSlovak}
-        aria-label="{t('language.slovak')}"
-      >
-        <text class="language-option-text">{t('language.slovak')}</text>
-      </button>
+      <column class="language-popover-inner">
+        {#for locale in locales}
+        <button
+          class="{'language-option' .. (locale == selected_locale and ' language-option-selected' or '')}"
+          onclick={onSelectLocale(locale)}
+        >
+          <text class="language-option-text">{t('language.' .. locale)}</text>
+        </button>
+        {/for}
+      </column>
     </column>
   </popover>
 </template>
 
 <script lang="luau">
-english_button_class = "language-option language-option-selected"
-slovak_button_class  = "language-option"
+locales = { "en", "sk", "de", "fr", "es", "ja", "zh", "ko", "ar", "hi" }
 
-local function locale_is_slovak(locale)
-    return locale == "sk" or string.find(locale or "", "sk-", 1, true) == 1
+selected_locale = "en"
+surface_id = nil
+
+local function get_surface_id()
+    return surface_id or "@mesh/language-popover"
+end
+
+local function apply_selection(locale)
+    selected_locale = locale
 end
 
 local function current_locale()
@@ -37,23 +39,22 @@ end
 
 local function stored_locale(storage)
     local locale = storage and storage.language
-    if locale == "en" or locale == "sk" then
-        return locale
+    for _, valid in locales do
+        if locale == valid then
+            return locale
+        end
     end
     return nil
 end
 
-local function apply_selection(locale)
-    if locale_is_slovak(locale) then
-        english_button_class = "language-option"
-        slovak_button_class  = "language-option language-option-selected"
-    else
-        english_button_class = "language-option language-option-selected"
-        slovak_button_class  = "language-option"
-    end
+local function select_locale(locale)
+    apply_selection(locale)
+    mesh.locale.set(locale)
+    mesh.popover.hide(get_surface_id())
 end
 
 function init(self)
+    surface_id = self and self.id or surface_id
     local locale = stored_locale(self.storage)
     if locale ~= nil then
         mesh.locale.set(locale)
@@ -61,27 +62,23 @@ function init(self)
 end
 
 function render(self)
+    surface_id = self and self.id or surface_id
     apply_selection(stored_locale(self.storage) or current_locale())
 end
 
-function onSelectEnglish(event)
-    apply_selection("en")
-    mesh.locale.set("en")
-    mesh.popover.hide("@mesh/language-popover")
-end
-
-function onSelectSlovak(event)
-    apply_selection("sk")
-    mesh.locale.set("sk")
-    mesh.popover.hide("@mesh/language-popover")
+function onSelectLocale(locale, event)
+    if locale then
+        select_locale(locale)
+    end
 end
 </script>
 
 <style>
 .language-popover-shell {
     width: 100%;
-    height: 100%;
-    padding: 0 token(spacing.sm) token(spacing.sm) token(spacing.sm);
+    height: fit-content;
+    max-height: 200px;
+    padding: token(spacing.sm);
     background: transparent;
     opacity: 1;
     transition: opacity token(animation.duration.short) token(animation.curves.bezier.standard);
@@ -93,32 +90,29 @@ end
 
 .language-popover {
     width: 100%;
-    flex-direction: column;
     max-width: 260px;
-    gap: token(spacing.sm);
-    padding: token(spacing.sm);
+    overflow: hidden;
     border-radius: token(radius.lg);
     background: token(color.surface-container);
-    color: token(color.on-surface);
     border-width: 1px;
     border-style: solid;
     border-color: token(color.outline-variant);
 }
 
+.language-popover-inner {
+    width: 100%;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    gap: token(spacing.sm);
+    padding: token(spacing.sm);
+}
+
 .language-option {
     width: 100%;
-    height: 36px;
-    min-height: 36px;
     flex-shrink: 0;
     justify-content: start;
     align-items: center;
-    padding: 0 token(spacing.md);
-    border-radius: token(radius.md);
-    background: token(color.surface-container);
-    color: token(color.on-surface);
-    border-width: 2px;
-    border-style: solid;
-    border-color: transparent;
     text-wrap: none;
     transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
                 color token(animation.duration.short) token(animation.curves.bezier.standard),

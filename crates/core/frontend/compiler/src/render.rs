@@ -16,6 +16,7 @@ use mesh_core_elements::{
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
+use serde_json;
 
 use std::collections::BTreeMap;
 
@@ -540,6 +541,23 @@ fn build_component_ref(
                 attr.name.clone(),
                 resolve_component_prop_handler_value(state, host_instance_key, handler),
             );
+        } else if let AttributeValue::EventHandlerCall { handler, args } = &attr.value {
+            let resolved_handler = resolve_event_handler_value(state, handler);
+            let resolved_args: Vec<serde_json::Value> = args
+                .iter()
+                .map(|arg| {
+                    let val = state.map(|store| eval_expr(arg, store)).unwrap_or_default();
+                    serde_json::Value::String(val)
+                })
+                .collect();
+            let call_value =
+                serde_json::json!({"h": resolved_handler, "a": resolved_args}).to_string();
+            let namespaced = if resolved_handler.starts_with("__mesh_embed__::") {
+                call_value
+            } else {
+                format!("__mesh_embed__::{host_instance_key}::{call_value}")
+            };
+            props.insert(attr.name.clone(), namespaced);
         } else if let AttributeValue::Binding(binding) = &attr.value {
             props.insert(format!("__mesh_binding_{}", attr.name), binding.clone());
         } else if let AttributeValue::InstanceBinding(binding) = &attr.value {
@@ -625,6 +643,19 @@ pub(crate) fn parse_attributes(
             AttributeValue::EventHandler(handler) => {
                 let resolved_handler = resolve_event_handler_value(state, handler);
                 event_handlers.insert(normalize_event_handler_name(&attr.name), resolved_handler);
+            }
+            AttributeValue::EventHandlerCall { handler, args } => {
+                let resolved_handler = resolve_event_handler_value(state, handler);
+                let resolved_args: Vec<serde_json::Value> = args
+                    .iter()
+                    .map(|arg| {
+                        let val = state.map(|store| eval_expr(arg, store)).unwrap_or_default();
+                        serde_json::Value::String(val)
+                    })
+                    .collect();
+                let value =
+                    serde_json::json!({"h": resolved_handler, "a": resolved_args}).to_string();
+                event_handlers.insert(normalize_event_handler_name(&attr.name), value);
             }
         }
     }

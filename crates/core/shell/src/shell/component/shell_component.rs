@@ -342,6 +342,16 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.observe_surface_size(content_width, content_height);
         let paint_width = width.max(content_width).max(1);
         let paint_height = height.max(content_height).max(1);
+        // Partial-damage clip rects are computed in logical coordinates, but the
+        // painter applies the damage clip in physical buffer space (and scales the
+        // display list by `scale`). At a fractional scale logical != physical, so a
+        // partial clear/clip misaligns with where the scaled content actually paints
+        // and leaves a fixed transparent gap. Full-surface paint uses clip=None and
+        // clears the whole buffer, sidestepping the mismatch. Force it when the scale
+        // is non-integer; the optimized partial path still runs at integer scales.
+        if (scale - scale.round()).abs() > f32::EPSILON {
+            self.surface_pixels_invalid = true;
+        }
         let use_retained_style_path = !requires_tree_rebuild
             && can_use_retained_path
             && self.last_tree.is_some()
@@ -960,6 +970,14 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn last_widget_tree(&self) -> Option<&WidgetNode> {
         self.last_tree.as_ref()
+    }
+
+    fn content_input_size(&self) -> Option<(u32, u32)> {
+        // `last_surface_size` is the logical content size (from the component's own
+        // `requested_layout_size`), NOT the tooltip-inflated surface size the shell's
+        // StubSurface reports. Confining pointer input to this rect keeps clicks over
+        // the tooltip padding falling through to the windows beneath.
+        self.last_surface_size
     }
 
     fn apply_position(&mut self, margin_top: i32, margin_left: i32) {

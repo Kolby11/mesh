@@ -229,6 +229,8 @@ pub enum AttributeValue {
     InstanceBinding(String),
     /// Event handler: `onclick="onTap"` — calls a script function.
     EventHandler(String),
+    /// Event handler with pre-bound arguments: `onclick={selectLocale(locale)}`.
+    EventHandlerCall { handler: String, args: Vec<String> },
 }
 
 /// Raw text between elements.

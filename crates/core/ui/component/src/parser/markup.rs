@@ -376,7 +376,17 @@ fn parse_xml_attributes(
         } else if is_event_attr(&name) {
             // onclick="handler" or onclick="{handler}" — strip braces if present.
             let handler = extract_brace_expr(&value).unwrap_or(value);
-            (name, AttributeValue::EventHandler(handler))
+            if let Some((fn_name, fn_args)) = parse_handler_call(&handler) {
+                (
+                    name,
+                    AttributeValue::EventHandlerCall {
+                        handler: fn_name,
+                        args: fn_args,
+                    },
+                )
+            } else {
+                (name, AttributeValue::EventHandler(handler))
+            }
         } else if let Some(expr) = extract_brace_expr(&value) {
             // title="{expr}" — dynamic binding, expression inside braces.
             (name, AttributeValue::Binding(expr))
@@ -396,6 +406,75 @@ fn parse_xml_attributes(
 /// Returns true if the attribute name is an `on...` event handler (`onclick`, `oninput`, etc.).
 fn is_event_attr(name: &str) -> bool {
     name.len() > 2 && name.starts_with("on") && name[2..].chars().all(|c| c.is_ascii_alphabetic())
+}
+
+/// Parse a handler call like `func(arg1, arg2)` into handler name and argument list.
+/// Returns `None` if the value is a simple handler name without call syntax.
+fn parse_handler_call(value: &str) -> Option<(String, Vec<String>)> {
+    let value = value.trim();
+    let open = value.find('(')?;
+    if !value.ends_with(')') {
+        return None;
+    }
+    let fn_name = value[..open].trim().to_string();
+    if fn_name.is_empty()
+        || !fn_name
+            .bytes()
+            .next()
+            .map_or(false, |b| b.is_ascii_alphabetic() || b == b'_')
+    {
+        return None;
+    }
+    let args_str = &value[open + 1..value.len() - 1].trim();
+    if args_str.is_empty() {
+        return Some((fn_name, Vec::new()));
+    }
+    let args: Vec<String> = split_call_args(args_str)
+        .into_iter()
+        .map(|a| a.trim().to_string())
+        .collect();
+    Some((fn_name, args))
+}
+
+/// Split comma-separated function call arguments, respecting nested calls and strings.
+fn split_call_args(s: &str) -> Vec<&str> {
+    let bytes = s.as_bytes();
+    let mut depth = 0;
+    let mut in_string = false;
+    let mut quote = b'"';
+    let mut start = 0;
+    let mut args = Vec::new();
+
+    for i in 0..bytes.len() {
+        let b = bytes[i];
+        if in_string {
+            if b == quote && (i == 0 || bytes[i - 1] != b'\\') {
+                in_string = false;
+            }
+            continue;
+        }
+        if b == b'"' || b == b'\'' {
+            in_string = true;
+            quote = b;
+            continue;
+        }
+        if b == b'(' {
+            depth += 1;
+            continue;
+        }
+        if b == b')' {
+            depth -= 1;
+            continue;
+        }
+        if depth == 0 && b == b',' {
+            args.push(&s[start..i]);
+            start = i + 1;
+        }
+    }
+    if start < s.len() {
+        args.push(&s[start..]);
+    }
+    args
 }
 
 /// If `value` is exactly `{expr}`, returns the inner expression; otherwise `None`.

@@ -856,6 +856,108 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     );
 }
 
+/// Count pixels with non-zero alpha inside `[left,right) x [top,bottom)`.
+/// Bounds are surface-local logical coordinates; the buffer is the painted
+/// surface at scale 1.0, so they map 1:1.
+fn opaque_pixels_in_bounds(
+    buffer: &PixelBuffer,
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+) -> u32 {
+    let x0 = left.floor().max(0.0) as u32;
+    let y0 = top.floor().max(0.0) as u32;
+    let x1 = (right.ceil() as u32).min(buffer.width);
+    let y1 = (bottom.ceil() as u32).min(buffer.height);
+    let mut count = 0;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let offset = (y * buffer.stride + x * 4) as usize;
+            if buffer.data[offset + 3] != 0 {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// End-to-end proof that the icon pipeline lands pixels on a real module
+/// surface: compile the shipped navigation bar, paint it, locate the volume
+/// `<icon>` node, and assert its bounding box contains rasterized pixels.
+/// This exercises the full chain — template `<icon>` → WidgetNode →
+/// `DisplayPaintContent::Icon` → `render_display_icon_node` → registry/XDG
+/// resolution → SVG/PNG raster (or the built-in missing-icon fallback) → blit.
+/// The missing-icon fallback always rasterizes, so this is deterministic even
+/// without a system icon theme installed.
+#[test]
+fn shipped_navigation_icon_rasterizes_pixels_on_real_surface() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({
+                "available": true,
+                "percent": 50,
+                "muted": false
+            }),
+        })
+        .unwrap();
+    component.visible = true;
+
+    // Paint at a full-screen width so the right-aligned control cluster (which
+    // holds the volume button) lands on-buffer; the real shell paints the
+    // navigation bar at the output width, not a narrow box.
+    let theme = default_theme();
+    let width = 2560;
+    let height = 80;
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .paint(&theme, width, height, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation bar");
+    let button = first_node_with_click_handler(
+        tree,
+        "__mesh_embed__::@mesh/navigation-bar::onToggleAudioSurface",
+    )
+    .expect("volume button");
+    let icon = first_node_by_tag(button, "icon").expect("volume icon node");
+    assert!(
+        icon.attributes.get("name").is_some() || icon.attributes.get("src").is_some(),
+        "volume icon should declare a name or src to resolve"
+    );
+    let icon_key = icon
+        .attributes
+        .get("_mesh_key")
+        .expect("icon mesh key")
+        .clone();
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, &icon_key, 0.0, 0.0).expect("icon bounds");
+    assert!(
+        right > left && bottom > top,
+        "icon should have a non-empty layout box, got {left},{top},{right},{bottom}"
+    );
+    assert!(
+        right <= width as f32 && bottom <= height as f32,
+        "volume icon bounds [{left},{top},{right},{bottom}] should fall inside the painted \
+         {width}x{height} surface so it is actually visible"
+    );
+
+    let painted = opaque_pixels_in_bounds(&buffer, left, top, right, bottom);
+    assert!(
+        painted > 0,
+        "the volume icon should rasterize visible pixels onto the real navigation surface \
+         (themed icon or built-in missing-icon fallback), but its bounds \
+         [{left},{top},{right},{bottom}] were fully transparent"
+    );
+}
+
 #[test]
 fn real_core_surfaces_quick_settings_commands_publish_service_requests() {
     let mut audio_ctx = make_audio_ctx();

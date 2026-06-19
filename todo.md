@@ -6,7 +6,7 @@ Items marked `→ vX.Y` are tracked as GSD milestones in `.planning/ROADMAP.md`.
 
 ## Shell features
 
-- [ ] Icon rendering using icon packs — XDG resolution and SVG rasterization pipeline needs end-to-end proof on a real module surface
+- [x] Icon rendering using icon packs — XDG resolution and SVG rasterization pipeline. Done: the full chain (`<icon>` → `DisplayPaintContent::Icon` → `render_display_icon_node` → registry/XDG/pack resolution → resvg/image raster + caches → blit, with built-in missing-icon fallback) was already implemented and unit-tested; added an end-to-end pixel-level proof on a real shipped surface (`shipped_navigation_icon_rasterizes_pixels_on_real_surface` in `real_surfaces.rs`) that paints `@mesh/navigation-bar` and asserts the volume `<icon>` rasterizes non-transparent pixels within its layout box. Note surfaced by the proof: the navigation bar's right-aligned control cluster overflows off-buffer when painted narrower than its intrinsic content width (icon landed at x≈1978 on a 960px paint); fine at full screen width but worth a follow-up for small outputs.
 - [ ] Layer system — specify which Wayland layer (background/bottom/top/overlay) a surface targets; needed for proper popover/overlay stacking
 - [ ] Positioning system — `position: relative / absolute / fixed` in layout and paint; needed for tooltips, context menus, dropdowns → v1.22
 - [ ] Settings module — surface for managing installed modules, active providers, theme, i18n → v1.22

@@ -148,6 +148,15 @@ impl PresentationEngine {
         }
     }
 
+    /// Restrict the surface's input region (logical coordinates) so clicks over
+    /// the tooltip-overlay buffer padding fall through to the windows beneath.
+    /// `None` resets to whole-surface input.
+    pub fn update_input_region(&mut self, surface_id: &str, input_rect: Option<DamageRect>) {
+        if let Backend::WaylandSurface(bridge) = &mut self.backend {
+            bridge.update_input_region(surface_id, input_rect);
+        }
+    }
+
     /// Set the logical-coordinate blur region for a surface.
     /// Only meaningful on Wayland backends with `org_kde_kwin_blur` support.
     /// Pass `None` to clear any previously committed blur region from the

@@ -1,5 +1,13 @@
 {
-  "language.english": "English",
-  "language.slovak": "Slovak",
+  "language.en": "English",
+  "language.sk": "Slovak",
+  "language.de": "German",
+  "language.fr": "French",
+  "language.es": "Spanish",
+  "language.ja": "Japanese",
+  "language.zh": "Chinese",
+  "language.ko": "Korean",
+  "language.ar": "Arabic",
+  "language.hi": "Hindi",
   "language.choose": "Choose language"
 }

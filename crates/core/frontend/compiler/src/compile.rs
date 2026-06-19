@@ -400,6 +400,12 @@ fn validate_attributes(
             AttributeValue::EventHandler(handler) => {
                 validate_identifier(handler, path, allowed_symbols, loop_locals)?;
             }
+            AttributeValue::EventHandlerCall { handler, args } => {
+                validate_identifier(handler, path, allowed_symbols, loop_locals)?;
+                for arg in args {
+                    validate_expression(arg, path, allowed_symbols, loop_locals)?;
+                }
+            }
             AttributeValue::Static(_) => {}
         }
     }

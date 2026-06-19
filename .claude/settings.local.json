@@ -117,7 +117,9 @@
       "Bash(cargo fmt *)",
       "Bash(sed -n '/struct InterfaceContractCapabilitySection/,/^}/p' crates/core/extension/module/src/package/installed_graph.rs)",
       "Bash(sed -n '118,128p' crates/core/extension/module/src/package/installed_graph.rs)",
-      "Bash(xargs ls -la)"
+      "Bash(xargs ls -la)",
+      "Bash(awk 'NR>=1000 && NR<=1080 && /^impl |impl ShellComponent/ {print NR\": \"$0}' crates/core/shell/src/shell/component/shell_component.rs)",
+      "Bash(awk 'NR>=4 && NR<=1076 && /fn /{print NR\": \"$0}' crates/core/shell/src/shell/component/shell_component.rs)"
     ]
   }
 }

@@ -18,7 +18,7 @@ pub(crate) fn json_value_to_string(value: serde_json::Value) -> String {
 /// - `cond and a or b` - ternary (Lua idiom)
 /// - `x == y`, `x ~= y`, `x > y`, `x >= y`, `x < y`, `x <= y` - comparisons
 /// - `x .. y` - string concatenation
-/// - `t("key")` / `t(variable)` - translation
+/// - `t(expr)` - translation where expr is any expression (literal, variable, concat, etc.)
 /// - `variable` / `a.b.c` - variable lookup
 ///
 /// Expressions are static after module compilation, so the parsed form is
@@ -82,10 +82,8 @@ enum CompiledExpr {
         rhs: Rc<CompiledExpr>,
     },
     Concat(Rc<CompiledExpr>, Rc<CompiledExpr>),
-    /// `t("key")` with a literal key.
-    TranslateLiteral(String),
-    /// `t(path)` — resolve the path, then translate the result.
-    TranslatePath(String),
+    /// `t(expr)` — evaluate the inner expression, then translate the result.
+    TranslateExpr(Rc<CompiledExpr>),
     Literal(String),
     /// Bare variable or dotted path lookup.
     Path(String),
@@ -143,11 +141,7 @@ fn parse_expr(expr: &str) -> CompiledExpr {
     }
 
     if let Some(arg) = expr.strip_prefix("t(").and_then(|s| s.strip_suffix(')')) {
-        let arg = arg.trim();
-        if let Some(key) = strip_string_literal(arg) {
-            return CompiledExpr::TranslateLiteral(key);
-        }
-        return CompiledExpr::TranslatePath(arg.to_string());
+        return CompiledExpr::TranslateExpr(Rc::new(parse_expr(arg.trim())));
     }
 
     if let Some(s) = strip_string_literal(expr) {
@@ -223,9 +217,8 @@ fn eval_compiled(expr: &CompiledExpr, store: &dyn mesh_core_elements::VariableSt
             let r = eval_compiled(rhs, store);
             format!("{l}{r}")
         }
-        CompiledExpr::TranslateLiteral(key) => store.translate(key).unwrap_or_else(|| key.clone()),
-        CompiledExpr::TranslatePath(arg) => {
-            let resolved = eval_path(arg, store);
+        CompiledExpr::TranslateExpr(inner) => {
+            let resolved = eval_compiled(inner, store);
             store.translate(&resolved).unwrap_or(resolved)
         }
         CompiledExpr::Literal(s) => s.clone(),

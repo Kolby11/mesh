@@ -1,5 +1,13 @@
 {
-  "language.english": "Anglictina",
-  "language.slovak": "Slovencina",
+  "language.en": "Anglictina",
+  "language.sk": "Slovencina",
+  "language.de": "Nemcina",
+  "language.fr": "Francuzstina",
+  "language.es": "Spanielcina",
+  "language.ja": "Japoncina",
+  "language.zh": "Cinstina",
+  "language.ko": "Korejcina",
+  "language.ar": "Arabcina",
+  "language.hi": "Hindcina",
   "language.choose": "Vyberte jazyk"
 }

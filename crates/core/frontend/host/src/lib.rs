@@ -312,6 +312,13 @@ pub trait ShellComponent: Send {
     fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {
         &[]
     }
+    /// The interactive content size, excluding any tooltip-overlay buffer padding.
+    /// Used to confine the surface's pointer input region to the real content so
+    /// clicks over the padding fall through to the windows beneath. `None` leaves
+    /// the input region at the whole-surface default.
+    fn content_input_size(&self) -> Option<(u32, u32)> {
+        None
+    }
     /// Return the last widget tree built by `paint`, for the debug layout inspector.
     fn last_widget_tree(&self) -> Option<&WidgetNode> {
         None
