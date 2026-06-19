@@ -13,6 +13,110 @@ Items marked `→ vX.Y` are tracked as GSD milestones in `.planning/ROADMAP.md`.
 - [ ] Popups / overlays — transient surfaces with custom content and dismiss behavior → v1.22
 - [ ] Clean up backend modules and interfaces — consider moving the interface contract declaration from the separate `modules/interfaces/` directory into the implementing backend module, or bundling it as core metadata; evaluate impact on multi-provider resolution before changing
 
+### Module system redesign research — 2026-06-18
+
+High-level direction:
+
+- [ ] Keep the current core rule: a module is the installable unit, an interface is the contract, a backend provider implements the contract, a frontend consumes the contract, and libraries/resource packs are reusable dependencies.
+- [x] Do not preserve old conventions for compatibility. Prefer a clean canonical module model over long-lived legacy aliases/shims; migrate shipped modules and remove old public shapes instead of supporting both indefinitely. First enforcement slice landed 2026-06-18: module loading now rejects legacy `package.json`, `mesh.toml`, and old top-level `id/type/api_version` `module.json`; root graph loading now requires canonical `name/version/mesh`.
+- [ ] Keep `config/module.json` / future user root graph lean: installed modules, enabled flags, active providers, active layout entrypoint, active theme/mode. Do not add root buckets for frontend dependencies, backend dependencies, icons, fonts, i18n, etc.
+- [x] Make `InstalledModuleGraph` the single runtime source of truth for shell graph consumers. Shell now caches the installed graph and shares it across interface registration, frontend filtering, graph-declared i18n catalogs, backend launch, resources, and diagnostics. Remaining future cleanup: replace recursive module discovery with graph-first `ModuleInstance` loading instead of only using the graph as the authoritative filter/source of truth.
+- [x] Simplify author-facing `module.json` around two questions: `mesh.uses` for dependencies/capabilities/resources and `mesh.provides` for contributions/settings/resources. Normalize that author shape into the existing internal `dependencies`, `capabilities`, `entrypoints`, and `contributes` structs. Backend provider contracts remain under `mesh.implements` so `provides` is no longer overloaded.
+
+Recommended author-facing shape:
+
+```json
+{
+  "name": "@mesh/example",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "entry": "src/main.mesh",
+    "uses": {
+      "interfaces": { "mesh.audio": ">=1.0" },
+      "modules": { "@mesh/audio-popover": ">=0.1.0" },
+      "resources": { "icons": ["@mesh/icons-default"] },
+      "capabilities": ["shell.surface", "service.audio.read"]
+    },
+    "provides": {
+      "layout": [{ "id": "main", "entry": "src/main.mesh" }],
+      "settings": { "schema": {} },
+      "i18n": [{ "locale": "en", "path": "config/i18n/en.json" }]
+    }
+  }
+}
+```
+
+Component usage contracts to preserve and clarify:
+
+- [ ] Frontend surface modules declare a `.mesh` entrypoint, surface settings schema, surface layout policy, accessibility metadata, required component-module imports, interface dependencies, icon requirements, i18n catalogs, and keybind actions. Today these are spread across `entrypoints`, `dependencies.modules`, `dependencies.icons`, `iconRequirements`, `contributes.i18n`, `contributes.layout`, `contributes.settings`, `surfaceLayout`, and `accessibility`; collapse the authoring story while keeping typed graph indexes. Progress: graph now emits a typed frontend surface record for main entrypoint + settings namespace + accessibility + surface layout, reports `missing_frontend_surface_layout` / `missing_frontend_accessibility`, and exposes the surface contract through `mesh.debug` module graph entries.
+- [x] Frontend component imports are a good pattern: `require("@mesh/audio-popover")` and `require("./components/volume-button.mesh")` are explicit, and cross-module component imports are already validated against declared module dependencies. Keep this rule and make the diagnostic author-facing. Catalog diagnostics now point authors to explicit script imports and `mesh.uses.modules`.
+- [x] Interface usage should be explicit dependencies, not only capabilities. If a script calls `require("mesh.audio@>=1.0")`, the manifest should declare `uses.interfaces["mesh.audio"]`; capabilities grant read/control power, but the interface dependency declares the contract being consumed. Frontend catalog validation now rejects undeclared enabled-graph `mesh.*` imports.
+- [x] Optional interface usage needs first-class syntax. Example: `@mesh/quick-settings` tries `mesh.brightness@>=1.0`, then falls back to shell events, but no brightness interface/provider is installed in the root graph. Implemented manifest syntax as `uses.optionalInterfaces`; debug diagnostics now expose optional unavailable/inactive status and per-module optional interfaces. Remaining work is presenting fallback/health in settings UI.
+- [x] Backend provider modules declare one or more implemented interfaces, native binary requirements, exec capabilities, optional stream tools, settings schema, and lifecycle entrypoint. Example: `@mesh/hyprland-wm` needs `hyprctl`, optional `socat`/`nc`, emits `mesh.hyprland` state/events, and implements `switch_workspace`. Provider graph diagnostics now require `baseModule` contracts to be declared in `mesh.uses.modules`; shipped backends declare their interface modules alongside binaries, capabilities, optional tools, entry, and implements metadata.
+- [x] Interface modules are contract packages: state fields, methods, events, capability requirements, version, domain, and relationship. Keep them data-only and generic. Decide later whether core interfaces stay in `modules/interfaces/*` or can be bundled with providers without breaking multi-provider resolution. Graph diagnostics now emit `missing_interface_contract_file` when the declared contract file is absent on disk.
+- [x] Library modules should be first-class. Common D-Bus helpers, polling/stream parsing, command result shaping, formatting helpers, and reusable UI utilities should be provided as `kind: "library"` modules and imported with `require("@mesh/backend-kit")` or similar. Libraries must not grant capabilities; consuming modules still request capabilities. Validated: library modules declaring `mesh.capabilities.required` are now rejected at parse time.
+
+Icons and resources:
+
+- [x] Treat semantic icon names as a module contract. Frontends use `<icon name="audio-volume-high" />`; icon packs map semantic names to concrete theme assets. Manifests should declare required and optional semantic icons, and the graph should diagnose missing mappings. Graph diagnostics now emit `missing_required_icon` even when no icon pack is enabled and `missing_optional_icon` for optional names that no enabled icon pack maps.
+- [x] Add tooling/linting to extract static and obvious dynamic icon names from `.mesh` files and compare them to `iconRequirements`. Current gap fixed 2026-06-18 by adding `battery-caution` to default/material icon packs; linting added 2026-06-18 via `undeclared_icon_use` graph diagnostic; scanner upgraded to recursive (covers `src/components/`).
+- [x] Keep icon pack modules ordinary modules. Users should be able to swap the active icon pack or install multiple packs; module code should not depend on a concrete icon theme. Manifest validation now restricts `mesh.icon_pack` to `kind: "icon-pack"` modules; graph tests cover multiple enabled icon-pack modules contributing mappings side by side, with frontend pack selection remaining module-id based.
+- [x] Apply the same pattern to future font packs, sound packs, language packs, theme packs, and other resource packs: frontend/backend modules depend on resource capabilities by semantic id, resource modules contribute concrete files/mappings. Font/theme/icon contribution fields are now kind-scoped to ordinary resource-pack modules (`font-pack`, `theme`, `icon-pack`) while bundled i18n catalogs remain valid on normal modules and standalone language packs use the same catalog contribution shape.
+
+Capabilities, permissions, and dependencies:
+
+- [x] Separate dependencies from capabilities in docs and validation. Dependencies say what must be present: modules, interfaces, resource packs, binaries. Capabilities say what host power is granted: `service.audio.read`, `service.audio.control`, `exec.hyprctl`, `locale.write`, `theme.read`. `mesh.uses` validation now rejects module/resource dependencies that are not module ids, interface dependencies that are module ids or non-dotted names, and capabilities that look like module or interface dependencies.
+- [x] Validate capability/interface alignment. If an interface contract requires `service.power.read`, a provider should declare it; a frontend requiring `mesh.power` should declare the read capability if it reads proxy state and control capability if it calls methods. Graph diagnostics now load contract `[capabilities].required` from interface modules and emit `missing_provider_required_capability` / `missing_interface_required_capability` for enabled providers and frontends.
+- [x] Keep native binary metadata as install/runtime health input. Backend binary deps now drive install checks, runtime health, diagnostics, backend lifecycle status, and package-manager suggestions from one manifest declaration.
+- [x] Add health propagation to the graph/runtime story: missing required binary -> backend unavailable; selected provider unavailable -> interface unavailable; frontend sees interface health, not provider-specific failure handling. Graph health records now derive provider/interface/frontend status from required-binary diagnostics and active provider selection; debug module graph entries expose health; backend candidate statuses surface frontend-facing interface outages.
+
+Backends, interfaces, and service events:
+
+- [x] Prefer interface method calls over raw event channels for domain commands. Example: `wm.switch_workspace(1)` is better than `mesh.events.publish("mesh.hyprland.switch_workspace", ...)`; raw events should be shell/system commands or explicit extension channels. Navigation workspace switching now uses only the `mesh.hyprland` proxy method; graph diagnostics scan static `.mesh` sources and emit `raw_interface_domain_event_publish` for `mesh.events.publish("mesh.*", ...)`.
+- [ ] Make event channels typed and declared. Backend `mesh.service.emit_event("WorkspaceChanged", payload)` should be validated against the interface contract; frontend `audio.VolumeChanged:on(...)` should be known to the compiler/diagnostics. Progress: graph diagnostics now load interface `[[events]]` declarations and emit `undeclared_interface_event_emit` when backend Luau statically calls `mesh.service.emit_event("...")` with an event name absent from the implemented interface contract.
+- [x] Keep shell-owned events (`shell.position-surface`, `shell.set-theme`, `shell.activate-popover`, debug commands, shutdown) separate from interface-domain events (`mesh.audio.*`, `mesh.hyprland.*`). Document which namespace module authors can publish to. Docs now list the declared shell-owned channels; graph diagnostics emit `raw_interface_domain_event_publish` for static `mesh.*` publishes and `unknown_shell_event_publish` for undeclared static `shell.*` publishes.
+- [ ] Eliminate service-specific Rust branches where possible. Current audio optimistic state and some debug/profiling paths are pragmatic, but new module domains should route through interfaces/contracts/providers.
+
+Keyboard and interaction:
+
+- [x] Preserve the current keybind flow: manifest declares `mesh.keybinds.<action>`, template nodes subscribe with `keybind="{this.keybinds.action.id}"` and `onkeybind={handler}`, runtime resolves user overrides and locale defaults, then annotates accessibility/debug metadata. Graph diagnostics now scan static `.mesh` keybind subscriptions and emit `undeclared_keybind_subscription` / `keybind_subscription_missing_handler` when template usage falls out of sync with manifest declarations.
+- [x] Move all legacy settings-derived shortcut declarations behind migration diagnostics. New modules should declare keybind identity, label, description, category, default trigger, localized triggers, and scope in the manifest. Settings-only shortcut declarations no longer create effective keybinds; legacy settings for manifest-declared ids are reported as ignored so authors migrate the full action metadata into `mesh.keybinds`.
+- [x] Keep locale-specific access keys. `localizedTriggers` are useful for different keyboard mnemonics by language; validation should report missing/empty keys and duplicate effective bindings. Graph diagnostics now emit `duplicate_keybind_trigger` for cross-module trigger collisions.
+- [x] Make popover/focus ownership a documented module pattern. `mesh.popover.activate(surface_id, event, { focus = true })` registers trigger return focus and can temporarily transfer keyboard mode; modules need clear rules for when a popover owns focus and when it closes on focus leave. Docs now define the trigger-event requirement, `options.focus`, return-focus tracking, close-on-focus-leave, and the rule that shell owns focus state while modules request activation/hide.
+- [x] Surface layout settings should describe keyboard behavior (`none`, `on_demand`, `exclusive`) and size policy, but runtime keyboard focus state should remain shell-owned. `mesh.surfaceLayout.keyboard_mode` now provides the module default, shipped frontend manifests declare keyboard policy, user settings still override durable policy, and docs keep runtime focus state owned by the shell.
+
+I18n and localized text:
+
+- [x] Make i18n graph-driven. Frontend components now load translation catalogs from installed graph `contributed_i18n()` paths instead of scanning `config/i18n/{locale}.json` by convention.
+- [x] Keep the localized manifest text shape `{ "t": "key.path", "fallback": "Text" }`. Raw strings are literals, not translation keys. Loader diagnostics now warn when keybind text or layout labels look like dotted i18n keys but were written as raw strings, and localized layout labels validate the same `t`/`fallback` shape.
+- [x] Resolve localized manifest metadata through the active locale for script descriptors, keybind debug data, settings UI labels, layout labels, provider labels, and resource labels. Provider and resource labels now use LocalizedText types; debug snapshot exposes resolved labels with key/fallback metadata; resolve_manifest_text and resolve_debug_manifest_text use module-scoped translate_for_module lookup.
+- [x] Let modules declare supported locales and contributed catalogs once. Template `t("key")`, manifest localized text, keybind labels, and settings labels should all use the same module-scoped catalog source. LocaleEngine gains load_module_translations and translate_for_module; graph catalog loading is module-scoped; redundant_supported_locales diagnostic guides authors to declare once in provides.i18n; navigation-bar supportedLocales removed.
+- [x] Add diagnostics for catalogs that do not cover template `t(...)` keys or manifest translation keys. Graph diagnostics now emit `undeclared_i18n_key` for static `t('key')` calls in `.mesh` templates that are absent from the module's default-locale catalog. Scanner is recursive (covers `src/components/`). `nav.live` in navigation-bar was the first real bug caught.
+
+Customization and reusability:
+
+- [ ] Treat manifests as defaults and user config as overrides. Module authors provide settings schema/defaults; users choose active provider, layout entrypoint, theme, icon pack, locale, and per-module settings in the root graph/settings files.
+- [ ] Support multiple instances of the same frontend module later. Module identity should not be the only surface identity; root graph should eventually support configured instances like two panels or repeated widgets with separate settings/storage scopes.
+- [ ] Keep `self.storage` scoped to module/component/provider instance and use it for durable per-instance state, not installed graph state.
+- [ ] Settings UI should be generated from contributed schemas by default, with optional custom `settings_ui` entrypoint for advanced modules.
+- [ ] Diagnostics/settings UI should show each module's uses/provides graph: required interfaces, active provider, optional interfaces, required icons, native binaries, capabilities, settings namespace, i18n catalogs, keybinds, health. The `mesh.debug` snapshot now exposes a typed `module_graph` payload with installed module uses/provides, optional interfaces, icons, capabilities, settings namespaces, i18n catalogs, and graph diagnostics. The debug inspector now has a Modules tab that renders the first graph entries; remaining work is a full settings UI with filtering, active-provider detail, native binary health, keybinds, and per-module customization controls.
+
+Concrete cleanup tasks:
+
+- [x] Remove legacy manifest/field conventions after migration rather than preserving compatibility behavior. Examples completed 2026-06-18: top-level `id/type/api_version`, legacy top-level `settings`, `icon_requirements`, `surface_layout`, `package.json`, `mesh.toml`, and backend-provider `provides` as public vocabulary.
+- [x] Add `mesh.uses` / object-shaped `mesh.provides` canonical facade and normalize it into existing manifest structs.
+- [x] Migrate remaining legacy-shaped shipped manifests (`audio-popover`, `debug-inspector`, `text-selection-proof`, `material-symbols`) to canonical top-level `name` + `mesh`.
+- [x] Make graph loading a cached shell runtime object shared by discovery, frontend catalog, interface registry, backend launch, resources, and diagnostics.
+- [x] Replace direct `config/i18n` scanning with graph `contributed_i18n()` loading.
+- [x] Add interface-dependency validation for `require("mesh.*")`.
+- [x] Add icon-requirement lint for shipped frontends and fix `battery-caution` in the default icon pack or the battery component.
+- [x] Add optional interface dependency support and update `quick-settings` brightness behavior to declare `mesh.brightness` optional.
+- [x] Expose installed module uses/provides graph through the debug snapshot and `mesh.debug` service payload.
+- [x] Add a debug-inspector Modules tab that renders installed module uses/provides summaries from `mesh.debug.module_graph`.
+- [x] Document the module author workflow with examples for frontend surface, backend provider, interface module, library module, icon pack, language pack, and theme pack.
+
 ---
 
 ## Performance — remaining open items

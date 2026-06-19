@@ -3,15 +3,20 @@ use crate::manifest::CapabilitiesSection;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 struct EnvGuard {
     key: &'static str,
     old: Option<String>,
+    _lock: MutexGuard<'static, ()>,
 }
 
 impl EnvGuard {
     fn set(key: &'static str, value: Option<&str>) -> Self {
+        let lock = ENV_LOCK.lock().unwrap();
         let old = std::env::var(key).ok();
         unsafe {
             match value {
@@ -19,7 +24,11 @@ impl EnvGuard {
                 None => std::env::remove_var(key),
             }
         }
-        Self { key, old }
+        Self {
+            key,
+            old,
+            _lock: lock,
+        }
     }
 }
 
@@ -87,7 +96,7 @@ fn module_root_manifest_parses_minimal_module_json() {
 }
 
 #[test]
-fn module_root_manifest_accepts_legacy_top_level_shape() {
+fn module_root_manifest_rejects_legacy_top_level_shape() {
     let content = r#"
 {
   "schemaVersion": 1,
@@ -97,12 +106,10 @@ fn module_root_manifest_accepts_legacy_top_level_shape() {
   "layout": { "entrypoint": "@mesh/panel:main" }
 }
 "#;
-    let manifest = RootModuleGraphManifest::from_json_str(content).unwrap();
-    assert_eq!(manifest.schema_version, 1);
-    assert_eq!(manifest.modules_dir, "modules");
-    assert_eq!(
-        manifest.layout.unwrap().entrypoint.as_str(),
-        "@mesh/panel:main"
+    let err = RootModuleGraphManifest::from_json_str(content).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("root module graph must use canonical name/version/mesh shape")
     );
 }
 
@@ -119,12 +126,12 @@ fn module_manifest_parses_backend_module_json() {
   "mesh": {
     "apiVersion": "0.1",
     "kind": "backend",
-    "capabilities": { "required": ["exec.wpctl"] },
-    "i18n": { "defaultLocale": "en", "supportedLocales": ["en", "sk"] },
-    "dependencies": {
+    "uses": {
+      "capabilities": ["exec.wpctl"],
       "binaries": [{ "name": "wpctl", "reason": "PipeWire control" }]
     },
-    "entrypoints": { "main": "src/main.luau" },
+    "i18n": { "defaultLocale": "en", "supportedLocales": ["en", "sk"] },
+    "entry": "src/main.luau",
     "implements": [
       { "interface": "mesh.audio", "version": "1.0", "baseModule": "@mesh/audio-interface", "provider": "pipewire", "label": "PipeWire", "priority": 100 }
     ]
@@ -342,6 +349,160 @@ fn module_package_manifest_rejects_non_frontend_theme_contributions() {
 }
 
 #[test]
+fn module_package_manifest_rejects_non_icon_pack_icon_pack_contribution() {
+    let content = r##"
+{
+  "name": "@mesh/bad-icon-frontend",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "icon_pack": {
+      "id": "bad",
+      "mappings": {
+        "audio-volume-high": "bad/audio-volume-high"
+      }
+    }
+  }
+}
+"##;
+    let err = ModuleManifest::from_json_str(content).unwrap_err();
+    assert!(err.to_string().contains("icon-pack modules"));
+}
+
+#[test]
+fn module_package_manifest_rejects_resource_pack_contributions_from_wrong_kind() {
+    let bad_icons = r##"
+{
+  "name": "@mesh/bad-icons",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "provides": {
+      "icons": [{ "id": "bad", "path": "icons" }]
+    }
+  }
+}
+"##;
+    let bad_fonts = r##"
+{
+  "name": "@mesh/bad-fonts",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "provides": {
+      "fonts": [{ "id": "bad", "path": "fonts" }]
+    }
+  }
+}
+"##;
+    let bad_themes = r##"
+{
+  "name": "@mesh/bad-themes",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "provides": {
+      "themes": [{
+        "id": "bad",
+        "label": "Bad",
+        "modes": { "dark": "themes/dark.json" }
+      }]
+    }
+  }
+}
+"##;
+
+    assert!(
+        ModuleManifest::from_json_str(bad_icons)
+            .unwrap_err()
+            .to_string()
+            .contains("icon-pack modules")
+    );
+    assert!(
+        ModuleManifest::from_json_str(bad_fonts)
+            .unwrap_err()
+            .to_string()
+            .contains("font-pack modules")
+    );
+    assert!(
+        ModuleManifest::from_json_str(bad_themes)
+            .unwrap_err()
+            .to_string()
+            .contains("theme modules")
+    );
+}
+
+#[test]
+fn module_package_manifest_rejects_dependency_capability_bucket_mismatches() {
+    let interface_as_capability = r##"
+{
+  "name": "@mesh/bad-interface-capability",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "uses": {
+      "capabilities": ["mesh.audio"]
+    }
+  }
+}
+"##;
+    let capability_as_module = r##"
+{
+  "name": "@mesh/bad-capability-module",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "uses": {
+      "modules": {
+        "service.audio.read": "*"
+      }
+    }
+  }
+}
+"##;
+    let module_as_interface = r##"
+{
+  "name": "@mesh/bad-module-interface",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "uses": {
+      "interfaces": {
+        "@mesh/audio-interface": ">=1.0"
+      }
+    }
+  }
+}
+"##;
+
+    assert!(
+        ModuleManifest::from_json_str(interface_as_capability)
+            .unwrap_err()
+            .to_string()
+            .contains("interfaces belong in mesh.uses.interfaces")
+    );
+    assert!(
+        ModuleManifest::from_json_str(capability_as_module)
+            .unwrap_err()
+            .to_string()
+            .contains("host powers belong in mesh.uses.capabilities")
+    );
+    assert!(
+        ModuleManifest::from_json_str(module_as_interface)
+            .unwrap_err()
+            .to_string()
+            .contains("module ids belong in mesh.uses.modules")
+    );
+}
+
+#[test]
 fn module_manifest_loader_rejects_ambiguous_module_and_package_json() {
     let dir = temp_dir("module-ambiguity");
     fs::write(
@@ -435,23 +596,78 @@ fn module_manifest_loader_does_not_warn_for_literal_keybind_label() {
 }
 
 #[test]
-fn module_manifest_loader_accepts_legacy_package_json_with_replacement_warning() {
+fn module_manifest_loader_warns_for_raw_dotted_layout_label() {
+    let dir = temp_dir("canonical-module-raw-layout-label");
+    fs::write(
+        dir.join("module.json"),
+        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","provides":{"layout":[{"id":"main","entrypoint":"src/main.mesh","label":"layout.main.label"}]}}}"#,
+    )
+    .unwrap();
+
+    let loaded = load_module_manifest(&dir).unwrap();
+
+    assert_eq!(loaded.source, ModuleManifestSource::CanonicalModuleJson);
+    assert_eq!(loaded.diagnostics.len(), 1);
+    let diagnostic = &loaded.diagnostics[0];
+    assert_eq!(
+        diagnostic.severity,
+        ModuleManifestDiagnosticSeverity::Warning
+    );
+    assert_eq!(diagnostic.module_id.as_deref(), Some("@mesh/module"));
+    assert_eq!(
+        diagnostic.field_path.as_deref(),
+        Some("mesh.provides.layout[0].label")
+    );
+    assert!(
+        diagnostic
+            .message
+            .contains("looks like an i18n key but is a raw literal string")
+    );
+    assert!(
+        diagnostic
+            .suggested_action
+            .contains(r#"{ "t": "layout.main.label", "fallback": "..." }"#)
+    );
+}
+
+#[test]
+fn module_manifest_loader_accepts_localized_layout_label_object() {
+    let dir = temp_dir("canonical-module-localized-layout-label");
+    fs::write(
+        dir.join("module.json"),
+        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","provides":{"layout":[{"id":"main","entrypoint":"src/main.mesh","label":{"t":"layout.main.label","fallback":"Main"}}]}}}"#,
+    )
+    .unwrap();
+
+    let loaded = load_module_manifest(&dir).unwrap();
+
+    assert_eq!(loaded.source, ModuleManifestSource::CanonicalModuleJson);
+    assert!(loaded.diagnostics.is_empty());
+    assert_eq!(
+        loaded.manifest.mesh.contributes.layout[0]
+            .label
+            .as_ref()
+            .and_then(crate::manifest::LocalizedText::translation_key),
+        Some("layout.main.label")
+    );
+}
+
+#[test]
+fn module_manifest_loader_rejects_legacy_package_json() {
     let dir = temp_dir("legacy-package");
     fs::write(
         dir.join("package.json"),
         r#"{"name":"@mesh/package","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
     )
     .unwrap();
-    let loaded = load_module_manifest(&dir).unwrap();
-    assert_eq!(loaded.source, ModuleManifestSource::LegacyPackageJson);
-    assert_eq!(loaded.manifest.name, "@mesh/package");
+    let err = load_module_manifest(&dir).unwrap_err();
+    let ModuleManifestError::Diagnostic { diagnostic } = err else {
+        panic!("expected diagnostic error for legacy package.json");
+    };
+    assert_eq!(diagnostic.severity, ModuleManifestDiagnosticSeverity::Error);
     assert_eq!(
-        loaded.diagnostics[0].severity,
-        ModuleManifestDiagnosticSeverity::Warning
-    );
-    assert_eq!(
-        loaded.diagnostics[0].suggested_action,
-        "replace package.json with module.json"
+        diagnostic.suggested_action,
+        "rename package.json to module.json"
     );
 }
 
@@ -475,28 +691,26 @@ fn module_manifest_loader_rejects_plugin_json() {
 }
 
 #[test]
-fn module_manifest_loader_accepts_legacy_module_json() {
+fn module_manifest_loader_rejects_legacy_module_json() {
     let dir = temp_dir("legacy-module");
     fs::write(
         dir.join("module.json"),
         r#"{"id":"@mesh/module","version":"0.1.0","type":"surface","api_version":"0.1","entrypoints":{"main":"src/main.mesh"}}"#,
     )
     .unwrap();
-    let loaded = load_module_manifest(&dir).unwrap();
-    assert_eq!(loaded.source, ModuleManifestSource::LegacyModuleJson);
-    assert_eq!(loaded.manifest.name, "@mesh/module");
+    let err = load_module_manifest(&dir).unwrap_err();
+    let ModuleManifestError::Diagnostic { diagnostic } = err else {
+        panic!("expected diagnostic error for legacy module.json");
+    };
+    assert_eq!(diagnostic.severity, ModuleManifestDiagnosticSeverity::Error);
     assert_eq!(
-        loaded.diagnostics[0].severity,
-        ModuleManifestDiagnosticSeverity::Warning
-    );
-    assert_eq!(
-        loaded.diagnostics[0].suggested_action,
-        "replace legacy module.json fields with name/version/mesh"
+        diagnostic.suggested_action,
+        "replace legacy module.json fields with canonical name/version/mesh"
     );
 }
 
 #[test]
-fn module_manifest_loader_accepts_legacy_mesh_toml_with_replacement_warning() {
+fn module_manifest_loader_rejects_legacy_mesh_toml() {
     let dir = temp_dir("legacy-mesh-toml");
     fs::write(
         dir.join("mesh.toml"),
@@ -509,16 +723,14 @@ api_version = "0.1"
 "#,
     )
     .unwrap();
-    let loaded = load_module_manifest(&dir).unwrap();
-    assert_eq!(loaded.source, ModuleManifestSource::LegacyMeshToml);
-    assert_eq!(loaded.manifest.name, "@mesh/toml-module");
+    let err = load_module_manifest(&dir).unwrap_err();
+    let ModuleManifestError::Diagnostic { diagnostic } = err else {
+        panic!("expected diagnostic error for legacy mesh.toml");
+    };
+    assert_eq!(diagnostic.severity, ModuleManifestDiagnosticSeverity::Error);
     assert_eq!(
-        loaded.diagnostics[0].severity,
-        ModuleManifestDiagnosticSeverity::Warning
-    );
-    assert_eq!(
-        loaded.diagnostics[0].suggested_action,
-        "replace mesh.toml with module.json"
+        diagnostic.suggested_action,
+        "replace mesh.toml with canonical module.json"
     );
 }
 
@@ -555,10 +767,8 @@ fn shipped_navigation_manifest_uses_explicit_localized_keybind_text() {
         loaded.manifest.mesh.i18n.default_locale.as_deref(),
         Some("en")
     );
-    assert_eq!(
-        loaded.manifest.mesh.i18n.supported_locales,
-        vec!["en", "sk"]
-    );
+    // supportedLocales removed from navigation-bar; locales declared once via provides.i18n
+    assert!(loaded.manifest.mesh.i18n.supported_locales.is_empty());
     assert!(
         loaded
             .manifest
@@ -755,6 +965,63 @@ fn shipped_module_diagnostics_report_missing_navigation_icon() {
     );
 }
 
+#[test]
+fn shipped_frontend_icon_literals_are_declared() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let module_dir = workspace_root.join("modules/frontend/navigation-bar");
+    let loaded = load_module_manifest(&module_dir).unwrap();
+    let declared = loaded
+        .manifest
+        .mesh
+        .icon_requirements
+        .required
+        .iter()
+        .chain(loaded.manifest.mesh.icon_requirements.optional.iter())
+        .collect::<std::collections::HashSet<_>>();
+
+    for source_path in [
+        module_dir.join("src/main.mesh"),
+        module_dir.join("src/components/battery-button.mesh"),
+        module_dir.join("src/components/volume-button.mesh"),
+        module_dir.join("src/components/now-playing.mesh"),
+        module_dir.join("src/components/settings-button.mesh"),
+        module_dir.join("src/components/theme-button.mesh"),
+    ] {
+        let source = fs::read_to_string(&source_path).unwrap();
+        for icon in obvious_semantic_icon_literals(&source) {
+            assert!(
+                declared.contains(&icon),
+                "{} uses semantic icon '{icon}' but @mesh/navigation-bar does not declare it in iconRequirements",
+                source_path.display()
+            );
+        }
+    }
+}
+
+fn obvious_semantic_icon_literals(source: &str) -> std::collections::HashSet<String> {
+    let prefixes = [
+        "audio-volume-",
+        "battery-",
+        "media-playback-",
+        "preferences-",
+        "weather-",
+        "window-",
+    ];
+    source
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .filter(|literal| prefixes.iter().any(|prefix| literal.starts_with(prefix)))
+        .filter(|literal| {
+            !literal.ends_with("-widget")
+                && !literal.ends_with("-button")
+                && !literal.ends_with("-glyph")
+                && !literal.ends_with("-value")
+        })
+        .map(str::to_string)
+        .collect()
+}
+
 fn loaded_module(
     name: &str,
     kind: ModuleKind,
@@ -772,13 +1039,15 @@ fn loaded_module(
             mesh: MeshModuleSection {
                 api_version: "0.1".into(),
                 kind,
+                entry: None,
+                uses: MeshUses::default(),
                 capabilities: CapabilitiesSection::default(),
                 i18n: MeshI18nSupport::default(),
                 entrypoints: MeshEntrypoints::default(),
                 keybinds: crate::manifest::KeybindsSection::default(),
                 dependencies,
-                provides,
-                implements: Vec::new(),
+                provides: MeshProvides::default(),
+                implements: provides,
                 interface: None,
                 contributes,
                 icons: None,
@@ -790,10 +1059,27 @@ fn loaded_module(
                 experimental: serde_json::Value::Null,
             },
         },
-        path: PathBuf::from(format!("{name}/package.json")),
-        source: ModuleManifestSource::LegacyPackageJson,
+        path: PathBuf::from(format!("{name}/module.json")),
+        source: ModuleManifestSource::CanonicalModuleJson,
         diagnostics: Vec::new(),
     }
+}
+
+fn declare_frontend_surface_contract(module: &mut LoadedModuleManifest) {
+    module.manifest.mesh.accessibility = Some(crate::manifest::AccessibilitySection {
+        role: Some("application".into()),
+        label: None,
+        description: None,
+    });
+    module.manifest.mesh.surface_layout = Some(crate::manifest::SurfaceLayoutSection {
+        size_policy: Some("content_measured".into()),
+        keyboard_mode: Some("on_demand".into()),
+        prefers_content_children_sizing: Some(true),
+        min_width: Some(320),
+        max_width: None,
+        min_height: Some(120),
+        max_height: None,
+    });
 }
 
 fn root_with_modules(
@@ -922,7 +1208,9 @@ fn audio_modules() -> Vec<LoadedModuleManifest> {
                 version: None,
                 base_module: None,
                 provider: Some("pipewire".into()),
-                label: Some("PipeWire".into()),
+                label: Some(crate::manifest::LocalizedText::Literal(
+                    "PipeWire".to_string(),
+                )),
                 priority: 100,
             }],
             MeshContributes::default(),
@@ -936,7 +1224,9 @@ fn audio_modules() -> Vec<LoadedModuleManifest> {
                 version: None,
                 base_module: None,
                 provider: Some("pulseaudio".into()),
-                label: Some("PulseAudio".into()),
+                label: Some(crate::manifest::LocalizedText::Literal(
+                    "PulseAudio".to_string(),
+                )),
                 priority: 50,
             }],
             MeshContributes::default(),
@@ -1018,7 +1308,7 @@ fn installed_module_graph_keeps_provider_interface_and_frontend_requirements_sep
     interface
         .manifest
         .mesh
-        .provides
+        .implements
         .push(MeshProvidesDeclaration {
             interface: "mesh.example".into(),
             version: None,
@@ -1045,7 +1335,9 @@ fn installed_module_graph_keeps_provider_interface_and_frontend_requirements_sep
                 version: None,
                 base_module: Some("@mesh/example-interface".into()),
                 provider: Some("example".into()),
-                label: Some("Example".into()),
+                label: Some(crate::manifest::LocalizedText::Literal(
+                    "Example".to_string(),
+                )),
                 priority: 100,
             }],
             MeshContributes::default(),
@@ -1105,7 +1397,9 @@ fn provider_capability_metadata_comes_only_from_backend_manifest() {
             version: Some("1.2.0".into()),
             base_module: Some("@mesh/example-interface".into()),
             provider: Some("example".into()),
-            label: Some("Example".into()),
+            label: Some(crate::manifest::LocalizedText::Literal(
+                "Example".to_string(),
+            )),
             priority: 100,
         }],
         MeshContributes::default(),
@@ -1145,13 +1439,21 @@ fn installed_module_graph_routes_generic_interface_provider_without_service_bran
     let backend = loaded_module(
         "@mesh/example-backend",
         ModuleKind::Backend,
-        MeshDependencies::default(),
+        MeshDependencies {
+            modules: HashMap::from([(
+                "@mesh/example-interface".into(),
+                crate::manifest::DependencySpec::Simple(">=1.0.0".into()),
+            )]),
+            ..MeshDependencies::default()
+        },
         vec![MeshProvidesDeclaration {
             interface: "mesh.example.alt".into(),
             version: Some("1.0.0".into()),
             base_module: None,
             provider: Some("example-alt".into()),
-            label: Some("Example Alt".into()),
+            label: Some(crate::manifest::LocalizedText::Literal(
+                "Example Alt".to_string(),
+            )),
             priority: 25,
         }],
         MeshContributes::default(),
@@ -1319,7 +1621,9 @@ fn installed_module_graph_rejects_active_provider_interface_mismatch() {
             version: None,
             base_module: None,
             provider: Some("networkmanager".into()),
-            label: Some("NetworkManager".into()),
+            label: Some(crate::manifest::LocalizedText::Literal(
+                "NetworkManager".to_string(),
+            )),
             priority: 100,
         }],
         MeshContributes::default(),
@@ -1363,23 +1667,34 @@ fn installed_module_graph_resolves_layout_entrypoint() {
 fn installed_module_graph_indexes_theme_icon_font_i18n_contributions() {
     let mut modes = HashMap::new();
     modes.insert("dark".into(), "themes/dark.json".into());
-    let contributes = MeshContributes {
+    let theme_contributes = MeshContributes {
         themes: vec![ThemeContribution {
             id: "mesh-default".into(),
-            label: "MESH Default".into(),
+            label: Some(crate::manifest::LocalizedText::Literal(
+                "MESH Default".to_string(),
+            )),
             modes,
             default_mode: Some("dark".into()),
         }],
+        ..MeshContributes::default()
+    };
+    let icon_contributes = MeshContributes {
         icons: vec![PathContribution {
             id: "material".into(),
             path: "icons".into(),
             label: None,
         }],
+        ..MeshContributes::default()
+    };
+    let font_contributes = MeshContributes {
         fonts: vec![PathContribution {
             id: "inter".into(),
             path: "fonts".into(),
             label: None,
         }],
+        ..MeshContributes::default()
+    };
+    let i18n_contributes = MeshContributes {
         i18n: vec![I18nContribution {
             id: "en".into(),
             locale: "en".into(),
@@ -1387,16 +1702,48 @@ fn installed_module_graph_indexes_theme_icon_font_i18n_contributions() {
         }],
         ..MeshContributes::default()
     };
-    let root = root_with_modules(&[("@mesh/resources", ModuleKind::Theme)], &[], None);
+    let root = root_with_modules(
+        &[
+            ("@mesh/theme", ModuleKind::Theme),
+            ("@mesh/icons", ModuleKind::IconPack),
+            ("@mesh/fonts", ModuleKind::FontPack),
+            ("@mesh/lang-en", ModuleKind::LanguagePack),
+        ],
+        &[],
+        None,
+    );
     let graph = InstalledModuleGraph::from_parts(
         root,
-        vec![loaded_module(
-            "@mesh/resources",
-            ModuleKind::Theme,
-            MeshDependencies::default(),
-            vec![],
-            contributes,
-        )],
+        vec![
+            loaded_module(
+                "@mesh/theme",
+                ModuleKind::Theme,
+                MeshDependencies::default(),
+                vec![],
+                theme_contributes,
+            ),
+            loaded_module(
+                "@mesh/icons",
+                ModuleKind::IconPack,
+                MeshDependencies::default(),
+                vec![],
+                icon_contributes,
+            ),
+            loaded_module(
+                "@mesh/fonts",
+                ModuleKind::FontPack,
+                MeshDependencies::default(),
+                vec![],
+                font_contributes,
+            ),
+            loaded_module(
+                "@mesh/lang-en",
+                ModuleKind::LanguagePack,
+                MeshDependencies::default(),
+                vec![],
+                i18n_contributes,
+            ),
+        ],
     )
     .unwrap();
     assert_eq!(graph.contributed_themes().len(), 1);
@@ -1408,7 +1755,7 @@ fn installed_module_graph_indexes_theme_icon_font_i18n_contributions() {
 #[test]
 fn contribution_index_records_source_metadata_and_scoped_ids() {
     let icon_pack = |module_id: &str| {
-        loaded_module(
+        let mut module = loaded_module(
             module_id,
             ModuleKind::IconPack,
             MeshDependencies::default(),
@@ -1421,7 +1768,21 @@ fn contribution_index_records_source_metadata_and_scoped_ids() {
                 }],
                 ..MeshContributes::default()
             },
-        )
+        );
+        module.manifest.mesh.icon_pack = Some(crate::manifest::IconPackSection {
+            id: module_id
+                .rsplit('/')
+                .next()
+                .unwrap_or(module_id)
+                .trim_start_matches("icons-")
+                .into(),
+            mappings: HashMap::from([(
+                "audio-volume-high".into(),
+                format!("{module_id}/audio-volume-high"),
+            )]),
+            ..crate::manifest::IconPackSection::default()
+        });
+        module
     };
     let root = root_with_modules(
         &[
@@ -1451,6 +1812,16 @@ fn contribution_index_records_source_metadata_and_scoped_ids() {
             "@mesh/icons-b:shared".to_string()
         ]
     );
+    let mut icon_pack_ids = graph
+        .icon_pack_contributions()
+        .iter()
+        .map(|pack| format!("{}:{}", pack.module_id, pack.id))
+        .collect::<Vec<_>>();
+    icon_pack_ids.sort();
+    assert_eq!(
+        icon_pack_ids,
+        vec!["@mesh/icons-a:a".to_string(), "@mesh/icons-b:b".to_string()]
+    );
     let icon = graph
         .contributed_icons()
         .iter()
@@ -1460,12 +1831,12 @@ fn contribution_index_records_source_metadata_and_scoped_ids() {
     assert_eq!(icon.source.local_id, "shared");
     assert_eq!(
         icon.source.manifest_source,
-        ModuleManifestSource::LegacyPackageJson
+        ModuleManifestSource::CanonicalModuleJson
     );
     assert!(
         icon.source
             .manifest_path
-            .ends_with("@mesh/icons-a/package.json")
+            .ends_with("@mesh/icons-a/module.json")
     );
 }
 
@@ -1485,10 +1856,11 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
     );
     frontend.manifest.mesh.entrypoints.main = Some("src/main.mesh".into());
     frontend.manifest.mesh.entrypoints.settings_ui = Some("src/settings.mesh".into());
+    declare_frontend_surface_contract(&mut frontend);
     frontend.manifest.mesh.keybinds.actions.insert(
         "mute".into(),
         crate::manifest::KeybindAction {
-            label: Some(crate::manifest::LocalizedText::Literal("Mute".into())),
+            label: Some(crate::manifest::LocalizedText::Literal("Mute".to_string())),
             scope: crate::manifest::KeybindScope::Surface,
             trigger: crate::manifest::KeybindTrigger {
                 kind: crate::manifest::KeybindTriggerKind::Shortcut,
@@ -1527,7 +1899,13 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
     let backend = loaded_module(
         "@mesh/example-backend",
         ModuleKind::Backend,
-        MeshDependencies::default(),
+        MeshDependencies {
+            modules: HashMap::from([(
+                "@mesh/example-interface".into(),
+                crate::manifest::DependencySpec::Simple(">=1.0.0".into()),
+            )]),
+            ..MeshDependencies::default()
+        },
         vec![MeshProvidesDeclaration {
             interface: "mesh.example".into(),
             version: Some("1.0".into()),
@@ -1561,6 +1939,14 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
             .unwrap();
 
     assert_eq!(graph.frontend_entrypoints().len(), 2);
+    assert_eq!(graph.frontend_surfaces().len(), 1);
+    assert_eq!(graph.frontend_surfaces()[0].path, "src/main.mesh");
+    assert_eq!(
+        graph.frontend_surfaces()[0].settings_namespace.as_deref(),
+        Some("@mesh/example-widget")
+    );
+    assert!(graph.frontend_surfaces()[0].accessibility.is_some());
+    assert!(graph.frontend_surfaces()[0].surface_layout.is_some());
     assert!(graph.frontend_entrypoints().iter().any(|entrypoint| {
         entrypoint.kind == FrontendEntrypointKind::Main && entrypoint.path == "src/main.mesh"
     }));
@@ -1709,7 +2095,7 @@ fn contribution_index_preserves_layout_localized_text() {
           "mesh": {
             "apiVersion": "0.1",
             "kind": "frontend",
-            "contributes": {
+            "provides": {
               "layout": [
                 {
                   "id": "main",
@@ -1858,6 +2244,81 @@ fn contribution_index_reports_resource_and_settings_compatibility_diagnostics() 
 }
 
 #[test]
+fn graph_diagnostics_report_required_icon_without_enabled_icon_pack() {
+    let root = root_with_modules(&[("@mesh/example-widget", ModuleKind::Frontend)], &[], None);
+    let mut frontend = loaded_module(
+        "@mesh/example-widget",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    frontend.manifest.mesh.icon_requirements.required = vec!["audio-volume-high".into()];
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
+
+    let diagnostic = graph
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.status == "missing_required_icon")
+        .unwrap();
+    assert_eq!(diagnostic.module_id, "@mesh/example-widget");
+    assert!(diagnostic.message.contains("required semantic icon"));
+    assert!(diagnostic.message.contains("audio-volume-high"));
+}
+
+#[test]
+fn graph_diagnostics_report_optional_icon_missing_mapping() {
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-widget", ModuleKind::Frontend),
+            ("@mesh/icons-material", ModuleKind::IconPack),
+        ],
+        &[],
+        None,
+    );
+    let mut frontend = loaded_module(
+        "@mesh/example-widget",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    frontend.manifest.mesh.icon_requirements.optional = vec!["weather-clear".into()];
+    let mut icon_pack = loaded_module(
+        "@mesh/icons-material",
+        ModuleKind::IconPack,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    icon_pack.manifest.mesh.icon_pack = Some(crate::manifest::IconPackSection {
+        id: "material".into(),
+        mappings: HashMap::from([(
+            "audio-volume-high".into(),
+            "material-symbols/volume_up".into(),
+        )]),
+        ..crate::manifest::IconPackSection::default()
+    });
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend, icon_pack]).unwrap();
+
+    let diagnostic = graph
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.status == "missing_optional_icon")
+        .unwrap();
+    assert_eq!(diagnostic.module_id, "@mesh/example-widget");
+    assert!(
+        diagnostic
+            .contribution_id
+            .as_deref()
+            .is_some_and(|id| id.contains("optional:weather-clear"))
+    );
+    assert!(diagnostic.message.contains("optional semantic icon"));
+}
+
+#[test]
 fn disabled_modules_remain_catalog_nodes_but_not_runtime_contributions() {
     let mut deps = MeshDependencies::default();
     deps.backend.insert("mesh.example".into(), ">=1.0.0".into());
@@ -1962,6 +2423,7 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
         MeshContributes::default(),
     );
     frontend.manifest.mesh.entrypoints.main = Some("src/main.mesh".into());
+    declare_frontend_surface_contract(&mut frontend);
     frontend.manifest.mesh.icon_requirements.required = vec!["example-action".into()];
 
     let interface = interface_module(
@@ -1974,13 +2436,21 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
     let backend = loaded_module(
         "@mesh/example-backend",
         ModuleKind::Backend,
-        MeshDependencies::default(),
+        MeshDependencies {
+            modules: HashMap::from([(
+                "@mesh/example-interface".into(),
+                crate::manifest::DependencySpec::Simple(">=1.0.0".into()),
+            )]),
+            ..MeshDependencies::default()
+        },
         vec![MeshProvidesDeclaration {
             interface: "mesh.example".into(),
             version: Some("1.0".into()),
             base_module: Some("@mesh/example-interface".into()),
             provider: Some("example".into()),
-            label: Some("Example".into()),
+            label: Some(crate::manifest::LocalizedText::Literal(
+                "Example".to_string(),
+            )),
             priority: 100,
         }],
         MeshContributes::default(),
@@ -2019,7 +2489,7 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
             fonts: vec![PathContribution {
                 id: "inter".into(),
                 path: "fonts".into(),
-                label: Some("Inter".into()),
+                label: Some(crate::manifest::LocalizedText::Literal("Inter".to_string())),
             }],
             ..MeshContributes::default()
         },
@@ -2048,7 +2518,9 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
         MeshContributes {
             themes: vec![ThemeContribution {
                 id: "mesh-default".into(),
-                label: "Default".into(),
+                label: Some(crate::manifest::LocalizedText::Literal(
+                    "Default".to_string(),
+                )),
                 modes: theme_modes,
                 default_mode: Some("dark".into()),
             }],
@@ -2085,7 +2557,11 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
     )
     .unwrap();
 
-    assert!(graph.diagnostics().is_empty());
+    assert!(
+        graph.diagnostics().is_empty(),
+        "expected no diagnostics, got: {:?}",
+        graph.diagnostics()
+    );
     assert_eq!(
         graph
             .requirements_for_frontend("@mesh/example-widget")
@@ -2197,4 +2673,1172 @@ fn installed_module_graph_rejects_contribution_path_escape() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn entry_auto_generates_default_layout_contribution_for_frontend() {
+    let content = r#"
+{
+  "name": "@mesh/simple-frontend",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "entry": "src/main.mesh",
+    "uses": { "capabilities": ["shell.surface"] }
+  }
+}
+"#;
+    let manifest = ModuleManifest::from_json_str(content).unwrap();
+    assert_eq!(manifest.mesh.contributes.layout.len(), 1);
+    let layout = &manifest.mesh.contributes.layout[0];
+    assert_eq!(layout.id, "main");
+    assert_eq!(layout.entrypoint, "src/main.mesh");
+}
+
+#[test]
+fn explicit_provides_layout_is_not_overridden_by_entry() {
+    let content = r#"
+{
+  "name": "@mesh/custom-frontend",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "entry": "src/main.mesh",
+    "provides": {
+      "layout": [
+        { "id": "compact", "entrypoint": "src/compact.mesh" },
+        { "id": "full",    "entrypoint": "src/full.mesh" }
+      ]
+    }
+  }
+}
+"#;
+    let manifest = ModuleManifest::from_json_str(content).unwrap();
+    assert_eq!(manifest.mesh.contributes.layout.len(), 2);
+    assert!(
+        manifest
+            .mesh
+            .contributes
+            .layout
+            .iter()
+            .any(|l| l.id == "compact")
+    );
+    assert!(
+        manifest
+            .mesh
+            .contributes
+            .layout
+            .iter()
+            .any(|l| l.id == "full")
+    );
+}
+
+#[test]
+fn backend_entry_does_not_auto_generate_layout_contribution() {
+    let content = r#"
+{
+  "name": "@mesh/my-backend",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "entry": "src/main.luau",
+    "implements": [{ "interface": "mesh.audio" }]
+  }
+}
+"#;
+    let manifest = ModuleManifest::from_json_str(content).unwrap();
+    assert!(manifest.mesh.contributes.layout.is_empty());
+}
+
+#[test]
+fn uses_icon_requirements_normalized_into_mesh_icon_requirements() {
+    let content = r#"
+{
+  "name": "@mesh/example-frontend",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "uses": {
+      "iconRequirements": {
+        "required": ["audio-volume-high"],
+        "optional": ["audio-volume-low"]
+      },
+      "capabilities": ["shell.surface"]
+    },
+    "entry": "src/main.mesh"
+  }
+}
+"#;
+    let manifest = ModuleManifest::from_json_str(content).unwrap();
+    assert!(
+        manifest
+            .mesh
+            .icon_requirements
+            .required
+            .contains(&"audio-volume-high".into())
+    );
+    assert!(
+        manifest
+            .mesh
+            .icon_requirements
+            .optional
+            .contains(&"audio-volume-low".into())
+    );
+}
+
+#[test]
+fn uses_icon_requirements_merges_with_top_level_icon_requirements() {
+    let content = r#"
+{
+  "name": "@mesh/example-frontend",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "uses": {
+      "iconRequirements": { "required": ["audio-volume-high"] }
+    },
+    "iconRequirements": {
+      "required": ["audio-volume-muted"],
+      "optional": ["audio-volume-low"]
+    },
+    "entry": "src/main.mesh"
+  }
+}
+"#;
+    let manifest = ModuleManifest::from_json_str(content).unwrap();
+    let required = &manifest.mesh.icon_requirements.required;
+    assert!(required.contains(&"audio-volume-high".into()));
+    assert!(required.contains(&"audio-volume-muted".into()));
+    assert!(
+        manifest
+            .mesh
+            .icon_requirements
+            .optional
+            .contains(&"audio-volume-low".into())
+    );
+}
+
+#[test]
+fn graph_diagnostics_report_missing_required_binary() {
+    let dep = MeshDependencies {
+        binaries: vec![crate::manifest::BinaryDependency {
+            name: "this-binary-definitely-does-not-exist-on-any-system-12345".into(),
+            version: None,
+            reason: Some("test binary".into()),
+            optional: false,
+            packages: HashMap::from([
+                ("arch".into(), "test-bin-arch".into()),
+                ("debian".into(), "test-bin-deb".into()),
+            ]),
+        }],
+        ..MeshDependencies::default()
+    };
+    let root = root_with_modules(&[("@mesh/backend", ModuleKind::Backend)], &[], None);
+    let graph = InstalledModuleGraph::from_parts(
+        root,
+        vec![loaded_module(
+            "@mesh/backend",
+            ModuleKind::Backend,
+            dep,
+            vec![],
+            MeshContributes::default(),
+        )],
+    )
+    .unwrap();
+    let diagnostic = graph
+        .diagnostics()
+        .iter()
+        .find(|d| d.status == "missing_required_binary")
+        .expect("missing_required_binary diagnostic");
+    assert!(diagnostic.message.contains("arch:test-bin-arch"));
+    assert!(diagnostic.message.contains("debian:test-bin-deb"));
+}
+
+#[test]
+fn graph_diagnostics_skip_optional_missing_binary() {
+    let dep = MeshDependencies {
+        binaries: vec![crate::manifest::BinaryDependency {
+            name: "this-binary-definitely-does-not-exist-on-any-system-12345".into(),
+            version: None,
+            reason: None,
+            optional: true,
+            packages: Default::default(),
+        }],
+        ..MeshDependencies::default()
+    };
+    let root = root_with_modules(&[("@mesh/backend", ModuleKind::Backend)], &[], None);
+    let graph = InstalledModuleGraph::from_parts(
+        root,
+        vec![loaded_module(
+            "@mesh/backend",
+            ModuleKind::Backend,
+            dep,
+            vec![],
+            MeshContributes::default(),
+        )],
+    )
+    .unwrap();
+    assert!(
+        !graph
+            .diagnostics()
+            .iter()
+            .any(|d| d.status == "missing_required_binary")
+    );
+}
+
+#[test]
+fn extract_icon_names_from_mesh_source_finds_static_names() {
+    use super::installed_graph::extract_icon_names_from_mesh_source;
+    let src = r#"<icon name="audio-volume-high" size="24"/><icon name="battery-full"/>"#;
+    let names = extract_icon_names_from_mesh_source(src);
+    assert!(names.contains(&"audio-volume-high".into()));
+    assert!(names.contains(&"battery-full".into()));
+}
+
+#[test]
+fn extract_icon_names_ignores_dynamic_expressions() {
+    use super::installed_graph::extract_icon_names_from_mesh_source;
+    let src = r#"<icon name="{icon_name}" /><icon name="audio-volume-muted"/>"#;
+    let names = extract_icon_names_from_mesh_source(src);
+    assert!(!names.iter().any(|n| n.contains('{')));
+    assert!(names.contains(&"audio-volume-muted".into()));
+}
+
+#[test]
+fn library_module_with_required_capabilities_is_rejected() {
+    let content = r#"
+{
+  "name": "@mesh/example-lib",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "library",
+    "capabilities": { "required": ["exec.run"] }
+  }
+}
+"#;
+    let result = ModuleManifest::from_json_str(content);
+    assert!(
+        result.is_err(),
+        "library module must not declare required capabilities"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("library modules must not"),
+        "error message was: {err}"
+    );
+}
+
+#[test]
+fn library_module_with_no_capabilities_is_accepted() {
+    let content = r#"
+{
+  "name": "@mesh/example-lib",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "library"
+  }
+}
+"#;
+    let result = ModuleManifest::from_json_str(content);
+    assert!(
+        result.is_ok(),
+        "library module with no capabilities should be valid"
+    );
+}
+
+#[test]
+fn graph_diagnostics_report_missing_interface_contract_file() {
+    // Use a real temp dir so the module directory exists; the contract file is deliberately absent.
+    let dir = temp_dir("interface-contract-test");
+    let manifest_path = dir.join("module.json");
+    let root = root_with_modules(
+        &[("@mesh/test-interface", ModuleKind::Interface)],
+        &[],
+        None,
+    );
+    let mut iface = loaded_module(
+        "@mesh/test-interface",
+        ModuleKind::Interface,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    iface.manifest.mesh.interface =
+        Some(crate::package::module_manifest::MeshInterfaceDeclaration {
+            name: "mesh.test".into(),
+            version: Some("1.0".into()),
+            file: Some("contract.toml".into()),
+            domain: Some("test".into()),
+            extends: None,
+            relationship: Some(crate::package::module_manifest::InterfaceRelationship::Base),
+            reason: None,
+        });
+    iface.path = manifest_path;
+    let graph = InstalledModuleGraph::from_parts(root, vec![iface]).unwrap();
+    assert!(
+        graph
+            .diagnostics()
+            .iter()
+            .any(|d| d.status == "missing_interface_contract_file"),
+        "expected missing_interface_contract_file diagnostic; got: {:?}",
+        graph.diagnostics()
+    );
+}
+
+#[test]
+fn graph_diagnostics_report_duplicate_keybind_trigger() {
+    let root = root_with_modules(
+        &[
+            ("@mesh/mod-a", ModuleKind::Frontend),
+            ("@mesh/mod-b", ModuleKind::Frontend),
+        ],
+        &[],
+        None,
+    );
+    let mut mod_a = loaded_module(
+        "@mesh/mod-a",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    mod_a.manifest.mesh.keybinds.actions.insert(
+        "toggle".into(),
+        crate::manifest::KeybindAction {
+            scope: crate::manifest::KeybindScope::Surface,
+            trigger: crate::manifest::KeybindTrigger {
+                kind: crate::manifest::KeybindTriggerKind::Shortcut,
+                key: Some("t".into()),
+                modifiers: vec!["ctrl".into()],
+            },
+            ..crate::manifest::KeybindAction::default()
+        },
+    );
+    let mut mod_b = loaded_module(
+        "@mesh/mod-b",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    mod_b.manifest.mesh.keybinds.actions.insert(
+        "open".into(),
+        crate::manifest::KeybindAction {
+            scope: crate::manifest::KeybindScope::Surface,
+            trigger: crate::manifest::KeybindTrigger {
+                kind: crate::manifest::KeybindTriggerKind::Shortcut,
+                key: Some("t".into()),
+                modifiers: vec!["ctrl".into()],
+            },
+            ..crate::manifest::KeybindAction::default()
+        },
+    );
+    let graph = InstalledModuleGraph::from_parts(root, vec![mod_a, mod_b]).unwrap();
+    let dupes: Vec<_> = graph
+        .diagnostics()
+        .iter()
+        .filter(|d| d.status == "duplicate_keybind_trigger")
+        .collect();
+    assert_eq!(
+        dupes.len(),
+        2,
+        "both conflicting actions should get a diagnostic"
+    );
+}
+
+#[test]
+fn extract_t_keys_from_mesh_source_finds_static_keys() {
+    use super::installed_graph::extract_t_keys_from_mesh_source;
+    let src = r#"
+        <text>{t('nav.volume')}</text>
+        <text aria-label="{t("nav.mute")}"/>
+        <text>{t(dynamic_key)}</text>
+    "#;
+    let keys = extract_t_keys_from_mesh_source(src);
+    assert!(
+        keys.contains(&"nav.volume".into()),
+        "single-quote key should be found"
+    );
+    assert!(
+        keys.contains(&"nav.mute".into()),
+        "double-quote key should be found"
+    );
+    assert!(
+        !keys.iter().any(|k: &String| k.contains("dynamic")),
+        "dynamic key must not appear"
+    );
+}
+
+#[test]
+fn extract_t_keys_ignores_dynamic_expressions() {
+    use super::installed_graph::extract_t_keys_from_mesh_source;
+    let src = r#"{t(audio_title_key)}{t("audio.fixed")}"#;
+    let keys = extract_t_keys_from_mesh_source(src);
+    assert_eq!(keys, vec!["audio.fixed".to_string()]);
+}
+
+#[test]
+fn extract_mesh_event_publish_channels_finds_static_channels() {
+    use super::installed_graph::extract_mesh_event_publish_channels;
+
+    let src = r#"
+<script>
+mesh.events.publish("shell.set-theme", { theme_id = "dark" })
+mesh.events.publish('mesh.hyprland.switch_workspace', { id = 1 })
+</script>
+"#;
+    let channels = extract_mesh_event_publish_channels(src);
+    assert_eq!(
+        channels,
+        vec!["mesh.hyprland.switch_workspace", "shell.set-theme"]
+    );
+}
+
+#[test]
+fn extract_mesh_event_publish_channels_ignores_dynamic_channels() {
+    use super::installed_graph::extract_mesh_event_publish_channels;
+
+    let src = r#"
+<script>
+local channel = "mesh." .. domain
+mesh.events.publish(channel, {})
+</script>
+"#;
+    let channels = extract_mesh_event_publish_channels(src);
+    assert!(channels.is_empty());
+}
+
+#[test]
+fn extract_backend_emit_event_names_finds_static_events() {
+    use super::installed_graph::extract_backend_emit_event_names;
+
+    let src = r#"
+function on_poll()
+    mesh.service.emit_event("VolumeChanged", { level = 67 })
+    mesh.service.emit_event('DeviceChanged', { id = "default" })
+end
+"#;
+    let names = extract_backend_emit_event_names(src);
+    assert_eq!(names, vec!["DeviceChanged", "VolumeChanged"]);
+}
+
+#[test]
+fn extract_keybind_subscriptions_from_mesh_source_finds_static_actions() {
+    use super::installed_graph::extract_keybind_subscriptions_from_mesh_source;
+
+    let src = r#"
+<template>
+  <button keybind="{this.keybinds.mute.id}" onkeybind={onMute}></button>
+  <button keybind="open"></button>
+  <button keybind="{dynamic_id}" onkeybind={onDynamic}></button>
+</template>
+"#;
+    let subscriptions = extract_keybind_subscriptions_from_mesh_source(src);
+    assert_eq!(
+        subscriptions,
+        vec![("mute".to_string(), true), ("open".to_string(), false)]
+    );
+}
+
+#[test]
+fn graph_diagnostics_report_undeclared_i18n_key() {
+    let dir = temp_dir("i18n-key-test");
+    let src_dir = dir.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let catalog_dir = dir.join("config").join("i18n");
+    fs::create_dir_all(&catalog_dir).unwrap();
+
+    // Write a .mesh file that uses a key not present in the catalog.
+    fs::write(
+        src_dir.join("main.mesh"),
+        r#"<text>{t('nav.volume')}{t('nav.missing')}</text>"#,
+    )
+    .unwrap();
+    // Write catalog with only one of those keys.
+    fs::write(catalog_dir.join("en.json"), r#"{"nav.volume": "Volume"}"#).unwrap();
+
+    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Frontend)], &[], None);
+    let mut module = loaded_module(
+        "@mesh/test-frontend",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes {
+            i18n: vec![crate::package::module_manifest::I18nContribution {
+                id: "en".into(),
+                locale: "en".into(),
+                path: "config/i18n/en.json".into(),
+            }],
+            ..MeshContributes::default()
+        },
+    );
+    module.manifest.mesh.i18n.default_locale = Some("en".into());
+    module.path = dir.join("module.json");
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![module]).unwrap();
+    let i18n_diags: Vec<_> = graph
+        .diagnostics()
+        .iter()
+        .filter(|d| d.status == "undeclared_i18n_key")
+        .collect();
+    assert_eq!(
+        i18n_diags.len(),
+        1,
+        "exactly one undeclared key; got: {:?}",
+        i18n_diags
+    );
+    assert!(
+        i18n_diags[0].message.contains("nav.missing"),
+        "diagnostic should name the missing key"
+    );
+}
+
+#[test]
+fn graph_diagnostics_report_raw_interface_domain_event_publish() {
+    let dir = temp_dir("raw-interface-event-test");
+    let src_dir = dir.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(
+        src_dir.join("main.mesh"),
+        r#"
+<script>
+mesh.events.publish("shell.set-theme", { theme_id = "dark" })
+mesh.events.publish("mesh.hyprland.switch_workspace", { id = 1 })
+</script>
+"#,
+    )
+    .unwrap();
+
+    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Frontend)], &[], None);
+    let mut module = loaded_module(
+        "@mesh/test-frontend",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    module.path = dir.join("module.json");
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![module]).unwrap();
+
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/test-frontend"
+            && diagnostic.status == "raw_interface_domain_event_publish"
+            && diagnostic
+                .message
+                .contains("mesh.hyprland.switch_workspace")
+    }));
+    assert!(!graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.status == "raw_interface_domain_event_publish"
+            && diagnostic.message.contains("shell.set-theme")
+    }));
+}
+
+#[test]
+fn graph_diagnostics_report_unknown_shell_event_publish() {
+    let dir = temp_dir("unknown-shell-event-test");
+    let src_dir = dir.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(
+        src_dir.join("main.mesh"),
+        r#"
+<script>
+mesh.events.publish("shell.set-theme", { theme_id = "dark" })
+mesh.events.publish("shell.not-declared", {})
+</script>
+"#,
+    )
+    .unwrap();
+
+    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Frontend)], &[], None);
+    let mut module = loaded_module(
+        "@mesh/test-frontend",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    module.path = dir.join("module.json");
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![module]).unwrap();
+
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/test-frontend"
+            && diagnostic.status == "unknown_shell_event_publish"
+            && diagnostic.message.contains("shell.not-declared")
+    }));
+    assert!(!graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.status == "unknown_shell_event_publish"
+            && diagnostic.message.contains("shell.set-theme")
+    }));
+}
+
+#[test]
+fn graph_diagnostics_report_keybind_subscription_contract_gaps() {
+    let dir = temp_dir("keybind-subscription-test");
+    let src_dir = dir.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(
+        src_dir.join("main.mesh"),
+        r#"
+<template>
+  <button keybind="{this.keybinds.mute.id}" onkeybind={onMute}></button>
+  <button keybind="missing" onkeybind={onMissing}></button>
+  <button keybind="mute"></button>
+</template>
+"#,
+    )
+    .unwrap();
+
+    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Frontend)], &[], None);
+    let mut module = loaded_module(
+        "@mesh/test-frontend",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    module.path = dir.join("module.json");
+    module.manifest.mesh.keybinds.actions.insert(
+        "mute".into(),
+        crate::manifest::KeybindAction {
+            trigger: crate::manifest::KeybindTrigger {
+                kind: crate::manifest::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            ..crate::manifest::KeybindAction::default()
+        },
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![module]).unwrap();
+
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/test-frontend"
+            && diagnostic.status == "undeclared_keybind_subscription"
+            && diagnostic.message.contains("missing")
+    }));
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/test-frontend"
+            && diagnostic.status == "keybind_subscription_missing_handler"
+            && diagnostic.message.contains("mute")
+    }));
+}
+
+#[test]
+fn graph_diagnostics_report_backend_undeclared_interface_event_emit() {
+    let interface_dir = temp_dir("interface-event-contract-test");
+    fs::write(
+        interface_dir.join("interface.toml"),
+        r#"
+[[events]]
+name = "DeclaredChanged"
+"#,
+    )
+    .unwrap();
+    let backend_dir = temp_dir("backend-event-emit-test");
+    let backend_src = backend_dir.join("src");
+    fs::create_dir_all(&backend_src).unwrap();
+    fs::write(
+        backend_src.join("main.luau"),
+        r#"
+function on_poll()
+    mesh.service.emit_event("MissingChanged", { value = 1 })
+end
+"#,
+    )
+    .unwrap();
+
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-interface", ModuleKind::Interface),
+            ("@mesh/example-backend", ModuleKind::Backend),
+        ],
+        &[("mesh.example", "@mesh/example-backend")],
+        None,
+    );
+    let mut interface = loaded_module(
+        "@mesh/example-interface",
+        ModuleKind::Interface,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    interface.path = interface_dir.join("module.json");
+    interface.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
+        name: "mesh.example".into(),
+        version: Some("1.0".into()),
+        file: Some("interface.toml".into()),
+        domain: Some("example".into()),
+        extends: None,
+        relationship: Some(InterfaceRelationship::Base),
+        reason: None,
+    });
+    let mut backend = loaded_module(
+        "@mesh/example-backend",
+        ModuleKind::Backend,
+        MeshDependencies {
+            modules: HashMap::from([(
+                "@mesh/example-interface".into(),
+                crate::manifest::DependencySpec::Simple(">=1.0.0".into()),
+            )]),
+            ..MeshDependencies::default()
+        },
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.0".into()),
+            base_module: Some("@mesh/example-interface".into()),
+            provider: Some("example".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+    backend.path = backend_dir.join("module.json");
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![interface, backend]).unwrap();
+
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/example-backend"
+            && diagnostic.status == "undeclared_interface_event_emit"
+            && diagnostic.message.contains("MissingChanged")
+    }));
+}
+
+#[test]
+fn graph_diagnostics_no_undeclared_i18n_key_when_all_present() {
+    let dir = temp_dir("i18n-key-ok-test");
+    let src_dir = dir.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let catalog_dir = dir.join("config").join("i18n");
+    fs::create_dir_all(&catalog_dir).unwrap();
+
+    fs::write(
+        src_dir.join("main.mesh"),
+        r#"<text>{t('nav.volume')}</text>"#,
+    )
+    .unwrap();
+    fs::write(catalog_dir.join("en.json"), r#"{"nav.volume": "Volume"}"#).unwrap();
+
+    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Frontend)], &[], None);
+    let mut module = loaded_module(
+        "@mesh/test-frontend",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes {
+            i18n: vec![crate::package::module_manifest::I18nContribution {
+                id: "en".into(),
+                locale: "en".into(),
+                path: "config/i18n/en.json".into(),
+            }],
+            ..MeshContributes::default()
+        },
+    );
+    module.manifest.mesh.i18n.default_locale = Some("en".into());
+    module.path = dir.join("module.json");
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![module]).unwrap();
+    assert!(
+        !graph
+            .diagnostics()
+            .iter()
+            .any(|d| d.status == "undeclared_i18n_key"),
+        "no undeclared_i18n_key diagnostic when all keys are in catalog"
+    );
+}
+
+#[test]
+fn graph_diagnostics_no_duplicate_keybind_for_unique_triggers() {
+    let root = root_with_modules(
+        &[
+            ("@mesh/mod-a", ModuleKind::Frontend),
+            ("@mesh/mod-b", ModuleKind::Frontend),
+        ],
+        &[],
+        None,
+    );
+    let mut mod_a = loaded_module(
+        "@mesh/mod-a",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    mod_a.manifest.mesh.keybinds.actions.insert(
+        "toggle".into(),
+        crate::manifest::KeybindAction {
+            scope: crate::manifest::KeybindScope::Surface,
+            trigger: crate::manifest::KeybindTrigger {
+                kind: crate::manifest::KeybindTriggerKind::Shortcut,
+                key: Some("t".into()),
+                modifiers: vec!["ctrl".into()],
+            },
+            ..crate::manifest::KeybindAction::default()
+        },
+    );
+    let mut mod_b = loaded_module(
+        "@mesh/mod-b",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    mod_b.manifest.mesh.keybinds.actions.insert(
+        "open".into(),
+        crate::manifest::KeybindAction {
+            scope: crate::manifest::KeybindScope::Surface,
+            trigger: crate::manifest::KeybindTrigger {
+                kind: crate::manifest::KeybindTriggerKind::Shortcut,
+                key: Some("o".into()),
+                modifiers: vec!["ctrl".into()],
+            },
+            ..crate::manifest::KeybindAction::default()
+        },
+    );
+    let graph = InstalledModuleGraph::from_parts(root, vec![mod_a, mod_b]).unwrap();
+    assert!(
+        !graph
+            .diagnostics()
+            .iter()
+            .any(|d| d.status == "duplicate_keybind_trigger"),
+        "different trigger keys must not generate duplicate_keybind_trigger"
+    );
+}
+
+#[test]
+fn graph_diagnostics_report_frontend_surface_contract_gaps() {
+    let root = root_with_modules(&[("@mesh/surface", ModuleKind::Frontend)], &[], None);
+    let mut frontend = loaded_module(
+        "@mesh/surface",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    frontend.manifest.mesh.entrypoints.main = Some("src/main.mesh".into());
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
+
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/surface"
+            && diagnostic.status == "missing_frontend_surface_layout"
+            && diagnostic.message.contains("mesh.surfaceLayout")
+    }));
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/surface"
+            && diagnostic.status == "missing_frontend_accessibility"
+            && diagnostic.message.contains("mesh.accessibility")
+    }));
+}
+
+#[test]
+fn graph_health_marks_active_provider_unavailable_when_required_binary_is_missing() {
+    let root = root_with_modules(
+        &[("@mesh/backend", ModuleKind::Backend)],
+        &[("mesh.example", "@mesh/backend")],
+        None,
+    );
+    let dependencies = MeshDependencies {
+        binaries: vec![crate::manifest::BinaryDependency {
+            name: "this-binary-definitely-does-not-exist-on-any-system-graph-health".into(),
+            version: None,
+            reason: Some("graph health test".into()),
+            optional: false,
+            packages: Default::default(),
+        }],
+        ..MeshDependencies::default()
+    };
+    let mut backend = loaded_module(
+        "@mesh/backend",
+        ModuleKind::Backend,
+        dependencies,
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider: Some("test".into()),
+            label: Some(crate::manifest::LocalizedText::Literal("Test".to_string())),
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+    backend.manifest.mesh.capabilities.required = vec!["exec.test".into()];
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
+
+    assert!(graph.health().iter().any(|record| {
+        record.module_id == "@mesh/backend"
+            && record.interface.as_deref() == Some("mesh.example")
+            && record.provider_id.as_deref() == Some("@mesh/backend")
+            && record.status == "provider_unavailable"
+    }));
+    assert!(graph.health().iter().any(|record| {
+        record.interface.as_deref() == Some("mesh.example")
+            && record.provider_id.as_deref() == Some("@mesh/backend")
+            && record.status == "interface_unavailable"
+    }));
+}
+
+#[test]
+fn graph_health_marks_frontend_required_interface_unavailable_when_active_provider_is_unhealthy() {
+    let root = root_with_modules(
+        &[
+            ("@mesh/frontend", ModuleKind::Frontend),
+            ("@mesh/backend", ModuleKind::Backend),
+        ],
+        &[("mesh.example", "@mesh/backend")],
+        None,
+    );
+    let frontend_dependencies = MeshDependencies {
+        backend: HashMap::from([("mesh.example".into(), ">=1.0".into())]),
+        ..MeshDependencies::default()
+    };
+    let frontend = loaded_module(
+        "@mesh/frontend",
+        ModuleKind::Frontend,
+        frontend_dependencies,
+        vec![],
+        MeshContributes::default(),
+    );
+    let backend_dependencies = MeshDependencies {
+        binaries: vec![crate::manifest::BinaryDependency {
+            name: "this-binary-definitely-does-not-exist-on-any-system-frontend-health".into(),
+            version: None,
+            reason: None,
+            optional: false,
+            packages: Default::default(),
+        }],
+        ..MeshDependencies::default()
+    };
+    let backend = loaded_module(
+        "@mesh/backend",
+        ModuleKind::Backend,
+        backend_dependencies,
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider: Some("test".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend, backend]).unwrap();
+
+    assert!(graph.health().iter().any(|record| {
+        record.module_id == "@mesh/frontend"
+            && record.interface.as_deref() == Some("mesh.example")
+            && record.provider_id.as_deref() == Some("@mesh/backend")
+            && record.status == "required_interface_unavailable"
+    }));
+}
+
+#[test]
+fn graph_diagnostics_report_backend_provider_missing_interface_required_capability() {
+    let dir = temp_dir("interface-capability-backend-test");
+    fs::write(
+        dir.join("interface.toml"),
+        r#"
+[capabilities]
+required = ["service.example.read"]
+"#,
+    )
+    .unwrap();
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-interface", ModuleKind::Interface),
+            ("@mesh/example-backend", ModuleKind::Backend),
+        ],
+        &[("mesh.example", "@mesh/example-backend")],
+        None,
+    );
+    let mut interface = loaded_module(
+        "@mesh/example-interface",
+        ModuleKind::Interface,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    interface.path = dir.join("module.json");
+    interface.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
+        name: "mesh.example".into(),
+        version: Some("1.0".into()),
+        file: Some("interface.toml".into()),
+        domain: Some("example".into()),
+        extends: None,
+        relationship: Some(InterfaceRelationship::Base),
+        reason: None,
+    });
+    let backend = loaded_module(
+        "@mesh/example-backend",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.0".into()),
+            base_module: Some("@mesh/example-interface".into()),
+            provider: Some("example".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![interface, backend]).unwrap();
+
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/example-backend"
+            && diagnostic.status == "missing_provider_required_capability"
+            && diagnostic.message.contains("service.example.read")
+    }));
+}
+
+#[test]
+fn graph_diagnostics_report_frontend_missing_interface_required_capability() {
+    let dir = temp_dir("interface-capability-frontend-test");
+    fs::write(
+        dir.join("interface.toml"),
+        r#"
+[capabilities]
+required = ["service.example.read"]
+"#,
+    )
+    .unwrap();
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-interface", ModuleKind::Interface),
+            ("@mesh/example-backend", ModuleKind::Backend),
+            ("@mesh/example-frontend", ModuleKind::Frontend),
+        ],
+        &[("mesh.example", "@mesh/example-backend")],
+        None,
+    );
+    let mut interface = loaded_module(
+        "@mesh/example-interface",
+        ModuleKind::Interface,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    interface.path = dir.join("module.json");
+    interface.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
+        name: "mesh.example".into(),
+        version: Some("1.0".into()),
+        file: Some("interface.toml".into()),
+        domain: Some("example".into()),
+        extends: None,
+        relationship: Some(InterfaceRelationship::Base),
+        reason: None,
+    });
+    let mut backend = loaded_module(
+        "@mesh/example-backend",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.0".into()),
+            base_module: Some("@mesh/example-interface".into()),
+            provider: Some("example".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+    backend.manifest.mesh.capabilities.required = vec!["service.example.read".into()];
+    let frontend = loaded_module(
+        "@mesh/example-frontend",
+        ModuleKind::Frontend,
+        MeshDependencies {
+            backend: HashMap::from([("mesh.example".into(), ">=1.0".into())]),
+            ..MeshDependencies::default()
+        },
+        vec![],
+        MeshContributes::default(),
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![interface, backend, frontend]).unwrap();
+
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/example-frontend"
+            && diagnostic.status == "missing_interface_required_capability"
+            && diagnostic.message.contains("service.example.read")
+    }));
+}
+
+#[test]
+fn graph_diagnostics_report_backend_provider_missing_base_module_dependency() {
+    let root = root_with_modules(
+        &[("@mesh/example-backend", ModuleKind::Backend)],
+        &[("mesh.example", "@mesh/example-backend")],
+        None,
+    );
+    let backend = loaded_module(
+        "@mesh/example-backend",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.0".into()),
+            base_module: Some("@mesh/example-interface".into()),
+            provider: Some("example".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
+
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/example-backend"
+            && diagnostic.status == "missing_provider_interface_module_dependency"
+            && diagnostic.message.contains("@mesh/example-interface")
+            && diagnostic.message.contains("mesh.uses.modules")
+    }));
+}
+
+#[test]
+fn graph_diagnostics_accept_backend_provider_declared_base_module_dependency() {
+    let root = root_with_modules(
+        &[("@mesh/example-backend", ModuleKind::Backend)],
+        &[("mesh.example", "@mesh/example-backend")],
+        None,
+    );
+    let backend = loaded_module(
+        "@mesh/example-backend",
+        ModuleKind::Backend,
+        MeshDependencies {
+            modules: HashMap::from([(
+                "@mesh/example-interface".into(),
+                crate::manifest::DependencySpec::Simple(">=1.0.0".into()),
+            )]),
+            ..MeshDependencies::default()
+        },
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.0".into()),
+            base_module: Some("@mesh/example-interface".into()),
+            provider: Some("example".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
+
+    assert!(!graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/example-backend"
+            && diagnostic.status == "missing_provider_interface_module_dependency"
+    }));
 }

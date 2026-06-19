@@ -117,6 +117,7 @@ impl Shell {
 
         DebugSnapshot {
             modules,
+            module_graph: self.module_graph_entries(),
             module_instances,
             interfaces,
             backend_runtimes,
@@ -160,6 +161,7 @@ fn debug_service_payload(
         "profiling_session_id": debug.profiling_session_id,
         "active_view": debug.active_view.label(),
         "modules": snapshot.modules.iter().map(module_entry_json).collect::<Vec<_>>(),
+        "module_graph": snapshot.module_graph.iter().map(module_graph_entry_json).collect::<Vec<_>>(),
         "module_instances": snapshot.module_instances.iter().map(module_object_entry_json).collect::<Vec<_>>(),
         "interfaces": snapshot.interfaces.iter().map(interface_entry_json).collect::<Vec<_>>(),
         "backend_runtimes": snapshot.backend_runtimes.iter().map(backend_runtime_entry_json).collect::<Vec<_>>(),
@@ -173,6 +175,188 @@ fn debug_service_payload(
 }
 
 impl Shell {
+    fn module_graph_entries(&self) -> Vec<mesh_core_debug::ModuleGraphEntry> {
+        let Some(graph) = self.installed_module_graph.as_ref() else {
+            return Vec::new();
+        };
+
+        let mut entries = graph
+            .modules()
+            .into_iter()
+            .map(|module| {
+                let requirements = graph.requirements_for_frontend(&module.id);
+                let mut diagnostics = graph
+                    .diagnostics()
+                    .iter()
+                    .filter(|diagnostic| diagnostic.module_id == module.id)
+                    .map(|diagnostic| diagnostic.status.clone())
+                    .collect::<Vec<_>>();
+                diagnostics.sort();
+                diagnostics.dedup();
+
+                let mut health = graph
+                    .health()
+                    .iter()
+                    .filter(|record| record.module_id == module.id)
+                    .map(|record| record.status.clone())
+                    .collect::<Vec<_>>();
+                health.sort();
+                health.dedup();
+
+                let mut provides_interfaces = Vec::new();
+                let mut provides_interface_labels = Vec::new();
+                if module.kind == ModuleKind::Backend {
+                    let providers: Vec<_> = graph
+                        .backend_provider_contributions()
+                        .into_iter()
+                        .filter(|provider| provider.module_id == module.id)
+                        .collect();
+                    for provider in &providers {
+                        provides_interfaces.push(provider.interface.clone());
+                        provides_interface_labels.push(provider.label.as_ref().map(|label| {
+                            resolve_debug_manifest_text(&self.locale, &module.id, label).text
+                        }));
+                    }
+                }
+                if let Some(interface) = graph
+                    .declared_interfaces()
+                    .into_iter()
+                    .find(|interface| interface.module_id == module.id)
+                {
+                    provides_interfaces.push(interface.name.clone());
+                    provides_interface_labels.push(None);
+                }
+                {
+                    let mut pairs: Vec<(String, Option<String>)> = provides_interfaces
+                        .into_iter()
+                        .zip(provides_interface_labels)
+                        .collect();
+                    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                    pairs.dedup_by(|a, b| a.0 == b.0);
+                    provides_interfaces = pairs.iter().map(|(i, _)| i.clone()).collect();
+                    provides_interface_labels = pairs.into_iter().map(|(_, l)| l).collect();
+                }
+
+                let provides_themes: Vec<String> = graph
+                    .contributed_themes()
+                    .iter()
+                    .filter(|t| t.module_id == module.id)
+                    .map(|t| t.id.clone())
+                    .collect();
+                let provides_theme_labels: Vec<Option<String>> = graph
+                    .contributed_themes()
+                    .iter()
+                    .filter(|t| t.module_id == module.id)
+                    .map(|t| {
+                        t.label.as_ref().map(|label| {
+                            resolve_debug_manifest_text(&self.locale, &module.id, label).text
+                        })
+                    })
+                    .collect();
+
+                let provides_settings = graph
+                    .settings_schemas()
+                    .iter()
+                    .filter(|settings| settings.module_id == module.id)
+                    .map(|settings| settings.namespace.clone())
+                    .collect::<Vec<_>>();
+                let provides_i18n = graph
+                    .contributed_i18n()
+                    .iter()
+                    .filter(|i18n| i18n.module_id == module.id)
+                    .map(|i18n| format!("{}:{}", i18n.locale, i18n.path))
+                    .collect::<Vec<_>>();
+                let required_icons = graph
+                    .icon_requirements()
+                    .iter()
+                    .filter(|icon| icon.module_id == module.id && icon.required)
+                    .map(|icon| icon.name.clone())
+                    .collect::<Vec<_>>();
+                let optional_icons = graph
+                    .icon_requirements()
+                    .iter()
+                    .filter(|icon| icon.module_id == module.id && !icon.required)
+                    .map(|icon| icon.name.clone())
+                    .collect::<Vec<_>>();
+                let frontend_surface = graph
+                    .frontend_surfaces()
+                    .iter()
+                    .find(|surface| surface.module_id == module.id);
+                let surface_layout_label = frontend_surface.and_then(|surface| {
+                    graph
+                        .contributed_layouts()
+                        .iter()
+                        .find(|layout| layout.module_id == module.id && layout.path == surface.path)
+                        .and_then(|layout| layout.label.as_ref())
+                        .map(|label| resolve_debug_manifest_text(&self.locale, &module.id, label))
+                });
+
+                mesh_core_debug::ModuleGraphEntry {
+                    module_id: module.id.clone(),
+                    kind: format!("{:?}", module.kind).to_lowercase(),
+                    enabled: module.enabled,
+                    path: module.path.clone(),
+                    uses_modules: requirements
+                        .map(|requirements| sorted_keys(&requirements.modules))
+                        .unwrap_or_default(),
+                    uses_interfaces: requirements
+                        .map(|requirements| sorted_keys(&requirements.backend))
+                        .unwrap_or_default(),
+                    uses_optional_interfaces: requirements
+                        .map(|requirements| sorted_keys(&requirements.optional_backend))
+                        .unwrap_or_default(),
+                    uses_icon_packs: requirements
+                        .map(|requirements| sorted_keys(&requirements.icons))
+                        .unwrap_or_default(),
+                    uses_i18n_packs: requirements
+                        .map(|requirements| sorted_keys(&requirements.i18n))
+                        .unwrap_or_default(),
+                    uses_theme_packs: requirements
+                        .map(|requirements| sorted_keys(&requirements.themes))
+                        .unwrap_or_default(),
+                    uses_font_packs: requirements
+                        .map(|requirements| sorted_keys(&requirements.fonts))
+                        .unwrap_or_default(),
+                    capabilities: module.manifest.mesh.capabilities.required.clone(),
+                    optional_capabilities: module.manifest.mesh.capabilities.optional.clone(),
+                    surface_entrypoint: frontend_surface.map(|surface| surface.path.clone()),
+                    surface_settings_namespace: frontend_surface
+                        .and_then(|surface| surface.settings_namespace.clone()),
+                    surface_accessibility_role: frontend_surface
+                        .and_then(|surface| surface.accessibility.as_ref())
+                        .and_then(|accessibility| accessibility.role.clone()),
+                    surface_accessibility_label: frontend_surface
+                        .and_then(|surface| surface.accessibility.as_ref())
+                        .and_then(|accessibility| accessibility.label.clone()),
+                    surface_size_policy: frontend_surface
+                        .and_then(|surface| surface.surface_layout.as_ref())
+                        .and_then(|layout| layout.size_policy.clone()),
+                    surface_layout_label: surface_layout_label
+                        .as_ref()
+                        .map(|resolved| resolved.text.clone()),
+                    surface_layout_label_key: surface_layout_label
+                        .as_ref()
+                        .and_then(|resolved| resolved.key.clone()),
+                    surface_layout_label_fallback: surface_layout_label
+                        .as_ref()
+                        .and_then(|resolved| resolved.fallback.clone()),
+                    provides_interfaces,
+                    provides_interface_labels,
+                    provides_settings,
+                    provides_i18n,
+                    provides_themes,
+                    provides_theme_labels,
+                    required_icons,
+                    optional_icons,
+                    diagnostics,
+                    health,
+                }
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.module_id.cmp(&right.module_id));
+        entries
+    }
+
     fn module_object_entries(&self) -> Vec<mesh_core_debug::ModuleObjectEntry> {
         let mut entries = Vec::new();
 
@@ -796,6 +980,50 @@ fn module_entry_json(entry: &ModuleEntry) -> serde_json::Value {
     })
 }
 
+fn module_graph_entry_json(entry: &mesh_core_debug::ModuleGraphEntry) -> serde_json::Value {
+    serde_json::json!({
+        "module_id": entry.module_id,
+        "kind": entry.kind,
+        "enabled": entry.enabled,
+        "path": entry.path,
+        "uses": {
+            "modules": entry.uses_modules,
+            "interfaces": entry.uses_interfaces,
+            "optional_interfaces": entry.uses_optional_interfaces,
+            "icon_packs": entry.uses_icon_packs,
+            "i18n_packs": entry.uses_i18n_packs,
+            "theme_packs": entry.uses_theme_packs,
+            "font_packs": entry.uses_font_packs,
+            "capabilities": entry.capabilities,
+            "optional_capabilities": entry.optional_capabilities,
+        },
+        "provides": {
+            "interfaces": entry.provides_interfaces.iter().zip(entry.provides_interface_labels.iter())
+                .map(|(iface, label)| serde_json::json!({ "interface": iface, "label": label }))
+                .collect::<Vec<_>>(),
+            "themes": entry.provides_themes.iter().zip(entry.provides_theme_labels.iter())
+                .map(|(id, label)| serde_json::json!({ "id": id, "label": label }))
+                .collect::<Vec<_>>(),
+            "settings": entry.provides_settings,
+            "i18n": entry.provides_i18n,
+            "required_icons": entry.required_icons,
+            "optional_icons": entry.optional_icons,
+        },
+        "surface": entry.surface_entrypoint.as_ref().map(|entrypoint| serde_json::json!({
+            "entrypoint": entrypoint,
+            "settings_namespace": entry.surface_settings_namespace.as_ref(),
+            "accessibility_role": entry.surface_accessibility_role.as_ref(),
+            "accessibility_label": entry.surface_accessibility_label.as_ref(),
+            "size_policy": entry.surface_size_policy.as_ref(),
+            "layout_label": entry.surface_layout_label.as_ref(),
+            "layout_label_key": entry.surface_layout_label_key.as_ref(),
+            "layout_label_fallback": entry.surface_layout_label_fallback.as_ref(),
+        })),
+        "diagnostics": entry.diagnostics,
+        "health": entry.health,
+    })
+}
+
 fn module_object_entry_json(entry: &mesh_core_debug::ModuleObjectEntry) -> serde_json::Value {
     serde_json::json!({
         "instance_id": entry.instance_id,
@@ -807,6 +1035,42 @@ fn module_object_entry_json(entry: &mesh_core_debug::ModuleObjectEntry) -> serde
         "active": entry.active,
         "capabilities": entry.capabilities,
     })
+}
+
+fn sorted_keys<T>(map: &std::collections::HashMap<String, T>) -> Vec<String> {
+    let mut keys = map.keys().cloned().collect::<Vec<_>>();
+    keys.sort();
+    keys
+}
+
+struct ResolvedDebugManifestText {
+    text: String,
+    key: Option<String>,
+    fallback: Option<String>,
+}
+
+fn resolve_debug_manifest_text(
+    locale: &mesh_core_locale::LocaleEngine,
+    module_id: &str,
+    text: &mesh_core_module::LocalizedText,
+) -> ResolvedDebugManifestText {
+    match text {
+        mesh_core_module::LocalizedText::Literal(value) => ResolvedDebugManifestText {
+            text: value.clone(),
+            key: None,
+            fallback: None,
+        },
+        mesh_core_module::LocalizedText::Translation { key, fallback } => {
+            ResolvedDebugManifestText {
+                text: locale
+                    .translate_for_module(key, module_id)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| fallback.clone()),
+                key: Some(key.clone()),
+                fallback: Some(fallback.clone()),
+            }
+        }
+    }
 }
 
 fn interface_entry_json(entry: &InterfaceEntry) -> serde_json::Value {

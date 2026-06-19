@@ -19,11 +19,12 @@ pub struct ModuleManifest {
 
 impl ModuleManifest {
     pub fn from_json_str(input: &str) -> Result<Self, ModuleManifestError> {
-        let parsed: Self =
+        let mut parsed: Self =
             serde_json::from_str(input).map_err(|source| ModuleManifestError::Json {
                 path: PathBuf::from("<inline>"),
                 source,
             })?;
+        parsed.normalize();
         parsed.validate()?;
         Ok(parsed)
     }
@@ -33,13 +34,18 @@ impl ModuleManifest {
             path: path.to_path_buf(),
             source,
         })?;
-        let parsed: Self =
+        let mut parsed: Self =
             serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
                 path: path.to_path_buf(),
                 source,
             })?;
+        parsed.normalize();
         parsed.validate()?;
         Ok(parsed)
+    }
+
+    pub fn normalize(&mut self) {
+        self.mesh.normalize();
     }
 
     pub fn validate(&self) -> Result<(), ModuleManifestError> {
@@ -66,7 +72,8 @@ impl ModuleManifest {
     }
 
     pub fn into_runtime_manifest(self) -> Manifest {
-        let mesh = self.mesh;
+        let mut mesh = self.mesh;
+        mesh.normalize();
         let settings =
             mesh.contributes
                 .settings
@@ -112,7 +119,12 @@ impl ModuleManifest {
                 interface: provided.interface,
                 version: provided.version,
                 base_module: provided.base_module,
-                backend_name: provided.label.or(provided.provider),
+                backend_name: provided
+                    .label
+                    .as_ref()
+                    .map(manifest::LocalizedText::fallback_text)
+                    .map(str::to_string)
+                    .or(provided.provider),
                 priority: provided.priority,
                 optional_capabilities: Vec::new(),
             })
@@ -169,141 +181,6 @@ impl ModuleManifest {
             surface_layout: mesh.surface_layout,
         }
     }
-
-    pub(crate) fn from_legacy_manifest(manifest: Manifest) -> Self {
-        let package = manifest.package.clone();
-        let mut contributes = MeshContributes::default();
-
-        if package.module_type == ModuleType::Surface || package.module_type == ModuleType::Widget {
-            if let Some(main) = manifest.entrypoints.main.clone() {
-                contributes.layout.push(LayoutContribution {
-                    id: "main".into(),
-                    entrypoint: main,
-                    label: package.name.clone().map(manifest::LocalizedText::Literal),
-                });
-            }
-        }
-        if let Some(settings) = &manifest.settings {
-            contributes.settings = Some(SettingsContribution {
-                namespace: settings
-                    .namespace
-                    .clone()
-                    .unwrap_or_else(|| package.id.clone()),
-                schema: settings.inline_schema.clone().unwrap_or_default(),
-            });
-        }
-        if let Some(theme) = &manifest.theme {
-            let mut modes = theme.modes.clone();
-            if modes.is_empty() {
-                if let Some(base) = &theme.base {
-                    modes.insert("default".into(), base.clone());
-                }
-            }
-            if !modes.is_empty() {
-                contributes.themes.push(ThemeContribution {
-                    id: package.id.clone(),
-                    label: package.name.clone().unwrap_or_else(|| package.id.clone()),
-                    modes,
-                    default_mode: theme.default_mode.clone(),
-                });
-            }
-        }
-        if let Some(i18n) = &manifest.i18n {
-            contributes.i18n.push(I18nContribution {
-                id: package.id.clone(),
-                locale: i18n.default_locale.clone(),
-                path: i18n.bundled.clone(),
-            });
-        }
-        if let Some(assets) = &manifest.assets {
-            if let Some(icons) = &assets.icons {
-                contributes.icons.push(PathContribution {
-                    id: package.id.clone(),
-                    path: icons.path().to_string(),
-                    label: package.name.clone(),
-                });
-            }
-        }
-        for font in &manifest.dependencies.fonts {
-            contributes.fonts.push(PathContribution {
-                id: font.family.clone(),
-                path: font.family.clone(),
-                label: None,
-            });
-        }
-
-        let provides = manifest
-            .declared_provides()
-            .into_iter()
-            .map(MeshProvidesDeclaration::from)
-            .collect();
-        let interface = manifest
-            .interface
-            .as_ref()
-            .map(|interface| MeshInterfaceDeclaration {
-                name: interface.name.clone(),
-                version: Some(interface.version.clone()),
-                file: Some(interface.file.clone()),
-                domain: interface.name.split('.').nth(1).map(str::to_string),
-                extends: interface.extends.clone(),
-                relationship: interface
-                    .extends
-                    .as_ref()
-                    .map(|_| InterfaceRelationship::Extension),
-                reason: None,
-            });
-        let dependencies = MeshDependencies::from_manifest_dependencies(manifest.dependencies);
-        let icons = manifest.icons.clone();
-        let icon_pack = manifest.icon_pack.clone();
-        let icon_requirements = manifest.icon_requirements.clone();
-        let keybinds = manifest.keybinds.clone();
-        let accessibility = manifest.accessibility.clone();
-        let surface_layout = manifest.surface_layout.clone();
-
-        Self {
-            name: package.id,
-            version: package.version,
-            description: package.description,
-            license: package.license,
-            repository: package.repository.map(|url| ModuleRepository {
-                repository_type: "git".into(),
-                url,
-            }),
-            mesh: MeshModuleSection {
-                api_version: package.api_version,
-                kind: ModuleKind::from(package.module_type),
-                capabilities: manifest.capabilities,
-                i18n: MeshI18nSupport {
-                    default_locale: manifest
-                        .i18n
-                        .as_ref()
-                        .map(|i18n| i18n.default_locale.clone()),
-                    supported_locales: manifest
-                        .i18n
-                        .as_ref()
-                        .map(|i18n| vec![i18n.default_locale.clone()])
-                        .unwrap_or_default(),
-                },
-                entrypoints: MeshEntrypoints {
-                    main: manifest.entrypoints.main,
-                    settings_ui: manifest.entrypoints.settings_ui,
-                },
-                keybinds,
-                dependencies,
-                provides,
-                implements: Vec::new(),
-                interface,
-                theme: None,
-                contributes,
-                icons,
-                icon_pack,
-                icon_requirements,
-                accessibility,
-                surface_layout,
-                experimental: serde_json::Value::Null,
-            },
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -311,6 +188,10 @@ pub struct MeshModuleSection {
     #[serde(rename = "apiVersion")]
     pub api_version: String,
     pub kind: ModuleKind,
+    #[serde(default)]
+    pub entry: Option<String>,
+    #[serde(default)]
+    pub uses: MeshUses,
     #[serde(default)]
     pub capabilities: CapabilitiesSection,
     #[serde(default)]
@@ -322,7 +203,7 @@ pub struct MeshModuleSection {
     #[serde(default)]
     pub dependencies: MeshDependencies,
     #[serde(default)]
-    pub provides: Vec<MeshProvidesDeclaration>,
+    pub provides: MeshProvides,
     #[serde(default)]
     pub implements: Vec<MeshProvidesDeclaration>,
     #[serde(default)]
@@ -346,6 +227,44 @@ pub struct MeshModuleSection {
 }
 
 impl MeshModuleSection {
+    fn normalize(&mut self) {
+        if let Some(entry) = &self.entry
+            && self.entrypoints.main.is_none()
+        {
+            self.entrypoints.main = Some(entry.clone());
+        }
+        // Auto-generate the default layout contribution for frontend modules that
+        // set `entry` but omit an explicit `provides.layout` / `contributes.layout`.
+        // This lets simple frontends declare only `entry` rather than also repeating
+        // the same path under `provides.layout`.
+        if self.kind == ModuleKind::Frontend
+            && self.contributes.layout.is_empty()
+            && self.provides.layout.is_empty()
+            && let Some(entry) = &self.entry
+        {
+            self.provides.layout.push(LayoutContribution {
+                id: "main".into(),
+                entrypoint: entry.clone(),
+                label: None,
+            });
+        }
+        self.dependencies.merge_uses(&self.uses);
+        merge_unique(&mut self.capabilities.required, &self.uses.capabilities);
+        merge_unique(
+            &mut self.capabilities.optional,
+            &self.uses.optional_capabilities,
+        );
+        merge_unique(
+            &mut self.icon_requirements.required,
+            &self.uses.icon_requirements.required,
+        );
+        merge_unique(
+            &mut self.icon_requirements.optional,
+            &self.uses.icon_requirements.optional,
+        );
+        self.contributes.merge_provides(&self.provides);
+    }
+
     fn validate(&self) -> Result<(), ModuleManifestError> {
         if self.api_version.trim().is_empty() {
             return Err(ModuleManifestError::Validation(
@@ -358,6 +277,7 @@ impl MeshModuleSection {
                 "interface modules must declare mesh.interface".into(),
             ));
         }
+        self.uses.validate()?;
         if let Some(interface) = &self.interface {
             interface.validate()?;
             if self.kind == ModuleKind::Interface {
@@ -373,6 +293,11 @@ impl MeshModuleSection {
                 }
             }
         }
+        if self.kind == ModuleKind::Library && !self.capabilities.required.is_empty() {
+            return Err(ModuleManifestError::Validation(
+                "library modules must not declare mesh.capabilities.required; consuming modules request capabilities instead".into(),
+            ));
+        }
         if let Some(theme) = &self.theme {
             if self.kind != ModuleKind::Frontend {
                 return Err(ModuleManifestError::Validation(
@@ -381,17 +306,38 @@ impl MeshModuleSection {
             }
             theme.validate().map_err(ModuleManifestError::Validation)?;
         }
+        if self.icon_pack.is_some() && self.kind != ModuleKind::IconPack {
+            return Err(ModuleManifestError::Validation(
+                "mesh.icon_pack is only supported for icon-pack modules".into(),
+            ));
+        }
+        if !self.contributes.icons.is_empty() && self.kind != ModuleKind::IconPack {
+            return Err(ModuleManifestError::Validation(
+                "mesh.provides.icons is only supported for icon-pack modules".into(),
+            ));
+        }
+        if !self.contributes.fonts.is_empty() && self.kind != ModuleKind::FontPack {
+            return Err(ModuleManifestError::Validation(
+                "mesh.provides.fonts is only supported for font-pack modules".into(),
+            ));
+        }
+        if !self.contributes.themes.is_empty() && self.kind != ModuleKind::Theme {
+            return Err(ModuleManifestError::Validation(
+                "mesh.provides.themes is only supported for theme modules".into(),
+            ));
+        }
         self.keybinds
             .validate()
             .map_err(ModuleManifestError::Validation)?;
         for provided in self.implementations() {
             provided.validate()?;
         }
+        self.provides.validate()?;
         self.contributes.validate()
     }
 
     pub fn implementations(&self) -> impl Iterator<Item = &MeshProvidesDeclaration> {
-        self.provides.iter().chain(self.implements.iter())
+        self.implements.iter()
     }
 
     fn localized_text_diagnostics(
@@ -426,6 +372,81 @@ impl MeshModuleSection {
                     ),
                 ));
             }
+        }
+        for (index, contribution) in self.contributes.layout.iter().enumerate() {
+            let Some(value) = contribution.label.as_ref() else {
+                continue;
+            };
+            if !value.is_suspicious_raw_i18n_key() {
+                continue;
+            }
+
+            let field_path = format!("mesh.provides.layout[{index}].label");
+            let key = value.fallback_text();
+            diagnostics.push(ModuleManifestDiagnostic::warning(
+                path,
+                Some(module_id.to_string()),
+                Some(field_path.clone()),
+                format!("{field_path} looks like an i18n key but is a raw literal string"),
+                format!("use {{ \"t\": \"{key}\", \"fallback\": \"...\" }} to localize this field"),
+            ));
+        }
+        for (index, contribution) in self.contributes.themes.iter().enumerate() {
+            let Some(value) = contribution.label.as_ref() else {
+                continue;
+            };
+            if !value.is_suspicious_raw_i18n_key() {
+                continue;
+            }
+            let field_path = format!("mesh.provides.themes[{index}].label");
+            let key = value.fallback_text();
+            diagnostics.push(ModuleManifestDiagnostic::warning(
+                path,
+                Some(module_id.to_string()),
+                Some(field_path.clone()),
+                format!("{field_path} looks like an i18n key but is a raw literal string"),
+                format!("use {{ \"t\": \"{key}\", \"fallback\": \"...\" }} to localize this field"),
+            ));
+        }
+        for (index, contribution) in self
+            .contributes
+            .icons
+            .iter()
+            .chain(self.contributes.fonts.iter())
+            .enumerate()
+        {
+            let Some(value) = contribution.label.as_ref() else {
+                continue;
+            };
+            if !value.is_suspicious_raw_i18n_key() {
+                continue;
+            }
+            let field_path = format!("mesh.provides.resources[{index}].label");
+            let key = value.fallback_text();
+            diagnostics.push(ModuleManifestDiagnostic::warning(
+                path,
+                Some(module_id.to_string()),
+                Some(field_path.clone()),
+                format!("{field_path} looks like an i18n key but is a raw literal string"),
+                format!("use {{ \"t\": \"{key}\", \"fallback\": \"...\" }} to localize this field"),
+            ));
+        }
+        for provided in self.implements.iter() {
+            let Some(value) = provided.label.as_ref() else {
+                continue;
+            };
+            if !value.is_suspicious_raw_i18n_key() {
+                continue;
+            }
+            let field_path = format!("mesh.implements[{}].label", provided.interface);
+            let key = value.fallback_text();
+            diagnostics.push(ModuleManifestDiagnostic::warning(
+                path,
+                Some(module_id.to_string()),
+                Some(field_path.clone()),
+                format!("{field_path} looks like an i18n key but is a raw literal string"),
+                format!("use {{ \"t\": \"{key}\", \"fallback\": \"...\" }} to localize this field"),
+            ));
         }
 
         diagnostics
@@ -538,11 +559,139 @@ pub struct MeshEntrypoints {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MeshUses {
+    #[serde(default)]
+    pub modules: HashMap<String, DependencySpec>,
+    #[serde(default)]
+    pub interfaces: HashMap<String, String>,
+    #[serde(default, rename = "optionalInterfaces", alias = "optional_interfaces")]
+    pub optional_interfaces: HashMap<String, String>,
+    #[serde(default)]
+    pub resources: MeshResourceUses,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(
+        default,
+        rename = "optionalCapabilities",
+        alias = "optional_capabilities"
+    )]
+    pub optional_capabilities: Vec<String>,
+    #[serde(default)]
+    pub binaries: Vec<manifest::BinaryDependency>,
+    #[serde(default, rename = "iconRequirements", alias = "icon_requirements")]
+    pub icon_requirements: manifest::IconRequirementsSection,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MeshResourceUses {
+    #[serde(default)]
+    pub icons: Vec<String>,
+    #[serde(default)]
+    pub fonts: Vec<String>,
+    #[serde(default)]
+    pub i18n: Vec<String>,
+    #[serde(default)]
+    pub themes: Vec<String>,
+}
+
+impl MeshUses {
+    fn validate(&self) -> Result<(), ModuleManifestError> {
+        for module_id in self.modules.keys() {
+            validate_module_dependency_id("mesh.uses.modules", module_id)?;
+        }
+        for module_id in self
+            .resources
+            .icons
+            .iter()
+            .chain(self.resources.fonts.iter())
+            .chain(self.resources.i18n.iter())
+            .chain(self.resources.themes.iter())
+        {
+            validate_module_dependency_id("mesh.uses.resources", module_id)?;
+        }
+        for interface in self
+            .interfaces
+            .keys()
+            .chain(self.optional_interfaces.keys())
+        {
+            validate_interface_dependency_id(interface)?;
+        }
+        for capability in self
+            .capabilities
+            .iter()
+            .chain(self.optional_capabilities.iter())
+        {
+            validate_capability_id(capability)?;
+        }
+        Ok(())
+    }
+}
+
+fn validate_module_dependency_id(field: &str, value: &str) -> Result<(), ModuleManifestError> {
+    if value.trim().is_empty() {
+        return Err(ModuleManifestError::Validation(format!(
+            "{field} entries cannot be empty"
+        )));
+    }
+    if !value.starts_with('@') {
+        return Err(ModuleManifestError::Validation(format!(
+            "{field} entry '{value}' must be a module id such as @scope/name; interfaces belong in mesh.uses.interfaces and host powers belong in mesh.uses.capabilities"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_interface_dependency_id(value: &str) -> Result<(), ModuleManifestError> {
+    if value.trim().is_empty() {
+        return Err(ModuleManifestError::Validation(
+            "mesh.uses.interfaces entries cannot be empty".into(),
+        ));
+    }
+    if value.starts_with('@') {
+        return Err(ModuleManifestError::Validation(format!(
+            "mesh.uses.interfaces entry '{value}' must be an interface contract name; module ids belong in mesh.uses.modules"
+        )));
+    }
+    if !value.contains('.') {
+        return Err(ModuleManifestError::Validation(format!(
+            "mesh.uses.interfaces entry '{value}' must use a dotted interface name such as mesh.audio"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_capability_id(value: &str) -> Result<(), ModuleManifestError> {
+    if value.trim().is_empty() {
+        return Err(ModuleManifestError::Validation(
+            "mesh.uses.capabilities entries cannot be empty".into(),
+        ));
+    }
+    if value.starts_with('@') {
+        return Err(ModuleManifestError::Validation(format!(
+            "mesh.uses.capabilities entry '{value}' looks like a module id; dependencies belong in mesh.uses.modules"
+        )));
+    }
+    if value.starts_with("mesh.") {
+        return Err(ModuleManifestError::Validation(format!(
+            "mesh.uses.capabilities entry '{value}' looks like an interface contract; interfaces belong in mesh.uses.interfaces"
+        )));
+    }
+    if !value.contains('.') {
+        return Err(ModuleManifestError::Validation(format!(
+            "mesh.uses.capabilities entry '{value}' must use a dotted capability name such as service.audio.read"
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MeshDependencies {
     #[serde(default)]
     pub modules: HashMap<String, DependencySpec>,
     #[serde(default)]
     pub backend: HashMap<String, String>,
+    #[serde(default)]
+    pub optional_backend: HashMap<String, String>,
     #[serde(default)]
     pub icons: HashMap<String, String>,
     #[serde(default)]
@@ -556,41 +705,6 @@ pub struct MeshDependencies {
 }
 
 impl MeshDependencies {
-    fn from_manifest_dependencies(dependencies: crate::manifest::DependenciesSection) -> Self {
-        let icons = dependencies
-            .icon_packs
-            .required
-            .into_iter()
-            .map(|id| (id, "*".into()))
-            .collect();
-        let i18n = dependencies
-            .language_packs
-            .required
-            .into_iter()
-            .map(|id| (id, "*".into()))
-            .collect();
-        let themes = dependencies
-            .themes
-            .required
-            .into_iter()
-            .map(|id| (id, "*".into()))
-            .collect();
-        let fonts = dependencies
-            .fonts
-            .into_iter()
-            .map(|font| (font.family, "*".into()))
-            .collect();
-        Self {
-            modules: dependencies.modules,
-            backend: HashMap::new(),
-            icons,
-            fonts,
-            i18n,
-            themes,
-            binaries: dependencies.binaries,
-        }
-    }
-
     fn into_manifest_dependencies(self) -> manifest::DependenciesSection {
         manifest::DependenciesSection {
             modules: self.modules,
@@ -620,6 +734,45 @@ impl MeshDependencies {
                 .collect(),
         }
     }
+
+    fn merge_uses(&mut self, uses: &MeshUses) {
+        for (id, spec) in &uses.modules {
+            self.modules
+                .entry(id.clone())
+                .or_insert_with(|| spec.clone());
+        }
+        for (interface, spec) in &uses.interfaces {
+            self.backend
+                .entry(interface.clone())
+                .or_insert_with(|| spec.clone());
+        }
+        for (interface, spec) in &uses.optional_interfaces {
+            self.optional_backend
+                .entry(interface.clone())
+                .or_insert_with(|| spec.clone());
+        }
+        for icon_pack in &uses.resources.icons {
+            self.icons
+                .entry(icon_pack.clone())
+                .or_insert_with(|| "*".into());
+        }
+        for font_pack in &uses.resources.fonts {
+            self.fonts
+                .entry(font_pack.clone())
+                .or_insert_with(|| "*".into());
+        }
+        for language_pack in &uses.resources.i18n {
+            self.i18n
+                .entry(language_pack.clone())
+                .or_insert_with(|| "*".into());
+        }
+        for theme in &uses.resources.themes {
+            self.themes
+                .entry(theme.clone())
+                .or_insert_with(|| "*".into());
+        }
+        self.binaries.extend(uses.binaries.iter().cloned());
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -632,7 +785,7 @@ pub struct MeshProvidesDeclaration {
     #[serde(default)]
     pub provider: Option<String>,
     #[serde(default)]
-    pub label: Option<String>,
+    pub label: Option<manifest::LocalizedText>,
     #[serde(default)]
     pub priority: u32,
 }
@@ -750,9 +903,44 @@ impl From<crate::manifest::ProvidedInterface> for MeshProvidesDeclaration {
             version: provided.version,
             base_module: provided.base_module,
             provider: provided.backend_name.clone(),
-            label: provided.backend_name,
+            label: provided
+                .backend_name
+                .map(crate::manifest::LocalizedText::Literal),
             priority: provided.priority,
         }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MeshProvides {
+    #[serde(default)]
+    pub layout: Vec<LayoutContribution>,
+    #[serde(default)]
+    pub settings: Option<SettingsContribution>,
+    #[serde(default)]
+    pub themes: Vec<ThemeContribution>,
+    #[serde(default)]
+    pub icons: Vec<PathContribution>,
+    #[serde(default)]
+    pub fonts: Vec<PathContribution>,
+    #[serde(default)]
+    pub i18n: Vec<I18nContribution>,
+    #[serde(default)]
+    pub libraries: Vec<LibraryContribution>,
+}
+
+impl MeshProvides {
+    fn validate(&self) -> Result<(), ModuleManifestError> {
+        MeshContributes {
+            layout: self.layout.clone(),
+            settings: self.settings.clone(),
+            themes: self.themes.clone(),
+            icons: self.icons.clone(),
+            fonts: self.fonts.clone(),
+            i18n: self.i18n.clone(),
+            libraries: self.libraries.clone(),
+        }
+        .validate()
     }
 }
 
@@ -778,6 +966,11 @@ impl MeshContributes {
     fn validate(&self) -> Result<(), ModuleManifestError> {
         for contribution in &self.layout {
             validate_relative_path("layout entrypoint", &contribution.entrypoint)?;
+            if let Some(label) = &contribution.label {
+                label
+                    .validate("mesh.provides.layout[].label")
+                    .map_err(ModuleManifestError::Validation)?;
+            }
         }
         for contribution in &self.themes {
             for path in contribution.modes.values() {
@@ -797,6 +990,18 @@ impl MeshContributes {
             contribution.validate()?;
         }
         Ok(())
+    }
+
+    fn merge_provides(&mut self, provides: &MeshProvides) {
+        self.layout.extend(provides.layout.iter().cloned());
+        self.themes.extend(provides.themes.iter().cloned());
+        self.icons.extend(provides.icons.iter().cloned());
+        self.fonts.extend(provides.fonts.iter().cloned());
+        self.i18n.extend(provides.i18n.iter().cloned());
+        self.libraries.extend(provides.libraries.iter().cloned());
+        if self.settings.is_none() {
+            self.settings = provides.settings.clone();
+        }
     }
 }
 
@@ -819,7 +1024,7 @@ pub struct SettingsContribution {
 pub struct ThemeContribution {
     pub id: String,
     #[serde(default)]
-    pub label: String,
+    pub label: Option<manifest::LocalizedText>,
     #[serde(default)]
     pub modes: HashMap<String, String>,
     #[serde(default)]
@@ -831,7 +1036,7 @@ pub struct PathContribution {
     pub id: String,
     pub path: String,
     #[serde(default)]
-    pub label: Option<String>,
+    pub label: Option<manifest::LocalizedText>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -855,5 +1060,13 @@ impl LibraryContribution {
             ));
         }
         validate_relative_path("library contribution", &self.path)
+    }
+}
+
+fn merge_unique(target: &mut Vec<String>, additions: &[String]) {
+    for item in additions {
+        if !target.iter().any(|existing| existing == item) {
+            target.push(item.clone());
+        }
     }
 }

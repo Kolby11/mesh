@@ -718,6 +718,9 @@ pub struct SurfaceLayoutSection {
     /// "fixed" | "content_measured"
     #[serde(default)]
     pub size_policy: Option<String>,
+    /// "none" | "on_demand" | "exclusive"
+    #[serde(default)]
+    pub keyboard_mode: Option<String>,
     /// Use content-children bounds (vs root bounds) when measuring size
     #[serde(default)]
     pub prefers_content_children_sizing: Option<bool>,

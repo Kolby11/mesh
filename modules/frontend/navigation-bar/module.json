@@ -5,8 +5,27 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "frontend",
-    "capabilities": {
-      "required": [
+    "uses": {
+      "modules": {
+        "@mesh/audio-popover": ">=0.1.0",
+        "@mesh/language-popover": ">=0.1.0",
+        "@mesh/theme-selector": ">=0.1.0",
+        "@mesh/quick-settings": ">=0.1.0"
+      },
+      "interfaces": {
+        "mesh.audio": ">=1.0",
+        "mesh.power": ">=1.0",
+        "mesh.hyprland": ">=1.0",
+        "mesh.theme": ">=1.0"
+      },
+      "optionalInterfaces": {
+        "mesh.brightness": ">=1.0",
+        "mesh.media": ">=1.0"
+      },
+      "resources": {
+        "icons": ["@mesh/icons-default"]
+      },
+      "capabilities": [
         "shell.surface",
         "service.audio.read",
         "service.audio.control",
@@ -19,22 +38,7 @@
       ]
     },
     "i18n": {
-      "defaultLocale": "en",
-      "supportedLocales": [
-        "en",
-        "sk"
-      ]
-    },
-    "dependencies": {
-      "modules": {
-        "@mesh/audio-popover": ">=0.1.0",
-        "@mesh/language-popover": ">=0.1.0",
-        "@mesh/theme-selector": ">=0.1.0",
-        "@mesh/quick-settings": ">=0.1.0"
-      },
-      "icons": {
-        "@mesh/icons-default": "*"
-      }
+      "defaultLocale": "en"
     },
     "iconRequirements": {
       "required": [
@@ -46,13 +50,16 @@
         "audio-volume-low",
         "audio-volume-medium",
         "audio-volume-high",
+        "battery-empty",
+        "battery-caution",
+        "battery-low",
+        "battery-good",
+        "battery-full",
         "media-playback-start",
         "window-close"
       ]
     },
-    "entrypoints": {
-      "main": "src/main.mesh"
-    },
+    "entry": "src/main.mesh",
     "keybinds": {
       "mute": {
         "label": {
@@ -73,7 +80,7 @@
         }
       }
     },
-    "contributes": {
+    "provides": {
       "i18n": [
         {
           "id": "en",
@@ -174,7 +181,8 @@
       }
     },
     "surfaceLayout": {
-      "size_policy": "fixed"
+      "size_policy": "fixed",
+      "keyboard_mode": "none"
     },
     "accessibility": {
       "role": "toolbar"

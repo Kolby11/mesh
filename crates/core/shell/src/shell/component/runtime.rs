@@ -88,31 +88,21 @@ impl FrontendSurfaceComponent {
         Some(snapshot)
     }
 
-    /// Load translation files from `config/i18n/{locale}.json` inside the module directory.
-
-    pub(super) fn load_module_i18n_from_dir(&mut self, module_dir: &Path) {
-        let i18n_dir = module_dir.join("config/i18n");
-        let entries = match std::fs::read_dir(&i18n_dir) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            let Ok(content) = std::fs::read_to_string(&path) else {
+    pub(super) fn load_graph_i18n_catalogs(&mut self) {
+        for (module_id, locale, path) in &self.graph_i18n_catalogs {
+            let Ok(content) = std::fs::read_to_string(path) else {
+                tracing::warn!(
+                    "module '{}': failed to read graph i18n catalog {}",
+                    self.id(),
+                    path.display()
+                );
                 continue;
             };
             let messages: HashMap<String, String> = match serde_json::from_str(&content) {
                 Ok(m) => m,
                 Err(_) => {
                     tracing::warn!(
-                        "module '{}': failed to parse i18n file {}",
+                        "module '{}': failed to parse graph i18n catalog {}",
                         self.id(),
                         path.display()
                     );
@@ -120,33 +110,18 @@ impl FrontendSurfaceComponent {
                 }
             };
             tracing::debug!(
-                "module '{}': loaded {} translations for locale '{}'",
+                "module '{}': loaded {} graph translations for locale '{}'",
                 self.id(),
                 messages.len(),
-                stem
+                locale
             );
-            self.locale
-                .load_translations(mesh_core_locale::TranslationSet {
-                    locale: stem.to_string(),
+            self.locale.load_module_translations(
+                module_id,
+                mesh_core_locale::TranslationSet {
+                    locale: locale.clone(),
                     messages,
-                });
-        }
-    }
-
-    pub(super) fn load_module_i18n(&mut self) {
-        let module_dir = self.module_dir.clone();
-        self.load_module_i18n_from_dir(&module_dir);
-    }
-
-    pub(super) fn load_catalog_i18n(&mut self) {
-        let module_dirs: Vec<PathBuf> = self
-            .frontend_catalog
-            .modules
-            .values()
-            .map(|entry| entry.module_dir.clone())
-            .collect();
-        for module_dir in module_dirs {
-            self.load_module_i18n_from_dir(&module_dir);
+                },
+            );
         }
     }
 
@@ -612,7 +587,7 @@ impl FrontendSurfaceComponent {
             mesh_core_module::LocalizedText::Translation { key, fallback } => {
                 let resolved = self
                     .locale
-                    .translate(key)
+                    .translate_for_module(key, module_id)
                     .map(str::to_string)
                     .unwrap_or_else(|| {
                         if let Some(diagnostics) = &self.diagnostics {

@@ -1,5 +1,5 @@
 use super::{
-    InterfaceRelationship, MeshDependencies, ModuleKind, ModuleManifest, ModuleManifestDiagnostic,
+    InterfaceRelationship, ModuleKind, ModuleManifest, ModuleManifestDiagnostic,
     ModuleManifestError, PathContribution, RootModuleGraphManifest, dependency_spec_to_string,
     parse_module_entrypoint, validate_relative_path,
 };
@@ -18,9 +18,6 @@ pub struct LoadedModuleManifest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModuleManifestSource {
     CanonicalModuleJson,
-    LegacyPackageJson,
-    LegacyModuleJson,
-    LegacyMeshToml,
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +29,7 @@ pub struct InstalledModuleGraph {
     interface_declarations: HashMap<String, InterfaceDeclarationNode>,
     interface_guidance: Vec<InterfaceGuidanceRecord>,
     diagnostics: Vec<ModuleGraphDiagnostic>,
+    health: Vec<ModuleGraphHealthRecord>,
     contributions: ModuleContributionIndex,
     layout_entrypoint: Option<ResolvedLayoutEntrypoint>,
 }
@@ -88,10 +86,7 @@ impl InstalledModuleGraph {
                 if entry.kind == ModuleKind::Frontend {
                     frontend_requirements.insert(
                         module_id.clone(),
-                        FrontendRequirementSet::from_dependencies(
-                            module_id,
-                            &node.manifest.mesh.dependencies,
-                        ),
+                        FrontendRequirementSet::from_manifest(module_id, &node.manifest),
                     );
                 }
 
@@ -219,8 +214,19 @@ impl InstalledModuleGraph {
             None => None,
         };
         let interface_guidance = build_interface_guidance(&interface_declarations);
-        let diagnostics =
-            build_graph_diagnostics(&graph_modules, &frontend_requirements, &contributions);
+        let diagnostics = build_graph_diagnostics(
+            &graph_modules,
+            &frontend_requirements,
+            &interface_declarations,
+            &backend_providers,
+            &contributions,
+        );
+        let health = build_graph_health(
+            &backend_providers,
+            &root.providers,
+            &frontend_requirements,
+            &diagnostics,
+        );
 
         Ok(Self {
             modules: graph_modules,
@@ -230,6 +236,7 @@ impl InstalledModuleGraph {
             interface_declarations,
             interface_guidance,
             diagnostics,
+            health,
             contributions,
             layout_entrypoint,
         })
@@ -244,6 +251,12 @@ impl InstalledModuleGraph {
             .values()
             .filter(|module| module.enabled)
             .collect()
+    }
+
+    pub fn modules(&self) -> Vec<&InstalledModuleNode> {
+        let mut modules = self.modules.values().collect::<Vec<_>>();
+        modules.sort_by(|left, right| left.id.cmp(&right.id));
+        modules
     }
 
     pub fn modules_by_kind(&self, kind: ModuleKind) -> Vec<&InstalledModuleNode> {
@@ -299,6 +312,10 @@ impl InstalledModuleGraph {
 
     pub fn diagnostics(&self) -> &[ModuleGraphDiagnostic] {
         &self.diagnostics
+    }
+
+    pub fn health(&self) -> &[ModuleGraphHealthRecord] {
+        &self.health
     }
 
     pub fn backend_providers_for_interface(&self, interface: &str) -> &[BackendProviderNode] {
@@ -369,6 +386,10 @@ impl InstalledModuleGraph {
 
     pub fn frontend_entrypoints(&self) -> &[ContributedFrontendEntrypoint] {
         &self.contributions.frontend_entrypoints
+    }
+
+    pub fn frontend_surfaces(&self) -> &[ContributedFrontendSurface] {
+        &self.contributions.frontend_surfaces
     }
 
     pub fn contributed_layouts(&self) -> &[ContributedLayout] {
@@ -456,10 +477,18 @@ pub struct BackendProviderNode {
     pub version: Option<String>,
     pub base_module: Option<String>,
     pub provider: Option<String>,
-    pub label: Option<String>,
+    pub label: Option<manifest::LocalizedText>,
     pub priority: u32,
     pub required_capabilities: Vec<String>,
     pub optional_capabilities: Vec<String>,
+}
+
+impl BackendProviderNode {
+    pub fn label_text(&self) -> Option<&str> {
+        self.label
+            .as_ref()
+            .map(manifest::LocalizedText::fallback_text)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -491,6 +520,38 @@ pub struct ModuleGraphDiagnostic {
     pub contribution_id: Option<String>,
     pub status: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleGraphHealthRecord {
+    pub module_id: String,
+    pub interface: Option<String>,
+    pub provider_id: Option<String>,
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct InterfaceContractCapabilityToml {
+    #[serde(default)]
+    capabilities: InterfaceContractCapabilitySection,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct InterfaceContractCapabilitySection {
+    #[serde(default)]
+    required: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct InterfaceContractEventsToml {
+    #[serde(default)]
+    events: Vec<InterfaceContractEventSection>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct InterfaceContractEventSection {
+    name: String,
 }
 
 fn build_interface_guidance(
@@ -549,14 +610,518 @@ fn build_interface_guidance(
     guidance
 }
 
+fn load_interface_contract_capabilities(
+    modules: &HashMap<String, InstalledModuleNode>,
+    declarations: &HashMap<String, InterfaceDeclarationNode>,
+) -> HashMap<String, InterfaceContractCapabilitySection> {
+    let mut capabilities = HashMap::new();
+    for declaration in declarations.values() {
+        let Some(file) = &declaration.file else {
+            continue;
+        };
+        let Some(module) = modules.get(&declaration.module_id) else {
+            continue;
+        };
+        let module_dir = module.manifest_path.parent().unwrap_or(Path::new("."));
+        let contract_path = module_dir.join(file);
+        let Ok(content) = std::fs::read_to_string(&contract_path) else {
+            continue;
+        };
+        let Ok(parsed) = toml::from_str::<InterfaceContractCapabilityToml>(&content) else {
+            continue;
+        };
+        capabilities.insert(declaration.name.clone(), parsed.capabilities);
+    }
+    capabilities
+}
+
+fn load_interface_contract_events(
+    modules: &HashMap<String, InstalledModuleNode>,
+    declarations: &HashMap<String, InterfaceDeclarationNode>,
+) -> HashMap<String, std::collections::HashSet<String>> {
+    let mut events = HashMap::new();
+    for declaration in declarations.values() {
+        let Some(file) = &declaration.file else {
+            continue;
+        };
+        let Some(module) = modules.get(&declaration.module_id) else {
+            continue;
+        };
+        let module_dir = module.manifest_path.parent().unwrap_or(Path::new("."));
+        let contract_path = module_dir.join(file);
+        let Ok(content) = std::fs::read_to_string(&contract_path) else {
+            continue;
+        };
+        let Ok(parsed) = toml::from_str::<InterfaceContractEventsToml>(&content) else {
+            continue;
+        };
+        events.insert(
+            declaration.name.clone(),
+            parsed
+                .events
+                .into_iter()
+                .map(|event| event.name)
+                .collect::<std::collections::HashSet<_>>(),
+        );
+    }
+    events
+}
+
+fn build_graph_health(
+    backend_providers: &HashMap<String, Vec<BackendProviderNode>>,
+    active_providers: &HashMap<String, String>,
+    frontend_requirements: &HashMap<String, FrontendRequirementSet>,
+    diagnostics: &[ModuleGraphDiagnostic],
+) -> Vec<ModuleGraphHealthRecord> {
+    let mut health = Vec::new();
+    let unavailable_backend_modules = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.status == "missing_required_binary")
+        .map(|diagnostic| diagnostic.module_id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+
+    let provider_available = |provider: &BackendProviderNode| {
+        !unavailable_backend_modules.contains(provider.module_id.as_str())
+    };
+
+    for provider in backend_providers
+        .values()
+        .flat_map(|providers| providers.iter())
+    {
+        let available = provider_available(provider);
+        health.push(ModuleGraphHealthRecord {
+            module_id: provider.module_id.clone(),
+            interface: Some(provider.interface.clone()),
+            provider_id: Some(provider.module_id.clone()),
+            status: if available {
+                "provider_available".into()
+            } else {
+                "provider_unavailable".into()
+            },
+            message: if available {
+                format!(
+                    "provider {} is available for {}",
+                    provider.module_id, provider.interface
+                )
+            } else {
+                format!(
+                    "provider {} is unavailable for {} because a required runtime dependency is missing",
+                    provider.module_id, provider.interface
+                )
+            },
+        });
+    }
+
+    let mut interfaces = std::collections::BTreeSet::new();
+    interfaces.extend(backend_providers.keys().cloned());
+    interfaces.extend(active_providers.keys().cloned());
+    for requirements in frontend_requirements.values() {
+        interfaces.extend(requirements.backend.keys().cloned());
+        interfaces.extend(requirements.optional_backend.keys().cloned());
+    }
+
+    let mut interface_statuses: HashMap<String, (String, Option<String>, String)> = HashMap::new();
+    for interface in interfaces {
+        let providers = backend_providers
+            .get(&interface)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let active_provider = active_providers.get(&interface);
+        let (status, provider_id, message) = if providers.is_empty() {
+            (
+                "interface_unavailable".to_string(),
+                None,
+                format!("interface {interface} has no installed backend provider"),
+            )
+        } else if let Some(active_provider_id) = active_provider {
+            let active = providers
+                .iter()
+                .find(|provider| provider.module_id == *active_provider_id);
+            match active {
+                Some(provider) if provider_available(provider) => (
+                    "interface_available".to_string(),
+                    Some(provider.module_id.clone()),
+                    format!(
+                        "interface {interface} is available through active provider {}",
+                        provider.module_id
+                    ),
+                ),
+                Some(provider) => (
+                    "interface_unavailable".to_string(),
+                    Some(provider.module_id.clone()),
+                    format!(
+                        "interface {interface} is unavailable because active provider {} is unavailable",
+                        provider.module_id
+                    ),
+                ),
+                None => (
+                    "interface_unavailable".to_string(),
+                    Some(active_provider_id.clone()),
+                    format!(
+                        "interface {interface} selects missing active provider {active_provider_id}"
+                    ),
+                ),
+            }
+        } else {
+            (
+                "interface_unconfigured".to_string(),
+                None,
+                format!("interface {interface} has installed providers but no active provider"),
+            )
+        };
+
+        interface_statuses.insert(
+            interface.clone(),
+            (status.clone(), provider_id.clone(), message.clone()),
+        );
+        health.push(ModuleGraphHealthRecord {
+            module_id: provider_id
+                .clone()
+                .unwrap_or_else(|| format!("interface:{interface}")),
+            interface: Some(interface),
+            provider_id,
+            status,
+            message,
+        });
+    }
+
+    for requirements in frontend_requirements.values() {
+        for interface in requirements.backend.keys() {
+            if let Some((status, provider_id, message)) = interface_statuses.get(interface)
+                && status != "interface_available"
+            {
+                health.push(ModuleGraphHealthRecord {
+                    module_id: requirements.module_id.clone(),
+                    interface: Some(interface.clone()),
+                    provider_id: provider_id.clone(),
+                    status: "required_interface_unavailable".into(),
+                    message: format!(
+                        "frontend module {} requires {interface}, but {message}",
+                        requirements.module_id
+                    ),
+                });
+            }
+        }
+        for interface in requirements.optional_backend.keys() {
+            if let Some((status, provider_id, message)) = interface_statuses.get(interface)
+                && status != "interface_available"
+            {
+                health.push(ModuleGraphHealthRecord {
+                    module_id: requirements.module_id.clone(),
+                    interface: Some(interface.clone()),
+                    provider_id: provider_id.clone(),
+                    status: "optional_interface_unavailable".into(),
+                    message: format!(
+                        "frontend module {} can use optional {interface}, but {message}",
+                        requirements.module_id
+                    ),
+                });
+            }
+        }
+    }
+
+    health.sort_by(|a, b| {
+        a.module_id
+            .cmp(&b.module_id)
+            .then_with(|| a.interface.cmp(&b.interface))
+            .then_with(|| a.provider_id.cmp(&b.provider_id))
+            .then_with(|| a.status.cmp(&b.status))
+    });
+    health
+}
+
+fn binary_on_path(name: &str) -> bool {
+    std::env::var_os("PATH")
+        .map(|path_var| std::env::split_paths(&path_var).any(|dir| dir.join(name).is_file()))
+        .unwrap_or(false)
+}
+
+fn binary_package_hint(binary: &manifest::BinaryDependency) -> String {
+    if binary.packages.is_empty() {
+        return String::new();
+    }
+    let mut packages = binary.packages.iter().collect::<Vec<_>>();
+    packages.sort_by(|(left, _), (right, _)| left.cmp(right));
+    format!(
+        "; install package {}",
+        packages
+            .into_iter()
+            .map(|(manager, package)| format!("{manager}:{package}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+pub(crate) fn extract_icon_names_from_mesh_source(content: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut remaining = content;
+    while let Some(start) = remaining.find("<icon") {
+        remaining = &remaining[start + 5..];
+        let tag_end = remaining.find('>').unwrap_or(remaining.len());
+        let tag = &remaining[..tag_end];
+        if let Some(name_pos) = tag.find("name=") {
+            let after = &tag[name_pos + 5..];
+            let close = if after.starts_with('"') {
+                '"'
+            } else if after.starts_with('\'') {
+                '\''
+            } else {
+                continue;
+            };
+            let value = &after[1..];
+            if let Some(end) = value.find(close) {
+                let name = &value[..end];
+                if !name.is_empty() && !name.contains('{') {
+                    names.push(name.to_string());
+                }
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+pub(crate) fn extract_t_keys_from_mesh_source(content: &str) -> Vec<String> {
+    let mut keys = Vec::new();
+    let mut remaining = content;
+    while let Some(start) = remaining.find("t(") {
+        remaining = &remaining[start + 2..];
+        let quote = if remaining.starts_with('\'') {
+            '\''
+        } else if remaining.starts_with('"') {
+            '"'
+        } else {
+            // dynamic expression — skip
+            continue;
+        };
+        let inner = &remaining[1..];
+        if let Some(end) = inner.find(quote) {
+            let key = &inner[..end];
+            if !key.is_empty() && !key.contains('{') && !key.contains(' ') {
+                keys.push(key.to_string());
+            }
+            remaining = &inner[end + 1..];
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+pub(crate) fn extract_mesh_event_publish_channels(content: &str) -> Vec<String> {
+    let mut channels = Vec::new();
+    let mut remaining = content;
+    while let Some(start) = remaining.find("mesh.events.publish(") {
+        remaining = &remaining[start + "mesh.events.publish(".len()..];
+        let quote = if remaining.starts_with('\'') {
+            '\''
+        } else if remaining.starts_with('"') {
+            '"'
+        } else {
+            // Dynamic channel expression — skip.
+            continue;
+        };
+        let inner = &remaining[1..];
+        if let Some(end) = inner.find(quote) {
+            let channel = &inner[..end];
+            if !channel.is_empty() && !channel.contains('{') && !channel.contains(' ') {
+                channels.push(channel.to_string());
+            }
+            remaining = &inner[end + 1..];
+        }
+    }
+    channels.sort();
+    channels.dedup();
+    channels
+}
+
+pub(crate) fn extract_backend_emit_event_names(content: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut remaining = content;
+    while let Some(start) = remaining.find("mesh.service.emit_event(") {
+        remaining = &remaining[start + "mesh.service.emit_event(".len()..];
+        let quote = if remaining.starts_with('\'') {
+            '\''
+        } else if remaining.starts_with('"') {
+            '"'
+        } else {
+            // Dynamic event name — skip.
+            continue;
+        };
+        let inner = &remaining[1..];
+        if let Some(end) = inner.find(quote) {
+            let name = &inner[..end];
+            if !name.is_empty() && !name.contains('{') && !name.contains(' ') {
+                names.push(name.to_string());
+            }
+            remaining = &inner[end + 1..];
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+pub(crate) fn extract_keybind_subscriptions_from_mesh_source(content: &str) -> Vec<(String, bool)> {
+    let mut subscriptions = Vec::new();
+    let mut remaining = content;
+    while let Some(start) = remaining.find("keybind=") {
+        if start > 0 {
+            let previous = remaining[..start].chars().next_back().unwrap_or(' ');
+            if previous.is_ascii_alphanumeric() || previous == '_' || previous == '-' {
+                remaining = &remaining[start + "keybind=".len()..];
+                continue;
+            }
+        }
+        let tag_start = remaining[..start].rfind('<').unwrap_or(0);
+        let tag_end = remaining[start..]
+            .find('>')
+            .map(|offset| start + offset)
+            .unwrap_or(remaining.len());
+        let tag = &remaining[tag_start..tag_end];
+        let after = &remaining[start + "keybind=".len()..];
+        let (value, advance) = if after.starts_with('"') || after.starts_with('\'') {
+            let quote = after.chars().next().unwrap();
+            let inner = &after[1..];
+            match inner.find(quote) {
+                Some(end) => (&inner[..end], end + 2),
+                None => {
+                    remaining = &after[1..];
+                    continue;
+                }
+            }
+        } else if let Some(inner) = after.strip_prefix('{') {
+            match inner.find('}') {
+                Some(end) => (&inner[..end], end + 2),
+                None => {
+                    remaining = inner;
+                    continue;
+                }
+            }
+        } else {
+            remaining = after;
+            continue;
+        };
+
+        let expression = value
+            .strip_prefix('{')
+            .and_then(|inner| inner.strip_suffix('}'));
+        let is_expression = expression.is_some();
+        let normalized = expression.unwrap_or(value).trim();
+        let action_id = if let Some(start) = normalized.find("this.keybinds.") {
+            let rest = &normalized[start + "this.keybinds.".len()..];
+            rest.strip_suffix(".id").unwrap_or(rest)
+        } else if !is_expression
+            && !normalized.contains('{')
+            && !normalized.contains('}')
+            && !normalized.contains('.')
+        {
+            normalized
+        } else {
+            remaining = &after[advance.min(after.len())..];
+            continue;
+        };
+        if !action_id.trim().is_empty() {
+            subscriptions.push((action_id.trim().to_string(), tag.contains("onkeybind=")));
+        }
+        remaining = &after[advance.min(after.len())..];
+    }
+    subscriptions.sort();
+    subscriptions.dedup();
+    subscriptions
+}
+
+fn is_declared_shell_event_channel(channel: &str) -> bool {
+    matches!(
+        channel,
+        "shell.show-surface"
+            | "shell.hide-surface"
+            | "shell.toggle-surface"
+            | "shell.position-surface"
+            | "shell.activate-popover"
+            | "shell.set-theme"
+            | "shell.set-locale"
+            | "shell.toggle-debug-overlay"
+            | "shell.toggle-debug-layout-bounds"
+            | "shell.toggle-debug-profiling"
+            | "shell.run-debug-benchmark"
+            | "shell.brightness-down"
+            | "shell.brightness-up"
+            | "shell.set-brightness"
+            | "shell.toggle-calendar"
+    )
+}
+
+fn scan_mesh_files_recursive(dir: &Path) -> Vec<(std::path::PathBuf, String)> {
+    let mut results = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return results;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            results.extend(scan_mesh_files_recursive(&path));
+        } else if path.extension().and_then(|e| e.to_str()) == Some("mesh") {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                results.push((path, content));
+            }
+        }
+    }
+    results
+}
+
+fn scan_files_recursive(dir: &Path, extension: &str) -> Vec<(std::path::PathBuf, String)> {
+    let mut results = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return results;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            results.extend(scan_files_recursive(&path, extension));
+        } else if path.extension().and_then(|e| e.to_str()) == Some(extension) {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                results.push((path, content));
+            }
+        }
+    }
+    results
+}
+
 fn build_graph_diagnostics(
     modules: &HashMap<String, InstalledModuleNode>,
     frontend_requirements: &HashMap<String, FrontendRequirementSet>,
+    interface_declarations: &HashMap<String, InterfaceDeclarationNode>,
+    backend_providers: &HashMap<String, Vec<BackendProviderNode>>,
     contributions: &ModuleContributionIndex,
 ) -> Vec<ModuleGraphDiagnostic> {
     let mut diagnostics = Vec::new();
+    let contract_capabilities =
+        load_interface_contract_capabilities(modules, interface_declarations);
+    let contract_events = load_interface_contract_events(modules, interface_declarations);
 
     for requirements in frontend_requirements.values() {
+        for interface in requirements.backend.keys() {
+            if let Some(capabilities) = contract_capabilities.get(interface) {
+                for required in &capabilities.required {
+                    if !requirements.capabilities.iter().any(|cap| cap == required) {
+                        diagnostics.push(ModuleGraphDiagnostic {
+                            module_id: requirements.module_id.clone(),
+                            contribution_id: Some(format!(
+                                "{}:interface:{}",
+                                requirements.module_id, interface
+                            )),
+                            status: "missing_interface_required_capability".into(),
+                            message: format!(
+                                "frontend module {} requires interface {interface} but does not declare required capability {required}",
+                                requirements.module_id
+                            ),
+                        });
+                    }
+                }
+            }
+        }
         for icon_pack in requirements.icons.keys() {
             if !resource_module_or_contribution_exists(
                 modules,
@@ -631,28 +1196,110 @@ fn build_graph_diagnostics(
         }
     }
 
-    if !contributions.icon_packs.is_empty() {
-        for requirement in contributions
-            .icon_requirements
-            .iter()
-            .filter(|requirement| requirement.required)
-        {
-            if !contributions
-                .icon_packs
-                .iter()
-                .any(|pack| pack.mappings.contains_key(&requirement.name))
-            {
+    for provider in backend_providers
+        .values()
+        .flat_map(|providers| providers.iter())
+    {
+        if let Some(base_module) = &provider.base_module {
+            let declares_base_module = modules.get(&provider.module_id).is_some_and(|module| {
+                module
+                    .manifest
+                    .mesh
+                    .dependencies
+                    .modules
+                    .contains_key(base_module)
+            });
+            if !declares_base_module {
                 diagnostics.push(ModuleGraphDiagnostic {
-                    module_id: requirement.module_id.clone(),
-                    contribution_id: Some(requirement.source.scoped_id.clone()),
-                    status: "missing_required_icon".into(),
+                    module_id: provider.module_id.clone(),
+                    contribution_id: Some(provider.source.scoped_id.clone()),
+                    status: "missing_provider_interface_module_dependency".into(),
                     message: format!(
-                        "module {} requires semantic icon {}, but no enabled icon pack maps it",
-                        requirement.module_id, requirement.name
+                        "backend provider {} implements {} with base module {base_module} but does not declare it in mesh.uses.modules",
+                        provider.module_id, provider.interface
                     ),
                 });
             }
         }
+        if let Some(capabilities) = contract_capabilities.get(&provider.interface) {
+            for required in &capabilities.required {
+                if !provider
+                    .required_capabilities
+                    .iter()
+                    .any(|cap| cap == required)
+                {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: provider.module_id.clone(),
+                        contribution_id: Some(provider.source.scoped_id.clone()),
+                        status: "missing_provider_required_capability".into(),
+                        message: format!(
+                            "backend provider {} implements {} but does not declare required interface capability {required}",
+                            provider.module_id, provider.interface
+                        ),
+                    });
+                }
+            }
+        }
+        if let Some(events) = contract_events.get(&provider.interface)
+            && let Some(module) = modules.get(&provider.module_id)
+        {
+            let module_dir = module.manifest_path.parent().unwrap_or(Path::new("."));
+            let scan_root = module_dir.join("src");
+            let scan_root = if scan_root.is_dir() {
+                scan_root.as_path()
+            } else {
+                module_dir
+            };
+            for (path, content) in scan_files_recursive(scan_root, "luau") {
+                let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                for event in extract_backend_emit_event_names(&content) {
+                    if !events.contains(&event) {
+                        diagnostics.push(ModuleGraphDiagnostic {
+                            module_id: provider.module_id.clone(),
+                            contribution_id: Some(format!(
+                                "{}:event:{}",
+                                provider.module_id, file_name
+                            )),
+                            status: "undeclared_interface_event_emit".into(),
+                            message: format!(
+                                "backend provider {} emits event '{}' for interface {} in {}, but the interface contract does not declare it",
+                                provider.module_id, event, provider.interface, file_name
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for requirement in &contributions.icon_requirements {
+        if contributions
+            .icon_packs
+            .iter()
+            .any(|pack| pack.mappings.contains_key(&requirement.name))
+        {
+            continue;
+        }
+
+        diagnostics.push(ModuleGraphDiagnostic {
+            module_id: requirement.module_id.clone(),
+            contribution_id: Some(requirement.source.scoped_id.clone()),
+            status: if requirement.required {
+                "missing_required_icon".into()
+            } else {
+                "missing_optional_icon".into()
+            },
+            message: format!(
+                "module {} declares {} semantic icon {}, but no enabled icon pack maps it",
+                requirement.module_id,
+                if requirement.required {
+                    "required"
+                } else {
+                    "optional"
+                },
+                requirement.name
+            ),
+        });
     }
 
     let mut settings_by_namespace: HashMap<&str, Vec<&ContributedSettingsSchema>> = HashMap::new();
@@ -675,6 +1322,322 @@ fn build_graph_diagnostics(
                     "settings namespace {namespace} is contributed by multiple enabled modules"
                 ),
             });
+        }
+    }
+
+    for surface in &contributions.frontend_surfaces {
+        if surface.surface_layout.is_none() {
+            diagnostics.push(ModuleGraphDiagnostic {
+                module_id: surface.module_id.clone(),
+                contribution_id: Some(surface.source.scoped_id.clone()),
+                status: "missing_frontend_surface_layout".into(),
+                message: format!(
+                    "frontend module {} has a main entrypoint but does not declare mesh.surfaceLayout",
+                    surface.module_id
+                ),
+            });
+        }
+        if surface.accessibility.is_none() {
+            diagnostics.push(ModuleGraphDiagnostic {
+                module_id: surface.module_id.clone(),
+                contribution_id: Some(surface.source.scoped_id.clone()),
+                status: "missing_frontend_accessibility".into(),
+                message: format!(
+                    "frontend module {} has a main entrypoint but does not declare mesh.accessibility",
+                    surface.module_id
+                ),
+            });
+        }
+    }
+
+    for module in modules.values().filter(|m| m.enabled) {
+        for binary in &module.manifest.mesh.dependencies.binaries {
+            if !binary.optional && !binary_on_path(&binary.name) {
+                diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: module.id.clone(),
+                    contribution_id: None,
+                    status: "missing_required_binary".into(),
+                    message: format!(
+                        "module {} requires binary '{}' but it was not found on PATH{}{}",
+                        module.id,
+                        binary.name,
+                        binary
+                            .reason
+                            .as_deref()
+                            .map(|r| format!("; needed for {r}"))
+                            .unwrap_or_default(),
+                        binary_package_hint(binary)
+                    ),
+                });
+            }
+        }
+    }
+
+    for module in modules
+        .values()
+        .filter(|m| m.enabled && m.kind == ModuleKind::Frontend)
+    {
+        let module_dir = module.manifest_path.parent().unwrap_or(Path::new("."));
+        let declared_keybinds = module
+            .manifest
+            .mesh
+            .keybinds
+            .actions
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        let all_declared_icons: std::collections::HashSet<&str> = module
+            .manifest
+            .mesh
+            .icon_requirements
+            .required
+            .iter()
+            .chain(module.manifest.mesh.icon_requirements.optional.iter())
+            .map(String::as_str)
+            .collect();
+
+        // Load the default-locale catalog keys once per module.
+        let default_locale = module
+            .manifest
+            .mesh
+            .i18n
+            .default_locale
+            .as_deref()
+            .unwrap_or("en");
+        let all_i18n: Vec<_> = module
+            .manifest
+            .mesh
+            .contributes
+            .i18n
+            .iter()
+            .chain(module.manifest.mesh.provides.i18n.iter())
+            .collect();
+        if !all_i18n.is_empty() {
+            let contributed_locales = all_i18n
+                .iter()
+                .map(|catalog| catalog.locale.as_str())
+                .collect::<std::collections::HashSet<_>>();
+            for locale in &module.manifest.mesh.i18n.supported_locales {
+                if !contributed_locales.contains(locale.as_str()) {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module.id.clone(),
+                        contribution_id: Some(format!("{}:i18n:{}", module.id, locale)),
+                        status: "missing_supported_locale_catalog".into(),
+                        message: format!(
+                            "module {} declares supported locale '{}' but does not contribute an i18n catalog for it",
+                            module.id, locale
+                        ),
+                    });
+                }
+            }
+            // Warn when mesh.i18n.supportedLocales is redundant with provides.i18n.
+            // Authors should declare catalogs once in provides.i18n and omit supportedLocales.
+            if !module.manifest.mesh.i18n.supported_locales.is_empty() {
+                let declared: std::collections::HashSet<&str> = module
+                    .manifest
+                    .mesh
+                    .i18n
+                    .supported_locales
+                    .iter()
+                    .map(String::as_str)
+                    .collect();
+                if declared == contributed_locales {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module.id.clone(),
+                        contribution_id: Some(format!("{}:i18n:supported_locales", module.id)),
+                        status: "redundant_supported_locales".into(),
+                        message: format!(
+                            "module {} mesh.i18n.supportedLocales lists the same locales as provides.i18n; remove supportedLocales and declare catalogs once in provides.i18n",
+                            module.id
+                        ),
+                    });
+                }
+            }
+            // Warn when defaultLocale is declared but has no contributed catalog.
+            if let Some(default) = module.manifest.mesh.i18n.default_locale.as_deref() {
+                if !contributed_locales.contains(default) {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module.id.clone(),
+                        contribution_id: Some(format!("{}:i18n:default_locale", module.id)),
+                        status: "missing_default_locale_catalog".into(),
+                        message: format!(
+                            "module {} declares defaultLocale '{}' but contributes no i18n catalog for it",
+                            module.id, default
+                        ),
+                    });
+                }
+            }
+        }
+        let catalog_keys: Option<std::collections::HashSet<String>> = all_i18n
+            .iter()
+            .find(|c| c.locale == default_locale)
+            .and_then(|c| {
+                let catalog_path = module_dir.join(&c.path);
+                let content = std::fs::read_to_string(&catalog_path).ok()?;
+                let map: serde_json::Map<String, serde_json::Value> =
+                    serde_json::from_str(&content).ok()?;
+                Some(map.keys().cloned().collect())
+            });
+
+        let mesh_src_dir = module_dir.join("src");
+        let scan_root = if mesh_src_dir.is_dir() {
+            mesh_src_dir.as_path()
+        } else {
+            module_dir
+        };
+
+        for (path, content) in scan_mesh_files_recursive(scan_root) {
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+            for icon_name in extract_icon_names_from_mesh_source(&content) {
+                if !all_declared_icons.contains(icon_name.as_str()) {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module.id.clone(),
+                        contribution_id: Some(format!("{}:icon:{}", module.id, file_name)),
+                        status: "undeclared_icon_use".into(),
+                        message: format!(
+                            "module {} uses icon '{}' in {} but does not declare it in iconRequirements",
+                            module.id, icon_name, file_name
+                        ),
+                    });
+                }
+            }
+            if let Some(catalog) = &catalog_keys {
+                for key in extract_t_keys_from_mesh_source(&content) {
+                    if !catalog.contains(&key) {
+                        diagnostics.push(ModuleGraphDiagnostic {
+                            module_id: module.id.clone(),
+                            contribution_id: Some(format!("{}:i18n:{}", module.id, file_name)),
+                            status: "undeclared_i18n_key".into(),
+                            message: format!(
+                                "module {} uses translation key '{}' in {} but it is not in the '{}' catalog",
+                                module.id, key, file_name, default_locale
+                            ),
+                        });
+                    }
+                }
+            }
+            for channel in extract_mesh_event_publish_channels(&content) {
+                if channel.starts_with("mesh.") {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module.id.clone(),
+                        contribution_id: Some(format!("{}:event:{}", module.id, file_name)),
+                        status: "raw_interface_domain_event_publish".into(),
+                        message: format!(
+                            "module {} publishes raw interface-domain event '{}' in {}; call the interface proxy method instead, or use a shell.* event for shell-owned commands",
+                            module.id, channel, file_name
+                        ),
+                    });
+                } else if channel.starts_with("shell.")
+                    && !is_declared_shell_event_channel(&channel)
+                {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module.id.clone(),
+                        contribution_id: Some(format!("{}:event:{}", module.id, file_name)),
+                        status: "unknown_shell_event_publish".into(),
+                        message: format!(
+                            "module {} publishes shell event '{}' in {}, but the shell-owned event namespace does not declare it",
+                            module.id, channel, file_name
+                        ),
+                    });
+                }
+            }
+            for (action_id, has_handler) in extract_keybind_subscriptions_from_mesh_source(&content)
+            {
+                if !declared_keybinds.contains(action_id.as_str()) {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module.id.clone(),
+                        contribution_id: Some(format!("{}:keybind:{}", module.id, file_name)),
+                        status: "undeclared_keybind_subscription".into(),
+                        message: format!(
+                            "module {} subscribes to keybind action '{}' in {}, but mesh.keybinds does not declare it",
+                            module.id, action_id, file_name
+                        ),
+                    });
+                }
+                if !has_handler {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module.id.clone(),
+                        contribution_id: Some(format!("{}:keybind:{}", module.id, file_name)),
+                        status: "keybind_subscription_missing_handler".into(),
+                        message: format!(
+                            "module {} subscribes to keybind action '{}' in {} without an onkeybind handler",
+                            module.id, action_id, file_name
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    for module in modules
+        .values()
+        .filter(|m| m.enabled && m.kind == ModuleKind::Interface)
+    {
+        if let Some(interface) = &module.manifest.mesh.interface {
+            if let Some(file) = &interface.file {
+                let module_dir = module.manifest_path.parent().unwrap_or(Path::new("."));
+                // Only validate on-disk modules; test fixtures use fictional paths.
+                if module_dir.exists() && !module_dir.join(file).exists() {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module.id.clone(),
+                        contribution_id: None,
+                        status: "missing_interface_contract_file".into(),
+                        message: format!(
+                            "interface module {} declares contract file '{}' but it does not exist",
+                            module.id, file
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    {
+        let mut trigger_owners: HashMap<
+            (String, String, String, Vec<String>),
+            Vec<(String, String)>,
+        > = HashMap::new();
+        for action in &contributions.keybinds {
+            if let Some(key) = &action.trigger.key {
+                let mut mods: Vec<String> = action
+                    .trigger
+                    .modifiers
+                    .iter()
+                    .map(|m| m.to_ascii_lowercase())
+                    .collect();
+                mods.sort();
+                let effective = (
+                    format!("{:?}", action.scope),
+                    format!("{:?}", action.trigger.kind),
+                    key.to_ascii_lowercase(),
+                    mods,
+                );
+                trigger_owners
+                    .entry(effective)
+                    .or_default()
+                    .push((action.module_id.clone(), action.action_id.clone()));
+            }
+        }
+        for ((_, _, key, mods), owners) in &trigger_owners {
+            if owners.len() <= 1 {
+                continue;
+            }
+            let trigger_str = if mods.is_empty() {
+                key.clone()
+            } else {
+                format!("{}+{}", mods.join("+"), key)
+            };
+            for (module_id, action_id) in owners {
+                diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: module_id.clone(),
+                    contribution_id: Some(format!("{module_id}:{action_id}")),
+                    status: "duplicate_keybind_trigger".into(),
+                    message: format!(
+                        "keybind action {module_id}:{action_id} has trigger '{trigger_str}' that conflicts with {} other action(s)",
+                        owners.len() - 1
+                    ),
+                });
+            }
         }
     }
 
@@ -750,14 +1713,18 @@ pub struct FrontendRequirementSet {
     pub module_id: String,
     pub modules: HashMap<String, String>,
     pub backend: HashMap<String, String>,
+    pub optional_backend: HashMap<String, String>,
     pub icons: HashMap<String, String>,
     pub fonts: HashMap<String, String>,
     pub i18n: HashMap<String, String>,
     pub themes: HashMap<String, String>,
+    pub capabilities: Vec<String>,
+    pub optional_capabilities: Vec<String>,
 }
 
 impl FrontendRequirementSet {
-    fn from_dependencies(module_id: &str, dependencies: &MeshDependencies) -> Self {
+    fn from_manifest(module_id: &str, manifest: &ModuleManifest) -> Self {
+        let dependencies = &manifest.mesh.dependencies;
         let modules = dependencies
             .modules
             .iter()
@@ -767,10 +1734,13 @@ impl FrontendRequirementSet {
             module_id: module_id.into(),
             modules,
             backend: dependencies.backend.clone(),
+            optional_backend: dependencies.optional_backend.clone(),
             icons: dependencies.icons.clone(),
             fonts: dependencies.fonts.clone(),
             i18n: dependencies.i18n.clone(),
             themes: dependencies.themes.clone(),
+            capabilities: manifest.mesh.capabilities.required.clone(),
+            optional_capabilities: manifest.mesh.capabilities.optional.clone(),
         }
     }
 }
@@ -778,6 +1748,7 @@ impl FrontendRequirementSet {
 #[derive(Debug, Clone, Default)]
 pub struct ModuleContributionIndex {
     frontend_entrypoints: Vec<ContributedFrontendEntrypoint>,
+    frontend_surfaces: Vec<ContributedFrontendSurface>,
     layout: Vec<ContributedLayout>,
     themes: Vec<ContributedTheme>,
     icons: Vec<ContributedPathResource>,
@@ -797,6 +1768,12 @@ impl ModuleContributionIndex {
         if module.kind == ModuleKind::Frontend {
             if let Some(path) = &manifest.mesh.entrypoints.main {
                 validate_relative_path("frontend main entrypoint", path)?;
+                let settings_namespace = manifest
+                    .mesh
+                    .contributes
+                    .settings
+                    .as_ref()
+                    .map(|settings| settings.namespace.clone());
                 self.frontend_entrypoints
                     .push(ContributedFrontendEntrypoint {
                         source: ContributionSource::new(module, "main"),
@@ -804,6 +1781,14 @@ impl ModuleContributionIndex {
                         kind: FrontendEntrypointKind::Main,
                         path: path.clone(),
                     });
+                self.frontend_surfaces.push(ContributedFrontendSurface {
+                    source: ContributionSource::new(module, "surface"),
+                    module_id: module_id.into(),
+                    path: path.clone(),
+                    settings_namespace,
+                    accessibility: manifest.mesh.accessibility.clone(),
+                    surface_layout: manifest.mesh.surface_layout.clone(),
+                });
             }
             if let Some(path) = &manifest.mesh.entrypoints.settings_ui {
                 validate_relative_path("frontend settings entrypoint", path)?;
@@ -933,6 +1918,16 @@ pub struct ContributedFrontendEntrypoint {
     pub path: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ContributedFrontendSurface {
+    pub source: ContributionSource,
+    pub module_id: String,
+    pub path: String,
+    pub settings_namespace: Option<String>,
+    pub accessibility: Option<manifest::AccessibilitySection>,
+    pub surface_layout: Option<manifest::SurfaceLayoutSection>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnresolvedModuleRequirement {
     pub module_id: String,
@@ -968,9 +1963,17 @@ pub struct ContributedTheme {
     pub source: ContributionSource,
     pub module_id: String,
     pub id: String,
-    pub label: String,
+    pub label: Option<manifest::LocalizedText>,
     pub modes: HashMap<String, String>,
     pub default_mode: Option<String>,
+}
+
+impl ContributedTheme {
+    pub fn label_text(&self) -> Option<&str> {
+        self.label
+            .as_ref()
+            .map(manifest::LocalizedText::fallback_text)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -979,7 +1982,7 @@ pub struct ContributedPathResource {
     pub module_id: String,
     pub id: String,
     pub path: String,
-    pub label: Option<String>,
+    pub label: Option<manifest::LocalizedText>,
 }
 
 impl ContributedPathResource {
@@ -995,6 +1998,12 @@ impl ContributedPathResource {
             path: contribution.path.clone(),
             label: contribution.label.clone(),
         })
+    }
+
+    pub fn label_text(&self) -> Option<&str> {
+        self.label
+            .as_ref()
+            .map(manifest::LocalizedText::fallback_text)
     }
 }
 
@@ -1153,72 +2162,43 @@ pub fn load_module_manifest(
             });
         }
 
-        let loaded = manifest::load_manifest(module_dir).map_err(|err| {
-            ModuleManifestError::LegacyManifest {
-                path: module_dir.to_path_buf(),
-                message: err.to_string(),
-            }
-        })?;
-        let path = loaded.path.clone();
-        let manifest = ModuleManifest::from_legacy_manifest(loaded.manifest);
-        let module_id = Some(manifest.name.clone());
-        return Ok(LoadedModuleManifest {
-            manifest,
-            path,
-            source: ModuleManifestSource::LegacyModuleJson,
-            diagnostics: vec![ModuleManifestDiagnostic::warning(
+        return Err(ModuleManifestError::Diagnostic {
+            diagnostic: ModuleManifestDiagnostic::error(
                 &module_json,
-                module_id,
+                None,
                 Some("$".into()),
                 "legacy module.json shape uses id/type/api_version fields",
-                "replace legacy module.json fields with name/version/mesh",
-            )],
+                "replace legacy module.json fields with canonical name/version/mesh",
+            ),
         });
     }
 
     if package_json.exists() {
-        let manifest = ModuleManifest::from_path(&package_json)?;
-        let module_id = Some(manifest.name.clone());
-        return Ok(LoadedModuleManifest {
-            manifest,
-            path: package_json.clone(),
-            source: ModuleManifestSource::LegacyPackageJson,
-            diagnostics: vec![ModuleManifestDiagnostic::warning(
+        return Err(ModuleManifestError::Diagnostic {
+            diagnostic: ModuleManifestDiagnostic::error(
                 package_json,
-                module_id,
+                None,
                 None,
                 "package.json is a legacy MESH module manifest path",
-                "replace package.json with module.json",
-            )],
+                "rename package.json to module.json",
+            ),
         });
     }
 
     if mesh_toml.exists() {
-        let loaded = manifest::load_manifest(module_dir).map_err(|err| {
-            ModuleManifestError::LegacyManifest {
-                path: module_dir.to_path_buf(),
-                message: err.to_string(),
-            }
-        })?;
-        let path = loaded.path.clone();
-        let manifest = ModuleManifest::from_legacy_manifest(loaded.manifest);
-        let module_id = Some(manifest.name.clone());
-        return Ok(LoadedModuleManifest {
-            manifest,
-            path,
-            source: ModuleManifestSource::LegacyMeshToml,
-            diagnostics: vec![ModuleManifestDiagnostic::warning(
+        return Err(ModuleManifestError::Diagnostic {
+            diagnostic: ModuleManifestDiagnostic::error(
                 mesh_toml,
-                module_id,
+                None,
                 None,
                 "mesh.toml is a legacy MESH module manifest path",
-                "replace mesh.toml with module.json",
-            )],
+                "replace mesh.toml with canonical module.json",
+            ),
         });
     }
 
     Err(ModuleManifestError::Validation(format!(
-        "no module.json, package.json, or mesh.toml found in {}",
+        "no module.json found in {}",
         module_dir.display()
     )))
 }

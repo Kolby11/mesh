@@ -285,6 +285,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// surface hides.
     pub(super) keyboard_mode_override: Option<KeyboardMode>,
     pub(super) frontend_catalog: FrontendCatalog,
+    graph_i18n_catalogs: Vec<(String, String, PathBuf)>,
     pub(super) visible: bool,
     surface_exiting: bool,
     dirty: bool,
@@ -442,6 +443,7 @@ impl FrontendSurfaceComponent {
             surface_layout: settings_state.layout.clone(),
             keyboard_mode_override: None,
             frontend_catalog,
+            graph_i18n_catalogs: Vec::new(),
             visible: settings_state.layout.visible_on_start,
             surface_exiting: false,
             dirty: true,
@@ -516,6 +518,14 @@ impl FrontendSurfaceComponent {
             cached_style_rule_index: None,
             scripts_use_element_metrics,
         }
+    }
+
+    pub(super) fn with_graph_i18n_catalogs(
+        mut self,
+        graph_i18n_catalogs: Vec<(String, String, PathBuf)>,
+    ) -> Self {
+        self.graph_i18n_catalogs = graph_i18n_catalogs;
+        self
     }
 
     pub(super) fn invalidate(&mut self, flags: ComponentDirtyFlags) {

@@ -18,6 +18,9 @@ pub struct LocaleEngine {
     active_locale: String,
     fallback_chain: Vec<String>,
     translations: HashMap<String, HashMap<String, String>>,
+    /// Per-module catalogs. Scoped lookup checks these before the global pool.
+    /// Key: module_id → locale → translation key → value.
+    module_translations: HashMap<String, HashMap<String, HashMap<String, String>>>,
 }
 
 impl LocaleEngine {
@@ -27,6 +30,7 @@ impl LocaleEngine {
             active_locale: locale.clone(),
             fallback_chain: vec![locale, "en".to_string()],
             translations: HashMap::new(),
+            module_translations: HashMap::new(),
         }
     }
 
@@ -45,6 +49,7 @@ impl LocaleEngine {
             active_locale: locale,
             fallback_chain,
             translations: HashMap::new(),
+            module_translations: HashMap::new(),
         }
     }
 
@@ -67,6 +72,21 @@ impl LocaleEngine {
             .extend(set.messages);
     }
 
+    /// Register translations scoped to a specific module.
+    ///
+    /// Module-scoped translations take precedence over global ones in
+    /// `translate_for_module`. All catalogs are also merged into the global pool
+    /// so that `translate` and template `t("key")` calls continue to work.
+    pub fn load_module_translations(&mut self, module_id: &str, set: TranslationSet) {
+        self.module_translations
+            .entry(module_id.to_string())
+            .or_default()
+            .entry(set.locale.clone())
+            .or_default()
+            .extend(set.messages.clone());
+        self.load_translations(set);
+    }
+
     /// Look up a translation key, walking the fallback chain.
     pub fn translate(&self, key: &str) -> Option<&str> {
         for locale in &self.fallback_chain {
@@ -77,6 +97,24 @@ impl LocaleEngine {
             }
         }
         None
+    }
+
+    /// Look up a translation key scoped to a module, then fall back to global.
+    ///
+    /// Use this when resolving manifest text (keybind labels, layout labels,
+    /// provider labels, resource labels) so module-specific catalog entries take
+    /// precedence and accidental cross-module key collisions are avoided.
+    pub fn translate_for_module<'a>(&'a self, key: &str, module_id: &str) -> Option<&'a str> {
+        if let Some(module_locales) = self.module_translations.get(module_id) {
+            for locale in &self.fallback_chain {
+                if let Some(messages) = module_locales.get(locale) {
+                    if let Some(value) = messages.get(key) {
+                        return Some(value.as_str());
+                    }
+                }
+            }
+        }
+        self.translate(key)
     }
 
     /// Translate with interpolation. Placeholders use `{name}` syntax.

@@ -85,6 +85,7 @@ impl Shell {
             diagnostics: DiagnosticsCollector::new(),
             services: ServiceRegistry::new(),
             interfaces,
+            installed_module_graph: None,
             modules: HashMap::new(),
             module_dirs,
             core: ShellCoreState::default(),
@@ -132,14 +133,32 @@ impl Shell {
         tracing::info!("discovered {} modules", self.modules.len());
     }
 
+    pub(in crate::shell) fn installed_module_graph_path(&self) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .join("config/module.json")
+    }
+
+    pub(in crate::shell) fn load_installed_module_graph_cached(
+        &mut self,
+    ) -> Result<&InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
+        if self.installed_module_graph.is_none() {
+            let graph_path = self.installed_module_graph_path();
+            self.installed_module_graph = Some(load_installed_module_graph(&graph_path)?);
+        }
+        Ok(self
+            .installed_module_graph
+            .as_ref()
+            .expect("installed module graph was just loaded"))
+    }
+
     fn register_installed_graph_interfaces(&mut self) {
-        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let graph_path = workspace_root.join("config/module.json");
-        let graph = match load_installed_module_graph(&graph_path) {
-            Ok(graph) => graph,
+        let graph_path = self.installed_module_graph_path();
+        let graph = match self.load_installed_module_graph_cached() {
+            Ok(graph) => graph.clone(),
             Err(err) => {
                 tracing::warn!(
-                    "failed to load installed module graph from {}; keeping legacy interface discovery: {err}",
+                    "failed to load installed module graph from {}; keeping discovered interfaces only: {err}",
                     graph_path.display()
                 );
                 return;
@@ -341,24 +360,46 @@ impl Shell {
             return Ok(());
         }
 
-        let frontend_catalog = FrontendCatalog::from_modules(&self.modules)?;
+        let graph = self.load_installed_module_graph_cached().ok().cloned();
+        let frontend_catalog = FrontendCatalog::from_modules(&self.modules, graph.as_ref())?;
         let enabled_frontends = self.installed_enabled_frontend_ids();
+        let graph_i18n_catalogs = self.graph_i18n_catalog_paths();
         for entry in frontend_catalog.top_level_surfaces_filtered(enabled_frontends.as_ref()) {
-            self.register_component(Box::new(FrontendSurfaceComponent::new(
-                entry.compiled,
-                entry.module_dir,
-                frontend_catalog.clone(),
-                self.interfaces.catalog(),
-            )));
+            self.register_component(Box::new(
+                FrontendSurfaceComponent::new(
+                    entry.compiled,
+                    entry.module_dir,
+                    frontend_catalog.clone(),
+                    self.interfaces.catalog(),
+                )
+                .with_graph_i18n_catalogs(graph_i18n_catalogs.clone()),
+            ));
         }
 
         Ok(())
     }
 
-    fn installed_enabled_frontend_ids(&self) -> Option<HashSet<String>> {
-        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let graph_path = workspace_root.join("config/module.json");
-        match load_installed_module_graph(&graph_path) {
+    fn graph_i18n_catalog_paths(&self) -> Vec<(String, String, PathBuf)> {
+        let Some(graph) = self.installed_module_graph.as_ref() else {
+            return Vec::new();
+        };
+        graph
+            .contributed_i18n()
+            .iter()
+            .filter_map(|catalog| {
+                let module_dir = catalog.source.manifest_path.parent()?;
+                Some((
+                    catalog.module_id.clone(),
+                    catalog.locale.clone(),
+                    module_dir.join(&catalog.path),
+                ))
+            })
+            .collect()
+    }
+
+    fn installed_enabled_frontend_ids(&mut self) -> Option<HashSet<String>> {
+        let graph_path = self.installed_module_graph_path();
+        match self.load_installed_module_graph_cached() {
             Ok(graph) => {
                 let mut enabled = graph
                     .frontend_modules()
@@ -370,7 +411,7 @@ impl Shell {
             }
             Err(err) => {
                 tracing::warn!(
-                    "failed to load installed module graph from {}; using legacy frontend discovery: {err}",
+                    "failed to load installed module graph from {}; using all discovered frontend modules: {err}",
                     graph_path.display()
                 );
                 None

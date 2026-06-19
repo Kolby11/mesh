@@ -1,0 +1,115 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-06-19T07:12:23.928Z",
+  "phase": null,
+  "phase_name": "module-system-redesign-todo",
+  "phase_dir": null,
+  "plan": null,
+  "task": null,
+  "total_tasks": null,
+  "status": "paused",
+  "completed_tasks": [
+    {
+      "id": 1,
+      "name": "Label types upgraded to LocalizedText (PathContribution, ThemeContribution, MeshProvidesDeclaration, BackendProviderNode)",
+      "status": "done"
+    },
+    {
+      "id": 2,
+      "name": "Module-scoped locale engine (load_module_translations + translate_for_module)",
+      "status": "done"
+    },
+    {
+      "id": 3,
+      "name": "Module-scoped catalog loading wired through discovery → runtime",
+      "status": "done"
+    },
+    {
+      "id": 4,
+      "name": "resolve_manifest_text uses translate_for_module (scoped before global)",
+      "status": "done"
+    },
+    {
+      "id": 5,
+      "name": "Debug snapshot expanded with provider/theme labels (provides_interface_labels, provides_themes, provides_theme_labels)",
+      "status": "done"
+    },
+    {
+      "id": 6,
+      "name": "redundant_supported_locales and missing_default_locale_catalog diagnostics added",
+      "status": "done"
+    },
+    {
+      "id": 7,
+      "name": "navigation-bar/module.json: removed redundant supportedLocales",
+      "status": "done"
+    },
+    {
+      "id": 8,
+      "name": "All tests passing (118 module tests, locale tests, surface-config tests)",
+      "status": "done"
+    }
+  ],
+  "remaining_tasks": [
+    {
+      "id": 9,
+      "name": "Mark todo.md items complete for the two finished slices",
+      "status": "not_started"
+    },
+    {
+      "id": 10,
+      "name": "Settings UI labels — schema description fields in settings JSON blob; convention-only for now (serde_json::Value, can't type directly)",
+      "status": "deferred"
+    },
+    {
+      "id": 11,
+      "name": "Make event channels typed and declared (undeclared_interface_event_emit already for backends; frontend side remains)",
+      "status": "not_started"
+    },
+    {
+      "id": 12,
+      "name": "Eliminate service-specific Rust branches (audio optimistic state etc.)",
+      "status": "not_started"
+    }
+  ],
+  "blockers": [],
+  "human_actions_pending": [],
+  "decisions": [
+    {
+      "decision": "PathContribution/ThemeContribution/MeshProvidesDeclaration.label changed to Option<LocalizedText> — backwards compatible since LocalizedText deserializes from plain strings too",
+      "rationale": "Consistent with LayoutContribution.label and KeybindAction.label; enables locale-resolved display in settings UI",
+      "phase": "module-system-redesign"
+    },
+    {
+      "decision": "Module-scoped catalogs also merged into global pool (load_module_translations calls load_translations internally)",
+      "rationale": "Preserves backward compat for t() in templates; scoped lookup just checks module bucket first before falling back to global",
+      "phase": "module-system-redesign"
+    },
+    {
+      "decision": "redundant_supported_locales emitted as advisory — not hard error — so existing modules with both mesh.i18n.supportedLocales and provides.i18n still load",
+      "rationale": "Clean migration path without breaking ships",
+      "phase": "module-system-redesign"
+    },
+    {
+      "decision": "Settings schema description labels (in serde_json::Value blob) deferred — convention note only",
+      "rationale": "Schema is a raw serde_json::Value; typing it would require a full schema DSL redesign; the settings UI is not yet built",
+      "phase": "module-system-redesign"
+    }
+  ],
+  "uncommitted_files": [
+    "crates/core/foundation/locale/src/lib.rs",
+    "crates/core/foundation/debug/src/lib.rs",
+    "crates/core/extension/module/src/manifest/model.rs",
+    "crates/core/extension/module/src/package/installed_graph.rs",
+    "crates/core/extension/module/src/package/module_manifest.rs",
+    "crates/core/extension/module/src/package/tests.rs",
+    "crates/core/shell/src/shell/component.rs",
+    "crates/core/shell/src/shell/component/runtime.rs",
+    "crates/core/shell/src/shell/runtime/debug.rs",
+    "crates/core/shell/src/shell/discovery.rs",
+    "modules/frontend/navigation-bar/module.json",
+    "todo.md"
+  ],
+  "next_action": "Update todo.md to mark the two completed items ([x]) for 'Resolve localized manifest metadata...' and 'Let modules declare supported locales...', then commit all uncommitted files",
+  "context_notes": "Working through todo.md module system redesign items. The two i18n/locale items are now fully implemented. Next items in the list are event channel typing and eliminating service-specific Rust branches. All 118 module tests pass. Shell lib compiles cleanly (smithay-client-toolkit pkg-config is missing in this environment but that's an env issue, not a code issue)."
+}

@@ -7,6 +7,7 @@
 #[derive(Debug, Clone, Default)]
 pub struct DebugSnapshot {
     pub modules: Vec<ModuleEntry>,
+    pub module_graph: Vec<ModuleGraphEntry>,
     pub module_instances: Vec<ModuleObjectEntry>,
     pub interfaces: Vec<InterfaceEntry>,
     pub backend_runtimes: Vec<BackendRuntimeEntry>,
@@ -43,6 +44,7 @@ pub struct DebugKeybindEntry {
 pub enum DebugInspectorView {
     #[default]
     Overview,
+    Modules,
     Surfaces,
     BackendServices,
     Benchmark,
@@ -52,6 +54,7 @@ impl DebugInspectorView {
     pub fn label(self) -> &'static str {
         match self {
             Self::Overview => "overview",
+            Self::Modules => "modules",
             Self::Surfaces => "surfaces",
             Self::BackendServices => "backend_services",
             Self::Benchmark => "benchmark",
@@ -60,7 +63,7 @@ impl DebugInspectorView {
 
     pub fn from_legacy_tab(tab: DebugTab) -> Self {
         match tab {
-            DebugTab::Modules => Self::Overview,
+            DebugTab::Modules => Self::Modules,
             DebugTab::Interfaces => Self::Surfaces,
             DebugTab::Health => Self::BackendServices,
         }
@@ -404,6 +407,42 @@ pub struct ModuleEntry {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModuleGraphEntry {
+    pub module_id: String,
+    pub kind: String,
+    pub enabled: bool,
+    pub path: String,
+    pub uses_modules: Vec<String>,
+    pub uses_interfaces: Vec<String>,
+    pub uses_optional_interfaces: Vec<String>,
+    pub uses_icon_packs: Vec<String>,
+    pub uses_i18n_packs: Vec<String>,
+    pub uses_theme_packs: Vec<String>,
+    pub uses_font_packs: Vec<String>,
+    pub capabilities: Vec<String>,
+    pub optional_capabilities: Vec<String>,
+    pub surface_entrypoint: Option<String>,
+    pub surface_settings_namespace: Option<String>,
+    pub surface_accessibility_role: Option<String>,
+    pub surface_accessibility_label: Option<String>,
+    pub surface_size_policy: Option<String>,
+    pub surface_layout_label: Option<String>,
+    pub surface_layout_label_key: Option<String>,
+    pub surface_layout_label_fallback: Option<String>,
+    pub provides_interfaces: Vec<String>,
+    /// Resolved display labels for each provided interface, indexed parallel to `provides_interfaces`.
+    pub provides_interface_labels: Vec<Option<String>>,
+    pub provides_settings: Vec<String>,
+    pub provides_i18n: Vec<String>,
+    pub provides_themes: Vec<String>,
+    pub provides_theme_labels: Vec<Option<String>>,
+    pub required_icons: Vec<String>,
+    pub optional_icons: Vec<String>,
+    pub diagnostics: Vec<String>,
+    pub health: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleObjectEntry {
     pub instance_id: String,
@@ -481,13 +520,14 @@ impl DebugOverlayState {
 
     pub fn cycle_tab(&mut self) {
         self.active_view = match self.active_view {
-            DebugInspectorView::Overview => DebugInspectorView::Surfaces,
+            DebugInspectorView::Overview => DebugInspectorView::Modules,
+            DebugInspectorView::Modules => DebugInspectorView::Surfaces,
             DebugInspectorView::Surfaces => DebugInspectorView::BackendServices,
             DebugInspectorView::BackendServices => DebugInspectorView::Benchmark,
             DebugInspectorView::Benchmark => DebugInspectorView::Overview,
         };
         self.active_tab = match self.active_view {
-            DebugInspectorView::Overview => DebugTab::Modules,
+            DebugInspectorView::Overview | DebugInspectorView::Modules => DebugTab::Modules,
             DebugInspectorView::Surfaces => DebugTab::Interfaces,
             DebugInspectorView::BackendServices | DebugInspectorView::Benchmark => DebugTab::Health,
         };
@@ -518,6 +558,8 @@ mod tests {
     fn cycle_tab_reaches_benchmark_view() {
         let mut state = DebugOverlayState::default();
 
+        state.cycle_tab();
+        assert_eq!(state.active_view, DebugInspectorView::Modules);
         state.cycle_tab();
         assert_eq!(state.active_view, DebugInspectorView::Surfaces);
         state.cycle_tab();
