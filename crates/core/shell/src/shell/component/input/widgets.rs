@@ -245,7 +245,7 @@ impl FrontendSurfaceComponent {
         sibling_source_key(tree, key, item_tags, backward)
     }
 
-    pub(super) fn pointer_event_target_key(
+    pub(in crate::shell::component) fn pointer_event_target_key(
         &self,
         tree: &WidgetNode,
         x: f32,

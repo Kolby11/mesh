@@ -219,6 +219,12 @@ impl PresentationEngine {
         }
     }
 
+    pub fn set_pointer_interactive(&mut self, interactive: bool) {
+        if let Backend::WaylandSurface(bridge) = &mut self.backend {
+            bridge.set_pointer_interactive(interactive);
+        }
+    }
+
     /// Returns true when the backend supports fd-based blocking dispatch (WaylandSurface).
     /// Returns false for DevWindow, which uses internal polling.
     pub fn supports_blocking_dispatch(&self) -> bool {

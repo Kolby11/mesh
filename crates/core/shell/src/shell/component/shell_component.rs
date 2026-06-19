@@ -950,6 +950,14 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.handle_component_input(theme, width, height, input)
     }
 
+    fn hovered_target_is_interactive(&self) -> bool {
+        let Some(tree) = self.last_tree.as_ref() else {
+            return false;
+        };
+        self.pointer_event_target_key(tree, self.hovered_pos.0, self.hovered_pos.1)
+            .is_some()
+    }
+
     fn last_widget_tree(&self) -> Option<&WidgetNode> {
         self.last_tree.as_ref()
     }

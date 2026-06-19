@@ -223,10 +223,17 @@ impl PointerHandler for State {
                     tracing::debug!("[hover] layer_shell: pointer enter surface_id={surface_id}");
                     self.pointer_focus = Some(surface_id.clone());
                     if let Some(pointer) = self.pointer.as_ref()
-                        && let Err(error) = pointer.set_cursor(conn, CursorIcon::Default)
+                        && let Err(error) = pointer.set_cursor(
+                            conn,
+                            if self.pointer_interactive {
+                                CursorIcon::Pointer
+                            } else {
+                                CursorIcon::Default
+                            },
+                        )
                     {
                         tracing::debug!(
-                            "[hover] layer_shell: failed to set default cursor on enter: {error}"
+                            "[hover] layer_shell: failed to set cursor on enter: {error}"
                         );
                     }
                 }

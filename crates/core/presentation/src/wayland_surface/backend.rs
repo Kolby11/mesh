@@ -630,6 +630,7 @@ impl LayerShellBackend {
             pool,
             surfaces: HashMap::new(),
             pointer: None,
+            pointer_interactive: false,
             keyboard: None,
             pointer_focus: None,
             keyboard_focus: None,
@@ -644,6 +645,24 @@ impl LayerShellBackend {
             event_queue,
             state,
         })
+    }
+
+    pub fn set_pointer_interactive(&mut self, interactive: bool) {
+        if self.state.pointer_interactive == interactive {
+            return;
+        }
+        self.state.pointer_interactive = interactive;
+        let Some(pointer) = self.state.pointer.as_ref() else {
+            return;
+        };
+        let icon = if interactive {
+            CursorIcon::Pointer
+        } else {
+            CursorIcon::Default
+        };
+        if let Err(error) = pointer.set_cursor(&self._conn, icon) {
+            tracing::debug!("layer_shell: failed to update cursor icon: {error}");
+        }
     }
 
     /// Apply a surface's desired config. Creates the layer surface lazily on first call.

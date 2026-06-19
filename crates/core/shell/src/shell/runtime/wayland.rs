@@ -139,12 +139,16 @@ impl Shell {
                 runtime
                     .component
                     .surface_size_changed(surface_size.0, surface_size.1);
-                runtime.component.handle_input(
+                let emitted = runtime.component.handle_input(
                     self.theme.active(),
                     surface_size.0,
                     surface_size.1,
                     input,
-                )
+                )?;
+                let interactive = runtime.component.hovered_target_is_interactive();
+                self.presentation_engine
+                    .set_pointer_interactive(interactive);
+                Ok(emitted)
             }
             .map_err(ShellRunError::Component)?;
 

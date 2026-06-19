@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_frontend_host::ShellComponent;
 
 #[test]
 fn keyboard_activation_focused_input_backspace_edits_value() {
@@ -45,6 +46,44 @@ end
     assert_eq!(
         runtime_value(&component, "input_seen"),
         Some(serde_json::Value::String("a".into()))
+    );
+}
+
+#[test]
+fn hovered_target_is_interactive_for_clickable_ancestor_label() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau"></script>
+"#,
+    );
+    let mut button = event_node(
+        "button",
+        "root/0",
+        10.0,
+        10.0,
+        80.0,
+        28.0,
+        &[("click", "onTap")],
+    );
+    button
+        .children
+        .push(event_node("text", "root/0/0", 20.0, 14.0, 12.0, 12.0, &[]));
+    component.last_tree = Some(root_with(vec![button]));
+    let theme = default_theme();
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerMove { x: 24.0, y: 18.0 },
+        )
+        .unwrap();
+
+    assert!(
+        component.hovered_target_is_interactive(),
+        "hovering a text label inside a clickable button should request an interactive cursor"
     );
 }
 

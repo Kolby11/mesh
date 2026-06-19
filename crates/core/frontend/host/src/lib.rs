@@ -247,6 +247,10 @@ pub trait ShellComponent: Send {
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         Ok(Vec::new())
     }
+    /// Whether the current pointer hover target should use an interactive cursor.
+    fn hovered_target_is_interactive(&self) -> bool {
+        false
+    }
     /// Receive a cross-surface Tab focus transfer initiated from another
     /// component. The default implementation is a no-op so non-frontend
     /// components can ignore this.
