@@ -10,6 +10,9 @@ local last_state_snapshot = nil
 local last_emitted_percent = nil
 local last_emitted_muted = nil
 
+local STREAM_SAFETY_POLL_MS = 1000
+local FALLBACK_POLL_MS = 250
+
 local function debug_info(message)
     mesh.log.info("[pulseaudio-audio] " .. message)
 end
@@ -19,16 +22,15 @@ local function debug_warn(message)
 end
 
 function start(self)
-    -- Keep polling as a low-latency fallback even when pactl subscribe starts.
-    -- Some audio stacks batch subscription output while a hardware volume key
-    -- is held and only flush on release; the poll path prevents that from
-    -- delaying the visible slider/value.
-    mesh.service.set_poll_interval(100)
+    -- With `pactl subscribe` active, live changes arrive on the stream and
+    -- the poll path is only a safety net for missed/batched events.
+    mesh.service.set_poll_interval(STREAM_SAFETY_POLL_MS)
     local subscribed = mesh.exec_stream("pactl", { "subscribe" })
     if subscribed then
         debug_info("subscribed to pactl for live volume events")
     else
-        debug_warn("pactl subscribe unavailable; falling back to 100ms poll")
+        mesh.service.set_poll_interval(FALLBACK_POLL_MS)
+        debug_warn("pactl subscribe unavailable; falling back to 250ms poll")
     end
 end
 
