@@ -330,8 +330,8 @@ fn style_fingerprint(style: &ComputedStyle) -> u64 {
     hash_corners(style.border_radius, &mut hasher);
     style.opacity.to_bits().hash(&mut hasher);
     hash_transform(style.transform, &mut hasher);
-    style.transition.hash(&mut hasher);
-    style.animation.hash(&mut hasher);
+    style.transitions.hash(&mut hasher);
+    style.animations.hash(&mut hasher);
     style.overflow_x.hash(&mut hasher);
     style.overflow_y.hash(&mut hasher);
     style.font_family.hash(&mut hasher);

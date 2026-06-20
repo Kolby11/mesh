@@ -508,7 +508,7 @@ impl FrontendSurfaceComponent {
         now: Instant,
         has_active_animation: &mut bool,
     ) {
-        if node.computed_style.animation.name.is_some() {
+        if node.computed_style.animations.iter().any(|a| a.name.is_some()) {
             // CSS animations own their animated properties; do not layer
             // transition playback on top of the same node.
             self.style_animations.remove(key);
@@ -523,7 +523,8 @@ impl FrontendSurfaceComponent {
             .or_else(|| previous_styles.get(key).copied())
             .unwrap_or(desired);
 
-        let transition = node.computed_style.transition;
+        // Use the first transition entry for backward-compat single-transition path
+        let transition = node.computed_style.transitions.first().copied().unwrap_or_default();
         let props = transition.properties;
         if props.animates_border_radius() {
             node.computed_style.border_radius = desired.border_radius;
@@ -613,9 +614,21 @@ impl FrontendSurfaceComponent {
         has_active_keyframe_animation: &mut bool,
         active_keyframe_bucket: &mut AnimationPropertyBucket,
     ) {
-        let Some(animation_name) = node.computed_style.animation.name.clone() else {
+        // Apply all named keyframe animations on this node
+        let animations: Vec<_> = node
+            .computed_style
+            .animations
+            .iter()
+            .filter(|a| a.name.is_some())
+            .cloned()
+            .collect();
+
+        if animations.is_empty() {
             return;
-        };
+        }
+
+        for animation_style in animations {
+        let animation_name = animation_style.name.clone().unwrap();
 
         let animation_key = format!("{key}::{animation_name}");
         live_keyframe_keys.insert(animation_key.clone());
@@ -624,7 +637,7 @@ impl FrontendSurfaceComponent {
             self.record_runtime_animation_diagnostic(format!(
                 "unresolved animation '{animation_name}'"
             ));
-            return;
+            continue;
         };
 
         let render_rule =
@@ -634,7 +647,6 @@ impl FrontendSurfaceComponent {
             .insert(animation_key.clone(), render_rule.clone());
 
         let existing = self.keyframe_animations.get(&animation_key).cloned();
-        let animation_style = node.computed_style.animation.clone();
         let paused_at = match (&existing, animation_style.play_state) {
             (Some(active), AnimationPlayState::Paused)
                 if active.play_state == AnimationPlayState::Paused =>
@@ -674,6 +686,7 @@ impl FrontendSurfaceComponent {
             *active_keyframe_bucket =
                 merge_animation_bucket(*active_keyframe_bucket, keyframe_bucket);
         }
+        } // end for animation_style in animations
     }
 
     fn find_component_keyframe_rule(&self, name: &str) -> Option<&component_style::KeyframeRule> {

@@ -347,8 +347,7 @@ impl FrontendRenderEngine {
             return;
         }
 
-        // Apply the visually-supported parts of `transform`. Rotation still
-        // propagates through the data model but is not painted yet.
+        // Apply transform: translate, then scale around transform-origin, then rotate.
         let transform = style.transform;
         let offset_x = offset_x + transform.translate_x;
         let offset_y = offset_y + transform.translate_y;
@@ -362,10 +361,106 @@ impl FrontendRenderEngine {
         let scaled_h = base_h * scale_y;
         let base_x = (layout.x + offset_x) * scale;
         let base_y = (layout.y + offset_y) * scale;
-        let x = (base_x - (scaled_w - base_w) * 0.5).round() as i32;
-        let y = (base_y - (scaled_h - base_h) * 0.5).round() as i32;
+
+        // Apply transform-origin for scale pivot
+        let origin_x = style.transform_origin.x.resolve(layout.width) * scale;
+        let origin_y = style.transform_origin.y.resolve(layout.height) * scale;
+        let origin_frac_x = if base_w > 0.0 { origin_x / base_w } else { 0.5 };
+        let origin_frac_y = if base_h > 0.0 { origin_y / base_h } else { 0.5 };
+        let x = (base_x - (scaled_w - base_w) * origin_frac_x).round() as i32;
+        let y = (base_y - (scaled_h - base_h) * origin_frac_y).round() as i32;
         let w = scaled_w.round().max(0.0) as i32;
         let h = scaled_h.round().max(0.0) as i32;
+
+        // If rotation is non-zero, render to a temp buffer and blit rotated
+        let nearly_zero = |v: f32| v.abs() < f32::EPSILON;
+        if !nearly_zero(transform.rotation) && w > 0 && h > 0 {
+            // Render element at (0,0) in temp buffer
+            let mut temp = PixelBuffer::new(w as u32, h as u32);
+            let temp_bounds = ClipRect { x: 0, y: 0, width: w, height: h };
+            let temp_clip = temp_bounds;
+            self.render_node_self(node, &mut temp, scale, temp_bounds, temp_clip, module_id);
+            // Render children into temp buffer too
+            let scroll_x = node_attr_f32(node, "_mesh_scroll_x");
+            let scroll_y = node_attr_f32(node, "_mesh_scroll_y");
+            let child_offset_x_temp = -scroll_x;
+            let child_offset_y_temp = -scroll_y;
+            let child_clip_temp = if node_clips_children(node) { temp_clip } else { temp_clip };
+            for child in &node.children {
+                self.render_node_with_filter(
+                    child,
+                    &mut temp,
+                    scale,
+                    child_offset_x_temp,
+                    child_offset_y_temp,
+                    child_clip_temp,
+                    paint_nodes,
+                    module_id,
+                );
+            }
+            // Blit rotated temp buffer onto main buffer
+            let angle = transform.rotation;
+            let cos_a = angle.cos();
+            let sin_a = angle.sin();
+            // Center of rotation in temp buffer space
+            let cx = origin_x;
+            let cy = origin_y;
+            // Bounding box of rotated element
+            let corners_x = [0.0f32 - cx, w as f32 - cx, 0.0 - cx, w as f32 - cx];
+            let corners_y = [0.0f32 - cy, 0.0 - cy, h as f32 - cy, h as f32 - cy];
+            let mut rot_min_x = f32::MAX;
+            let mut rot_max_x = f32::MIN;
+            let mut rot_min_y = f32::MAX;
+            let mut rot_max_y = f32::MIN;
+            for i in 0..4 {
+                let rx = corners_x[i] * cos_a - corners_y[i] * sin_a;
+                let ry = corners_x[i] * sin_a + corners_y[i] * cos_a;
+                rot_min_x = rot_min_x.min(rx);
+                rot_max_x = rot_max_x.max(rx);
+                rot_min_y = rot_min_y.min(ry);
+                rot_max_y = rot_max_y.max(ry);
+            }
+            let rot_w = (rot_max_x - rot_min_x).ceil() as i32;
+            let rot_h = (rot_max_y - rot_min_y).ceil() as i32;
+            // dst_x/dst_y is where the rotated bounding box starts on the output buffer
+            let dst_x = x + rot_min_x as i32;
+            let dst_y = y + rot_min_y as i32;
+            let opacity = style.opacity;
+            for py in 0..rot_h {
+                for px in 0..rot_w {
+                    // relative to rotation center in rotated space
+                    let rx = px as f32 + rot_min_x;
+                    let ry = py as f32 + rot_min_y;
+                    // inverse rotate to source coords
+                    let sx = rx * cos_a + ry * sin_a + cx;
+                    let sy = -rx * sin_a + ry * cos_a + cy;
+                    if sx < 0.0 || sy < 0.0 || sx >= w as f32 || sy >= h as f32 {
+                        continue;
+                    }
+                    // Bilinear sample from temp
+                    let tx = sx as u32;
+                    let ty = sy as u32;
+                    if tx >= temp.width || ty >= temp.height {
+                        continue;
+                    }
+                    let src_pixel = temp.get_pixel(tx, ty);
+                    if src_pixel.a == 0 {
+                        continue;
+                    }
+                    let out_x = (dst_x + px) as u32;
+                    let out_y = (dst_y + py) as u32;
+                    if out_x >= buffer.width || out_y >= buffer.height {
+                        continue;
+                    }
+                    // Apply opacity via coverage
+                    let coverage = ((opacity * 255.0).round() as u8).min(255);
+                    buffer.blend_pixel(out_x, out_y, src_pixel, coverage);
+                }
+            }
+            self.render_scrollbars(node, buffer, scale, ClipRect { x, y, width: w, height: h }, clip);
+            return;
+        }
+
         let bounds = ClipRect {
             x,
             y,

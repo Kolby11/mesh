@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use mesh_core_elements::{
-    BoxShadow, Corners, Dimension, Edges, TransitionStyle, VisualFilter, WidgetNode, style::Color,
+    BoxShadow, Corners, Dimension, Edges, TransitionStyle, VisualFilter, WidgetNode,
+    style::{Color, Visibility},
 };
 
 use super::easing::{Easing, apply_easing};
@@ -39,6 +40,7 @@ pub struct AnimatableStyle {
     pub inset_right: Option<f32>,
     pub inset_bottom: Option<f32>,
     pub inset_left: Option<f32>,
+    pub visibility: Visibility,
 }
 
 impl AnimatableStyle {
@@ -71,6 +73,7 @@ impl AnimatableStyle {
             inset_right: s.inset_right,
             inset_bottom: s.inset_bottom,
             inset_left: s.inset_left,
+            visibility: s.visibility,
         }
     }
 
@@ -102,6 +105,7 @@ impl AnimatableStyle {
         s.inset_right = self.inset_right;
         s.inset_bottom = self.inset_bottom;
         s.inset_left = self.inset_left;
+        s.visibility = self.visibility;
     }
 }
 
@@ -138,6 +142,14 @@ impl Interpolate for AnimatableStyle {
             inset_right: lerp_option_f32(self.inset_right, other.inset_right, progress),
             inset_bottom: lerp_option_f32(self.inset_bottom, other.inset_bottom, progress),
             inset_left: lerp_option_f32(self.inset_left, other.inset_left, progress),
+            // CSS: visibility is discrete — if either endpoint is Visible, stay Visible
+            visibility: if self.visibility == Visibility::Visible
+                || other.visibility == Visibility::Visible
+            {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            },
         }
     }
 }
@@ -199,6 +211,9 @@ fn lerp_dimension(from: Dimension, to: Dimension, progress: f32) -> Dimension {
     match (from, to) {
         (Dimension::Px(a), Dimension::Px(b)) => Dimension::Px(a.lerp(b, progress)),
         (Dimension::Percent(a), Dimension::Percent(b)) => Dimension::Percent(a.lerp(b, progress)),
+        // Treat Auto as Px(0) when the other side is Px, so it interpolates through zero
+        (Dimension::Auto, Dimension::Px(b)) => Dimension::Px((0.0f32).lerp(b, progress)),
+        (Dimension::Px(a), Dimension::Auto) => Dimension::Px(a.lerp(0.0, progress)),
         _ => to,
     }
 }
@@ -206,7 +221,10 @@ fn lerp_dimension(from: Dimension, to: Dimension, progress: f32) -> Dimension {
 fn lerp_option_f32(from: Option<f32>, to: Option<f32>, progress: f32) -> Option<f32> {
     match (from, to) {
         (Some(a), Some(b)) => Some(a.lerp(b, progress)),
-        _ => to,
+        // Treat None as Some(0) so None<->Some(v) transitions interpolate through zero
+        (None, Some(b)) => Some((0.0f32).lerp(b, progress)),
+        (Some(a), None) => Some(a.lerp(0.0, progress)),
+        (None, None) => None,
     }
 }
 
@@ -285,6 +303,7 @@ mod tests {
             inset_right: None,
             inset_bottom: None,
             inset_left: None,
+            visibility: Visibility::Visible,
         };
         let to = AnimatableStyle {
             opacity: 1.0,

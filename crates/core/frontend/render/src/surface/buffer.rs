@@ -89,6 +89,23 @@ impl PixelBuffer {
         true
     }
 
+    /// Get a single pixel. Returns transparent black if out of bounds. BGRA → Color.
+    pub fn get_pixel(&self, x: u32, y: u32) -> Color {
+        if x >= self.width || y >= self.height {
+            return Color::TRANSPARENT;
+        }
+        let offset = (y * self.stride + x * 4) as usize;
+        if offset + 3 >= self.data.len() {
+            return Color::TRANSPARENT;
+        }
+        Color {
+            b: self.data[offset],
+            g: self.data[offset + 1],
+            r: self.data[offset + 2],
+            a: self.data[offset + 3],
+        }
+    }
+
     /// Set a single pixel. Coordinates are bounds-checked.
     pub fn set_pixel(&mut self, x: u32, y: u32, color: Color) {
         if x >= self.width || y >= self.height {
