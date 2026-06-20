@@ -7,7 +7,7 @@
 //! engine substitutes `cubic-bezier(0.2, 0, 0, 1)`, and the parser produces
 //! a `CubicBezier` variant that this module knows how to evaluate.
 
-use mesh_core_elements::TransitionEasing;
+use mesh_core_elements::{StepPosition, TransitionEasing};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Easing {
@@ -19,7 +19,8 @@ pub enum Easing {
     /// (x1, y1, x2, y2) — the two control points of a cubic Bézier from
     /// (0,0) to (1,1). Same convention as CSS `cubic-bezier()`.
     CubicBezier(f32, f32, f32, f32),
-    // TODO: Steps(u32, StepPosition),
+    /// `steps(n, <position>)` — a discrete step function with `n` intervals.
+    Steps(u32, StepPosition),
 }
 
 impl From<TransitionEasing> for Easing {
@@ -31,6 +32,7 @@ impl From<TransitionEasing> for Easing {
             TransitionEasing::EaseOut => Easing::EaseOut,
             TransitionEasing::EaseInOut => Easing::EaseInOut,
             TransitionEasing::CubicBezier(x1, y1, x2, y2) => Easing::CubicBezier(x1, y1, x2, y2),
+            TransitionEasing::Steps(count, position) => Easing::Steps(count, position),
         }
     }
 }
@@ -44,7 +46,31 @@ pub fn apply_easing(easing: Easing, t: f32) -> f32 {
         Easing::EaseOut => ease_out_cubic(t),
         Easing::EaseInOut => ease_in_out_cubic(t),
         Easing::CubicBezier(x1, y1, x2, y2) => cubic_bezier_eval(t, x1, y1, x2, y2),
+        Easing::Steps(count, position) => steps_eval(t, count, position),
     }
+}
+
+/// Evaluate a CSS `steps(n, <position>)` timing function at progress `t`.
+///
+/// The output is a staircase: the current interval index divided by the number
+/// of jumps. `jump-start`/`jump-both` add a leading jump; `jump-none` drops a
+/// jump so both 0 and 1 are reachable. Matches the CSS Easing Functions spec.
+fn steps_eval(t: f32, count: u32, position: StepPosition) -> f32 {
+    let steps = count.max(1) as f32;
+    let mut current = (t * steps).floor();
+
+    if matches!(position, StepPosition::JumpStart | StepPosition::JumpBoth) {
+        current += 1.0;
+    }
+
+    let jumps = match position {
+        // `steps(1, jump-none)` is degenerate; guard the divisor.
+        StepPosition::JumpNone => (steps - 1.0).max(1.0),
+        StepPosition::JumpBoth => steps + 1.0,
+        StepPosition::JumpStart | StepPosition::JumpEnd => steps,
+    };
+
+    (current / jumps).clamp(0.0, 1.0)
 }
 
 fn ease_in_cubic(t: f32) -> f32 {
@@ -157,6 +183,40 @@ mod tests {
         for t in [0.1, 0.25, 0.5, 0.75, 0.9] {
             assert!((apply_easing(curve, t) - t).abs() < 1e-2);
         }
+    }
+
+    #[test]
+    fn steps_jump_end_holds_start_and_reaches_end() {
+        let curve = Easing::Steps(4, StepPosition::JumpEnd);
+        assert_eq!(apply_easing(curve, 0.0), 0.0);
+        assert_eq!(apply_easing(curve, 0.1), 0.0); // still in first interval
+        assert_eq!(apply_easing(curve, 0.3), 0.25); // second interval
+        assert_eq!(apply_easing(curve, 0.6), 0.5);
+        assert_eq!(apply_easing(curve, 1.0), 1.0);
+    }
+
+    #[test]
+    fn steps_jump_start_jumps_immediately() {
+        let curve = Easing::Steps(4, StepPosition::JumpStart);
+        assert_eq!(apply_easing(curve, 0.0), 0.25); // leading jump
+        assert_eq!(apply_easing(curve, 0.3), 0.5);
+        assert_eq!(apply_easing(curve, 1.0), 1.0);
+    }
+
+    #[test]
+    fn steps_jump_none_reaches_both_ends() {
+        let curve = Easing::Steps(4, StepPosition::JumpNone);
+        assert_eq!(apply_easing(curve, 0.0), 0.0);
+        assert!((apply_easing(curve, 0.3) - 1.0 / 3.0).abs() < 1e-6);
+        assert_eq!(apply_easing(curve, 0.8), 1.0); // last stop reached before t=1
+    }
+
+    #[test]
+    fn steps_jump_both_holds_neither_end() {
+        let curve = Easing::Steps(4, StepPosition::JumpBoth);
+        assert!((apply_easing(curve, 0.0) - 0.2).abs() < 1e-6); // 1/5
+        assert!((apply_easing(curve, 0.9) - 0.8).abs() < 1e-6); // 4/5
+        assert_eq!(apply_easing(curve, 1.0), 1.0);
     }
 
     #[test]

@@ -1328,6 +1328,21 @@ impl Default for Transform2D {
     }
 }
 
+/// Where the jumps land in a CSS `steps()` timing function. The legacy `start`
+/// / `end` keywords map onto `JumpStart` / `JumpEnd`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum StepPosition {
+    /// Jump at the start of each interval (`jump-start` / `start`).
+    JumpStart,
+    /// Jump at the end of each interval (`jump-end` / `end`). CSS default.
+    #[default]
+    JumpEnd,
+    /// No jump at either end — `n` stops including both 0 and 1 (`jump-none`).
+    JumpNone,
+    /// Jump at both ends — neither 0 nor 1 is held (`jump-both`).
+    JumpBoth,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum TransitionEasing {
     Linear,
@@ -1337,16 +1352,25 @@ pub enum TransitionEasing {
     EaseOut,
     EaseInOut,
     CubicBezier(f32, f32, f32, f32),
+    /// `steps(n, <position>)` — a discrete step function with `n` intervals.
+    Steps(u32, StepPosition),
 }
 
 impl std::hash::Hash for TransitionEasing {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
-        if let Self::CubicBezier(a, b, c, d) = self {
-            a.to_bits().hash(state);
-            b.to_bits().hash(state);
-            c.to_bits().hash(state);
-            d.to_bits().hash(state);
+        match self {
+            Self::CubicBezier(a, b, c, d) => {
+                a.to_bits().hash(state);
+                b.to_bits().hash(state);
+                c.to_bits().hash(state);
+                d.to_bits().hash(state);
+            }
+            Self::Steps(count, position) => {
+                count.hash(state);
+                position.hash(state);
+            }
+            _ => {}
         }
     }
 }

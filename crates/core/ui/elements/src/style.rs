@@ -1567,6 +1567,57 @@ mod tests {
         assert!(style.transition.properties.animates_border_color());
     }
 
+    fn resolve_single_decl(property: &str, value: &str) -> ComputedStyle {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: property.to_string(),
+                value: StyleValue::Literal(value.to_string()),
+            }],
+            container_query: None,
+        }];
+        resolver.resolve_node_style(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        )
+    }
+
+    #[test]
+    fn transition_shorthand_parses_steps_with_position() {
+        let style = resolve_single_decl("transition", "opacity 200ms steps(4, jump-end)");
+        assert_eq!(
+            style.transition.easing,
+            TransitionEasing::Steps(4, StepPosition::JumpEnd)
+        );
+        assert!(style.transition.properties.animates_opacity());
+    }
+
+    #[test]
+    fn transition_shorthand_parses_step_end_keyword() {
+        let style = resolve_single_decl("transition", "transform 100ms step-start");
+        assert_eq!(
+            style.transition.easing,
+            TransitionEasing::Steps(1, StepPosition::JumpStart)
+        );
+    }
+
+    #[test]
+    fn animation_shorthand_parses_steps_with_inner_space() {
+        let style = resolve_single_decl("animation", "pulse 1s steps(3, jump-none) infinite");
+        assert_eq!(
+            style.animation.easing,
+            TransitionEasing::Steps(3, StepPosition::JumpNone)
+        );
+        assert_eq!(style.animation.name.as_deref(), Some("pulse"));
+        assert_eq!(style.animation.duration_ms, 1000);
+    }
+
     #[test]
     fn transition_property_supports_phase_8_visual_properties() {
         let properties = parse_transition_properties(

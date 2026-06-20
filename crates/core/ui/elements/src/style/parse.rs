@@ -330,8 +330,44 @@ pub(super) fn parse_easing_keyword(value: &str) -> TransitionEasing {
         "ease-in" => TransitionEasing::EaseIn,
         "ease-out" => TransitionEasing::EaseOut,
         "ease-in-out" => TransitionEasing::EaseInOut,
+        "step-start" => TransitionEasing::Steps(1, StepPosition::JumpStart),
+        "step-end" => TransitionEasing::Steps(1, StepPosition::JumpEnd),
+        _ if trimmed.starts_with("steps(") => {
+            parse_steps(trimmed).unwrap_or(TransitionEasing::EaseOut)
+        }
         _ => parse_cubic_bezier(trimmed).unwrap_or(TransitionEasing::EaseOut),
     }
+}
+
+/// True for any token that names an easing function — keyword, `cubic-bezier()`,
+/// `steps()`, or the `step-start`/`step-end` shorthands.
+fn is_easing_token(token: &str) -> bool {
+    matches!(
+        token,
+        "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out" | "step-start" | "step-end"
+    ) || token.starts_with("cubic-bezier(")
+        || token.starts_with("steps(")
+}
+
+pub(super) fn parse_steps(value: &str) -> Option<TransitionEasing> {
+    let inner = value.strip_prefix("steps(").and_then(|rest| rest.strip_suffix(')'))?;
+    let mut parts = inner.split(',');
+    let count = parts.next()?.trim().parse::<u32>().ok()?;
+    if count == 0 {
+        return None;
+    }
+    let position = match parts.next().map(str::trim) {
+        None => StepPosition::JumpEnd,
+        Some("jump-start") | Some("start") => StepPosition::JumpStart,
+        Some("jump-end") | Some("end") => StepPosition::JumpEnd,
+        Some("jump-none") => StepPosition::JumpNone,
+        Some("jump-both") => StepPosition::JumpBoth,
+        Some(_) => return None,
+    };
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(TransitionEasing::Steps(count, position))
 }
 
 pub(super) fn parse_cubic_bezier(value: &str) -> Option<TransitionEasing> {
@@ -458,12 +494,7 @@ fn parse_transition_shorthand_uncached(
                     properties.inset_bottom = true;
                     properties.inset_left = true;
                 }
-                "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
-                    if easing == TransitionEasing::EaseOut =>
-                {
-                    easing = parse_easing_keyword(token)
-                }
-                _ if token.starts_with("cubic-bezier(") && easing == TransitionEasing::EaseOut => {
+                _ if is_easing_token(token) && easing == TransitionEasing::EaseOut => {
                     easing = parse_easing_keyword(token);
                 }
                 _ => {}
@@ -521,7 +552,11 @@ pub(super) fn parse_animation_shorthand(value: &str) -> AnimationStyle {
     let mut animation = AnimationStyle::default();
     let mut time_count = 0;
 
-    for token in first_comma_item(value).split_whitespace() {
+    for token in split_paren_aware(first_comma_item(value), ' ')
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
         if looks_like_explicit_time(token) {
             let ms = parse_time_ms(token);
             if time_count == 0 {
@@ -530,10 +565,7 @@ pub(super) fn parse_animation_shorthand(value: &str) -> AnimationStyle {
                 animation.delay_ms = ms;
             }
             time_count += 1;
-        } else if matches!(
-            token,
-            "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
-        ) {
+        } else if is_easing_token(token) {
             animation.easing = parse_easing_keyword(token);
         } else if token == "infinite" || token.parse::<u32>().is_ok() {
             animation.iteration_count = parse_animation_iteration_count(token);

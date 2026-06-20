@@ -25,7 +25,7 @@ mod runtime_tree;
 mod shell_component;
 mod tooltip;
 
-use animation::StyleAnimation;
+use mesh_core_animation::transition::TransitionAnimator;
 pub(in crate::shell) use catalog::FrontendCatalog;
 #[cfg(test)]
 pub(crate) use input::KeybindResolutionSource;
@@ -384,7 +384,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// a popover through keyboard navigation so the owner script does not
     /// immediately re-show it from stale state.
     portal_hidden_bindings: RefCell<HashMap<String, String>>,
-    style_animations: HashMap<String, StyleAnimation>,
+    transitions: TransitionAnimator,
     keyframe_animations: HashMap<String, mesh_core_animation::keyframes::ActiveKeyframeAnimation>,
     keyframe_rules: HashMap<String, mesh_core_animation::keyframes::KeyframeRule>,
     has_active_keyframe_animation: bool,
@@ -508,7 +508,7 @@ impl FrontendSurfaceComponent {
             pending_surface_states: RefCell::new(HashMap::new()),
             last_surface_states: HashMap::new(),
             portal_hidden_bindings: RefCell::new(HashMap::new()),
-            style_animations: HashMap::new(),
+            transitions: TransitionAnimator::new(),
             keyframe_animations: HashMap::new(),
             keyframe_rules: HashMap::new(),
             has_active_keyframe_animation: false,

@@ -273,7 +273,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn wants_render(&self) -> bool {
         self.dirty
             || self.style_only_dirty
-            || !self.style_animations.is_empty()
+            || !self.transitions.is_empty()
             || self.has_active_keyframe_animation
     }
 
@@ -818,7 +818,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // A theme swap is a global palette replacement, not a local CSS
         // transition. Drop transition state so stale light/dark colors cannot
         // paint over the newly active theme.
-        self.style_animations.clear();
+        self.transitions.clear();
         // Preserve keyframe timelines, but rebuild token-resolved rules.
         self.keyframe_rules.clear();
         self.render_hooks_pending = true;
