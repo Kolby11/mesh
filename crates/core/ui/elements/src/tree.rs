@@ -62,6 +62,9 @@ pub struct WidgetNode {
     /// Service field reads captured during template evaluation.
     /// Each entry is a (service_name, field_name) pair read by this node's expressions.
     pub service_field_reads: Vec<(String, String)>,
+    /// Cached split `class` tokens derived from the raw `class` attribute.
+    cached_class_attr: Option<String>,
+    cached_classes: Vec<String>,
 }
 
 impl WidgetNode {
@@ -78,7 +81,26 @@ impl WidgetNode {
             event_handlers: BTreeMap::new(),
             state: ElementState::default(),
             service_field_reads: Vec::new(),
+            cached_class_attr: None,
+            cached_classes: Vec::new(),
         }
+    }
+
+    pub fn refresh_class_tokens_cache(&mut self) {
+        let class_attr = self.attributes.get("class").map(String::as_str);
+        if self.cached_class_attr.as_deref() != class_attr {
+            self.cached_classes = class_attr
+                .into_iter()
+                .flat_map(str::split_whitespace)
+                .filter(|class| !class.is_empty())
+                .map(str::to_owned)
+                .collect();
+            self.cached_class_attr = class_attr.map(str::to_owned);
+        }
+    }
+
+    pub fn class_tokens(&self) -> &[String] {
+        &self.cached_classes
     }
 
     /// Recursively find a node by ID.
@@ -120,5 +142,24 @@ mod tests {
     #[test]
     fn new_widget_node_has_empty_service_field_reads() {
         assert!(WidgetNode::new("text").service_field_reads.is_empty());
+    }
+
+    #[test]
+    fn class_tokens_refresh_when_class_attribute_changes() {
+        let mut node = WidgetNode::new("text");
+        node.refresh_class_tokens_cache();
+        assert!(node.class_tokens().is_empty());
+
+        node.attributes.insert("class".into(), "primary compact".into());
+        node.refresh_class_tokens_cache();
+        assert_eq!(node.class_tokens(), ["primary", "compact"]);
+
+        node.attributes.insert("class".into(), "compact active".into());
+        node.refresh_class_tokens_cache();
+        assert_eq!(node.class_tokens(), ["compact", "active"]);
+
+        node.attributes.remove("class");
+        node.refresh_class_tokens_cache();
+        assert!(node.class_tokens().is_empty());
     }
 }

@@ -83,15 +83,6 @@ impl<'a> ClassList<'a> {
         }
     }
 
-    fn from_class_attr(class_attr: Option<&'a String>) -> Self {
-        match class_attr {
-            Some(class_attr) => {
-                Self::Owned(split_class_values(std::iter::once(class_attr.as_str())))
-            }
-            None => Self::Empty,
-        }
-    }
-
     fn iter(&self) -> impl Iterator<Item = &str> {
         match self {
             Self::Empty => ClassListIter::Empty,
@@ -149,8 +140,9 @@ impl<'a> StyleNodeAttrs<'a> {
         }
     }
 
-    pub fn from_node(node: &'a crate::tree::WidgetNode) -> Self {
-        let classes = ClassList::from_class_attr(node.attributes.get("class"));
+    pub fn from_node(node: &'a mut crate::tree::WidgetNode) -> Self {
+        node.refresh_class_tokens_cache();
+        let classes = ClassList::from_class_slice(node.class_tokens());
         Self {
             tag: node.tag.as_str(),
             classes,
