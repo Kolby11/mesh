@@ -43,6 +43,7 @@ impl FrontendRenderEngine {
             width: buffer.width as i32,
             height: buffer.height as i32,
         };
+        self.viewport_clip.set(clip);
         self.render_node(root, buffer, scale, offset_x, offset_y, clip, module_id);
     }
 
@@ -69,6 +70,7 @@ impl FrontendRenderEngine {
             height: clip.3 as i32,
         };
         let clip = intersect_clip(surface_clip, damage_clip);
+        self.viewport_clip.set(surface_clip);
         self.render_node(root, buffer, scale, offset_x, offset_y, clip, module_id);
     }
 
@@ -97,6 +99,7 @@ impl FrontendRenderEngine {
             height: clip.3 as i32,
         };
         let clip = intersect_clip(surface_clip, damage_clip);
+        self.viewport_clip.set(surface_clip);
         self.render_node_with_filter(
             root,
             buffer,
@@ -504,26 +507,29 @@ impl FrontendRenderEngine {
             let mut child_order: Vec<usize> = (0..node.children.len()).collect();
             child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
             for index in child_order {
+                let child = &node.children[index];
+                let (cox, coy, cc) = fixed_child_offsets(child, child_offset_x, child_offset_y, child_clip, self.viewport_clip.get());
                 self.render_node_with_filter(
-                    &node.children[index],
+                    child,
                     buffer,
                     scale,
-                    child_offset_x,
-                    child_offset_y,
-                    child_clip,
+                    cox,
+                    coy,
+                    cc,
                     paint_nodes,
                     module_id,
                 );
             }
         } else {
             for child in &node.children {
+                let (cox, coy, cc) = fixed_child_offsets(child, child_offset_x, child_offset_y, child_clip, self.viewport_clip.get());
                 self.render_node_with_filter(
                     child,
                     buffer,
                     scale,
-                    child_offset_x,
-                    child_offset_y,
-                    child_clip,
+                    cox,
+                    coy,
+                    cc,
                     paint_nodes,
                     module_id,
                 );
@@ -979,5 +985,22 @@ fn scaled_display_clip(clip: DisplayListClip, scale: f32) -> ClipRect {
         y: (clip.y as f32 * scale).round() as i32,
         width: (clip.width as f32 * scale).round().max(0.0) as i32,
         height: (clip.height as f32 * scale).round().max(0.0) as i32,
+    }
+}
+
+/// Returns (offset_x, offset_y, clip) for a child node.
+/// For `position: fixed` children, resets the accumulated offset to (0, 0)
+/// and uses the viewport clip so they are not constrained by scrollable ancestors.
+fn fixed_child_offsets(
+    child: &WidgetNode,
+    child_offset_x: f32,
+    child_offset_y: f32,
+    child_clip: ClipRect,
+    viewport_clip: ClipRect,
+) -> (f32, f32, ClipRect) {
+    if child.computed_style.position == Position::Fixed {
+        (0.0, 0.0, viewport_clip)
+    } else {
+        (child_offset_x, child_offset_y, child_clip)
     }
 }

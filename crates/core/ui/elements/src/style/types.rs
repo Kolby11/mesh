@@ -1631,6 +1631,7 @@ pub enum Position {
     Static,
     Relative,
     Absolute,
+    Fixed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

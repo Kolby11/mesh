@@ -1606,6 +1606,7 @@ fn apply_declaration(
             {
                 "relative" => Position::Relative,
                 "absolute" => Position::Absolute,
+                "fixed" => Position::Fixed,
                 _ => Position::Static,
             };
         }

@@ -19,7 +19,7 @@ pub(crate) use backend::{
     UnsupportedPainterFeature,
 };
 use mesh_core_elements::style::{
-    BackgroundPaint, Color, Display, Overflow, TextAlign, TextDirection, TextOverflow,
+    BackgroundPaint, Color, Display, Overflow, Position, TextAlign, TextDirection, TextOverflow,
 };
 use mesh_core_elements::tree::WidgetNode;
 use mesh_core_elements::{BoxShadow, VisualFilter};
@@ -134,6 +134,9 @@ pub struct FrontendRenderEngine {
     /// its full size, anchored at the element-closest edge.
     tooltip_scale_from: Cell<f32>,
     render_scratch: RefCell<RenderScratch>,
+    /// Full-surface clip set at the start of each render pass. Used to give
+    /// `position: fixed` children the viewport clip rather than their parent's.
+    viewport_clip: Cell<ClipRect>,
 }
 
 #[derive(Default)]
@@ -180,6 +183,7 @@ impl FrontendRenderEngine {
             tooltip_center_x: Cell::new(false),
             tooltip_scale_from: Cell::new(0.0),
             render_scratch: RefCell::new(RenderScratch::default()),
+            viewport_clip: Cell::new(ClipRect { x: 0, y: 0, width: 0, height: 0 }),
         }
     }
 
@@ -194,6 +198,7 @@ impl FrontendRenderEngine {
             tooltip_center_x: Cell::new(false),
             tooltip_scale_from: Cell::new(0.0),
             render_scratch: RefCell::new(RenderScratch::default()),
+            viewport_clip: Cell::new(ClipRect { x: 0, y: 0, width: 0, height: 0 }),
         }
     }
 

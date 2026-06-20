@@ -4,8 +4,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use mesh_core_elements::style::{
-    BackgroundPaint, Color, Display, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
-    Visibility,
+    BackgroundPaint, Color, Display, Edges, Overflow, Position, TextAlign, TextDirection,
+    TextOverflow, Visibility,
 };
 use mesh_core_elements::{BoxShadow, VisualFilter};
 use mesh_core_elements::{LayoutRect, NodeId, WidgetNode};
@@ -756,11 +756,13 @@ impl RetainedDisplayList {
                 let rebuild_ancestors = collect_dirty_ancestor_ids(root, dirty_node_ids);
                 let mut next_subtrees = HashMap::new();
                 let mut local_metrics = LocalReuseMetrics::default();
+                let vclip = surface_clip(surface);
                 let subtree = build_paint_subtree(
                     root,
                     0.0,
                     0.0,
-                    surface_clip(surface),
+                    vclip,
+                    vclip,
                     false,
                     dirty_node_ids,
                     &rebuild_ancestors,
@@ -779,11 +781,13 @@ impl RetainedDisplayList {
             LocalReuseDecision::FallbackFull { .. } => {
                 let mut next_subtrees = HashMap::new();
                 let mut local_metrics = LocalReuseMetrics::default();
+                let vclip = surface_clip(surface);
                 let subtree = build_paint_subtree(
                     root,
                     0.0,
                     0.0,
-                    surface_clip(surface),
+                    vclip,
+                    vclip,
                     true,
                     dirty_node_ids,
                     &HashSet::new(),
@@ -1412,6 +1416,7 @@ fn build_paint_subtree(
     offset_x: f32,
     offset_y: f32,
     clip: DisplayListClip,
+    viewport_clip: DisplayListClip,
     force_rebuild: bool,
     dirty_node_ids: &HashSet<NodeId>,
     dirty_ancestors: &HashSet<NodeId>,
@@ -1489,12 +1494,18 @@ fn build_paint_subtree(
     };
     let child_order = compute_child_order(node);
     for_children_in_order(node, child_order.as_deref(), |child| {
+        let (cox, coy, cc) = if child.computed_style.position == Position::Fixed {
+            (0.0, 0.0, viewport_clip)
+        } else {
+            (child_offset_x, child_offset_y, child_clip)
+        };
         append_child_paint_subtree(
             &mut subtree,
             child,
-            child_offset_x,
-            child_offset_y,
-            child_clip,
+            cox,
+            coy,
+            cc,
+            viewport_clip,
             force_rebuild || node_is_dirty,
             dirty_node_ids,
             dirty_ancestors,
@@ -1561,6 +1572,7 @@ fn append_child_paint_subtree(
     child_offset_x: f32,
     child_offset_y: f32,
     child_clip: DisplayListClip,
+    viewport_clip: DisplayListClip,
     force_rebuild: bool,
     dirty_node_ids: &HashSet<NodeId>,
     dirty_ancestors: &HashSet<NodeId>,
@@ -1580,6 +1592,7 @@ fn append_child_paint_subtree(
         child_offset_x,
         child_offset_y,
         child_clip,
+        viewport_clip,
         force_rebuild,
         dirty_node_ids,
         dirty_ancestors,

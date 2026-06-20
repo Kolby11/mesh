@@ -279,7 +279,7 @@ impl LayoutEngine {
                     );
                     zero_layout_subtree(root);
                 } else {
-                    write_taffy_layout(root, &tree, &node_map);
+                    write_taffy_layout(root, &tree, &node_map, available_width, available_height);
                 }
             }
             Err(error) => {
@@ -397,7 +397,7 @@ impl LayoutEngine {
                 );
                 zero_layout_subtree(root);
             } else {
-                write_taffy_layout(root, &state.tree, &node_map);
+                write_taffy_layout(root, &state.tree, &node_map, available_width, available_height);
                 state.last_available = (available_width, available_height);
             }
         }
@@ -465,7 +465,7 @@ fn taffy_style_for_node(node: &WidgetNode, report: &mut TaffyLayoutReport) -> ta
         },
         position: match style.position {
             Position::Static | Position::Relative => taffy_style::Position::Relative,
-            Position::Absolute => taffy_style::Position::Absolute,
+            Position::Absolute | Position::Fixed => taffy_style::Position::Absolute,
         },
         inset: TaffyRect {
             left: taffy_length_percentage(style.inset_left),
@@ -649,7 +649,7 @@ fn compute_fresh_retained_layout(
                 zero_layout_subtree(root);
                 state.valid = false;
             } else {
-                write_taffy_layout(root, &state.tree, &node_id_to_taffy);
+                write_taffy_layout(root, &state.tree, &node_id_to_taffy, available_width, available_height);
                 state.last_available = (available_width, available_height);
                 state.valid = true;
             }
@@ -733,7 +733,7 @@ fn compute_structural_retained_layout(
                 zero_layout_subtree(root);
                 state.valid = false;
             } else {
-                write_taffy_layout(root, &state.tree, &node_id_to_taffy);
+                write_taffy_layout(root, &state.tree, &node_id_to_taffy, available_width, available_height);
                 state.last_available = (available_width, available_height);
                 state.valid = true;
             }
@@ -986,8 +986,10 @@ fn write_taffy_layout(
     node: &mut WidgetNode,
     tree: &TaffyTree<NodeId>,
     node_map: &HashMap<NodeId, TaffyNodeId>,
+    viewport_w: f32,
+    viewport_h: f32,
 ) {
-    write_taffy_layout_with_parent(node, tree, node_map, None, 0.0, 0.0);
+    write_taffy_layout_with_parent(node, tree, node_map, None, 0.0, 0.0, viewport_w, viewport_h);
 }
 
 fn write_taffy_layout_with_parent(
@@ -997,6 +999,8 @@ fn write_taffy_layout_with_parent(
     parent_padding: Option<Edges>,
     parent_x: f32,
     parent_y: f32,
+    viewport_w: f32,
+    viewport_h: f32,
 ) {
     if node.computed_style.display == Display::None {
         zero_layout_subtree(node);
@@ -1031,17 +1035,52 @@ fn write_taffy_layout_with_parent(
                 node.layout.height = (node.layout.height - padding.vertical()).max(0.0);
             }
         }
+
+        // Fixed: positioned relative to the viewport, ignoring scroll and transforms.
+        // Override x/y (and size when both edges constrain it) using viewport dimensions.
+        if node.computed_style.position == Position::Fixed {
+            let w = node.layout.width;
+            let h = node.layout.height;
+            let s = &node.computed_style;
+            match (s.inset_left, s.inset_right) {
+                (Some(l), Some(r)) => {
+                    node.layout.x = l;
+                    node.layout.width = (viewport_w - l - r).max(0.0);
+                }
+                (Some(l), None) => node.layout.x = l,
+                (None, Some(r)) => node.layout.x = (viewport_w - w - r).max(0.0),
+                (None, None) => node.layout.x = 0.0,
+            }
+            match (s.inset_top, s.inset_bottom) {
+                (Some(t), Some(b)) => {
+                    node.layout.y = t;
+                    node.layout.height = (viewport_h - t - b).max(0.0);
+                }
+                (Some(t), None) => node.layout.y = t,
+                (None, Some(b)) => node.layout.y = (viewport_h - h - b).max(0.0),
+                (None, None) => node.layout.y = 0.0,
+            }
+        }
     }
 
     let padding = node.computed_style.padding;
     for child in &mut node.children {
+        // Fixed children are positioned from the viewport origin, not the parent.
+        let (child_parent_x, child_parent_y, child_parent_padding) =
+            if child.computed_style.position == Position::Fixed {
+                (0.0, 0.0, None)
+            } else {
+                (node.layout.x, node.layout.y, Some(padding))
+            };
         write_taffy_layout_with_parent(
             child,
             tree,
             node_map,
-            Some(padding),
-            node.layout.x,
-            node.layout.y,
+            child_parent_padding,
+            child_parent_x,
+            child_parent_y,
+            viewport_w,
+            viewport_h,
         );
     }
 }
@@ -1909,5 +1948,81 @@ mod tests {
         assert!(state.node_map.is_empty());
         assert_eq!(state.last_available, (0.0, 0.0));
         assert_eq!(state.tree.total_node_count(), 0);
+    }
+
+    #[test]
+    fn fixed_child_positioned_from_viewport() {
+        let mut root = make_node("root", Dimension::Px(960.0), Dimension::Px(540.0));
+        let mut inner = make_node("inner", Dimension::Px(200.0), Dimension::Px(100.0));
+        inner.layout.x = 0.0;
+        inner.layout.y = 0.0;
+        let mut overlay = make_node("overlay", Dimension::Px(100.0), Dimension::Px(40.0));
+        overlay.computed_style.position = Position::Fixed;
+        overlay.computed_style.inset_right = Some(10.0);
+        overlay.computed_style.inset_bottom = Some(8.0);
+        inner.children = vec![overlay];
+        root.children = vec![inner];
+        LayoutEngine::compute(&mut root, 960.0, 540.0);
+        // Fixed: bottom-right corner of the 960x540 viewport
+        assert!(
+            (root.children[0].children[0].layout.x - 850.0).abs() < 0.5,
+            "expected x≈850, got {}",
+            root.children[0].children[0].layout.x
+        );
+        assert!(
+            (root.children[0].children[0].layout.y - 492.0).abs() < 0.5,
+            "expected y≈492, got {}",
+            root.children[0].children[0].layout.y
+        );
+    }
+
+    #[test]
+    fn fixed_child_top_left_positioned_from_viewport() {
+        let mut root = make_node("root", Dimension::Px(800.0), Dimension::Px(600.0));
+        let mut panel = make_node("panel", Dimension::Px(400.0), Dimension::Px(300.0));
+        panel.computed_style.padding = Edges::all(20.0);
+        let mut tooltip = make_node("tooltip", Dimension::Px(120.0), Dimension::Px(30.0));
+        tooltip.computed_style.position = Position::Fixed;
+        tooltip.computed_style.inset_top = Some(50.0);
+        tooltip.computed_style.inset_left = Some(100.0);
+        panel.children = vec![tooltip];
+        root.children = vec![panel];
+        LayoutEngine::compute(&mut root, 800.0, 600.0);
+        let tooltip_layout = &root.children[0].children[0].layout;
+        assert!(
+            (tooltip_layout.x - 100.0).abs() < 0.5,
+            "expected x≈100, got {}",
+            tooltip_layout.x
+        );
+        assert!(
+            (tooltip_layout.y - 50.0).abs() < 0.5,
+            "expected y≈50, got {}",
+            tooltip_layout.y
+        );
+    }
+
+    #[test]
+    fn fixed_child_full_width_stretch() {
+        let mut root = make_node("root", Dimension::Px(1920.0), Dimension::Px(1080.0));
+        let mut inner = make_node("inner", Dimension::Px(400.0), Dimension::Px(200.0));
+        let mut bar = make_node("bar", Dimension::Auto, Dimension::Px(40.0));
+        bar.computed_style.position = Position::Fixed;
+        bar.computed_style.inset_top = Some(0.0);
+        bar.computed_style.inset_left = Some(0.0);
+        bar.computed_style.inset_right = Some(0.0);
+        inner.children = vec![bar];
+        root.children = vec![inner];
+        LayoutEngine::compute(&mut root, 1920.0, 1080.0);
+        let bar_layout = &root.children[0].children[0].layout;
+        assert!(
+            (bar_layout.x - 0.0).abs() < 0.5,
+            "expected x=0, got {}",
+            bar_layout.x
+        );
+        assert!(
+            (bar_layout.width - 1920.0).abs() < 0.5,
+            "expected width=1920, got {}",
+            bar_layout.width
+        );
     }
 }
