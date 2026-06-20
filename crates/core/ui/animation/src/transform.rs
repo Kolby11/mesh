@@ -21,11 +21,10 @@
 
 pub use mesh_core_elements::Transform2D;
 
-/// True for transforms the current painter can render correctly. Subtrees
-/// rooted at any node returning `false` still need the rotated Skia layer path.
-pub fn is_paintable(transform: &Transform2D) -> bool {
-    let nearly_zero = |v: f32| v.abs() < f32::EPSILON;
-    nearly_zero(transform.rotation)
+/// True for transforms the current painter can render correctly.
+/// Rotation is now painted via software blit so all transforms are paintable.
+pub fn is_paintable(_transform: &Transform2D) -> bool {
+    true
 }
 
 /// Compose two transforms as if `outer` were applied after `inner` in CSS

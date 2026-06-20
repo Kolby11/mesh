@@ -1353,72 +1353,74 @@ fn apply_declaration(
                 parse_filter(&resolver.resolve_value_with_variables(value, variables))
         }
         "transition-duration" => {
-            style.transition.duration_ms =
+            first_transition_mut(&mut style.transitions).duration_ms =
                 parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
         }
         "transition-delay" => {
-            style.transition.delay_ms =
+            first_transition_mut(&mut style.transitions).delay_ms =
                 parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
         }
         "transition-timing-function" => {
-            style.transition.easing = parse_easing_keyword(first_comma_item(
-                &resolver.resolve_value_with_variables(value, variables),
-            ))
+            first_transition_mut(&mut style.transitions).easing = parse_easing_keyword(
+                first_comma_item(&resolver.resolve_value_with_variables(value, variables)),
+            )
         }
         "transition-property" => {
-            style.transition.properties = parse_transition_properties(
-                &resolver.resolve_value_with_variables(value, variables),
-            )
+            first_transition_mut(&mut style.transitions).properties =
+                parse_transition_properties(
+                    &resolver.resolve_value_with_variables(value, variables),
+                )
         }
         "transition" => {
             let resolved = resolver.resolve_value_with_variables(value, variables);
-            let parsed = parse_transition_shorthand(&resolved);
-            style.transition.properties = parsed.0;
-            style.transition.duration_ms = parsed.1;
-            style.transition.delay_ms = parsed.2;
-            style.transition.easing = parsed.3;
+            style.transitions = parse_transition_shorthand(&resolved);
         }
         "animation-name" => {
-            style.animation.name = parse_animation_name(first_comma_item(
-                &resolver.resolve_value_with_variables(value, variables),
-            ))
+            first_animation_mut(&mut style.animations).name = parse_animation_name(
+                first_comma_item(&resolver.resolve_value_with_variables(value, variables)),
+            )
         }
         "animation-duration" => {
-            style.animation.duration_ms =
+            first_animation_mut(&mut style.animations).duration_ms =
                 parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
         }
         "animation-delay" => {
-            style.animation.delay_ms =
+            first_animation_mut(&mut style.animations).delay_ms =
                 parse_first_time_ms(&resolver.resolve_value_with_variables(value, variables))
         }
         "animation-timing-function" => {
-            style.animation.easing = parse_easing_keyword(first_comma_item(
-                &resolver.resolve_value_with_variables(value, variables),
-            ))
+            first_animation_mut(&mut style.animations).easing = parse_easing_keyword(
+                first_comma_item(&resolver.resolve_value_with_variables(value, variables)),
+            )
         }
         "animation-iteration-count" => {
-            style.animation.iteration_count = parse_animation_iteration_count(first_comma_item(
-                &resolver.resolve_value_with_variables(value, variables),
-            ))
+            first_animation_mut(&mut style.animations).iteration_count =
+                parse_animation_iteration_count(first_comma_item(
+                    &resolver.resolve_value_with_variables(value, variables),
+                ))
         }
         "animation-direction" => {
-            style.animation.direction = parse_animation_direction(first_comma_item(
-                &resolver.resolve_value_with_variables(value, variables),
-            ))
+            first_animation_mut(&mut style.animations).direction = parse_animation_direction(
+                first_comma_item(&resolver.resolve_value_with_variables(value, variables)),
+            )
         }
         "animation-fill-mode" => {
-            style.animation.fill_mode = parse_animation_fill_mode(first_comma_item(
-                &resolver.resolve_value_with_variables(value, variables),
-            ))
+            first_animation_mut(&mut style.animations).fill_mode = parse_animation_fill_mode(
+                first_comma_item(&resolver.resolve_value_with_variables(value, variables)),
+            )
         }
         "animation-play-state" => {
-            style.animation.play_state = parse_animation_play_state(first_comma_item(
-                &resolver.resolve_value_with_variables(value, variables),
-            ))
+            first_animation_mut(&mut style.animations).play_state = parse_animation_play_state(
+                first_comma_item(&resolver.resolve_value_with_variables(value, variables)),
+            )
         }
         "animation" => {
-            style.animation =
+            style.animations =
                 parse_animation_shorthand(&resolver.resolve_value_with_variables(value, variables))
+        }
+        "transform-origin" => {
+            style.transform_origin =
+                parse_transform_origin(&resolver.resolve_value_with_variables(value, variables))
         }
         "overflow" => {
             let (x, y) =
