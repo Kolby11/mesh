@@ -119,7 +119,13 @@
       "Bash(sed -n '118,128p' crates/core/extension/module/src/package/installed_graph.rs)",
       "Bash(xargs ls -la)",
       "Bash(awk 'NR>=1000 && NR<=1080 && /^impl |impl ShellComponent/ {print NR\": \"$0}' crates/core/shell/src/shell/component/shell_component.rs)",
-      "Bash(awk 'NR>=4 && NR<=1076 && /fn /{print NR\": \"$0}' crates/core/shell/src/shell/component/shell_component.rs)"
+      "Bash(awk 'NR>=4 && NR<=1076 && /fn /{print NR\": \"$0}' crates/core/shell/src/shell/component/shell_component.rs)",
+      "Bash(sed -i '20,316d' crates/core/shell/src/shell/component/animation.rs)",
+      "Bash(sed -n '16,24p' crates/core/shell/src/shell/component/animation.rs)",
+      "Bash(sed -i 's/!self\\\\.style_animations\\\\.is_empty\\(\\)/!self.transitions.is_empty\\(\\)/; s/self\\\\.style_animations\\\\.clear\\(\\);/self.transitions.clear\\(\\);/' crates/core/shell/src/shell/component/shell_component.rs)",
+      "Bash(sed -i 's/!component\\\\.style_animations\\\\.is_empty\\(\\)/!component.transitions.is_empty\\(\\)/' crates/core/shell/src/shell/component/tests/interaction/reflow.rs)",
+      "Bash(sed -i 's/component\\\\.style_animations\\\\.contains_key\\(/component.transitions.contains_key\\(/g' crates/core/shell/src/shell/component/tests/interaction/navigation.rs)",
+      "Bash(nix-env -q)"
     ]
   }
 }

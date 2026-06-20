@@ -596,7 +596,7 @@ const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
     StyleProfileProperty {
         property: "transform-origin",
         category: "transform",
-        status: StyleProfileStatus::Deferred,
+        status: StyleProfileStatus::Implemented,
     },
     StyleProfileProperty {
         property: "box-shadow",
@@ -747,11 +747,12 @@ pub struct ComputedStyle {
     pub border_radius: Corners,
     pub opacity: f32,
     pub transform: Transform2D,
+    pub transform_origin: TransformOrigin,
     pub box_shadow: BoxShadow,
     pub filter: VisualFilter,
     pub backdrop_filter: VisualFilter,
-    pub transition: TransitionStyle,
-    pub animation: AnimationStyle,
+    pub transitions: Vec<TransitionStyle>,
+    pub animations: Vec<AnimationStyle>,
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
     pub font_family: Arc<str>,
@@ -818,11 +819,12 @@ impl Default for ComputedStyle {
             border_radius: Corners::zero(),
             opacity: 1.0,
             transform: Transform2D::IDENTITY,
+            transform_origin: TransformOrigin::default(),
             box_shadow: BoxShadow::NONE,
             filter: VisualFilter::NONE,
             backdrop_filter: VisualFilter::NONE,
-            transition: TransitionStyle::default(),
-            animation: AnimationStyle::default(),
+            transitions: vec![TransitionStyle::default()],
+            animations: vec![AnimationStyle::default()],
             overflow_x: Overflow::Visible,
             overflow_y: Overflow::Visible,
             font_family: Arc::from("Inter"),
@@ -1328,6 +1330,53 @@ impl Default for Transform2D {
     }
 }
 
+/// Where the jumps land in a CSS `steps()` timing function. The legacy `start`
+/// / `end` keywords map onto `JumpStart` / `JumpEnd`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum StepPosition {
+    /// Jump at the start of each interval (`jump-start` / `start`).
+    JumpStart,
+    /// Jump at the end of each interval (`jump-end` / `end`). CSS default.
+    #[default]
+    JumpEnd,
+    /// No jump at either end — `n` stops including both 0 and 1 (`jump-none`).
+    JumpNone,
+    /// Jump at both ends — neither 0 nor 1 is held (`jump-both`).
+    JumpBoth,
+}
+
+/// A single axis value for `transform-origin`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TransformOriginValue {
+    Percent(f32),
+    Px(f32),
+}
+
+impl TransformOriginValue {
+    pub fn resolve(&self, size: f32) -> f32 {
+        match self {
+            Self::Percent(p) => size * p / 100.0,
+            Self::Px(v) => *v,
+        }
+    }
+}
+
+/// The CSS `transform-origin` property. Default is 50% 50% (center).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransformOrigin {
+    pub x: TransformOriginValue,
+    pub y: TransformOriginValue,
+}
+
+impl Default for TransformOrigin {
+    fn default() -> Self {
+        Self {
+            x: TransformOriginValue::Percent(50.0),
+            y: TransformOriginValue::Percent(50.0),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum TransitionEasing {
     Linear,
@@ -1337,16 +1386,25 @@ pub enum TransitionEasing {
     EaseOut,
     EaseInOut,
     CubicBezier(f32, f32, f32, f32),
+    /// `steps(n, <position>)` — a discrete step function with `n` intervals.
+    Steps(u32, StepPosition),
 }
 
 impl std::hash::Hash for TransitionEasing {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
-        if let Self::CubicBezier(a, b, c, d) = self {
-            a.to_bits().hash(state);
-            b.to_bits().hash(state);
-            c.to_bits().hash(state);
-            d.to_bits().hash(state);
+        match self {
+            Self::CubicBezier(a, b, c, d) => {
+                a.to_bits().hash(state);
+                b.to_bits().hash(state);
+                c.to_bits().hash(state);
+                d.to_bits().hash(state);
+            }
+            Self::Steps(count, position) => {
+                count.hash(state);
+                position.hash(state);
+            }
+            _ => {}
         }
     }
 }

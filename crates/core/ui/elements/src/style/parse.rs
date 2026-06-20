@@ -330,8 +330,44 @@ pub(super) fn parse_easing_keyword(value: &str) -> TransitionEasing {
         "ease-in" => TransitionEasing::EaseIn,
         "ease-out" => TransitionEasing::EaseOut,
         "ease-in-out" => TransitionEasing::EaseInOut,
+        "step-start" => TransitionEasing::Steps(1, StepPosition::JumpStart),
+        "step-end" => TransitionEasing::Steps(1, StepPosition::JumpEnd),
+        _ if trimmed.starts_with("steps(") => {
+            parse_steps(trimmed).unwrap_or(TransitionEasing::EaseOut)
+        }
         _ => parse_cubic_bezier(trimmed).unwrap_or(TransitionEasing::EaseOut),
     }
+}
+
+/// True for any token that names an easing function — keyword, `cubic-bezier()`,
+/// `steps()`, or the `step-start`/`step-end` shorthands.
+fn is_easing_token(token: &str) -> bool {
+    matches!(
+        token,
+        "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out" | "step-start" | "step-end"
+    ) || token.starts_with("cubic-bezier(")
+        || token.starts_with("steps(")
+}
+
+pub(super) fn parse_steps(value: &str) -> Option<TransitionEasing> {
+    let inner = value.strip_prefix("steps(").and_then(|rest| rest.strip_suffix(')'))?;
+    let mut parts = inner.split(',');
+    let count = parts.next()?.trim().parse::<u32>().ok()?;
+    if count == 0 {
+        return None;
+    }
+    let position = match parts.next().map(str::trim) {
+        None => StepPosition::JumpEnd,
+        Some("jump-start") | Some("start") => StepPosition::JumpStart,
+        Some("jump-end") | Some("end") => StepPosition::JumpEnd,
+        Some("jump-none") => StepPosition::JumpNone,
+        Some("jump-both") => StepPosition::JumpBoth,
+        Some(_) => return None,
+    };
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(TransitionEasing::Steps(count, position))
 }
 
 pub(super) fn parse_cubic_bezier(value: &str) -> Option<TransitionEasing> {
@@ -368,110 +404,134 @@ pub(super) fn looks_like_time(token: &str) -> bool {
 /// shorthand strings come from a small static set of style declarations, but
 /// restyle re-applies them per node per frame; profiling showed the raw parse
 /// at ~14% of interaction-burst CPU.
-pub(super) fn parse_transition_shorthand(
-    value: &str,
-) -> (TransitionProperties, u32, u32, TransitionEasing) {
+pub(super) fn parse_transition_shorthand(value: &str) -> Vec<TransitionStyle> {
     use std::cell::RefCell;
     use std::collections::HashMap;
 
     const CACHE_CAPACITY: usize = 256;
 
     thread_local! {
-        static CACHE: RefCell<HashMap<String, (TransitionProperties, u32, u32, TransitionEasing)>> =
+        static CACHE: RefCell<HashMap<String, Vec<TransitionStyle>>> =
             RefCell::new(HashMap::new());
     }
 
     CACHE.with(|cache| {
         if let Some(parsed) = cache.borrow().get(value) {
-            return *parsed;
+            return parsed.clone();
         }
         let parsed = parse_transition_shorthand_uncached(value);
         let mut cache = cache.borrow_mut();
         if cache.len() >= CACHE_CAPACITY {
             cache.clear();
         }
-        cache.insert(value.to_string(), parsed);
+        cache.insert(value.to_string(), parsed.clone());
         parsed
     })
 }
 
-fn parse_transition_shorthand_uncached(
-    value: &str,
-) -> (TransitionProperties, u32, u32, TransitionEasing) {
+fn parse_transition_item(item: &str) -> TransitionStyle {
     let mut properties = TransitionProperties::none();
     let mut duration_ms = 0u32;
     let mut delay_ms = 0u32;
     let mut easing = TransitionEasing::EaseOut;
+    let mut time_count = 0;
 
-    for item in split_paren_aware(value, ',') {
-        let item = item.trim();
-        if item.is_empty() {
+    for token in split_paren_aware(item, ' ')
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        if looks_like_time(token) {
+            let ms = parse_time_ms(token);
+            if time_count == 0 {
+                duration_ms = ms;
+            } else if time_count == 1 {
+                delay_ms = ms;
+            }
+            time_count += 1;
             continue;
         }
-        let mut item_time_count = 0;
-        for token in split_paren_aware(item, ' ')
-            .iter()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            if looks_like_time(token) {
-                let ms = parse_time_ms(token);
-                if item_time_count == 0 && duration_ms == 0 {
-                    duration_ms = ms;
-                } else if item_time_count > 0 && delay_ms == 0 {
-                    delay_ms = ms;
-                }
-                item_time_count += 1;
-                continue;
+        if is_easing_token(token) {
+            easing = parse_easing_keyword(token);
+            continue;
+        }
+        match token {
+            "all" => properties = TransitionProperties::all(),
+            "border-radius" => properties.border_radius = true,
+            "border-width" => properties.border_width = true,
+            "opacity" => properties.opacity = true,
+            "background-color" | "background" => properties.background_color = true,
+            "border-color" => properties.border_color = true,
+            "color" => properties.color = true,
+            "width" => properties.width = true,
+            "height" => properties.height = true,
+            "padding" => properties.padding = true,
+            "margin" => properties.margin = true,
+            "transform" => properties.transform = true,
+            "box-shadow" => properties.box_shadow = true,
+            "filter" => properties.filter = true,
+            "backdrop-filter" => properties.backdrop_filter = true,
+            "min-width" => properties.min_width = true,
+            "max-width" => properties.max_width = true,
+            "min-height" => properties.min_height = true,
+            "max-height" => properties.max_height = true,
+            "font-size" => properties.font_size = true,
+            "letter-spacing" => properties.letter_spacing = true,
+            "line-height" => properties.line_height = true,
+            "gap" => properties.gap = true,
+            "top" => properties.inset_top = true,
+            "right" => properties.inset_right = true,
+            "bottom" => properties.inset_bottom = true,
+            "left" => properties.inset_left = true,
+            "inset" => {
+                properties.inset_top = true;
+                properties.inset_right = true;
+                properties.inset_bottom = true;
+                properties.inset_left = true;
             }
-            match token {
-                "all" => properties = TransitionProperties::all(),
-                "border-radius" => properties.border_radius = true,
-                "border-width" => properties.border_width = true,
-                "opacity" => properties.opacity = true,
-                "background-color" | "background" => properties.background_color = true,
-                "border-color" => properties.border_color = true,
-                "color" => properties.color = true,
-                "width" => properties.width = true,
-                "height" => properties.height = true,
-                "padding" => properties.padding = true,
-                "margin" => properties.margin = true,
-                "transform" => properties.transform = true,
-                "box-shadow" => properties.box_shadow = true,
-                "filter" => properties.filter = true,
-                "backdrop-filter" => properties.backdrop_filter = true,
-                "min-width" => properties.min_width = true,
-                "max-width" => properties.max_width = true,
-                "min-height" => properties.min_height = true,
-                "max-height" => properties.max_height = true,
-                "font-size" => properties.font_size = true,
-                "letter-spacing" => properties.letter_spacing = true,
-                "line-height" => properties.line_height = true,
-                "gap" => properties.gap = true,
-                "top" => properties.inset_top = true,
-                "right" => properties.inset_right = true,
-                "bottom" => properties.inset_bottom = true,
-                "left" => properties.inset_left = true,
-                "inset" => {
-                    properties.inset_top = true;
-                    properties.inset_right = true;
-                    properties.inset_bottom = true;
-                    properties.inset_left = true;
-                }
-                "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
-                    if easing == TransitionEasing::EaseOut =>
-                {
-                    easing = parse_easing_keyword(token)
-                }
-                _ if token.starts_with("cubic-bezier(") && easing == TransitionEasing::EaseOut => {
-                    easing = parse_easing_keyword(token);
-                }
-                _ => {}
-            }
+            _ => {}
         }
     }
 
-    (properties, duration_ms, delay_ms, easing)
+    TransitionStyle {
+        duration_ms,
+        delay_ms,
+        easing,
+        properties,
+    }
+}
+
+fn parse_transition_shorthand_uncached(value: &str) -> Vec<TransitionStyle> {
+    let items: Vec<TransitionStyle> = split_paren_aware(value, ',')
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|item| parse_transition_item(item))
+        .collect();
+
+    if items.is_empty() {
+        vec![TransitionStyle::default()]
+    } else {
+        items
+    }
+}
+
+/// Helper to get a mutable reference to the first transition entry,
+/// inserting a default entry if the vec is empty.
+pub(super) fn first_transition_mut(transitions: &mut Vec<TransitionStyle>) -> &mut TransitionStyle {
+    if transitions.is_empty() {
+        transitions.push(TransitionStyle::default());
+    }
+    &mut transitions[0]
+}
+
+/// Helper to get a mutable reference to the first animation entry,
+/// inserting a default entry if the vec is empty.
+pub(super) fn first_animation_mut(animations: &mut Vec<AnimationStyle>) -> &mut AnimationStyle {
+    if animations.is_empty() {
+        animations.push(AnimationStyle::default());
+    }
+    &mut animations[0]
 }
 
 pub(super) fn parse_animation_name(value: &str) -> Option<String> {
@@ -517,11 +577,11 @@ pub(super) fn parse_animation_play_state(value: &str) -> AnimationPlayState {
     }
 }
 
-pub(super) fn parse_animation_shorthand(value: &str) -> AnimationStyle {
+fn parse_animation_item(item: &str) -> AnimationStyle {
     let mut animation = AnimationStyle::default();
     let mut time_count = 0;
 
-    for token in first_comma_item(value).split_whitespace() {
+    for token in item.split_whitespace() {
         if looks_like_explicit_time(token) {
             let ms = parse_time_ms(token);
             if time_count == 0 {
@@ -530,10 +590,7 @@ pub(super) fn parse_animation_shorthand(value: &str) -> AnimationStyle {
                 animation.delay_ms = ms;
             }
             time_count += 1;
-        } else if matches!(
-            token,
-            "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
-        ) {
+        } else if is_easing_token(token) {
             animation.easing = parse_easing_keyword(token);
         } else if token == "infinite" || token.parse::<u32>().is_ok() {
             animation.iteration_count = parse_animation_iteration_count(token);
@@ -552,6 +609,51 @@ pub(super) fn parse_animation_shorthand(value: &str) -> AnimationStyle {
     }
 
     animation
+}
+
+pub(super) fn parse_animation_shorthand(value: &str) -> Vec<AnimationStyle> {
+    let items: Vec<AnimationStyle> = split_paren_aware(value, ',')
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|item| parse_animation_item(item))
+        .collect();
+
+    if items.is_empty() {
+        vec![AnimationStyle::default()]
+    } else {
+        items
+    }
+}
+
+pub(super) fn parse_transform_origin(value: &str) -> TransformOrigin {
+    let parts: Vec<&str> = value.split_whitespace().collect();
+    let parse_axis = |s: &str| -> TransformOriginValue {
+        match s {
+            "left" | "top" => TransformOriginValue::Percent(0.0),
+            "right" | "bottom" => TransformOriginValue::Percent(100.0),
+            "center" => TransformOriginValue::Percent(50.0),
+            _ if s.ends_with('%') => {
+                let v = s.trim_end_matches('%').parse::<f32>().unwrap_or(50.0);
+                TransformOriginValue::Percent(v)
+            }
+            _ => TransformOriginValue::Px(parse_px(s)),
+        }
+    };
+
+    match parts.as_slice() {
+        [] => TransformOrigin::default(),
+        [one] => {
+            let x = parse_axis(one);
+            let y = TransformOriginValue::Percent(50.0);
+            TransformOrigin { x, y }
+        }
+        [x_str, y_str, ..] => {
+            let x = parse_axis(x_str);
+            let y = parse_axis(y_str);
+            TransformOrigin { x, y }
+        }
+    }
 }
 
 fn looks_like_explicit_time(token: &str) -> bool {

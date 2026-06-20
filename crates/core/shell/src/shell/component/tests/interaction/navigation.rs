@@ -2252,7 +2252,7 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
 
     assert!(hovered_button.state.hovered);
     assert!(
-        component.style_animations.contains_key(&button_key),
+        component.transitions.contains_key(&button_key),
         "hover should start the visible navigation transition"
     );
     assert_eq!(hovered_button.computed_style.border_radius.top_left, 8.0);
@@ -2311,7 +2311,7 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
 
     assert!(active_button.state.active);
     assert!(
-        component.style_animations.contains_key(&button_key),
+        component.transitions.contains_key(&button_key),
         "active press should start the visible squircle-to-circle transition"
     );
     std::thread::sleep(Duration::from_millis(220));

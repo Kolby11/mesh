@@ -438,7 +438,7 @@ mod tests {
         );
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        assert_eq!(style.animation.duration_ms, 90);
+        assert_eq!(style.animations[0].duration_ms, 90);
     }
 
     #[test]
@@ -463,7 +463,7 @@ mod tests {
             ElementState::default(),
         );
 
-        assert_eq!(style.animation.duration_ms, 0);
+        assert_eq!(style.animations[0].duration_ms, 0);
         assert_eq!(diagnostics.len(), 1);
         assert!(
             diagnostics[0]
@@ -1379,8 +1379,8 @@ mod tests {
         assert_eq!(style.padding.left, 24.0);
         assert_eq!(style.padding.right, 24.0);
         assert_eq!(style.border_radius, Corners::all(8.0));
-        assert_eq!(style.transition.duration_ms, 150);
-        assert_eq!(style.animation.duration_ms, 360);
+        assert_eq!(style.transitions[0].duration_ms, 150);
+        assert_eq!(style.animations[0].duration_ms, 360);
     }
 
     #[test]
@@ -1560,11 +1560,62 @@ mod tests {
             ElementState::default(),
         );
 
-        assert_eq!(style.transition.duration_ms, 150);
-        assert_eq!(style.transition.delay_ms, 25);
-        assert_eq!(style.transition.easing, TransitionEasing::EaseIn);
+        assert_eq!(style.transitions[0].duration_ms, 150);
+        assert_eq!(style.transitions[0].delay_ms, 25);
+        assert_eq!(style.transitions[0].easing, TransitionEasing::EaseIn);
+        assert!(style.transitions[0].properties.animates_opacity());
+        assert!(style.transitions[0].properties.animates_border_color());
+    }
+
+    fn resolve_single_decl(property: &str, value: &str) -> ComputedStyle {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: property.to_string(),
+                value: StyleValue::Literal(value.to_string()),
+            }],
+            container_query: None,
+        }];
+        resolver.resolve_node_style(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        )
+    }
+
+    #[test]
+    fn transition_shorthand_parses_steps_with_position() {
+        let style = resolve_single_decl("transition", "opacity 200ms steps(4, jump-end)");
+        assert_eq!(
+            style.transition.easing,
+            TransitionEasing::Steps(4, StepPosition::JumpEnd)
+        );
         assert!(style.transition.properties.animates_opacity());
-        assert!(style.transition.properties.animates_border_color());
+    }
+
+    #[test]
+    fn transition_shorthand_parses_step_end_keyword() {
+        let style = resolve_single_decl("transition", "transform 100ms step-start");
+        assert_eq!(
+            style.transition.easing,
+            TransitionEasing::Steps(1, StepPosition::JumpStart)
+        );
+    }
+
+    #[test]
+    fn animation_shorthand_parses_steps_with_inner_space() {
+        let style = resolve_single_decl("animation", "pulse 1s steps(3, jump-none) infinite");
+        assert_eq!(
+            style.animation.easing,
+            TransitionEasing::Steps(3, StepPosition::JumpNone)
+        );
+        assert_eq!(style.animation.name.as_deref(), Some("pulse"));
+        assert_eq!(style.animation.duration_ms, 1000);
     }
 
     #[test]
@@ -1787,17 +1838,17 @@ mod tests {
             ElementState::default(),
         );
 
-        assert_eq!(style.animation.name.as_deref(), Some("pulse"));
-        assert_eq!(style.animation.duration_ms, 320);
-        assert_eq!(style.animation.delay_ms, 40);
-        assert_eq!(style.animation.easing, TransitionEasing::EaseInOut);
+        assert_eq!(style.animations[0].name.as_deref(), Some("pulse"));
+        assert_eq!(style.animations[0].duration_ms, 320);
+        assert_eq!(style.animations[0].delay_ms, 40);
+        assert_eq!(style.animations[0].easing, TransitionEasing::EaseInOut);
         assert_eq!(
-            style.animation.iteration_count,
+            style.animations[0].iteration_count,
             AnimationIterationCount::Infinite
         );
-        assert_eq!(style.animation.direction, AnimationDirection::Alternate);
-        assert_eq!(style.animation.fill_mode, AnimationFillMode::Both);
-        assert_eq!(style.animation.play_state, AnimationPlayState::Paused);
+        assert_eq!(style.animations[0].direction, AnimationDirection::Alternate);
+        assert_eq!(style.animations[0].fill_mode, AnimationFillMode::Both);
+        assert_eq!(style.animations[0].play_state, AnimationPlayState::Paused);
     }
 
     #[test]
@@ -1824,17 +1875,17 @@ mod tests {
             ElementState::default(),
         );
 
-        assert_eq!(style.animation.name.as_deref(), Some("pulse"));
-        assert_eq!(style.animation.duration_ms, 250);
-        assert_eq!(style.animation.delay_ms, 50);
-        assert_eq!(style.animation.easing, TransitionEasing::EaseInOut);
+        assert_eq!(style.animations[0].name.as_deref(), Some("pulse"));
+        assert_eq!(style.animations[0].duration_ms, 250);
+        assert_eq!(style.animations[0].delay_ms, 50);
+        assert_eq!(style.animations[0].easing, TransitionEasing::EaseInOut);
         assert_eq!(
-            style.animation.iteration_count,
+            style.animations[0].iteration_count,
             AnimationIterationCount::Number(2)
         );
-        assert_eq!(style.animation.direction, AnimationDirection::Alternate);
-        assert_eq!(style.animation.fill_mode, AnimationFillMode::Both);
-        assert_eq!(style.animation.play_state, AnimationPlayState::Paused);
+        assert_eq!(style.animations[0].direction, AnimationDirection::Alternate);
+        assert_eq!(style.animations[0].fill_mode, AnimationFillMode::Both);
+        assert_eq!(style.animations[0].play_state, AnimationPlayState::Paused);
     }
 
     #[test]

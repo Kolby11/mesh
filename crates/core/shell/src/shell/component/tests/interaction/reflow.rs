@@ -775,7 +775,7 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         .paint(&light, width, height, &mut buffer, 1.0)
         .unwrap();
     assert!(
-        !component.style_animations.is_empty(),
+        !component.transitions.is_empty(),
         "hovering the theme button should leave transition state to invalidate"
     );
 
