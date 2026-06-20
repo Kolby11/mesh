@@ -48,6 +48,7 @@ use mesh_core_frontend::{
 use mesh_core_locale::LocaleEngine;
 use mesh_core_scripting::{
     BoundInstanceCall, LocaleBoundState, ScriptContext, ScriptInterfaceImport, ScriptState,
+    SurfaceVm,
 };
 use mesh_core_theme::{Theme, default_theme};
 use mesh_core_wayland::{Edge, KeyboardMode, ShellSurface};
@@ -351,6 +352,10 @@ pub(super) struct FrontendSurfaceComponent {
     tooltip_appeared_at: Option<std::time::Instant>,
     last_tooltip_damage: Option<DamageRect>,
     runtimes: Arc<Mutex<HashMap<String, EmbeddedFrontendRuntime>>>,
+    /// The single Lua realm shared by every component instance in this surface.
+    /// Each runtime's `ScriptContext` attaches a clone, so sibling/child
+    /// components can hold live `bind:this` references to one another.
+    surface_vm: SurfaceVm,
     render_stack: RefCell<Vec<String>>,
     /// The theme used by the current/last paint, shared cheaply with child
     /// component builds and animation restyle. Refreshed from the paint-time
@@ -489,6 +494,7 @@ impl FrontendSurfaceComponent {
             tooltip_appeared_at: None,
             last_tooltip_damage: None,
             runtimes: Arc::new(Mutex::new(HashMap::new())),
+            surface_vm: SurfaceVm::new(),
             render_stack: RefCell::new(Vec::new()),
             active_theme: RefCell::new(Arc::new(default_theme())),
             active_theme_stale: Cell::new(true),

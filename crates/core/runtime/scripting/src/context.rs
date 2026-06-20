@@ -5,7 +5,7 @@ mod runtime;
 mod state;
 
 pub use errors::{PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport};
-pub use runtime::{BoundInstanceCall, ScriptContext};
+pub use runtime::{BoundInstanceCall, ScriptContext, SurfaceVm};
 pub use state::{LocaleBoundState, ScriptState};
 
 #[cfg(test)]

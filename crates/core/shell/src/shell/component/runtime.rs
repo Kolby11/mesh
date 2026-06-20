@@ -140,6 +140,9 @@ impl FrontendSurfaceComponent {
             component_id: component_id.clone(),
             source,
         })?;
+        // All components in this surface share one Lua realm so bind:this is a
+        // live cross-component reference rather than a snapshot.
+        script_ctx.attach_shared_vm(&self.surface_vm);
         script_ctx.set_interface_catalog(self.interface_catalog.clone());
         seed_service_state(script_ctx.state_mut());
         script_ctx

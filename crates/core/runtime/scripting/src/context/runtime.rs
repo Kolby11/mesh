@@ -54,6 +54,35 @@ impl ScriptVm {
     }
 }
 
+/// An opaque, shareable Lua realm owned by a single frontend surface.
+///
+/// Every component instance in the surface attaches a clone of the same
+/// `SurfaceVm` (via [`ScriptContext::attach_shared_vm`]) so they all live in one
+/// realm — the prerequisite for live `bind:this` cross-component references.
+/// Clones are cheap handles to the same VM. Holding this type lets the shell own
+/// the realm without depending on `mlua` directly.
+#[derive(Clone, Debug)]
+pub struct SurfaceVm(Lua);
+
+impl SurfaceVm {
+    /// Create a fresh sandboxed realm for one surface.
+    pub fn new() -> Self {
+        let lua = Lua::new();
+        lua.sandbox(true).expect("surface vm sandbox init failed");
+        Self(lua)
+    }
+
+    pub(crate) fn handle(&self) -> Lua {
+        self.0.clone()
+    }
+}
+
+impl Default for SurfaceVm {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A script execution context for one component instance.
 ///
 /// Owns frontend script state, capability metadata, and the mlua runtime.
@@ -115,13 +144,13 @@ impl ScriptContext {
             .lua()
     }
 
-    /// Attach a shared VM to run on instead of a private pool checkout.
+    /// Attach a shared surface VM to run on instead of a private pool checkout.
     ///
     /// Used by a frontend surface so all of its component instances share one
-    /// Lua realm. Must be called before the script is loaded/initialized; a
-    /// no-op effect once the context is already initialized.
-    pub fn attach_shared_vm(&mut self, lua: Lua) {
-        self.shared_vm = Some(lua);
+    /// Lua realm. Must be called before the script is loaded/initialized; it has
+    /// no effect once the context is already initialized.
+    pub fn attach_shared_vm(&mut self, vm: &SurfaceVm) {
+        self.shared_vm = Some(vm.handle());
     }
 
     fn env(&self) -> &Table {

@@ -26,5 +26,5 @@ pub use backend::{
 };
 pub use context::{
     BoundInstanceCall, LocaleBoundState, PublishedEvent, ScriptContext, ScriptError,
-    ScriptInterfaceImport, ScriptState,
+    ScriptInterfaceImport, ScriptState, SurfaceVm,
 };
