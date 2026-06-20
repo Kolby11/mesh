@@ -1627,3 +1627,95 @@ end
     assert_eq!(calls[1].function_name, "decrease_volume");
     assert_eq!(calls[1].args, vec![serde_json::json!(3)]);
 }
+
+#[test]
+fn components_sharing_one_vm_keep_isolated_public_members() {
+    // Two component instances on a single shared surface VM must keep their
+    // public members private to their own _ENV — sharing the VM does not share
+    // bare globals (that only happens through an explicit bind:this reference).
+    let lua = mlua::Lua::new();
+    lua.sandbox(true).unwrap();
+
+    let mut ctx_a = ScriptContext::new("@mesh/comp-a", CapabilitySet::new()).unwrap();
+    ctx_a.attach_shared_vm(lua.clone());
+    ctx_a.load_script("secret = \"a-value\"\nfunction init() end").unwrap();
+    ctx_a.call_init().unwrap();
+
+    let mut ctx_b = ScriptContext::new("@mesh/comp-b", CapabilitySet::new()).unwrap();
+    ctx_b.attach_shared_vm(lua.clone());
+    ctx_b.load_script("secret = \"b-value\"\nfunction init() end").unwrap();
+    ctx_b.call_init().unwrap();
+
+    assert_eq!(ctx_a.state.get("secret"), Some(serde_json::json!("a-value")));
+    assert_eq!(ctx_b.state.get("secret"), Some(serde_json::json!("b-value")));
+}
+
+#[test]
+fn interface_event_subscriptions_are_independent_on_shared_vm() {
+    // The interface-event channel registry lives on each instance's _ENV, so a
+    // subscription on one component must not register on another sharing the VM.
+    let lua = mlua::Lua::new();
+    lua.sandbox(true).unwrap();
+
+    let mut subscriber_caps = CapabilitySet::new();
+    subscriber_caps.grant(Capability::new("service.audio.read"));
+    let mut subscriber = ScriptContext::new("@mesh/subscriber", subscriber_caps).unwrap();
+    subscriber.attach_shared_vm(lua.clone());
+    subscriber.set_interface_catalog(audio_catalog());
+    subscriber
+        .load_script(
+            r#"
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.events.VolumeChanged:subscribe(function(_event) end)
+end
+"#,
+        )
+        .unwrap();
+    subscriber.call_init().unwrap();
+
+    let mut idle_caps = CapabilitySet::new();
+    idle_caps.grant(Capability::new("service.audio.read"));
+    let mut idle = ScriptContext::new("@mesh/idle", idle_caps).unwrap();
+    idle.attach_shared_vm(lua.clone());
+    idle.set_interface_catalog(audio_catalog());
+    idle.load_script("function init() end").unwrap();
+    idle.call_init().unwrap();
+
+    assert!(subscriber.is_subscribed_to_interface_event("audio", "VolumeChanged"));
+    assert!(!idle.has_interface_event_subscription_for_service("audio"));
+}
+
+#[test]
+fn same_component_on_shared_vm_has_independent_self_channels() {
+    // Two instances of the SAME component (same module_id) on one VM must not
+    // share `self.Changed` — the regression that motivated moving the self-event
+    // registry from globals to the per-instance _ENV.
+    let lua = mlua::Lua::new();
+    lua.sandbox(true).unwrap();
+
+    fn instance(lua: &mlua::Lua) -> ScriptContext {
+        let mut ctx = ScriptContext::new("@mesh/item-row", CapabilitySet::new()).unwrap();
+        ctx.attach_shared_vm(lua.clone());
+        ctx.load_script(
+            r#"
+hits = 0
+function init(self)
+    self.Changed:on(function(_event) hits = hits + 1 end)
+    self.Changed:fire({})
+end
+"#,
+        )
+        .unwrap();
+        ctx.call_init().unwrap();
+        ctx
+    }
+
+    let first = instance(&lua);
+    let second = instance(&lua);
+
+    // Each instance's own fire incremented only its own counter. If the channels
+    // collided, the second instance's fire would also run the first's handler.
+    assert_eq!(first.state.get("hits"), Some(serde_json::json!(1)));
+    assert_eq!(second.state.get("hits"), Some(serde_json::json!(1)));
+}

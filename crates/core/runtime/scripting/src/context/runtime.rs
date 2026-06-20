@@ -32,6 +32,28 @@ struct SharedInterfaceBindings {
     generation: u64,
 }
 
+/// Backing VM for a [`ScriptContext`].
+///
+/// A standalone context (backend modules, tests) owns a private pool VM. A
+/// frontend component that belongs to a surface instead borrows a clone of the
+/// surface's shared `Lua` so that every component in the surface lives in one
+/// realm — the prerequisite for live `bind:this` cross-component references.
+/// `mlua`'s `Lua` is a cheap reference-counted handle; clones share one VM.
+#[derive(Debug)]
+enum ScriptVm {
+    Pooled(pool::PooledVm),
+    Shared(Lua),
+}
+
+impl ScriptVm {
+    fn lua(&self) -> &Lua {
+        match self {
+            ScriptVm::Pooled(vm) => vm.lua(),
+            ScriptVm::Shared(lua) => lua,
+        }
+    }
+}
+
 /// A script execution context for one component instance.
 ///
 /// Owns frontend script state, capability metadata, and the mlua runtime.
@@ -43,7 +65,11 @@ pub struct ScriptContext {
     pub module_id: String,
     pub capabilities: CapabilitySet,
     pub state: ScriptState,
-    vm: Option<pool::PooledVm>,
+    vm: Option<ScriptVm>,
+    /// When set, [`ensure_initialized`] runs on this shared VM (a clone of the
+    /// owning surface's `Lua`) instead of checking out a private pool VM. Must
+    /// be attached before the script is loaded.
+    shared_vm: Option<Lua>,
     env_table: Option<Table>,
     interface_catalog: InterfaceCatalog,
     pub(super) interface_bindings: HashMap<String, InterfaceResolution>,
@@ -89,6 +115,15 @@ impl ScriptContext {
             .lua()
     }
 
+    /// Attach a shared VM to run on instead of a private pool checkout.
+    ///
+    /// Used by a frontend surface so all of its component instances share one
+    /// Lua realm. Must be called before the script is loaded/initialized; a
+    /// no-op effect once the context is already initialized.
+    pub fn attach_shared_vm(&mut self, lua: Lua) {
+        self.shared_vm = Some(lua);
+    }
+
     fn env(&self) -> &Table {
         self.env_table
             .as_ref()
@@ -129,6 +164,7 @@ impl ScriptContext {
             capabilities,
             state: ScriptState::new(),
             vm: None,
+            shared_vm: None,
             env_table: None,
             interface_catalog: InterfaceCatalog::default(),
             interface_bindings: HashMap::new(),
@@ -174,7 +210,10 @@ impl ScriptContext {
         if self.vm.is_some() {
             return Ok(());
         }
-        let vm = pool::checkout();
+        let vm = match self.shared_vm.clone() {
+            Some(lua) => ScriptVm::Shared(lua),
+            None => ScriptVm::Pooled(pool::checkout()),
+        };
         let lua = vm.lua();
 
         // ISO-01: create per-component _ENV with __index = globals() fallthrough
@@ -305,8 +344,9 @@ impl ScriptContext {
         payload: &Value,
     ) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
-        let channel =
-            interface_event_channel(self.lua(), service, event_name, None).map_err(lua_err)?;
+        let scope = self.env().clone();
+        let channel = interface_event_channel(self.lua(), &scope, service, event_name, None)
+            .map_err(lua_err)?;
         let emit = channel.get::<Function>("emit").map_err(lua_err)?;
         let lua_payload = self.lua().to_value(payload).map_err(lua_err)?;
         emit.call::<()>((channel, lua_payload))
@@ -646,7 +686,10 @@ impl ScriptContext {
         )
         .map_err(lua_err)?;
         current_self.set("storage", storage).map_err(lua_err)?;
-        let module_id = self.module_id.clone();
+        // Self event channels (`self.Changed`) are registered on the per-instance
+        // _ENV so two instances of the same component keep independent channels
+        // when they share one surface VM.
+        let self_events_scope = self.env().clone();
         let self_events_meta = self.lua().create_table().map_err(lua_err)?;
         self_events_meta
             .set(
@@ -659,7 +702,7 @@ impl ScriptContext {
                         if !is_named_event_channel(&key) {
                             return Ok(LuaValue::Nil);
                         }
-                        let channel = self_event_channel(lua, &module_id, &key)?;
+                        let channel = self_event_channel(lua, &self_events_scope, &key)?;
                         table.set(key.as_str(), channel.clone())?;
                         Ok(LuaValue::Table(channel))
                     })
@@ -1004,6 +1047,9 @@ impl ScriptContext {
         let module_id_for_require = self.module_id.clone();
         let capabilities_for_require = self.capabilities.clone();
         let diagnostics_for_require = Arc::clone(&self.shared_diagnostics);
+        // The per-instance _ENV is the channel-registry scope so interface event
+        // channels stay private when components share one surface VM.
+        let scope_for_require = globals.clone();
         let require = self
             .lua()
             .create_function(move |lua, module: String| {
@@ -1073,6 +1119,7 @@ impl ScriptContext {
 
                 let proxy = create_interface_proxy(
                     lua,
+                    &scope_for_require,
                     resolution,
                     module_id_for_require.clone(),
                     capabilities_for_require.clone(),
@@ -1142,6 +1189,7 @@ impl ScriptContext {
             }
             let proxy = create_interface_proxy(
                 self.lua(),
+                &globals,
                 resolution,
                 self.module_id.clone(),
                 self.capabilities.clone(),
@@ -1331,29 +1379,25 @@ fn is_named_event_channel(name: &str) -> bool {
             .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
-fn self_event_channel(lua: &Lua, module_id: &str, event_name: &str) -> mlua::Result<Table> {
-    let globals = lua.globals();
-    let registry = match globals.get::<LuaValue>("__mesh_self_event_channels") {
-        Ok(LuaValue::Table(table)) => table,
-        _ => {
-            let table = lua.create_table()?;
-            globals.set("__mesh_self_event_channels", table.clone())?;
-            table
-        }
-    };
-    let module_table = match registry.get::<LuaValue>(module_id)? {
+/// Resolve (or lazily create) a `self.<Event>` channel.
+///
+/// The registry lives on the per-instance `_ENV` table (`scope`) so two
+/// instances of the same component keep independent `self` channels when they
+/// share one surface VM.
+fn self_event_channel(lua: &Lua, scope: &Table, event_name: &str) -> mlua::Result<Table> {
+    let registry = match scope.raw_get::<LuaValue>("__mesh_self_event_channels")? {
         LuaValue::Table(table) => table,
         _ => {
             let table = lua.create_table()?;
-            registry.set(module_id, table.clone())?;
+            scope.raw_set("__mesh_self_event_channels", table.clone())?;
             table
         }
     };
-    match module_table.get::<LuaValue>(event_name)? {
+    match registry.raw_get::<LuaValue>(event_name)? {
         LuaValue::Table(channel) => Ok(channel),
         _ => {
             let channel = create_event_channel(lua, None, None)?;
-            module_table.set(event_name, channel.clone())?;
+            registry.raw_set(event_name, channel.clone())?;
             Ok(channel)
         }
     }

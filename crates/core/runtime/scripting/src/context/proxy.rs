@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 pub(super) fn create_interface_proxy(
     lua: &Lua,
+    scope: &Table,
     resolution: InterfaceResolution,
     source_module_id: String,
     source_capabilities: CapabilitySet,
@@ -17,6 +18,7 @@ pub(super) fn create_interface_proxy(
 ) -> mlua::Result<Table> {
     create_service_proxy(
         lua,
+        scope,
         service_name_from_interface(&resolution.requested),
         resolution.contract,
         resolution.requested,
@@ -30,6 +32,7 @@ pub(super) fn create_interface_proxy(
 
 pub(super) fn create_service_proxy(
     lua: &Lua,
+    scope: &Table,
     service_name: String,
     contract: Option<InterfaceContract>,
     interface_name: String,
@@ -59,6 +62,7 @@ pub(super) fn create_service_proxy(
     proxy.set("state", state_proxy)?;
     let events_proxy = create_events_proxy(
         lua,
+        scope,
         &service_name,
         contract
             .as_ref()
@@ -98,6 +102,7 @@ pub(super) fn create_service_proxy(
         })
         .unwrap_or_default();
 
+    let index_scope = scope.clone();
     meta.set(
         "__index",
         lua.create_function(move |lua, (table, key): (Table, String)| {
@@ -110,6 +115,7 @@ pub(super) fn create_service_proxy(
             {
                 return interface_event_channel(
                     lua,
+                    &index_scope,
                     &service_name,
                     &key,
                     Some(Arc::clone(&subscribed_interface_events)),
@@ -174,6 +180,7 @@ pub(super) fn create_service_proxy(
 
 pub(super) fn create_events_proxy(
     lua: &Lua,
+    scope: &Table,
     service_name: &str,
     event_names: Vec<String>,
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
@@ -184,6 +191,7 @@ pub(super) fn create_events_proxy(
             name.as_str(),
             interface_event_channel(
                 lua,
+                scope,
                 service_name,
                 &name,
                 Some(Arc::clone(&subscribed_interface_events)),
@@ -193,30 +201,35 @@ pub(super) fn create_events_proxy(
     Ok(events)
 }
 
+/// Resolve (or lazily create) the interface-event channel for `(service, event)`.
+///
+/// The channel registry lives on the per-instance `_ENV` table (`scope`), not on
+/// `lua.globals()`, so that components sharing a single surface VM keep
+/// independent channels and per-context subscription tracking.
 pub(super) fn interface_event_channel(
     lua: &Lua,
+    scope: &Table,
     service_name: &str,
     event_name: &str,
     subscribed_interface_events: Option<Arc<Mutex<HashMap<String, HashMap<String, usize>>>>>,
 ) -> mlua::Result<Table> {
-    let globals = lua.globals();
-    let registry = match globals.get::<LuaValue>("__mesh_interface_event_channels") {
-        Ok(LuaValue::Table(table)) => table,
-        _ => {
-            let table = lua.create_table()?;
-            globals.set("__mesh_interface_event_channels", table.clone())?;
-            table
-        }
-    };
-    let service_table = match registry.get::<LuaValue>(service_name)? {
+    let registry = match scope.raw_get::<LuaValue>("__mesh_interface_event_channels")? {
         LuaValue::Table(table) => table,
         _ => {
             let table = lua.create_table()?;
-            registry.set(service_name, table.clone())?;
+            scope.raw_set("__mesh_interface_event_channels", table.clone())?;
             table
         }
     };
-    match service_table.get::<LuaValue>(event_name)? {
+    let service_table = match registry.raw_get::<LuaValue>(service_name)? {
+        LuaValue::Table(table) => table,
+        _ => {
+            let table = lua.create_table()?;
+            registry.raw_set(service_name, table.clone())?;
+            table
+        }
+    };
+    match service_table.raw_get::<LuaValue>(event_name)? {
         LuaValue::Table(channel) => Ok(channel),
         _ => {
             let channel = create_event_channel(
@@ -224,7 +237,7 @@ pub(super) fn interface_event_channel(
                 subscribed_interface_events,
                 Some((service_name.to_string(), event_name.to_string())),
             )?;
-            service_table.set(event_name, channel.clone())?;
+            service_table.raw_set(event_name, channel.clone())?;
             Ok(channel)
         }
     }
