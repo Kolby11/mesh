@@ -2,7 +2,7 @@ use super::*;
 
 fn transition_test_tree(property: mesh_core_elements::TransitionProperties) -> WidgetNode {
     let mut node = event_node("box", "root/0", 0.0, 0.0, 100.0, 20.0, &[]);
-    node.computed_style.transition = mesh_core_elements::TransitionStyle {
+    node.computed_style.transitions[0] = mesh_core_elements::TransitionStyle {
         duration_ms: 100,
         properties: property,
         ..mesh_core_elements::TransitionStyle::default()
@@ -340,7 +340,9 @@ fn navigation_bar_keyframe_animation_continues_across_rebuild() {
     let first_status_accent =
         first_node_with_attr(first_tree, "class", "status-accent").expect("status accent node");
     assert_eq!(
-        first_status_accent.computed_style.animation.name.as_deref(),
+        first_status_accent.computed_style.animations[0]
+            .name
+            .as_deref(),
         Some("status-pulse")
     );
 
@@ -364,9 +366,7 @@ fn navigation_bar_keyframe_animation_continues_across_rebuild() {
         .expect("rebuilt status accent node");
 
     assert_eq!(
-        rebuilt_status_accent
-            .computed_style
-            .animation
+        rebuilt_status_accent.computed_style.animations[0]
             .name
             .as_deref(),
         Some("status-pulse")
@@ -453,7 +453,7 @@ fn keyframe_animation_name_change_restarts_timeline() {
         .started_at = original_start;
 
     let mut tree = component.build_tree(&theme, 160, 48);
-    tree.children[0].computed_style.animation.name = Some("pulse-b".into());
+    tree.children[0].computed_style.animations[0].name = Some("pulse-b".into());
     component.apply_style_animations(&mut tree);
     component.last_tree = Some(tree);
 

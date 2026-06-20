@@ -240,6 +240,16 @@ impl PresentationEngine {
         matches!(&self.backend, Backend::WaylandSurface(_))
     }
 
+    /// Returns true for backends that must be periodically pumped to surface
+    /// input events. The dev-window/minifb backend has no fd-based blocking
+    /// primitive, but only needs this while it has open windows.
+    pub fn needs_polling_dispatch(&self) -> bool {
+        match &self.backend {
+            Backend::WaylandSurface(_) => false,
+            Backend::DevWindow(bridge) => bridge.needs_polling_dispatch(),
+        }
+    }
+
     /// Block on the backend until `timeout` elapses or a wakeup occurs.
     ///
     /// `eventfd_fd` is an optional IPC/backend wakeup fd checked *after*

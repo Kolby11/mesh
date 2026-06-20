@@ -130,6 +130,7 @@ pub(super) enum ShellMessage {
         name: String,
         payload: serde_json::Value,
     },
+    FilesystemChanged,
     Ipc(CoreRequest),
 }
 

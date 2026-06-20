@@ -12,7 +12,12 @@ impl Shell {
         if now < self.next_theme_reload_check {
             return Ok(VecDeque::new());
         }
-        self.next_theme_reload_check = now + THEME_RELOAD_POLL_INTERVAL;
+        self.next_theme_reload_check = now
+            + if self.file_watcher_active {
+                super::FILE_WATCHER_RELOAD_PARK
+            } else {
+                THEME_RELOAD_POLL_INTERVAL
+            };
 
         let Ok(metadata) = std::fs::metadata(&self.theme_watch.path) else {
             return Ok(VecDeque::new());
@@ -120,7 +125,12 @@ impl Shell {
         if now < self.next_shell_settings_reload_check {
             return Ok(requests);
         }
-        self.next_shell_settings_reload_check = now + SHELL_SETTINGS_RELOAD_POLL_INTERVAL;
+        self.next_shell_settings_reload_check = now
+            + if self.file_watcher_active {
+                super::FILE_WATCHER_RELOAD_PARK
+            } else {
+                SHELL_SETTINGS_RELOAD_POLL_INTERVAL
+            };
 
         let Ok(metadata) = std::fs::metadata(&self.settings_watch.path) else {
             return Ok(requests);

@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mesh_core_capability::CapabilitySet;
 use mesh_core_debug::ProfilingStage;
@@ -219,6 +219,13 @@ pub trait ShellComponent: Send {
     }
     fn wants_tick(&self) -> bool {
         true
+    }
+    /// Return the next time this component needs `tick()` for timer-driven
+    /// work. The default preserves the old roughly-60Hz tick contract for
+    /// components that have not opted into explicit deadlines. Implementations
+    /// can return `None` when they have no pending timer.
+    fn next_tick_deadline(&self) -> Option<Instant> {
+        Some(Instant::now() + Duration::from_millis(16))
     }
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError>;
     fn wants_render(&self) -> bool;

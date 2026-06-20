@@ -2212,18 +2212,14 @@ fn navigation_buttons_animate_shape_from_squircle_to_circle_with_transform() {
         visible_pixels > 40_000,
         "navigation bar should paint visible Skia backgrounds, got only {visible_pixels} nontransparent pixels"
     );
-    assert!(button.computed_style.transition.duration_ms > 0);
+    assert!(button.computed_style.transitions[0].duration_ms > 0);
     assert!(
-        button
-            .computed_style
-            .transition
+        button.computed_style.transitions[0]
             .properties
             .animates_border_radius()
     );
     assert!(
-        button
-            .computed_style
-            .transition
+        button.computed_style.transitions[0]
             .properties
             .animates_transform()
     );

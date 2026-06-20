@@ -227,6 +227,31 @@ impl ShellComponent for FrontendSurfaceComponent {
             || !self.pending_surface_states.borrow().is_empty()
     }
 
+    fn next_tick_deadline(&self) -> Option<std::time::Instant> {
+        if !self.pending_surface_states.borrow().is_empty() {
+            return Some(std::time::Instant::now());
+        }
+
+        if let Some(start) = self.hover_start
+            && !self.tooltip_visible
+        {
+            return Some(start + Duration::from_millis(self.tooltip_settings.delay_ms));
+        }
+
+        if self.tooltip_visible
+            && let Some(appeared) = self.tooltip_appeared_at
+        {
+            const TOOLTIP_FADE_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+            let now = std::time::Instant::now();
+            let fade_until = appeared + self.tooltip_fade_duration();
+            if fade_until > now {
+                return Some((now + TOOLTIP_FADE_FRAME_INTERVAL).min(fade_until));
+            }
+        }
+
+        None
+    }
+
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
         if self.hover_start.is_some() {
             self.refresh_tooltip_settings();

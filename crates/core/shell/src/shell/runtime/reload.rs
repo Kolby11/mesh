@@ -12,7 +12,12 @@ impl Shell {
         if now < self.next_frontend_reload_check {
             return Ok(());
         }
-        self.next_frontend_reload_check = now + FRONTEND_RELOAD_POLL_INTERVAL;
+        self.next_frontend_reload_check = now
+            + if self.file_watcher_active {
+                super::FILE_WATCHER_RELOAD_PARK
+            } else {
+                FRONTEND_RELOAD_POLL_INTERVAL
+            };
 
         for runtime in &mut self.components {
             if runtime.source_paths.is_empty() {
@@ -77,7 +82,12 @@ impl Shell {
         if now < self.next_module_settings_reload_check {
             return Ok(());
         }
-        self.next_module_settings_reload_check = now + MODULE_SETTINGS_RELOAD_POLL_INTERVAL;
+        self.next_module_settings_reload_check = now
+            + if self.file_watcher_active {
+                super::FILE_WATCHER_RELOAD_PARK
+            } else {
+                MODULE_SETTINGS_RELOAD_POLL_INTERVAL
+            };
 
         for runtime in &mut self.components {
             let current_settings_path = runtime.component.module_settings_path();

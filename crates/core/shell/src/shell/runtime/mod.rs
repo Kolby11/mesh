@@ -13,9 +13,19 @@ mod theme;
 mod wayland;
 
 const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
-const MIN_RUNTIME_SLEEP: Duration = Duration::from_millis(16);
+const DEV_WINDOW_POLL_SLEEP: Duration = Duration::from_millis(16);
+pub(in crate::shell) const FILE_WATCHER_RELOAD_PARK: Duration = Duration::from_secs(24 * 60 * 60);
 
 impl Shell {
+    fn surface_is_effectively_visible(&self, surface_id: &str) -> bool {
+        self.core
+            .surfaces
+            .get(surface_id)
+            .map(|state| state.visible)
+            .or_else(|| self.surfaces.get(surface_id).map(|surface| surface.visible))
+            .unwrap_or(true)
+    }
+
     pub(in crate::shell) fn rebuild_component_surface_index(&mut self) {
         self.component_by_surface.clear();
         self.component_by_surface.reserve(self.components.len());
@@ -46,7 +56,10 @@ impl Shell {
         self.component_by_surface.get(surface_id).copied()
     }
 
-    fn next_runtime_sleep(&self, shell_message_backlog_likely: bool) -> Duration {
+    pub(in crate::shell) fn next_runtime_sleep(
+        &self,
+        shell_message_backlog_likely: bool,
+    ) -> Duration {
         if shell_message_backlog_likely
             || !self.pending_wayland_events.is_empty()
             || self.components_have_ready_render_work()
@@ -93,12 +106,24 @@ impl Shell {
             next_deadline = next_deadline.min(closing_until);
         }
 
-        let sleep_for = next_deadline.saturating_duration_since(now);
-        if sleep_for < MIN_RUNTIME_SLEEP {
-            Duration::ZERO
-        } else {
-            sleep_for
+        for runtime in &self.components {
+            if !self.surface_is_effectively_visible(runtime.surface_id.as_str()) {
+                continue;
+            }
+            if !runtime.component.wants_tick() {
+                continue;
+            }
+            let Some(tick_deadline) = runtime.component.next_tick_deadline() else {
+                continue;
+            };
+            if tick_deadline <= now {
+                return Duration::ZERO;
+            }
+            next_deadline = next_deadline.min(tick_deadline);
         }
+
+        let sleep_for = next_deadline.saturating_duration_since(now);
+        sleep_for
     }
 
     fn components_have_ready_render_work(&self) -> bool {
@@ -110,16 +135,8 @@ impl Shell {
                 return false;
             }
             let surface_id = runtime.surface_id.as_str();
-            let visible = self
-                .core
-                .surfaces
-                .get(surface_id)
-                .map(|state| state.visible)
-                .or_else(|| self.surfaces.get(surface_id).map(|surface| surface.visible))
-                .unwrap_or(true);
-
-            !visible
-                || !self
+            self.surface_is_effectively_visible(surface_id)
+                && !self
                     .presentation_engine
                     .surface_waiting_for_frame_callback(surface_id)
         })
@@ -142,6 +159,8 @@ impl Shell {
         let eventfd_raw = eventfd.as_raw_fd();
         self.eventfd_fd = Some(eventfd);
 
+        self.file_watcher_active =
+            file_watch::spawn_file_watcher(self.file_watch_paths(), tx.clone(), eventfd_raw);
         self.spawn_backend_modules(&runtime, tx.clone(), eventfd_raw);
         let ipc_socket_path = default_ipc_socket_path();
         spawn_ipc_server(&runtime, ipc_socket_path.clone(), tx, eventfd_raw).map_err(|source| {
@@ -205,11 +224,6 @@ impl Shell {
             self.presentation_engine.pump();
 
             let deadline = self.next_runtime_sleep(shell_message_backlog_likely);
-            let sleep_for = if deadline.is_zero() {
-                MIN_RUNTIME_SLEEP
-            } else {
-                deadline
-            };
             if self.presentation_engine.supports_blocking_dispatch() {
                 let wait_started = self.profiling_enabled().then(std::time::Instant::now);
                 let eventfd_borrowed = self
@@ -219,7 +233,7 @@ impl Shell {
                     .as_fd();
                 let result = self
                     .presentation_engine
-                    .wait_for_events(sleep_for, eventfd_borrowed)
+                    .wait_for_events(deadline, eventfd_borrowed)
                     .map_err(ShellRunError::Presentation)?;
                 if let Some(started) = wait_started {
                     self.record_shell_profiling_stage(
@@ -229,7 +243,19 @@ impl Shell {
                     );
                 }
             } else {
-                std::thread::sleep(sleep_for);
+                let sleep_for = if deadline.is_zero() {
+                    DEV_WINDOW_POLL_SLEEP
+                } else if self.presentation_engine.needs_polling_dispatch() {
+                    deadline.min(DEV_WINDOW_POLL_SLEEP)
+                } else {
+                    deadline
+                };
+                let eventfd_borrowed = self
+                    .eventfd_fd
+                    .as_ref()
+                    .expect("eventfd must be created before shell loop")
+                    .as_fd();
+                wait_for_eventfd(sleep_for, eventfd_borrowed);
             }
         }
 
@@ -252,6 +278,7 @@ impl Shell {
             ShellMessage::BackendLifecycle { .. } => "backend_lifecycle",
             ShellMessage::BackendCommandResult { .. } => "backend_command_result",
             ShellMessage::BackendInterfaceEvent { .. } => "backend_interface_event",
+            ShellMessage::FilesystemChanged => "filesystem_changed",
             ShellMessage::Ipc(_) => "ipc",
         };
         match message {
@@ -303,6 +330,9 @@ impl Shell {
                     payload,
                 )?);
             }
+            ShellMessage::FilesystemChanged => {
+                self.schedule_reload_checks_now();
+            }
             ShellMessage::Ipc(request) => {
                 pending.push_back(request);
             }
@@ -316,16 +346,70 @@ impl Shell {
         }
         Ok(())
     }
+
+    fn file_watch_paths(&self) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        paths.push(self.theme_watch.path.clone());
+        paths.push(self.settings_watch.path.clone());
+        for runtime in &self.components {
+            paths.extend(runtime.source_paths.iter().map(|(path, _)| path.clone()));
+            if let Some(path) = &runtime.module_settings_path {
+                paths.push(path.clone());
+            }
+        }
+        paths
+    }
+
+    fn schedule_reload_checks_now(&mut self) {
+        let now = std::time::Instant::now();
+        self.next_theme_reload_check = now;
+        self.next_shell_settings_reload_check = now;
+        self.next_frontend_reload_check = now;
+        self.next_module_settings_reload_check = now;
+    }
+}
+
+fn wait_for_eventfd(timeout: Duration, eventfd_fd: std::os::unix::io::BorrowedFd<'_>) {
+    use rustix::event::{PollFd, PollFlags, poll};
+    use rustix::io::read as eventfd_read;
+
+    let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+    let mut fds = [PollFd::new(
+        &eventfd_fd,
+        PollFlags::IN | PollFlags::ERR | PollFlags::HUP,
+    )];
+    let ready = match poll(&mut fds, timeout_ms) {
+        Ok(0) | Err(rustix::io::Errno::INTR) => false,
+        Ok(_) => fds[0]
+            .revents()
+            .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP),
+        Err(err) => {
+            tracing::warn!("eventfd wait failed: {err}");
+            false
+        }
+    };
+    if ready {
+        let mut counter = [0u8; 8];
+        let _ = eventfd_read(&eventfd_fd, &mut counter);
+    }
 }
 
 #[derive(Default)]
 struct CoalescedShellMessages {
     messages: Vec<ShellMessage>,
     backend_update_index: HashMap<String, HashMap<String, usize>>,
+    has_filesystem_changed: bool,
 }
 
 impl CoalescedShellMessages {
     fn push(&mut self, message: ShellMessage) {
+        if matches!(message, ShellMessage::FilesystemChanged) {
+            if self.has_filesystem_changed {
+                return;
+            }
+            self.has_filesystem_changed = true;
+        }
+
         if let ShellMessage::BackendServiceUpdate {
             interface,
             provider_id,
@@ -390,5 +474,16 @@ mod tests {
             payload.get("value").and_then(|value| value.as_i64()),
             Some(2)
         );
+    }
+
+    #[test]
+    fn coalesced_shell_messages_keep_single_filesystem_change() {
+        let mut coalesced = CoalescedShellMessages::default();
+        coalesced.push(ShellMessage::FilesystemChanged);
+        coalesced.push(ShellMessage::FilesystemChanged);
+
+        let messages = coalesced.into_vec();
+        assert_eq!(messages.len(), 1);
+        assert!(matches!(messages[0], ShellMessage::FilesystemChanged));
     }
 }

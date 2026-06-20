@@ -103,6 +103,7 @@ impl Shell {
             next_shell_settings_reload_check: now,
             next_frontend_reload_check: now,
             next_module_settings_reload_check: now,
+            file_watcher_active: false,
             debug: DebugOverlayState::default(),
             debug_overlay: DebugOverlay::new(),
             active_key_modifiers: KeyModifiers::default(),

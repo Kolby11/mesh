@@ -5,7 +5,8 @@ use std::time::{Duration, Instant};
 
 use mesh_core_elements::{
     BoxShadow, Corners, Dimension, Edges, TransitionProperties, TransitionStyle, VisualFilter,
-    WidgetNode, style::{Color, Visibility},
+    WidgetNode,
+    style::{Color, Visibility},
 };
 
 use super::easing::{Easing, apply_easing};
@@ -50,7 +51,11 @@ impl AnimatableStyle {
             // Clamp to the radius the painter can actually draw for this box so
             // transitions and keyframes interpolate toward the visible value
             // rather than an over-large authored radius.
-            border_radius: visual_border_radius(s.border_radius, node.layout.width, node.layout.height),
+            border_radius: visual_border_radius(
+                s.border_radius,
+                node.layout.width,
+                node.layout.height,
+            ),
             border_width: s.border_width,
             opacity: s.opacity,
             background_color: s.background_color,
@@ -383,7 +388,9 @@ impl TransitionAnimator {
 
     /// Style currently displayed by an in-flight transition for `key`.
     pub fn displayed_style(&self, key: &str, now: Instant) -> Option<AnimatableStyle> {
-        self.active.get(key).map(|transition| transition.current(now))
+        self.active
+            .get(key)
+            .map(|transition| transition.current(now))
     }
 
     /// The transition for `key` if it has not finished — used to classify the
@@ -418,7 +425,12 @@ impl TransitionAnimator {
         now: Instant,
     ) -> bool {
         let desired = AnimatableStyle::from_node(node);
-        let transition = node.computed_style.transitions.first().copied().unwrap_or_default();
+        let transition = node
+            .computed_style
+            .transitions
+            .first()
+            .copied()
+            .unwrap_or_default();
         let props = transition.properties;
 
         // The clamped visual radius is authoritative whether or not the radius
@@ -427,7 +439,8 @@ impl TransitionAnimator {
             node.computed_style.border_radius = desired.border_radius;
         }
 
-        let should_animate = transition.duration_ms > 0 && previous_displayed.differs(&desired, props);
+        let should_animate =
+            transition.duration_ms > 0 && previous_displayed.differs(&desired, props);
 
         if should_animate {
             let restart = self.active.get(key).is_none_or(|transition_in_flight| {

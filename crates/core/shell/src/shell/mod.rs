@@ -31,6 +31,7 @@ use tokio::task::AbortHandle;
 mod backend;
 mod component;
 mod discovery;
+mod file_watch;
 mod ipc;
 mod runtime;
 mod service;
@@ -386,6 +387,7 @@ pub struct Shell {
     next_shell_settings_reload_check: std::time::Instant,
     next_frontend_reload_check: std::time::Instant,
     next_module_settings_reload_check: std::time::Instant,
+    file_watcher_active: bool,
     debug: DebugOverlayState,
     debug_overlay: DebugOverlay,
     active_key_modifiers: KeyModifiers,

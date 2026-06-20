@@ -16,17 +16,13 @@ impl Shell {
             if !self.components[index].component.wants_render() {
                 continue;
             }
-            let visible = self
-                .core
-                .surfaces
-                .get(&surface_id)
-                .map(|state| state.visible)
-                .unwrap_or_else(|| {
-                    self.surfaces
-                        .get(&surface_id)
-                        .map(|surface| surface.visible)
-                        .unwrap_or(true)
-                });
+            let visible = self.surface_is_effectively_visible(&surface_id);
+            if !visible
+                && self.components[index].last_surface_config.is_none()
+                && self.components[index].known_surface_size.is_none()
+            {
+                continue;
+            }
             if visible
                 && self
                     .presentation_engine
@@ -247,17 +243,7 @@ impl Shell {
                 rerender_attempts += 1;
             }
 
-            let visible = self
-                .core
-                .surfaces
-                .get(&surface_id)
-                .map(|state| state.visible)
-                .unwrap_or_else(|| {
-                    self.surfaces
-                        .get(&surface_id)
-                        .map(|surface| surface.visible)
-                        .unwrap_or(true)
-                });
+            let visible = self.surface_is_effectively_visible(&surface_id);
 
             for record in component_stage_records {
                 let module_id = record

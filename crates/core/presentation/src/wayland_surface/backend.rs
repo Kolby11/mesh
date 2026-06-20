@@ -995,11 +995,7 @@ impl LayerShellBackend {
     /// input region the compositor routes clicks over that whole extra area to
     /// this surface, creating a dead zone where clicks never reach the windows
     /// underneath. `None` resets to the default (whole-surface input).
-    pub(crate) fn update_input_region(
-        &mut self,
-        surface_id: &str,
-        input_rect: Option<DamageRect>,
-    ) {
+    pub(crate) fn update_input_region(&mut self, surface_id: &str, input_rect: Option<DamageRect>) {
         let Some(entry) = self.state.surfaces.get(surface_id) else {
             return;
         };
@@ -1247,45 +1243,43 @@ impl LayerShellBackend {
             });
         };
 
-        // 3. Block on the Wayland connection fd with the deadline.
+        // 3. Block on both Wayland and the shell eventfd. Backend/IPC work
+        // must be able to interrupt long idle waits once the shell is no
+        // longer clamped to a fixed 16ms loop cadence.
         let wayland_fd = read_guard.connection_fd();
-        let mut wayland_fds = [PollFd::new(
-            &wayland_fd,
-            PollFlags::IN | PollFlags::ERR | PollFlags::HUP,
-        )];
+        let mut fds = [
+            PollFd::new(&wayland_fd, PollFlags::IN | PollFlags::ERR | PollFlags::HUP),
+            PollFd::new(&eventfd_fd, PollFlags::IN | PollFlags::ERR | PollFlags::HUP),
+        ];
         let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
 
-        let wayland_ready = match poll(&mut wayland_fds, timeout_ms) {
+        let (wayland_ready, ipc_ready) = match poll(&mut fds, timeout_ms) {
             Ok(0) => {
                 drop(read_guard);
                 return Ok(WaitResult::deadline_expired());
             }
-            Err(rustix::io::Errno::INTR) => false,
-            Ok(_) => wayland_fds[0]
-                .revents()
-                .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP),
+            Err(rustix::io::Errno::INTR) => (false, false),
+            Ok(_) => (
+                fds[0]
+                    .revents()
+                    .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP),
+                fds[1]
+                    .revents()
+                    .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP),
+            ),
             Err(err) => {
                 drop(read_guard);
                 return Err(PresentationError::SurfaceCreate(format!("poll: {err}")));
             }
         };
 
-        // 4. Check eventfd with a 0ms poll — detects IPC/backend signals
-        //    that arrived during the Wayland block.
-        let mut eventfd_fds = [PollFd::new(&eventfd_fd, PollFlags::IN)];
-        let ipc_ready = match poll(&mut eventfd_fds, 0) {
-            Ok(0) | Err(rustix::io::Errno::INTR) => false,
-            Ok(_) => eventfd_fds[0].revents().contains(PollFlags::IN),
-            Err(_) => false,
-        };
-
-        // 5. Read and consume the eventfd counter so it doesn't keep firing.
+        // 4. Read and consume the eventfd counter so it doesn't keep firing.
         if ipc_ready {
             let mut counter = [0u8; 8];
             let _ = eventfd_read(&eventfd_fd, &mut counter);
         }
 
-        // 6. Read Wayland data.
+        // 5. Read Wayland data.
         let mut wake_reason = WaitReason::DeadlineExpired;
         if wayland_ready {
             match read_guard.read() {
@@ -1308,7 +1302,7 @@ impl LayerShellBackend {
             wake_reason = WaitReason::IpcEvent;
         }
 
-        // 7. Dispatch any events that were read.
+        // 6. Dispatch any events that were read.
         self.event_queue
             .dispatch_pending(&mut self.state)
             .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;

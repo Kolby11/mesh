@@ -350,7 +350,9 @@ fn is_easing_token(token: &str) -> bool {
 }
 
 pub(super) fn parse_steps(value: &str) -> Option<TransitionEasing> {
-    let inner = value.strip_prefix("steps(").and_then(|rest| rest.strip_suffix(')'))?;
+    let inner = value
+        .strip_prefix("steps(")
+        .and_then(|rest| rest.strip_suffix(')'))?;
     let mut parts = inner.split(',');
     let count = parts.next()?.trim().parse::<u32>().ok()?;
     if count == 0 {

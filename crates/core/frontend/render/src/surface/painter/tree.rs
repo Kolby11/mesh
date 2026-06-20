@@ -380,7 +380,12 @@ impl FrontendRenderEngine {
         if !nearly_zero(transform.rotation) && w > 0 && h > 0 {
             // Render element at (0,0) in temp buffer
             let mut temp = PixelBuffer::new(w as u32, h as u32);
-            let temp_bounds = ClipRect { x: 0, y: 0, width: w, height: h };
+            let temp_bounds = ClipRect {
+                x: 0,
+                y: 0,
+                width: w,
+                height: h,
+            };
             let temp_clip = temp_bounds;
             self.render_node_self(node, &mut temp, scale, temp_bounds, temp_clip, module_id);
             // Render children into temp buffer too
@@ -388,7 +393,11 @@ impl FrontendRenderEngine {
             let scroll_y = node_attr_f32(node, "_mesh_scroll_y");
             let child_offset_x_temp = -scroll_x;
             let child_offset_y_temp = -scroll_y;
-            let child_clip_temp = if node_clips_children(node) { temp_clip } else { temp_clip };
+            let child_clip_temp = if node_clips_children(node) {
+                temp_clip
+            } else {
+                temp_clip
+            };
             for child in &node.children {
                 self.render_node_with_filter(
                     child,
@@ -460,7 +469,18 @@ impl FrontendRenderEngine {
                     buffer.blend_pixel(out_x, out_y, src_pixel, coverage);
                 }
             }
-            self.render_scrollbars(node, buffer, scale, ClipRect { x, y, width: w, height: h }, clip);
+            self.render_scrollbars(
+                node,
+                buffer,
+                scale,
+                ClipRect {
+                    x,
+                    y,
+                    width: w,
+                    height: h,
+                },
+                clip,
+            );
             return;
         }
 
@@ -508,7 +528,13 @@ impl FrontendRenderEngine {
             child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
             for index in child_order {
                 let child = &node.children[index];
-                let (cox, coy, cc) = fixed_child_offsets(child, child_offset_x, child_offset_y, child_clip, self.viewport_clip.get());
+                let (cox, coy, cc) = fixed_child_offsets(
+                    child,
+                    child_offset_x,
+                    child_offset_y,
+                    child_clip,
+                    self.viewport_clip.get(),
+                );
                 self.render_node_with_filter(
                     child,
                     buffer,
@@ -522,7 +548,13 @@ impl FrontendRenderEngine {
             }
         } else {
             for child in &node.children {
-                let (cox, coy, cc) = fixed_child_offsets(child, child_offset_x, child_offset_y, child_clip, self.viewport_clip.get());
+                let (cox, coy, cc) = fixed_child_offsets(
+                    child,
+                    child_offset_x,
+                    child_offset_y,
+                    child_clip,
+                    self.viewport_clip.get(),
+                );
                 self.render_node_with_filter(
                     child,
                     buffer,

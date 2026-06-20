@@ -193,6 +193,10 @@ impl DevWindowBackend {
 
         events
     }
+
+    pub fn needs_polling_dispatch(&self) -> bool {
+        !self.windows.is_empty()
+    }
 }
 
 fn create_window_surface(title: &str, width: u32, height: u32) -> Result<WindowSurface, String> {

@@ -28,7 +28,7 @@ mesh-core-elements = { workspace = true }
 mesh-core-interaction = { workspace = true }
 mesh-core-scripting = { workspace = true }
 mesh-core-icon = { workspace = true }
-rustix = { version = "0.38", features = ["event"] }
+rustix = { version = "0.38", features = ["event", "fs"] }
 
 tokio = { workspace = true }
 tracing = { workspace = true }

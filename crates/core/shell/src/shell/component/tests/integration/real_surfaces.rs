@@ -580,7 +580,7 @@ fn shipped_navigation_animation_keeps_status_pulse_repaint_only() {
     let status_accent =
         first_node_with_attr(&tree, "class", "status-accent").expect("status pulse node");
     assert_eq!(
-        status_accent.computed_style.animation.name.as_deref(),
+        status_accent.computed_style.animations[0].name.as_deref(),
         Some("status-pulse")
     );
     component.dirty = false;

@@ -183,7 +183,12 @@ impl FrontendRenderEngine {
             tooltip_center_x: Cell::new(false),
             tooltip_scale_from: Cell::new(0.0),
             render_scratch: RefCell::new(RenderScratch::default()),
-            viewport_clip: Cell::new(ClipRect { x: 0, y: 0, width: 0, height: 0 }),
+            viewport_clip: Cell::new(ClipRect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            }),
         }
     }
 
@@ -198,7 +203,12 @@ impl FrontendRenderEngine {
             tooltip_center_x: Cell::new(false),
             tooltip_scale_from: Cell::new(0.0),
             render_scratch: RefCell::new(RenderScratch::default()),
-            viewport_clip: Cell::new(ClipRect { x: 0, y: 0, width: 0, height: 0 }),
+            viewport_clip: Cell::new(ClipRect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            }),
         }
     }
 

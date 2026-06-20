@@ -39,7 +39,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
@@ -585,6 +585,268 @@ impl ClipboardWriter for RecordingClipboard {
         self.writes.lock().unwrap().push(text.to_string());
         Ok(())
     }
+}
+
+struct DeadlineTickComponent {
+    surface_id: String,
+    deadline: Option<Instant>,
+}
+
+impl DeadlineTickComponent {
+    fn new(surface_id: &str, deadline: Option<Instant>) -> Self {
+        Self {
+            surface_id: surface_id.to_string(),
+            deadline,
+        }
+    }
+}
+
+impl super::types::ShellComponent for DeadlineTickComponent {
+    fn id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn surface_id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn mount(
+        &mut self,
+        _ctx: super::types::ComponentContext,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_core_event(
+        &mut self,
+        _event: &super::types::CoreEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_service_event(
+        &mut self,
+        _event: &ServiceEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn next_tick_deadline(&self) -> Option<Instant> {
+        self.deadline
+    }
+
+    fn tick(&mut self) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn wants_render(&self) -> bool {
+        false
+    }
+
+    fn render(
+        &mut self,
+        _surface: &mut dyn mesh_core_wayland::ShellSurface,
+    ) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn paint(
+        &mut self,
+        _theme: &mesh_core_theme::Theme,
+        _width: u32,
+        _height: u32,
+        _buffer: &mut mesh_core_render::PixelBuffer,
+        _scale: f32,
+    ) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn theme_changed(&mut self) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct DirtyHiddenState {
+    render_calls: usize,
+}
+
+struct DirtyHiddenComponent {
+    surface_id: String,
+    deadline: Option<Instant>,
+    state: Arc<Mutex<DirtyHiddenState>>,
+}
+
+impl DirtyHiddenComponent {
+    fn new(
+        surface_id: &str,
+        deadline: Option<Instant>,
+        state: Arc<Mutex<DirtyHiddenState>>,
+    ) -> Self {
+        Self {
+            surface_id: surface_id.to_string(),
+            deadline,
+            state,
+        }
+    }
+}
+
+impl super::types::ShellComponent for DirtyHiddenComponent {
+    fn id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn surface_id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn mount(
+        &mut self,
+        _ctx: super::types::ComponentContext,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_core_event(
+        &mut self,
+        _event: &super::types::CoreEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_service_event(
+        &mut self,
+        _event: &ServiceEvent,
+    ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
+    fn next_tick_deadline(&self) -> Option<Instant> {
+        self.deadline
+    }
+
+    fn tick(&mut self) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn wants_render(&self) -> bool {
+        true
+    }
+
+    fn render(
+        &mut self,
+        _surface: &mut dyn mesh_core_wayland::ShellSurface,
+    ) -> Result<(), super::types::ComponentError> {
+        self.state.lock().unwrap().render_calls += 1;
+        Ok(())
+    }
+
+    fn paint(
+        &mut self,
+        _theme: &mesh_core_theme::Theme,
+        _width: u32,
+        _height: u32,
+        _buffer: &mut mesh_core_render::PixelBuffer,
+        _scale: f32,
+    ) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn theme_changed(&mut self) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+}
+
+fn park_reload_deadlines(shell: &mut Shell) {
+    let later = Instant::now() + Duration::from_secs(60);
+    shell.next_theme_reload_check = later;
+    shell.next_shell_settings_reload_check = later;
+    shell.next_frontend_reload_check = later;
+    shell.next_module_settings_reload_check = later;
+}
+
+#[test]
+fn scheduler_uses_component_tick_deadline() {
+    let mut shell = Shell::new();
+    park_reload_deadlines(&mut shell);
+    let deadline = Instant::now() + Duration::from_millis(120);
+    shell
+        .components
+        .push(super::types::ComponentRuntime::new(Box::new(
+            DeadlineTickComponent::new("@test/deadline", Some(deadline)),
+        )));
+
+    let sleep = shell.next_runtime_sleep(false);
+
+    assert!(sleep <= Duration::from_millis(120), "{sleep:?}");
+    assert!(sleep >= Duration::from_millis(80), "{sleep:?}");
+}
+
+#[test]
+fn scheduler_wakes_immediately_for_due_component_tick_deadline() {
+    let mut shell = Shell::new();
+    park_reload_deadlines(&mut shell);
+    shell
+        .components
+        .push(super::types::ComponentRuntime::new(Box::new(
+            DeadlineTickComponent::new(
+                "@test/deadline",
+                Some(Instant::now() - Duration::from_millis(1)),
+            ),
+        )));
+
+    assert_eq!(shell.next_runtime_sleep(false), Duration::ZERO);
+}
+
+#[test]
+fn scheduler_ignores_hidden_component_deadlines_and_render_dirtiness() {
+    let state = Arc::new(Mutex::new(DirtyHiddenState::default()));
+    let mut shell = Shell::new();
+    park_reload_deadlines(&mut shell);
+    shell.register_component(Box::new(DirtyHiddenComponent::new(
+        "@test/hidden",
+        Some(Instant::now()),
+        Arc::clone(&state),
+    )));
+    shell
+        .core
+        .surfaces
+        .get_mut("@test/hidden")
+        .expect("hidden surface state")
+        .visible = false;
+    shell.presented_last_frame = true;
+
+    let sleep = shell.next_runtime_sleep(false);
+
+    assert!(
+        sleep >= Duration::from_secs(30),
+        "hidden dirty component should not force an immediate wake: {sleep:?}"
+    );
+}
+
+#[test]
+fn render_skips_already_hidden_dirty_surface() {
+    let state = Arc::new(Mutex::new(DirtyHiddenState::default()));
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(DirtyHiddenComponent::new(
+        "@test/hidden",
+        None,
+        Arc::clone(&state),
+    )));
+    shell
+        .core
+        .surfaces
+        .get_mut("@test/hidden")
+        .expect("hidden surface state")
+        .visible = false;
+
+    shell.render_components().unwrap();
+
+    assert_eq!(state.lock().unwrap().render_calls, 0);
 }
 
 #[test]

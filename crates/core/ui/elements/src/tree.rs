@@ -150,11 +150,13 @@ mod tests {
         node.refresh_class_tokens_cache();
         assert!(node.class_tokens().is_empty());
 
-        node.attributes.insert("class".into(), "primary compact".into());
+        node.attributes
+            .insert("class".into(), "primary compact".into());
         node.refresh_class_tokens_cache();
         assert_eq!(node.class_tokens(), ["primary", "compact"]);
 
-        node.attributes.insert("class".into(), "compact active".into());
+        node.attributes
+            .insert("class".into(), "compact active".into());
         node.refresh_class_tokens_cache();
         assert_eq!(node.class_tokens(), ["compact", "active"]);
 

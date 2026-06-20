@@ -25,10 +25,10 @@ mod runtime_tree;
 mod shell_component;
 mod tooltip;
 
-use mesh_core_animation::transition::TransitionAnimator;
 pub(in crate::shell) use catalog::FrontendCatalog;
 #[cfg(test)]
 pub(crate) use input::KeybindResolutionSource;
+use mesh_core_animation::transition::TransitionAnimator;
 pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 use runtime_tree::{
     NodeServiceFieldDependencies, RetainedWidgetTree, annotate_runtime_tree, collect_all_keys,

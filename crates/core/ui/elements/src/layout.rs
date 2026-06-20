@@ -397,7 +397,13 @@ impl LayoutEngine {
                 );
                 zero_layout_subtree(root);
             } else {
-                write_taffy_layout(root, &state.tree, &node_map, available_width, available_height);
+                write_taffy_layout(
+                    root,
+                    &state.tree,
+                    &node_map,
+                    available_width,
+                    available_height,
+                );
                 state.last_available = (available_width, available_height);
             }
         }
@@ -649,7 +655,13 @@ fn compute_fresh_retained_layout(
                 zero_layout_subtree(root);
                 state.valid = false;
             } else {
-                write_taffy_layout(root, &state.tree, &node_id_to_taffy, available_width, available_height);
+                write_taffy_layout(
+                    root,
+                    &state.tree,
+                    &node_id_to_taffy,
+                    available_width,
+                    available_height,
+                );
                 state.last_available = (available_width, available_height);
                 state.valid = true;
             }
@@ -733,7 +745,13 @@ fn compute_structural_retained_layout(
                 zero_layout_subtree(root);
                 state.valid = false;
             } else {
-                write_taffy_layout(root, &state.tree, &node_id_to_taffy, available_width, available_height);
+                write_taffy_layout(
+                    root,
+                    &state.tree,
+                    &node_id_to_taffy,
+                    available_width,
+                    available_height,
+                );
                 state.last_available = (available_width, available_height);
                 state.valid = true;
             }
@@ -949,7 +967,8 @@ fn measure_taffy_node(
     let max_width = if text.nowrap {
         known_dimensions.width
     } else {
-        known_dimensions.width
+        known_dimensions
+            .width
             .or_else(|| available_space_to_option(available_space.width))
     };
     let measure_key = TextMeasureKey::new(text, max_width);

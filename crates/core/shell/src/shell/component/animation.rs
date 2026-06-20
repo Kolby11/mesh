@@ -204,7 +204,12 @@ impl FrontendSurfaceComponent {
         now: Instant,
         has_active_animation: &mut bool,
     ) {
-        if node.computed_style.animations.iter().any(|a| a.name.is_some()) {
+        if node
+            .computed_style
+            .animations
+            .iter()
+            .any(|a| a.name.is_some())
+        {
             // CSS animations own their animated properties; do not layer
             // transition playback on top of the same node.
             self.transitions.remove(key);
@@ -253,64 +258,66 @@ impl FrontendSurfaceComponent {
         }
 
         for animation_style in animations {
-        let animation_name = animation_style.name.clone().unwrap();
+            let animation_name = animation_style.name.clone().unwrap();
 
-        let animation_key = format!("{key}::{animation_name}");
-        live_keyframe_keys.insert(animation_key.clone());
+            let animation_key = format!("{key}::{animation_name}");
+            live_keyframe_keys.insert(animation_key.clone());
 
-        let Some(parsed_rule) = self.find_component_keyframe_rule(&animation_name).cloned() else {
-            self.record_runtime_animation_diagnostic(format!(
-                "unresolved animation '{animation_name}'"
-            ));
-            continue;
-        };
+            let Some(parsed_rule) = self.find_component_keyframe_rule(&animation_name).cloned()
+            else {
+                self.record_runtime_animation_diagnostic(format!(
+                    "unresolved animation '{animation_name}'"
+                ));
+                continue;
+            };
 
-        let render_rule =
-            self.build_render_keyframe_rule(&animation_key, &parsed_rule, node, resolver);
-        let keyframe_bucket = keyframe_rule_animation_bucket(&render_rule);
-        self.keyframe_rules
-            .insert(animation_key.clone(), render_rule.clone());
+            let render_rule =
+                self.build_render_keyframe_rule(&animation_key, &parsed_rule, node, resolver);
+            let keyframe_bucket = keyframe_rule_animation_bucket(&render_rule);
+            self.keyframe_rules
+                .insert(animation_key.clone(), render_rule.clone());
 
-        let existing = self.keyframe_animations.get(&animation_key).cloned();
-        let paused_at = match (&existing, animation_style.play_state) {
-            (Some(active), AnimationPlayState::Paused)
-                if active.play_state == AnimationPlayState::Paused =>
+            let existing = self.keyframe_animations.get(&animation_key).cloned();
+            let paused_at = match (&existing, animation_style.play_state) {
+                (Some(active), AnimationPlayState::Paused)
+                    if active.play_state == AnimationPlayState::Paused =>
+                {
+                    active.paused_at
+                }
+                (Some(_), AnimationPlayState::Paused) => Some(now),
+                (None, AnimationPlayState::Paused) => Some(now),
+                _ => None,
+            };
+
+            let active = ActiveKeyframeAnimation {
+                rule_name: animation_key.clone(),
+                started_at: existing
+                    .map(|animation| animation.started_at)
+                    .unwrap_or(now),
+                duration: Duration::from_millis(u64::from(animation_style.duration_ms)),
+                delay: Duration::from_millis(u64::from(animation_style.delay_ms)),
+                easing: animation_style.easing.into(),
+                iteration_count: animation_style.iteration_count,
+                direction: animation_style.direction,
+                fill_mode: animation_style.fill_mode,
+                play_state: animation_style.play_state,
+                paused_at,
+            };
+            self.keyframe_animations
+                .insert(animation_key.clone(), active.clone());
+
+            let mut registry = KeyframeRegistry::new();
+            registry.insert(render_rule);
+            if let Some(current) = active.current(&registry, AnimatableStyle::from_node(node), now)
             {
-                active.paused_at
+                current.apply_to_node(node);
             }
-            (Some(_), AnimationPlayState::Paused) => Some(now),
-            (None, AnimationPlayState::Paused) => Some(now),
-            _ => None,
-        };
 
-        let active = ActiveKeyframeAnimation {
-            rule_name: animation_key.clone(),
-            started_at: existing
-                .map(|animation| animation.started_at)
-                .unwrap_or(now),
-            duration: Duration::from_millis(u64::from(animation_style.duration_ms)),
-            delay: Duration::from_millis(u64::from(animation_style.delay_ms)),
-            easing: animation_style.easing.into(),
-            iteration_count: animation_style.iteration_count,
-            direction: animation_style.direction,
-            fill_mode: animation_style.fill_mode,
-            play_state: animation_style.play_state,
-            paused_at,
-        };
-        self.keyframe_animations
-            .insert(animation_key.clone(), active.clone());
-
-        let mut registry = KeyframeRegistry::new();
-        registry.insert(render_rule);
-        if let Some(current) = active.current(&registry, AnimatableStyle::from_node(node), now) {
-            current.apply_to_node(node);
-        }
-
-        if active.play_state == AnimationPlayState::Running && !active.finished(now) {
-            *has_active_keyframe_animation = true;
-            *active_keyframe_bucket =
-                merge_animation_bucket(*active_keyframe_bucket, keyframe_bucket);
-        }
+            if active.play_state == AnimationPlayState::Running && !active.finished(now) {
+                *has_active_keyframe_animation = true;
+                *active_keyframe_bucket =
+                    merge_animation_bucket(*active_keyframe_bucket, keyframe_bucket);
+            }
         } // end for animation_style in animations
     }
 

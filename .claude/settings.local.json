@@ -125,7 +125,8 @@
       "Bash(sed -i 's/!self\\\\.style_animations\\\\.is_empty\\(\\)/!self.transitions.is_empty\\(\\)/; s/self\\\\.style_animations\\\\.clear\\(\\);/self.transitions.clear\\(\\);/' crates/core/shell/src/shell/component/shell_component.rs)",
       "Bash(sed -i 's/!component\\\\.style_animations\\\\.is_empty\\(\\)/!component.transitions.is_empty\\(\\)/' crates/core/shell/src/shell/component/tests/interaction/reflow.rs)",
       "Bash(sed -i 's/component\\\\.style_animations\\\\.contains_key\\(/component.transitions.contains_key\\(/g' crates/core/shell/src/shell/component/tests/interaction/navigation.rs)",
-      "Bash(nix-env -q)"
+      "Bash(nix-env -q)",
+      "Bash(xargs ls)"
     ]
   }
 }

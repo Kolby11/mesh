@@ -1375,10 +1375,9 @@ fn apply_declaration(
             )
         }
         "transition-property" => {
-            first_transition_mut(&mut style.transitions).properties =
-                parse_transition_properties(
-                    &resolver.resolve_value_with_variables(value, variables),
-                )
+            first_transition_mut(&mut style.transitions).properties = parse_transition_properties(
+                &resolver.resolve_value_with_variables(value, variables),
+            )
         }
         "transition" => {
             let resolved = resolver.resolve_value_with_variables(value, variables);
