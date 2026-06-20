@@ -290,6 +290,36 @@ Use `bind:this` when the parent needs the mounted child instance:
 The bound variable references the mounted instance, not the component
 definition imported with `require(...)`.
 
+`bind:this` is a **live reference**, not a snapshot. Every component in a single
+frontend surface shares one Lua realm, so the bound variable forwards straight
+to the child's live state:
+
+- **Reads see the current value.** `volume_bar.percent` reads the child's
+  `percent` at call time — no per-frame copy, no staleness.
+- **Calls run synchronously and return real values.**
+  `local p = volume_bar.set_volume(50)` runs the child's `set_volume` in the
+  same tick and returns whatever it returns.
+- **Events flow child→parent.** The child's `self.<Event>` channels are exposed
+  on the bound reference, so the parent can subscribe and receive synchronous
+  fires:
+
+  ```lua
+  -- parent
+  volume_bar.Changed:on(function(event) audio_label = event.label end)
+
+  -- child (capture the channel where `self` is available, then fire later)
+  local changed
+  function init(self) changed = self.Changed end
+  function onDrag() changed:fire({ label = string.format("%d%%", percent) }) end
+  ```
+
+Only the child's **public members** and `self.<Event>` channels cross the
+boundary. Host internals (`self`, `module`, `mesh`, `require`, `__mesh_*`) and
+lifecycle hooks (`init`, `render`, `mount`, `unmount`) stay private to the child.
+
+Cross-*surface* references (e.g. panel ↔ launcher) are a separate trust boundary
+and remain a marshalled event bus — `bind:this` liveness is within one surface.
+
 ### Event handlers
 
 Use `on...` event attribute names with a Luau function reference in `{}`:

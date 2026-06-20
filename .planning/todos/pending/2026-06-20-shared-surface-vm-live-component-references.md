@@ -56,6 +56,85 @@ a queue drained AFTER the parent handler finishes (`process_bound_instance_calls
 in component/runtime.rs ~498). Result: reads are up to one frame stale, calls are
 fire-and-forget with no return value, and there is no child->parent event path.
 
+## Status
+
+- [x] **Phase A.0** — registry relocation to per-`_ENV` (commit 7da57c9)
+- [x] **Phase A** — `ScriptVm`/`SurfaceVm` + shell wiring (commits 7da57c9, 1320368).
+      Verified: scripting 137 tests pass; shell `component::tests` failure set
+      byte-identical to branch-point baseline (45 pre-existing, zero regressions).
+- [x] **Phase B** — live `bind:this` proxy (DONE)
+      Added `ScriptContext::install_live_binding(&self, binding, child:
+      &ScriptContext)` (runtime.rs): a proxy table whose metatable
+      `__index`/`__newindex` `raw_get`/`raw_set` straight onto the child's live
+      `_ENV` (`raw_*` keeps the surface curated — child's own members only, no
+      inherited globals). Denylist `is_denied_binding_key` gates host internals,
+      sourced from the child's `builtin_globals` (covers `self`/`module`/`mesh`/
+      `require`/`__mesh_*`) plus `__`-prefix and lifecycle hooks. Both contexts
+      share one surface VM (Phase A) so the child `Table` handle is valid in the
+      parent — no copy. `bind_child_instance` (composition.rs) now takes two
+      immutable `runtimes.get()` borrows out of one guard and calls
+      `install_live_binding`; it records the parent→child link in a new
+      `bound_children` RefCell on `FrontendSurfaceComponent`.
+      REACTIVITY GAP solved: added `ScriptContext::resync_state` and
+      `resync_bound_children(parent_key)` (runtime.rs), called after every parent
+      handler in `call_namespaced_handler`, so a child mutated through the live
+      proxy re-syncs its reactive state and re-renders.
+      Verified: scripting 139 tests pass (2 new — `live_binding_reads_and_calls_
+      child_in_same_tick`, `live_binding_does_not_expose_host_internals`); shell
+      `component::tests` failure set byte-identical to branch-point (46 pre-existing,
+      zero regressions). NOTE: the old `install_bound_instance_proxy` /
+      `BoundInstanceCall` queue path is now dead (live proxy never enqueues) but
+      left in place — Phase D removes it.
+- [x] **Phase C** — child→parent events (DONE)
+      Extended the live-proxy `__index` (runtime.rs `install_live_binding`): when a
+      key has no public member but is a named-event-channel identifier (uppercase
+      first char), resolve the child's live `self.<Event>` channel via
+      `self_event_channel(child_env, key)`. The parent does `child.Event:on(fn)`,
+      the child's `self.Event:fire(...)` runs the parent's closure synchronously —
+      same channel table in the shared VM, no marshalling. Raw public members take
+      precedence so a public var named like an event still wins.
+      Shell: generalized `resync_bound_children` → `resync_binding_neighbors`
+      (runtime.rs), now bidirectional — after a handler on instance X it re-syncs
+      both children X binds AND parents that bind X, so a child→parent fire
+      re-renders the parent.
+      Verified: scripting 140 tests pass (new
+      `live_binding_routes_child_self_event_to_parent_in_same_tick`); shell
+      `component::tests` failure set byte-identical to baseline (46, zero
+      regressions). NOTE: child fires self-events from a captured channel
+      (`local ch; function init(self) ch = self.Changed end`) since non-lifecycle
+      handlers don't receive `self`.
+- [x] **Phase D** — remove BoundInstanceCall machinery (DONE)
+      Deleted `BoundInstanceCall` (struct + `bound_instance_calls`/
+      `shared_bound_instance_calls` fields + exports), `install_bound_instance_proxy`,
+      `public_member_snapshot` (no callers after Phase B), `drain_bound_instance_calls`,
+      `is_bound_instance_self_arg`, the `sync_side_channels` bound-call drain, and the
+      shell's `process_bound_instance_calls` + its call site in `call_namespaced_handler`.
+      Removed the obsolete `bound_instance_proxy_queues_public_function_call` test.
+      Kept `public_field_names`/`public_function_names` (still public introspection
+      API with their own test). Verified: scripting 139 tests pass; shell
+      `component::tests` failure set byte-identical to baseline (46, zero regressions);
+      both crates build clean.
+- [x] **Phase E** — shell integration test + docs (DONE)
+      Shell integration test `bind_this_event_handler_calls_child_live_and_resyncs_it`
+      (`crates/core/shell/src/shell/component/tests/integration/bind_live.rs`): builds
+      a surface with a local `Child` bound via `bind:this`, paints it (real render +
+      composition path installs the live binding), then dispatches a parent event
+      handler that calls `child.set_value(99)` through the live reference and asserts
+      the real return value AND the child's re-synced own state. Updated
+      `docs/frontend/mesh-syntax.md` and `docs/llm-context.md` `bind:this` sections to
+      describe live-reference semantics (live reads, synchronous calls with real
+      returns, child→parent events, the public-only boundary, and the cross-surface
+      exception). Verified: scripting 139 pass, shell test passes, shell failure set
+      byte-identical to baseline (46, zero regressions).
+
+## All phases complete
+
+Live `bind:this` references ship: within one frontend surface, a bound child is a
+genuine live handle — reads see current values, calls run synchronously and return
+real values, and `child.<Event>:on(fn)` receives the child's synchronous fires.
+The old snapshot/queue machinery is gone. Cross-surface references remain a
+marshalled bus by design.
+
 ## Plan (phased, each independently testable)
 
 ### Phase A.0 — Relocate per-component VM-global state to per-`_ENV` (PREREQUISITE)

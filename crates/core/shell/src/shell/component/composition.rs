@@ -184,36 +184,41 @@ impl FrontendSurfaceComponent {
         binding: &str,
         child_instance_key: &str,
     ) {
-        let child_snapshot = {
-            let mut runtimes = self.runtimes.lock().unwrap();
-            let Some(child) = runtimes.get_mut(child_instance_key) else {
-                return;
-            };
-            let mut snapshot = child.script_ctx.public_member_snapshot();
-            if let serde_json::Value::Object(object) = &mut snapshot {
-                object.insert(
-                    "__instance_id".to_string(),
-                    serde_json::Value::String(child_instance_key.to_string()),
-                );
-            }
-            snapshot
+        // Live `bind:this`: parent and child share one surface VM, so the parent
+        // env holds a proxy table forwarding straight to the child's live `_ENV`.
+        // Reads see current values; calls run the child's real function and return
+        // its real value synchronously — no snapshot, no queued call stubs.
+        let runtimes = self.runtimes.lock().unwrap();
+        let (Some(parent), Some(child)) = (
+            runtimes.get(host_instance_key),
+            runtimes.get(child_instance_key),
+        ) else {
+            return;
         };
+        if let Err(source) = parent
+            .script_ctx
+            .install_live_binding(binding, &child.script_ctx)
+        {
+            tracing::warn!(
+                component_id = %parent.module_id,
+                binding = %binding,
+                child_instance_key = %child_instance_key,
+                error = %source,
+                "failed to install live bound child instance proxy"
+            );
+            return;
+        }
+        drop(runtimes);
 
-        if let Some(parent) = self.runtimes.lock().unwrap().get_mut(host_instance_key) {
-            if let Err(source) = parent.script_ctx.install_bound_instance_proxy(
-                host_instance_key,
-                binding,
-                child_instance_key,
-                &child_snapshot,
-            ) {
-                tracing::warn!(
-                    component_id = %parent.module_id,
-                    binding = %binding,
-                    child_instance_key = %child_instance_key,
-                    error = %source,
-                    "failed to install bound child instance proxy"
-                );
-            }
+        // Record the link so the parent's event handlers can re-sync this child
+        // after a live cross-call mutates its `_ENV` directly.
+        let mut bound_children = self.bound_children.borrow_mut();
+        let links = bound_children.entry(host_instance_key.to_string()).or_default();
+        if !links
+            .iter()
+            .any(|(b, key)| b == binding && key == child_instance_key)
+        {
+            links.push((binding.to_string(), child_instance_key.to_string()));
         }
     }
 }

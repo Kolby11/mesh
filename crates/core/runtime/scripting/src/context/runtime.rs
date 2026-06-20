@@ -17,15 +17,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct BoundInstanceCall {
-    pub parent_instance_key: String,
-    pub binding: String,
-    pub child_instance_key: String,
-    pub function_name: String,
-    pub args: Vec<Value>,
-}
-
 #[derive(Debug, Default)]
 struct SharedInterfaceBindings {
     bindings: HashMap<String, InterfaceResolution>,
@@ -117,8 +108,6 @@ pub struct ScriptContext {
     shared_published_events: Arc<Mutex<Vec<PublishedEvent>>>,
     diagnostics: Vec<ScriptDiagnostic>,
     shared_diagnostics: Arc<Mutex<Vec<ScriptDiagnostic>>>,
-    bound_instance_calls: Vec<BoundInstanceCall>,
-    shared_bound_instance_calls: Arc<Mutex<Vec<BoundInstanceCall>>>,
     storage: Arc<Mutex<ScopedStorage>>,
     tracked_storage_keys: Arc<Mutex<HashSet<String>>>,
     changed_storage_keys: Arc<Mutex<HashSet<String>>>,
@@ -207,8 +196,6 @@ impl ScriptContext {
             shared_published_events: Arc::new(Mutex::new(Vec::new())),
             diagnostics: storage_diagnostics,
             shared_diagnostics: Arc::new(Mutex::new(Vec::new())),
-            bound_instance_calls: Vec::new(),
-            shared_bound_instance_calls: Arc::new(Mutex::new(Vec::new())),
             storage: Arc::new(Mutex::new(storage)),
             tracked_storage_keys: Arc::new(Mutex::new(HashSet::new())),
             changed_storage_keys: Arc::new(Mutex::new(HashSet::new())),
@@ -301,7 +288,6 @@ impl ScriptContext {
         }
         self.shared_published_events.lock().unwrap().clear();
         self.shared_diagnostics.lock().unwrap().clear();
-        self.shared_bound_instance_calls.lock().unwrap().clear();
         self.changed_storage_keys.lock().unwrap().clear();
         self.clear_tracked_service_fields();
         self.clear_subscribed_interface_events();
@@ -519,82 +505,94 @@ impl ScriptContext {
         names
     }
 
-    pub fn public_member_snapshot(&mut self) -> Value {
-        let mut object = serde_json::Map::new();
-        for name in self.public_field_names() {
-            if let Some(value) = self.state.get(&name) {
-                object.insert(name, value);
-            }
+    /// Install a **live** `bind:this` reference to another component instance.
+    ///
+    /// Builds a proxy table whose metatable forwards `__index`/`__newindex`
+    /// straight to the child's live `_ENV`. Because parent and child share one
+    /// surface VM (see [`SurfaceVm`]), the forwarded `Table` handle is valid in
+    /// the parent — reads see the child's current value, calls run the child's
+    /// real function synchronously and return its real value, all with no copy.
+    ///
+    /// Host internals are hidden by a denylist sourced from the child's
+    /// `builtin_globals` (`self`, `module`, `mesh`, `require`, the `__mesh_*`
+    /// sentinels) plus the lifecycle hooks, so only the child's public values and
+    /// functions pass through. Takes `&self`/`&child` (no `&mut`) so the caller
+    /// can borrow both runtimes out of one map guard at once; both must already
+    /// be initialized (the binding is refreshed every render once they are).
+    pub fn install_live_binding(
+        &self,
+        binding: &str,
+        child: &ScriptContext,
+    ) -> Result<(), ScriptError> {
+        if self.vm.is_none() || child.vm.is_none() {
+            return Ok(());
         }
-        object.insert(
-            "__functions".to_string(),
-            Value::Array(
-                self.public_function_names()
-                    .into_iter()
-                    .map(Value::String)
-                    .collect(),
-            ),
-        );
-        Value::Object(object)
+        let lua = self.lua();
+        let child_env = child.env().clone();
+        let denylist = child.builtin_globals.clone();
+
+        let proxy = lua.create_table().map_err(lua_err)?;
+        let meta = lua.create_table().map_err(lua_err)?;
+
+        let index_env = child_env.clone();
+        let index_deny = denylist.clone();
+        meta.set(
+            "__index",
+            lua.create_function(move |lua, (_proxy, key): (Table, String)| {
+                if is_denied_binding_key(&key, &index_deny) {
+                    return Ok(LuaValue::Nil);
+                }
+                // raw_get keeps the surface curated: only the child's own public
+                // members are exposed, not globals inherited via `_ENV.__index`.
+                let raw = index_env.raw_get::<LuaValue>(key.as_str())?;
+                if !matches!(raw, LuaValue::Nil) {
+                    return Ok(raw);
+                }
+                // Child→parent events: a named-channel key with no public member
+                // resolves the child's live `self.<Event>` channel, so the parent
+                // can `child.Event:on(fn)` and receive the child's synchronous
+                // `self.Event:fire(...)` in the same tick (same channel table,
+                // shared VM, no marshalling).
+                if is_named_event_channel(&key) {
+                    return self_event_channel(lua, &index_env, &key).map(LuaValue::Table);
+                }
+                Ok(LuaValue::Nil)
+            })
+            .map_err(lua_err)?,
+        )
+        .map_err(lua_err)?;
+
+        let newindex_env = child_env;
+        meta.set(
+            "__newindex",
+            lua.create_function(move |_, (_proxy, key, value): (Table, String, LuaValue)| {
+                if is_denied_binding_key(&key, &denylist) {
+                    return Ok(());
+                }
+                newindex_env.raw_set(key, value)
+            })
+            .map_err(lua_err)?,
+        )
+        .map_err(lua_err)?;
+
+        proxy.set_metatable(Some(meta)).map_err(lua_err)?;
+        self.env().set(binding, proxy).map_err(map_lua_error)?;
+        Ok(())
     }
 
-    pub fn install_bound_instance_proxy(
-        &mut self,
-        parent_instance_key: &str,
-        binding: &str,
-        child_instance_key: &str,
-        snapshot: &Value,
-    ) -> Result<(), ScriptError> {
-        self.ensure_initialized()?;
-        self.state.set(binding.to_string(), snapshot.clone());
-
-        let table = self.lua().create_table().map_err(lua_err)?;
-        if let Value::Object(object) = snapshot {
-            for (key, value) in object {
-                if key == "__functions" {
-                    continue;
-                }
-                table
-                    .set(key.as_str(), self.lua().to_value(value).map_err(lua_err)?)
-                    .map_err(lua_err)?;
-            }
-
-            if let Some(functions) = object.get("__functions").and_then(Value::as_array) {
-                for function_name in functions.iter().filter_map(Value::as_str) {
-                    let call_queue = Arc::clone(&self.shared_bound_instance_calls);
-                    let parent_instance_key = parent_instance_key.to_string();
-                    let binding = binding.to_string();
-                    let child_instance_key = child_instance_key.to_string();
-                    let function_name_owned = function_name.to_string();
-                    let function = self
-                        .lua()
-                        .create_function(move |lua, args: Variadic<LuaValue>| {
-                            let mut serialized_args = Vec::new();
-                            for (index, arg) in args.into_iter().enumerate() {
-                                if index == 0
-                                    && is_bound_instance_self_arg(&arg, child_instance_key.as_str())
-                                {
-                                    continue;
-                                }
-                                serialized_args.push(lua.from_value(arg)?);
-                            }
-                            call_queue.lock().unwrap().push(BoundInstanceCall {
-                                parent_instance_key: parent_instance_key.clone(),
-                                binding: binding.clone(),
-                                child_instance_key: child_instance_key.clone(),
-                                function_name: function_name_owned.clone(),
-                                args: serialized_args,
-                            });
-                            Ok(())
-                        })
-                        .map_err(lua_err)?;
-                    table.set(function_name, function).map_err(lua_err)?;
-                }
-            }
+    /// Re-sync reactive state after a live `bind:this` cross-call mutated this
+    /// child's `_ENV` directly (bypassing the shell's normal post-handler sync).
+    ///
+    /// A parent calling `child.set_volume(50)` through a live binding runs the
+    /// child's function synchronously in the shared VM, so the child's Lua `_ENV`
+    /// changes but its Rust-side `ScriptState` does not. The shell calls this on
+    /// every bound child after a parent handler so `{bound vars}` re-render.
+    pub fn resync_state(&mut self) {
+        if self.vm.is_none() {
+            return;
         }
-
-        self.env().set(binding, table).map_err(map_lua_error)?;
-        Ok(())
+        self.sync_state_from_lua();
+        self.sync_side_channels();
     }
 
     /// Call the script's `init(self)` function if it exists.
@@ -757,11 +755,6 @@ impl ScriptContext {
     pub fn drain_published_events(&mut self) -> Vec<PublishedEvent> {
         self.sync_side_channels();
         std::mem::take(&mut self.published_events)
-    }
-
-    pub fn drain_bound_instance_calls(&mut self) -> Vec<BoundInstanceCall> {
-        self.sync_side_channels();
-        std::mem::take(&mut self.bound_instance_calls)
     }
 
     pub fn drain_diagnostics(&mut self) -> Vec<ScriptDiagnostic> {
@@ -1318,12 +1311,6 @@ impl ScriptContext {
                 self.diagnostics.extend(diagnostics.drain(..));
             }
         }
-        {
-            let mut calls = self.shared_bound_instance_calls.lock().unwrap();
-            if !calls.is_empty() {
-                self.bound_instance_calls.extend(calls.drain(..));
-            }
-        }
         let changed_storage_keys = {
             let mut changed = self.changed_storage_keys.lock().unwrap();
             changed.drain().collect::<HashSet<_>>()
@@ -1390,13 +1377,12 @@ fn is_reserved_runtime_hook(name: &str) -> bool {
     is_lifecycle_handler(name)
 }
 
-fn is_bound_instance_self_arg(value: &LuaValue, child_instance_key: &str) -> bool {
-    let LuaValue::Table(table) = value else {
-        return false;
-    };
-    table
-        .get::<String>("__instance_id")
-        .is_ok_and(|instance_id| instance_id == child_instance_key)
+/// Gate for the live `bind:this` proxy: hide host internals so only the child's
+/// public values and functions cross the boundary. `denylist` is the child's
+/// `builtin_globals` (`self`, `module`, `mesh`, `require`, the `__mesh_*`
+/// sentinels installed before user script execution).
+fn is_denied_binding_key(key: &str, denylist: &HashSet<String>) -> bool {
+    key.starts_with("__") || is_reserved_runtime_hook(key) || denylist.contains(key)
 }
 
 fn is_named_event_channel(name: &str) -> bool {

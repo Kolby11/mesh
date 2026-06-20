@@ -1579,56 +1579,6 @@ end
 }
 
 #[test]
-fn bound_instance_proxy_queues_public_function_call() {
-    let caps = CapabilitySet::new();
-    let mut ctx = ScriptContext::new("@test/parent", caps).unwrap();
-    ctx.load_script(
-        r#"
-called = false
-
-function invoke_child()
-    slider.increase_volume(10)
-    slider:decrease_volume(3)
-    called = true
-end
-"#,
-    )
-    .unwrap();
-    ctx.install_bound_instance_proxy(
-        "parent-instance",
-        "slider",
-        "child-instance",
-        &serde_json::json!({
-            "__instance_id": "child-instance",
-            "volume": 42,
-            "__functions": ["increase_volume", "decrease_volume"]
-        }),
-    )
-    .unwrap();
-
-    ctx.call_handler("invoke_child", &[]).unwrap();
-
-    assert_eq!(ctx.state.get("called"), Some(serde_json::json!(true)));
-    assert_eq!(
-        ctx.state.get("slider"),
-        Some(serde_json::json!({
-            "__instance_id": "child-instance",
-            "volume": 42,
-            "__functions": ["increase_volume", "decrease_volume"]
-        }))
-    );
-    let calls = ctx.drain_bound_instance_calls();
-    assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].parent_instance_key, "parent-instance");
-    assert_eq!(calls[0].binding, "slider");
-    assert_eq!(calls[0].child_instance_key, "child-instance");
-    assert_eq!(calls[0].function_name, "increase_volume");
-    assert_eq!(calls[0].args, vec![serde_json::json!(10)]);
-    assert_eq!(calls[1].function_name, "decrease_volume");
-    assert_eq!(calls[1].args, vec![serde_json::json!(3)]);
-}
-
-#[test]
 fn components_sharing_one_vm_keep_isolated_public_members() {
     // Two component instances on a single shared surface VM must keep their
     // public members private to their own _ENV — sharing the VM does not share
@@ -1715,4 +1665,159 @@ end
     // collided, the second instance's fire would also run the first's handler.
     assert_eq!(first.state.get("hits"), Some(serde_json::json!(1)));
     assert_eq!(second.state.get("hits"), Some(serde_json::json!(1)));
+}
+
+#[test]
+fn live_binding_reads_and_calls_child_in_same_tick() {
+    // A live `bind:this` proxy forwards straight to the child's `_ENV` in the
+    // shared VM: the parent reads the child's current value and calls its real
+    // function synchronously, with the real return value — no snapshot, no queue.
+    let vm = SurfaceVm::new();
+
+    let mut child = ScriptContext::new("@mesh/slider", CapabilitySet::new()).unwrap();
+    child.attach_shared_vm(&vm);
+    child
+        .load_script(
+            r#"
+percent = 10
+function set_volume(value)
+    percent = value
+    return percent
+end
+function init() end
+"#,
+        )
+        .unwrap();
+    child.call_init().unwrap();
+
+    let mut parent = ScriptContext::new("@mesh/host", CapabilitySet::new()).unwrap();
+    parent.attach_shared_vm(&vm);
+    parent
+        .load_script(
+            r#"
+returned = 0
+observed = 0
+function bump()
+    returned = slider.set_volume(77)
+    observed = slider.percent
+end
+function init() end
+"#,
+        )
+        .unwrap();
+    parent.call_init().unwrap();
+
+    parent.install_live_binding("slider", &child).unwrap();
+    parent.call_handler("bump", &[]).unwrap();
+
+    // The bound call ran the child's real function and returned its real value.
+    assert_eq!(parent.state.get("returned"), Some(serde_json::json!(77)));
+    // The parent read the value the child mutated within the same tick (liveness).
+    assert_eq!(parent.state.get("observed"), Some(serde_json::json!(77)));
+
+    // Re-syncing the child surfaces the live `_ENV` mutation into its own state.
+    child.resync_state();
+    assert_eq!(child.state.get("percent"), Some(serde_json::json!(77)));
+}
+
+#[test]
+fn live_binding_does_not_expose_host_internals() {
+    // The live proxy is curated: host internals (`self`, `module`, `mesh`,
+    // `require`, `__mesh_*`) and lifecycle hooks must not cross the boundary,
+    // only the child's public members do.
+    let vm = SurfaceVm::new();
+
+    let mut child = ScriptContext::new("@mesh/child", CapabilitySet::new()).unwrap();
+    child.attach_shared_vm(&vm);
+    child
+        .load_script("public_value = 5\nfunction init() end")
+        .unwrap();
+    child.call_init().unwrap();
+
+    let mut parent = ScriptContext::new("@mesh/parent", CapabilitySet::new()).unwrap();
+    parent.attach_shared_vm(&vm);
+    parent
+        .load_script(
+            r#"
+has_public = false
+has_self = true
+has_require = true
+has_mesh = true
+function probe()
+    has_public = child.public_value == 5
+    has_self = child.self ~= nil
+    has_require = child.require ~= nil
+    has_mesh = child.mesh ~= nil
+end
+function init() end
+"#,
+        )
+        .unwrap();
+    parent.call_init().unwrap();
+
+    parent.install_live_binding("child", &child).unwrap();
+    parent.call_handler("probe", &[]).unwrap();
+
+    assert_eq!(parent.state.get("has_public"), Some(serde_json::json!(true)));
+    assert_eq!(parent.state.get("has_self"), Some(serde_json::json!(false)));
+    assert_eq!(
+        parent.state.get("has_require"),
+        Some(serde_json::json!(false))
+    );
+    assert_eq!(parent.state.get("has_mesh"), Some(serde_json::json!(false)));
+}
+
+#[test]
+fn live_binding_routes_child_self_event_to_parent_in_same_tick() {
+    // Child→parent events: the live proxy exposes the child's `self.<Event>`
+    // channel, so a parent subscribes with `child.Event:on(fn)` and the child's
+    // `self.Event:fire(...)` runs the parent's closure synchronously — same
+    // channel table in the shared VM, no marshalling.
+    let vm = SurfaceVm::new();
+
+    let mut child = ScriptContext::new("@mesh/emitter", CapabilitySet::new()).unwrap();
+    child.attach_shared_vm(&vm);
+    child
+        .load_script(
+            r#"
+local changed
+function init(self)
+    changed = self.Changed
+end
+function announce()
+    changed:fire({ value = 42 })
+end
+"#,
+        )
+        .unwrap();
+    child.call_init().unwrap();
+
+    let mut parent = ScriptContext::new("@mesh/listener", CapabilitySet::new()).unwrap();
+    parent.attach_shared_vm(&vm);
+    parent
+        .load_script(
+            r#"
+received = 0
+function listen()
+    emitter.Changed:on(function(event) received = event.value end)
+end
+function init() end
+"#,
+        )
+        .unwrap();
+    parent.call_init().unwrap();
+
+    parent.install_live_binding("emitter", &child).unwrap();
+
+    // Parent registers a real Lua closure on the child's live self-event channel.
+    parent.call_handler("listen", &[]).unwrap();
+    assert_eq!(parent.state.get("received"), Some(serde_json::json!(0)));
+
+    // The child fires; the parent's closure runs synchronously in the same tick.
+    child.call_handler("announce", &[]).unwrap();
+
+    // The parent's `_ENV` was mutated by the fired callback; re-syncing surfaces
+    // it into the parent's reactive state (what the shell does after the handler).
+    parent.resync_state();
+    assert_eq!(parent.state.get("received"), Some(serde_json::json!(42)));
 }

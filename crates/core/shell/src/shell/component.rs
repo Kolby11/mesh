@@ -47,8 +47,7 @@ use mesh_core_frontend::{
 };
 use mesh_core_locale::LocaleEngine;
 use mesh_core_scripting::{
-    BoundInstanceCall, LocaleBoundState, ScriptContext, ScriptInterfaceImport, ScriptState,
-    SurfaceVm,
+    LocaleBoundState, ScriptContext, ScriptInterfaceImport, ScriptState, SurfaceVm,
 };
 use mesh_core_theme::{Theme, default_theme};
 use mesh_core_wayland::{Edge, KeyboardMode, ShellSurface};
@@ -389,6 +388,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// a popover through keyboard navigation so the owner script does not
     /// immediately re-show it from stale state.
     portal_hidden_bindings: RefCell<HashMap<String, String>>,
+    /// `parent_instance_key -> [(binding, child_instance_key)]` for live
+    /// `bind:this` references. After a parent event handler runs, each linked
+    /// child is re-synced so values its parent mutated through the live proxy
+    /// re-render. Refreshed every render by `bind_child_instance`.
+    bound_children: RefCell<HashMap<String, Vec<(String, String)>>>,
     transitions: TransitionAnimator,
     keyframe_animations: HashMap<String, mesh_core_animation::keyframes::ActiveKeyframeAnimation>,
     keyframe_rules: HashMap<String, mesh_core_animation::keyframes::KeyframeRule>,
@@ -514,6 +518,7 @@ impl FrontendSurfaceComponent {
             pending_surface_states: RefCell::new(HashMap::new()),
             last_surface_states: HashMap::new(),
             portal_hidden_bindings: RefCell::new(HashMap::new()),
+            bound_children: RefCell::new(HashMap::new()),
             transitions: TransitionAnimator::new(),
             keyframe_animations: HashMap::new(),
             keyframe_rules: HashMap::new(),
