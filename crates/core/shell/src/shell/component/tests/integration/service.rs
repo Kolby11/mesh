@@ -2,6 +2,99 @@ use super::*;
 use crate::shell::service::script_events_to_requests;
 
 #[test]
+fn frontend_component_observes_only_subscribed_interface_events() {
+    let component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.events.VolumeChanged:subscribe(function(_event) end)
+end
+</script>
+"#,
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+
+    assert!(ShellComponent::observes_service_event(
+        &component,
+        &ServiceEvent::InterfaceEvent {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            name: "VolumeChanged".into(),
+            payload: serde_json::json!({ "device_id": "default", "level": 42 }),
+        },
+    ));
+    assert!(!ShellComponent::observes_service_event(
+        &component,
+        &ServiceEvent::InterfaceEvent {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            name: "OtherEvent".into(),
+            payload: serde_json::json!({}),
+        },
+    ));
+    assert!(!ShellComponent::observes_service_event(
+        &component,
+        &ServiceEvent::InterfaceEvent {
+            service: "mesh.network".into(),
+            source_module: "@mesh/networkmanager-network".into(),
+            name: "VolumeChanged".into(),
+            payload: serde_json::json!({}),
+        },
+    ));
+}
+
+#[test]
+fn frontend_component_keeps_service_updates_for_subscribed_event_services_only() {
+    let subscribed = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.events.VolumeChanged:subscribe(function(_event) end)
+end
+</script>
+"#,
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+    let idle = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+function init() end
+</script>
+"#,
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+
+    let audio_update = ServiceEvent::Updated {
+        service: "mesh.audio".into(),
+        source_module: "@mesh/pipewire-audio".into(),
+        payload: serde_json::json!({ "percent": 42, "muted": false }),
+    };
+
+    assert!(ShellComponent::observes_service_event(
+        &subscribed,
+        &audio_update,
+    ));
+    assert!(!ShellComponent::observes_service_event(
+        &idle,
+        &audio_update
+    ));
+}
+
+#[test]
 fn frontend_proxy_update_reaches_panel_or_quick_settings_render_state() {
     let mut ctx = make_audio_ctx();
     ctx.load_script(

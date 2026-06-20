@@ -592,6 +592,54 @@ end
 }
 
 #[test]
+fn interface_event_subscription_registry_tracks_subscribe_and_unsubscribe() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    unsubscribe = audio.events.VolumeChanged:subscribe(function(_event) end)
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    assert!(ctx.is_subscribed_to_interface_event("audio", "VolumeChanged"));
+    assert!(ctx.has_interface_event_subscription_for_service("audio"));
+
+    ctx.call_handler("unsubscribe", &[]).unwrap();
+    assert!(!ctx.is_subscribed_to_interface_event("audio", "VolumeChanged"));
+    assert!(!ctx.has_interface_event_subscription_for_service("audio"));
+}
+
+#[test]
+fn interface_event_subscription_registry_clears_on_reload() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.events.VolumeChanged:subscribe(function(_event) end)
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    assert!(ctx.has_interface_event_subscription_for_service("audio"));
+
+    ctx.load_script("function init() end").unwrap();
+    assert!(!ctx.has_interface_event_subscription_for_service("audio"));
+}
+
+#[test]
 fn self_named_event_channel_supports_on_and_fire() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();

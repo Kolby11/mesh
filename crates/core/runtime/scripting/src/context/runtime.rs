@@ -57,6 +57,7 @@ pub struct ScriptContext {
     /// instead of iterating the entire globals table.
     user_global_keys: Vec<String>,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
+    subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Vec<PublishedEvent>,
     shared_published_events: Arc<Mutex<Vec<PublishedEvent>>>,
     diagnostics: Vec<ScriptDiagnostic>,
@@ -136,6 +137,7 @@ impl ScriptContext {
             builtin_globals: HashSet::new(),
             user_global_keys: Vec::new(),
             tracked_service_fields: Arc::new(Mutex::new(HashMap::new())),
+            subscribed_interface_events: Arc::new(Mutex::new(HashMap::new())),
             published_events: Vec::new(),
             shared_published_events: Arc::new(Mutex::new(Vec::new())),
             diagnostics: storage_diagnostics,
@@ -203,6 +205,7 @@ impl ScriptContext {
         self.env_table = None;
         self.builtin_globals.clear();
         self.user_global_keys.clear();
+        self.subscribed_interface_events.lock().unwrap().clear();
         self.vm = None;
     }
 
@@ -233,6 +236,7 @@ impl ScriptContext {
         self.shared_bound_instance_calls.lock().unwrap().clear();
         self.changed_storage_keys.lock().unwrap().clear();
         self.clear_tracked_service_fields();
+        self.clear_subscribed_interface_events();
         self.clear_tracked_storage_keys();
         // Host API already installed into env_table by ensure_initialized.
         // builtin_globals already populated.
@@ -301,7 +305,8 @@ impl ScriptContext {
         payload: &Value,
     ) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
-        let channel = interface_event_channel(self.lua(), service, event_name).map_err(lua_err)?;
+        let channel =
+            interface_event_channel(self.lua(), service, event_name, None).map_err(lua_err)?;
         let emit = channel.get::<Function>("emit").map_err(lua_err)?;
         let lua_payload = self.lua().to_value(payload).map_err(lua_err)?;
         emit.call::<()>((channel, lua_payload))
@@ -325,6 +330,14 @@ impl ScriptContext {
 
     pub fn tracked_service_fields(&self) -> HashMap<String, HashSet<String>> {
         self.tracked_service_fields.lock().unwrap().clone()
+    }
+
+    pub fn has_tracked_fields_for_service(&self, service: &str) -> bool {
+        self.tracked_service_fields
+            .lock()
+            .unwrap()
+            .get(service)
+            .is_some_and(|fields| !fields.is_empty())
     }
 
     pub fn tracked_fields_for_service(&self, service: &str) -> HashSet<String> {
@@ -355,6 +368,46 @@ impl ScriptContext {
 
     pub fn clear_tracked_service_fields(&self) {
         self.tracked_service_fields.lock().unwrap().clear();
+    }
+
+    pub fn subscribed_interface_events(&self) -> HashMap<String, HashSet<String>> {
+        self.subscribed_interface_events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(service, events)| {
+                (
+                    service.clone(),
+                    events
+                        .iter()
+                        .filter(|(_, count)| **count > 0)
+                        .map(|(event, _)| event.clone())
+                        .collect(),
+                )
+            })
+            .filter(|(_, events): &(String, HashSet<String>)| !events.is_empty())
+            .collect()
+    }
+
+    pub fn has_interface_event_subscription_for_service(&self, service: &str) -> bool {
+        self.subscribed_interface_events
+            .lock()
+            .unwrap()
+            .get(service)
+            .is_some_and(|events| events.values().any(|count| *count > 0))
+    }
+
+    pub fn is_subscribed_to_interface_event(&self, service: &str, event_name: &str) -> bool {
+        self.subscribed_interface_events
+            .lock()
+            .unwrap()
+            .get(service)
+            .and_then(|events| events.get(event_name))
+            .is_some_and(|count| *count > 0)
+    }
+
+    pub fn clear_subscribed_interface_events(&self) {
+        self.subscribed_interface_events.lock().unwrap().clear();
     }
 
     pub fn tracked_storage_keys(&self) -> HashSet<String> {
@@ -677,7 +730,7 @@ impl ScriptContext {
                 "__index",
                 self.lua()
                     .create_function(|lua, (table, key): (Table, String)| {
-                        let channel = create_event_channel(lua)?;
+                        let channel = create_event_channel(lua, None, None)?;
                         table.set(key.as_str(), channel.clone())?;
                         Ok(channel)
                     })
@@ -947,6 +1000,7 @@ impl ScriptContext {
 
         let published_events = Arc::clone(&self.shared_published_events);
         let tracked_service_fields = Arc::clone(&self.tracked_service_fields);
+        let subscribed_interface_events = Arc::clone(&self.subscribed_interface_events);
         let module_id_for_require = self.module_id.clone();
         let capabilities_for_require = self.capabilities.clone();
         let diagnostics_for_require = Arc::clone(&self.shared_diagnostics);
@@ -1023,6 +1077,7 @@ impl ScriptContext {
                     module_id_for_require.clone(),
                     capabilities_for_require.clone(),
                     Arc::clone(&tracked_service_fields),
+                    Arc::clone(&subscribed_interface_events),
                     Arc::clone(&published_events),
                 )?;
                 Ok(proxy)
@@ -1091,6 +1146,7 @@ impl ScriptContext {
                 self.module_id.clone(),
                 self.capabilities.clone(),
                 Arc::clone(&self.tracked_service_fields),
+                Arc::clone(&self.subscribed_interface_events),
                 Arc::clone(&self.shared_published_events),
             )
             .map_err(lua_err)?;
@@ -1296,7 +1352,7 @@ fn self_event_channel(lua: &Lua, module_id: &str, event_name: &str) -> mlua::Res
     match module_table.get::<LuaValue>(event_name)? {
         LuaValue::Table(channel) => Ok(channel),
         _ => {
-            let channel = create_event_channel(lua)?;
+            let channel = create_event_channel(lua, None, None)?;
             module_table.set(event_name, channel.clone())?;
             Ok(channel)
         }

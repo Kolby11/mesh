@@ -14,8 +14,8 @@ use mesh_core_module::{ExportsSection, Manifest, ModuleSection, ModuleType};
 use mesh_core_scripting::ScriptContext;
 use mesh_core_service::contract::ContractStateField;
 use mesh_core_service::{
-    ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract, InterfaceMethod,
-    InterfaceProvider, parse_contract_version,
+    ContractCapabilities, InterfaceArgument, InterfaceCatalog, InterfaceContract, InterfaceEvent,
+    InterfaceMethod, InterfaceProvider, parse_contract_version,
 };
 use mesh_core_theme::{Theme, default_theme};
 use std::collections::HashMap;
@@ -78,7 +78,10 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                 coalesce: false,
             },
         ],
-        events: Vec::new(),
+        events: vec![InterfaceEvent {
+            name: "VolumeChanged".into(),
+            payload: Some("{ device_id: string, level: float }".into()),
+        }],
         types: HashMap::new(),
         capabilities: ContractCapabilities::default(),
     });

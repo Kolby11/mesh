@@ -1,6 +1,31 @@
 use super::*;
 use crate::shell::component::runtime::script_has_service_read;
 
+impl FrontendSurfaceComponent {
+    fn runtime_observes_service_event(
+        runtime: &EmbeddedFrontendRuntime,
+        event: &ServiceEvent,
+    ) -> bool {
+        match event {
+            ServiceEvent::Updated { service, .. } => {
+                let service_name = crate::shell::service::service_name_from_interface(service);
+                runtime
+                    .script_ctx
+                    .has_tracked_fields_for_service(&service_name)
+                    || runtime
+                        .script_ctx
+                        .has_interface_event_subscription_for_service(&service_name)
+            }
+            ServiceEvent::InterfaceEvent { service, name, .. } => {
+                let service_name = crate::shell::service::service_name_from_interface(service);
+                runtime
+                    .script_ctx
+                    .is_subscribed_to_interface_event(&service_name, name)
+            }
+        }
+    }
+}
+
 impl ShellComponent for FrontendSurfaceComponent {
     fn id(&self) -> &str {
         &self.compiled.manifest.package.id
@@ -139,6 +164,9 @@ impl ShellComponent for FrontendSurfaceComponent {
             std::mem::take(&mut *runtimes)
         };
         for runtime in runtimes.values_mut() {
+            if !Self::runtime_observes_service_event(runtime, event) {
+                continue;
+            }
             let capabilities = &runtime.script_ctx.capabilities;
             let has_read = capabilities.is_granted(&caps.read)
                 || caps
@@ -155,7 +183,6 @@ impl ShellComponent for FrontendSurfaceComponent {
             runtime
                 .script_ctx
                 .apply_service_payload(service_name, payload);
-            needs_rebuild = true;
             if !has_read {
                 continue;
             }
@@ -202,18 +229,12 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn observes_service_event(&self, event: &ServiceEvent) -> bool {
-        // Service payloads are now applied to every runtime so interface
-        // proxies work regardless of read capability.  Always observe
-        // when we have any runtimes — the per-runtime read capability
-        // check inside handle_service_event only gates Rust-side state.
-        let _ = event;
         let Ok(runtimes) = self.runtimes.lock() else {
             return true;
         };
-        if runtimes.is_empty() {
-            return true;
-        }
-        true
+        runtimes
+            .values()
+            .any(|runtime| Self::runtime_observes_service_event(runtime, event))
     }
 
     fn wants_tick(&self) -> bool {
@@ -1196,6 +1217,9 @@ impl FrontendSurfaceComponent {
         };
         let emit_result: Result<(), ComponentError> = (|| {
             for runtime in runtimes.values_mut() {
+                if !Self::runtime_observes_service_event(runtime, event) {
+                    continue;
+                }
                 if !script_has_service_read(&runtime.script_ctx, service, &service_name) {
                     continue;
                 }

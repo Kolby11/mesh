@@ -12,6 +12,7 @@ pub(super) fn create_interface_proxy(
     source_module_id: String,
     source_capabilities: CapabilitySet,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
+    subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
 ) -> mlua::Result<Table> {
     create_service_proxy(
@@ -22,6 +23,7 @@ pub(super) fn create_interface_proxy(
         source_module_id,
         source_capabilities,
         tracked_service_fields,
+        subscribed_interface_events,
         published_events,
     )
 }
@@ -34,6 +36,7 @@ pub(super) fn create_service_proxy(
     source_module_id: String,
     source_capabilities: CapabilitySet,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
+    subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
 ) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
@@ -67,6 +70,7 @@ pub(super) fn create_service_proxy(
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default(),
+        Arc::clone(&subscribed_interface_events),
     )?;
     proxy.set("events", events_proxy)?;
     let event_names = contract
@@ -104,7 +108,13 @@ pub(super) fn create_service_proxy(
                 && !method_names.contains(&key)
                 && !state_field_names.contains(&key)
             {
-                return interface_event_channel(lua, &service_name, &key).map(LuaValue::Table);
+                return interface_event_channel(
+                    lua,
+                    &service_name,
+                    &key,
+                    Some(Arc::clone(&subscribed_interface_events)),
+                )
+                .map(LuaValue::Table);
             }
             // Case A: known contract method — dispatch as a service command.
             if let Some(method) = methods.iter().find(|m| m.name == key) {
@@ -166,12 +176,18 @@ pub(super) fn create_events_proxy(
     lua: &Lua,
     service_name: &str,
     event_names: Vec<String>,
+    subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
 ) -> mlua::Result<Table> {
     let events = lua.create_table()?;
     for name in event_names {
         events.set(
             name.as_str(),
-            interface_event_channel(lua, service_name, &name)?,
+            interface_event_channel(
+                lua,
+                service_name,
+                &name,
+                Some(Arc::clone(&subscribed_interface_events)),
+            )?,
         )?;
     }
     Ok(events)
@@ -181,6 +197,7 @@ pub(super) fn interface_event_channel(
     lua: &Lua,
     service_name: &str,
     event_name: &str,
+    subscribed_interface_events: Option<Arc<Mutex<HashMap<String, HashMap<String, usize>>>>>,
 ) -> mlua::Result<Table> {
     let globals = lua.globals();
     let registry = match globals.get::<LuaValue>("__mesh_interface_event_channels") {
@@ -202,14 +219,22 @@ pub(super) fn interface_event_channel(
     match service_table.get::<LuaValue>(event_name)? {
         LuaValue::Table(channel) => Ok(channel),
         _ => {
-            let channel = create_event_channel(lua)?;
+            let channel = create_event_channel(
+                lua,
+                subscribed_interface_events,
+                Some((service_name.to_string(), event_name.to_string())),
+            )?;
             service_table.set(event_name, channel.clone())?;
             Ok(channel)
         }
     }
 }
 
-pub(super) fn create_event_channel(lua: &Lua) -> mlua::Result<Table> {
+pub(super) fn create_event_channel(
+    lua: &Lua,
+    subscribed_interface_events: Option<Arc<Mutex<HashMap<String, HashMap<String, usize>>>>>,
+    subscription_key: Option<(String, String)>,
+) -> mlua::Result<Table> {
     let channel = lua.create_table()?;
     let subscribers = lua.create_table()?;
     channel.set("__subscribers", subscribers.clone())?;
@@ -219,7 +244,41 @@ pub(super) fn create_event_channel(lua: &Lua) -> mlua::Result<Table> {
             let subscribers: Table = table.get("__subscribers")?;
             let id = subscribers.raw_len() + 1;
             subscribers.raw_set(id, callback)?;
-            Ok(lua.create_function(move |_lua, ()| subscribers.raw_set(id, LuaValue::Nil))?)
+            if let (Some(registry), Some((service_name, event_name))) =
+                (&subscribed_interface_events, &subscription_key)
+            {
+                let mut registry = registry.lock().unwrap();
+                *registry
+                    .entry(service_name.clone())
+                    .or_default()
+                    .entry(event_name.clone())
+                    .or_default() += 1;
+            }
+            let subscribed_interface_events = subscribed_interface_events.clone();
+            let subscription_key = subscription_key.clone();
+            Ok(lua.create_function(move |_lua, ()| {
+                let existing = subscribers.raw_get::<LuaValue>(id)?;
+                if !matches!(existing, LuaValue::Nil) {
+                    subscribers.raw_set(id, LuaValue::Nil)?;
+                    if let (Some(registry), Some((service_name, event_name))) =
+                        (&subscribed_interface_events, &subscription_key)
+                    {
+                        let mut registry = registry.lock().unwrap();
+                        if let Some(events) = registry.get_mut(service_name) {
+                            if let Some(count) = events.get_mut(event_name) {
+                                *count = count.saturating_sub(1);
+                                if *count == 0 {
+                                    events.remove(event_name);
+                                }
+                            }
+                            if events.is_empty() {
+                                registry.remove(service_name);
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            })?)
         })?,
     )?;
     channel.set("on", channel.get::<Function>("subscribe")?)?;
