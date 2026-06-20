@@ -71,6 +71,18 @@ pub(super) trait TextRenderCache {
         anchor: (f32, f32),
         focus: (f32, f32),
     ) -> Option<TextSelectionGeometry>;
+
+    fn truncate_with_ellipsis_shaped(
+        &self,
+        _text: &str,
+        _font_family: &str,
+        _font_size: f32,
+        _font_weight: u16,
+        _line_height: f32,
+        _max_width: f32,
+    ) -> Option<String> {
+        None
+    }
 }
 
 impl TextRenderCache for TextRenderer {
@@ -181,6 +193,26 @@ impl TextRenderCache for TextRenderer {
             max_width,
             anchor,
             focus,
+        )
+    }
+
+    fn truncate_with_ellipsis_shaped(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        max_width: f32,
+    ) -> Option<String> {
+        TextRenderer::truncate_with_ellipsis_shaped(
+            self,
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            max_width,
         )
     }
 }
@@ -295,6 +327,26 @@ impl TextRenderCache for SharedTextMeasurer {
             focus,
         )
     }
+
+    fn truncate_with_ellipsis_shaped(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        max_width: f32,
+    ) -> Option<String> {
+        SharedTextMeasurer::truncate_with_ellipsis_shaped(
+            self,
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            max_width,
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -364,6 +416,32 @@ fn ellipsis_cache_key(
     line_height.hash(&mut state);
     max_width.hash(&mut state);
     state.finish()
+}
+
+fn insert_ellipsis_cache_entry(
+    cache_key: u64,
+    text: &str,
+    font_family: &str,
+    font_size_bits: u32,
+    font_weight: u16,
+    line_height_bits: u32,
+    max_width_bits: u32,
+    value: String,
+) {
+    if let Ok(mut guard) = ellipsis_cache().lock() {
+        guard.insert(
+            cache_key,
+            EllipsisCacheEntry {
+                text: text.to_string(),
+                font_family: font_family.to_string(),
+                font_size: font_size_bits,
+                font_weight,
+                line_height: line_height_bits,
+                max_width: max_width_bits,
+                value,
+            },
+        );
+    }
 }
 
 impl FrontendRenderEngine {
@@ -785,6 +863,27 @@ pub(super) fn truncate_with_ellipsis(
         return ELLIPSIS.to_string();
     }
 
+    if let Some(output) = renderer.truncate_with_ellipsis_shaped(
+        text,
+        font_family,
+        font_size,
+        font_weight,
+        line_height,
+        max_width,
+    ) {
+        insert_ellipsis_cache_entry(
+            cache_key,
+            text,
+            font_family,
+            font_size_bits,
+            font_weight,
+            line_height_bits,
+            max_width_bits,
+            output.clone(),
+        );
+        return output;
+    }
+
     let mut low = 0usize;
     let mut high = char_count;
     let mut boundaries: Vec<usize> = text.char_indices().map(|(index, _)| index).collect();
@@ -813,20 +912,16 @@ pub(super) fn truncate_with_ellipsis(
     let mut output = String::with_capacity(split + ELLIPSIS.len());
     output.push_str(&text[..split]);
     output.push_str(ELLIPSIS);
-    if let Ok(mut guard) = cache.lock() {
-        guard.insert(
-            cache_key,
-            EllipsisCacheEntry {
-                text: text.to_string(),
-                font_family: font_family.to_string(),
-                font_size: font_size_bits,
-                font_weight,
-                line_height: line_height_bits,
-                max_width: max_width_bits,
-                value: output.clone(),
-            },
-        );
-    }
+    insert_ellipsis_cache_entry(
+        cache_key,
+        text,
+        font_family,
+        font_size_bits,
+        font_weight,
+        line_height_bits,
+        max_width_bits,
+        output.clone(),
+    );
     output
 }
 
@@ -1047,6 +1142,25 @@ mod tests {
         let renderer = TextRenderer::new();
         let truncated = truncate_with_ellipsis(&renderer, "", "Inter", 14.0, 400, 1.4, 20.0);
         assert_eq!(truncated, "…");
+    }
+
+    #[test]
+    fn truncate_with_ellipsis_uses_single_shaped_layout_for_text() {
+        let renderer = TextRenderer::new();
+        let text = "single shaped layout cache proof for ellipsis truncation";
+        let (char_width, _) = renderer.measure_styled("s", "Inter", 14.0, 400, 1.4, None);
+        let (ellipsis_width, _) = renderer.measure_styled("…", "Inter", 14.0, 400, 1.4, None);
+        let max_width = char_width * 12.0 + ellipsis_width;
+
+        renderer.reset_cache_metrics();
+        let truncated = truncate_with_ellipsis(&renderer, text, "Inter", 14.0, 400, 1.4, max_width);
+
+        assert!(truncated.ends_with("…"));
+        let metrics = renderer.cache_metrics();
+        assert!(
+            metrics.layout_misses <= 1,
+            "expected one shaped miss for the full text, got {metrics:?}"
+        );
     }
 }
 

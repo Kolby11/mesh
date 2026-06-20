@@ -415,6 +415,88 @@ impl TextRenderer {
         (measured_width, measured_height)
     }
 
+    pub fn truncate_with_ellipsis_shaped(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        max_width: f32,
+    ) -> Option<String> {
+        if text.is_empty() || text.contains('\n') {
+            return None;
+        }
+
+        const ELLIPSIS: &str = "…";
+
+        let mut engine = self.engine.borrow_mut();
+        let (_, metrics, width, align) = text_config(
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            None,
+            TextAlign::Left,
+        );
+
+        let ellipsis_params = TextLayoutParams::new(
+            ELLIPSIS,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            None,
+            TextAlign::Left,
+        );
+        let mut ellipsis_layout = engine.take_layout(&ellipsis_params, metrics, width, align);
+        let ellipsis_width = {
+            let ellipsis_layout = ellipsis_layout.borrow_with(&mut engine.font_system);
+            ellipsis_layout
+                .layout_runs()
+                .map(|run| run.line_w)
+                .fold(0.0f32, f32::max)
+        };
+        engine.store_layout(&ellipsis_params, ellipsis_layout);
+
+        let target = (max_width - ellipsis_width).max(0.0);
+        let params = TextLayoutParams::new(
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            None,
+            TextAlign::Left,
+        );
+        let mut cosmic = engine.take_layout(&params, metrics, width, align);
+        let split = {
+            let cosmic = cosmic.borrow_with(&mut engine.font_system);
+            let mut runs = cosmic.layout_runs();
+            match runs.next() {
+                Some(run) if !run.rtl && runs.next().is_none() => {
+                    let mut best_end = 0usize;
+                    for glyph in run.glyphs {
+                        if glyph.x + glyph.w <= target {
+                            best_end = glyph.end;
+                        } else {
+                            break;
+                        }
+                    }
+                    Some(best_end)
+                }
+                _ => None,
+            }
+        };
+        engine.store_layout(&params, cosmic);
+        let split = split?;
+
+        let mut output = String::with_capacity(split + ELLIPSIS.len());
+        output.push_str(&text[..split]);
+        output.push_str(ELLIPSIS);
+        Some(output)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn selection_geometry(
         &self,
@@ -735,6 +817,27 @@ impl SharedTextMeasurer {
     ) -> (f32, f32) {
         RENDERER.with(|renderer| {
             renderer.borrow().measure_styled(
+                text,
+                font_family,
+                font_size,
+                font_weight,
+                line_height,
+                max_width,
+            )
+        })
+    }
+
+    pub fn truncate_with_ellipsis_shaped(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        line_height: f32,
+        max_width: f32,
+    ) -> Option<String> {
+        RENDERER.with(|renderer| {
+            renderer.borrow().truncate_with_ellipsis_shaped(
                 text,
                 font_family,
                 font_size,
