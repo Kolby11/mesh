@@ -92,6 +92,7 @@ const SUPPORTED_CSS_PROPERTIES: &[&str] = &[
     "letter-spacing",
     "text-align",
     "text-overflow",
+    "white-space",
     "direction",
     "flex",
     "flex-direction",
@@ -641,7 +642,7 @@ const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
     StyleProfileProperty {
         property: "white-space",
         category: "font",
-        status: StyleProfileStatus::OutOfScope,
+        status: StyleProfileStatus::Implemented,
     },
     StyleProfileProperty {
         property: "container-type",
@@ -764,6 +765,7 @@ pub struct ComputedStyle {
     pub font_style: FontStyle,
     pub letter_spacing: f32,
     pub text_overflow: TextOverflow,
+    pub white_space: WhiteSpace,
     pub text_direction: TextDirection,
     pub display: Display,
     pub visibility: Visibility,
@@ -836,6 +838,7 @@ impl Default for ComputedStyle {
             font_style: FontStyle::Normal,
             letter_spacing: 0.0,
             text_overflow: TextOverflow::Clip,
+            white_space: WhiteSpace::Normal,
             text_direction: TextDirection::Ltr,
             display: Display::Flex,
             visibility: Visibility::Visible,
@@ -1591,10 +1594,18 @@ pub enum TextDirection {
     Rtl,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TextOverflow {
+    #[default]
     Clip,
     Ellipsis,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum WhiteSpace {
+    #[default]
+    Normal,
+    Nowrap,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

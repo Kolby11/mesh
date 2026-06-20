@@ -413,6 +413,7 @@ struct TextMeasureData {
     font_size: f32,
     font_weight: u16,
     line_height: f32,
+    nowrap: bool,
 }
 
 fn taffy_dimension(dimension: Dimension) -> taffy_style::Dimension {
@@ -583,6 +584,7 @@ fn build_taffy_tree(
                     font_size: node.computed_style.font_size,
                     font_weight: node.computed_style.font_weight,
                     line_height: node.computed_style.line_height,
+                    nowrap: node.computed_style.white_space == crate::WhiteSpace::Nowrap,
                 },
             );
         }
@@ -853,6 +855,7 @@ fn update_text_context(
                 font_size: node.computed_style.font_size,
                 font_weight: node.computed_style.font_weight,
                 line_height: node.computed_style.line_height,
+                nowrap: node.computed_style.white_space == crate::WhiteSpace::Nowrap,
             },
         );
         tree.set_node_context(taffy_id, Some(node.id))?;
@@ -943,9 +946,12 @@ fn measure_taffy_node(
         };
     };
 
-    let max_width = known_dimensions
-        .width
-        .or_else(|| available_space_to_option(available_space.width));
+    let max_width = if text.nowrap {
+        known_dimensions.width
+    } else {
+        known_dimensions.width
+            .or_else(|| available_space_to_option(available_space.width))
+    };
     let measure_key = TextMeasureKey::new(text, max_width);
     let (measured_width, measured_height) =
         if let Some(measured) = intrinsic_cache.get_text_measurement(&measure_key) {

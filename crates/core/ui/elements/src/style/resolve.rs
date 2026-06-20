@@ -1241,6 +1241,15 @@ fn apply_declaration(
                 _ => TextOverflow::Clip,
             };
         }
+        "white-space" => {
+            style.white_space = match resolver
+                .resolve_value_with_variables(value, variables)
+                .as_str()
+            {
+                "nowrap" => WhiteSpace::Nowrap,
+                _ => WhiteSpace::Normal,
+            };
+        }
         "line-height" => {
             style.line_height = resolver.resolve_number_with_variables(value, variables)
         }

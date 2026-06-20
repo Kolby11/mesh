@@ -126,6 +126,7 @@ mod tests {
             "letter-spacing",
             "text-align",
             "text-overflow",
+            "white-space",
             "direction",
             "flex",
             "flex-direction",
@@ -218,7 +219,6 @@ mod tests {
         for property in [
             "grid-template-columns",
             "float",
-            "white-space",
             "container-type",
             "text-wrap",
         ] {
@@ -723,7 +723,7 @@ mod tests {
         );
         assert_eq!(outside.color, Color::from_hex("#112233").unwrap());
         assert_eq!(outside.background_color, Color::TRANSPARENT);
-        assert_eq!(outside.transition.duration_ms, 0);
+        assert_eq!(outside.transitions[0].duration_ms, 0);
 
         let inside = resolver.resolve_node_style_for_module(
             &[],
@@ -736,8 +736,8 @@ mod tests {
         );
         assert_eq!(inside.color, Color::from_hex("#112233").unwrap());
         assert_eq!(inside.background_color, Color::from_hex("#f6b73c").unwrap());
-        assert_eq!(inside.transition.duration_ms, 150);
-        assert!(inside.transition.properties.animates_background_color());
+        assert_eq!(inside.transitions[0].duration_ms, 150);
+        assert!(inside.transitions[0].properties.animates_background_color());
     }
 
     #[test]
@@ -1592,17 +1592,17 @@ mod tests {
     fn transition_shorthand_parses_steps_with_position() {
         let style = resolve_single_decl("transition", "opacity 200ms steps(4, jump-end)");
         assert_eq!(
-            style.transition.easing,
+            style.transitions[0].easing,
             TransitionEasing::Steps(4, StepPosition::JumpEnd)
         );
-        assert!(style.transition.properties.animates_opacity());
+        assert!(style.transitions[0].properties.animates_opacity());
     }
 
     #[test]
     fn transition_shorthand_parses_step_end_keyword() {
         let style = resolve_single_decl("transition", "transform 100ms step-start");
         assert_eq!(
-            style.transition.easing,
+            style.transitions[0].easing,
             TransitionEasing::Steps(1, StepPosition::JumpStart)
         );
     }
@@ -1611,11 +1611,11 @@ mod tests {
     fn animation_shorthand_parses_steps_with_inner_space() {
         let style = resolve_single_decl("animation", "pulse 1s steps(3, jump-none) infinite");
         assert_eq!(
-            style.animation.easing,
+            style.animations[0].easing,
             TransitionEasing::Steps(3, StepPosition::JumpNone)
         );
-        assert_eq!(style.animation.name.as_deref(), Some("pulse"));
-        assert_eq!(style.animation.duration_ms, 1000);
+        assert_eq!(style.animations[0].name.as_deref(), Some("pulse"));
+        assert_eq!(style.animations[0].duration_ms, 1000);
     }
 
     #[test]

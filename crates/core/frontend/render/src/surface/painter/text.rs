@@ -530,6 +530,11 @@ impl FrontendRenderEngine {
             return;
         }
 
+        let render_max_width = if style.white_space == mesh_core_elements::WhiteSpace::Nowrap {
+            None
+        } else {
+            Some(inner_width)
+        };
         self.text_renderer.render_clipped(
             &display_text,
             &style.font_family,
@@ -542,7 +547,7 @@ impl FrontendRenderEngine {
             tx,
             ty,
             clip_to_tuple(clip),
-            Some(inner_width),
+            render_max_width,
         );
     }
 
