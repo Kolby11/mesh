@@ -321,6 +321,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             || self.style_only_dirty
             || !self.transitions.is_empty()
             || self.has_active_keyframe_animation
+            || !self.scroll_animations.is_empty()
     }
 
     fn surface_size_changed(&mut self, width: u32, height: u32) -> bool {

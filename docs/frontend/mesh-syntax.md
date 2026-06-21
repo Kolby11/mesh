@@ -290,6 +290,36 @@ Use `bind:this` when the parent needs the mounted child instance:
 The bound variable references the mounted instance, not the component
 definition imported with `require(...)`.
 
+`bind:this` is a **live reference**, not a snapshot. Every component in a single
+frontend surface shares one Lua realm, so the bound variable forwards straight
+to the child's live state:
+
+- **Reads see the current value.** `volume_bar.percent` reads the child's
+  `percent` at call time — no per-frame copy, no staleness.
+- **Calls run synchronously and return real values.**
+  `local p = volume_bar.set_volume(50)` runs the child's `set_volume` in the
+  same tick and returns whatever it returns.
+- **Events flow child→parent.** The child's `self.<Event>` channels are exposed
+  on the bound reference, so the parent can subscribe and receive synchronous
+  fires:
+
+  ```lua
+  -- parent
+  volume_bar.Changed:on(function(event) audio_label = event.label end)
+
+  -- child (capture the channel where `self` is available, then fire later)
+  local changed
+  function init(self) changed = self.Changed end
+  function onDrag() changed:fire({ label = string.format("%d%%", percent) }) end
+  ```
+
+Only the child's **public members** and `self.<Event>` channels cross the
+boundary. Host internals (`self`, `module`, `mesh`, `require`, `__mesh_*`) and
+lifecycle hooks (`init`, `render`, `mount`, `unmount`) stay private to the child.
+
+Cross-*surface* references (e.g. panel ↔ launcher) are a separate trust boundary
+and remain a marshalled event bus — `bind:this` liveness is within one surface.
+
 ### Event handlers
 
 Use `on...` event attribute names with a Luau function reference in `{}`:
@@ -320,6 +350,70 @@ Available fields include `width`, `height`, `left`, `top`, `right`, `bottom`,
 `client_width`, `client_height`, `client_bound_rect`, `clientBoundRect`, and
 `bounding_client_rect`. Runtime-generated keys are also available in
 `elements`, but `refs` is the stable author-facing API.
+
+`refs.<name>` is a **live element reference**, the closest analog to a DOM node
+handle. The reference is stable across renders and its fields always report the
+most recently painted layout (geometry is only known after layout, so a value
+read during `render` reflects the previous committed frame — the same rule as
+reading layout inside a DOM effect). `refs.<name>.present` (alias `exists`)
+reports whether the element is in the current tree, so a script can guard a
+conditionally rendered node.
+
+Live references also expose **imperative methods** that act on the real widget
+node — both `refs.x:focus()` (method) and `refs.x.focus()` (plain) call styles
+work:
+
+```lua
+function onSearchOpen()
+    if refs.search_input.present then
+        refs.search_input:focus()   -- move keyboard focus to the input
+    end
+end
+
+function onSearchClose()
+    refs.search_input:blur()        -- release focus if this element holds it
+end
+
+function onSelectResult()
+    refs.active_result:scroll_into_view()  -- scroll the list so the row is visible
+end
+
+function onResetList()
+    refs.result_list:scroll_to(0)          -- jump the scroll container to the top
+end
+
+function onSmoothReveal()
+    refs.active_result:scroll_into_view({ smooth = true })  -- animated reveal
+    refs.result_list:scroll_to(0, { smooth = true, duration = 300 })
+end
+```
+
+| Method                  | Effect                                                          |
+| ----------------------- | -------------------------------------------------------------- |
+| `:focus()`              | Routes through the canonical focus path (fires `onfocus`).     |
+| `:blur()`               | Clears focus if this element currently holds it (fires `onblur`). |
+| `:click()`              | Synthesizes a click on the node through the real dispatch path (fires `onclick`, or activation handlers for menu/list items). |
+| `:scroll_into_view()`   | Scrolls each scrollable ancestor just enough to reveal the element (CSS "nearest" alignment; handles nested scroll regions). |
+| `:scroll_to(top[,left])`| Sets this element's own scroll offset (DOM `element.scrollTop`), clamped to its scrollable range; omitted axes stay put. |
+| `:set_value(text)`      | Sets an input's text (DOM `input.value = ...`); does not fire `oninput`/`onchange`. Equivalent to `refs.x.value = text`. |
+
+Both scroll methods accept a trailing **options table** `{ smooth = true,
+duration = <ms> }` (DOM `behavior: "smooth"`). With `smooth`, the offset eases
+to the target (`EaseOut`, default 250 ms) instead of snapping; a later instant
+scroll on the same container cancels the animation.
+
+Scroll position and extent are readable live on the reference:
+`refs.x.scroll_top` / `scroll_left` (current offset), `refs.x.scroll_height` /
+`scroll_width` (full content size), and `refs.x.max_scroll_top` /
+`max_scroll_left` (the clamp bounds).
+
+On input-like elements `refs.x.value` is the **live editable text** (DOM
+`input.value`) — readable and assignable. Reads reflect the latest paint;
+`refs.x.value = "..."` (or `:set_value(...)`) updates the stored text without
+firing input events. Every other field is read-only; assigning to it errors.
+
+Method calls are queued and applied by the shell right after the handler
+returns, so they compose with the handler's other state changes in one frame.
 
 Common event attributes:
 

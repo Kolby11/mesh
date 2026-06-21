@@ -417,6 +417,42 @@ pub static BASE_ELEMENT_FIELDS: &[ElementFieldDef] = &[
         "Vertical scroll",
     ),
     field(
+        "scroll_left",
+        ElementFieldType::Number,
+        false,
+        "Horizontal scroll offset (DOM scrollLeft; alias of scroll_x)",
+    ),
+    field(
+        "scroll_top",
+        ElementFieldType::Number,
+        false,
+        "Vertical scroll offset (DOM scrollTop; alias of scroll_y)",
+    ),
+    field(
+        "scroll_width",
+        ElementFieldType::Number,
+        false,
+        "Full scrollable content width",
+    ),
+    field(
+        "scroll_height",
+        ElementFieldType::Number,
+        false,
+        "Full scrollable content height",
+    ),
+    field(
+        "max_scroll_left",
+        ElementFieldType::Number,
+        false,
+        "Maximum horizontal scroll offset",
+    ),
+    field(
+        "max_scroll_top",
+        ElementFieldType::Number,
+        false,
+        "Maximum vertical scroll offset",
+    ),
+    field(
         "hovered",
         ElementFieldType::Boolean,
         false,
@@ -1730,6 +1766,12 @@ pub struct ElementSnapshot {
     pub bounding_client_rect: ElementRect,
     pub scroll_x: f32,
     pub scroll_y: f32,
+    pub scroll_left: f32,
+    pub scroll_top: f32,
+    pub scroll_width: f32,
+    pub scroll_height: f32,
+    pub max_scroll_left: f32,
+    pub max_scroll_top: f32,
     pub hovered: bool,
     pub active: bool,
     pub focused: bool,
@@ -1768,6 +1810,17 @@ pub fn element_snapshot(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Elem
         .get("_mesh_scroll_y")
         .and_then(|value| value.parse::<f32>().ok())
         .unwrap_or(0.0);
+    let attr_f32 = |key: &str| {
+        node.attributes
+            .get(key)
+            .and_then(|value| value.parse::<f32>().ok())
+            .unwrap_or(0.0)
+    };
+    let max_scroll_left = attr_f32("_mesh_scroll_max_x");
+    let max_scroll_top = attr_f32("_mesh_scroll_max_y");
+    // Full content extent = viewport content box + the overflow we can scroll to.
+    let scroll_width = client_width + max_scroll_left;
+    let scroll_height = client_height + max_scroll_top;
     let state = ElementStateSnapshot::from(node.state);
     let element_type = element_type_for_tag(&node.tag).type_name.to_string();
     let client_bound_rect = ElementRect {
@@ -1814,6 +1867,12 @@ pub fn element_snapshot(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Elem
         bounding_client_rect,
         scroll_x,
         scroll_y,
+        scroll_left: scroll_x,
+        scroll_top: scroll_y,
+        scroll_width,
+        scroll_height,
+        max_scroll_left,
+        max_scroll_top,
         hovered: state.hovered,
         active: state.active,
         focused: state.focused,

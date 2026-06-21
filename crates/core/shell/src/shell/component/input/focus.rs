@@ -2,7 +2,7 @@ use super::super::*;
 use mesh_core_elements::style::{Overflow, TextAlign, TextDirection, TextOverflow};
 
 impl FrontendSurfaceComponent {
-    pub(super) fn set_focus_target(
+    pub(in crate::shell::component) fn set_focus_target(
         &mut self,
         tree: &WidgetNode,
         next_key: Option<String>,

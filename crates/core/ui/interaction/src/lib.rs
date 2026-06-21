@@ -11,7 +11,10 @@ pub use hit_test::{
     find_tooltip_by_key, find_tooltip_text_by_key, is_input_key, is_slider_key,
     namespace_event_handlers, node_is_source, parse_namespaced_handler, source_element_tag,
 };
-pub use scroll::{annotate_overflow_tree, find_scrollable_at, measure_content_size, scroll_limits};
+pub use scroll::{
+    annotate_overflow_tree, find_scrollable_at, measure_content_size, scroll_into_view_offsets,
+    scroll_limits,
+};
 
 pub(crate) type ContentBounds = (f32, f32, f32, f32);
 

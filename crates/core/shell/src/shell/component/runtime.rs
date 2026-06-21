@@ -140,6 +140,9 @@ impl FrontendSurfaceComponent {
             component_id: component_id.clone(),
             source,
         })?;
+        // All components in this surface share one Lua realm so bind:this is a
+        // live cross-component reference rather than a snapshot.
+        script_ctx.attach_shared_vm(&self.surface_vm);
         script_ctx.set_interface_catalog(self.interface_catalog.clone());
         seed_service_state(script_ctx.state_mut());
         script_ctx
@@ -481,78 +484,73 @@ impl FrontendSurfaceComponent {
         Self::drain_script_diagnostics(&self.diagnostics, runtime);
         let state_dirty = runtime.script_ctx.state().is_dirty();
         let mut events = script_events_to_requests(runtime.script_ctx.drain_published_events());
-        let bound_calls = runtime.script_ctx.drain_bound_instance_calls();
         drop(runtimes);
-        let (bound_state_dirty, mut bound_events) = self.process_bound_instance_calls(bound_calls);
-        events.append(&mut bound_events);
-        if state_dirty {
+        // A live `bind:this` cross-call mutated another instance's `_ENV` directly
+        // during this handler — a parent calling `child.fn()` (parent→child) or a
+        // child firing `self.Event` to a subscribed parent (child→parent). Re-sync
+        // every instance linked to this one so its reactive state catches up.
+        let (neighbors_dirty, mut neighbor_events) = self.resync_binding_neighbors(&instance_key);
+        events.append(&mut neighbor_events);
+        if state_dirty || neighbors_dirty {
             self.invalidate_script_state();
         }
-        if bound_state_dirty {
-            self.invalidate_script_state();
-        }
+
+        // Execute imperative element actions the handler queued via live
+        // `refs.<name>` references (focus/blur), routed through the real focus path.
+        let mut element_requests = self.apply_element_actions()?;
+        events.append(&mut element_requests);
 
         Ok(events)
     }
 
-    fn process_bound_instance_calls(
-        &mut self,
-        calls: Vec<BoundInstanceCall>,
-    ) -> (bool, Vec<CoreRequest>) {
-        let mut pending = std::collections::VecDeque::from(calls);
-        let mut state_dirty = false;
-        let mut events = Vec::new();
-
-        while let Some(call) = pending.pop_front() {
-            let child_dirty = {
-                let mut runtimes = self.runtimes.lock().unwrap();
-                let Some(child) = runtimes.get_mut(&call.child_instance_key) else {
-                    continue;
-                };
-
-                if let Err(source) = child
-                    .script_ctx
-                    .call_handler(&call.function_name, &call.args)
+    /// Re-sync every instance linked to `instance_key` by a live `bind:this`
+    /// reference, in either direction: children this instance binds (it may have
+    /// called their functions) and parents that bind this instance (it may have
+    /// fired `self.<Event>` to them). A live cross-call mutates the neighbor's
+    /// `_ENV` in the shared VM without going through the shell's normal
+    /// post-handler sync, so its Rust-side reactive state would otherwise stay
+    /// stale until some other event re-rendered it.
+    fn resync_binding_neighbors(&mut self, instance_key: &str) -> (bool, Vec<CoreRequest>) {
+        let neighbor_keys: Vec<String> = {
+            let bound_children = self.bound_children.borrow();
+            let mut keys: Vec<String> = bound_children
+                .get(instance_key)
+                .map(|links| links.iter().map(|(_, key)| key.clone()).collect())
+                .unwrap_or_default();
+            for (parent_key, links) in bound_children.iter() {
+                if parent_key != instance_key
+                    && links.iter().any(|(_, child)| child == instance_key)
                 {
-                    let error_message = source.to_string();
-                    tracing::warn!(
-                        component_id = %child.module_id,
-                        handler = %call.function_name,
-                        error = %error_message,
-                        "bound child instance call failed"
-                    );
-                    if let Some(diagnostics) = &self.diagnostics {
-                        diagnostics.record_handler_error(
-                            child.module_id.clone(),
-                            call.function_name.clone(),
-                            error_message,
-                        );
-                    }
-                    Self::drain_script_diagnostics(&self.diagnostics, child);
-                    continue;
+                    keys.push(parent_key.clone());
                 }
-
-                Self::drain_script_diagnostics(&self.diagnostics, child);
-                pending.extend(child.script_ctx.drain_bound_instance_calls());
-                let dirty = child.script_ctx.state().is_dirty();
-                events.extend(script_events_to_requests(
-                    child.script_ctx.drain_published_events(),
-                ));
-                dirty
-            };
-
-            if child_dirty {
-                state_dirty = true;
             }
-            self.bind_child_instance(
-                &call.parent_instance_key,
-                &call.binding,
-                &call.child_instance_key,
-            );
+            keys.sort();
+            keys.dedup();
+            keys
+        };
+        if neighbor_keys.is_empty() {
+            return (false, Vec::new());
         }
 
+        let mut state_dirty = false;
+        let mut events = Vec::new();
+        for neighbor_key in neighbor_keys {
+            let mut runtimes = self.runtimes.lock().unwrap();
+            let Some(neighbor) = runtimes.get_mut(&neighbor_key) else {
+                continue;
+            };
+            neighbor.script_ctx.resync_state();
+            Self::drain_script_diagnostics(&self.diagnostics, neighbor);
+            if neighbor.script_ctx.state().is_dirty() {
+                state_dirty = true;
+            }
+            events.extend(script_events_to_requests(
+                neighbor.script_ctx.drain_published_events(),
+            ));
+        }
         (state_dirty, events)
     }
+
 }
 
 /// If `handler_name` is a JSON object with `h` and `a` fields, unpack it into

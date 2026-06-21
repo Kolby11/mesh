@@ -11,7 +11,7 @@ use mesh_core_interaction::{
     find_focusable_at, find_node_bounds_by_key, find_node_by_key, find_node_path_at,
     find_scrollable_at, find_tooltip_by_key, is_input_key, is_slider_key, measure_content_size,
     namespace_event_handlers, next_focus_target, node_is_source, parse_namespaced_handler,
-    scroll_limits, source_element_tag,
+    scroll_into_view_offsets, scroll_limits, source_element_tag,
 };
 mod animation;
 mod catalog;
@@ -47,7 +47,7 @@ use mesh_core_frontend::{
 };
 use mesh_core_locale::LocaleEngine;
 use mesh_core_scripting::{
-    BoundInstanceCall, LocaleBoundState, ScriptContext, ScriptInterfaceImport, ScriptState,
+    LocaleBoundState, ScriptContext, ScriptInterfaceImport, ScriptState, SurfaceVm,
 };
 use mesh_core_theme::{Theme, default_theme};
 use mesh_core_wayland::{Edge, KeyboardMode, ShellSurface};
@@ -83,6 +83,17 @@ bitflags::bitflags! {
         /// against the retained tree and marks only changed leaf nodes dirty.
         const SCRIPT_NARROW = 1 << 9;
     }
+}
+
+/// A running smooth-scroll animation from `start` to `target` over `duration`,
+/// eased with `EaseOut`. Created when a script requests a scroll with
+/// `{ smooth = true }`; advanced each frame by `advance_scroll_animations`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ScrollAnimation {
+    pub(super) start: ScrollOffsetState,
+    pub(super) target: ScrollOffsetState,
+    pub(super) start_time: std::time::Instant,
+    pub(super) duration: std::time::Duration,
 }
 
 impl ComponentDirtyFlags {
@@ -333,6 +344,11 @@ pub(super) struct FrontendSurfaceComponent {
     checked_values: HashMap<String, bool>,
     render_hooks_pending: bool,
     pub(super) scroll_offsets: HashMap<String, ScrollOffsetState>,
+    /// In-flight smooth-scroll animations keyed by scroll-container node key.
+    /// Ticked at the top of `finalize_tree`; each writes an eased offset into
+    /// `scroll_offsets` until it settles, then is dropped. Started by
+    /// `refs.x:scroll_to(.., { smooth = true })` / `:scroll_into_view({ smooth })`.
+    pub(super) scroll_animations: HashMap<String, ScrollAnimation>,
     // Hover tracking for CSS :hover and tooltip system.
     hovered_key: Option<String>,
     hovered_path: Vec<String>,
@@ -351,6 +367,10 @@ pub(super) struct FrontendSurfaceComponent {
     tooltip_appeared_at: Option<std::time::Instant>,
     last_tooltip_damage: Option<DamageRect>,
     runtimes: Arc<Mutex<HashMap<String, EmbeddedFrontendRuntime>>>,
+    /// The single Lua realm shared by every component instance in this surface.
+    /// Each runtime's `ScriptContext` attaches a clone, so sibling/child
+    /// components can hold live `bind:this` references to one another.
+    surface_vm: SurfaceVm,
     render_stack: RefCell<Vec<String>>,
     /// The theme used by the current/last paint, shared cheaply with child
     /// component builds and animation restyle. Refreshed from the paint-time
@@ -384,6 +404,16 @@ pub(super) struct FrontendSurfaceComponent {
     /// a popover through keyboard navigation so the owner script does not
     /// immediately re-show it from stale state.
     portal_hidden_bindings: RefCell<HashMap<String, String>>,
+    /// `parent_instance_key -> [(binding, child_instance_key)]` for live
+    /// `bind:this` references. After a parent event handler runs, each linked
+    /// child is re-synced so values its parent mutated through the live proxy
+    /// re-render. Refreshed every render by `bind_child_instance`.
+    bound_children: RefCell<HashMap<String, Vec<(String, String)>>>,
+    /// `refs.<name>` -> live widget node key, rebuilt every paint by
+    /// `publish_element_metrics`. Lets imperative element actions
+    /// (`refs.<name>:focus()`) resolve a script-facing ref name back to the
+    /// retained node it targets.
+    ref_node_keys: RefCell<HashMap<String, String>>,
     transitions: TransitionAnimator,
     keyframe_animations: HashMap<String, mesh_core_animation::keyframes::ActiveKeyframeAnimation>,
     keyframe_rules: HashMap<String, mesh_core_animation::keyframes::KeyframeRule>,
@@ -478,6 +508,7 @@ impl FrontendSurfaceComponent {
             checked_values: HashMap::new(),
             render_hooks_pending: true,
             scroll_offsets: HashMap::new(),
+            scroll_animations: HashMap::new(),
             hovered_key: None,
             hovered_path: Vec::new(),
             previous_hovered_path: Vec::new(),
@@ -489,6 +520,7 @@ impl FrontendSurfaceComponent {
             tooltip_appeared_at: None,
             last_tooltip_damage: None,
             runtimes: Arc::new(Mutex::new(HashMap::new())),
+            surface_vm: SurfaceVm::new(),
             render_stack: RefCell::new(Vec::new()),
             active_theme: RefCell::new(Arc::new(default_theme())),
             active_theme_stale: Cell::new(true),
@@ -508,6 +540,8 @@ impl FrontendSurfaceComponent {
             pending_surface_states: RefCell::new(HashMap::new()),
             last_surface_states: HashMap::new(),
             portal_hidden_bindings: RefCell::new(HashMap::new()),
+            bound_children: RefCell::new(HashMap::new()),
+            ref_node_keys: RefCell::new(HashMap::new()),
             transitions: TransitionAnimator::new(),
             keyframe_animations: HashMap::new(),
             keyframe_rules: HashMap::new(),
