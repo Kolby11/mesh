@@ -4,8 +4,8 @@ use tokio::sync::RwLock;
 use tower_lsp::{Client, LanguageServer, jsonrpc::Result, lsp_types::*};
 
 use crate::{
-    analyzer, diagnostics, document::Document, hover, manifest, manifest::ManifestDocument,
-    module_registry::ModuleRegistry, semantic_tokens,
+    analyzer, definition, diagnostics, document::Document, hover, manifest,
+    manifest::ManifestDocument, module_registry::ModuleRegistry, semantic_tokens,
 };
 
 pub struct Backend {
@@ -67,6 +67,7 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(semantic_tokens::server_capabilities()),
                 ..Default::default()
@@ -152,10 +153,23 @@ impl LanguageServer for Backend {
         Ok(hover::hover(doc, position, &registry))
     }
 
-    async fn formatting(
+    async fn goto_definition(
         &self,
-        params: DocumentFormattingParams,
-    ) -> Result<Option<Vec<TextEdit>>> {
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let docs = self.documents.read().await;
+        let Some(doc) = docs.get(uri) else {
+            return Ok(None);
+        };
+        let registry = self.registry.read().await;
+
+        Ok(definition::definition(doc, position, &registry))
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = &params.text_document.uri;
         // Manifest documents (module.json/package.json) are not `.mesh` files;
         // leave them to a JSON formatter.

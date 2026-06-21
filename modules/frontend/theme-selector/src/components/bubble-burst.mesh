@@ -1,0 +1,122 @@
+<template>
+    <box class="bb-stage" aria-hidden="true">
+        <box class="bb-anchor">
+            <box class="{left_class}" />
+            <box class="{center_class}" />
+            <box class="{right_class}" />
+        </box>
+    </box>
+</template>
+
+<script lang="luau">
+-- Decorative "burst" of three bubbles that fan out of the origin point
+-- (top-center of the stage, which sits directly under the option buttons)
+-- into a half circle below it. The whole animation is pure CSS: each bubble
+-- starts collapsed at the origin and adding the `bb-on` class drives a
+-- transition to its fanned-out resting position. No timers, no per-frame
+-- script work — the script only swaps the public class strings, which the
+-- template binds as whole-value class expressions.
+left_class = "bb-bubble bb-bubble-left"
+center_class = "bb-bubble bb-bubble-center"
+right_class = "bb-bubble bb-bubble-right"
+
+local fanned = false
+
+local function set_classes(suffix)
+    left_class = "bb-bubble bb-bubble-left" .. suffix
+    center_class = "bb-bubble bb-bubble-center" .. suffix
+    right_class = "bb-bubble bb-bubble-right" .. suffix
+end
+
+-- Fan the bubbles out into the half circle (idempotent).
+function play()
+    fanned = true
+    set_classes(" bb-on")
+end
+
+-- Collapse them back into the origin point.
+function reset()
+    fanned = false
+    set_classes("")
+end
+
+-- Flip between fanned-out and collapsed.
+function toggle()
+    if fanned then
+        reset()
+    else
+        play()
+    end
+end
+</script>
+
+<style>
+    /* The stage participates in normal layout so the content-measured surface
+    reserves room for the bubbles and never clips them. */
+    .bb-stage {
+        width: 100%;
+        height: 52px;
+        position: relative;
+        flex-direction: column;
+        align-items: center;
+        justify-content: start;
+    }
+
+    /* A zero-size point centered horizontally at the top of the stage. The
+    absolutely positioned bubbles all originate from here, so they appear
+    to come out of one spot directly under the buttons. */
+    .bb-anchor {
+        width: 0px;
+        height: 0px;
+        position: relative;
+    }
+
+    .bb-bubble {
+        position: absolute;
+        top: 0px;
+        left: 0px;
+        width: 16px;
+        height: 16px;
+        border-radius: var(--radius-full);
+        opacity: 0;
+        /* translate(-8, -8) centers the 16px dot exactly on the anchor point
+        while scale(0) keeps it invisibly tucked into the origin. */
+        transform: translate(-8px, -8px) scale(0);
+    }
+
+    .bb-bubble-center {
+        background: var(--color-tertiary);
+        transition: transform 360ms var(--animation-curves-bezier-emphasized-decelerate),
+        opacity 220ms var(--animation-curves-bezier-standard);
+    }
+
+    .bb-bubble-left {
+        background: var(--color-primary);
+        transition: transform 360ms var(--animation-curves-bezier-emphasized-decelerate) 70ms,
+        opacity 220ms var(--animation-curves-bezier-standard) 70ms;
+    }
+
+    .bb-bubble-right {
+        background: var(--color-secondary);
+        transition: transform 360ms var(--animation-curves-bezier-emphasized-decelerate) 140ms,
+        opacity 220ms var(--animation-curves-bezier-standard) 140ms;
+    }
+
+    /* Fanned-out resting positions form a half circle below the origin.
+    Each target is shifted by -8px to keep the dot centered on the point.
+    left  -> (-26, 16)   center -> (0, 28)   right -> (26, 16) */
+    .bb-bubble-left.bb-on {
+        opacity: 1;
+        transform: translate(-34px, 8px) scale(1);
+    }
+
+    .bb-bubble-center.bb-on {
+        opacity: 1;
+        transform: translate(-8px, 20px) scale(1);
+    }
+
+    .bb-bubble-right.bb-on {
+        opacity: 1;
+        transform: translate(18px, 8px) scale(1);
+    }
+</style>

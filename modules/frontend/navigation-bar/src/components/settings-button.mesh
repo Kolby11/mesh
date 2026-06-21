@@ -1,28 +1,51 @@
 <template>
-  <button
-    class="nav-button"
-    onclick={onButtonClick}
-    aria-haspopup="true"
-    title="{t('nav.open_settings')}"
-    aria-label="{t('nav.open_settings')}"
-  >
-    <icon class="nav-button-glyph" name="preferences-system" size="18" />
-  </button>
+  <stack class="nav-button-shell">
+    <button
+      class="nav-button"
+      onclick={onSettingsToggle}
+      aria-haspopup="true"
+      title="{t('nav.open_settings')}"
+      aria-label="{t('nav.open_settings')}"
+    >
+      <icon class="nav-button-glyph" name="preferences-system" size="18" />
+    </button>
+    <QuickSettings hidden={settings_surface_hidden} />
+  </stack>
 </template>
 
 <script lang="luau">
 local t = import("mesh.i18n", "t")
+local QuickSettings = require("@mesh/quick-settings")
 
-onActivate = nil
+settings_surface_id = "@mesh/quick-settings"
+settings_surface_hidden = true
 
-function onButtonClick(event)
-    if type(onActivate) == "function" then
-        onActivate(event)
+function onSettingsToggle(event)
+    if settings_surface_hidden then
+        mesh.events.publish("shell.position-surface", {
+            surface_id = settings_surface_id,
+            margin_top = 0,
+            margin_left = tonumber((event.current_target.position or {}).margin_left) or 0,
+        })
+        local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
+        mesh.popover.activate(settings_surface_id, event, { focus = focus })
+        settings_surface_hidden = false
+    else
+        mesh.popover.hide(settings_surface_id)
+        settings_surface_hidden = true
     end
 end
 </script>
 
 <style>
+.nav-button-shell {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+}
+
 .nav-button {
     width: 40px;
     height: 40px;
@@ -72,5 +95,17 @@ end
     align-items: center;
     color: inherit;
     transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+}
+
+@container (max-width: 720px) {
+    .nav-button-shell {
+        width: 36px;
+        height: 36px;
+    }
+
+    .nav-button {
+        width: 36px;
+        height: 36px;
+    }
 }
 </style>

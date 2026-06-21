@@ -841,6 +841,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.last_tooltip_damage = current_tooltip_damage;
         self.surface_pixels_invalid = false;
         self.clear_runtime_dirty_states();
+        if self.surface_entering {
+            self.surface_entering = false;
+            self.invalidate_script_state();
+        }
 
         Ok(())
     }
@@ -1039,7 +1043,19 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn set_surface_exiting(&mut self, exiting: bool) {
+        if !exiting {
+            // A hidden surface keeps its component instance alive. Restart CSS
+            // keyframes when it is shown again so one-shot entrance animations
+            // do not remain stuck at their completed timestamp.
+            self.transitions.clear();
+            self.keyframe_animations.clear();
+            self.keyframe_rules.clear();
+            self.surface_entering = true;
+        }
         if self.surface_exiting == exiting {
+            if !exiting {
+                self.invalidate_interaction_restyle();
+            }
             return;
         }
         self.surface_exiting = exiting;

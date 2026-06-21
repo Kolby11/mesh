@@ -35,6 +35,25 @@ pub enum ElementRefSource {
     BindThis,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ByteSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptSymbolKind {
+    Function,
+    Variable,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScriptSymbol {
+    pub name: String,
+    pub kind: ScriptSymbolKind,
+    pub span: ByteSpan,
+}
+
 pub struct Document {
     pub uri: Url,
     pub source: String,
@@ -48,6 +67,8 @@ pub struct Document {
     pub imports: Vec<ComponentImport>,
     /// Top-level and local function names found in the script block.
     pub script_functions: Vec<String>,
+    /// Script-local symbols that support navigation.
+    pub script_symbols: Vec<ScriptSymbol>,
     /// Template element bindings exposed to Luau through `refs.<name>`.
     pub element_refs: Vec<ElementRef>,
     /// Lua variables assigned from `refs.<name>`, e.g. `local panel = refs.panel`.
@@ -68,6 +89,7 @@ impl Document {
             state_vars,
             service_bindings,
             script_functions,
+            script_symbols,
             interface_proxies,
             element_ref_aliases,
         ) = extract_script_info(&source);
@@ -103,6 +125,7 @@ impl Document {
             service_bindings,
             imports,
             script_functions,
+            script_symbols,
             element_refs,
             element_ref_aliases,
             interface_proxies,
@@ -213,16 +236,29 @@ fn extract_script_info(
     Vec<String>,
     Vec<(String, String)>,
     Vec<String>,
+    Vec<ScriptSymbol>,
     HashMap<String, String>,
     Vec<ElementRefAlias>,
 ) {
     let mut state_vars: Vec<String> = Vec::new();
     let mut service_bindings: Vec<(String, String)> = Vec::new();
     let mut functions: Vec<String> = Vec::new();
+    let mut script_symbols: Vec<ScriptSymbol> = Vec::new();
     let mut interface_proxies: HashMap<String, String> = HashMap::new();
     let mut element_ref_aliases: Vec<ElementRefAlias> = Vec::new();
 
-    let script = extract_block_text(source, "script");
+    let Some((script_start, script_end)) = block_content_range(source, "script") else {
+        return (
+            state_vars,
+            service_bindings,
+            functions,
+            script_symbols,
+            interface_proxies,
+            element_ref_aliases,
+        );
+    };
+    let script = &source[script_start..script_end];
+    let mut line_start = script_start;
 
     for line in script.lines() {
         let t = line.trim();
@@ -254,10 +290,17 @@ fn extract_script_info(
             }
         }
 
+        if let Some((name, span)) = parse_function_definition(line, line_start) {
+            push_script_symbol(&mut script_symbols, name, ScriptSymbolKind::Function, span);
+        }
+
         // Bare non-local assignment (`name = value`) is a public reactive member.
         if let Some(name) = parse_public_assignment(t) {
             if !state_vars.contains(&name) {
-                state_vars.push(name);
+                state_vars.push(name.clone());
+            }
+            if let Some(span) = assignment_name_span(line, line_start, &name) {
+                push_script_symbol(&mut script_symbols, name, ScriptSymbolKind::Variable, span);
             }
         }
 
@@ -266,7 +309,15 @@ fn extract_script_info(
                 if let Some(name) = rest.split('=').next() {
                     let name = name.trim().to_string();
                     if !name.is_empty() && !functions.contains(&name) {
-                        functions.push(name);
+                        functions.push(name.clone());
+                    }
+                    if let Some(span) = assignment_name_span(line, line_start, &name) {
+                        push_script_symbol(
+                            &mut script_symbols,
+                            name,
+                            ScriptSymbolKind::Function,
+                            span,
+                        );
                     }
                 }
             }
@@ -311,15 +362,71 @@ fn extract_script_info(
                 element_ref_aliases.push(ElementRefAlias { alias, target });
             }
         }
+
+        line_start += line.len() + 1;
     }
 
     (
         state_vars,
         service_bindings,
         functions,
+        script_symbols,
         interface_proxies,
         element_ref_aliases,
     )
+}
+
+fn push_script_symbol(
+    symbols: &mut Vec<ScriptSymbol>,
+    name: String,
+    kind: ScriptSymbolKind,
+    span: ByteSpan,
+) {
+    if symbols
+        .iter()
+        .any(|symbol| symbol.name == name && symbol.kind == kind)
+    {
+        return;
+    }
+    symbols.push(ScriptSymbol { name, kind, span });
+}
+
+fn parse_function_definition(line: &str, line_start: usize) -> Option<(String, ByteSpan)> {
+    let trimmed = line.trim_start();
+    let prefix = if trimmed.starts_with("local function ") {
+        "local function "
+    } else if trimmed.starts_with("function ") {
+        "function "
+    } else {
+        return None;
+    };
+
+    let name = trimmed
+        .strip_prefix(prefix)?
+        .split('(')
+        .next()?
+        .trim()
+        .to_string();
+    if name.is_empty() {
+        return None;
+    }
+
+    let column = line.find(&name)?;
+    Some((
+        name.clone(),
+        ByteSpan {
+            start: line_start + column,
+            end: line_start + column + name.len(),
+        },
+    ))
+}
+
+fn assignment_name_span(line: &str, line_start: usize, name: &str) -> Option<ByteSpan> {
+    let column = line.find(name)?;
+    Some(ByteSpan {
+        start: line_start + column,
+        end: line_start + column + name.len(),
+    })
 }
 
 fn parse_element_ref_alias(line: &str) -> Option<(String, ElementRefAliasTarget)> {
@@ -434,7 +541,8 @@ fn parse_public_assignment(line: &str) -> Option<String> {
 fn is_lua_keyword(word: &str) -> bool {
     matches!(
         word,
-        "and" | "break"
+        "and"
+            | "break"
             | "do"
             | "else"
             | "elseif"

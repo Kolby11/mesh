@@ -1,25 +1,31 @@
 <template>
-  <button
-    ref="volume-button"
-    class="nav-button"
-    keybind="{this.keybinds.mute.id}"
-    onclick={onActivate}
-    onkeybind={onMuteKeybind}
-    title="{t(audio_tooltip_key) .. audio_tooltip_value}"
-    aria-label="{t('nav.open_audio')}"
-  >
-    <icon class="nav-button-glyph" name="{icon_name}" size="18" />
-  </button>
+    <stack class="nav-button-shell">
+        <button
+            ref="volume-button"
+            class="nav-button"
+            keybind="{this.keybinds.mute.id}"
+            onclick={onAudioToggle}
+            onkeybind={onMuteKeybind}
+            title={t(audio_tooltip_key) .. audio_tooltip_value}
+            aria-label={t('nav.open_audio')}
+        >
+            <icon class="nav-button-glyph" name="{icon_name}" size="18" />
+        </button>
+        <AudioPopover hidden={audio_surface_hidden} />
+    </stack>
 </template>
 
 <script lang="luau">
 local t = import("mesh.i18n", "t")
 local audio = require("mesh.audio")
+local AudioPopover = require("@mesh/audio-popover")
 
 icon_name = "audio-volume-muted"
 audio_tooltip_key = "nav.volume_unavailable"
 audio_tooltip_value = ""
 audio_percent = 0
+audio_surface_id = "@mesh/audio-popover"
+audio_surface_hidden = true
 
 local function update_audio_copy(percent, muted)
     audio_percent = percent
@@ -45,8 +51,12 @@ end
 if audio and audio.VolumeChanged then
     audio.VolumeChanged:on(function(event)
         local percent = math.floor(tonumber(event.level) or 0)
-        if percent < 0 then percent = 0 end
-        if percent > 100 then percent = 100 end
+        if percent < 0 then
+            percent = 0
+        end
+        if percent > 100 then
+            percent = 100
+        end
         local muted = audio.muted or false
         update_audio_copy(percent, muted)
     end)
@@ -62,82 +72,114 @@ function render(self)
     end
 
     local percent = math.floor(tonumber(audio.percent) or 0)
-    if percent < 0 then percent = 0 end
-    if percent > 100 then percent = 100 end
+    if percent < 0 then
+        percent = 0
+    end
+    if percent > 100 then
+        percent = 100
+    end
     local muted = audio.muted or false
     update_audio_copy(percent, muted)
 end
 
+function onAudioToggle(event)
+    if audio_surface_hidden then
+        mesh.events.publish("shell.position-surface", {
+            surface_id = audio_surface_id,
+            margin_top = 0,
+            margin_left = tonumber((event.current_target.position or {}).margin_left) or 0,
+        })
+        local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
+        mesh.popover.activate(audio_surface_id, event, { focus = focus })
+        audio_surface_hidden = false
+    else
+        mesh.popover.hide(audio_surface_id)
+        audio_surface_hidden = true
+    end
+end
 </script>
 
 <style>
-.nav-button {
-    width: 40px;
-    height: 40px;
-    flex-shrink: 0;
-    justify-content: center;
-    align-items: center;
-    padding: var(--spacing-xs);
-    border-radius: var(--radius-full);
-    transform: translateY(0px) scale(1);
-    background: var(--color-surface-container);
-    color: var(--color-on-surface);
-    border-width: 2px;
-    border-style: solid;
-    border-color: transparent;
-    text-wrap: none;
-    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
-}
-
-.nav-button:hover {
-    background: var(--color-secondary-container);
-    color: var(--color-on-secondary-container);
-    transform: translateY(-1px) scale(1.04);
-}
-
-.nav-button:focus,
-.nav-button:focus-visible {
-    background: var(--color-tertiary-container);
-    color: var(--color-on-tertiary-container);
-    transform: translateY(-1px) scale(1.03);
-}
-
-.nav-button:active {
-    background: var(--color-primary);
-    color: var(--color-on-primary);
-    border-color: var(--color-primary);
-    transform: translateY(0px) scale(0.94);
-}
-
-.nav-button-glyph {
-    width: 24px;
-    height: 24px;
-    flex-shrink: 0;
-    justify-content: center;
-    align-items: center;
-    color: inherit;
-    --icon-fill: 0;
-    --icon-weight: 400;
-    transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
-}
-
-.nav-button:hover .nav-button-glyph {
-    --icon-fill: 1;
-    --icon-weight: 500;
-}
-
-.nav-button:active .nav-button-glyph {
-    --icon-fill: 1;
-    --icon-weight: 600;
-}
-
-@container (max-width: 720px) {
-    .nav-button {
-        width: 36px;
-        height: 36px;
+    .nav-button-shell {
+        width: 40px;
+        height: 40px;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
     }
-}
+
+    .nav-button {
+        width: 40px;
+        height: 40px;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
+        padding: var(--spacing-xs);
+        border-radius: var(--radius-full);
+        transform: translateY(0px) scale(1);
+        background: var(--color-surface-container);
+        color: var(--color-on-surface);
+        border-width: 2px;
+        border-style: solid;
+        border-color: transparent;
+        text-wrap: none;
+        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+        color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+        border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+        transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .nav-button:hover {
+        background: var(--color-secondary-container);
+        color: var(--color-on-secondary-container);
+        transform: translateY(-1px) scale(1.04);
+    }
+
+    .nav-button:focus,
+    .nav-button:focus-visible {
+        background: var(--color-tertiary-container);
+        color: var(--color-on-tertiary-container);
+        transform: translateY(-1px) scale(1.03);
+    }
+
+    .nav-button:active {
+        background: var(--color-primary);
+        color: var(--color-on-primary);
+        border-color: var(--color-primary);
+        transform: translateY(0px) scale(0.94);
+    }
+
+    .nav-button-glyph {
+        width: 24px;
+        height: 24px;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
+        color: inherit;
+        --icon-fill: 0;
+        --icon-weight: 400;
+        transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .nav-button:hover .nav-button-glyph {
+        --icon-fill: 1;
+        --icon-weight: 500;
+    }
+
+    .nav-button:active .nav-button-glyph {
+        --icon-fill: 1;
+        --icon-weight: 600;
+    }
+
+    @container (max-width: 720px) {
+        .nav-button-shell {
+            width: 36px;
+            height: 36px;
+        }
+
+        .nav-button {
+            width: 36px;
+            height: 36px;
+        }
+    }
 </style>

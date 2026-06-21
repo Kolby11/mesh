@@ -1,116 +1,56 @@
 <template>
-  <stack class="nav-root">
-    <row class="nav-shell">
+    <stack class="nav-root">
+        <row class="nav-shell">
 
-      <!-- Left: workspaces, active window, now playing -->
-      <row class="left-cluster">
-        <WorkspaceList />
-        <WindowTitle />
-        <NowPlaying />
-      </row>
+            <!-- Left: workspaces, active window, now playing -->
+            <row class="left-cluster">
+                <WorkspaceList />
+                <WindowTitle />
+                <NowPlaying />
+            </row>
 
-      <spacer class="nav-spacer" />
+            <!-- Center: clock with date -->
+            <ClockButton />
 
-      <!-- Center: clock with date -->
-      <ClockButton />
+            <spacer class="nav-spacer" />
 
-      <spacer class="nav-spacer" />
+            <!-- Right: brightness, audio, theme, language, battery, settings -->
+            <row class="right-cluster">
+                <BrightnessButton />
+                <row class="control-button-cell">
+                    <VolumeButton onMuteKeybind={onMuteShortcut} />
+                </row>
+                <row class="control-button-cell">
+                    <ThemeButton />
+                </row>
+                <row class="control-button-cell">
+                    <LanguageButton />
+                </row>
+                <row class="control-button-cell">
+                    <BatteryButton />
+                </row>
+                <row class="control-button-cell">
+                    <SettingsButton />
+                </row>
+            </row>
 
-      <!-- Right: brightness, audio, theme, language, battery, settings -->
-      <row class="right-cluster">
-        <BrightnessButton />
-        <row class="control-button-cell">
-          <VolumeButton
-            onActivate={onToggleAudioSurface}
-            onMuteKeybind={onMuteShortcut}
-          />
         </row>
-        <row class="control-button-cell">
-          <ThemeButton onActivate={onToggleThemeSurface} />
-        </row>
-        <row class="control-button-cell">
-          <LanguageButton onActivate={onToggleLanguageSurface} />
-        </row>
-        <row class="control-button-cell">
-          <BatteryButton />
-        </row>
-        <row class="control-button-cell">
-          <SettingsButton onActivate={onToggleSettingsSurface} />
-        </row>
-      </row>
-
-    </row>
-
-    <!-- Popover surfaces -->
-    <AudioPopover hidden={audio_surface_hidden} />
-    <LanguagePopover hidden={language_surface_hidden} />
-    <ThemeSelector hidden={theme_surface_hidden} />
-    <QuickSettings hidden={settings_surface_hidden} />
-  </stack>
+    </stack>
 </template>
 
 <script lang="luau">
-local AudioPopover   = require("@mesh/audio-popover")
-local LanguagePopover = require("@mesh/language-popover")
-local ThemeSelector  = require("@mesh/theme-selector")
-local QuickSettings  = require("@mesh/quick-settings")
-
-local BatteryButton   = require("./components/battery-button.mesh")
+local BatteryButton = require("./components/battery-button.mesh")
 local BrightnessButton = require("./components/brightness-button.mesh")
-local ClockButton     = require("./components/clock-button.mesh")
-local LanguageButton  = require("./components/language-button.mesh")
-local NowPlaying      = require("./components/now-playing.mesh")
-local SettingsButton  = require("./components/settings-button.mesh")
-local ThemeButton     = require("./components/theme-button.mesh")
-local VolumeButton    = require("./components/volume-button.mesh")
-local WindowTitle     = require("./components/window-title.mesh")
-local WorkspaceList   = require("./components/workspace-list.mesh")
+local ClockButton = require("./components/clock-button.mesh")
+local LanguageButton = require("./components/language-button.mesh")
+local NowPlaying = require("./components/now-playing.mesh")
+local SettingsButton = require("./components/settings-button.mesh")
+local ThemeButton = require("./components/theme-button.mesh")
+local VolumeButton = require("./components/volume-button.mesh")
+local WindowTitle = require("./components/window-title.mesh")
+local WorkspaceList = require("./components/workspace-list.mesh")
 
 local audio = require("mesh.audio")
-
-audio_surface_id    = "@mesh/audio-popover"
-audio_surface_hidden = true
-
-language_surface_id    = "@mesh/language-popover"
-language_surface_hidden = true
-
-theme_surface_id    = "@mesh/theme-selector"
-theme_surface_hidden = true
-
-settings_surface_id    = "@mesh/quick-settings"
-settings_surface_hidden = true
-
-local function toggle_surface(surface_id, is_hidden_ref, event)
-    if is_hidden_ref then
-        mesh.events.publish("shell.position-surface", {
-            surface_id  = surface_id,
-            margin_top  = 0,
-            margin_left = tonumber((event.current_target.position or {}).margin_left) or 0,
-        })
-        local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
-        mesh.popover.activate(surface_id, event, { focus = focus })
-        return false
-    else
-        mesh.popover.hide(surface_id)
-        return true
-    end
-end
-
-function onToggleAudioSurface(event)
-    audio_surface_hidden = toggle_surface(audio_surface_id, audio_surface_hidden, event)
-end
-
-function onToggleLanguageSurface(event)
-    language_surface_hidden = toggle_surface(language_surface_id, language_surface_hidden, event)
-end
-
-function onToggleThemeSurface(event)
-    theme_surface_hidden = toggle_surface(theme_surface_id, theme_surface_hidden, event)
-end
-
-function onToggleSettingsSurface(event)
-    settings_surface_hidden = toggle_surface(settings_surface_id, settings_surface_hidden, event)
-end
 
 function onMuteShortcut()
     if audio and audio.available ~= false then
@@ -124,71 +64,73 @@ end
 </script>
 
 <style>
-.nav-root {
-    width: 100%;
-    height: 100%;
-}
-
-.nav-shell {
-    width: 100%;
-    height: 100%;
-    container-type: inline-size;
-    justify-content: start;
-    align-items: center;
-    gap: var(--spacing-md);
-    padding-inline: var(--spacing-lg);
-    overflow-x: hidden;
-    overflow-y: hidden;
-    background: rgba(10, 10, 14, 0.75);
-    backdrop-filter: blur(20px);
-    color: var(--color-on-surface);
-    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
-}
-
-.left-cluster {
-    align-items: center;
-    gap: var(--spacing-sm);
-    min-width: 0;
-    flex-shrink: 1;
-    transition: gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
-}
-
-.nav-spacer {
-    flex-grow: 1;
-}
-
-.right-cluster {
-    height: 100%;
-    flex-shrink: 0;
-    align-items: center;
-    gap: 2px;
-    transition: gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
-}
-
-.control-button-cell {
-    height: 40px;
-    flex-shrink: 0;
-    align-items: center;
-    padding-inline: 1px;
-    padding-block: 0;
-}
-
-@container (max-width: 860px) {
-    .nav-shell {
-        gap: var(--spacing-sm);
+    .nav-root {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
     }
-}
 
-@container (max-width: 720px) {
     .nav-shell {
+        width: 100%;
+        height: 100%;
+        container-type: inline-size;
+        justify-content: start;
+        align-items: center;
+        gap: var(--spacing-md);
+        padding-inline: var(--spacing-lg);
+        overflow-x: hidden;
+        overflow-y: hidden;
+        background: rgba(10, 10, 14, 0.75);
+        backdrop-filter: blur(20px);
+        color: var(--color-on-surface);
+        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+        color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+        gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .left-cluster {
+        align-items: center;
         gap: var(--spacing-sm);
-        padding-inline: var(--spacing-md);
+        min-width: 0;
+        flex-shrink: 1;
+        transition: gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .nav-spacer {
+        flex-grow: 1;
     }
 
     .right-cluster {
-        gap: 1px;
+        height: 100%;
+        flex-shrink: 0;
+        align-items: center;
+        gap: 2px;
+        transition: gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
     }
-}
+
+    .control-button-cell {
+        height: 40px;
+        flex-shrink: 0;
+        align-items: center;
+        padding-inline: 1px;
+        padding-block: 0;
+    }
+
+    @container (max-width: 860px) {
+        .nav-shell {
+            gap: var(--spacing-sm);
+        }
+    }
+
+    @container (max-width: 720px) {
+        .nav-shell {
+            gap: var(--spacing-sm);
+            padding-inline: var(--spacing-md);
+        }
+
+        .right-cluster {
+            gap: 1px;
+        }
+    }
 </style>

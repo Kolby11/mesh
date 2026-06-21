@@ -221,9 +221,14 @@ impl FrontendSurfaceComponent {
             &self.scroll_offsets,
         );
         if self.surface_exiting {
-            append_class(tree, "mesh-surface-exiting");
+            append_class_recursive(tree, "mesh-surface-exiting");
             tree.attributes
                 .insert("_mesh_surface_exiting".into(), "true".into());
+        }
+        if self.surface_entering {
+            append_class_recursive(tree, "mesh-surface-entering");
+            tree.attributes
+                .insert("_mesh_surface_entering".into(), "true".into());
         }
         self.annotate_surface_shortcuts(tree);
         annotate_overflow_tree(tree, "root", &mut self.scroll_offsets);
@@ -543,6 +548,13 @@ fn append_class(node: &mut WidgetNode, class_name: &str) {
         class.push(' ');
     }
     class.push_str(class_name);
+}
+
+fn append_class_recursive(node: &mut WidgetNode, class_name: &str) {
+    append_class(node, class_name);
+    for child in &mut node.children {
+        append_class_recursive(child, class_name);
+    }
 }
 
 fn annotate_selection_node(

@@ -42,6 +42,19 @@ fn assert_layout_contains(parent: &WidgetNode, child: &WidgetNode, label: &str) 
     );
 }
 
+fn first_node_with_class_token<'a>(node: &'a WidgetNode, token: &str) -> Option<&'a WidgetNode> {
+    if node
+        .attributes
+        .get("class")
+        .is_some_and(|class| class.split_whitespace().any(|candidate| candidate == token))
+    {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| first_node_with_class_token(child, token))
+}
+
 #[test]
 fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
     let theme = default_theme();
@@ -189,6 +202,114 @@ fn shipped_audio_popover_content_measured_surface_contains_volume_actions() {
     for action in &actions.children {
         assert_layout_contains(actions, action, "@mesh/audio-popover volume action");
     }
+}
+
+#[test]
+fn shipped_theme_selector_uses_left_anchored_content_measured_popover_layout() {
+    let theme_selector =
+        real_frontend_module_component("@mesh/theme-selector", audio_network_catalog());
+
+    assert_eq!(
+        theme_selector.surface_layout.edge,
+        Edge::Left,
+        "@mesh/theme-selector should use the shell's popover positioning anchor"
+    );
+    assert_eq!(
+        theme_selector.surface_layout.size_policy,
+        SurfaceSizePolicy::ContentMeasured,
+        "@mesh/theme-selector should stay content-measured like the other nav popovers"
+    );
+    assert_eq!(theme_selector.surface_layout.width, 112);
+    assert_eq!(theme_selector.surface_layout.height, 116);
+    assert_eq!(
+        theme_selector.surface_layout.display_transition.show_ms,
+        120
+    );
+    assert_eq!(
+        theme_selector.surface_layout.display_transition.hide_ms,
+        120
+    );
+}
+
+#[test]
+fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
+    let theme = default_theme();
+    let mut theme_selector =
+        real_frontend_module_component("@mesh/theme-selector", audio_network_catalog());
+    theme_selector.visible = true;
+    theme_selector.set_surface_exiting(false);
+
+    let mut buffer = PixelBuffer::new(112, 116);
+    theme_selector
+        .paint(&theme, 112, 116, &mut buffer, 1.0)
+        .unwrap();
+    let entering_tree = theme_selector
+        .last_tree
+        .as_ref()
+        .expect("rendered theme selector entering frame");
+    assert!(
+        entering_tree
+            .attributes
+            .get("class")
+            .is_some_and(|class| class.contains("mesh-surface-entering")),
+        "first show paint should expose mesh-surface-entering for collapsed bubble positions"
+    );
+    let entering_bubble =
+        first_node_with_class_token(entering_tree, "theme-bubble").expect("entering theme bubble");
+    assert_eq!(
+        entering_bubble.computed_style.transform.translate_x, 0.0,
+        "entering bubble should start at the trigger origin"
+    );
+    assert_eq!(
+        entering_bubble.computed_style.transform.translate_y, -18.0,
+        "entering bubble should start tucked above the trigger origin"
+    );
+
+    theme_selector
+        .paint(&theme, 112, 116, &mut buffer, 1.0)
+        .unwrap();
+    let launched_tree = theme_selector
+        .last_tree
+        .as_ref()
+        .expect("rendered theme selector launch frame");
+    assert!(
+        launched_tree
+            .attributes
+            .get("class")
+            .is_none_or(|class| !class.contains("mesh-surface-entering")),
+        "second show paint should transition from entering state into resting bubble positions"
+    );
+    let launched_bubble =
+        first_node_with_class_token(launched_tree, "theme-bubble").expect("launched theme bubble");
+    assert!(
+        launched_bubble.computed_style.transform.translate_x > -1.0,
+        "launch transition should begin from the entering transform"
+    );
+    assert!(
+        !theme_selector.transitions.is_empty(),
+        "dropping mesh-surface-entering should start bubble transform transitions"
+    );
+
+    theme_selector.set_surface_exiting(false);
+    assert!(
+        theme_selector.transitions.is_empty(),
+        "showing a kept-alive surface should clear stale transitions before replaying the launch"
+    );
+
+    theme_selector
+        .paint(&theme, 112, 116, &mut buffer, 1.0)
+        .unwrap();
+    let replay_tree = theme_selector
+        .last_tree
+        .as_ref()
+        .expect("rendered theme selector replay entering frame");
+    assert!(
+        replay_tree
+            .attributes
+            .get("class")
+            .is_some_and(|class| class.contains("mesh-surface-entering")),
+        "re-show should expose a fresh entering frame"
+    );
 }
 
 #[test]

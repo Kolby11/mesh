@@ -1,20 +1,25 @@
 <template>
-  <button
-    ref="language-button"
-    class="nav-button"
-    onclick={onActivate}
-    title="{t('nav.language_menu')}"
-    aria-label="{t('nav.language_menu')}"
-  >
-    <label class="language-label">{current_locale_label}</label>
-  </button>
+  <stack class="nav-button-shell">
+    <button
+      ref="language-button"
+      class="nav-button"
+      onclick={onLanguageToggle}
+      title="{t('nav.language_menu')}"
+      aria-label="{t('nav.language_menu')}"
+    >
+      <label class="language-label">{current_locale_label}</label>
+    </button>
+    <LanguagePopover hidden={language_surface_hidden} />
+  </stack>
 </template>
 
 <script lang="luau">
 local t = import("mesh.i18n", "t")
+local LanguagePopover = require("@mesh/language-popover")
 
-onActivate = nil
 current_locale_label = "EN"
+language_surface_id = "@mesh/language-popover"
+language_surface_hidden = true
 
 local function locale_code()
     local locale = mesh.locale.current()
@@ -50,9 +55,33 @@ end
 function render(self)
     current_locale_label = locale_label(locale_code())
 end
+
+function onLanguageToggle(event)
+    if language_surface_hidden then
+        mesh.events.publish("shell.position-surface", {
+            surface_id = language_surface_id,
+            margin_top = 0,
+            margin_left = tonumber((event.current_target.position or {}).margin_left) or 0,
+        })
+        local focus = event.trigger ~= nil and event.trigger.type == "keyboard"
+        mesh.popover.activate(language_surface_id, event, { focus = focus })
+        language_surface_hidden = false
+    else
+        mesh.popover.hide(language_surface_id)
+        language_surface_hidden = true
+    end
+end
 </script>
 
 <style>
+.nav-button-shell {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+}
+
 .nav-button {
     width: 40px;
     height: 40px;
@@ -102,5 +131,17 @@ end
     letter-spacing: 0.05em;
     user-select: none;
     transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+}
+
+@container (max-width: 720px) {
+    .nav-button-shell {
+        width: 36px;
+        height: 36px;
+    }
+
+    .nav-button {
+        width: 36px;
+        height: 36px;
+    }
 }
 </style>

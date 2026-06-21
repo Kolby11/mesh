@@ -493,6 +493,7 @@ pub(super) fn real_frontend_module_component(
     let navigation_dir = root.join("modules/frontend/navigation-bar");
     let audio_popover_dir = root.join("modules/frontend/audio-popover");
     let language_popover_dir = root.join("modules/frontend/language-popover");
+    let theme_selector_dir = root.join("modules/frontend/theme-selector");
     let debug_inspector_dir = root.join("modules/frontend/debug-inspector");
 
     let navigation_manifest = mesh_core_module::manifest::load_manifest(&navigation_dir)
@@ -505,6 +506,9 @@ pub(super) fn real_frontend_module_component(
         mesh_core_module::manifest::load_manifest(&language_popover_dir)
             .expect("language popover manifest")
             .manifest;
+    let theme_selector_manifest = mesh_core_module::manifest::load_manifest(&theme_selector_dir)
+        .expect("theme selector manifest")
+        .manifest;
     let debug_inspector_manifest = mesh_core_module::manifest::load_manifest(&debug_inspector_dir)
         .expect("debug inspector manifest")
         .manifest;
@@ -578,6 +582,7 @@ pub(super) fn real_frontend_module_component(
         module_component_imports: HashMap::from([
             ("AudioPopover".into(), "@mesh/audio-popover".into()),
             ("LanguagePopover".into(), "@mesh/language-popover".into()),
+            ("ThemeSelector".into(), "@mesh/theme-selector".into()),
         ]),
         watched_paths: Vec::new(),
     };
@@ -599,6 +604,18 @@ pub(super) fn real_frontend_module_component(
         component: parse_component(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../../modules/frontend/language-popover/src/main.mesh"
+        )))
+        .unwrap(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
+    let theme_selector_compiled = CompiledFrontendModule {
+        manifest: theme_selector_manifest,
+        source_path: theme_selector_dir.join("src/main.mesh"),
+        component: parse_component(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../modules/frontend/theme-selector/src/main.mesh"
         )))
         .unwrap(),
         local_components: HashMap::new(),
@@ -691,6 +708,13 @@ pub(super) fn real_frontend_module_component(
                 },
             ),
             (
+                "@mesh/theme-selector".into(),
+                FrontendCatalogEntry {
+                    module_dir: theme_selector_dir.clone(),
+                    compiled: theme_selector_compiled.clone(),
+                },
+            ),
+            (
                 "@mesh/debug-inspector".into(),
                 FrontendCatalogEntry {
                     module_dir: debug_inspector_dir.clone(),
@@ -705,6 +729,8 @@ pub(super) fn real_frontend_module_component(
         (audio_popover_compiled, audio_popover_dir)
     } else if module_id == "@mesh/language-popover" {
         (language_popover_compiled, language_popover_dir)
+    } else if module_id == "@mesh/theme-selector" {
+        (theme_selector_compiled, theme_selector_dir)
     } else if module_id == "@mesh/debug-inspector" {
         (debug_inspector_compiled, debug_inspector_dir)
     } else {

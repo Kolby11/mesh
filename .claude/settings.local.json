@@ -138,7 +138,15 @@
       "Bash(code --version)",
       "Bash(cargo search *)",
       "Bash(cargo info *)",
-      "Bash(xargs -I{} grep -A4 '\\\\[lib\\\\]\\\\|^name' {}/Cargo.toml)"
+      "Bash(xargs -I{} grep -A4 '\\\\[lib\\\\]\\\\|^name' {}/Cargo.toml)",
+      "Bash(sed -n '1,40p' modules/frontend/audio-popover/module.json)",
+      "Bash(sed -n '1,6p' modules/frontend/audio-popover/src/main.mesh)",
+      "Bash(sed -n '/\"surface\"/,/}/p' modules/frontend/language-popover/module.json)",
+      "Bash(sed -n '/\"surface\"/,/}/p' modules/frontend/quick-settings/module.json)",
+      "Bash(cp modules/frontend/theme-selector/module.json /tmp/ts-module.json.bak)",
+      "Bash(sed -i 's/\"visible_on_start\": false/\"visible_on_start\": true/' modules/frontend/theme-selector/module.json)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(sed -i 's/\"visible_on_start\": true/\"visible_on_start\": false/' modules/frontend/theme-selector/module.json)"
     ]
   }
 }

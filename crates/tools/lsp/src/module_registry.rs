@@ -16,6 +16,10 @@ pub struct InterfaceShape {
 pub struct ModuleRegistry {
     /// Maps module-id → Manifest for all discovered modules.
     pub manifests: HashMap<String, Manifest>,
+    /// Maps module-id → directory containing its manifest.
+    pub module_dirs: HashMap<String, PathBuf>,
+    /// Maps module-id → resolved main entrypoint path when present.
+    pub module_entrypoints: HashMap<String, PathBuf>,
     /// Maps interface name (e.g. "mesh.audio") → list of field names it emits.
     pub interface_fields: HashMap<String, Vec<String>>,
     /// Maps interface name → inferred shape (state fields + commands) from backend script.
@@ -28,6 +32,8 @@ impl ModuleRegistry {
     pub fn empty() -> Self {
         Self {
             manifests: HashMap::new(),
+            module_dirs: HashMap::new(),
+            module_entrypoints: HashMap::new(),
             interface_fields: HashMap::new(),
             interface_shapes: HashMap::new(),
             exported_tags: HashMap::new(),
@@ -87,12 +93,19 @@ impl ModuleRegistry {
         };
         let manifest = loaded.manifest;
         let module_id = manifest.package.id.clone();
+        let manifest_dir = loaded.path.parent().unwrap_or(dir).to_path_buf();
 
         // Record exported component tag
         if let Some(tag) = manifest.exported_component_tag() {
             self.exported_tags
                 .insert(tag.to_string(), module_id.clone());
         }
+
+        if let Some(entry) = &manifest.entrypoints.main {
+            self.module_entrypoints
+                .insert(module_id.clone(), manifest_dir.join(entry));
+        }
+        self.module_dirs.insert(module_id.clone(), manifest_dir);
 
         // For interface modules, record the interface name
         if manifest.package.module_type == ModuleType::Interface {
@@ -159,6 +172,10 @@ impl ModuleRegistry {
     /// Component tags exported by modules: tag name → module-id.
     pub fn exported_component_tags(&self) -> &HashMap<String, String> {
         &self.exported_tags
+    }
+
+    pub fn module_entrypoint(&self, module_id: &str) -> Option<&Path> {
+        self.module_entrypoints.get(module_id).map(PathBuf::as_path)
     }
 }
 

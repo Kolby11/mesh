@@ -1,5 +1,6 @@
 pub mod analyzer;
 pub mod backend;
+pub mod definition;
 pub mod diagnostics;
 pub mod document;
 pub mod format;

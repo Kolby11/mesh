@@ -301,6 +301,7 @@ pub(super) struct FrontendSurfaceComponent {
     graph_i18n_catalogs: Vec<(String, String, PathBuf)>,
     pub(super) visible: bool,
     surface_exiting: bool,
+    surface_entering: bool,
     dirty: bool,
     /// Set when only appearance changed (e.g. hover) without script-state
     /// changes. Triggers a paint via `wants_render`, but lets `paint` skip the
@@ -485,6 +486,7 @@ impl FrontendSurfaceComponent {
             graph_i18n_catalogs: Vec::new(),
             visible: settings_state.layout.visible_on_start,
             surface_exiting: false,
+            surface_entering: false,
             dirty: true,
             style_only_dirty: false,
             dirty_types: ComponentDirtyFlags::TREE_REBUILD | ComponentDirtyFlags::SURFACE_CONFIG,

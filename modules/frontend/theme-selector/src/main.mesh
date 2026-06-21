@@ -1,37 +1,48 @@
 <template>
-    <popover class="ts-shell" aria-label="Select theme">
-        <column class="ts-panel">
+    <popover class="theme-float-shell" onmouseleave={onSelectorLeave} aria-label="Select theme">
+        <box class="theme-float-stage">
             <button class="{dark_class}" onclick={onDark} aria-label="Default Dark">
-                <icon class="ts-icon" name="weather-clear-night" size="18" />
-                <text class="ts-label">Default Dark</text>
+                <box class="theme-bubble-core theme-bubble-core-dark">
+                    <icon class="theme-bubble-icon" name="weather-clear-night" size="14" />
+                </box>
             </button>
             <button class="{light_class}" onclick={onLight} aria-label="Default Light">
-                <icon class="ts-icon" name="weather-clear" size="18" />
-                <text class="ts-label">Default Light</text>
+                <box class="theme-bubble-core theme-bubble-core-light">
+                    <icon class="theme-bubble-icon" name="weather-clear" size="14" />
+                </box>
             </button>
             <button class="{gruvbox_class}" onclick={onGruvbox} aria-label="Gruvbox">
-                <icon class="ts-icon" name="emblem-photos" size="18" />
-                <text class="ts-label">Gruvbox</text>
+                <box class="theme-bubble-core theme-bubble-core-gruvbox">
+                    <icon class="theme-bubble-icon" name="palette" size="14" />
+                </box>
             </button>
-        </column>
+        </box>
     </popover>
 </template>
 
 <script lang="luau">
-dark_class        = "ts-option ts-option-active"
-light_class       = "ts-option"
-gruvbox_class     = "ts-option"
-
 local theme = require("mesh.theme")
 
-local THEME_DARK        = "mesh-default-dark"
-local THEME_LIGHT       = "mesh-default-light"
-local THEME_GRUVBOX     = "gruvbox-dark"
+dark_class = "theme-bubble theme-bubble-dark"
+light_class = "theme-bubble theme-bubble-light"
+gruvbox_class = "theme-bubble theme-bubble-gruvbox"
+
+local THEME_DARK = "mesh-default-dark"
+local THEME_LIGHT = "mesh-default-light"
+local THEME_GRUVBOX = "gruvbox-dark"
 
 local function sync_classes(current)
-    dark_class       = (current == THEME_DARK)       and "ts-option ts-option-active" or "ts-option"
-    light_class      = (current == THEME_LIGHT)      and "ts-option ts-option-active" or "ts-option"
-    gruvbox_class    = (current == THEME_GRUVBOX)    and "ts-option ts-option-active" or "ts-option"
+    dark_class = "theme-bubble theme-bubble-dark"
+    light_class = "theme-bubble theme-bubble-light"
+    gruvbox_class = "theme-bubble theme-bubble-gruvbox"
+
+    if current == THEME_DARK then
+        dark_class = dark_class .. " theme-bubble-active"
+    elseif current == THEME_LIGHT then
+        light_class = light_class .. " theme-bubble-active"
+    elseif current == THEME_GRUVBOX then
+        gruvbox_class = gruvbox_class .. " theme-bubble-active"
+    end
 end
 
 function render(self)
@@ -47,88 +58,174 @@ local function apply_theme(id)
     mesh.popover.hide("@mesh/theme-selector")
 end
 
-function onDark()       apply_theme(THEME_DARK)        end
-function onLight()      apply_theme(THEME_LIGHT)       end
-function onGruvbox()    apply_theme(THEME_GRUVBOX)     end
+function onDark()
+    apply_theme(THEME_DARK)
+end
+function onLight()
+    apply_theme(THEME_LIGHT)
+end
+function onGruvbox()
+    apply_theme(THEME_GRUVBOX)
+end
+
+function onSelectorLeave()
+    mesh.popover.hide("@mesh/theme-selector")
+end
 </script>
 
 <style>
-    .ts-shell {
+    .theme-float-shell {
         width: 100%;
         height: 100%;
-        padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-sm) var(--spacing-sm);
+        padding: 0;
         background: transparent;
         opacity: 1;
         transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
     }
 
-    .ts-shell.mesh-surface-exiting {
+    .theme-float-shell.mesh-surface-exiting {
         opacity: 0;
     }
 
-    .ts-panel {
-        gap: var(--spacing-xs);
-        padding: var(--spacing-sm);
-        border-radius: var(--radius-lg);
-        background: var(--color-surface-container);
-        color: var(--color-on-surface);
-        border-width: 1px;
-        border-style: solid;
-        border-color: var(--color-outline-variant);
-        min-width: 180px;
+    .theme-float-stage {
+        width: 112px;
+        height: 116px;
+        position: relative;
+        overflow: visible;
     }
 
-    .ts-option {
-        width: 100%;
-        height: 40px;
-        justify-content: start;
+    .theme-bubble {
+        position: absolute;
+        top: 40px;
+        left: 56px;
+        width: 36px;
+        height: 36px;
+        justify-content: center;
         align-items: center;
-        gap: var(--spacing-sm);
-        padding-inline: var(--spacing-md);
-        border-radius: var(--radius-md);
+        padding: 0;
+        border-radius: var(--radius-full);
         background: transparent;
-        color: var(--color-on-surface);
+        border-width: 0;
+        opacity: 1;
+        transition: transform 360ms var(--animation-curves-bezier-emphasized-decelerate),
+        opacity 220ms var(--animation-curves-bezier-standard);
+    }
+
+    .theme-bubble-core {
+        width: 36px;
+        height: 36px;
+        justify-content: center;
+        align-items: center;
+        border-radius: var(--radius-full);
         border-width: 2px;
         border-style: solid;
         border-color: transparent;
-        text-wrap: none;
-        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+        box-shadow: 0px 6px 18px rgba(0, 0, 0, 0.34);
+        color: var(--color-on-surface);
+        animation-duration: 2800ms;
+        animation-timing-function: ease-in-out;
+        animation-iteration-count: infinite;
     }
 
-    .ts-option:hover {
-        background: var(--color-secondary-container);
-        color: var(--color-on-secondary-container);
-        border-radius: var(--radius-md);
+    .theme-bubble-dark {
+        transform: translate(-46px, 2px) scale(1);
+        transition-delay: 0ms;
     }
 
-    .ts-option:focus,
-    .ts-option:focus-visible {
-        background: var(--color-tertiary-container);
-        color: var(--color-on-tertiary-container);
+    .theme-bubble-light {
+        transform: translate(-18px, 26px) scale(1);
+        transition-delay: 45ms;
     }
 
-    .ts-option:active,
-    .ts-option-active {
-        background: var(--color-primary-container);
-        color: var(--color-on-primary-container);
+    .theme-bubble-gruvbox {
+        transform: translate(10px, 2px) scale(1);
+        transition-delay: 90ms;
+    }
+
+    .theme-bubble.mesh-surface-entering {
+        transform: translate(0px, -18px) scale(0.12);
+        opacity: 0;
+    }
+
+    .theme-bubble.mesh-surface-exiting {
+        transform: translate(0px, -18px) scale(0.12);
+        opacity: 0;
+        animation-name: none;
+        transition: transform 160ms var(--animation-curves-bezier-emphasized-decelerate),
+        opacity 120ms var(--animation-curves-bezier-standard);
+    }
+
+    .theme-bubble-core.mesh-surface-exiting {
+        animation-name: none;
+    }
+
+    .theme-bubble-dark .theme-bubble-core {
+        background: #121821;
+        animation-name: theme-bubble-float-dark;
+        animation-delay: 360ms;
+    }
+
+    .theme-bubble-light .theme-bubble-core {
+        background: #f3ead7;
+        color: #443a2b;
+        animation-name: theme-bubble-float-light;
+        animation-delay: 430ms;
+    }
+
+    .theme-bubble-gruvbox .theme-bubble-core {
+        background: #5b4636;
+        color: #f2e5bc;
+        animation-name: theme-bubble-float-gruvbox;
+        animation-delay: 500ms;
+    }
+
+    .theme-bubble-active .theme-bubble-core {
         border-color: var(--color-primary);
-        border-radius: var(--radius-full);
     }
 
-    .ts-icon {
-        width: 20px;
-        height: 20px;
-        flex-shrink: 0;
+    .theme-bubble:hover .theme-bubble-core {
+        border-color: var(--color-secondary);
+    }
+
+    .theme-bubble-icon {
+        width: 18px;
+        height: 18px;
         color: inherit;
     }
 
-    .ts-label {
-        font-size: var(--typography-size-sm);
-        font-weight: 600;
-        color: inherit;
-        text-wrap: none;
+    @keyframes theme-bubble-float-dark {
+        0% {
+            transform: translate(0px, 0px) scale(1);
+        }
+        54% {
+            transform: translate(-3px, -6px) scale(1.05);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    @keyframes theme-bubble-float-light {
+        0% {
+            transform: translate(0px, 0px) scale(1);
+        }
+        54% {
+            transform: translate(0px, -7px) scale(1.04);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    @keyframes theme-bubble-float-gruvbox {
+        0% {
+            transform: translate(0px, 0px) scale(1);
+        }
+        54% {
+            transform: translate(3px, -5px) scale(1.05);
+        }
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
     }
 </style>
