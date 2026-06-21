@@ -1969,3 +1969,36 @@ end
         .collect();
     assert_eq!(nums, vec![80.0]);
 }
+
+#[test]
+fn refs_method_options_table_is_separated_from_positional_args() {
+    // A DOM-style options table (`{ smooth = true }`) is captured into `options`,
+    // distinct from positional numeric args and from the stripped `self` table.
+    let mut ctx = ScriptContext::new("@test/refs-options", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+function smooth_jump()
+    refs.list:scroll_to(100, { smooth = true, duration = 300 })
+end
+function smooth_reveal()
+    refs.row:scroll_into_view({ smooth = true })
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_handler("smooth_jump", &[]).unwrap();
+    let actions = ctx.drain_element_actions();
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].action, "scroll_to");
+    assert_eq!(actions[0].args.as_array().unwrap().len(), 1);
+    assert_eq!(actions[0].args[0].as_f64(), Some(100.0));
+    assert_eq!(actions[0].options.get("smooth").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(actions[0].options.get("duration").and_then(|v| v.as_f64()), Some(300.0));
+
+    ctx.call_handler("smooth_reveal", &[]).unwrap();
+    let actions = ctx.drain_element_actions();
+    // No positional args, options-only — `self` table must not leak into either.
+    assert!(actions[0].args.as_array().unwrap().is_empty());
+    assert_eq!(actions[0].options.get("smooth").and_then(|v| v.as_bool()), Some(true));
+}

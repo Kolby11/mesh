@@ -184,3 +184,66 @@ end
         "refs.list.scroll_top should read back 100, got {read}"
     );
 }
+
+#[test]
+fn refs_scroll_to_smooth_eases_the_offset_over_time() {
+    // `refs.x:scroll_to(top, { smooth = true })` registers a ScrollAnimation
+    // instead of snapping; advance_scroll_animations eases the offset to the
+    // target over its duration.
+    let mut component = test_frontend_component(
+        r#"
+<style>
+scroll { height: 60px; overflow-y: auto; }
+.content { height: 240px; }
+</style>
+<template>
+    <scroll ref="list">
+        <box class="content" />
+    </scroll>
+</template>
+<script lang="luau">
+function smooth_jump()
+    refs.list:scroll_to(100, { smooth = true, duration = 200 })
+end
+</script>
+"#,
+    );
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 120);
+    component.paint(&theme, 160, 120, &mut buffer, 1.0).unwrap();
+
+    component.call_namespaced_handler("smooth_jump", &[]).unwrap();
+
+    // Smooth scroll registers an animation and does NOT snap the offset.
+    let animation = *component
+        .scroll_animations
+        .get("root/0")
+        .expect("smooth scroll_to should register a ScrollAnimation");
+    assert!((animation.target.y - 100.0).abs() < 0.01);
+    let offset_now = component
+        .scroll_offsets
+        .get("root/0")
+        .map(|o| o.y)
+        .unwrap_or(0.0);
+    assert!(offset_now < 1.0, "offset should not snap, got {offset_now}");
+
+    // Halfway through, the eased offset is partway to the target (ease-out is
+    // past the midpoint at t=0.5).
+    component.advance_scroll_animations(animation.start_time + animation.duration / 2);
+    let mid = component.scroll_offsets.get("root/0").unwrap().y;
+    assert!(
+        mid > 50.0 && mid < 100.0,
+        "mid-animation offset should be eased between 50 and 100, got {mid}"
+    );
+    assert!(!component.scroll_animations.is_empty());
+
+    // At/after the full duration, it lands exactly on the target and is dropped.
+    component.advance_scroll_animations(animation.start_time + animation.duration);
+    let end = component.scroll_offsets.get("root/0").unwrap().y;
+    assert!((end - 100.0).abs() < 0.01, "should settle at 100, got {end}");
+    assert!(
+        component.scroll_animations.is_empty(),
+        "animation should be dropped once settled"
+    );
+}

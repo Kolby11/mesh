@@ -17,6 +17,10 @@ pub struct ElementAction {
     /// `focus`/`blur`/`scroll_into_view` ignore it, `scroll_to(top[, left])`
     /// reads `[0]`/`[1]`.
     pub args: Value,
+    /// An optional trailing options table (e.g. `{ smooth = true, duration = 300 }`)
+    /// serialized as a JSON object, or `Null` when none was passed. Lets methods
+    /// take DOM-style behavior options without colliding with positional args.
+    pub options: Value,
 }
 
 /// Imperative methods exposed on a live element-node proxy. Anything not in this
@@ -56,6 +60,10 @@ fn create_element_node_proxy(
     actions: Arc<Mutex<Vec<ElementAction>>>,
 ) -> mlua::Result<Table> {
     let node = lua.create_table()?;
+    // Tag the proxy so imperative methods can recognize the implicit `self` from
+    // `obj:method(...)` calls and strip it, while keeping a real options table as
+    // an argument. Set raw so it bypasses the `__index` geometry lookup below.
+    node.raw_set("__mesh_is_element_ref", true)?;
     let meta = lua.create_table()?;
     let scope = scope.clone();
     let name_owned = name.to_string();
@@ -77,19 +85,34 @@ fn create_element_node_proxy(
                 let action = key.clone();
                 return Ok(LuaValue::Function(lua.create_function(
                     move |lua, args: Variadic<LuaValue>| {
-                        // Collect positional args in order, dropping any table — a
-                        // `:` method-call passes the node proxy as `self`, which we
-                        // ignore. The remaining values (e.g. `scroll_to(top, left)`)
-                        // are forwarded to the shell as a JSON array.
-                        let payload = args
-                            .iter()
-                            .filter(|value| !matches!(value, LuaValue::Table(_)))
-                            .map(|value| lua.from_value::<Value>(value.clone()))
-                            .collect::<mlua::Result<Vec<Value>>>()?;
+                        // Separate args into positional values and an options table.
+                        // A `:` method-call passes the node proxy as `self` (a table
+                        // tagged with `__mesh_is_element_ref`), which we skip; any
+                        // other table is a DOM-style options bag
+                        // (e.g. `{ smooth = true }`); the rest (numbers) are
+                        // positional, forwarded as a JSON array.
+                        let mut positional = Vec::new();
+                        let mut options = Value::Null;
+                        for value in args.iter() {
+                            match value {
+                                LuaValue::Table(table) => {
+                                    let is_self = table
+                                        .raw_get::<Option<bool>>("__mesh_is_element_ref")?
+                                        .unwrap_or(false);
+                                    if !is_self {
+                                        options = lua.from_value::<Value>(value.clone())?;
+                                    }
+                                }
+                                other => {
+                                    positional.push(lua.from_value::<Value>(other.clone())?);
+                                }
+                            }
+                        }
                         actions.lock().unwrap().push(ElementAction {
                             target: target.clone(),
                             action: action.clone(),
-                            args: Value::Array(payload),
+                            args: Value::Array(positional),
+                            options,
                         });
                         Ok(())
                     },

@@ -100,10 +100,10 @@ impl FrontendSurfaceComponent {
                 }
                 "scroll_to" => {
                     // `refs.x:scroll_to(top[, left])` sets the element's own scroll
-                    // offset directly (DOM `element.scrollTop = y`), clamped to the
-                    // container's scrollable range. Omitted axes stay put.
-                    if let Some(key) = ref_keys.get(&action.target)
-                        && let Some(node) = find_node_by_key(&tree, key)
+                    // offset (DOM `element.scrollTop = y`), clamped to the container's
+                    // range; omitted axes stay put. `{ smooth = true }` eases there.
+                    if let Some(key) = ref_keys.get(&action.target).cloned()
+                        && let Some(node) = find_node_by_key(&tree, &key)
                     {
                         let (max_x, max_y) = scroll_limits(node);
                         let nums = action.args.as_array();
@@ -112,23 +112,15 @@ impl FrontendSurfaceComponent {
                                 .and_then(serde_json::Value::as_f64)
                                 .map(|value| value as f32)
                         };
-                        let entry = self.scroll_offsets.entry(key.clone()).or_default();
-                        let mut moved = false;
+                        let current = self.scroll_offsets.get(&key).copied().unwrap_or_default();
+                        let mut target = current;
                         if let Some(top) = arg_f32(0) {
-                            let next = top.clamp(0.0, max_y);
-                            if (next - entry.y).abs() > f32::EPSILON {
-                                entry.y = next;
-                                moved = true;
-                            }
+                            target.y = top.clamp(0.0, max_y);
                         }
                         if let Some(left) = arg_f32(1) {
-                            let next = left.clamp(0.0, max_x);
-                            if (next - entry.x).abs() > f32::EPSILON {
-                                entry.x = next;
-                                moved = true;
-                            }
+                            target.x = left.clamp(0.0, max_x);
                         }
-                        if moved {
+                        if self.apply_scroll_target(key, current, target, &action.options) {
                             self.invalidate(
                                 ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS,
                             );
@@ -142,10 +134,21 @@ impl FrontendSurfaceComponent {
                     if let Some(key) = ref_keys.get(&action.target) {
                         let updates =
                             scroll_into_view_offsets(&tree, key, &self.scroll_offsets);
-                        if !updates.is_empty() {
-                            for (container_key, offset) in updates {
-                                self.scroll_offsets.insert(container_key, offset);
-                            }
+                        let mut moved = false;
+                        for (container_key, target) in updates {
+                            let current = self
+                                .scroll_offsets
+                                .get(&container_key)
+                                .copied()
+                                .unwrap_or_default();
+                            moved |= self.apply_scroll_target(
+                                container_key,
+                                current,
+                                target,
+                                &action.options,
+                            );
+                        }
+                        if moved {
                             self.invalidate(
                                 ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS,
                             );
@@ -158,6 +161,94 @@ impl FrontendSurfaceComponent {
             }
         }
         Ok(requests)
+    }
+
+    /// Apply a resolved scroll target to a container, honoring the `{ smooth }`
+    /// option. Instant scrolls snap `scroll_offsets` and cancel any running
+    /// animation; smooth scrolls register a `ScrollAnimation` that
+    /// `advance_scroll_animations` eases over `duration` (default 250ms). Returns
+    /// whether anything will change (so the caller can invalidate).
+    pub(super) fn apply_scroll_target(
+        &mut self,
+        key: String,
+        current: ScrollOffsetState,
+        target: ScrollOffsetState,
+        options: &serde_json::Value,
+    ) -> bool {
+        if (target.x - current.x).abs() < f32::EPSILON
+            && (target.y - current.y).abs() < f32::EPSILON
+        {
+            return false;
+        }
+
+        let smooth = options
+            .get("smooth")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if smooth {
+            let duration_ms = options
+                .get("duration")
+                .and_then(serde_json::Value::as_f64)
+                .filter(|value| *value > 0.0)
+                .unwrap_or(250.0);
+            self.scroll_animations.insert(
+                key,
+                ScrollAnimation {
+                    start: current,
+                    target,
+                    start_time: std::time::Instant::now(),
+                    duration: std::time::Duration::from_secs_f64(duration_ms / 1000.0),
+                },
+            );
+        } else {
+            // A snap supersedes any in-flight smooth scroll on the same container.
+            self.scroll_animations.remove(&key);
+            self.scroll_offsets.insert(key, target);
+        }
+        true
+    }
+
+    /// Tick every in-flight smooth-scroll animation: write its eased offset into
+    /// `scroll_offsets` and drop it once it reaches the target. Called at the top
+    /// of `finalize_tree` (before annotation reads the offsets); keeps requesting
+    /// repaints via `wants_render` while any animation is live.
+    pub(super) fn advance_scroll_animations(&mut self, now: std::time::Instant) {
+        if self.scroll_animations.is_empty() {
+            return;
+        }
+
+        let mut finished = Vec::new();
+        let mut updates = Vec::new();
+        for (key, animation) in &self.scroll_animations {
+            let elapsed = now.saturating_duration_since(animation.start_time).as_secs_f32();
+            let duration = animation.duration.as_secs_f32().max(f32::EPSILON);
+            let progress = (elapsed / duration).clamp(0.0, 1.0);
+            let eased = mesh_core_animation::apply_easing(
+                mesh_core_animation::Easing::EaseOut,
+                progress,
+            );
+            let x = animation.start.x + (animation.target.x - animation.start.x) * eased;
+            let y = animation.start.y + (animation.target.y - animation.start.y) * eased;
+            updates.push((key.clone(), ScrollOffsetState { x, y }));
+            if progress >= 1.0 {
+                finished.push(key.clone());
+            }
+        }
+
+        for (key, offset) in updates {
+            self.scroll_offsets.insert(key, offset);
+        }
+        for key in finished {
+            self.scroll_animations.remove(&key);
+        }
+
+        // Keep frames coming until every animation settles. This runs inside
+        // `finalize_tree` (after the per-paint dirty flags were taken), so the
+        // flag schedules the next frame via the cheap restyle path — mirroring
+        // how keyframe animations re-arm themselves.
+        if !self.scroll_animations.is_empty() {
+            self.invalidate_style_path(ComponentDirtyFlags::VISUAL_REPAINT);
+        }
     }
 
     /// Remove hover, focus, and active targets that no longer exist in the final

@@ -381,6 +381,11 @@ end
 function onResetList()
     refs.result_list:scroll_to(0)          -- jump the scroll container to the top
 end
+
+function onSmoothReveal()
+    refs.active_result:scroll_into_view({ smooth = true })  -- animated reveal
+    refs.result_list:scroll_to(0, { smooth = true, duration = 300 })
+end
 ```
 
 | Method                  | Effect                                                          |
@@ -389,6 +394,11 @@ end
 | `:blur()`               | Clears focus if this element currently holds it (fires `onblur`). |
 | `:scroll_into_view()`   | Scrolls each scrollable ancestor just enough to reveal the element (CSS "nearest" alignment; handles nested scroll regions). |
 | `:scroll_to(top[,left])`| Sets this element's own scroll offset (DOM `element.scrollTop`), clamped to its scrollable range; omitted axes stay put. |
+
+Both scroll methods accept a trailing **options table** `{ smooth = true,
+duration = <ms> }` (DOM `behavior: "smooth"`). With `smooth`, the offset eases
+to the target (`EaseOut`, default 250 ms) instead of snapping; a later instant
+scroll on the same container cancels the animation.
 
 Scroll position and extent are readable live on the reference:
 `refs.x.scroll_top` / `scroll_left` (current offset), `refs.x.scroll_height` /

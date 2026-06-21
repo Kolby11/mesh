@@ -85,6 +85,17 @@ bitflags::bitflags! {
     }
 }
 
+/// A running smooth-scroll animation from `start` to `target` over `duration`,
+/// eased with `EaseOut`. Created when a script requests a scroll with
+/// `{ smooth = true }`; advanced each frame by `advance_scroll_animations`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ScrollAnimation {
+    pub(super) start: ScrollOffsetState,
+    pub(super) target: ScrollOffsetState,
+    pub(super) start_time: std::time::Instant,
+    pub(super) duration: std::time::Duration,
+}
+
 impl ComponentDirtyFlags {
     pub(super) const TREE_REBUILD: Self = Self::SCRIPT
         .union(Self::STATE)
@@ -333,6 +344,11 @@ pub(super) struct FrontendSurfaceComponent {
     checked_values: HashMap<String, bool>,
     render_hooks_pending: bool,
     pub(super) scroll_offsets: HashMap<String, ScrollOffsetState>,
+    /// In-flight smooth-scroll animations keyed by scroll-container node key.
+    /// Ticked at the top of `finalize_tree`; each writes an eased offset into
+    /// `scroll_offsets` until it settles, then is dropped. Started by
+    /// `refs.x:scroll_to(.., { smooth = true })` / `:scroll_into_view({ smooth })`.
+    pub(super) scroll_animations: HashMap<String, ScrollAnimation>,
     // Hover tracking for CSS :hover and tooltip system.
     hovered_key: Option<String>,
     hovered_path: Vec<String>,
@@ -492,6 +508,7 @@ impl FrontendSurfaceComponent {
             checked_values: HashMap::new(),
             render_hooks_pending: true,
             scroll_offsets: HashMap::new(),
+            scroll_animations: HashMap::new(),
             hovered_key: None,
             hovered_path: Vec::new(),
             previous_hovered_path: Vec::new(),

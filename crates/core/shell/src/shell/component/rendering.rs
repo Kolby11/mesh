@@ -203,6 +203,9 @@ impl FrontendSurfaceComponent {
         trigger_kind: &'static str,
         dirty_types: ComponentDirtyFlags,
     ) {
+        // Advance smooth-scroll animations before annotation reads scroll_offsets,
+        // so the eased offset lands in this frame's `_mesh_scroll_*` attributes.
+        self.advance_scroll_animations(std::time::Instant::now());
         annotate_runtime_tree(
             tree,
             "root".to_string(),
