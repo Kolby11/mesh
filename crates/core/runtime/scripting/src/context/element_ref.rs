@@ -26,7 +26,13 @@ pub struct ElementAction {
 /// Imperative methods exposed on a live element-node proxy. Anything not in this
 /// list is treated as a live geometry/state field read from the latest paint.
 pub(super) const ELEMENT_METHODS: &[&str] =
-    &["focus", "blur", "scroll_into_view", "scroll_to", "click"];
+    &["focus", "blur", "scroll_into_view", "scroll_to", "click", "set_value"];
+
+/// Tags whose `value` is editable text content (DOM `input.value`), so the proxy
+/// reads/writes the live string rather than the snapshot's accessibility flag.
+fn is_textual_value_tag(tag: &str) -> bool {
+    matches!(tag, "input" | "textarea")
+}
 
 /// Build the `refs` proxy. `refs.<name>` returns a live element-node proxy whose
 /// geometry/state fields read from the most recent paint (fed via
@@ -68,6 +74,9 @@ fn create_element_node_proxy(
     let meta = lua.create_table()?;
     let scope = scope.clone();
     let name_owned = name.to_string();
+    // Clones for the `__newindex` closure, since `__index` moves the originals.
+    let write_actions = Arc::clone(&actions);
+    let write_name = name_owned.clone();
     meta.set(
         "__index",
         lua.create_function(move |lua, (_node, key): (Table, String)| {
@@ -119,15 +128,55 @@ fn create_element_node_proxy(
                     },
                 )?));
             }
-            // Live geometry/state field: read from the latest published metrics.
-            match element_metrics_entry(&scope, &name_owned)? {
-                Some(metrics) => metrics.get::<LuaValue>(key),
-                None => Ok(LuaValue::Nil),
+            let metrics = match element_metrics_entry(&scope, &name_owned)? {
+                Some(metrics) => metrics,
+                None => return Ok(LuaValue::Nil),
+            };
+            // `value` on an input-like element is the live text (DOM `input.value`),
+            // read from the attributes map rather than the snapshot's a11y flag.
+            if key == "value" && metrics_is_textual(&metrics)? {
+                if let LuaValue::Table(attributes) = metrics.get::<LuaValue>("attributes")? {
+                    return attributes.get::<LuaValue>("value");
+                }
+                return Ok(LuaValue::Nil);
             }
+            // Live geometry/state field: read from the latest published metrics.
+            metrics.get::<LuaValue>(key)
         })?,
+    )?;
+    // `refs.x.value = "..."` writes input text (DOM `input.value = ...`) by
+    // queuing a `set_value` action; every other field is read-only.
+    meta.set(
+        "__newindex",
+        lua.create_function(
+            move |lua, (_node, key, value): (Table, String, LuaValue)| {
+                if key != "value" {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "element reference field '{key}' is read-only"
+                    )));
+                }
+                let payload = lua.from_value::<Value>(value)?;
+                write_actions.lock().unwrap().push(ElementAction {
+                    target: write_name.clone(),
+                    action: "set_value".to_string(),
+                    args: Value::Array(vec![payload]),
+                    options: Value::Null,
+                });
+                Ok(())
+            },
+        )?,
     )?;
     node.set_metatable(Some(meta))?;
     Ok(node)
+}
+
+/// Whether a metrics snapshot describes an input-like element (so `value` is
+/// editable text). Reads the snapshot's `tag`.
+fn metrics_is_textual(metrics: &Table) -> mlua::Result<bool> {
+    match metrics.get::<LuaValue>("tag")? {
+        LuaValue::String(tag) => Ok(is_textual_value_tag(&tag.to_str()?)),
+        _ => Ok(false),
+    }
 }
 
 /// Resolve the latest metrics table for `name` from the surface-wide

@@ -127,6 +127,23 @@ impl FrontendSurfaceComponent {
                         }
                     }
                 }
+                "set_value" => {
+                    // `refs.input.value = "..."` / `refs.input:set_value("...")`
+                    // sets the input's text directly (DOM `input.value = ...`). Like
+                    // the DOM, this does not fire `oninput`/`onchange`.
+                    if let Some(key) = ref_keys.get(&action.target).cloned()
+                        && find_node_by_key(&tree, &key).is_some()
+                    {
+                        let text = action
+                            .args
+                            .as_array()
+                            .and_then(|values| values.first())
+                            .map(json_value_to_string)
+                            .unwrap_or_default();
+                        self.input_values.insert(key, text);
+                        self.invalidate_text_state();
+                    }
+                }
                 "click" => {
                     // `refs.x:click()` synthesizes a click on the live node through
                     // the same dispatch a real pointer release uses.
@@ -342,5 +359,16 @@ impl FrontendSurfaceComponent {
         if should_clear_selection {
             self.selection = None;
         }
+    }
+}
+
+/// Coerce a JSON arg into the string an input stores: strings pass through,
+/// numbers/booleans render to their literal text, null/containers become empty.
+fn json_value_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Number(number) => number.to_string(),
+        serde_json::Value::Bool(flag) => flag.to_string(),
+        _ => String::new(),
     }
 }

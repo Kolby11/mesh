@@ -395,6 +395,7 @@ end
 | `:click()`              | Synthesizes a click on the node through the real dispatch path (fires `onclick`, or activation handlers for menu/list items). |
 | `:scroll_into_view()`   | Scrolls each scrollable ancestor just enough to reveal the element (CSS "nearest" alignment; handles nested scroll regions). |
 | `:scroll_to(top[,left])`| Sets this element's own scroll offset (DOM `element.scrollTop`), clamped to its scrollable range; omitted axes stay put. |
+| `:set_value(text)`      | Sets an input's text (DOM `input.value = ...`); does not fire `oninput`/`onchange`. Equivalent to `refs.x.value = text`. |
 
 Both scroll methods accept a trailing **options table** `{ smooth = true,
 duration = <ms> }` (DOM `behavior: "smooth"`). With `smooth`, the offset eases
@@ -405,6 +406,11 @@ Scroll position and extent are readable live on the reference:
 `refs.x.scroll_top` / `scroll_left` (current offset), `refs.x.scroll_height` /
 `scroll_width` (full content size), and `refs.x.max_scroll_top` /
 `max_scroll_left` (the clamp bounds).
+
+On input-like elements `refs.x.value` is the **live editable text** (DOM
+`input.value`) — readable and assignable. Reads reflect the latest paint;
+`refs.x.value = "..."` (or `:set_value(...)`) updates the stored text without
+firing input events. Every other field is read-only; assigning to it errors.
 
 Method calls are queued and applied by the shell right after the handler
 returns, so they compose with the handler's other state changes in one frame.

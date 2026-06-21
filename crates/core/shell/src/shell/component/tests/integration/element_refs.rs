@@ -282,3 +282,45 @@ end
         "refs.action:click() should fire onclick once, got {clicks}"
     );
 }
+
+#[test]
+fn refs_value_write_sets_input_text_and_reads_back() {
+    // `refs.input.value = "..."` sets the input's text; refs.input.value reads the
+    // live string (not the a11y bool) back on the next paint.
+    let mut component = test_frontend_component(
+        r#"
+<template>
+    <input ref="field" type="text" value="start" />
+</template>
+<script lang="luau">
+read_value = ""
+function set_it()
+    refs.field.value = "typed"
+end
+function read_it()
+    read_value = refs.field.value
+end
+</script>
+"#,
+    );
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(200, 60);
+    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+
+    component.call_namespaced_handler("set_it", &[]).unwrap();
+    assert_eq!(
+        component.input_values.get("root/0").map(String::as_str),
+        Some("typed"),
+        "writing refs.field.value should update the input's stored text"
+    );
+
+    // Repaint so the new value is published, then read it back through the ref.
+    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+    component.call_namespaced_handler("read_it", &[]).unwrap();
+    assert_eq!(
+        runtime_value(&component, "read_value").and_then(|value| value.as_str().map(String::from)),
+        Some("typed".to_string()),
+        "refs.field.value should read back the live input string"
+    );
+}

@@ -2002,3 +2002,49 @@ end
     assert!(actions[0].args.as_array().unwrap().is_empty());
     assert_eq!(actions[0].options.get("smooth").and_then(|v| v.as_bool()), Some(true));
 }
+
+#[test]
+fn refs_value_write_queues_set_value_via_assignment_and_method() {
+    // `refs.x.value = "..."` (assignment) and `refs.x:set_value("...")` (method)
+    // both queue a set_value action carrying the new text.
+    let mut ctx = ScriptContext::new("@test/refs-set-value", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+function assign()
+    refs.field.value = "hello"
+end
+function call_method()
+    refs.field:set_value("world")
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_handler("assign", &[]).unwrap();
+    let actions = ctx.drain_element_actions();
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].target, "field");
+    assert_eq!(actions[0].action, "set_value");
+    assert_eq!(actions[0].args[0].as_str(), Some("hello"));
+
+    ctx.call_handler("call_method", &[]).unwrap();
+    let actions = ctx.drain_element_actions();
+    assert_eq!(actions[0].action, "set_value");
+    assert_eq!(actions[0].args[0].as_str(), Some("world"));
+}
+
+#[test]
+fn refs_write_to_readonly_field_errors() {
+    // Only `value` is writable; assigning to any other field is a hard error.
+    let mut ctx = ScriptContext::new("@test/refs-readonly", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+function bad()
+    refs.field.width = 50
+end
+"#,
+    )
+    .unwrap();
+
+    assert!(ctx.call_handler("bad", &[]).is_err());
+}
