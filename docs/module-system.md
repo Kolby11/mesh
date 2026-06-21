@@ -185,7 +185,7 @@ removal targets, not public author-facing aliases. They are no longer accepted
 as compatibility inputs.
 
 | Input | Severity | Author action | Runtime behavior |
-| ----- | -------- | ------------- | ---------------- |
+| ---- | ------- | ------------ | --------------- |
 | `package.json` | error | rename package.json to module.json and use canonical `name/version/mesh` | Fails manifest loading. |
 | legacy `module.json` with `id/type/api_version` | error | replace legacy fields with `name`, `version`, and `mesh` | Fails manifest loading. |
 | `mesh.toml` | error | replace mesh.toml with canonical module.json | Fails manifest loading. |
@@ -529,8 +529,8 @@ Theme packs contribute theme modes:
           "label": "Alice",
           "default_mode": "dark",
           "modes": {
-            "dark": "themes/dark.json",
-            "light": "themes/light.json"
+            "dark": "themes/dark/theme.css",
+            "light": "themes/light/theme.css"
           }
         }
       ]
@@ -539,9 +539,9 @@ Theme packs contribute theme modes:
 }
 ```
 
-Theme mode paths are validated as package-relative paths. Future resource-pack
-kinds should follow the same `mesh.uses.resources.*` and `mesh.provides.*`
-pattern.
+Theme mode paths point at package-relative CSS theme entries. Future
+resource-pack kinds should follow the same `mesh.uses.resources.*` and
+`mesh.provides.*` pattern.
 
 ## Extend or Add a MESH Module
 
@@ -628,7 +628,7 @@ PulseAudio behavior stays in Luau backend provider modules.
 The `mesh.kind` value describes the module's main role:
 
 | Kind            | Purpose                                                                 |
-| --------------- | ----------------------------------------------------------------------- |
+| -------------- | ---------------------------------------------------------------------- |
 | `interface`     | Declares a named contract, types, methods, events, and shared settings. |
 | `backend`       | Provides one or more interfaces.                                        |
 | `frontend`      | Contributes `.mesh` UI entrypoints, widgets, surfaces, or settings UI.  |
@@ -838,7 +838,7 @@ Use `mesh.interface.domain` to group related interfaces, and
 `mesh.interface.relationship` to explain intent:
 
 | Relationship  | Meaning                                                                                                            |
-| ------------- | ------------------------------------------------------------------------------------------------------------------ |
+| ------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `base`        | A broad shared contract for a domain, such as `mesh.audio`.                                                        |
 | `extension`   | Extra surface area that builds on another interface.                                                               |
 | `independent` | A separate model in the same or a new domain. Allowed, but less interoperable unless frontends target it directly. |
@@ -1041,8 +1041,8 @@ deliberately.
 ### Frontend Theme Contributions
 
 Frontend modules may declare a `mesh.theme` block in their manifest. This is
-the module-owned theme contribution that Mesh validates and installs under the
-active theme file's `modules.<module-id>` subtree.
+the module-owned theme contribution that Mesh validates and installs under an
+explicit module scope for the active theme package.
 
 Example:
 
@@ -1061,13 +1061,13 @@ Example:
       "defaults": {
         "components": {
           "base": {
-            "transition": "background-color token(animation.duration.fast) token(animation.curves.bezier.standard)"
+            "transition": "background-color var(--animation-duration-fast) var(--animation-curves-bezier-standard)"
           },
           "button": {
-            "border-radius": "token(radius.md)"
+            "border-radius": "var(--radius-md)"
           },
           "weather-chip": {
-            "background": "token(@mesh/weather.weather.color.sunny)"
+            "background": "var(--weather-color-sunny)"
           }
         }
       }
@@ -1079,19 +1079,19 @@ Example:
 Rules:
 
 - `mesh.theme.tokens` defines module-owned token defaults.
-- `mesh.theme.defaults.components.base` is subtree-scoped to that module.
+- `mesh.theme.defaults.components.base` maps to the module-scoped `node` rule.
 - `mesh.theme.defaults.components.button` overrides the core primitive inside
   that module subtree only.
 - custom component keys such as `weather-chip` are module-local component
   defaults.
 - module contributions are not theme-variant-specific in v1.
-- invalid token names, invalid style properties, or unresolved explicit token
+- invalid token names, invalid style properties, or unresolved theme variable
   references block installation.
 
-Cross-module token usage must be explicit:
+Module-scoped theme variable usage must stay inside the module scope:
 
 ```css
-background: token(@mesh/weather.weather.color.sunny);
+background: var(--weather-color-sunny);
 ```
 
 On installation, Mesh writes the contribution into the active authored theme

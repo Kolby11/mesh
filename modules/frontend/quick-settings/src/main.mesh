@@ -189,10 +189,10 @@ end
 .qs-shell {
     width: 100%;
     height: 100%;
-    padding: token(spacing.xs);
+    padding: var(--spacing-xs);
     background: transparent;
     opacity: 1;
-    transition: opacity token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 .qs-shell.mesh-surface-exiting {
@@ -201,27 +201,27 @@ end
 
 .qs-panel {
     width: 300px;
-    gap: token(spacing.sm);
-    padding: token(spacing.md);
-    border-radius: token(radius.xl);
-    background: token(color.surface-container);
-    color: token(color.on-surface);
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-xl);
+    background: var(--color-surface-container);
+    color: var(--color-on-surface);
     border-width: 1px;
     border-style: solid;
-    border-color: token(color.outline-variant);
+    border-color: var(--color-outline-variant);
 }
 
 .qs-header {
     align-items: center;
     height: 32px;
-    gap: token(spacing.sm);
-    margin-bottom: token(spacing.xs);
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-xs);
 }
 
 .qs-title {
-    font-size: token(typography.size.md);
+    font-size: var(--typography-size-md);
     font-weight: 700;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
 }
 
 .qs-close-btn {
@@ -229,22 +229,22 @@ end
     height: 28px;
     justify-content: center;
     align-items: center;
-    border-radius: token(radius.full);
+    border-radius: var(--radius-full);
     background: transparent;
-    color: token(color.on-surface-variant);
+    color: var(--color-on-surface-variant);
     border-width: 0;
-    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                color token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                color var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 .qs-close-btn:hover {
-    background: token(color.surface-container-high);
-    color: token(color.on-surface);
+    background: var(--color-surface-container-high);
+    color: var(--color-on-surface);
 }
 
 .qs-control-row {
     align-items: center;
-    gap: token(spacing.sm);
+    gap: var(--spacing-sm);
     height: 36px;
 }
 
@@ -252,7 +252,7 @@ end
     width: 18px;
     height: 18px;
     flex-shrink: 0;
-    color: token(color.on-surface-variant);
+    color: var(--color-on-surface-variant);
 }
 
 .qs-slider {
@@ -261,9 +261,9 @@ end
 }
 
 .qs-row-value {
-    font-size: token(typography.size.xs);
+    font-size: var(--typography-size-xs);
     font-weight: 600;
-    color: token(color.on-surface-variant);
+    color: var(--color-on-surface-variant);
     text-wrap: none;
     min-width: 32px;
     justify-content: end;
@@ -272,55 +272,55 @@ end
 
 .qs-sep {
     height: 1px;
-    background: token(color.outline-variant);
-    margin-block: token(spacing.xs);
+    background: var(--color-outline-variant);
+    margin-block: var(--spacing-xs);
 }
 
 .qs-section-row {
     align-items: center;
-    gap: token(spacing.md);
+    gap: var(--spacing-md);
     min-height: 36px;
 }
 
 .qs-section-label {
-    font-size: token(typography.size.xs);
+    font-size: var(--typography-size-xs);
     font-weight: 600;
-    color: token(color.on-surface-variant);
+    color: var(--color-on-surface-variant);
     text-transform: uppercase;
     text-wrap: none;
     min-width: 64px;
 }
 
 .qs-chip-row {
-    gap: token(spacing.xs);
+    gap: var(--spacing-xs);
     align-items: center;
 }
 
 .qs-chip {
     height: 28px;
-    padding-inline: token(spacing.sm);
+    padding-inline: var(--spacing-sm);
     justify-content: center;
     align-items: center;
-    border-radius: token(radius.full);
-    background: token(color.surface-container-high);
-    color: token(color.on-surface);
+    border-radius: var(--radius-full);
+    background: var(--color-surface-container-high);
+    color: var(--color-on-surface);
     border-width: 0;
-    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                color token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                color var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 .qs-chip:hover {
-    background: token(color.secondary-container);
-    color: token(color.on-secondary-container);
+    background: var(--color-secondary-container);
+    color: var(--color-on-secondary-container);
 }
 
 .qs-chip-active {
-    background: token(color.primary);
-    color: token(color.on-primary);
+    background: var(--color-primary);
+    color: var(--color-on-primary);
 }
 
 .qs-chip-text {
-    font-size: token(typography.size.xs);
+    font-size: var(--typography-size-xs);
     font-weight: 600;
     color: inherit;
     text-wrap: none;

@@ -92,56 +92,56 @@
 <style>
 .modules-view,
 .module-list {
-    gap: token(spacing.md);
+    gap: var(--spacing-md);
 }
 
 .section-title,
 .section-subtitle,
 .empty-title,
 .module-title {
-    font-size: token(typography.size.sm);
+    font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
 }
 
 .section-copy,
 .empty-text,
 .module-meta,
 .module-metric {
-    font-size: token(typography.size.xs);
-    color: token(color.on-surface-variant);
+    font-size: var(--typography-size-xs);
+    color: var(--color-on-surface-variant);
 }
 
 .empty-card,
 .module-card {
     width: 100%;
-    padding: token(spacing.md);
-    border-radius: token(radius.md);
-    background: token(color.surface-container);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-container);
     border-width: 1px;
     border-style: solid;
-    border-color: token(color.outline-variant);
+    border-color: var(--color-outline-variant);
 }
 
 .empty-copy,
 .module-copy {
-    gap: token(spacing.xs);
+    gap: var(--spacing-xs);
 }
 
 .module-head {
     width: 100%;
     align-items: center;
     justify-content: space-between;
-    gap: token(spacing.sm);
+    gap: var(--spacing-sm);
 }
 
 .module-kind {
-    padding-inline: token(spacing.sm);
-    padding-block: token(spacing.xs);
-    border-radius: token(radius.full);
-    background: token(color.secondary-container);
-    color: token(color.on-secondary-container);
-    font-size: token(typography.size.xs);
+    padding-inline: var(--spacing-sm);
+    padding-block: var(--spacing-xs);
+    border-radius: var(--radius-full);
+    background: var(--color-secondary-container);
+    color: var(--color-on-secondary-container);
+    font-size: var(--typography-size-xs);
     font-weight: 700;
 }
 </style>

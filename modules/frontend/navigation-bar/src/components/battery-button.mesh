@@ -106,19 +106,19 @@ end
     flex-shrink: 0;
     justify-content: center;
     align-items: center;
-    gap: token(spacing.xs);
-    padding-inline: token(spacing.sm);
-    border-radius: token(radius.full);
-    background: token(color.surface-container);
-    color: token(color.on-surface);
+    gap: var(--spacing-xs);
+    padding-inline: var(--spacing-sm);
+    border-radius: var(--radius-full);
+    background: var(--color-surface-container);
+    color: var(--color-on-surface);
     text-wrap: none;
-    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                color token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                color var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 .battery-widget:hover {
-    background: token(color.secondary-container);
-    color: token(color.on-secondary-container);
+    background: var(--color-secondary-container);
+    color: var(--color-on-secondary-container);
 }
 
 .battery-glyph {
@@ -127,12 +127,12 @@ end
     justify-content: center;
     align-items: center;
     color: inherit;
-    transition: color token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 .battery-value {
     color: inherit;
-    font-size: token(typography.size.sm);
+    font-size: var(--typography-size-sm);
     font-weight: 700;
 }
 
@@ -143,7 +143,7 @@ end
 
     .battery-widget {
         width: 44px;
-        padding-inline: token(spacing.xs);
+        padding-inline: var(--spacing-xs);
     }
 }
 </style>

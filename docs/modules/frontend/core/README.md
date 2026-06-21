@@ -290,15 +290,15 @@ Each surface's `src/main.mesh` is a Svelte-inspired single-file component with
 these blocks:
 
 | Block                  | Purpose                                                                                                                                                                                                          |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `<template>`           | XHTML-like markup describing the UI tree. Dynamic attributes use `{}` and event handlers use `onclick={handler}`-style attributes.                                                                               |
 | `<script lang="luau">` | Luau code implementing public/private component members, service proxy reads via `require("mesh.<service>")`, display-state derivation in `render(self)`, and element event handlers.                              |
-| `<style>`              | CSS-like styling. Token references use `token(group.name)` and inherit the active theme. Supports `overflow`, `overflow-x`, `overflow-y`, and container breakpoints via `@container (min-width: 640px) { ... }`. |
+| `<style>`              | CSS-like styling. Token references use `var(--group-name)` and inherit the active theme. Supports `overflow`, `overflow-x`, `overflow-y`, and container breakpoints via `@container (min-width: 640px) { ... }`. |
 
 ## Core surfaces
 
 | Module                                                 | Manifest ID                 | Purpose                                                                                    |
-| ------------------------------------------------------ | --------------------------- | ------------------------------------------------------------------------------------------ |
+| ----------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------- |
 | [base-surface](./base-surface/README.md)               | `@mesh/base-surface`        | Composition test surface with imported launcher/sidebar widgets and configurable placement |
 | [navigation-bar](./navigation-bar/README.md)           | `@mesh/navigation-bar`      | Top-edge navigation bar surface                                                            |
 | [panel](./panel/README.md)                             | `@mesh/panel`               | Top panel with clock, status icons, system tray                                            |

@@ -102,27 +102,27 @@ function onSwitch5() switch_to(5) end
     height: 26px;
     justify-content: center;
     align-items: center;
-    border-radius: token(radius.full);
+    border-radius: var(--radius-full);
     background: transparent;
-    color: token(color.on-surface-variant);
+    color: var(--color-on-surface-variant);
     border-width: 0;
-    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                color token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                color var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 .ws-btn:hover {
-    background: token(color.surface-container-high);
-    color: token(color.on-surface);
+    background: var(--color-surface-container-high);
+    color: var(--color-on-surface);
 }
 
 .ws-btn-active {
-    background: token(color.primary);
-    color: token(color.on-primary);
+    background: var(--color-primary);
+    color: var(--color-on-primary);
 }
 
 .ws-btn-active:hover {
-    background: token(color.primary);
-    color: token(color.on-primary);
+    background: var(--color-primary);
+    color: var(--color-on-primary);
 }
 
 .ws-num {

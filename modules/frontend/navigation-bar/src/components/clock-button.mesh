@@ -43,27 +43,27 @@ end
     flex-shrink: 0;
     justify-content: center;
     align-items: center;
-    padding-inline: token(spacing.md);
-    border-radius: token(radius.md);
-    background: token(color.surface-container);
-    color: token(color.on-surface);
+    padding-inline: var(--spacing-md);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-container);
+    color: var(--color-on-surface);
     border-width: 0;
     text-wrap: none;
-    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                color token(animation.duration.short) token(animation.curves.bezier.standard),
-                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
+    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
 }
 
 .clock-btn:hover {
-    background: token(color.secondary-container);
-    color: token(color.on-secondary-container);
-    border-radius: token(radius.lg);
+    background: var(--color-secondary-container);
+    color: var(--color-on-secondary-container);
+    border-radius: var(--radius-lg);
 }
 
 .clock-btn:active {
-    background: token(color.primary);
-    color: token(color.on-primary);
-    border-radius: token(radius.full);
+    background: var(--color-primary);
+    color: var(--color-on-primary);
+    border-radius: var(--radius-full);
 }
 
 .clock-content {

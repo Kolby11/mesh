@@ -95,63 +95,63 @@
 <style>
 .benchmark-view,
 .benchmark-list {
-    gap: token(spacing.md);
+    gap: var(--spacing-md);
 }
 
 .benchmark-copy {
-    gap: token(spacing.xs);
+    gap: var(--spacing-xs);
 }
 
 .benchmark-head {
     width: 100%;
     align-items: center;
     justify-content: space-between;
-    gap: token(spacing.sm);
+    gap: var(--spacing-sm);
 }
 
 .section-title,
 .benchmark-title {
-    font-size: token(typography.size.sm);
+    font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
 }
 
 .section-copy,
 .benchmark-meta,
 .benchmark-secondary-metric,
 .benchmark-hint {
-    font-size: token(typography.size.xs);
-    color: token(color.on-surface-variant);
+    font-size: var(--typography-size-xs);
+    color: var(--color-on-surface-variant);
 }
 
 .benchmark-status,
 .benchmark-primary-metric {
-    font-size: token(typography.size.xs);
+    font-size: var(--typography-size-xs);
     font-weight: 700;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
 }
 
 .benchmark-row {
     width: 100%;
-    padding: token(spacing.md);
-    background: token(color.surface-container);
+    padding: var(--spacing-md);
+    background: var(--color-surface-container);
     border-width: 1px;
     border-style: solid;
-    border-color: token(color.outline-variant);
+    border-color: var(--color-outline-variant);
 }
 
 .benchmark-action {
     min-height: 32px;
-    padding-inline: token(spacing.sm);
-    padding-block: token(spacing.xs);
+    padding-inline: var(--spacing-sm);
+    padding-block: var(--spacing-xs);
     justify-content: center;
     align-items: center;
-    background: token(color.primary);
+    background: var(--color-primary);
 }
 
 .benchmark-action-text {
-    font-size: token(typography.size.xs);
+    font-size: var(--typography-size-xs);
     font-weight: 700;
-    color: token(color.on-primary);
+    color: var(--color-on-primary);
 }
 </style>

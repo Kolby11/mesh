@@ -38,8 +38,8 @@ Unsupported properties produce style diagnostics or parser errors instead of hid
 | font | out-of-scope | Browser text-flow controls such as `white-space`, `text-wrap`, and `word-break` are not part of the bounded profile. |
 | selectors | implemented | Universal, tag, class, ID, compound selectors, selector lists, and the supported state pseudo-classes participate in style matching. |
 | selectors | out-of-scope | Descendant, child, sibling, attribute, structural pseudo-class, and pseudo-element selector behavior is outside MESH shell CSS. |
-| tokens | implemented | `token(...)` resolves through `mesh-core-theme` plus `StyleResolver` for supported declaration values. |
-| custom properties | implemented | CSS custom properties beginning with `--` are local variables resolved by `StyleResolver`; they are not theme tokens and do not create a full browser cascade model. |
+| theme variables | implemented | `var(--...)` resolves through local custom properties first, then through `mesh-core-theme` for supported declaration values. |
+| custom properties | implemented | CSS custom properties beginning with `--` are local variables resolved by `StyleResolver`; theme CSS also compiles root custom properties into design tokens. |
 
 ## Practical Syntax
 
@@ -47,18 +47,18 @@ Shorthands are practical shell shorthands rather than full browser-compatible sh
 
 ```css
 .card {
-    --surface: token(color.surface);
+    --surface: var(--color-surface);
     background: var(--surface);
-    padding: token(spacing.md);
+    padding: var(--spacing-md);
     margin: 4px 8px;
-    border: 1px solid token(color.outline);
-    border-radius: token(radius.md);
+    border: 1px solid var(--color-outline);
+    border-radius: var(--radius-md);
     display: flex;
     flex-direction: column;
     gap: 6px;
     overflow: hidden;
-    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                border-color token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                border-color var(--animation-duration-short) var(--animation-curves-bezier-standard);
     animation: pulse 250ms ease-in-out 50ms 2 alternate both paused;
 }
 ```
@@ -79,26 +79,26 @@ The current shell animator interpolates this practical visual set:
 - `margin`
 - `transform`
 
-`@keyframes` supports numeric percentage stops over the same transition-safe visual set. `from` and `to` aliases are rejected. Unsupported keyframe properties reject the keyframes rule. Keyframe stop values do not support `token(...)` or `var(...)` in this release.
+`@keyframes` supports numeric percentage stops over the same transition-safe visual set. `from` and `to` aliases are rejected. Unsupported keyframe properties reject the keyframes rule. Keyframe stop values do not support `var(...)` in this release.
 
 ## Tokens And Custom Properties
 
-Theme tokens are first-class MESH theme values:
+Theme variables are first-class MESH theme values:
 
 ```css
 .surface {
-    background: token(color.surface);
-    padding: token(spacing.md);
+    background: var(--color-surface);
+    padding: var(--spacing-md);
 }
 ```
 
-Theme token resolution belongs to `mesh-core-theme` and `StyleResolver`. Token values can be full declaration values or embedded in practical literals such as `border: 1px solid token(color.outline)`.
+Theme variable resolution belongs to `mesh-core-theme` and `StyleResolver`. Values can be full declaration values or embedded in practical literals such as `border: 1px solid var(--color-outline)`.
 
 CSS custom properties are local variables:
 
 ```css
 .surface {
-    --surface: token(color.surface);
+    --surface: var(--color-surface);
     background: var(--surface);
 }
 ```

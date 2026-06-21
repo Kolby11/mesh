@@ -175,12 +175,12 @@ end
 
 <style>
 .title {
-    color: token(color.on-surface);
-    font-size: token(typography.size.lg);
+    color: var(--color-on-surface);
+    font-size: var(--typography-size-lg);
 }
 
 button {
-    background: token(color.primary);
+    background: var(--color-primary);
     padding: 8px;
 }
 </style>
@@ -197,8 +197,8 @@ button {
         let style = file.style.unwrap();
         assert_eq!(style.rules.len(), 2);
         match &style.rules[0].declarations[0].value {
-            StyleValue::Token(name) => assert_eq!(name, "color.on-surface"),
-            other => panic!("expected token, got {other:?}"),
+            StyleValue::Var(name) => assert_eq!(name, "--color-on-surface"),
+            other => panic!("expected var, got {other:?}"),
         }
     }
 
@@ -226,7 +226,7 @@ button {
 <style>
 box {
     gap: 8px;
-    padding: token(spacing.md);
+    padding: var(--spacing-md);
     background: var(--bg);
 }
 </style>
@@ -235,7 +235,7 @@ box {
         let style = file.style.unwrap();
         let decls = &style.rules[0].declarations;
         assert!(matches!(&decls[0].value, StyleValue::Literal(v) if v == "8px"));
-        assert!(matches!(&decls[1].value, StyleValue::Token(v) if v == "spacing.md"));
+        assert!(matches!(&decls[1].value, StyleValue::Var(v) if v == "--spacing-md"));
         assert!(matches!(&decls[2].value, StyleValue::Var(v) if v == "--bg"));
         assert!(style.rules[0].container_query.is_none());
         assert!(style.keyframes.is_empty());

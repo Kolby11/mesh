@@ -39,7 +39,7 @@ Use lowercase MESH UI tags for built-in shell primitives. PascalCase tags are
 reserved for explicitly imported custom components.
 
 | Tag              | Purpose                        |
-| ---------------- | ------------------------------ |
+| --------------- | ----------------------------- |
 | `panel`          | Generic surface/container root |
 | `box`            | Generic container              |
 | `row`            | Horizontal layout container    |
@@ -389,7 +389,7 @@ end
 ```
 
 | Method                  | Effect                                                          |
-| ----------------------- | -------------------------------------------------------------- |
+| ---------------------- | ------------------------------------------------------------- |
 | `:focus()`              | Routes through the canonical focus path (fires `onfocus`).     |
 | `:blur()`               | Clears focus if this element currently holds it (fires `onblur`). |
 | `:click()`              | Synthesizes a click on the node through the real dispatch path (fires `onclick`, or activation handlers for menu/list items). |
@@ -418,7 +418,7 @@ returns, so they compose with the handler's other state changes in one frame.
 Common event attributes:
 
 | Attribute      | Fires when                 |
-| -------------- | -------------------------- |
+| ------------- | ------------------------- |
 | `onclick`      | element is clicked         |
 | `oninput`      | input value changes        |
 | `onchange`     | input value commits        |
@@ -567,30 +567,30 @@ frontend script.
 
 Write the supported MESH practical shell CSS subset. See
 [`docs/css-coverage.md`](../css-coverage.md) for the complete property and
-unsupported-feature contract. Use `token()` to reference theme design tokens
-and local `var(...)` values for supported declarations. Root theme tokens use
-plain names such as `token(color.surface)`. Cross-module token reads must be
-explicit, for example `token(@mesh/weather.weather.color.sunny)`:
+unsupported-feature contract. Use `var(--...)` to reference theme design
+values and local custom properties in supported declarations. Root theme values
+use names such as `var(--color-surface)`. Module-scoped theme values use the
+module's semantic variable names, for example `var(--weather-color-sunny)`:
 
 ```css
 <style>
 .nav-shell {
-    --surface: token(color.surface);
+    --surface: var(--color-surface);
     background: var(--surface);
-    color: token(color.on-surface);
-    padding: token(spacing.md);
-    border: 1px solid token(color.outline);
+    color: var(--color-on-surface);
+    padding: var(--spacing-md);
+    border: 1px solid var(--color-outline);
     display: flex;
     flex: 1 1 auto;
     overflow: hidden;
-    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard);
-    animation: pulse token(animation.duration.fast) token(animation.curves.bezier.standard);
+    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    animation: pulse var(--animation-duration-fast) var(--animation-curves-bezier-standard);
 }
 
 .chip {
-    border-radius: token(radius.full);
-    background: token(color.surface-container);
-    font-size: token(typography.size.sm);
+    border-radius: var(--radius-full);
+    background: var(--color-surface-container);
+    font-size: var(--typography-size-sm);
 }
 </style>
 ```
@@ -625,9 +625,9 @@ Keyframes are percentage-only:
 ```
 
 `from` and `to` aliases are rejected in this first release, and keyframe stop
-values must stay literal rather than using `token(...)` or `var(...)`. Theme
-tokens belong on the animation shorthand itself, for example
-`animation: pulse token(animation.duration.fast) token(animation.curves.bezier.standard)`.
+values must stay literal rather than using `var(...)`. Theme variables belong
+on the animation shorthand itself, for example
+`animation: pulse var(--animation-duration-fast) var(--animation-curves-bezier-standard)`.
 
 ---
 
@@ -693,36 +693,36 @@ end
     height: 100%;
     justify-content: space-between;
     align-items: center;
-    padding-inline: token(spacing.lg);
-    background: token(color.surface);
-    color: token(color.on-surface);
+    padding-inline: var(--spacing-lg);
+    background: var(--color-surface);
+    color: var(--color-on-surface);
 }
 
 .meta {
     align-items: center;
-    gap: token(spacing.xs);
+    gap: var(--spacing-xs);
 }
 
 .meta-pill {
-    padding-block: token(spacing.xs);
-    padding-inline: token(spacing.sm);
-    border-radius: token(radius.full);
-    background: token(color.tertiary-container);
+    padding-block: var(--spacing-xs);
+    padding-inline: var(--spacing-sm);
+    border-radius: var(--radius-full);
+    background: var(--color-tertiary-container);
 }
 
 .meta-pill-text {
-    color: token(color.on-tertiary-container);
-    font-size: token(typography.size.sm);
+    color: var(--color-on-tertiary-container);
+    font-size: var(--typography-size-sm);
     font-weight: 700;
 }
 
 .volume-widget {
     align-items: center;
-    gap: token(spacing.xs);
-    padding-block: token(spacing.xs);
-    padding-inline: token(spacing.sm);
-    border-radius: token(radius.full);
-    background: token(color.surface-container);
+    gap: var(--spacing-xs);
+    padding-block: var(--spacing-xs);
+    padding-inline: var(--spacing-sm);
+    border-radius: var(--radius-full);
+    background: var(--color-surface-container);
 }
 </style>
 ```
@@ -732,7 +732,7 @@ end
 ## Quick reference
 
 | Goal                | Syntax                    |
-| ------------------- | ------------------------- |
+| ------------------ | ------------------------ |
 | Static text         | `<text>Hello</text>`      |
 | Dynamic text        | `<text>{variable}</text>` |
 | Dynamic attribute   | `title="{expr}"`          |
@@ -740,7 +740,7 @@ end
 | Event handler       | `onclick={handler}`       |
 | Selectable text     | `selectable="true"`       |
 | Focus order hint    | `tabindex="0"`            |
-| Theme token         | `token(color.surface)`    |
+| Theme token         | `var(--color-surface)`    |
 | Translation key     | `{t("key")}`              |
 | Tooltip             | `title="..."`             |
 | Screen reader label | `aria-label="..."`        |

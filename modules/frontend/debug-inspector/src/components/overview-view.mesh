@@ -78,45 +78,45 @@
 
 <style>
 .overview-view {
-    gap: token(spacing.md);
+    gap: var(--spacing-md);
 }
 
 .section-title {
-    font-size: token(typography.size.sm);
+    font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
 }
 
 .state-card,
 .summary-card,
 .metric-group {
     width: 100%;
-    padding: token(spacing.md);
-    border-radius: token(radius.md);
-    background: token(color.surface-container);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-container);
     border-width: 1px;
     border-style: solid;
-    border-color: token(color.outline-variant);
+    border-color: var(--color-outline-variant);
 }
 
 .state-copy,
 .summary-copy {
-    gap: token(spacing.xs);
+    gap: var(--spacing-xs);
 }
 
 .state-title,
 .summary-title,
 .metric-group-title {
-    font-size: token(typography.size.sm);
+    font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
 }
 
 .state-text,
 .summary-text,
 .metric-summary {
-    font-size: token(typography.size.xs);
-    color: token(color.on-surface-variant);
+    font-size: var(--typography-size-xs);
+    color: var(--color-on-surface-variant);
 }
 
 .profiling-toggle {
@@ -124,14 +124,14 @@
     min-height: 36px;
     justify-content: center;
     align-items: center;
-    border-radius: token(radius.md);
-    background: token(color.primary);
+    border-radius: var(--radius-md);
+    background: var(--color-primary);
 }
 
 .profiling-toggle-text {
-    font-size: token(typography.size.sm);
+    font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: token(color.on-primary);
+    color: var(--color-on-primary);
 }
 
 .layout-bounds-toggle {
@@ -139,35 +139,35 @@
     min-height: 36px;
     justify-content: center;
     align-items: center;
-    border-radius: token(radius.md);
-    background: token(color.secondary-container);
+    border-radius: var(--radius-md);
+    background: var(--color-secondary-container);
 }
 
 .layout-bounds-toggle-text {
-    font-size: token(typography.size.sm);
+    font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: token(color.on-secondary-container);
+    color: var(--color-on-secondary-container);
 }
 
 .metric-group {
-    gap: token(spacing.sm);
+    gap: var(--spacing-sm);
 }
 
 .metric-row {
     width: 100%;
     justify-content: space-between;
     align-items: center;
-    gap: token(spacing.sm);
+    gap: var(--spacing-sm);
 }
 
 .metric-label {
-    font-size: token(typography.size.xs);
-    color: token(color.on-surface-variant);
+    font-size: var(--typography-size-xs);
+    color: var(--color-on-surface-variant);
 }
 
 .metric-value {
-    font-size: token(typography.size.xs);
+    font-size: var(--typography-size-xs);
     font-weight: 700;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
 }
 </style>

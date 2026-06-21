@@ -135,29 +135,27 @@ fn validate_theme_token_key(token_name: &str) -> Result<(), String> {
 
 fn validate_theme_value_references(value: &str) -> Result<(), String> {
     let mut rest = value;
-    while let Some(start) = rest.find("token(") {
-        let token_start = start + "token(".len();
-        let token_end = rest[token_start..]
+    while let Some(start) = rest.find("var(") {
+        let variable_start = start + "var(".len();
+        let variable_end = rest[variable_start..]
             .find(')')
-            .map(|offset| token_start + offset)
-            .ok_or_else(|| format!("invalid token() reference in '{value}'"))?;
-        let token_name = rest[token_start..token_end].trim();
-        if token_name.is_empty() {
-            return Err(format!("empty token() reference in '{value}'"));
+            .map(|offset| variable_start + offset)
+            .ok_or_else(|| format!("invalid var() reference in '{value}'"))?;
+        let variable_name = rest[variable_start..variable_end].trim();
+        if variable_name.is_empty() {
+            return Err(format!("empty var() reference in '{value}'"));
         }
-        if let Some(module_ref) = token_name.strip_prefix('@') {
-            let Some((module_id, owned_token)) = module_ref.split_once('.') else {
-                return Err(format!(
-                    "explicit module token reference '{token_name}' must use <module-id>.<token-name>"
-                ));
-            };
-            if module_id.trim().is_empty() || owned_token.trim().is_empty() {
-                return Err(format!(
-                    "explicit module token reference '{token_name}' must use <module-id>.<token-name>"
-                ));
-            }
+        if !variable_name.starts_with("--") {
+            return Err(format!(
+                "var() reference '{variable_name}' must use a CSS custom property name"
+            ));
         }
-        rest = &rest[token_end + 1..];
+        if variable_name.contains("--@") {
+            return Err(format!(
+                "var() reference '{variable_name}' must not use explicit module token syntax"
+            ));
+        }
+        rest = &rest[variable_end + 1..];
     }
 
     Ok(())

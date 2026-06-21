@@ -78,10 +78,10 @@ end
     width: 100%;
     height: fit-content;
     max-height: 200px;
-    padding: token(spacing.sm);
+    padding: var(--spacing-sm);
     background: transparent;
     opacity: 1;
-    transition: opacity token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 .language-popover-shell.mesh-surface-exiting {
@@ -92,11 +92,11 @@ end
     width: 100%;
     max-width: 260px;
     overflow: hidden;
-    border-radius: token(radius.lg);
-    background: token(color.surface-container);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-container);
     border-width: 1px;
     border-style: solid;
-    border-color: token(color.outline-variant);
+    border-color: var(--color-outline-variant);
 }
 
 .language-popover-inner {
@@ -104,8 +104,8 @@ end
     flex-direction: column;
     overflow-y: auto;
     overflow-x: hidden;
-    gap: token(spacing.sm);
-    padding: token(spacing.sm);
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm);
 }
 
 .language-option {
@@ -114,39 +114,39 @@ end
     justify-content: start;
     align-items: center;
     text-wrap: none;
-    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                color token(animation.duration.short) token(animation.curves.bezier.standard),
-                border-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                border-radius token(animation.duration.short) token(animation.curves.bezier.emphasized-decelerate);
+    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
 }
 
 .language-option:hover {
-    background: token(color.secondary-container);
-    color: token(color.on-secondary-container);
-    border-radius: token(radius.md);
+    background: var(--color-secondary-container);
+    color: var(--color-on-secondary-container);
+    border-radius: var(--radius-md);
 }
 
 .language-option:focus,
 .language-option:focus-visible {
-    background: token(color.tertiary-container);
-    color: token(color.on-tertiary-container);
-    border-radius: token(radius.md);
+    background: var(--color-tertiary-container);
+    color: var(--color-on-tertiary-container);
+    border-radius: var(--radius-md);
 }
 
 .language-option:active {
-    background: token(color.primary);
-    color: token(color.on-primary);
-    border-color: token(color.primary);
-    border-radius: token(radius.full);
+    background: var(--color-primary);
+    color: var(--color-on-primary);
+    border-color: var(--color-primary);
+    border-radius: var(--radius-full);
 }
 
 .language-option-selected {
-    background: token(color.secondary-container);
-    color: token(color.on-secondary-container);
+    background: var(--color-secondary-container);
+    color: var(--color-on-secondary-container);
 }
 
 .language-option-text {
-    font-size: token(typography.size.sm);
+    font-size: var(--typography-size-sm);
     font-weight: 700;
     color: inherit;
     text-wrap: none;

@@ -654,7 +654,7 @@ fn theme_change_repaints_token_styled_content() {
 box {
   width: 48px;
   height: 24px;
-  background-color: token(color.primary);
+  background-color: var(--color-primary);
 }
 </style>
 <template>

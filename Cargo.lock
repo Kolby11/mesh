@@ -1714,6 +1714,7 @@ dependencies = [
  "mesh-core-config",
  "mesh-core-elements",
  "mesh-core-module",
+ "mesh-core-theme",
  "serde",
  "serde_json",
  "tokio",

@@ -1,0 +1,14 @@
+{
+  "name": "@mesh/mesh-default-dark",
+  "version": "0.1.0",
+  "description": "MESH Default Dark theme.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "theme": {
+      "id": "mesh-default-dark",
+      "label": "MESH Default Dark",
+      "entry": "theme.css"
+    }
+  }
+}

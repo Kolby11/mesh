@@ -15,8 +15,8 @@
           "id": "@mesh/shell-theme",
           "label": "MESH Default",
           "modes": {
-            "dark": "themes/mesh-default-dark.json",
-            "light": "themes/mesh-default-light.json"
+            "dark": "themes/mesh-default-dark/theme.css",
+            "light": "themes/mesh-default-light/theme.css"
           },
           "default_mode": "dark"
         }

@@ -1,0 +1,83 @@
+{
+  "name": "mesh-language",
+  "displayName": "MESH Language",
+  "description": "Language support for MESH .mesh components and module.json manifests.",
+  "version": "0.1.0",
+  "publisher": "mesh",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:mesh",
+    "onLanguage:json",
+    "workspaceContains:**/module.json",
+    "workspaceContains:**/*.mesh"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "mesh",
+        "aliases": [
+          "MESH",
+          "mesh"
+        ],
+        "extensions": [
+          ".mesh"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mesh",
+        "scopeName": "source.mesh",
+        "path": "./syntaxes/mesh.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.html": "html",
+          "meta.embedded.block.lua": "lua",
+          "meta.embedded.block.css": "css"
+        }
+      }
+    ],
+    "configuration": {
+      "title": "MESH",
+      "properties": {
+        "mesh.lsp.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the mesh-tools-lsp binary. When empty, the extension looks in the workspace's target/release and target/debug directories, then on PATH."
+        },
+        "mesh.lsp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the communication between VS Code and the MESH language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "npm run build -- --sourcemap --watch"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.84.0",
+    "esbuild": "^0.21.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

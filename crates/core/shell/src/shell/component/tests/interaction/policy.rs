@@ -29,12 +29,12 @@ end
 box {
   width: 140px;
   height: 40px;
-  background-color: token(color.surface-container);
+  background-color: var(--color-surface-container);
 }
 text {
   width: 100px;
   height: 24px;
-  color: token(color.on-surface);
+  color: var(--color-on-surface);
 }
 </style>
 "#,

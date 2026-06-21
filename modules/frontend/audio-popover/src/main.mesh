@@ -15,7 +15,7 @@
   </popover>
 </template>
 
-<script lang="luau">
+<script lang="lua">
 local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 
@@ -107,10 +107,10 @@ end
 .audio-popover-shell {
     width: 100%;
     height: 100%;
-    padding: 0 token(spacing.sm) token(spacing.sm) token(spacing.sm);
+    padding: 0 var(--spacing-sm) var(--spacing-sm) var(--spacing-sm);
     background: transparent;
     opacity: 1;
-    transition: opacity token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 .audio-popover-shell.mesh-surface-exiting {
@@ -118,27 +118,27 @@ end
 }
 
 .audio-popover {
-    gap: token(spacing.xs);
-    padding: token(spacing.xs);
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm);
     align-items: center;
-    border-radius: token(radius.lg);
-    background: token(color.surface-container);
-    color: token(color.on-surface);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-container);
+    color: var(--color-on-surface);
 }
 
 .audio-slider {
-    width: 32px;
-    height: 160px;
+    width: 20px;
+    height: 100px;
 }
 
 .audio-slider:focus-visible {
-    border-radius: token(radius.md);
+    border-radius: var(--radius-lg);
 }
 
 .audio-percent {
-    font-size: token(typography.size.xs);
+    font-size: var(--typography-size-xs);
     font-weight: 700;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
     text-align: center;
 }
 </style>

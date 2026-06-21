@@ -150,9 +150,7 @@ fn validate_keyframe_declaration(
 ) -> Result<(), ParseError> {
     if contains_keyframe_value_reference(&declaration.value) {
         return Err(ParseError::InvalidStyle {
-            message: format!(
-                "keyframes '{rule_name}' cannot use token() or var() references in stop values"
-            ),
+            message: format!("keyframes '{rule_name}' cannot use var() references in stop values"),
             line: 0,
         });
     }
@@ -520,9 +518,7 @@ fn parse_selector(source: &str) -> Result<Selector, ParseError> {
 
 fn classify_style_value(value: &str) -> StyleValue {
     let value = value.trim();
-    if value.starts_with("token(") && value.ends_with(')') {
-        StyleValue::Token(value[6..value.len() - 1].trim().to_string())
-    } else if value.starts_with("var(") && value.ends_with(')') {
+    if value.starts_with("var(") && value.ends_with(')') {
         StyleValue::Var(value[4..value.len() - 1].trim().to_string())
     } else {
         StyleValue::Literal(value.to_string())
@@ -531,7 +527,7 @@ fn classify_style_value(value: &str) -> StyleValue {
 
 fn contains_keyframe_value_reference(value: &StyleValue) -> bool {
     match value {
-        StyleValue::Token(_) | StyleValue::Var(_) => true,
-        StyleValue::Literal(value) => value.contains("token(") || value.contains("var("),
+        StyleValue::Var(_) => true,
+        StyleValue::Literal(value) => value.contains("var("),
     }
 }

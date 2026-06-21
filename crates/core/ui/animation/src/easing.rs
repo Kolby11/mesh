@@ -3,7 +3,7 @@
 //! Mirrors the CSS `transition-timing-function` / `animation-timing-function`
 //! keyword set, plus `cubic-bezier(x1, y1, x2, y2)`. The bezier variant is
 //! how theme-driven motion tokens are realized — authors write
-//! `transition-timing-function: token(animation.curves.bezier.standard)`, the token
+//! `transition-timing-function: var(--animation-curves-bezier-standard)`, the token
 //! engine substitutes `cubic-bezier(0.2, 0, 0, 1)`, and the parser produces
 //! a `CubicBezier` variant that this module knows how to evaluate.
 

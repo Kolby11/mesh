@@ -8,12 +8,12 @@
 
 <style>
 .meta-label {
-    color: token(color.on-surface-variant);
-    font-size: token(typography.size.xs);
+    color: var(--color-on-surface-variant);
+    font-size: var(--typography-size-xs);
     font-weight: 600;
     text-transform: uppercase;
     text-wrap: none;
-    transition: color token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 @container (max-width: 720px) {

@@ -144,13 +144,11 @@ pub struct KeyframeStop {
     pub declarations: Vec<Declaration>,
 }
 
-/// A style value that may reference theme tokens.
+/// A style value that may reference local or theme CSS variables.
 #[derive(Debug, Clone)]
 pub enum StyleValue {
     /// A literal value: `#ff0000`, `16px`, `bold`.
     Literal(String),
-    /// A theme token reference: `token(color.primary)`.
-    Token(String),
     /// A variable reference: `var(--custom-prop)`.
     Var(String),
 }

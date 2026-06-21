@@ -126,7 +126,16 @@
       "Bash(sed -i 's/!component\\\\.style_animations\\\\.is_empty\\(\\)/!component.transitions.is_empty\\(\\)/' crates/core/shell/src/shell/component/tests/interaction/reflow.rs)",
       "Bash(sed -i 's/component\\\\.style_animations\\\\.contains_key\\(/component.transitions.contains_key\\(/g' crates/core/shell/src/shell/component/tests/interaction/navigation.rs)",
       "Bash(nix-env -q)",
-      "Bash(xargs ls)"
+      "Bash(xargs ls)",
+      "Bash(sed -n '184,240p' crates/core/extension/module/src/package/module_manifest.rs)",
+      "Bash(sed -n '905,928p' crates/core/extension/module/src/package/module_manifest.rs)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(ln -sfn /home/kolby/projects/mesh/editors/vscode ~/.vscode/extensions/mesh-language)",
+      "Read(//home/kolby/.vscode/extensions/**)",
+      "Bash(code --uninstall-extension mesh.mesh-vscode)",
+      "Bash(code --list-extensions)",
+      "Bash(code --version)"
     ]
   }
 }

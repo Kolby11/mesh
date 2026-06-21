@@ -4360,6 +4360,31 @@ fn set_theme_forces_full_present_on_existing_components() {
 }
 
 #[test]
+fn set_theme_loads_css_package_and_updates_runtime_setting() {
+    let mut shell = Shell::new();
+
+    shell.apply_set_theme("mesh-default-light").unwrap();
+
+    assert_eq!(shell.theme.active().id, "mesh-default-light");
+    assert_eq!(shell.settings.theme.active, "mesh-default-light");
+    assert_eq!(
+        shell
+            .theme
+            .active()
+            .token("color.surface")
+            .map(ToString::to_string),
+        Some("#FFFBFE".into())
+    );
+    assert!(
+        shell
+            .theme_watch
+            .path
+            .ends_with("mesh-default-light/theme.css"),
+        "theme watcher should follow the active CSS package"
+    );
+}
+
+#[test]
 fn settings_theme_reload_publishes_resolved_fallback_theme_state() {
     let _env_lock = SETTINGS_ENV_LOCK.lock().unwrap();
     let runtime = Runtime::new().unwrap();

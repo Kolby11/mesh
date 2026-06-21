@@ -136,24 +136,24 @@ end
     container-type: inline-size;
     justify-content: start;
     align-items: center;
-    gap: token(spacing.md);
-    padding-inline: token(spacing.lg);
+    gap: var(--spacing-md);
+    padding-inline: var(--spacing-lg);
     overflow-x: hidden;
     overflow-y: hidden;
     background: rgba(10, 10, 14, 0.75);
     backdrop-filter: blur(20px);
-    color: token(color.on-surface);
-    transition: background-color token(animation.duration.short) token(animation.curves.bezier.standard),
-                color token(animation.duration.short) token(animation.curves.bezier.standard),
-                gap token(animation.duration.short) token(animation.curves.bezier.standard);
+    color: var(--color-on-surface);
+    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 .left-cluster {
     align-items: center;
-    gap: token(spacing.sm);
+    gap: var(--spacing-sm);
     min-width: 0;
     flex-shrink: 1;
-    transition: gap token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 .nav-spacer {
@@ -165,7 +165,7 @@ end
     flex-shrink: 0;
     align-items: center;
     gap: 2px;
-    transition: gap token(animation.duration.short) token(animation.curves.bezier.standard);
+    transition: gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 .control-button-cell {
@@ -178,14 +178,14 @@ end
 
 @container (max-width: 860px) {
     .nav-shell {
-        gap: token(spacing.sm);
+        gap: var(--spacing-sm);
     }
 }
 
 @container (max-width: 720px) {
     .nav-shell {
-        gap: token(spacing.sm);
-        padding-inline: token(spacing.md);
+        gap: var(--spacing-sm);
+        padding-inline: var(--spacing-md);
     }
 
     .right-cluster {

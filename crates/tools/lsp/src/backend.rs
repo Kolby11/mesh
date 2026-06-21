@@ -3,11 +3,15 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use tower_lsp::{Client, LanguageServer, jsonrpc::Result, lsp_types::*};
 
-use crate::{analyzer, diagnostics, document::Document, hover, module_registry::ModuleRegistry};
+use crate::{
+    analyzer, diagnostics, document::Document, hover, manifest, manifest::ManifestDocument,
+    module_registry::ModuleRegistry,
+};
 
 pub struct Backend {
     client: Client,
     documents: Arc<RwLock<HashMap<Url, Document>>>,
+    manifests: Arc<RwLock<HashMap<Url, ManifestDocument>>>,
     registry: Arc<RwLock<ModuleRegistry>>,
 }
 
@@ -16,6 +20,7 @@ impl Backend {
         Self {
             client,
             documents: Arc::new(RwLock::new(HashMap::new())),
+            manifests: Arc::new(RwLock::new(HashMap::new())),
             registry: Arc::new(RwLock::new(ModuleRegistry::empty())),
         }
     }
@@ -92,6 +97,7 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         self.documents.write().await.remove(&uri);
+        self.manifests.write().await.remove(&uri);
         // Clear diagnostics on close.
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
@@ -99,6 +105,15 @@ impl LanguageServer for Backend {
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
+
+        if manifest::is_manifest_uri(uri) {
+            let manifests = self.manifests.read().await;
+            let Some(doc) = manifests.get(uri) else {
+                return Ok(None);
+            };
+            let items = manifest::complete::complete(doc, position);
+            return Ok((!items.is_empty()).then_some(CompletionResponse::Array(items)));
+        }
 
         let docs = self.documents.read().await;
         let Some(doc) = docs.get(uri) else {
@@ -118,6 +133,14 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
+        if manifest::is_manifest_uri(uri) {
+            let manifests = self.manifests.read().await;
+            let Some(doc) = manifests.get(uri) else {
+                return Ok(None);
+            };
+            return Ok(manifest::hover::hover(doc, position));
+        }
+
         let docs = self.documents.read().await;
         let Some(doc) = docs.get(uri) else {
             return Ok(None);
@@ -130,6 +153,14 @@ impl LanguageServer for Backend {
 
 impl Backend {
     async fn update_document(&self, uri: Url, source: String) {
+        if manifest::is_manifest_uri(&uri) {
+            let doc = ManifestDocument::new(uri.clone(), source);
+            let diags = manifest::diagnostics::diagnostics(&doc);
+            self.manifests.write().await.insert(uri.clone(), doc);
+            self.client.publish_diagnostics(uri, diags, None).await;
+            return;
+        }
+
         let doc = Document::new(uri.clone(), source);
         let diags = diagnostics::from_document(&doc);
         self.documents.write().await.insert(uri.clone(), doc);

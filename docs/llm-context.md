@@ -85,7 +85,7 @@ mesh-tools-cli
 ### Key types per crate
 
 | Crate                 | Key types / files                                                                                                                                |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mesh-core-shell`     | `Shell` in `shell/mod.rs` — module host, backend/service orchestrator, and event loop                                                            |
 | `mesh-core-module`    | `Manifest`, `ModuleType`, `SurfaceLayoutSection` in `manifest.rs`; `ModuleInstance` in `lifecycle.rs`                                            |
 | `mesh-core-component` | `ComponentFile`, `parser.rs` — parses `<template>`, `<script>`, `<style>` blocks                                                                 |
@@ -164,7 +164,7 @@ Surface layout defaults live in `module.json`, **not** in Rust. `mesh-core-shell
 ```
 <template>   ← XHTML-like markup with core elements, {expressions}, and component tags
 <script lang="luau">   ← Luau scripting (state, lifecycle, event handlers)
-<style>      ← CSS-like styling with token() references and @container queries
+<style>      ← CSS-like styling with var(--...) theme references and @container queries
 ```
 
 Components are reusable authoring units. They should be made from MESH core
@@ -229,13 +229,13 @@ backend module (`module.json` with `mesh.implements`)
 ## Common Task Entry Points
 
 | Task                           | Where to start                                                                                                                   |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | Add a CSS property             | `crates/core/ui/component/src/style.rs` / parser modules (parse), `crates/core/ui/elements/src/style.rs` (computed style), `crates/core/frontend/render/src/surface/painter.rs` (paint) |
 | Add a new frontend module      | Create `modules/frontend/<name>/`, `module.json` with `mesh.kind = "frontend"`, `src/main.mesh`                                  |
 | Change surface layout behavior | `surface_layout_from_manifest()` in `mesh-core-shell/src/shell.rs`; manifest's `mesh.surfaceLayout` section                      |
 | Add a backend provider module  | Create `modules/backend/<name>/`, `module.json` with `mesh.kind = "backend"` and `mesh.implements`, plus `src/main.luau`         |
 | Add a new CoreRequest action   | `CoreRequest` enum in `crates/core/shell/src/shell/types.rs` plus request handling under `crates/core/shell/src/shell/runtime/request.rs` |
-| Add a theme token              | `mesh-core-theme/src/lib.rs`, default theme JSON, then reference with `token(group.name)` in `.mesh`                             |
+| Add a theme value              | `config/themes/<theme-id>/theme.css`, then reference with `var(--group-name)` in `.mesh`                                        |
 | Debug rendering                | `ToggleDebugOverlay` / `CoreRequest::CycleDebugTab`; see `crates/core/foundation/debug/src/lib.rs` and `crates/core/frontend/render/src/surface/debug_overlay.rs` |
 | Module manifest parsing        | `mesh-core-module/src/manifest.rs` — `JsonManifest`, `TomlManifest`, `into_manifest()`                                           |
 | Fix icons                      | See "Icon System" section below — four specific files need changes                                                               |

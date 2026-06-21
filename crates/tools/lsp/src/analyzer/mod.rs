@@ -78,7 +78,7 @@ pub fn complete(
         }
         Block::Style => {
             let ctx = crate::util::style_context_at(content, loc.offset_in_block);
-            style::complete(ctx)
+            style::complete(ctx, content)
         }
         Block::Script => {
             let ctx = crate::util::script_context_at(content, loc.offset_in_block);

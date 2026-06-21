@@ -583,7 +583,11 @@ fn parse_animation_item(item: &str) -> AnimationStyle {
     let mut animation = AnimationStyle::default();
     let mut time_count = 0;
 
-    for token in item.split_whitespace() {
+    for token in split_paren_aware(item, ' ')
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
         if looks_like_explicit_time(token) {
             let ms = parse_time_ms(token);
             if time_count == 0 {

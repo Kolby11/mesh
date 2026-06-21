@@ -81,10 +81,19 @@ mod tests {
     }
 
     #[test]
-    fn resolve_theme_token() {
+    fn resolve_theme_var() {
         let theme = mesh_core_theme::default_theme();
         let resolver = StyleResolver::new(&theme);
-        let value = StyleValue::Token("color.primary".to_string());
+        let value = StyleValue::Var("--color-primary".to_string());
+        let resolved = resolver.resolve_value(&value);
+        assert_eq!(resolved, "#6750A4");
+    }
+
+    #[test]
+    fn resolve_theme_var_alias() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let value = StyleValue::Var("--color-primary".to_string());
         let resolved = resolver.resolve_value(&value);
         assert_eq!(resolved, "#6750A4");
     }
@@ -294,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn style_diagnostics_transform_origin_is_accepted_but_unlowered() {
+    fn style_diagnostics_transform_origin_is_accepted_and_lowered() {
         let theme = mesh_core_theme::default_theme();
         let resolver = StyleResolver::new(&theme);
         let rules = vec![StyleRule {
@@ -306,12 +315,17 @@ mod tests {
             container_query: None,
         }];
 
-        let (_style, diagnostics) = resolve_class(&resolver, &rules, "panel");
+        let (style, diagnostics) = resolve_class(&resolver, &rules, "panel");
 
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].property, "transform-origin");
-        assert!(diagnostics[0].message.contains("accepted by the parser"));
-        assert!(diagnostics[0].message.contains("not lowered"));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            style.transform_origin.x,
+            TransformOriginValue::Percent(50.0)
+        );
+        assert_eq!(
+            style.transform_origin.y,
+            TransformOriginValue::Percent(50.0)
+        );
     }
 
     #[test]
@@ -416,14 +430,14 @@ mod tests {
     }
 
     #[test]
-    fn animation_token_duration_resolves_from_theme() {
+    fn animation_variable_duration_resolves_from_theme() {
         let theme = mesh_core_theme::default_theme();
         let resolver = StyleResolver::new(&theme);
         let rules = vec![StyleRule {
             selector: Selector::Class("panel".to_string()),
             declarations: vec![mesh_core_component::style::Declaration {
                 property: "animation-duration".to_string(),
-                value: StyleValue::Token("animation.duration.fast".to_string()),
+                value: StyleValue::Var("--animation-duration-fast".to_string()),
             }],
             container_query: None,
         }];
@@ -442,14 +456,14 @@ mod tests {
     }
 
     #[test]
-    fn invalid_animation_token_produces_diagnostic_and_skips_declaration() {
+    fn invalid_animation_variable_produces_diagnostic_and_skips_declaration() {
         let theme = mesh_core_theme::default_theme();
         let resolver = StyleResolver::new(&theme);
         let rules = vec![StyleRule {
             selector: Selector::Class("panel".to_string()),
             declarations: vec![mesh_core_component::style::Declaration {
                 property: "animation-duration".to_string(),
-                value: StyleValue::Token("animation.duration.fastest".to_string()),
+                value: StyleValue::Var("--animation-duration-fastest".to_string()),
             }],
             container_query: None,
         }];
@@ -486,7 +500,7 @@ mod tests {
                 },
                 mesh_core_component::style::Declaration {
                     property: "color".to_string(),
-                    value: StyleValue::Token("color.primary".to_string()),
+                    value: StyleValue::Var("--color-primary".to_string()),
                 },
             ],
             container_query: None,
@@ -675,7 +689,7 @@ mod tests {
                     "base".into(),
                     std::collections::HashMap::from([(
                         "color".into(),
-                        "token(color.on-background)".into(),
+                        "var(--color-on-background)".into(),
                     )]),
                 )]),
             },
@@ -694,7 +708,7 @@ mod tests {
                             "base".into(),
                             std::collections::HashMap::from([(
                                 "transition".into(),
-                                "background-color token(animation.duration.short) token(animation.curves.bezier.standard)"
+                                "background-color var(--animation-duration-short) var(--animation-curves-bezier-standard)"
                                     .into(),
                             )]),
                         ),
@@ -702,7 +716,7 @@ mod tests {
                             "button".into(),
                             std::collections::HashMap::from([(
                                 "background".into(),
-                                "token(@mesh/weather.weather.color.sunny)".into(),
+                                "var(--weather-color-sunny)".into(),
                             )]),
                         ),
                     ]),
@@ -1042,8 +1056,8 @@ mod tests {
         let source = r#"
 <style>
 .panel {
-    padding-inline: token(spacing.lg);
-    padding-block: token(spacing.sm);
+    padding-inline: var(--spacing-lg);
+    padding-block: var(--spacing-sm);
 }
 </style>
 "#;
@@ -1280,7 +1294,7 @@ mod tests {
     }
 
     #[test]
-    fn css_variable_resolves_token_value_before_computed_style() {
+    fn css_variable_resolves_theme_variable_before_computed_style() {
         let theme = mesh_core_theme::default_theme();
         let resolver = StyleResolver::new(&theme);
         let rules = vec![StyleRule {
@@ -1288,7 +1302,7 @@ mod tests {
             declarations: vec![
                 mesh_core_component::style::Declaration {
                     property: "--surface".to_string(),
-                    value: StyleValue::Token("color.primary".to_string()),
+                    value: StyleValue::Var("--color-primary".to_string()),
                 },
                 mesh_core_component::style::Declaration {
                     property: "background".to_string(),
@@ -1308,6 +1322,37 @@ mod tests {
         );
 
         assert_eq!(style.background_color, Color::from_hex("#6750A4").unwrap());
+    }
+
+    #[test]
+    fn css_variable_local_value_wins_over_theme_variable() {
+        let theme = mesh_core_theme::default_theme();
+        let resolver = StyleResolver::new(&theme);
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![
+                mesh_core_component::style::Declaration {
+                    property: "--color-primary".to_string(),
+                    value: StyleValue::Literal("#ffffff".to_string()),
+                },
+                mesh_core_component::style::Declaration {
+                    property: "background".to_string(),
+                    value: StyleValue::Var("--color-primary".to_string()),
+                },
+            ],
+            container_query: None,
+        }];
+
+        let style = resolver.resolve_node_style(
+            &rules,
+            "box",
+            &["panel".to_string()],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        );
+
+        assert_eq!(style.background_color, Color::WHITE);
     }
 
     #[test]
@@ -1337,7 +1382,7 @@ mod tests {
     }
 
     #[test]
-    fn shipped_navigation_style_token_resolution_uses_theme_pipeline() {
+    fn shipped_navigation_style_variable_resolution_uses_theme_pipeline() {
         let theme = mesh_core_theme::default_theme();
         let resolver = StyleResolver::new(&theme);
         let rules = vec![StyleRule {
@@ -1345,27 +1390,27 @@ mod tests {
             declarations: vec![
                 Declaration {
                     property: "background".to_string(),
-                    value: StyleValue::Token("color.surface".to_string()),
+                    value: StyleValue::Var("--color-surface".to_string()),
                 },
                 Declaration {
                     property: "color".to_string(),
-                    value: StyleValue::Token("color.on-surface".to_string()),
+                    value: StyleValue::Var("--color-on-surface".to_string()),
                 },
                 Declaration {
                     property: "padding-inline".to_string(),
-                    value: StyleValue::Token("spacing.lg".to_string()),
+                    value: StyleValue::Var("--spacing-lg".to_string()),
                 },
                 Declaration {
                     property: "border-radius".to_string(),
-                    value: StyleValue::Token("radius.md".to_string()),
+                    value: StyleValue::Var("--radius-md".to_string()),
                 },
                 Declaration {
                     property: "transition-duration".to_string(),
-                    value: StyleValue::Token("animation.duration.short".to_string()),
+                    value: StyleValue::Var("--animation-duration-short".to_string()),
                 },
                 Declaration {
                     property: "animation-duration".to_string(),
-                    value: StyleValue::Token("animation.duration.long".to_string()),
+                    value: StyleValue::Var("--animation-duration-long".to_string()),
                 },
             ],
             container_query: None,
@@ -1392,7 +1437,7 @@ mod tests {
             declarations: vec![
                 Declaration {
                     property: "--surface".to_string(),
-                    value: StyleValue::Token("color.surface-container".to_string()),
+                    value: StyleValue::Var("--color-surface-container".to_string()),
                 },
                 Declaration {
                     property: "background".to_string(),
@@ -1409,14 +1454,14 @@ mod tests {
     }
 
     #[test]
-    fn shipped_navigation_style_animation_token_failures_are_actionable() {
+    fn shipped_navigation_style_animation_variable_failures_are_actionable() {
         let theme = mesh_core_theme::default_theme();
         let resolver = StyleResolver::new(&theme);
         let rules = vec![StyleRule {
             selector: Selector::Class("nav-shell".to_string()),
             declarations: vec![Declaration {
                 property: "transition-duration".to_string(),
-                value: StyleValue::Token("animation.duration.not-real".to_string()),
+                value: StyleValue::Var("--animation-duration-not-real".to_string()),
             }],
             container_query: None,
         }];
@@ -1479,10 +1524,15 @@ mod tests {
         assert!(diagnostic_properties.contains("border-style"));
         assert_eq!(
             nav_style.background_color,
-            Color::from_hex("#1C1B1F").unwrap()
+            Color {
+                r: 10,
+                g: 10,
+                b: 14,
+                a: 191,
+            }
         );
         assert_eq!(nav_style.padding.left, 16.0);
-        assert_eq!(status_style.font_size, 12.0);
+        assert_eq!(status_style.font_size, 14.0);
         assert_eq!(button_style.border_width, Edges::all(2.0));
         assert_eq!(
             button_style.background_color,
@@ -1523,17 +1573,9 @@ mod tests {
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(style.background_color, Color::from_hex("#211F26").unwrap());
         assert_eq!(style.color, Color::from_hex("#E6E1E5").unwrap());
-        assert_eq!(style.padding, Edges::all(16.0));
+        assert_eq!(style.padding, Edges::all(4.0));
         assert_eq!(style.border_radius, Corners::all(16.0));
-        assert_eq!(style.gap, 16.0);
-    }
-
-    #[test]
-    fn token_resolution_still_works_after_variable_support() {
-        let theme = mesh_core_theme::default_theme();
-        let resolver = StyleResolver::new(&theme);
-        let value = StyleValue::Token("color.primary".to_string());
-        assert_eq!(resolver.resolve_value(&value), "#6750A4");
+        assert_eq!(style.gap, 4.0);
     }
 
     #[test]
@@ -1564,7 +1606,7 @@ mod tests {
         assert_eq!(style.transitions[0].delay_ms, 25);
         assert_eq!(style.transitions[0].easing, TransitionEasing::EaseIn);
         assert!(style.transitions[0].properties.animates_opacity());
-        assert!(style.transitions[0].properties.animates_border_color());
+        assert!(style.transitions[1].properties.animates_border_color());
     }
 
     fn resolve_single_decl(property: &str, value: &str) -> ComputedStyle {
@@ -1895,10 +1937,10 @@ mod tests {
         let source = r#"
 <style>
 .shell-card {
-    --pad: token(spacing.md);
+    --pad: var(--spacing-md);
     padding: var(--pad);
     margin: 4px 8px;
-    border: 1px solid token(color.outline);
+    border: 1px solid var(--color-outline);
     display: flex;
     flex-direction: column;
     gap: 6px;

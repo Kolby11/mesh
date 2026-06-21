@@ -87,6 +87,7 @@ impl Shell {
             }
         }
         tracing::info!("active theme changed to '{theme_id}'");
+        self.settings.theme.active = theme_id.to_string();
         let path = mesh_core_theme::theme_path_for_id(theme_id);
         let modified_at = std::fs::metadata(&path)
             .ok()

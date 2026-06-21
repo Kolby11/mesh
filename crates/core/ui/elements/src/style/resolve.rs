@@ -358,20 +358,9 @@ impl<'a> StyleResolver<'a> {
     ) -> String {
         match value {
             StyleValue::Literal(s) => {
-                resolve_embedded_tokens(s, self.theme, strict_animation_tokens).unwrap_or_default()
+                resolve_embedded_references(s, self.theme, variables, strict_animation_tokens)
+                    .unwrap_or_default()
             }
-            StyleValue::Token(name) => match self.theme.token(name) {
-                Some(TokenValue::String(s)) => s.clone(),
-                Some(TokenValue::Number(n)) => format!("{n}"),
-                Some(TokenValue::Bool(b)) => format!("{b}"),
-                None => {
-                    if strict_animation_tokens && name.starts_with("animation.") {
-                        return String::new();
-                    }
-                    tracing::warn!("unresolved theme token: {name}");
-                    String::new()
-                }
-            },
             StyleValue::Var(name) => variables
                 .get(name)
                 .map(|value| {
@@ -381,7 +370,30 @@ impl<'a> StyleResolver<'a> {
                         strict_animation_tokens,
                     )
                 })
-                .unwrap_or_default(),
+                .unwrap_or_else(|| {
+                    self.resolve_theme_reference(name, strict_animation_tokens)
+                        .unwrap_or_default()
+                }),
+        }
+    }
+
+    fn resolve_theme_reference(
+        &self,
+        name: &str,
+        strict_animation_tokens: bool,
+    ) -> Result<String, String> {
+        let token_name = theme_reference_to_token_name(name);
+        match self.theme.token(&token_name) {
+            Some(TokenValue::String(s)) => Ok(s.clone()),
+            Some(TokenValue::Number(n)) => Ok(format!("{n}")),
+            Some(TokenValue::Bool(b)) => Ok(format!("{b}")),
+            None => {
+                if strict_animation_tokens && token_name.starts_with("animation.") {
+                    return Err(token_name);
+                }
+                tracing::warn!("unresolved theme token: {token_name}");
+                Ok(String::new())
+            }
         }
     }
 
@@ -397,16 +409,19 @@ impl<'a> StyleResolver<'a> {
                 }
                 Ok(())
             }
-            StyleValue::Token(name) => {
-                if name.starts_with("animation.") && self.theme.token(name).is_none() {
-                    return Err(name.clone());
-                }
-                Ok(())
-            }
             StyleValue::Var(name) => variables
                 .get(name)
                 .map(|value| self.validate_animation_value_with_variables(value, variables))
-                .unwrap_or(Ok(())),
+                .unwrap_or_else(|| {
+                    let token_name = theme_reference_to_token_name(name);
+                    if token_name.starts_with("animation.")
+                        && self.theme.token(&token_name).is_none()
+                    {
+                        Err(token_name)
+                    } else {
+                        Ok(())
+                    }
+                }),
         }
     }
 
@@ -808,6 +823,7 @@ impl<'a> StyleResolver<'a> {
             self.apply_theme_defaults_map(style, tag, defaults, diagnostics, variables);
         }
         if let Some(module_id) = module_id {
+            self.seed_module_theme_variables(module_id, variables);
             if let Some(defaults) = self.theme.module_component_defaults(module_id, "base") {
                 self.apply_theme_defaults_map(style, "base", defaults, diagnostics, variables);
             }
@@ -831,12 +847,34 @@ impl<'a> StyleResolver<'a> {
             self.apply_theme_defaults_map_no_diagnostics(style, defaults, variables);
         }
         if let Some(module_id) = module_id {
+            self.seed_module_theme_variables(module_id, variables);
             if let Some(defaults) = self.theme.module_component_defaults(module_id, "base") {
                 self.apply_theme_defaults_map_no_diagnostics(style, defaults, variables);
             }
             if let Some(defaults) = self.theme.module_component_defaults(module_id, tag) {
                 self.apply_theme_defaults_map_no_diagnostics(style, defaults, variables);
             }
+        }
+    }
+
+    fn seed_module_theme_variables(
+        &self,
+        module_id: &str,
+        variables: &mut HashMap<String, StyleValue>,
+    ) {
+        let Some(module) = self.theme.modules.get(module_id) else {
+            return;
+        };
+        for (name, value) in &module.tokens {
+            variables
+                .entry(format!("--{}", name.replace('.', "-")))
+                .or_insert_with(|| {
+                    StyleValue::Literal(match value {
+                        TokenValue::String(value) => value.clone(),
+                        TokenValue::Number(value) => format!("{value}"),
+                        TokenValue::Bool(value) => format!("{value}"),
+                    })
+                });
         }
     }
 
@@ -894,6 +932,9 @@ impl<'a> StyleResolver<'a> {
             return;
         }
         if !is_supported_css_property(&decl.property) {
+            return;
+        }
+        if contains_deprecated_token_reference(&decl.value) {
             return;
         }
         if is_strict_animation_property(&decl.property)
@@ -970,8 +1011,22 @@ impl<'a> StyleResolver<'a> {
             });
             return;
         }
+        if contains_deprecated_token_reference(&decl.value) {
+            diagnostics.push(StyleDiagnostic {
+                property: decl.property.clone(),
+                selector: selector.clone(),
+                message: "deprecated token() references are not supported; use var(--...)"
+                    .to_string(),
+            });
+            return;
+        }
         if let StyleValue::Var(name) = &decl.value
+            && !is_strict_animation_property(&decl.property)
             && !variables.contains_key(name)
+            && self
+                .theme
+                .token(&theme_reference_to_token_name(name))
+                .is_none()
         {
             diagnostics.push(StyleDiagnostic {
                 property: decl.property.clone(),
@@ -1022,11 +1077,16 @@ fn is_strict_animation_property(property: &str) -> bool {
     )
 }
 
+fn contains_deprecated_token_reference(value: &StyleValue) -> bool {
+    match value {
+        StyleValue::Literal(value) => value.contains("token("),
+        StyleValue::Var(_) => false,
+    }
+}
+
 fn classify_theme_style_value(value: &str) -> StyleValue {
     let value = value.trim();
-    if value.starts_with("token(") && value.ends_with(')') {
-        StyleValue::Token(value[6..value.len() - 1].trim().to_string())
-    } else if value.starts_with("var(") && value.ends_with(')') {
+    if value.starts_with("var(") && value.ends_with(')') {
         StyleValue::Var(value[4..value.len() - 1].trim().to_string())
     } else {
         StyleValue::Literal(value.to_string())
@@ -1681,52 +1741,178 @@ fn selector_to_diagnostic_string(selector: &Selector) -> String {
     }
 }
 
-fn resolve_embedded_tokens(
+fn resolve_embedded_references(
     value: &str,
     theme: &Theme,
+    variables: &HashMap<String, StyleValue>,
     strict_animation_tokens: bool,
 ) -> Result<String, String> {
     let mut output = String::with_capacity(value.len());
     let mut rest = value;
 
-    while let Some(start) = rest.find("token(") {
+    loop {
+        let var_start = rest.find("var(");
+        let Some(start) = var_start else {
+            break;
+        };
+
         output.push_str(&rest[..start]);
-        let token_start = start + "token(".len();
-        let Some(end) = rest[token_start..].find(')') else {
+        let reference_start = start + "var(".len();
+        let Some(end) = rest[reference_start..].find(')') else {
             output.push_str(&rest[start..]);
             return Ok(output);
         };
 
-        let name = rest[token_start..token_start + end].trim();
-        match theme.token(name) {
-            Some(TokenValue::String(s)) => output.push_str(s),
-            Some(TokenValue::Number(n)) => output.push_str(&format!("{n}")),
-            Some(TokenValue::Bool(b)) => output.push_str(&format!("{b}")),
-            None => {
-                if strict_animation_tokens && name.starts_with("animation.") {
-                    return Err(name.to_string());
+        let name = rest[reference_start..reference_start + end].trim();
+        if let Some(value) = variables.get(name) {
+            output.push_str(&resolve_embedded_references(
+                &style_value_to_string(value, theme, variables, strict_animation_tokens)?,
+                theme,
+                variables,
+                strict_animation_tokens,
+            )?);
+        } else {
+            let token_name = theme_reference_to_token_name(name);
+            match theme.token(&token_name) {
+                Some(TokenValue::String(s)) => output.push_str(s),
+                Some(TokenValue::Number(n)) => output.push_str(&format!("{n}")),
+                Some(TokenValue::Bool(b)) => output.push_str(&format!("{b}")),
+                None => {
+                    if strict_animation_tokens && token_name.starts_with("animation.") {
+                        return Err(token_name);
+                    }
+                    tracing::warn!("unresolved theme token: {token_name}");
                 }
-                tracing::warn!("unresolved theme token: {name}");
             }
         }
-        rest = &rest[token_start + end + 1..];
+        rest = &rest[reference_start + end + 1..];
     }
 
     output.push_str(rest);
     Ok(output)
 }
 
+fn style_value_to_string(
+    value: &StyleValue,
+    theme: &Theme,
+    variables: &HashMap<String, StyleValue>,
+    strict_animation_tokens: bool,
+) -> Result<String, String> {
+    match value {
+        StyleValue::Literal(value) => {
+            resolve_embedded_references(value, theme, variables, strict_animation_tokens)
+        }
+        StyleValue::Var(name) => {
+            if let Some(value) = variables.get(name) {
+                return style_value_to_string(value, theme, variables, strict_animation_tokens);
+            }
+            let token_name = theme_reference_to_token_name(name);
+            match theme.token(&token_name) {
+                Some(TokenValue::String(s)) => Ok(s.clone()),
+                Some(TokenValue::Number(n)) => Ok(format!("{n}")),
+                Some(TokenValue::Bool(b)) => Ok(format!("{b}")),
+                None => Ok(String::new()),
+            }
+        }
+    }
+}
+
+fn theme_reference_to_token_name(name: &str) -> String {
+    let name = name.trim();
+    let Some(variable) = name.strip_prefix("--") else {
+        return name.to_string();
+    };
+    css_custom_property_to_token_name(variable)
+}
+
+fn css_custom_property_to_token_name(variable: &str) -> String {
+    let Some((group, rest)) = variable.split_once('-') else {
+        return variable.to_string();
+    };
+
+    let rest = match group {
+        "animation" => canonicalize_prefixed(
+            rest,
+            &["curves-bezier", "default", "duration", "opacity", "scale"],
+        ),
+        "border" => canonicalize_prefixed(rest, &["style", "width"]),
+        "shadow" => canonicalize_prefixed(rest, &["colored", "umbra"]),
+        "shape" => canonicalize_prefixed(rest, &["corner"]),
+        "spacing" => canonicalize_prefixed(rest, &["inset"]),
+        "state" => canonicalize_suffixed(rest, &["opacity"]),
+        "icon" => canonicalize_prefixed(rest, &["size"]),
+        "typography" => canonicalize_prefixed(
+            rest,
+            &[
+                "family",
+                "line-height",
+                "scale-body-large",
+                "scale-body-medium",
+                "scale-body-small",
+                "scale-display-large",
+                "scale-display-medium",
+                "scale-display-small",
+                "scale-headline-large",
+                "scale-headline-medium",
+                "scale-headline-small",
+                "scale-label-large",
+                "scale-label-medium",
+                "scale-label-small",
+                "scale-title-large",
+                "scale-title-medium",
+                "scale-title-small",
+                "size",
+                "tracking",
+                "weight",
+            ],
+        ),
+        "color" | "elevation" | "radius" => rest.to_string(),
+        _ => rest.replace('-', "."),
+    };
+
+    format!("{group}.{rest}")
+}
+
+fn canonicalize_prefixed(value: &str, prefixes: &[&str]) -> String {
+    let mut prefixes = prefixes.to_vec();
+    prefixes.sort_by_key(|prefix| std::cmp::Reverse(prefix.len()));
+    for prefix in prefixes {
+        if value == prefix {
+            return prefix.to_string();
+        }
+        if let Some(rest) = value.strip_prefix(&format!("{prefix}-")) {
+            return format!("{}.{}", prefix.replace('-', "."), rest);
+        }
+    }
+    value.to_string()
+}
+
+fn canonicalize_suffixed(value: &str, suffixes: &[&str]) -> String {
+    for suffix in suffixes {
+        if let Some(rest) = value.strip_suffix(&format!("-{suffix}")) {
+            return format!("{rest}.{suffix}");
+        }
+    }
+    value.to_string()
+}
+
 fn find_unresolved_animation_token(value: &str, theme: &Theme) -> Option<String> {
     let mut rest = value;
 
-    while let Some(start) = rest.find("token(") {
-        let token_start = start + "token(".len();
-        let end = rest[token_start..].find(')')?;
-        let name = rest[token_start..token_start + end].trim();
-        if name.starts_with("animation.") && theme.token(name).is_none() {
+    loop {
+        let var_start = rest.find("var(");
+        let Some(start) = var_start else {
+            break;
+        };
+
+        let reference_start = start + "var(".len();
+        let end = rest[reference_start..].find(')')?;
+        let name =
+            theme_reference_to_token_name(rest[reference_start..reference_start + end].trim());
+        if name.starts_with("animation.") && theme.token(&name).is_none() {
             return Some(name.to_string());
         }
-        rest = &rest[token_start + end + 1..];
+        rest = &rest[reference_start + end + 1..];
     }
 
     None

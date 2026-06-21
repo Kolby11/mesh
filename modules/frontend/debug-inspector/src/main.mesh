@@ -1201,27 +1201,27 @@ end
 .inspector-shell {
     width: 100%;
     height: 100%;
-    padding: token(spacing.sm);
+    padding: var(--spacing-sm);
     background: transparent;
 }
 
 .inspector-root {
     width: 100%;
     height: 100%;
-    gap: token(spacing.md);
-    padding: token(spacing.md);
-    border-radius: token(radius.lg);
-    background: token(color.surface);
-    color: token(color.on-surface);
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    color: var(--color-on-surface);
     border-width: 1px;
     border-style: solid;
-    border-color: token(color.outline-variant);
+    border-color: var(--color-outline-variant);
 }
 
 .inspector-header {
     width: 100%;
     align-items: start;
-    gap: token(spacing.sm);
+    gap: var(--spacing-sm);
 }
 
 .header-copy {
@@ -1230,117 +1230,117 @@ end
 }
 
 .inspector-title {
-    font-size: token(typography.size.md);
+    font-size: var(--typography-size-md);
     font-weight: 700;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
 }
 
 .inspector-status {
-    font-size: token(typography.size.xs);
-    color: token(color.on-surface-variant);
+    font-size: var(--typography-size-xs);
+    color: var(--color-on-surface-variant);
 }
 
 .header-close {
     min-width: 64px;
     height: 32px;
-    padding-inline: token(spacing.sm);
+    padding-inline: var(--spacing-sm);
     justify-content: center;
     align-items: center;
-    border-radius: token(radius.md);
-    background: token(color.surface-container);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-container);
 }
 
 .header-close-text {
-    font-size: token(typography.size.sm);
+    font-size: var(--typography-size-sm);
     font-weight: 600;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
 }
 
 .profiling-zone {
-    gap: token(spacing.xs);
-    padding: token(spacing.md);
-    border-radius: token(radius.md);
-    background: token(color.surface-container-low);
+    gap: var(--spacing-xs);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-container-low);
     border-width: 1px;
     border-style: solid;
-    border-color: token(color.outline-variant);
+    border-color: var(--color-outline-variant);
 }
 
 .profiling-head {
     width: 100%;
     justify-content: space-between;
     align-items: center;
-    gap: token(spacing.sm);
+    gap: var(--spacing-sm);
 }
 
 .profiling-title {
-    font-size: token(typography.size.sm);
+    font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
 }
 
 .profiling-badge {
-    padding-inline: token(spacing.sm);
-    padding-block: token(spacing.xs);
-    border-radius: token(radius.full);
-    background: token(color.secondary-container);
-    color: token(color.on-secondary-container);
-    font-size: token(typography.size.xs);
+    padding-inline: var(--spacing-sm);
+    padding-block: var(--spacing-xs);
+    border-radius: var(--radius-full);
+    background: var(--color-secondary-container);
+    color: var(--color-on-secondary-container);
+    font-size: var(--typography-size-xs);
     font-weight: 700;
 }
 
 .profiling-copy {
-    font-size: token(typography.size.xs);
-    color: token(color.on-surface-variant);
+    font-size: var(--typography-size-xs);
+    color: var(--color-on-surface-variant);
 }
 
 .inspector-body {
     width: 100%;
     flex-grow: 1;
-    gap: token(spacing.md);
+    gap: var(--spacing-md);
 }
 
 .benchmark-view {
-    gap: token(spacing.md);
+    gap: var(--spacing-md);
 }
 
 .section-title {
-    font-size: token(typography.size.sm);
+    font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
 }
 
 .section-copy {
-    font-size: token(typography.size.xs);
-    color: token(color.on-surface-variant);
+    font-size: var(--typography-size-xs);
+    color: var(--color-on-surface-variant);
 }
 
 .benchmark-stack {
-    gap: token(spacing.sm);
+    gap: var(--spacing-sm);
 }
 
 .benchmark-card {
     width: 100%;
-    padding: token(spacing.md);
-    border-radius: token(radius.md);
-    background: token(color.surface-container);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-container);
     border-width: 1px;
     border-style: solid;
-    border-color: token(color.outline-variant);
+    border-color: var(--color-outline-variant);
 }
 
 .benchmark-card-copy {
-    gap: token(spacing.xs);
+    gap: var(--spacing-xs);
 }
 
 .benchmark-card-title {
-    font-size: token(typography.size.sm);
+    font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: token(color.on-surface);
+    color: var(--color-on-surface);
 }
 
 .benchmark-card-text {
-    font-size: token(typography.size.xs);
-    color: token(color.on-surface-variant);
+    font-size: var(--typography-size-xs);
+    color: var(--color-on-surface-variant);
 }
 </style>

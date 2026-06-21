@@ -16,38 +16,38 @@
 .proof-shell {
     width: 100%;
     height: 100%;
-    padding: token(spacing.md);
+    padding: var(--spacing-md);
     background: transparent;
 }
 
 .proof-card {
     width: 100%;
     height: 100%;
-    gap: token(spacing.sm);
-    padding: token(spacing.md);
-    border-radius: token(radius.lg);
-    background: token(color.surface-container);
-    color: token(color.on-surface);
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-container);
+    color: var(--color-on-surface);
     border-width: 1px;
     border-style: solid;
-    border-color: token(color.outline-variant);
+    border-color: var(--color-outline-variant);
 }
 
 .proof-eyebrow {
-    font-size: token(typography.size.xs);
+    font-size: var(--typography-size-xs);
     font-weight: 700;
-    color: token(color.on-surface-variant);
+    color: var(--color-on-surface-variant);
 }
 
 .proof-copy {
-    font-size: token(typography.size.md);
-    line-height: token(typography.line-height.normal);
-    color: token(color.on-surface);
+    font-size: var(--typography-size-md);
+    line-height: var(--typography-line-height-normal);
+    color: var(--color-on-surface);
 }
 
 .proof-note {
-    font-size: token(typography.size.sm);
-    line-height: token(typography.line-height.normal);
-    color: token(color.on-surface-variant);
+    font-size: var(--typography-size-sm);
+    line-height: var(--typography-line-height-normal);
+    color: var(--color-on-surface-variant);
 }
 </style>

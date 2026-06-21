@@ -359,10 +359,10 @@ fn module_package_manifest_parses_frontend_theme_contributions() {
       "defaults": {
         "components": {
           "base": {
-            "transition": "background-color token(animation.duration.short) token(animation.curves.bezier.standard)"
+            "transition": "background-color var(--animation-duration-short) var(--animation-curves-bezier-standard)"
           },
           "button": {
-            "background": "token(@mesh/weather.weather.color.sunny)"
+            "background": "var(--weather-color-sunny)"
           }
         }
       }
@@ -382,7 +382,7 @@ fn module_package_manifest_parses_frontend_theme_contributions() {
     );
     assert_eq!(
         theme.defaults.components["button"]["background"],
-        "token(@mesh/weather.weather.color.sunny)"
+        "var(--weather-color-sunny)"
     );
 
     let runtime = manifest.into_runtime_manifest();
@@ -478,7 +478,7 @@ fn module_package_manifest_rejects_resource_pack_contributions_from_wrong_kind()
       "themes": [{
         "id": "bad",
         "label": "Bad",
-        "modes": { "dark": "themes/dark.json" }
+        "modes": { "dark": "themes/dark/theme.css" }
       }]
     }
   }
@@ -1833,7 +1833,7 @@ fn installed_module_graph_resolves_layout_entrypoint() {
 #[test]
 fn installed_module_graph_indexes_theme_icon_font_i18n_contributions() {
     let mut modes = HashMap::new();
-    modes.insert("dark".into(), "themes/dark.json".into());
+    modes.insert("dark".into(), "themes/dark/theme.css".into());
     let theme_contributes = MeshContributes {
         themes: vec![ThemeContribution {
             id: "mesh-default".into(),
@@ -2677,7 +2677,7 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
         },
     );
     let mut theme_modes = HashMap::new();
-    theme_modes.insert("dark".into(), "themes/dark.json".into());
+    theme_modes.insert("dark".into(), "themes/dark/theme.css".into());
     let theme = loaded_module(
         "@mesh/example-theme",
         ModuleKind::Theme,

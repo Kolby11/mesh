@@ -557,7 +557,7 @@ fn animation_token_runtime_diagnostic_reaches_component() {
 <style>
 .panel {
   animation-name: pulse;
-  animation-duration: token(animation.duration.fastest);
+  animation-duration: var(--animation-duration-fastest);
   width: 10px;
   height: 10px;
 }

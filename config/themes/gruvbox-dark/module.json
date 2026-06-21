@@ -1,0 +1,14 @@
+{
+  "name": "@mesh/gruvbox-dark",
+  "version": "0.1.0",
+  "description": "Gruvbox Dark theme.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "theme": {
+      "id": "gruvbox-dark",
+      "label": "Gruvbox Dark",
+      "entry": "theme.css"
+    }
+  }
+}

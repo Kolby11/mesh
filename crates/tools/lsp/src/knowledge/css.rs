@@ -12,27 +12,27 @@ pub static CSS_PROPERTIES: &[CssProp] = &[
     CssProp {
         name: "background",
         description: "Background color.",
-        values: &["transparent", "token()", "var()"],
+        values: &["transparent", "var()"],
     },
     CssProp {
         name: "background-color",
         description: "Background color (alias for background).",
-        values: &["transparent", "token()", "var()"],
+        values: &["transparent", "var()"],
     },
     CssProp {
         name: "color",
         description: "Text color.",
-        values: &["transparent", "token()", "var()"],
+        values: &["transparent", "var()"],
     },
     CssProp {
         name: "border-color",
         description: "Border color.",
-        values: &["transparent", "token()", "var()"],
+        values: &["transparent", "var()"],
     },
     CssProp {
         name: "border",
         description: "Practical border shorthand: width, style keyword, color.",
-        values: &["none", "1px solid token()"],
+        values: &["none", "1px solid var(--color-outline)"],
     },
     CssProp {
         name: "font",
@@ -41,8 +41,8 @@ pub static CSS_PROPERTIES: &[CssProp] = &[
     },
     CssProp {
         name: "font-size",
-        description: "Font size in px or token reference.",
-        values: &["token()"],
+        description: "Font size in px or variable reference.",
+        values: &["var()"],
     },
     CssProp {
         name: "font-weight",

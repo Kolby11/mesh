@@ -9,11 +9,7 @@
       "interfaces": {
         "mesh.audio": ">=1.0"
       },
-      "capabilities": [
-        "shell.surface",
-        "service.audio.read",
-        "service.audio.control"
-      ]
+      "capabilities": ["shell.surface", "service.audio.read", "service.audio.control"]
     },
     "entry": "src/main.mesh",
     "surface": {

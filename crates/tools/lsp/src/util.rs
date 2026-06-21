@@ -31,6 +31,7 @@ pub enum TemplateContext {
 pub enum StyleContext {
     Property,
     Value { property: String },
+    Variable { prefix: String },
     Selector,
 }
 
@@ -234,6 +235,15 @@ pub fn style_context_at(block_content: &str, offset: usize) -> StyleContext {
 
     if let Some(colon_pos) = current_decl.rfind(':') {
         let property = current_decl[..colon_pos].trim().to_string();
+        let value_before_cursor = &current_decl[colon_pos + 1..];
+        if let Some(var_start) = value_before_cursor.rfind("var(") {
+            let after_var = &value_before_cursor[var_start + "var(".len()..];
+            if !after_var.contains(')') {
+                return StyleContext::Variable {
+                    prefix: after_var.trim().to_string(),
+                };
+            }
+        }
         StyleContext::Value { property }
     } else {
         StyleContext::Property

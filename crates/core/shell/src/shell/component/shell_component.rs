@@ -1142,8 +1142,9 @@ impl FrontendSurfaceComponent {
 
     /// Like `refresh_tooltip_settings` but also merges theme component
     /// defaults for `"tooltip"`. Called from `paint()` which has access to the
-    /// active theme. Token references such as `token(animation.duration.short)`
-    /// are resolved against the theme's token map.
+    /// active theme. Variable references such as
+    /// `var(--animation-duration-short)` are resolved against the theme's token
+    /// map.
     fn refresh_tooltip_settings_from_theme(&mut self, theme: &Theme) {
         self.refresh_tooltip_settings();
         let Some(defaults) = theme.component_defaults("tooltip") else {
@@ -1151,8 +1152,14 @@ impl FrontendSurfaceComponent {
         };
 
         let resolve = |raw: &str| -> String {
-            if let Some(token_name) = raw.strip_prefix("token(").and_then(|s| s.strip_suffix(")")) {
-                if let Some(val) = theme.token(token_name) {
+            if let Some(variable_name) = raw.strip_prefix("var(").and_then(|s| s.strip_suffix(")"))
+            {
+                if let Some(token_name) = variable_name
+                    .trim()
+                    .strip_prefix("--")
+                    .map(|name| name.replace('-', "."))
+                    && let Some(val) = theme.token(&token_name)
+                {
                     return val.to_string();
                 }
             }

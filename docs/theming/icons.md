@@ -165,7 +165,7 @@ Icon appearance is token-driven. These sit alongside the existing theme
 tokens (`color.*`, `spacing.*`, `typography.*`, …):
 
 | Token | Type | Purpose |
-|-------|------|---------|
+|------|-----|--------|
 | `icon.size.sm` | pixel | Small icons (status indicators) |
 | `icon.size.md` | pixel | Default size (buttons, list items) |
 | `icon.size.lg` | pixel | Large icons (hero affordances) |
@@ -178,7 +178,7 @@ tokens (`color.*`, `spacing.*`, `typography.*`, …):
 Call sites override per-instance when needed:
 
 ```xml
-<icon name="star" style="fill: 1; size: token(icon.size.lg)"/>
+<icon name="star" style="fill: 1; size: var(--icon-size-lg)"/>
 ```
 
 ### Color
@@ -190,7 +190,7 @@ parent — the same way you would for text.
 
 ```css
 .danger {
-  color: token(color.error);
+  color: var(--color-error);
 }
 ```
 
