@@ -247,3 +247,38 @@ end
         "animation should be dropped once settled"
     );
 }
+
+#[test]
+fn refs_click_method_fires_the_nodes_onclick_handler() {
+    // `refs.<name>:click()` synthesizes a click on the live node, routing through
+    // the same dispatch a real pointer release uses, so the node's onclick runs.
+    let mut component = test_frontend_component(
+        r#"
+<template>
+    <button ref="action" onclick="on_action">Go</button>
+</template>
+<script lang="luau">
+clicks = 0
+function on_action()
+    clicks = clicks + 1
+end
+function trigger()
+    refs.action:click()
+end
+</script>
+"#,
+    );
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 60);
+    component.paint(&theme, 160, 60, &mut buffer, 1.0).unwrap();
+
+    component.call_namespaced_handler("trigger", &[]).unwrap();
+    let clicks = runtime_value(&component, "clicks")
+        .and_then(|value| value.as_f64())
+        .unwrap_or(0.0);
+    assert!(
+        (clicks - 1.0).abs() < 0.01,
+        "refs.action:click() should fire onclick once, got {clicks}"
+    );
+}

@@ -392,6 +392,7 @@ end
 | ----------------------- | -------------------------------------------------------------- |
 | `:focus()`              | Routes through the canonical focus path (fires `onfocus`).     |
 | `:blur()`               | Clears focus if this element currently holds it (fires `onblur`). |
+| `:click()`              | Synthesizes a click on the node through the real dispatch path (fires `onclick`, or activation handlers for menu/list items). |
 | `:scroll_into_view()`   | Scrolls each scrollable ancestor just enough to reveal the element (CSS "nearest" alignment; handles nested scroll regions). |
 | `:scroll_to(top[,left])`| Sets this element's own scroll offset (DOM `element.scrollTop`), clamped to its scrollable range; omitted axes stay put. |
 

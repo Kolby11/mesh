@@ -127,6 +127,13 @@ impl FrontendSurfaceComponent {
                         }
                     }
                 }
+                "click" => {
+                    // `refs.x:click()` synthesizes a click on the live node through
+                    // the same dispatch a real pointer release uses.
+                    if let Some(key) = ref_keys.get(&action.target).cloned() {
+                        requests.extend(self.synthesize_click(&tree, &key)?);
+                    }
+                }
                 "scroll_into_view" => {
                     // Nudge each scrollable ancestor's offset just enough to reveal
                     // the target, routing through the same scroll_offsets map the
@@ -161,6 +168,33 @@ impl FrontendSurfaceComponent {
             }
         }
         Ok(requests)
+    }
+
+    /// Synthesize a click on a live element node, routing through the exact paths
+    /// a real pointer release uses: activation handlers for menu/collection items,
+    /// otherwise the node's `onclick`. The synthetic pointer position is the
+    /// element's center. A missing node or handler is a no-op.
+    pub(super) fn synthesize_click(
+        &mut self,
+        tree: &WidgetNode,
+        node_key: &str,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        if find_node_by_key(tree, node_key).is_none() {
+            return Ok(Vec::new());
+        }
+        let (cx, cy) = find_node_bounds_by_key(tree, node_key, 0.0, 0.0)
+            .map(|(left, top, right, bottom)| ((left + right) / 2.0, (top + bottom) / 2.0))
+            .unwrap_or((0.0, 0.0));
+        let click_event = self.build_click_event(tree, node_key, cx, cy);
+        if self.is_menu_item_key(tree, node_key)
+            || self.is_container_collection_item_key(tree, node_key)
+        {
+            self.dispatch_activation_handlers(tree, node_key, click_event)
+        } else if let Some(handler) = find_click_handler(tree, node_key) {
+            self.call_namespaced_handler(&handler, &[click_event])
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     /// Apply a resolved scroll target to a container, honoring the `{ smooth }`
