@@ -17,6 +17,7 @@ mesh-core-elements  = { workspace = true }
 mesh-core-module    = { workspace = true }
 mesh-core-theme     = { workspace = true }
 
+stylua     = { version = "2.5", default-features = false, features = ["luau"] }
 tower-lsp  = "0.20"
 tokio      = { workspace = true }
 serde      = { workspace = true }

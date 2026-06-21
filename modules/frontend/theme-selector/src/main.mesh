@@ -1,20 +1,20 @@
 <template>
-  <popover class="ts-shell" aria-label="Select theme">
-    <column class="ts-panel">
-      <button class="{dark_class}" onclick={onDark} aria-label="Default Dark">
-        <icon class="ts-icon" name="weather-clear-night" size="18" />
-        <text class="ts-label">Default Dark</text>
-      </button>
-      <button class="{light_class}" onclick={onLight} aria-label="Default Light">
-        <icon class="ts-icon" name="weather-clear" size="18" />
-        <text class="ts-label">Default Light</text>
-      </button>
-      <button class="{gruvbox_class}" onclick={onGruvbox} aria-label="Gruvbox">
-        <icon class="ts-icon" name="emblem-photos" size="18" />
-        <text class="ts-label">Gruvbox</text>
-      </button>
-    </column>
-  </popover>
+    <popover class="ts-shell" aria-label="Select theme">
+        <column class="ts-panel">
+            <button class="{dark_class}" onclick={onDark} aria-label="Default Dark">
+                <icon class="ts-icon" name="weather-clear-night" size="18" />
+                <text class="ts-label">Default Dark</text>
+            </button>
+            <button class="{light_class}" onclick={onLight} aria-label="Default Light">
+                <icon class="ts-icon" name="weather-clear" size="18" />
+                <text class="ts-label">Default Light</text>
+            </button>
+            <button class="{gruvbox_class}" onclick={onGruvbox} aria-label="Gruvbox">
+                <icon class="ts-icon" name="emblem-photos" size="18" />
+                <text class="ts-label">Gruvbox</text>
+            </button>
+        </column>
+    </popover>
 </template>
 
 <script lang="luau">
@@ -53,82 +53,82 @@ function onGruvbox()    apply_theme(THEME_GRUVBOX)     end
 </script>
 
 <style>
-.ts-shell {
-    width: 100%;
-    height: 100%;
-    padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-sm) var(--spacing-sm);
-    background: transparent;
-    opacity: 1;
-    transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
-}
+    .ts-shell {
+        width: 100%;
+        height: 100%;
+        padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-sm) var(--spacing-sm);
+        background: transparent;
+        opacity: 1;
+        transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
 
-.ts-shell.mesh-surface-exiting {
-    opacity: 0;
-}
+    .ts-shell.mesh-surface-exiting {
+        opacity: 0;
+    }
 
-.ts-panel {
-    gap: var(--spacing-xs);
-    padding: var(--spacing-sm);
-    border-radius: var(--radius-lg);
-    background: var(--color-surface-container);
-    color: var(--color-on-surface);
-    border-width: 1px;
-    border-style: solid;
-    border-color: var(--color-outline-variant);
-    min-width: 180px;
-}
+    .ts-panel {
+        gap: var(--spacing-xs);
+        padding: var(--spacing-sm);
+        border-radius: var(--radius-lg);
+        background: var(--color-surface-container);
+        color: var(--color-on-surface);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--color-outline-variant);
+        min-width: 180px;
+    }
 
-.ts-option {
-    width: 100%;
-    height: 40px;
-    justify-content: start;
-    align-items: center;
-    gap: var(--spacing-sm);
-    padding-inline: var(--spacing-md);
-    border-radius: var(--radius-md);
-    background: transparent;
-    color: var(--color-on-surface);
-    border-width: 2px;
-    border-style: solid;
-    border-color: transparent;
-    text-wrap: none;
-    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
-}
+    .ts-option {
+        width: 100%;
+        height: 40px;
+        justify-content: start;
+        align-items: center;
+        gap: var(--spacing-sm);
+        padding-inline: var(--spacing-md);
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--color-on-surface);
+        border-width: 2px;
+        border-style: solid;
+        border-color: transparent;
+        text-wrap: none;
+        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+        color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+        border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+        border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+    }
 
-.ts-option:hover {
-    background: var(--color-secondary-container);
-    color: var(--color-on-secondary-container);
-    border-radius: var(--radius-md);
-}
+    .ts-option:hover {
+        background: var(--color-secondary-container);
+        color: var(--color-on-secondary-container);
+        border-radius: var(--radius-md);
+    }
 
-.ts-option:focus,
-.ts-option:focus-visible {
-    background: var(--color-tertiary-container);
-    color: var(--color-on-tertiary-container);
-}
+    .ts-option:focus,
+    .ts-option:focus-visible {
+        background: var(--color-tertiary-container);
+        color: var(--color-on-tertiary-container);
+    }
 
-.ts-option:active,
-.ts-option-active {
-    background: var(--color-primary-container);
-    color: var(--color-on-primary-container);
-    border-color: var(--color-primary);
-    border-radius: var(--radius-full);
-}
+    .ts-option:active,
+    .ts-option-active {
+        background: var(--color-primary-container);
+        color: var(--color-on-primary-container);
+        border-color: var(--color-primary);
+        border-radius: var(--radius-full);
+    }
 
-.ts-icon {
-    width: 20px;
-    height: 20px;
-    flex-shrink: 0;
-    color: inherit;
-}
+    .ts-icon {
+        width: 20px;
+        height: 20px;
+        flex-shrink: 0;
+        color: inherit;
+    }
 
-.ts-label {
-    font-size: var(--typography-size-sm);
-    font-weight: 600;
-    color: inherit;
-    text-wrap: none;
-}
+    .ts-label {
+        font-size: var(--typography-size-sm);
+        font-weight: 600;
+        color: inherit;
+        text-wrap: none;
+    }
 </style>

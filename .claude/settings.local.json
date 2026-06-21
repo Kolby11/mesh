@@ -135,7 +135,10 @@
       "Read(//home/kolby/.vscode/extensions/**)",
       "Bash(code --uninstall-extension mesh.mesh-vscode)",
       "Bash(code --list-extensions)",
-      "Bash(code --version)"
+      "Bash(code --version)",
+      "Bash(cargo search *)",
+      "Bash(cargo info *)",
+      "Bash(xargs -I{} grep -A4 '\\\\[lib\\\\]\\\\|^name' {}/Cargo.toml)"
     ]
   }
 }

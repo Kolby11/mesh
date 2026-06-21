@@ -6,11 +6,10 @@
 //!
 //! - **template** (XHTML-like): re-indented from element/`{#block}` nesting.
 //! - **style** (CSS-like): re-indented from brace nesting.
-//! - **script** (Luau): conservatively rebased to flush-left, preserving the
-//!   author's relative indentation. Luau has insignificant whitespace and its
-//!   own dedicated formatters (e.g. stylua); heuristic re-indentation here would
-//!   fight callback/table styles, so we only normalize the block's base indent
-//!   and strip trailing whitespace.
+//! - **script** (Luau): formatted with stylua, the standard Luau formatter.
+//!   If stylua cannot parse the block (e.g. a mid-edit syntax error), it falls
+//!   back to rebasing the block flush-left while preserving the author's
+//!   relative indentation.
 //! - **i18n / other**: preserved verbatim (only trailing whitespace stripped).
 //!
 //! Top-level block tags and their closers sit at column 0; template and style
@@ -374,17 +373,24 @@ fn count_braces(t: &str) -> (i32, i32) {
 }
 
 // ---------------------------------------------------------------------------
-// Script (Luau) — conservative rebase only
+// Script (Luau)
 // ---------------------------------------------------------------------------
 
 fn format_script(lines: &[String], unit: &str) -> Vec<String> {
-    // Strip the longest common leading-whitespace prefix so the block is
-    // rebased flush-left, preserving the author's relative indentation. Then
-    // we do not add any base indent — script content is flush-left in the
-    // shipped corpus.
-    let common = common_whitespace_prefix(lines);
-    let _ = unit; // script content is intentionally not re-indented per level.
+    let source = lines.join("\n");
 
+    // Run the block through stylua, the standard Luau formatter, so the script
+    // is properly reformatted (collapsing manual alignment padding, normalizing
+    // indentation and spacing) rather than just rebased. stylua emits content
+    // flush-left, which matches the `.mesh` script convention.
+    if let Some(formatted) = stylua_format(&source, unit) {
+        return formatted.lines().map(str::to_string).collect();
+    }
+
+    // Fallback for content stylua can't parse (e.g. mid-edit syntax errors):
+    // strip the longest common leading-whitespace prefix to rebase the block
+    // flush-left, preserving the author's relative indentation.
+    let common = common_whitespace_prefix(lines);
     lines
         .iter()
         .map(|line| {
@@ -395,6 +401,29 @@ fn format_script(lines: &[String], unit: &str) -> Vec<String> {
             }
         })
         .collect()
+}
+
+/// Format a Luau chunk with stylua, honoring the editor's indent preference.
+/// Returns `None` if stylua cannot parse the source.
+fn stylua_format(source: &str, unit: &str) -> Option<String> {
+    use stylua_lib::{Config, IndentType, LuaVersion, OutputVerification};
+
+    let (indent_type, indent_width) = if unit.contains('\t') {
+        (IndentType::Tabs, unit.replace('\t', "    ").len().max(1))
+    } else {
+        (IndentType::Spaces, unit.len().max(1))
+    };
+
+    let config = Config {
+        line_endings: stylua_lib::LineEndings::Unix,
+        indent_type,
+        indent_width,
+        syntax: LuaVersion::Luau,
+        ..Config::default()
+    };
+
+    let formatted = stylua_lib::format_code(source, config, None, OutputVerification::None).ok()?;
+    Some(formatted.trim_end_matches('\n').to_string())
 }
 
 /// Longest leading-whitespace string shared by every non-blank line.
@@ -508,7 +537,8 @@ mod tests {
     }
 
     #[test]
-    fn script_rebased_flush_left_preserves_relative() {
+    fn script_formatted_with_stylua() {
+        // stylua reindents the block flush-left and normalizes spacing.
         let src = "<script lang=\"luau\">\n    local x = 1\n    if x then\n        x = 2\n    end\n</script>\n";
         let expected = "\
 <script lang=\"luau\">
@@ -522,17 +552,26 @@ end
     }
 
     #[test]
-    fn script_already_flush_left_unchanged_except_trailing() {
-        let src = "<script lang=\"luau\">\nlocal x = 1   \nfunction f()\n    return x\nend\n</script>\n";
+    fn script_stylua_collapses_alignment_padding() {
+        let src = "<script lang=\"luau\">\nlocal a       = 1\nlocal bb      = 2\n</script>\n";
         let expected = "\
 <script lang=\"luau\">
-local x = 1
-function f()
-    return x
-end
+local a = 1
+local bb = 2
 </script>
 ";
         assert_eq!(fmt(src), expected);
+    }
+
+    #[test]
+    fn script_falls_back_when_unparseable() {
+        // A syntax error (unterminated string) means stylua cannot parse it;
+        // the fallback rebases flush-left while preserving relative indentation.
+        let src = "<script lang=\"luau\">\n    local x = \"oops\n    broken(\n</script>\n";
+        let out = fmt(src);
+        // Fallback strips the common 4-space prefix; content is preserved.
+        assert!(out.contains("\nlocal x = \"oops\n"), "got:\n{out}");
+        assert!(out.contains("\nbroken(\n"), "got:\n{out}");
     }
 
     #[test]
