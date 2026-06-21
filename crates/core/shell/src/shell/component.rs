@@ -11,7 +11,7 @@ use mesh_core_interaction::{
     find_focusable_at, find_node_bounds_by_key, find_node_by_key, find_node_path_at,
     find_scrollable_at, find_tooltip_by_key, is_input_key, is_slider_key, measure_content_size,
     namespace_event_handlers, next_focus_target, node_is_source, parse_namespaced_handler,
-    scroll_limits, source_element_tag,
+    scroll_into_view_offsets, scroll_limits, source_element_tag,
 };
 mod animation;
 mod catalog;

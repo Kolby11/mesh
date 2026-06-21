@@ -98,6 +98,23 @@ impl FrontendSurfaceComponent {
                         requests.extend(self.set_focus_target(&tree, None, false)?);
                     }
                 }
+                "scroll_into_view" => {
+                    // Nudge each scrollable ancestor's offset just enough to reveal
+                    // the target, routing through the same scroll_offsets map the
+                    // wheel handler mutates. Geometry lives in mesh-core-interaction.
+                    if let Some(key) = ref_keys.get(&action.target) {
+                        let updates =
+                            scroll_into_view_offsets(&tree, key, &self.scroll_offsets);
+                        if !updates.is_empty() {
+                            for (container_key, offset) in updates {
+                                self.scroll_offsets.insert(container_key, offset);
+                            }
+                            self.invalidate(
+                                ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS,
+                            );
+                        }
+                    }
+                }
                 other => {
                     tracing::debug!(action = %other, target = %action.target, "unhandled element action");
                 }

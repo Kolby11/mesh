@@ -18,7 +18,7 @@ pub struct ElementAction {
 
 /// Imperative methods exposed on a live element-node proxy. Anything not in this
 /// list is treated as a live geometry/state field read from the latest paint.
-pub(super) const ELEMENT_METHODS: &[&str] = &["focus", "blur"];
+pub(super) const ELEMENT_METHODS: &[&str] = &["focus", "blur", "scroll_into_view"];
 
 /// Build the `refs` proxy. `refs.<name>` returns a live element-node proxy whose
 /// geometry/state fields read from the most recent paint (fed via

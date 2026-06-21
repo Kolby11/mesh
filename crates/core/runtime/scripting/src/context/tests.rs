@@ -1904,3 +1904,24 @@ end
     // Draining is one-shot.
     assert!(ctx.drain_element_actions().is_empty());
 }
+
+#[test]
+fn refs_scroll_into_view_queues_an_element_action() {
+    // `refs.<name>:scroll_into_view()` is the third imperative method; the shell
+    // turns it into scroll-offset adjustments on the real widget tree.
+    let mut ctx = ScriptContext::new("@test/refs-scroll", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+function reveal()
+    refs.row_42:scroll_into_view()
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_handler("reveal", &[]).unwrap();
+    let actions = ctx.drain_element_actions();
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].target, "row_42");
+    assert_eq!(actions[0].action, "scroll_into_view");
+}

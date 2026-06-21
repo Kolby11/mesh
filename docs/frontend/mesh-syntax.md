@@ -373,12 +373,17 @@ end
 function onSearchClose()
     refs.search_input:blur()        -- release focus if this element holds it
 end
+
+function onSelectResult()
+    refs.active_result:scroll_into_view()  -- scroll the list so the row is visible
+end
 ```
 
-| Method     | Effect                                                          |
-| ---------- | -------------------------------------------------------------- |
-| `:focus()` | Routes through the canonical focus path (fires `onfocus`).     |
-| `:blur()`  | Clears focus if this element currently holds it (fires `onblur`). |
+| Method               | Effect                                                          |
+| -------------------- | -------------------------------------------------------------- |
+| `:focus()`           | Routes through the canonical focus path (fires `onfocus`).     |
+| `:blur()`            | Clears focus if this element currently holds it (fires `onblur`). |
+| `:scroll_into_view()`| Scrolls each scrollable ancestor just enough to reveal the element (CSS "nearest" alignment; handles nested scroll regions). |
 
 Method calls are queued and applied by the shell right after the handler
 returns, so they compose with the handler's other state changes in one frame.
