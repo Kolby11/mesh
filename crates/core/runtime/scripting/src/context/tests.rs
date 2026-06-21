@@ -1925,3 +1925,47 @@ end
     assert_eq!(actions[0].target, "row_42");
     assert_eq!(actions[0].action, "scroll_into_view");
 }
+
+#[test]
+fn refs_scroll_to_forwards_positional_args_without_self() {
+    // `refs.x:scroll_to(top, left)` forwards its numeric args (in order, with the
+    // `:`-call self table stripped) as a JSON array the shell reads.
+    let mut ctx = ScriptContext::new("@test/refs-scroll-to", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+function jump()
+    refs.list:scroll_to(120, 40)
+end
+function jump_top_only()
+    refs.list:scroll_to(80)
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_handler("jump", &[]).unwrap();
+    let actions = ctx.drain_element_actions();
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].action, "scroll_to");
+    // Integer Lua literals serialize as JSON integers; the shell reads them via
+    // `as_f64`, so assert on the numeric values rather than the JSON number kind.
+    let nums: Vec<f64> = actions[0]
+        .args
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_f64().unwrap())
+        .collect();
+    assert_eq!(nums, vec![120.0, 40.0]);
+
+    ctx.call_handler("jump_top_only", &[]).unwrap();
+    let actions = ctx.drain_element_actions();
+    let nums: Vec<f64> = actions[0]
+        .args
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_f64().unwrap())
+        .collect();
+    assert_eq!(nums, vec![80.0]);
+}

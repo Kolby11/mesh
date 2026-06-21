@@ -98,6 +98,43 @@ impl FrontendSurfaceComponent {
                         requests.extend(self.set_focus_target(&tree, None, false)?);
                     }
                 }
+                "scroll_to" => {
+                    // `refs.x:scroll_to(top[, left])` sets the element's own scroll
+                    // offset directly (DOM `element.scrollTop = y`), clamped to the
+                    // container's scrollable range. Omitted axes stay put.
+                    if let Some(key) = ref_keys.get(&action.target)
+                        && let Some(node) = find_node_by_key(&tree, key)
+                    {
+                        let (max_x, max_y) = scroll_limits(node);
+                        let nums = action.args.as_array();
+                        let arg_f32 = |index: usize| {
+                            nums.and_then(|values| values.get(index))
+                                .and_then(serde_json::Value::as_f64)
+                                .map(|value| value as f32)
+                        };
+                        let entry = self.scroll_offsets.entry(key.clone()).or_default();
+                        let mut moved = false;
+                        if let Some(top) = arg_f32(0) {
+                            let next = top.clamp(0.0, max_y);
+                            if (next - entry.y).abs() > f32::EPSILON {
+                                entry.y = next;
+                                moved = true;
+                            }
+                        }
+                        if let Some(left) = arg_f32(1) {
+                            let next = left.clamp(0.0, max_x);
+                            if (next - entry.x).abs() > f32::EPSILON {
+                                entry.x = next;
+                                moved = true;
+                            }
+                        }
+                        if moved {
+                            self.invalidate(
+                                ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS,
+                            );
+                        }
+                    }
+                }
                 "scroll_into_view" => {
                     // Nudge each scrollable ancestor's offset just enough to reveal
                     // the target, routing through the same scroll_offsets map the

@@ -12,13 +12,16 @@ pub struct ElementAction {
     pub target: String,
     /// The method invoked, one of [`ELEMENT_METHODS`].
     pub action: String,
-    /// Method arguments serialized from Lua (currently unused by all methods).
+    /// Positional method arguments serialized from Lua, in call order, with the
+    /// implicit `self` table (from `:` method calls) stripped. A JSON array;
+    /// `focus`/`blur`/`scroll_into_view` ignore it, `scroll_to(top[, left])`
+    /// reads `[0]`/`[1]`.
     pub args: Value,
 }
 
 /// Imperative methods exposed on a live element-node proxy. Anything not in this
 /// list is treated as a live geometry/state field read from the latest paint.
-pub(super) const ELEMENT_METHODS: &[&str] = &["focus", "blur", "scroll_into_view"];
+pub(super) const ELEMENT_METHODS: &[&str] = &["focus", "blur", "scroll_into_view", "scroll_to"];
 
 /// Build the `refs` proxy. `refs.<name>` returns a live element-node proxy whose
 /// geometry/state fields read from the most recent paint (fed via
@@ -74,18 +77,19 @@ fn create_element_node_proxy(
                 let action = key.clone();
                 return Ok(LuaValue::Function(lua.create_function(
                     move |lua, args: Variadic<LuaValue>| {
-                        // Methods take no positional args; a method-call (`:`) only
-                        // passes the node proxy as `self`, which we ignore.
+                        // Collect positional args in order, dropping any table — a
+                        // `:` method-call passes the node proxy as `self`, which we
+                        // ignore. The remaining values (e.g. `scroll_to(top, left)`)
+                        // are forwarded to the shell as a JSON array.
                         let payload = args
                             .iter()
-                            .find(|value| !matches!(value, LuaValue::Table(_)))
+                            .filter(|value| !matches!(value, LuaValue::Table(_)))
                             .map(|value| lua.from_value::<Value>(value.clone()))
-                            .transpose()?
-                            .unwrap_or(Value::Null);
+                            .collect::<mlua::Result<Vec<Value>>>()?;
                         actions.lock().unwrap().push(ElementAction {
                             target: target.clone(),
                             action: action.clone(),
-                            args: payload,
+                            args: Value::Array(payload),
                         });
                         Ok(())
                     },

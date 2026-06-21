@@ -377,13 +377,23 @@ end
 function onSelectResult()
     refs.active_result:scroll_into_view()  -- scroll the list so the row is visible
 end
+
+function onResetList()
+    refs.result_list:scroll_to(0)          -- jump the scroll container to the top
+end
 ```
 
-| Method               | Effect                                                          |
-| -------------------- | -------------------------------------------------------------- |
-| `:focus()`           | Routes through the canonical focus path (fires `onfocus`).     |
-| `:blur()`            | Clears focus if this element currently holds it (fires `onblur`). |
-| `:scroll_into_view()`| Scrolls each scrollable ancestor just enough to reveal the element (CSS "nearest" alignment; handles nested scroll regions). |
+| Method                  | Effect                                                          |
+| ----------------------- | -------------------------------------------------------------- |
+| `:focus()`              | Routes through the canonical focus path (fires `onfocus`).     |
+| `:blur()`               | Clears focus if this element currently holds it (fires `onblur`). |
+| `:scroll_into_view()`   | Scrolls each scrollable ancestor just enough to reveal the element (CSS "nearest" alignment; handles nested scroll regions). |
+| `:scroll_to(top[,left])`| Sets this element's own scroll offset (DOM `element.scrollTop`), clamped to its scrollable range; omitted axes stay put. |
+
+Scroll position and extent are readable live on the reference:
+`refs.x.scroll_top` / `scroll_left` (current offset), `refs.x.scroll_height` /
+`scroll_width` (full content size), and `refs.x.max_scroll_top` /
+`max_scroll_left` (the clamp bounds).
 
 Method calls are queued and applied by the shell right after the handler
 returns, so they compose with the handler's other state changes in one frame.

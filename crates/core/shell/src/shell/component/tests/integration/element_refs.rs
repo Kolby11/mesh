@@ -128,3 +128,59 @@ end
         component.scroll_offsets
     );
 }
+
+#[test]
+fn refs_scroll_to_sets_offset_and_scroll_top_reads_it_back() {
+    // `refs.x:scroll_to(top)` sets the container's own offset (clamped to range),
+    // and `refs.x.scroll_top` reads the live offset back on the next paint.
+    let mut component = test_frontend_component(
+        r#"
+<style>
+scroll { height: 60px; overflow-y: auto; }
+.content { height: 240px; }
+</style>
+<template>
+    <scroll ref="list">
+        <box class="content" />
+    </scroll>
+</template>
+<script lang="luau">
+scrolled_top = -1
+function jump()
+    refs.list:scroll_to(100)
+end
+function read_back()
+    scrolled_top = refs.list.scroll_top
+end
+</script>
+"#,
+    );
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 120);
+    component.paint(&theme, 160, 120, &mut buffer, 1.0).unwrap();
+
+    // Set the offset through the live reference.
+    component.call_namespaced_handler("jump", &[]).unwrap();
+    let list_offset = component
+        .scroll_offsets
+        .iter()
+        .find(|(key, _)| key.as_str() == "root/0")
+        .map(|(_, offset)| offset.y)
+        .unwrap_or(0.0);
+    assert!(
+        (list_offset - 100.0).abs() < 0.01,
+        "scroll_to(100) should set the container offset to 100, got {list_offset}"
+    );
+
+    // Repaint so the new offset is published, then read it back via scroll_top.
+    component.paint(&theme, 160, 120, &mut buffer, 1.0).unwrap();
+    component.call_namespaced_handler("read_back", &[]).unwrap();
+    let read = runtime_value(&component, "scrolled_top")
+        .and_then(|value| value.as_f64())
+        .unwrap_or(-1.0);
+    assert!(
+        (read - 100.0).abs() < 0.01,
+        "refs.list.scroll_top should read back 100, got {read}"
+    );
+}
