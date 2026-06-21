@@ -66,8 +66,7 @@ local VolumeButton    = require("./components/volume-button.mesh")
 local WindowTitle     = require("./components/window-title.mesh")
 local WorkspaceList   = require("./components/workspace-list.mesh")
 
-local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
-if not audio_ok then audio = nil end
+local audio = require("mesh.audio")
 
 audio_surface_id    = "@mesh/audio-popover"
 audio_surface_hidden = true
@@ -114,7 +113,7 @@ function onToggleSettingsSurface(event)
 end
 
 function onMuteShortcut()
-    if audio_ok and audio and audio.available ~= false then
+    if audio and audio.available ~= false then
         if type(audio.set_muted) == "function" then
             audio.set_muted("default", not (audio.muted or false))
         else

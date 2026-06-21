@@ -13,8 +13,8 @@
 </template>
 
 <script lang="luau">
-local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
-if not audio_ok then audio = nil end
+local t = import("mesh.i18n", "t")
+local audio = require("mesh.audio")
 
 icon_name = "audio-volume-muted"
 audio_tooltip_key = "nav.volume_unavailable"
@@ -42,18 +42,18 @@ local function update_audio_copy(percent, muted)
     audio_tooltip_value = string.format(" %d%%", percent)
 end
 
-if audio_ok and audio and audio.VolumeChanged then
+if audio and audio.VolumeChanged then
     audio.VolumeChanged:on(function(event)
         local percent = math.floor(tonumber(event.level) or 0)
         if percent < 0 then percent = 0 end
         if percent > 100 then percent = 100 end
-        local muted = audio and audio.muted or false
+        local muted = audio.muted or false
         update_audio_copy(percent, muted)
     end)
 end
 
 function render(self)
-    if not audio_ok or not audio or audio.available == false then
+    if not audio or audio.available == false then
         icon_name = "audio-volume-muted"
         audio_tooltip_key = "nav.audio_service_unavailable"
         audio_tooltip_value = ""

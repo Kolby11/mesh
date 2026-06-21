@@ -30,8 +30,11 @@
         "service.audio.read",
         "service.audio.control",
         "service.power.read",
+        "service.brightness.read",
+        "service.brightness.control",
         "service.hyprland.read",
         "service.hyprland.control",
+        "service.media.read",
         "theme.read",
         "locale.read",
         "locale.write"

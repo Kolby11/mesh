@@ -60,8 +60,19 @@ pub enum ScriptContext {
     EventCurrentTarget {
         prefix: String,
     },
-    /// Cursor is after `require("mesh.` or `mesh.service.bind("`.
+    /// Cursor is after `mesh.service.bind("` / `mesh.service.on("`.
     ServiceName,
+    /// Cursor is inside the first string argument of `require(...)` / `import(...)`.
+    /// Completes module specifiers (host APIs, interfaces, components).
+    ImportSpecifier {
+        prefix: String,
+    },
+    /// Cursor is inside a name argument of `import("<specifier>", "<name>...`.
+    /// Completes the named members exported by `specifier`.
+    ImportMember {
+        specifier: String,
+        prefix: String,
+    },
     /// Cursor is after `<proxy_var>.` where `proxy_var` is bound to an interface via `require`.
     InterfaceProxy {
         /// The Lua variable name that holds the proxy (e.g. "audio").
@@ -284,10 +295,29 @@ pub fn script_context_at(block_content: &str, offset: usize) -> ScriptContext {
         }
     }
 
-    // Check for service name context: require("mesh." or mesh.service.bind(" or mesh.service.on("
+    // Cursor inside a `require(...)` / `import(...)` string argument: the first
+    // argument completes module specifiers; later `import` arguments complete the
+    // named members of the already-typed specifier.
+    if let Some(cursor) = import_cursor(before) {
+        if cursor.arg_string_index == 0 {
+            return ScriptContext::ImportSpecifier {
+                prefix: cursor.prefix,
+            };
+        }
+        if cursor.func == "import" {
+            if let Some(specifier) = cursor.first_arg {
+                return ScriptContext::ImportMember {
+                    specifier,
+                    prefix: cursor.prefix,
+                };
+            }
+        }
+        // `require` takes a single argument; nothing to complete past it.
+        return ScriptContext::General;
+    }
+
+    // Check for service binding context: mesh.service.bind(" or mesh.service.on("
     for pattern in &[
-        "require(\"mesh.",
-        "require('mesh.",
         "mesh.service.bind(\"",
         "mesh.service.bind('",
         "mesh.service.on(\"",
@@ -318,6 +348,74 @@ pub fn script_context_at(block_content: &str, offset: usize) -> ScriptContext {
     }
 
     ScriptContext::General
+}
+
+/// The cursor's position within an in-progress `require(...)` / `import(...)` call.
+struct ImportCursor {
+    /// Either `"require"` or `"import"`.
+    func: &'static str,
+    /// 0-based index of the string-literal argument the cursor is inside.
+    arg_string_index: usize,
+    /// Text typed inside the current (still-open) string literal.
+    prefix: String,
+    /// The first string argument, if it has already been completed (closed).
+    first_arg: Option<String>,
+}
+
+/// Detect whether `before` ends inside an open string literal of a `require(`
+/// or `import(` call, and report which argument and what has been typed.
+fn import_cursor(before: &str) -> Option<ImportCursor> {
+    let require_pos = before.rfind("require(");
+    let import_pos = before.rfind("import(");
+    let (func, start) = match (require_pos, import_pos) {
+        (Some(r), Some(i)) => {
+            if i > r {
+                ("import", i + "import(".len())
+            } else {
+                ("require", r + "require(".len())
+            }
+        }
+        (Some(r), None) => ("require", r + "require(".len()),
+        (None, Some(i)) => ("import", i + "import(".len()),
+        (None, None) => return None,
+    };
+
+    let args = &before[start..];
+    // A closing paren or newline means the cursor is no longer inside this call.
+    if args.contains(')') || args.contains('\n') {
+        return None;
+    }
+
+    let mut completed: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_string = false;
+    let mut quote = '"';
+    for ch in args.chars() {
+        if in_string {
+            if ch == quote {
+                in_string = false;
+                completed.push(std::mem::take(&mut current));
+            } else {
+                current.push(ch);
+            }
+        } else if ch == '"' || ch == '\'' {
+            in_string = true;
+            quote = ch;
+            current.clear();
+        }
+    }
+
+    // Only offer completion when the cursor sits inside an open string literal.
+    if !in_string {
+        return None;
+    }
+
+    Some(ImportCursor {
+        func,
+        arg_string_index: completed.len(),
+        prefix: current,
+        first_arg: completed.into_iter().next(),
+    })
 }
 
 fn current_lua_path_token(before: &str) -> Option<&str> {

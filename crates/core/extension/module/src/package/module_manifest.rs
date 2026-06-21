@@ -720,9 +720,27 @@ pub struct MeshDependencies {
 
 impl MeshDependencies {
     fn into_manifest_dependencies(self) -> manifest::DependenciesSection {
+        let interfaces = self
+            .backend
+            .into_iter()
+            .map(|(name, version)| manifest::InterfaceDependency {
+                name,
+                version: Some(version),
+                required: true,
+            })
+            .chain(
+                self.optional_backend
+                    .into_iter()
+                    .map(|(name, version)| manifest::InterfaceDependency {
+                        name,
+                        version: Some(version),
+                        required: false,
+                    }),
+            )
+            .collect();
         manifest::DependenciesSection {
             modules: self.modules,
-            interfaces: Vec::new(),
+            interfaces,
             icon_packs: manifest::OptionalDependencyGroup {
                 required: self.icons.keys().cloned().collect(),
                 optional: Vec::new(),

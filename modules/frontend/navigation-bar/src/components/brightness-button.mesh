@@ -21,14 +21,14 @@
 </template>
 
 <script lang="luau">
+local t = import("mesh.i18n", "t")
+local brightness = require("mesh.brightness")
+
 brightness_level = 100
 brightness_label = "100%"
 
-local bright_ok, brightness = pcall(require, "mesh.brightness@>=1.0")
-if not bright_ok then brightness = nil end
-
 function render(self)
-    if bright_ok and brightness and brightness.level ~= nil then
+    if brightness and brightness.level ~= nil then
         brightness_level = math.max(0, math.min(100, math.floor(tonumber(brightness.level) or 100)))
         brightness_label = string.format("%d%%", brightness_level)
     end
@@ -37,7 +37,7 @@ end
 function onBrightnessDown()
     brightness_level = math.max(0, brightness_level - 10)
     brightness_label = string.format("%d%%", brightness_level)
-    if bright_ok and brightness and type(brightness.decrease) == "function" then
+    if brightness and type(brightness.decrease) == "function" then
         brightness.decrease(10)
     else
         mesh.events.publish("shell.brightness-down", { step = 10 })
@@ -47,7 +47,7 @@ end
 function onBrightnessUp()
     brightness_level = math.min(100, brightness_level + 10)
     brightness_label = string.format("%d%%", brightness_level)
-    if bright_ok and brightness and type(brightness.increase) == "function" then
+    if brightness and type(brightness.increase) == "function" then
         brightness.increase(10)
     else
         mesh.events.publish("shell.brightness-up", { step = 10 })

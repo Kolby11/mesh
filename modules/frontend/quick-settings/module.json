@@ -19,6 +19,8 @@
         "service.audio.read",
         "service.audio.control",
         "service.power.read",
+        "service.brightness.read",
+        "service.brightness.control",
         "theme.read",
         "locale.read",
         "locale.write"

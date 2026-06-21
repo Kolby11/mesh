@@ -495,9 +495,56 @@ function render(self)
 end
 ```
 
+### Imports (`require` / `import`)
+
+`require` and `import` are the single, unified entry point for everything a
+frontend script consumes — builtin `mesh.*` libraries/host APIs, backend service
+interfaces, and other components. Both resolve through the **same** resolver, so
+their behavior can never drift (`import` delegates to `require` internally;
+`crates/core/runtime/scripting/src/context/runtime.rs`).
+
+```lua
+-- Default import (whole module) — the JS `import x from "..."` analog
+local i18n  = require("mesh.i18n")           -- builtin library
+local log   = require("mesh.log")            -- builtin host API
+local audio = require("mesh.audio@>=1.0")    -- backend service interface
+local Row   = require("./components/row.mesh")  -- component definition
+
+-- Named imports — `import(spec, ...names)`, the JS `import { a, b }` analog.
+-- It returns the requested fields as multiple values (valid Luau, no DSL).
+local t, plural   = import("mesh.i18n", "t", "plural")
+local request_redraw = import("mesh.ui", "request_redraw")
+local translate   = import("mesh.i18n", "t")  -- rename freely, it's just a local
+```
+
+Specifier categories:
+
+| Specifier | Resolves to |
+| --- | --- |
+| `mesh.i18n` | i18n library (`t`) |
+| `mesh.ui` / `mesh.log` / `mesh.locale` / `mesh.events` / `mesh.popover` | builtin host API tables |
+| `mesh.<service>[@ver]` | backend service interface proxy |
+| `./x.mesh`, `../x.mesh`, `@scope/name` | component definition |
+
+`import` with no names is identical to `require` (returns the whole module).
+Reading `module.field` (or a named `import`) goes through the resolved
+table/proxy's `__index`, so interface-proxy field reads stay reactively tracked
+exactly as a direct `audio.percent` access would be.
+
+**Ambient `mesh` global (backend helpers).** `mesh.exec`, `mesh.service`, and
+`mesh.config` stay on the always-present `mesh` global for backend providers —
+they are genuinely ambient capabilities, not importable modules. Discoverable
+subsystems (`ui`, `log`, `locale`, `events`, `popover`, `i18n`) are reachable
+both ambiently and via `require`/`import`; new frontend code should prefer the
+explicit `require`/`import` form.
+
+The LSP completes the specifier string inside `require("…")` / `import("…")`,
+the member-name arguments of `import("spec", "…")`, and the members of the bound
+local — see `crates/tools/lsp/src/analyzer/script.rs` and `util.rs`.
+
 ### Interface proxies
 
-`require("mesh.audio@>=1.0")` returns a proxy for the named backend service. Use it as a Lua local:
+`require("mesh.audio@>=1.0")` (or `import("mesh.audio@>=1.0", ...)`) returns a proxy for the named backend service. Use it as a Lua local:
 
 ```lua
 local audio = require("mesh.audio@>=1.0")

@@ -10,8 +10,8 @@
 </template>
 
 <script lang="luau">
-local power_ok, power = pcall(require, "mesh.power@>=1.0")
-if not power_ok then power = nil end
+local t = import("mesh.i18n", "t")
+local power = require("mesh.power")
 
 battery_icon_name = "battery-empty"
 battery_label = "--%"
@@ -68,7 +68,7 @@ function battery_icon_for(percent_value)
 end
 
 function render(self)
-    if not power_ok or not power or not power.available then
+    if not power or not power.available then
         battery_icon_name = "battery-empty"
         battery_label = "N/A"
         battery_tooltip_key = "nav.battery_unavailable"

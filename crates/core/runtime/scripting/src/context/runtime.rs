@@ -86,6 +86,7 @@ pub struct ScriptContext {
     pub module_id: String,
     pub capabilities: CapabilitySet,
     pub state: ScriptState,
+    optional_interfaces: Arc<HashSet<String>>,
     vm: Option<ScriptVm>,
     /// When set, [`ensure_initialized`] runs on this shared VM (a clone of the
     /// owning surface's `Lua`) instead of checking out a private pool VM. Must
@@ -184,6 +185,7 @@ impl ScriptContext {
             module_id,
             capabilities,
             state: ScriptState::new(),
+            optional_interfaces: Arc::new(HashSet::new()),
             vm: None,
             shared_vm: None,
             env_table: None,
@@ -222,6 +224,10 @@ impl ScriptContext {
 
     pub fn set_interface_catalog(&mut self, catalog: InterfaceCatalog) {
         self.interface_catalog = catalog;
+    }
+
+    pub fn set_optional_interfaces(&mut self, interfaces: HashSet<String>) {
+        self.optional_interfaces = Arc::new(interfaces);
     }
 
     /// Check out a pooled VM, create a per-component _ENV table, install host API,
@@ -1104,6 +1110,7 @@ impl ScriptContext {
         let module_id_for_require = self.module_id.clone();
         let capabilities_for_require = self.capabilities.clone();
         let diagnostics_for_require = Arc::clone(&self.shared_diagnostics);
+        let optional_interfaces_for_require = Arc::clone(&self.optional_interfaces);
         // The per-instance _ENV is the channel-registry scope so interface event
         // channels stay private when components share one surface VM.
         let scope_for_require = globals.clone();
@@ -1111,18 +1118,18 @@ impl ScriptContext {
             .lua()
             .create_function(move |lua, module: String| {
                 if module == "@mesh/i18n" || module == "mesh.i18n" {
-                    return create_i18n_library(lua);
+                    return create_i18n_library(lua).map(LuaValue::Table);
                 }
 
                 if let Some(host_api) = resolve_host_api(&mesh_for_require, &module)? {
-                    return Ok(host_api);
+                    return Ok(LuaValue::Table(host_api));
                 }
 
                 if is_component_definition_specifier(&module) {
                     let definition = lua.create_table()?;
                     definition.set("__mesh_component_definition", true)?;
                     definition.set("source", module.as_str())?;
-                    return Ok(definition);
+                    return Ok(LuaValue::Table(definition));
                 }
 
                 let mut module_name = module.as_str();
@@ -1160,6 +1167,9 @@ impl ScriptContext {
 
                 let resolution = interface_catalog.resolve(&canonical, version.as_deref());
                 if resolution.provider.is_none() {
+                    if optional_interfaces_for_require.contains(&canonical) {
+                        return Ok(LuaValue::Nil);
+                    }
                     let reason = lookup_failure_reason(&interface_catalog, &resolution);
                     return Err(record_lookup_diagnostic_lua(
                         &diagnostics_for_require,
@@ -1184,10 +1194,65 @@ impl ScriptContext {
                     Arc::clone(&subscribed_interface_events),
                     Arc::clone(&published_events),
                 )?;
-                Ok(proxy)
+                Ok(LuaValue::Table(proxy))
             })
             .map_err(lua_err)?;
-        globals.set("require", require).map_err(lua_err)?;
+        globals.set("require", require.clone()).map_err(lua_err)?;
+
+        // `import(spec, ...names)` is the named-import companion to `require`:
+        // it resolves the module through the very same `require` resolver (so
+        // resolution and reactive field-tracking can never drift) and returns
+        // the requested fields as multiple values, mirroring JS named imports.
+        //
+        //   local i18n = require("mesh.i18n")          -- default import
+        //   local t, plural = import("mesh.i18n", "t", "plural")  -- named
+        //   local translate = import("mesh.i18n", "t") -- rename freely
+        //
+        // With no names it is equivalent to `require` (returns the module).
+        // Reading `module[name]` goes through the resolved table/proxy's
+        // `__index`, so interface-proxy field reads stay tracked exactly as a
+        // direct `audio.percent` access would be.
+        let import = self
+            .lua()
+            .create_function(move |_lua, args: Variadic<LuaValue>| {
+                let mut iter = args.into_iter();
+                let spec = match iter.next() {
+                    Some(LuaValue::String(spec)) => spec,
+                    _ => {
+                        return Err(LuaError::external(ScriptError::LuaError(
+                            "import expects a module specifier string as its first argument"
+                                .to_string(),
+                        )));
+                    }
+                };
+
+                let module: LuaValue = require.call(spec.clone())?;
+
+                let names: Vec<LuaValue> = iter.collect();
+                if names.is_empty() {
+                    return Ok(Variadic::from_iter(std::iter::once(module)));
+                }
+
+                let LuaValue::Table(table) = &module else {
+                    return Err(LuaError::external(ScriptError::LuaError(format!(
+                        "import: module {:?} has no named members",
+                        spec.to_string_lossy()
+                    ))));
+                };
+
+                let mut results = Vec::with_capacity(names.len());
+                for name in names {
+                    let LuaValue::String(key) = name else {
+                        return Err(LuaError::external(ScriptError::LuaError(
+                            "import: member names must be strings".to_string(),
+                        )));
+                    };
+                    results.push(table.get::<LuaValue>(key)?);
+                }
+                Ok(Variadic::from_iter(results))
+            })
+            .map_err(lua_err)?;
+        globals.set("import", import).map_err(lua_err)?;
 
         // `refs.<name>` is a live element-node reference: geometry/state fields
         // read from the latest paint (`__mesh_element_metrics`, published by the
@@ -1234,6 +1299,13 @@ impl ScriptContext {
                 .interface_catalog
                 .resolve(&canonical, import.version.as_deref());
             if resolution.provider.is_none() {
+                // Optional interfaces resolve to `nil` rather than aborting: the
+                // script's own `require("mesh.x")` then returns nil via the lazy
+                // path. Leave the alias unbound so it falls through to nil.
+                if self.optional_interfaces.contains(&canonical) {
+                    globals.set(import.alias.as_str(), LuaValue::Nil).map_err(lua_err)?;
+                    continue;
+                }
                 let reason = lookup_failure_reason(&self.interface_catalog, &resolution);
                 record_lookup_diagnostic(
                     &self.shared_diagnostics,

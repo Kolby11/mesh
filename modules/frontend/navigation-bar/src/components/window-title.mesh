@@ -7,11 +7,10 @@
 <script lang="luau">
 window_title = "Desktop"
 
-local wm_ok, wm = pcall(require, "mesh.hyprland@>=1.0")
-if not wm_ok then wm = nil end
+local wm = require("mesh.hyprland")
 
 function render(self)
-    if wm_ok and wm and wm.active_window then
+    if wm and wm.active_window then
         local title = wm.active_window.title or ""
         if title ~= "" then
             window_title = #title > 36 and (string.sub(title, 1, 34) .. "…") or title

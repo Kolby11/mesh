@@ -72,14 +72,9 @@ theme_light_class = "qs-chip"
 lang_en_class = "qs-chip qs-chip-active"
 lang_sk_class = "qs-chip"
 
-local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
-if not audio_ok then audio = nil end
-
-local bright_ok, brightness = pcall(require, "mesh.brightness@>=1.0")
-if not bright_ok then brightness = nil end
-
-local theme_ok, theme = pcall(require, "mesh.theme")
-if not theme_ok then theme = nil end
+local audio      = require("mesh.audio")
+local brightness = require("mesh.brightness")
+local theme      = require("mesh.theme")
 
 local function volume_icon_for(percent, muted)
     if muted or percent == 0 then return "audio-volume-muted"
@@ -116,17 +111,17 @@ local function sync_lang(is_sk)
 end
 
 function render(self)
-    if audio_ok and audio and audio.available then
+    if audio and audio.available then
         local p = math.max(0, math.min(100, math.floor(tonumber(audio.percent) or 0)))
         sync_volume(p, audio.muted or false)
     end
 
-    if bright_ok and brightness and brightness.level ~= nil then
+    if brightness and brightness.level ~= nil then
         brightness_level = math.max(0, math.min(100, math.floor(tonumber(brightness.level) or 100)))
         brightness_label = string.format("%d%%", brightness_level)
     end
 
-    if theme_ok and theme then
+    if theme then
         local is_dark = true
         if theme.is_dark ~= nil then
             is_dark = theme.is_dark == true
@@ -144,7 +139,7 @@ end
 function onVolumeChange(event)
     local val = math.max(0, math.min(100, math.floor(tonumber(event.value) or 0)))
     sync_volume(val, false)
-    if audio_ok and audio and type(audio.set_volume) == "function" then
+    if audio and type(audio.set_volume) == "function" then
         audio.set_volume("default", val)
     end
 end
@@ -153,7 +148,7 @@ function onBrightnessChange(event)
     local val = math.max(0, math.min(100, math.floor(tonumber(event.value) or 100)))
     brightness_level = val
     brightness_label = string.format("%d%%", val)
-    if bright_ok and brightness and type(brightness.set) == "function" then
+    if brightness and type(brightness.set) == "function" then
         brightness.set(val)
     else
         mesh.events.publish("shell.set-brightness", { level = val })

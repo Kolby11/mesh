@@ -11,19 +11,17 @@
 </template>
 
 <script lang="luau">
+local t = import("mesh.i18n", "t")
+local theme = require("mesh.theme")
+
 onActivate = nil
 
 theme_icon = "weather-clear-night"
 theme_tooltip_key = "nav.select_theme"
 theme_is_dark = true
 
-local theme_ok, theme = pcall(function()
-    return require("mesh.theme")
-end)
-if not theme_ok then theme = nil end
-
 local function read_theme_is_dark()
-    if theme_ok and theme then
+    if theme then
         local current_is_dark = theme.is_dark
         if current_is_dark == nil and theme.state then
             current_is_dark = theme.state.is_dark

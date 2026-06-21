@@ -16,9 +16,8 @@
   </popover>
 </template>
 
-<script lang="lua">
-local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
-if not audio_ok then audio = nil end
+<script lang="luau">
+local audio = require("mesh.audio")
 
 audio_percent_label = "--%"
 slider_value = 0
@@ -39,7 +38,7 @@ local function sync_audio_copy(percent)
     audio_percent_label = string.format("%d%%", safe)
 end
 
-if audio_ok and audio and audio.VolumeChanged then
+if audio and audio.VolumeChanged then
     audio.VolumeChanged:on(function(event)
         local percent = clamp_percent(event.level)
         -- While the user is actively dragging, keep showing the drag
@@ -52,7 +51,7 @@ if audio_ok and audio and audio.VolumeChanged then
 end
 
 function render(self)
-    if not audio_ok or not audio or audio.available == false then
+    if not audio or audio.available == false then
         audio_percent_label = "--%"
         slider_value = 0
         volume_dragging = false
@@ -89,7 +88,7 @@ function onVolumeChange(value)
     volume_dragging = true
     pending_slider_value = pct
     sync_audio_copy(pct)
-    if audio_ok and audio and audio.available ~= false then
+    if audio and audio.available ~= false then
         if last_sent_slider_value == nil or math.abs(last_sent_slider_value - pct) >= 1 then
             last_sent_slider_value = pct
             audio.set_volume("default", pct / 100)

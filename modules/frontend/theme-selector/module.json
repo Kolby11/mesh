@@ -6,6 +6,9 @@
     "apiVersion": "0.1",
     "kind": "frontend",
     "uses": {
+      "interfaces": {
+        "mesh.theme": ">=1.0"
+      },
       "capabilities": [
         "shell.surface",
         "theme.read"

@@ -222,6 +222,96 @@ end
         assert!(labels.contains(&"onVolumeChange".to_string()));
     }
 
+    #[test]
+    fn import_specifier_completion_offers_builtin_modules() {
+        let (source, position) = fixture_with_cursor(
+            r#"<template></template>
+
+<script lang="luau">
+local i18n = require("$0")
+</script>
+"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        let labels = completion_labels(&doc, position);
+
+        assert!(labels.contains(&"mesh.i18n".to_string()));
+        assert!(labels.contains(&"mesh.ui".to_string()));
+        assert!(labels.contains(&"mesh.log".to_string()));
+    }
+
+    #[test]
+    fn import_specifier_completion_works_for_import_too() {
+        let (source, position) = fixture_with_cursor(
+            r#"<template></template>
+
+<script lang="luau">
+local t = import("mesh.i$0")
+</script>
+"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        let items = complete(&doc, position, &ModuleRegistry::empty());
+
+        // Prefix "mesh.i" should match mesh.i18n and insert only the suffix.
+        let item = items
+            .iter()
+            .find(|item| item.label == "mesh.i18n")
+            .expect("mesh.i18n suggested");
+        assert_eq!(item.insert_text.as_deref(), Some("18n"));
+    }
+
+    #[test]
+    fn import_member_completion_offers_i18n_t() {
+        let (source, position) = fixture_with_cursor(
+            r#"<template></template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "$0")
+</script>
+"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        let labels = completion_labels(&doc, position);
+
+        assert!(labels.contains(&"t".to_string()));
+    }
+
+    #[test]
+    fn import_member_completion_offers_host_api_methods() {
+        let (source, position) = fixture_with_cursor(
+            r#"<template></template>
+
+<script lang="luau">
+local redraw = import("mesh.ui", "$0")
+</script>
+"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        let labels = completion_labels(&doc, position);
+
+        assert!(labels.contains(&"request_redraw".to_string()));
+    }
+
+    #[test]
+    fn import_default_binding_enables_member_completion() {
+        // `local audio = import("mesh.audio")` (no extra names) should bind a
+        // proxy var just like `require`, so `audio.` completes its members.
+        let (source, position) = fixture_with_cursor(
+            r#"<template></template>
+
+<script lang="luau">
+local audio = import("mesh.audio")
+audio.$0
+</script>
+"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        // on_change is always offered for a bound interface proxy.
+        let labels = completion_labels(&doc, position);
+        assert!(labels.contains(&"on_change".to_string()));
+    }
+
     fn completion_labels(doc: &Document, position: Position) -> Vec<String> {
         complete(doc, position, &ModuleRegistry::empty())
             .into_iter()

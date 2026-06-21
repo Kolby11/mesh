@@ -16,6 +16,8 @@
 </template>
 
 <script lang="luau">
+local t = import("mesh.i18n", "t")
+
 locales = { "en", "sk", "de", "fr", "es", "ja", "zh", "ko", "ar", "hi" }
 
 selected_locale = "en"

@@ -5,7 +5,7 @@
 </template>
 
 <script lang="luau">
--- Standalone presentational pill using the built-in translation helper.
+local t = import("mesh.i18n", "t")
 </script>
 
 <style>

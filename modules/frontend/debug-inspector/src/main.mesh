@@ -214,15 +214,14 @@
 </template>
 
 <script lang="luau">
-import BackendServicesView from "./components/backend-services-view.mesh"
-import BenchmarkView from "./components/benchmark-view.mesh"
-import ModulesView from "./components/modules-view.mesh"
-import OverviewView from "./components/overview-view.mesh"
-import SurfacesView from "./components/surfaces-view.mesh"
-import ViewTabs from "./components/view-tabs.mesh"
+local BackendServicesView = require("./components/backend-services-view.mesh")
+local BenchmarkView       = require("./components/benchmark-view.mesh")
+local ModulesView         = require("./components/modules-view.mesh")
+local OverviewView        = require("./components/overview-view.mesh")
+local SurfacesView        = require("./components/surfaces-view.mesh")
+local ViewTabs            = require("./components/view-tabs.mesh")
 
-local debug_ok, debug_service = pcall(require, "mesh.debug@>=1.0")
-if not debug_ok then debug_service = nil end
+local debug_service = require("mesh.debug")
 
 active_view = "overview"
 last_service_active_view = ""
@@ -1073,7 +1072,7 @@ function runBackendUpdateBenchmark()
 end
 
 function onRender()
-    if not debug_ok or not debug_service then
+    if not debug_service then
         session_status = "Debug service unavailable"
         profiling_badge = "Unavailable"
         profiling_copy = "The shell debug service has not been published yet."

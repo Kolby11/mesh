@@ -787,6 +787,144 @@ module_source = ModuleChild.source
 }
 
 #[test]
+fn import_named_returns_selected_field() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/import-test", caps).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    local t = import("mesh.i18n", "t")
+    label = t("nav.volume")
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("label"), Some(serde_json::json!("nav.volume")));
+}
+
+#[test]
+fn import_multiple_named_returns_in_order() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("locale.read"));
+    let mut ctx = ScriptContext::new("@mesh/import-multi", caps).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    local current, set = import("mesh.locale", "current", "set")
+    current_locale = current()
+    set_type = type(set)
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("current_locale"), Some(serde_json::json!("en")));
+    assert_eq!(ctx.state.get("set_type"), Some(serde_json::json!("function")));
+}
+
+#[test]
+fn import_with_no_names_is_equivalent_to_require() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/import-default", caps).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    local i18n = import("mesh.i18n")
+    label = i18n.t("nav.audio")
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("label"), Some(serde_json::json!("nav.audio")));
+}
+
+#[test]
+fn import_renames_freely() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/import-rename", caps).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    local translate = import("mesh.i18n", "t")
+    label = translate("nav.battery")
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("label"), Some(serde_json::json!("nav.battery")));
+}
+
+#[test]
+fn import_interface_command_member_is_callable() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let mut ctx = ScriptContext::new("@mesh/import-iface", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+function init()
+    local VolumeChanged = import("mesh.audio@>=1.0", "VolumeChanged")
+    seen_level = 0
+    VolumeChanged:on(function(event) seen_level = event.level end)
+    VolumeChanged:emit({ level = 71 })
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("seen_level"), Some(serde_json::json!(71)));
+}
+
+#[test]
+fn import_component_definition_member() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/import-component", caps).unwrap();
+    ctx.load_script(
+        r#"
+local source = import("./child.mesh", "source")
+child_source = source
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        ctx.state.get("child_source"),
+        Some(serde_json::json!("./child.mesh"))
+    );
+}
+
+#[test]
+fn import_requires_string_specifier() {
+    let caps = CapabilitySet::new();
+    let mut ctx = ScriptContext::new("@mesh/import-bad-spec", caps).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    ok = pcall(import, 42)
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("ok"), Some(serde_json::json!(false)));
+}
+
+#[test]
 fn pcall_unsupported_require_is_false_without_diagnostic() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/unsupported-test", caps).unwrap();

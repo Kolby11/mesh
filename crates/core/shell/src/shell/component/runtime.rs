@@ -144,6 +144,15 @@ impl FrontendSurfaceComponent {
         // live cross-component reference rather than a snapshot.
         script_ctx.attach_shared_vm(&self.surface_vm);
         script_ctx.set_interface_catalog(self.interface_catalog.clone());
+        script_ctx.set_optional_interfaces(
+            manifest
+                .dependencies
+                .interfaces
+                .iter()
+                .filter(|dep| !dep.required)
+                .map(|dep| dep.name.clone())
+                .collect(),
+        );
         seed_service_state(script_ctx.state_mut());
         script_ctx
             .set_global_state("this", self.module_descriptor_from_manifest(manifest))

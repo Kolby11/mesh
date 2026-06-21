@@ -31,6 +31,10 @@ pub fn complete(
         }
         ScriptContext::EventCurrentTarget { prefix } => complete_event_current_target(&prefix),
         ScriptContext::ServiceName => complete_service_names(registry),
+        ScriptContext::ImportSpecifier { prefix } => complete_import_specifier(&prefix, registry),
+        ScriptContext::ImportMember { specifier, prefix } => {
+            complete_import_member(&specifier, &prefix, registry)
+        }
         ScriptContext::InterfaceProxy { var_name, prefix } => {
             complete_interface_proxy(&var_name, &prefix, doc, registry)
         }
@@ -202,6 +206,154 @@ fn complete_service_names(registry: &ModuleRegistry) -> Vec<CompletionItem> {
             ..Default::default()
         })
         .collect()
+}
+
+/// Builtin `mesh.*` module specifiers resolvable via `require`/`import`,
+/// independent of any installed backend interface.
+static BUILTIN_IMPORT_SPECIFIERS: &[(&str, &str)] = &[
+    ("mesh.i18n", "translation helpers (t)"),
+    ("mesh.ui", "UI host API (request_redraw, …)"),
+    ("mesh.log", "logging host API (info, warn, error)"),
+    ("mesh.locale", "locale host API (current, translate, set)"),
+    ("mesh.events", "event bus (subscribe, publish)"),
+    ("mesh.popover", "popover host API (activate, hide)"),
+];
+
+/// Completion inside the first string argument of `require(...)`/`import(...)`:
+/// builtin host-API/library specifiers plus discovered service interfaces.
+fn complete_import_specifier(prefix: &str, registry: &ModuleRegistry) -> Vec<CompletionItem> {
+    let mut items: Vec<CompletionItem> = BUILTIN_IMPORT_SPECIFIERS
+        .iter()
+        .filter_map(|(spec, detail)| {
+            specifier_item(spec, prefix, detail, CompletionItemKind::MODULE)
+        })
+        .collect();
+
+    for name in registry.service_names() {
+        if BUILTIN_IMPORT_SPECIFIERS.iter().any(|(spec, _)| *spec == name) {
+            continue;
+        }
+        if let Some(item) = specifier_item(name, prefix, "service interface", CompletionItemKind::INTERFACE)
+        {
+            items.push(item);
+        }
+    }
+
+    items
+}
+
+/// Completion inside an `import("<specifier>", "<name>...` member argument.
+fn complete_import_member(
+    specifier: &str,
+    prefix: &str,
+    registry: &ModuleRegistry,
+) -> Vec<CompletionItem> {
+    // Strip any version suffix: `mesh.audio@>=1.0` → `mesh.audio`.
+    let canonical = match specifier.rsplit_once('@') {
+        Some((left, _)) if left.starts_with("mesh.") => left,
+        _ => specifier,
+    };
+
+    if canonical == "mesh.i18n" {
+        return ["t"]
+            .into_iter()
+            .filter_map(|m| member_item(m, prefix, "i18n.t(key) -> string", CompletionItemKind::METHOD))
+            .collect();
+    }
+
+    if let Some(namespace) = canonical.strip_prefix("mesh.") {
+        if matches!(namespace, "ui" | "log" | "locale" | "events") {
+            let dotted = format!("{namespace}.");
+            let items: Vec<CompletionItem> = MESH_API_ENTRIES
+                .iter()
+                .filter_map(|entry| entry.path.strip_prefix(&dotted).map(|m| (m, entry)))
+                .filter(|(member, _)| !member.contains('.'))
+                .filter_map(|(member, entry)| {
+                    member_item(member, prefix, entry.signature, CompletionItemKind::METHOD)
+                })
+                .collect();
+            if !items.is_empty() {
+                return items;
+            }
+        }
+        if namespace == "popover" {
+            return [
+                ("activate", "popover.activate(surface_id, event?, focus?)"),
+                ("hide", "popover.hide(surface_id)"),
+            ]
+            .into_iter()
+            .filter_map(|(m, sig)| member_item(m, prefix, sig, CompletionItemKind::METHOD))
+            .collect();
+        }
+    }
+
+    if let Some(shape) = registry.interface_shapes.get(canonical) {
+        let mut items: Vec<CompletionItem> = Vec::new();
+        for field in &shape.state_fields {
+            if let Some(item) = member_item(
+                field,
+                prefix,
+                &format!("{canonical} state"),
+                CompletionItemKind::FIELD,
+            ) {
+                items.push(item);
+            }
+        }
+        for cmd in &shape.commands {
+            if let Some(item) = member_item(
+                cmd,
+                prefix,
+                &format!("{canonical} command"),
+                CompletionItemKind::METHOD,
+            ) {
+                items.push(item);
+            }
+        }
+        if let Some(item) =
+            member_item("on_change", prefix, "register change handler", CompletionItemKind::METHOD)
+        {
+            items.push(item);
+        }
+        return items;
+    }
+
+    vec![]
+}
+
+/// A module-specifier completion item that inserts only the untyped suffix.
+fn specifier_item(
+    label: &str,
+    prefix: &str,
+    detail: &str,
+    kind: CompletionItemKind,
+) -> Option<CompletionItem> {
+    let remaining = label.strip_prefix(prefix)?;
+    Some(CompletionItem {
+        label: label.to_string(),
+        kind: Some(kind),
+        detail: Some(detail.to_string()),
+        insert_text: Some(remaining.to_string()),
+        insert_text_format: Some(Fmt::PLAIN_TEXT),
+        ..Default::default()
+    })
+}
+
+/// A member-name completion item (used inside `import(...)` quoted name args).
+fn member_item(
+    member: &str,
+    prefix: &str,
+    detail: &str,
+    kind: CompletionItemKind,
+) -> Option<CompletionItem> {
+    let remaining = member.strip_prefix(prefix)?;
+    Some(CompletionItem {
+        label: member.to_string(),
+        kind: Some(kind),
+        detail: Some(detail.to_string()),
+        insert_text: Some(remaining.to_string()),
+        insert_text_format: Some(Fmt::PLAIN_TEXT),
+        ..Default::default()
+    })
 }
 
 fn complete_state_vars(doc: &Document) -> Vec<CompletionItem> {

@@ -22,8 +22,7 @@ dark_class        = "ts-option ts-option-active"
 light_class       = "ts-option"
 gruvbox_class     = "ts-option"
 
-local theme_ok, theme = pcall(require, "mesh.theme")
-if not theme_ok then theme = nil end
+local theme = require("mesh.theme")
 
 local THEME_DARK        = "mesh-default-dark"
 local THEME_LIGHT       = "mesh-default-light"
@@ -36,7 +35,7 @@ local function sync_classes(current)
 end
 
 function render(self)
-    if theme_ok and theme then
+    if theme then
         local current = theme.current or theme.theme_id or THEME_DARK
         sync_classes(current)
     end

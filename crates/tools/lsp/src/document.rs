@@ -272,9 +272,15 @@ fn extract_script_info(
             }
 
             // Detect: local <var> = require("mesh....")
-            if let Some(req_pos) = rest.find("= require(") {
+            //     or: local <var> = import("mesh....")  (default import, no names)
+            // A default `import(...)` with no extra arguments resolves to the
+            // same proxy table as `require(...)`, so it binds the same shape.
+            let binder = ["= require(", "= import("]
+                .into_iter()
+                .find_map(|kw| rest.find(kw).map(|pos| (kw, pos)));
+            if let Some((kw, req_pos)) = binder {
                 let var_name = rest[..req_pos].trim().to_string();
-                let after_req = &rest[req_pos + "= require(".len()..];
+                let after_req = &rest[req_pos + kw.len()..];
                 // Strip opening quote
                 let after_quote = after_req.trim_start_matches(|c| c == '"' || c == '\'');
                 // Extract the module string up to closing quote
@@ -282,8 +288,16 @@ fn extract_script_info(
                     .split(|c| c == '"' || c == '\'')
                     .next()
                     .unwrap_or("");
+                // Only a single-argument import maps to one proxy variable;
+                // `import("spec", "a", "b")` returns several values, not a proxy.
+                let rest_after_module = after_quote
+                    .get(module.len()..)
+                    .unwrap_or("")
+                    .trim_start_matches(|c| c == '"' || c == '\'');
+                let is_default_import =
+                    kw == "= require(" || !rest_after_module.trim_start().starts_with(',');
                 let iface = canonicalize_interface_name(module);
-                if !var_name.is_empty() && !iface.is_empty() {
+                if is_default_import && !var_name.is_empty() && !iface.is_empty() {
                     interface_proxies.insert(var_name, iface);
                 }
             }

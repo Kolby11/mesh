@@ -26,30 +26,11 @@ ws3_class = "ws-btn"
 ws4_class = "ws-btn"
 ws5_class = "ws-btn"
 
-local wm_ok, wm = pcall(require, "mesh.hyprland@>=1.0")
-if not wm_ok then
-    mesh.log.warn("[workspace-list] require mesh.hyprland failed: " .. tostring(wm))
-    wm = nil
-else
-    local switch_fn_type = "nil"
-    if type(wm) == "table" then
-        switch_fn_type = type(wm.switch_workspace)
-    end
-    mesh.log.info(string.format(
-        "[workspace-list] require ok, proxy=%s, switch_workspace=%s",
-        type(wm), switch_fn_type
-    ))
-end
+local wm = require("mesh.hyprland")
 
 local function get_hyprland_state()
-    -- Try the proxy first, fall back to reading the global service payload
-    -- set by the runtime's apply_service_payload.
-    if wm_ok and wm then
+    if wm then
         return wm.active_workspace
-    end
-    local svc = __mesh_svc_hyprland
-    if svc then
-        return svc.active_workspace
     end
     return nil
 end
@@ -76,7 +57,7 @@ end
 local function switch_to(n)
     ws_active = n
     sync_classes()
-    if wm_ok and wm and type(wm.switch_workspace) == "function" then
+    if wm and type(wm.switch_workspace) == "function" then
         wm.switch_workspace(n)
     else
         mesh.log.warn("[workspace-list] mesh.hyprland switch_workspace method is unavailable")

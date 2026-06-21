@@ -9,11 +9,10 @@
 is_playing = false
 track_name = ""
 
-local media_ok, media = pcall(require, "mesh.media@>=1.0")
-if not media_ok then media = nil end
+local media = require("mesh.media")
 
 function render(self)
-    if not media_ok or not media or not media.available then
+    if not media or not media.available then
         is_playing = false
         track_name = ""
         return

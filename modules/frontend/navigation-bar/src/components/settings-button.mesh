@@ -11,6 +11,8 @@
 </template>
 
 <script lang="luau">
+local t = import("mesh.i18n", "t")
+
 onActivate = nil
 
 function onButtonClick(event)
