@@ -25,8 +25,14 @@ pub struct ElementAction {
 
 /// Imperative methods exposed on a live element-node proxy. Anything not in this
 /// list is treated as a live geometry/state field read from the latest paint.
-pub(super) const ELEMENT_METHODS: &[&str] =
-    &["focus", "blur", "scroll_into_view", "scroll_to", "click", "set_value"];
+pub(super) const ELEMENT_METHODS: &[&str] = &[
+    "focus",
+    "blur",
+    "scroll_into_view",
+    "scroll_to",
+    "click",
+    "set_value",
+];
 
 /// Tags whose `value` is editable text content (DOM `input.value`), so the proxy
 /// reads/writes the live string rather than the snapshot's accessibility flag.
@@ -58,6 +64,32 @@ pub(super) fn create_refs_proxy(
     )?;
     proxy.set_metatable(Some(meta))?;
     Ok(proxy)
+}
+
+pub(super) fn install_bound_element_proxies(
+    lua: &Lua,
+    scope: &Table,
+    metrics: &Value,
+    actions: Arc<Mutex<Vec<ElementAction>>>,
+) -> mlua::Result<()> {
+    let Some(entries) = metrics.as_object() else {
+        return Ok(());
+    };
+
+    for (name, metrics) in entries {
+        let binding = metrics
+            .get("attributes")
+            .and_then(Value::as_object)
+            .and_then(|attributes| attributes.get("_mesh_bind_this"))
+            .and_then(Value::as_str);
+        if binding != Some(name.as_str()) {
+            continue;
+        }
+        let proxy = create_element_node_proxy(lua, scope, name, Arc::clone(&actions))?;
+        scope.raw_set(name.as_str(), proxy)?;
+    }
+
+    Ok(())
 }
 
 fn create_element_node_proxy(
@@ -140,6 +172,14 @@ fn create_element_node_proxy(
                 }
                 return Ok(LuaValue::Nil);
             }
+            if let LuaValue::Table(attributes) = metrics.get::<LuaValue>("attributes")? {
+                if let Some(attribute_name) = element_member_attribute_name(&key) {
+                    let value = attributes.get::<LuaValue>(attribute_name.as_str())?;
+                    if !matches!(value, LuaValue::Nil) {
+                        return Ok(value);
+                    }
+                }
+            }
             // Live geometry/state field: read from the latest published metrics.
             metrics.get::<LuaValue>(key)
         })?,
@@ -148,26 +188,88 @@ fn create_element_node_proxy(
     // queuing a `set_value` action; every other field is read-only.
     meta.set(
         "__newindex",
-        lua.create_function(
-            move |lua, (_node, key, value): (Table, String, LuaValue)| {
-                if key != "value" {
-                    return Err(mlua::Error::RuntimeError(format!(
-                        "element reference field '{key}' is read-only"
-                    )));
+        lua.create_function(move |lua, (_node, key, value): (Table, String, LuaValue)| {
+            if key != "value" {
+                if let Some(attribute_name) = element_member_attribute_name(&key) {
+                    let payload = lua.from_value::<Value>(value)?;
+                    write_actions.lock().unwrap().push(ElementAction {
+                        target: write_name.clone(),
+                        action: "set_attribute".to_string(),
+                        args: Value::Array(vec![Value::String(attribute_name), payload]),
+                        options: Value::Null,
+                    });
+                    return Ok(());
                 }
-                let payload = lua.from_value::<Value>(value)?;
-                write_actions.lock().unwrap().push(ElementAction {
-                    target: write_name.clone(),
-                    action: "set_value".to_string(),
-                    args: Value::Array(vec![payload]),
-                    options: Value::Null,
-                });
-                Ok(())
-            },
-        )?,
+                return Err(mlua::Error::RuntimeError(format!(
+                    "element reference field '{key}' is read-only"
+                )));
+            }
+            let payload = lua.from_value::<Value>(value)?;
+            write_actions.lock().unwrap().push(ElementAction {
+                target: write_name.clone(),
+                action: "set_value".to_string(),
+                args: Value::Array(vec![payload]),
+                options: Value::Null,
+            });
+            Ok(())
+        })?,
     )?;
     node.set_metatable(Some(meta))?;
     Ok(node)
+}
+
+fn element_member_attribute_name(key: &str) -> Option<String> {
+    if key == "className" {
+        return Some("class".to_string());
+    }
+    if matches!(
+        key,
+        "key"
+            | "tag"
+            | "element_type"
+            | "x"
+            | "y"
+            | "left"
+            | "top"
+            | "right"
+            | "bottom"
+            | "width"
+            | "height"
+            | "client_width"
+            | "client_height"
+            | "bounding_client_rect"
+            | "client_bound_rect"
+            | "scroll_x"
+            | "scroll_y"
+            | "scroll_left"
+            | "scroll_top"
+            | "scroll_width"
+            | "scroll_height"
+            | "max_scroll_left"
+            | "max_scroll_top"
+            | "hovered"
+            | "active"
+            | "focused"
+            | "disabled"
+            | "checked"
+            | "present"
+            | "exists"
+            | "attributes"
+            | "name"
+    ) {
+        return None;
+    }
+
+    let mut result = String::new();
+    for ch in key.chars() {
+        if ch.is_ascii_uppercase() {
+            result.push('-');
+            result.push(ch.to_ascii_lowercase());
+        } else {
+            result.push(ch);
+        }
+    }
+    Some(result)
 }
 
 /// Whether a metrics snapshot describes an input-like element (so `value` is

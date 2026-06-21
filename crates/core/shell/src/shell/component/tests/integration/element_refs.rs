@@ -31,7 +31,9 @@ end
     assert_eq!(component.focused_key, None);
 
     // The handler focuses the input through its live reference.
-    component.call_namespaced_handler("focus_field", &[]).unwrap();
+    component
+        .call_namespaced_handler("focus_field", &[])
+        .unwrap();
     assert_eq!(
         component.focused_key.as_deref(),
         Some("root/0"),
@@ -39,8 +41,61 @@ end
     );
 
     // Blurring the focused element clears focus.
-    component.call_namespaced_handler("blur_field", &[]).unwrap();
+    component
+        .call_namespaced_handler("blur_field", &[])
+        .unwrap();
     assert_eq!(component.focused_key, None);
+}
+
+#[test]
+fn bind_this_core_element_exposes_live_element_proxy() {
+    let mut component = test_frontend_component(
+        r#"
+<style>
+.panel { width: 120px; height: 40px; }
+</style>
+<template>
+    <input bind:this={field} class="panel" aria-label="Search" />
+</template>
+<script lang="luau">
+field_width = 0
+field_label = ""
+function inspect()
+    field_width = field.width
+    field_label = field.ariaLabel
+end
+function focus_bound()
+    field:focus()
+end
+</script>
+"#,
+    );
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(200, 60);
+    component.paint(&theme, 200, 60, &mut buffer, 1.0).unwrap();
+
+    component.call_namespaced_handler("inspect", &[]).unwrap();
+    let width = runtime_value(&component, "field_width")
+        .and_then(|value| value.as_f64())
+        .unwrap_or(0.0);
+    assert!(
+        (width - 120.0).abs() < 2.0,
+        "bind:this field.width should reflect live layout, got {width}"
+    );
+    assert_eq!(
+        runtime_value(&component, "field_label"),
+        Some(serde_json::json!("Search"))
+    );
+
+    component
+        .call_namespaced_handler("focus_bound", &[])
+        .unwrap();
+    assert_eq!(
+        component.focused_key.as_deref(),
+        Some("root/0"),
+        "bind:this field:focus() should focus the live node"
+    );
 }
 
 #[test]
@@ -213,7 +268,9 @@ end
     let mut buffer = PixelBuffer::new(160, 120);
     component.paint(&theme, 160, 120, &mut buffer, 1.0).unwrap();
 
-    component.call_namespaced_handler("smooth_jump", &[]).unwrap();
+    component
+        .call_namespaced_handler("smooth_jump", &[])
+        .unwrap();
 
     // Smooth scroll registers an animation and does NOT snap the offset.
     let animation = *component
@@ -241,7 +298,10 @@ end
     // At/after the full duration, it lands exactly on the target and is dropped.
     component.advance_scroll_animations(animation.start_time + animation.duration);
     let end = component.scroll_offsets.get("root/0").unwrap().y;
-    assert!((end - 100.0).abs() < 0.01, "should settle at 100, got {end}");
+    assert!(
+        (end - 100.0).abs() < 0.01,
+        "should settle at 100, got {end}"
+    );
     assert!(
         component.scroll_animations.is_empty(),
         "animation should be dropped once settled"

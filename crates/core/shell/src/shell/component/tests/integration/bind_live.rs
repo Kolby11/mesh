@@ -102,15 +102,27 @@ end
 
     // First paint instantiates the child and installs the live binding.
     component.paint(&theme, 120, 40, &mut buffer, 1.0).unwrap();
-    assert_eq!(runtime_value(&component, "observed"), Some(serde_json::json!(-1)));
-    assert_eq!(child_runtime_value(&component, "value"), Some(serde_json::json!(0)));
+    assert_eq!(
+        runtime_value(&component, "observed"),
+        Some(serde_json::json!(-1))
+    );
+    assert_eq!(
+        child_runtime_value(&component, "value"),
+        Some(serde_json::json!(0))
+    );
 
     // The parent handler calls the child through the live reference.
     component.call_namespaced_handler("bump", &[]).unwrap();
 
     // Real synchronous return value (proves the call ran and returned, not queued).
-    assert_eq!(runtime_value(&component, "observed"), Some(serde_json::json!(99)));
+    assert_eq!(
+        runtime_value(&component, "observed"),
+        Some(serde_json::json!(99))
+    );
     // The child's own reactive state reflects the live mutation (proves liveness
     // plus the shell's post-handler re-sync of bound neighbours).
-    assert_eq!(child_runtime_value(&component, "value"), Some(serde_json::json!(99)));
+    assert_eq!(
+        child_runtime_value(&component, "value"),
+        Some(serde_json::json!(99))
+    );
 }

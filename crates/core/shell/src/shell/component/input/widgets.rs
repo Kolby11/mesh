@@ -126,13 +126,21 @@ impl FrontendSurfaceComponent {
         find_node_by_key(tree, key).is_some_and(|node| node_is_source(node, &["option"]))
     }
 
-    pub(in crate::shell::component) fn is_menu_item_key(&self, tree: &WidgetNode, key: &str) -> bool {
+    pub(in crate::shell::component) fn is_menu_item_key(
+        &self,
+        tree: &WidgetNode,
+        key: &str,
+    ) -> bool {
         find_node_by_key(tree, key).is_some_and(|node| {
             node_is_source(node, &["menu-item", "command-item", "preference-row"])
         })
     }
 
-    pub(in crate::shell::component) fn is_container_collection_item_key(&self, tree: &WidgetNode, key: &str) -> bool {
+    pub(in crate::shell::component) fn is_container_collection_item_key(
+        &self,
+        tree: &WidgetNode,
+        key: &str,
+    ) -> bool {
         find_node_by_key(tree, key).is_some_and(|node| node_is_source(node, &["tab", "list-item"]))
     }
 

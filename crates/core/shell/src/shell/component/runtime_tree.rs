@@ -548,16 +548,29 @@ pub(super) fn collect_element_metrics(
         }
     }
     if let Some(reference) = node.attributes.get("ref") {
-        refs.insert(reference.clone(), metrics);
+        refs.insert(reference.clone(), metrics.clone());
         if let Some(key) = node_key {
             ref_keys.insert(reference.clone(), key.clone());
+        }
+    }
+    if let Some(binding) = node.attributes.get("_mesh_bind_this") {
+        refs.insert(binding.clone(), metrics);
+        if let Some(key) = node_key {
+            ref_keys.insert(binding.clone(), key.clone());
         }
     }
 
     let child_offset_x = offset_x - scroll_x;
     let child_offset_y = offset_y - scroll_y;
     for child in &node.children {
-        collect_element_metrics(child, child_offset_x, child_offset_y, elements, refs, ref_keys);
+        collect_element_metrics(
+            child,
+            child_offset_x,
+            child_offset_y,
+            elements,
+            refs,
+            ref_keys,
+        );
     }
 }
 

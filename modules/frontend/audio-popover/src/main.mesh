@@ -1,14 +1,15 @@
 <template>
-  <popover class="audio-popover-shell" aria-label="Audio controls">
+  <popover bind:this={popover} class="audio-popover-shell" aria-label="Audio controls">
     <column class="audio-popover">
       <slider
         class="audio-slider"
         min="0"
         max="100"
-        value="{slider_value}"
+        value={slider_value or 0}
         orient="vertical"
         onchange={onVolumeChange}
-        onrelease={onVolumeRelease}
+        onrelease={onVolumeRelease
+        }
       />
       <text class="audio-percent">{audio_percent_label}</text>
     </column>

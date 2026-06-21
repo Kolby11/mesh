@@ -50,6 +50,12 @@ pub enum ScriptContext {
         ref_name: String,
         prefix: String,
     },
+    /// Cursor is after a Lua variable known to hold an element ref, e.g. `node.`
+    /// after `local node = refs.panel`.
+    ElementRefAliasMember {
+        alias: String,
+        prefix: String,
+    },
     /// Cursor is after `event.current_target.`.
     EventCurrentTarget {
         prefix: String,
@@ -141,8 +147,12 @@ pub fn template_context_at(block_content: &str, offset: usize) -> TemplateContex
 
     if let Some(ob) = last_open_brace {
         let after_brace_closed = last_close_brace.is_some_and(|cb| cb > ob);
-        let inside_tag_angle = last_lt.is_some_and(|lt| last_gt.is_none_or(|gt| gt < lt));
-        if !after_brace_closed && !inside_tag_angle {
+        // An unclosed `{` is an expression context whether it appears in template
+        // content (`{state}`) or inside a tag as an attribute value
+        // (`value={state}`, `bind:this={ref}`). The brace must be the innermost
+        // open construct: it has to come after the most recent `<`.
+        let brace_after_tag_start = last_lt.is_none_or(|lt| ob > lt);
+        if !after_brace_closed && brace_after_tag_start {
             return TemplateContext::Expr;
         }
     }
@@ -262,7 +272,7 @@ pub fn script_context_at(block_content: &str, offset: usize) -> ScriptContext {
         }
 
         if let Some(rest) = token.strip_prefix("refs.") {
-            if let Some((ref_name, prefix)) = rest.split_once('.') {
+            if let Some((ref_name, prefix)) = rest.split_once(['.', ':']) {
                 return ScriptContext::RefMember {
                     ref_name: ref_name.to_string(),
                     prefix: prefix.to_string(),

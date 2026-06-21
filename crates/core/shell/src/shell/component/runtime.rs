@@ -550,7 +550,6 @@ impl FrontendSurfaceComponent {
         }
         (state_dirty, events)
     }
-
 }
 
 /// If `handler_name` is a JSON object with `h` and `a` fields, unpack it into

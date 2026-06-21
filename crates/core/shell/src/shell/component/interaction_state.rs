@@ -156,8 +156,7 @@ impl FrontendSurfaceComponent {
                     // the target, routing through the same scroll_offsets map the
                     // wheel handler mutates. Geometry lives in mesh-core-interaction.
                     if let Some(key) = ref_keys.get(&action.target) {
-                        let updates =
-                            scroll_into_view_offsets(&tree, key, &self.scroll_offsets);
+                        let updates = scroll_into_view_offsets(&tree, key, &self.scroll_offsets);
                         let mut moved = false;
                         for (container_key, target) in updates {
                             let current = self
@@ -271,13 +270,13 @@ impl FrontendSurfaceComponent {
         let mut finished = Vec::new();
         let mut updates = Vec::new();
         for (key, animation) in &self.scroll_animations {
-            let elapsed = now.saturating_duration_since(animation.start_time).as_secs_f32();
+            let elapsed = now
+                .saturating_duration_since(animation.start_time)
+                .as_secs_f32();
             let duration = animation.duration.as_secs_f32().max(f32::EPSILON);
             let progress = (elapsed / duration).clamp(0.0, 1.0);
-            let eased = mesh_core_animation::apply_easing(
-                mesh_core_animation::Easing::EaseOut,
-                progress,
-            );
+            let eased =
+                mesh_core_animation::apply_easing(mesh_core_animation::Easing::EaseOut, progress);
             let x = animation.start.x + (animation.target.x - animation.start.x) * eased;
             let y = animation.start.y + (animation.target.y - animation.start.y) * eased;
             updates.push((key.clone(), ScrollOffsetState { x, y }));

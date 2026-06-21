@@ -173,6 +173,15 @@ fn complete_expr(doc: &Document) -> Vec<CompletionItem> {
         });
     }
 
+    for name in &doc.script_functions {
+        items.push(CompletionItem {
+            label: name.clone(),
+            kind: Some(CompletionItemKind::FUNCTION),
+            detail: Some("script function".to_string()),
+            ..Default::default()
+        });
+    }
+
     items
 }
 

@@ -36,6 +36,7 @@ use runtime_tree::{
 };
 
 use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_component::template::{AttributeValue, TemplateNode};
 use mesh_core_config::TooltipSettings;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::{
@@ -693,12 +694,47 @@ fn scripts_reference_element_metrics(compiled: &CompiledFrontendModule) -> bool 
         .script
         .as_ref()
         .is_some_and(|script| uses_metrics(&script.source))
+        || template_uses_bind_this(&compiled.component.template)
         || compiled.local_components.values().any(|component| {
             component
                 .script
                 .as_ref()
                 .is_some_and(|script| uses_metrics(&script.source))
+                || template_uses_bind_this(&component.template)
         })
+}
+
+fn template_uses_bind_this(
+    template: &Option<mesh_core_component::template::TemplateBlock>,
+) -> bool {
+    template
+        .as_ref()
+        .is_some_and(|template| nodes_use_bind_this(&template.root))
+}
+
+fn nodes_use_bind_this(nodes: &[TemplateNode]) -> bool {
+    nodes.iter().any(|node| match node {
+        TemplateNode::Element(element) => {
+            element
+                .attributes
+                .iter()
+                .any(|attribute| matches!(attribute.value, AttributeValue::InstanceBinding(_)))
+                || nodes_use_bind_this(&element.children)
+        }
+        TemplateNode::Component(component) => {
+            component
+                .props
+                .iter()
+                .any(|attribute| matches!(attribute.value, AttributeValue::InstanceBinding(_)))
+                || nodes_use_bind_this(&component.children)
+        }
+        TemplateNode::If(if_node) => {
+            nodes_use_bind_this(&if_node.then_children)
+                || nodes_use_bind_this(&if_node.else_children)
+        }
+        TemplateNode::For(for_node) => nodes_use_bind_this(&for_node.children),
+        TemplateNode::Slot(_) | TemplateNode::Text(_) | TemplateNode::Expr(_) => false,
+    })
 }
 
 fn service_payload_cache_capacity(manifest: &mesh_core_module::Manifest) -> usize {

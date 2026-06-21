@@ -1,8 +1,8 @@
+use super::element_ref::{ElementAction, create_refs_proxy, install_bound_element_proxies};
 use super::lookup::{
     interface_error_message, lookup_failure_reason, lua_err, lua_value_to_string, map_lua_error,
     record_lookup_diagnostic, record_lookup_diagnostic_lua,
 };
-use super::element_ref::{ElementAction, create_refs_proxy};
 use super::proxy::{create_event_channel, create_interface_proxy, interface_event_channel};
 use super::{PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport, ScriptState};
 use crate::chunk_cache::ChunkCache;
@@ -372,6 +372,12 @@ impl ScriptContext {
                 .globals()
                 .set("__mesh_element_metrics", lua_value);
         }
+        let _ = install_bound_element_proxies(
+            self.lua(),
+            self.env(),
+            metrics,
+            Arc::clone(&self.shared_element_actions),
+        );
     }
 
     pub fn emit_interface_event(
@@ -1187,9 +1193,12 @@ impl ScriptContext {
         // read from the latest paint (`__mesh_element_metrics`, published by the
         // shell each frame) and methods (`focus`, `blur`, …) enqueue element
         // actions the shell executes against the real widget tree.
-        let refs_proxy =
-            create_refs_proxy(self.lua(), globals, Arc::clone(&self.shared_element_actions))
-                .map_err(lua_err)?;
+        let refs_proxy = create_refs_proxy(
+            self.lua(),
+            globals,
+            Arc::clone(&self.shared_element_actions),
+        )
+        .map_err(lua_err)?;
         globals.set("refs", refs_proxy).map_err(lua_err)?;
         Ok(())
     }

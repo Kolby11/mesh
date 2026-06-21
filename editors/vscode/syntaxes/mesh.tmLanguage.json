@@ -27,15 +27,116 @@
         "2": { "name": "entity.name.tag.mesh" },
         "3": { "name": "punctuation.definition.tag.end.mesh" }
       },
-      "contentName": "meta.embedded.block.html",
-      "patterns": [{ "include": "text.html.basic" }]
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#template-expression" },
+        { "include": "#mesh-component-tag" },
+        { "include": "#mesh-tag" }
+      ]
+    },
+    "template-expression": {
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": { "name": "punctuation.section.embedded.begin.mesh" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.embedded.end.mesh" }
+      },
+      "contentName": "meta.embedded.inline.lua",
+      "patterns": [{ "include": "source.lua" }]
+    },
+    "mesh-component-tag": {
+      "begin": "(</?)([A-Z][A-Za-z0-9_]*)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.mesh" },
+        "2": { "name": "entity.name.type.mesh.component" }
+      },
+      "end": "(/?>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.end.mesh" }
+      },
+      "patterns": [{ "include": "#tag-contents" }]
+    },
+    "mesh-tag": {
+      "begin": "(</?)([a-z][A-Za-z0-9_-]*)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.mesh" },
+        "2": { "name": "entity.name.tag.mesh" }
+      },
+      "end": "(/?>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.end.mesh" }
+      },
+      "patterns": [{ "include": "#tag-contents" }]
+    },
+    "tag-contents": {
+      "patterns": [
+        { "include": "#tag-bind-directive" },
+        { "include": "#tag-event" },
+        { "include": "#tag-attribute" },
+        { "include": "#tag-assign" },
+        { "include": "#attribute-value" }
+      ]
+    },
+    "tag-bind-directive": {
+      "match": "\\b(bind)(:)([A-Za-z][A-Za-z0-9_-]*)",
+      "captures": {
+        "1": { "name": "keyword.control.bind.mesh" },
+        "2": { "name": "punctuation.separator.directive.mesh" },
+        "3": { "name": "variable.other.bind-target.mesh" }
+      }
+    },
+    "tag-event": {
+      "match": "\\b(on[A-Za-z][A-Za-z0-9_-]*)",
+      "name": "entity.other.attribute-name.event.mesh"
+    },
+    "tag-attribute": {
+      "match": "\\b([A-Za-z_:][A-Za-z0-9_:.-]*)",
+      "name": "entity.other.attribute-name.mesh"
+    },
+    "tag-assign": {
+      "match": "=",
+      "name": "punctuation.separator.key-value.mesh"
+    },
+    "attribute-value": {
+      "patterns": [
+        {
+          "begin": "\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.mesh" }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.mesh" }
+          },
+          "name": "string.quoted.double.mesh",
+          "patterns": [{ "include": "#template-expression" }]
+        },
+        {
+          "begin": "'",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.mesh" }
+          },
+          "end": "'",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.mesh" }
+          },
+          "name": "string.quoted.single.mesh",
+          "patterns": [{ "include": "#template-expression" }]
+        },
+        { "include": "#template-expression" }
+      ]
     },
     "script-block": {
-      "begin": "(<)(script)\\b([^>]*)(>)",
+      "begin": "(<)(script)(?:\\s+([A-Za-z_][A-Za-z0-9_-]*)\\s*(=)\\s*(\"[^\"]*\"|'[^']*'))?\\s*(>)",
       "beginCaptures": {
         "1": { "name": "punctuation.definition.tag.begin.mesh" },
         "2": { "name": "entity.name.tag.mesh" },
-        "4": { "name": "punctuation.definition.tag.end.mesh" }
+        "3": { "name": "variable.parameter.mesh" },
+        "4": { "name": "punctuation.separator.key-value.mesh" },
+        "5": { "name": "string.quoted.mesh" },
+        "6": { "name": "punctuation.definition.tag.end.mesh" }
       },
       "end": "(</)(script)\\s*(>)",
       "endCaptures": {

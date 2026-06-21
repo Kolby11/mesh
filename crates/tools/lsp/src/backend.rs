@@ -5,7 +5,7 @@ use tower_lsp::{Client, LanguageServer, jsonrpc::Result, lsp_types::*};
 
 use crate::{
     analyzer, diagnostics, document::Document, hover, manifest, manifest::ManifestDocument,
-    module_registry::ModuleRegistry,
+    module_registry::ModuleRegistry, semantic_tokens,
 };
 
 pub struct Backend {
@@ -67,6 +67,7 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                semantic_tokens_provider: Some(semantic_tokens::server_capabilities()),
                 ..Default::default()
             },
         })
@@ -148,6 +149,19 @@ impl LanguageServer for Backend {
         let registry = self.registry.read().await;
 
         Ok(hover::hover(doc, position, &registry))
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = &params.text_document.uri;
+        let docs = self.documents.read().await;
+        let Some(doc) = docs.get(uri) else {
+            return Ok(None);
+        };
+
+        Ok(Some(semantic_tokens::full(doc)))
     }
 }
 

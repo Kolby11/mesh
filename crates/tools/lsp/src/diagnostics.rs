@@ -1,8 +1,8 @@
 use mesh_core_component::parser::ParseError;
-use mesh_core_elements::{BASE_ELEMENT_FIELDS, element_type_for_tag};
+use mesh_core_elements::{BASE_ELEMENT_FIELDS, element_contract_for_tag, element_type_for_tag};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
-use crate::document::{Document, block_content_range, extract_block_text};
+use crate::document::{Document, ElementRefAliasTarget, block_content_range, extract_block_text};
 
 pub fn from_document(doc: &Document) -> Vec<Diagnostic> {
     if let Some(err) = &doc.parse_error {
@@ -196,6 +196,45 @@ fn diagnostics_from_script_refs(doc: &Document) -> Vec<Diagnostic> {
         offset = name_end;
     }
 
+    for alias in &doc.element_ref_aliases {
+        let ElementRefAliasTarget::Ref(ref_name) = &alias.target else {
+            continue;
+        };
+        let Some(element_ref) = doc
+            .element_refs
+            .iter()
+            .find(|element_ref| element_ref.name == *ref_name)
+        else {
+            continue;
+        };
+        let mut offset = 0;
+        let needle = format!("{}.", alias.alias);
+        while let Some(relative) = script[offset..].find(&needle) {
+            let member_start = offset + relative + needle.len();
+            let Some((field_name, field_end)) = parse_identifier_at(script, member_start) else {
+                offset = member_start;
+                continue;
+            };
+            if !element_field_exists(&element_ref.tag, field_name) {
+                diagnostics.push(Diagnostic {
+                    range: byte_range_to_lsp_range(
+                        &doc.source,
+                        script_start + member_start,
+                        script_start + field_end,
+                    ),
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    message: format!(
+                        "`{}` does not expose field `{field_name}`",
+                        element_ref.element_type
+                    ),
+                    source: Some("mesh-tools-lsp".to_string()),
+                    ..Default::default()
+                });
+            }
+            offset = field_end;
+        }
+    }
+
     diagnostics
 }
 
@@ -224,6 +263,14 @@ fn element_field_exists(tag: &str, field_name: &str) -> bool {
         .iter()
         .chain(type_def.fields.iter())
         .any(|field| field.name == field_name)
+        || element_contract_for_tag(tag).is_some_and(|contract| {
+            contract.attributes.iter().any(|attribute| {
+                crate::analyzer::script::is_script_member_attribute(attribute.name)
+                    && (attribute.name == field_name
+                        || crate::analyzer::script::attribute_member_name(attribute.name)
+                            == field_name)
+            })
+        })
 }
 
 fn byte_range_to_lsp_range(source: &str, start: usize, end: usize) -> Range {
@@ -288,6 +335,30 @@ local invalid = refs.batteryIcon.value
             diagnostics[1]
                 .message
                 .contains("`IconElement` does not expose field `value`")
+        );
+    }
+
+    #[test]
+    fn bind_this_element_allows_attribute_member_aliases() {
+        let source = r#"
+<template>
+  <popover bind:this={popover} aria-label="Audio controls" />
+</template>
+<script lang="luau">
+popover.ariaLabel
+popover.notReal
+</script>
+"#;
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source.to_string());
+        let diags = from_document(&doc);
+
+        assert!(
+            !diags.iter().any(|diag| diag.message.contains("ariaLabel")),
+            "ariaLabel should resolve as aria-label attribute"
+        );
+        assert!(
+            diags.iter().any(|diag| diag.message.contains("notReal")),
+            "unknown direct bind:this member should be diagnosed"
         );
     }
 }

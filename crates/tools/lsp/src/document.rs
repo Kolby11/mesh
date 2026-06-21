@@ -16,10 +16,23 @@ pub struct ElementRef {
     pub source: ElementRefSource,
 }
 
+#[derive(Debug, Clone)]
+pub struct ElementRefAlias {
+    pub alias: String,
+    pub target: ElementRefAliasTarget,
+}
+
+#[derive(Debug, Clone)]
+pub enum ElementRefAliasTarget {
+    Ref(String),
+    CurrentTarget,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElementRefSource {
     Ref,
     Id,
+    BindThis,
 }
 
 pub struct Document {
@@ -37,6 +50,8 @@ pub struct Document {
     pub script_functions: Vec<String>,
     /// Template element bindings exposed to Luau through `refs.<name>`.
     pub element_refs: Vec<ElementRef>,
+    /// Lua variables assigned from `refs.<name>`, e.g. `local panel = refs.panel`.
+    pub element_ref_aliases: Vec<ElementRefAlias>,
     /// Local variables bound to interface proxies via `require("mesh....")`.
     /// Maps variable name → canonical interface name (e.g. "audio" → "mesh.audio").
     pub interface_proxies: HashMap<String, String>,
@@ -49,13 +64,31 @@ impl Document {
             Err(err) => (None, Some(err)),
         };
 
-        let (state_vars, service_bindings, script_functions, interface_proxies) =
-            extract_script_info(&source);
+        let (
+            state_vars,
+            service_bindings,
+            script_functions,
+            interface_proxies,
+            element_ref_aliases,
+        ) = extract_script_info(&source);
 
         let element_refs = parsed
             .as_ref()
             .map(extract_element_refs)
             .unwrap_or_default();
+        let mut element_ref_aliases = element_ref_aliases;
+        for element_ref in &element_refs {
+            if element_ref.source == ElementRefSource::BindThis
+                && !element_ref_aliases
+                    .iter()
+                    .any(|alias| alias.alias == element_ref.name)
+            {
+                element_ref_aliases.push(ElementRefAlias {
+                    alias: element_ref.name.clone(),
+                    target: ElementRefAliasTarget::Ref(element_ref.name.clone()),
+                });
+            }
+        }
         let imports = parsed
             .as_ref()
             .map(|parsed| parsed.imports.clone())
@@ -71,6 +104,7 @@ impl Document {
             imports,
             script_functions,
             element_refs,
+            element_ref_aliases,
             interface_proxies,
         }
     }
@@ -99,6 +133,9 @@ fn collect_element_refs(node: &TemplateNode, refs: &mut Vec<ElementRef>) {
             if let Some(name) = static_attr_value(node, "id") {
                 push_element_ref(refs, name, tag, ElementRefSource::Id);
             }
+            if let Some(name) = instance_binding_value(element, "bind:this") {
+                push_element_ref(refs, name, tag, ElementRefSource::BindThis);
+            }
             for child in &element.children {
                 collect_element_refs(child, refs);
             }
@@ -123,6 +160,21 @@ fn collect_element_refs(node: &TemplateNode, refs: &mut Vec<ElementRef>) {
         }
         TemplateNode::Slot(_) | TemplateNode::Text(_) | TemplateNode::Expr(_) => {}
     }
+}
+
+fn instance_binding_value(
+    element: &mesh_core_component::template::ElementNode,
+    attr_name: &str,
+) -> Option<String> {
+    element.attributes.iter().find_map(|attr| {
+        if attr.name != attr_name {
+            return None;
+        }
+        match &attr.value {
+            AttributeValue::InstanceBinding(value) if !value.is_empty() => Some(value.clone()),
+            _ => None,
+        }
+    })
 }
 
 fn static_attr_value(node: &TemplateNode, attr_name: &str) -> Option<String> {
@@ -162,11 +214,13 @@ fn extract_script_info(
     Vec<(String, String)>,
     Vec<String>,
     HashMap<String, String>,
+    Vec<ElementRefAlias>,
 ) {
     let mut state_vars: Vec<String> = Vec::new();
     let mut service_bindings: Vec<(String, String)> = Vec::new();
     let mut functions: Vec<String> = Vec::new();
     let mut interface_proxies: HashMap<String, String> = HashMap::new();
+    let mut element_ref_aliases: Vec<ElementRefAlias> = Vec::new();
 
     let script = extract_block_text(source, "script");
 
@@ -200,6 +254,13 @@ fn extract_script_info(
             }
         }
 
+        // Bare non-local assignment (`name = value`) is a public reactive member.
+        if let Some(name) = parse_public_assignment(t) {
+            if !state_vars.contains(&name) {
+                state_vars.push(name);
+            }
+        }
+
         if let Some(rest) = t.strip_prefix("local ") {
             if rest.contains("= function") || rest.contains("=function") {
                 if let Some(name) = rest.split('=').next() {
@@ -227,9 +288,49 @@ fn extract_script_info(
                 }
             }
         }
+
+        if let Some((alias, target)) = parse_element_ref_alias(t) {
+            if !element_ref_aliases
+                .iter()
+                .any(|existing| existing.alias == alias)
+            {
+                element_ref_aliases.push(ElementRefAlias { alias, target });
+            }
+        }
     }
 
-    (state_vars, service_bindings, functions, interface_proxies)
+    (
+        state_vars,
+        service_bindings,
+        functions,
+        interface_proxies,
+        element_ref_aliases,
+    )
+}
+
+fn parse_element_ref_alias(line: &str) -> Option<(String, ElementRefAliasTarget)> {
+    let line = line.strip_prefix("local ").unwrap_or(line);
+    let (alias, value) = line.split_once('=')?;
+    let alias = alias.trim();
+    if alias.is_empty()
+        || !alias
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        return None;
+    }
+
+    let value = value.trim();
+    if value.starts_with("event.current_target") {
+        return Some((alias.to_string(), ElementRefAliasTarget::CurrentTarget));
+    }
+
+    let rest = value.strip_prefix("refs.")?;
+    let ref_name: String = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .collect();
+    (!ref_name.is_empty()).then(|| (alias.to_string(), ElementRefAliasTarget::Ref(ref_name)))
 }
 
 /// Convert a require module string to a canonical interface name.
@@ -282,6 +383,64 @@ pub fn block_content_range(source: &str, block_name: &str) -> Option<(usize, usi
     let content_start = tag_start + close_angle + 1;
     let close_pos = source[content_start..].find(&close)?;
     Some((content_start, content_start + close_pos))
+}
+
+/// Detects a bare public assignment `name = value` (a public reactive script
+/// member). Returns the member name. Rejects `local`/keyword lines, comparisons
+/// (`==`, `~=`, `<=`, `>=`), compound LHS (`t.x`, `t:m`, `t[i]`), and multi-assign.
+fn parse_public_assignment(line: &str) -> Option<String> {
+    let line = line.trim();
+    let eq = line.find('=')?;
+    // Reject comparison / inequality operators.
+    let before = line.as_bytes()[eq.checked_sub(1)?];
+    let after = line.as_bytes().get(eq + 1).copied();
+    if matches!(before, b'=' | b'~' | b'<' | b'>' | b'!') || after == Some(b'=') {
+        return None;
+    }
+
+    let name = line[..eq].trim();
+    if name.is_empty() {
+        return None;
+    }
+    // LHS must be a single plain identifier.
+    let mut chars = name.chars();
+    let first = chars.next()?;
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return None;
+    }
+    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+    if is_lua_keyword(name) {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+fn is_lua_keyword(word: &str) -> bool {
+    matches!(
+        word,
+        "and" | "break"
+            | "do"
+            | "else"
+            | "elseif"
+            | "end"
+            | "false"
+            | "for"
+            | "function"
+            | "if"
+            | "in"
+            | "local"
+            | "nil"
+            | "not"
+            | "or"
+            | "repeat"
+            | "return"
+            | "then"
+            | "true"
+            | "until"
+            | "while"
+    )
 }
 
 fn parse_first_string_arg(s: &str) -> Option<String> {

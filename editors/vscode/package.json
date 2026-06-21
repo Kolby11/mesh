@@ -39,12 +39,97 @@
         "scopeName": "source.mesh",
         "path": "./syntaxes/mesh.tmLanguage.json",
         "embeddedLanguages": {
-          "meta.embedded.block.html": "html",
           "meta.embedded.block.lua": "lua",
-          "meta.embedded.block.css": "css"
+          "meta.embedded.block.css": "css",
+          "meta.embedded.inline.lua": "lua"
         }
       }
     ],
+    "semanticTokenTypes": [
+      {
+        "id": "meshBuiltinElement",
+        "superType": "class",
+        "description": "Built-in MESH template element"
+      },
+      {
+        "id": "meshComponentElement",
+        "superType": "class",
+        "description": "Imported or custom MESH component element"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "mesh",
+        "scopes": {
+          "meshBuiltinElement": [
+            "support.class.mesh.element",
+            "entity.name.tag.mesh"
+          ],
+          "meshComponentElement": [
+            "entity.name.type.mesh.component",
+            "entity.name.tag.mesh"
+          ]
+        }
+      }
+    ],
+    "configurationDefaults": {
+      "[mesh]": {
+        "editor.semanticHighlighting.enabled": true
+      },
+      "editor.semanticTokenColorCustomizations": {
+        "enabled": true,
+        "rules": {
+          "meshBuiltinElement:mesh": "#569CD6",
+          "meshComponentElement:mesh": "#73C991",
+          "keyword:mesh": "#569CD6",
+          "property:mesh": "#9CDCFE",
+          "string:mesh": "#CE9178",
+          "number:mesh": "#B5CEA8",
+          "variable:mesh": "#9CDCFE",
+          "function:mesh": "#DCDCAA"
+        }
+      },
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+            {
+              "scope": "entity.name.tag.mesh",
+              "settings": { "foreground": "#569CD6" }
+            },
+            {
+              "scope": "entity.name.type.mesh.component",
+              "settings": { "foreground": "#73C991" }
+            },
+            {
+              "scope": [
+                "entity.other.attribute-name.mesh",
+                "entity.other.attribute-name.event.mesh",
+                "variable.parameter.mesh"
+              ],
+              "settings": { "foreground": "#9CDCFE" }
+            },
+            {
+              "scope": "keyword.control.bind.mesh",
+              "settings": { "foreground": "#C586C0" }
+            },
+            {
+              "scope": "variable.other.bind-target.mesh",
+              "settings": { "foreground": "#569CD6" }
+            },
+            {
+              "scope": [
+                "string.quoted.double.mesh",
+                "string.quoted.single.mesh",
+                "string.quoted.mesh"
+              ],
+              "settings": { "foreground": "#CE9178" }
+            },
+            {
+              "scope": "constant.numeric.mesh",
+              "settings": { "foreground": "#B5CEA8" }
+            }
+          ]
+        }
+    },
     "configuration": {
       "title": "MESH",
       "properties": {

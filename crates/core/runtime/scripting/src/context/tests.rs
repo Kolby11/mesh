@@ -1587,16 +1587,26 @@ fn components_sharing_one_vm_keep_isolated_public_members() {
 
     let mut ctx_a = ScriptContext::new("@mesh/comp-a", CapabilitySet::new()).unwrap();
     ctx_a.attach_shared_vm(&vm);
-    ctx_a.load_script("secret = \"a-value\"\nfunction init() end").unwrap();
+    ctx_a
+        .load_script("secret = \"a-value\"\nfunction init() end")
+        .unwrap();
     ctx_a.call_init().unwrap();
 
     let mut ctx_b = ScriptContext::new("@mesh/comp-b", CapabilitySet::new()).unwrap();
     ctx_b.attach_shared_vm(&vm);
-    ctx_b.load_script("secret = \"b-value\"\nfunction init() end").unwrap();
+    ctx_b
+        .load_script("secret = \"b-value\"\nfunction init() end")
+        .unwrap();
     ctx_b.call_init().unwrap();
 
-    assert_eq!(ctx_a.state.get("secret"), Some(serde_json::json!("a-value")));
-    assert_eq!(ctx_b.state.get("secret"), Some(serde_json::json!("b-value")));
+    assert_eq!(
+        ctx_a.state.get("secret"),
+        Some(serde_json::json!("a-value"))
+    );
+    assert_eq!(
+        ctx_b.state.get("secret"),
+        Some(serde_json::json!("b-value"))
+    );
 }
 
 #[test]
@@ -1758,7 +1768,10 @@ function init() end
     parent.install_live_binding("child", &child).unwrap();
     parent.call_handler("probe", &[]).unwrap();
 
-    assert_eq!(parent.state.get("has_public"), Some(serde_json::json!(true)));
+    assert_eq!(
+        parent.state.get("has_public"),
+        Some(serde_json::json!(true))
+    );
     assert_eq!(parent.state.get("has_self"), Some(serde_json::json!(false)));
     assert_eq!(
         parent.state.get("has_require"),
@@ -1874,8 +1887,14 @@ end
     ctx.call_handler("probe", &[]).unwrap();
 
     // A field on an element not in the current tree reads nil; `present` is false.
-    assert_eq!(ctx.state.get("width_state"), Some(serde_json::json!("absent")));
-    assert_eq!(ctx.state.get("missing_present"), Some(serde_json::json!(false)));
+    assert_eq!(
+        ctx.state.get("width_state"),
+        Some(serde_json::json!("absent"))
+    );
+    assert_eq!(
+        ctx.state.get("missing_present"),
+        Some(serde_json::json!(false))
+    );
 }
 
 #[test]
@@ -1993,14 +2012,23 @@ end
     assert_eq!(actions[0].action, "scroll_to");
     assert_eq!(actions[0].args.as_array().unwrap().len(), 1);
     assert_eq!(actions[0].args[0].as_f64(), Some(100.0));
-    assert_eq!(actions[0].options.get("smooth").and_then(|v| v.as_bool()), Some(true));
-    assert_eq!(actions[0].options.get("duration").and_then(|v| v.as_f64()), Some(300.0));
+    assert_eq!(
+        actions[0].options.get("smooth").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        actions[0].options.get("duration").and_then(|v| v.as_f64()),
+        Some(300.0)
+    );
 
     ctx.call_handler("smooth_reveal", &[]).unwrap();
     let actions = ctx.drain_element_actions();
     // No positional args, options-only — `self` table must not leak into either.
     assert!(actions[0].args.as_array().unwrap().is_empty());
-    assert_eq!(actions[0].options.get("smooth").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        actions[0].options.get("smooth").and_then(|v| v.as_bool()),
+        Some(true)
+    );
 }
 
 #[test]

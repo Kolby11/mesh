@@ -213,7 +213,9 @@ impl FrontendSurfaceComponent {
         // Record the link so the parent's event handlers can re-sync this child
         // after a live cross-call mutates its `_ENV` directly.
         let mut bound_children = self.bound_children.borrow_mut();
-        let links = bound_children.entry(host_instance_key.to_string()).or_default();
+        let links = bound_children
+            .entry(host_instance_key.to_string())
+            .or_default();
         if !links
             .iter()
             .any(|(b, key)| b == binding && key == child_instance_key)

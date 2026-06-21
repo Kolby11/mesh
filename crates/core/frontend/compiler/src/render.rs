@@ -368,6 +368,15 @@ fn build_element_node(
 
     let (classes, id, mut attributes, event_handlers) =
         parse_attributes(&element.attributes, effective_state);
+    if let Some(binding) = element.attributes.iter().find_map(|attribute| {
+        if let AttributeValue::InstanceBinding(binding) = &attribute.value {
+            Some(binding.as_str())
+        } else {
+            None
+        }
+    }) {
+        attributes.insert("_mesh_bind_this".into(), binding.to_string());
+    }
     attributes
         .entry("data-mesh-element".into())
         .or_insert_with(|| source_tag.to_string());

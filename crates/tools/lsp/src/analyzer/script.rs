@@ -3,7 +3,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::{
-    document::{Document, ElementRefSource},
+    document::{Document, ElementRefAliasTarget, ElementRefSource},
     knowledge::mesh_api::MESH_API_ENTRIES,
     module_registry::ModuleRegistry,
     util::ScriptContext,
@@ -11,7 +11,8 @@ use crate::{
 
 use InsertTextFormat as Fmt;
 use mesh_core_elements::{
-    BASE_ELEMENT_FIELDS, ELEMENT_TYPE_DEFS, ElementFieldDef, ElementFieldType, element_type_for_tag,
+    BASE_ELEMENT_FIELDS, ELEMENT_TYPE_DEFS, ElementAttributeDef, ElementFieldDef, ElementFieldType,
+    element_contract_for_tag, element_type_for_tag,
 };
 
 pub fn complete(
@@ -24,6 +25,9 @@ pub fn complete(
         ScriptContext::Refs { prefix } => complete_refs(&prefix, doc),
         ScriptContext::RefMember { ref_name, prefix } => {
             complete_ref_members(&ref_name, &prefix, doc)
+        }
+        ScriptContext::ElementRefAliasMember { alias, prefix } => {
+            complete_element_ref_alias_members(&alias, &prefix, doc)
         }
         ScriptContext::EventCurrentTarget { prefix } => complete_event_current_target(&prefix),
         ScriptContext::ServiceName => complete_service_names(registry),
@@ -262,6 +266,7 @@ fn complete_refs(prefix: &str, doc: &Document) -> Vec<CompletionItem> {
                 match element_ref.source {
                     ElementRefSource::Ref => "",
                     ElementRefSource::Id => " id",
+                    ElementRefSource::BindThis => " bind:this",
                 }
             )),
             documentation: Some(Documentation::MarkupContent(MarkupContent {
@@ -288,6 +293,34 @@ fn complete_ref_members(ref_name: &str, prefix: &str, doc: &Document) -> Vec<Com
     complete_element_fields_for_tag(&element_ref.tag, prefix)
 }
 
+fn complete_element_ref_alias_members(
+    alias: &str,
+    prefix: &str,
+    doc: &Document,
+) -> Vec<CompletionItem> {
+    let Some(alias) = doc
+        .element_ref_aliases
+        .iter()
+        .find(|element_alias| element_alias.alias == alias)
+    else {
+        return vec![];
+    };
+
+    match &alias.target {
+        ElementRefAliasTarget::Ref(ref_name) => {
+            let Some(element_ref) = doc
+                .element_refs
+                .iter()
+                .find(|element_ref| element_ref.name == *ref_name)
+            else {
+                return vec![];
+            };
+            complete_element_fields_for_tag(&element_ref.tag, prefix)
+        }
+        ElementRefAliasTarget::CurrentTarget => complete_element_fields_for_tag("box", prefix),
+    }
+}
+
 fn complete_event_current_target(prefix: &str) -> Vec<CompletionItem> {
     complete_element_fields_for_tag("box", prefix)
 }
@@ -298,11 +331,34 @@ fn complete_element_fields_for_tag(tag: &str, prefix: &str) -> Vec<CompletionIte
     push_fields(&mut fields, BASE_ELEMENT_FIELDS);
     push_fields(&mut fields, type_def.fields);
 
-    fields
+    let mut items: Vec<CompletionItem> = fields
         .into_iter()
         .filter(|field| field.name.starts_with(prefix))
         .map(|field| field_completion_item(field, type_def.type_name))
-        .collect()
+        .collect();
+
+    for method in ELEMENT_REF_METHODS {
+        if method.name.starts_with(prefix) {
+            items.push(element_method_completion_item(method, type_def.type_name));
+        }
+    }
+    if let Some(contract) = element_contract_for_tag(tag) {
+        for attribute in contract.attributes {
+            if !is_script_member_attribute(attribute.name) {
+                continue;
+            }
+            let alias = attribute_member_name(attribute.name);
+            if alias.starts_with(prefix) && !items.iter().any(|item| item.label == alias) {
+                items.push(attribute_completion_item(
+                    attribute,
+                    alias,
+                    type_def.type_name,
+                ));
+            }
+        }
+    }
+
+    items
 }
 
 fn push_fields(fields: &mut Vec<&'static ElementFieldDef>, new_fields: &'static [ElementFieldDef]) {
@@ -338,6 +394,137 @@ fn field_completion_item(field: &ElementFieldDef, element_type: &str) -> Complet
     }
 }
 
+struct ElementMethodDef {
+    name: &'static str,
+    signature: &'static str,
+    snippet: &'static str,
+    description: &'static str,
+}
+
+const ELEMENT_REF_METHODS: &[ElementMethodDef] = &[
+    ElementMethodDef {
+        name: "focus",
+        signature: "focus()",
+        snippet: "focus()",
+        description: "Move focus to this live element.",
+    },
+    ElementMethodDef {
+        name: "blur",
+        signature: "blur()",
+        snippet: "blur()",
+        description: "Remove focus from this live element.",
+    },
+    ElementMethodDef {
+        name: "scroll_into_view",
+        signature: "scroll_into_view(options?: table)",
+        snippet: "scroll_into_view($1)",
+        description: "Scroll the nearest container so this live element becomes visible.",
+    },
+    ElementMethodDef {
+        name: "scroll_to",
+        signature: "scroll_to(top: number, left?: number, options?: table)",
+        snippet: "scroll_to($1)",
+        description: "Scroll this live element to the given offset.",
+    },
+    ElementMethodDef {
+        name: "click",
+        signature: "click()",
+        snippet: "click()",
+        description: "Synthesize a click on this live element.",
+    },
+    ElementMethodDef {
+        name: "set_value",
+        signature: "set_value(value: string)",
+        snippet: "set_value($1)",
+        description: "Set this live input element's text value.",
+    },
+];
+
+fn element_method_completion_item(method: &ElementMethodDef, element_type: &str) -> CompletionItem {
+    CompletionItem {
+        label: method.name.to_string(),
+        kind: Some(CompletionItemKind::METHOD),
+        detail: Some(method.signature.to_string()),
+        insert_text: Some(method.snippet.to_string()),
+        insert_text_format: Some(Fmt::SNIPPET),
+        documentation: Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: format!(
+                "**`{}:{}`**\n\n{}",
+                element_type, method.signature, method.description
+            ),
+        })),
+        ..Default::default()
+    }
+}
+
+fn attribute_completion_item(
+    attribute: &ElementAttributeDef,
+    label: String,
+    element_type: &str,
+) -> CompletionItem {
+    CompletionItem {
+        label,
+        kind: Some(CompletionItemKind::PROPERTY),
+        detail: Some("element attribute".to_string()),
+        documentation: Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: format!(
+                "**`{}.{}`**\n\n{}",
+                element_type, attribute.name, attribute.description
+            ),
+        })),
+        ..Default::default()
+    }
+}
+
+pub(crate) fn attribute_member_name(name: &str) -> String {
+    match name {
+        "class" => return "className".to_string(),
+        "ref" => return "ref".to_string(),
+        _ => {}
+    }
+
+    let mut result = String::new();
+    let mut uppercase_next = false;
+    for ch in name.chars() {
+        if ch == '-' || ch == '_' {
+            uppercase_next = true;
+        } else if uppercase_next {
+            result.push(ch.to_ascii_uppercase());
+            uppercase_next = false;
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
+pub(crate) fn is_script_member_attribute(name: &str) -> bool {
+    matches!(
+        name,
+        "id" | "class"
+            | "style"
+            | "ref"
+            | "label"
+            | "aria-label"
+            | "role"
+            | "aria-role"
+            | "title"
+            | "disabled"
+            | "name"
+            | "src"
+            | "alt"
+            | "placeholder"
+            | "type"
+            | "min"
+            | "max"
+            | "step"
+            | "checked"
+            | "selected"
+    )
+}
+
 fn luau_type_name(field_type: ElementFieldType) -> &'static str {
     match field_type {
         ElementFieldType::String => "string",
@@ -364,6 +551,24 @@ pub(crate) fn element_field_markdown(tag: &str, field_name: &str) -> Option<Stri
                 field.description
             )
         })
+        .or_else(|| {
+            element_contract_for_tag(tag)?
+                .attributes
+                .iter()
+                .find(|attribute| {
+                    is_script_member_attribute(attribute.name)
+                        && (attribute.name == field_name
+                            || attribute_member_name(attribute.name) == field_name)
+                })
+                .map(|attribute| {
+                    format!(
+                        "**`{}.{}`**\n\n{}",
+                        type_def.type_name,
+                        attribute_member_name(attribute.name),
+                        attribute.description
+                    )
+                })
+        })
 }
 
 pub(crate) fn element_ref_markdown(doc: &Document, ref_name: &str) -> Option<String> {
@@ -383,6 +588,7 @@ pub(crate) fn element_ref_markdown(doc: &Document, ref_name: &str) -> Option<Str
         match element_ref.source {
             ElementRefSource::Ref => "ref",
             ElementRefSource::Id => "id",
+            ElementRefSource::BindThis => "bind:this",
         }
     ))
 }
