@@ -2,6 +2,7 @@ pub mod analyzer;
 pub mod backend;
 pub mod diagnostics;
 pub mod document;
+pub mod format;
 pub mod hover;
 pub mod knowledge;
 pub mod manifest;

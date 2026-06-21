@@ -67,6 +67,7 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(semantic_tokens::server_capabilities()),
                 ..Default::default()
             },
@@ -151,6 +152,39 @@ impl LanguageServer for Backend {
         Ok(hover::hover(doc, position, &registry))
     }
 
+    async fn formatting(
+        &self,
+        params: DocumentFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri = &params.text_document.uri;
+        // Manifest documents (module.json/package.json) are not `.mesh` files;
+        // leave them to a JSON formatter.
+        if manifest::is_manifest_uri(uri) {
+            return Ok(None);
+        }
+
+        let docs = self.documents.read().await;
+        let Some(doc) = docs.get(uri) else {
+            return Ok(None);
+        };
+
+        let indent_unit = if params.options.insert_spaces {
+            " ".repeat(params.options.tab_size.max(1) as usize)
+        } else {
+            "\t".to_string()
+        };
+
+        let formatted = crate::format::format_document(&doc.source, &indent_unit);
+        if formatted == doc.source {
+            return Ok(None);
+        }
+
+        Ok(Some(vec![TextEdit {
+            range: full_document_range(&doc.source),
+            new_text: formatted,
+        }]))
+    }
+
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
@@ -179,5 +213,23 @@ impl Backend {
         let diags = diagnostics::from_document(&doc);
         self.documents.write().await.insert(uri.clone(), doc);
         self.client.publish_diagnostics(uri, diags, None).await;
+    }
+}
+
+/// A range that spans the entire document, for whole-document replacement edits.
+fn full_document_range(source: &str) -> Range {
+    let mut last_line = 0u32;
+    let mut last_line_len = 0u32;
+    for ch in source.chars() {
+        if ch == '\n' {
+            last_line += 1;
+            last_line_len = 0;
+        } else {
+            last_line_len += ch.len_utf16() as u32;
+        }
+    }
+    Range {
+        start: Position::new(0, 0),
+        end: Position::new(last_line, last_line_len),
     }
 }
